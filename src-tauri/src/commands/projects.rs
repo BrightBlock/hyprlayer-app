@@ -116,11 +116,33 @@ fn projects_from_config(config: &HyprlayerConfig) -> Vec<Project> {
     projects
 }
 
+/// Mapping entries the app itself added for work-item worktrees (ADR-0002
+/// exception #2) are skill-resolution infrastructure, not projects — drop
+/// them from every project listing. Two nets: known worktree paths from the
+/// store, plus anything under the worktree root (catches strays whose work
+/// item is already gone).
+async fn filter_worktree_mappings(state: &AppState, projects: &mut Vec<Project>) {
+    let worktree_root = state.worktrees.root().to_path_buf();
+    let db = state.db.clone();
+    let known: std::collections::HashSet<String> =
+        tauri::async_runtime::spawn_blocking(move || {
+            db.list_active_work_items()
+                .map(|items| items.into_iter().map(|i| i.worktree_path).collect())
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or_default();
+
+    projects.retain(|p| !known.contains(&p.path) && !Path::new(&p.path).starts_with(&worktree_root));
+}
+
 async fn config_summary(state: &AppState) -> (ConfigSummary, Vec<Project>) {
     let path = state.config.path().display().to_string();
     match state.config.load().await {
         Ok(loaded) => {
-            let projects = projects_from_config(&loaded.config);
+            let mut projects = projects_from_config(&loaded.config);
+            filter_worktree_mappings(state, &mut projects).await;
             let (user, backend_kind, configured) = loaded
                 .config
                 .thoughts
