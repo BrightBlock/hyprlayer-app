@@ -429,15 +429,15 @@ export function ProjectPage() {
                     <button
                       type="button"
                       onClick={selectDocsTab}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${
+                      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
                         docsActive
                           ? "bg-panel-2 text-ink"
                           : "text-ink-dim hover:bg-panel-2 hover:text-ink"
                       }`}
                       title="Project documents"
+                      aria-label="Project documents"
                     >
                       <BookIcon />
-                      Docs
                     </button>
                   )}
                   {activeView &&
