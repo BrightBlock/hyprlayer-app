@@ -120,14 +120,6 @@ function ArrowLeftIcon() {
   );
 }
 
-function ArrowRightIcon() {
-  return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12h14m0 0-6-6m6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 function SettingsIcon({ size = 18 }: { size?: number }) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -234,21 +226,18 @@ export function Root() {
   const crumb =
     currentSection === "Agent" ? (activeWorkstream?.item.title ?? "Workstreams") : currentSection;
 
-  // History arrows: hidden until there's somewhere to go. Back comes from
-  // the router; forward is tracked by counting BACK/FORWARD/PUSH actions
-  // (a PUSH truncates the forward stack).
+  // A single contextual Back affordance: only on secondary views (library,
+  // settings, docs, setup) so users can return to the agent view without
+  // re-clicking the worktree in the sidebar. Never shown on the agent view
+  // itself, and only when there is actual history to return to.
   const router = useRouter();
   const canGoBack = useCanGoBack();
-  const [canGoForward, setCanGoForward] = useState(false);
-  useEffect(() => {
-    let forwardSteps = 0;
-    return router.history.subscribe(({ action }) => {
-      if (action.type === "BACK") forwardSteps += 1;
-      else if (action.type === "FORWARD") forwardSteps = Math.max(0, forwardSteps - 1);
-      else if (action.type === "PUSH") forwardSteps = 0;
-      setCanGoForward(forwardSteps > 0);
-    });
-  }, [router]);
+  const onSecondaryView =
+    pathname.startsWith("/library") ||
+    pathname.startsWith("/settings") ||
+    pathname.startsWith("/onboarding") ||
+    (pathname.startsWith("/projects/") && pathname.endsWith("/docs"));
+  const showBack = canGoBack && onSecondaryView;
 
   // Right-click menu + archive flow for the worktree rows.
   const navigate = useNavigate();
@@ -358,29 +347,16 @@ export function Root() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {(canGoBack || canGoForward) && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => router.history.back()}
-                  disabled={!canGoBack}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
-                  title="Back"
-                  aria-label="Back"
-                >
-                  <ArrowLeftIcon />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.history.forward()}
-                  disabled={!canGoForward}
-                  className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
-                  title="Forward"
-                  aria-label="Forward"
-                >
-                  <ArrowRightIcon />
-                </button>
-              </>
+            {showBack && (
+              <button
+                type="button"
+                onClick={() => router.history.back()}
+                className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+                title="Back"
+                aria-label="Back"
+              >
+                <ArrowLeftIcon />
+              </button>
             )}
             {currentProject && (
               <>
