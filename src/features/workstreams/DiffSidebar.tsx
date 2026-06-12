@@ -137,7 +137,7 @@ export function DiffSidebar({ workstreamId, collapsed, onToggleCollapsed }: Prop
                     type="button"
                     onClick={() => void diff.refetch()}
                     disabled={diff.isFetching}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                     title="Refresh diff"
                     aria-label="Refresh diff"
                   >

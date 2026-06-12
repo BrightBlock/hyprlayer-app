@@ -27,7 +27,7 @@ function PanelLeftIcon() {
 
 function BookOpenIcon() {
   return (
-    <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none">
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
       <path
         d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z"
         stroke="currentColor"
@@ -105,9 +105,25 @@ function LibraryIcon() {
   );
 }
 
-function SettingsIcon() {
+function ArrowLeftIcon() {
   return (
     <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M5 12h14m0 0-6-6m6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
       <path d="M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z" stroke="currentColor" strokeWidth="1.8" />
       <path
         d="m18 13 .8.6-1.5 2.6-1-.4a6 6 0 0 1-1.2.7l-.2 1.1h-3l-.2-1.1a6 6 0 0 1-1.2-.7l-1 .4-1.5-2.6.8-.6a6 6 0 0 1 0-1.8l-.8-.6L9.5 8l1 .4a6 6 0 0 1 1.2-.7l.2-1.1h3l.2 1.1a6 6 0 0 1 1.2.7l1-.4 1.5 2.6-.8.6a6 6 0 0 1 0 1.8Z"
@@ -298,6 +314,26 @@ export function Root() {
           style={{ marginLeft: contentOffset }}
           data-tauri-drag-region
         >
+          <div className="mr-1 flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => window.history.back()}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+              title="Back"
+              aria-label="Back"
+            >
+              <ArrowLeftIcon />
+            </button>
+            <button
+              type="button"
+              onClick={() => window.history.forward()}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+              title="Forward"
+              aria-label="Forward"
+            >
+              <ArrowRightIcon />
+            </button>
+          </div>
           <div className="flex min-w-0 items-center gap-2 text-sm" data-tauri-drag-region>
             {currentProject ? (
               <>
@@ -321,14 +357,6 @@ export function Root() {
           <div className="flex shrink-0 items-center gap-2">
             {currentProject && (
               <>
-                <button
-                  type="button"
-                  className="inline-flex h-8 items-center gap-2 rounded-md border border-edge bg-panel-2 px-3 text-sm font-medium text-ink hover:bg-edge/60"
-                  title="Create PR workflow is not connected yet"
-                >
-                  <GitPullRequestIcon />
-                  Create PR
-                </button>
                 <Link
                   to="/projects/$projectPath/docs"
                   params={{ projectPath: currentProject.path }}
@@ -345,8 +373,19 @@ export function Root() {
                   title="Project settings"
                   aria-label="Project settings"
                 >
-                  <SettingsIcon />
+                  <SettingsIcon size={20} />
                 </Link>
+                {((activeWorkstream?.git.dirty ?? 0) > 0 ||
+                  (activeWorkstream?.git.ahead ?? 0) > 0) && (
+                  <button
+                    type="button"
+                    className="ml-1 inline-flex h-8 items-center gap-2 rounded-md border border-edge bg-panel-2 px-3 text-sm font-medium text-ink hover:bg-edge/60"
+                    title="Create PR workflow is not connected yet"
+                  >
+                    <GitPullRequestIcon />
+                    Create PR
+                  </button>
+                )}
               </>
             )}
           </div>
