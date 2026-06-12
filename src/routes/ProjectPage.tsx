@@ -161,18 +161,10 @@ export function ProjectPage() {
   const navigate = useNavigate({ from: "/projects/$projectPath" });
 
   const storageKey = `hyprlayer:last-workstream:${projectPath}`;
-  // The URL (?item=) is the source of truth — it's what the sidebar tree
-  // highlights and links to; localStorage only seeds the first visit.
-  const [activeItemId, setActiveItemId] = useState<string | null>(
-    () => search.item ?? localStorage.getItem(storageKey),
-  );
-
-  useEffect(() => {
-    if (search.item) {
-      setActiveItemId(search.item);
-      localStorage.setItem(storageKey, search.item);
-    }
-  }, [search.item, storageKey]);
+  // Selection is DERIVED from the URL every render — never mirrored into
+  // state. (A state mirror + URL canonicalizer once fought each other into
+  // an infinite navigate loop when switching between two workstreams.)
+  const activeItemId = search.item ?? localStorage.getItem(storageKey);
 
   // ?create=true (sidebar "+") pops the dialog once, then leaves the URL.
   useEffect(() => {
@@ -211,22 +203,32 @@ export function ProjectPage() {
   }, [shellMenu]);
 
   // Hooks live above the early returns. Selection resolves to the URL's
-  // ?item= when valid, else the first active workstream.
+  // ?item= when it names a live workstream, else last-used, else the first.
   const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
   const activeView = views.find((view) => view.item.id === activeItemId) ?? views[0] ?? null;
   const wsId = activeView?.item.id ?? null;
 
-  // When selection fell back (no/stale ?item=), write the resolved id into
-  // the URL so the sidebar highlight and header breadcrumb stay truthful.
+  // Canonicalize the URL to the resolved selection. A valid ?item= always
+  // resolves to itself (no rewrite, no loop); we only write when the param
+  // is missing, or names something the SETTLED list doesn't contain (e.g.
+  // archived elsewhere) — never mid-refetch, where a just-created id can
+  // legitimately be absent for a moment.
   useEffect(() => {
-    if (wsId && search.item !== wsId) {
+    if (!wsId) return;
+    localStorage.setItem(storageKey, wsId);
+    const stale =
+      search.item !== undefined &&
+      search.item !== wsId &&
+      workstreams.isSuccess &&
+      !workstreams.isFetching;
+    if (search.item === undefined || stale) {
       void navigate({
         search: (prev) => ({ ...prev, item: wsId }),
         replace: true,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsId, search.item]);
+  }, [wsId, search.item, storageKey, workstreams.isSuccess, workstreams.isFetching]);
 
   if (detail.isLoading || workstreams.isLoading) {
     return (
@@ -308,13 +310,12 @@ export function ProjectPage() {
   };
 
   const selectItem = (id: string | null) => {
-    setActiveItemId(id);
     if (id === null) {
       localStorage.removeItem(storageKey);
     } else {
       localStorage.setItem(storageKey, id);
     }
-    // Keep the URL in sync so the sidebar highlight follows.
+    // The URL is the single source of truth; rendering derives from it.
     void navigate({
       search: (prev) => ({ ...prev, item: id ?? undefined }),
       replace: true,
