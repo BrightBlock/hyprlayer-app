@@ -1,14 +1,14 @@
-import type { WorkItemView } from "../../lib/bindings";
+import type { WorkstreamView } from "../../lib/bindings";
 import { Spinner } from "../../components/ui";
-import { useReprovisionWorkItem } from "../../lib/queries";
+import { useReprovisionWorkstream } from "../../lib/queries";
 
 /**
- * Compact git status for the active work item: branch name, change counters
+ * Compact git status for the active workstream: branch name, change counters
  * ("●n ↑n ↓n", each only when non-zero), and a thoughts-broken warning with
  * an inline Fix (reprovision) action.
  */
-export function WorkItemChips({ projectPath, view }: { projectPath: string; view: WorkItemView }) {
-  const reprovision = useReprovisionWorkItem(projectPath);
+export function WorkstreamChips({ projectPath, view }: { projectPath: string; view: WorkstreamView }) {
+  const reprovision = useReprovisionWorkstream(projectPath);
   const { git, item } = view;
 
   const counters: string[] = [];

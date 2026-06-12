@@ -2,16 +2,16 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Badge, Button, Dialog, ErrorNote, TextInput, Spinner } from "../components/ui";
-import { ArchiveWorkItemDialog } from "../features/work-items/ArchiveWorkItemDialog";
-import { CreateWorkItemDialog } from "../features/work-items/CreateWorkItemDialog";
-import { DiffSidebar } from "../features/work-items/DiffSidebar";
-import { WorkItemChips } from "../features/work-items/WorkItemChips";
-import type { WorkItemView } from "../lib/bindings";
+import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
+import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
+import { DiffSidebar } from "../features/workstreams/DiffSidebar";
+import { WorkstreamChips } from "../features/workstreams/WorkstreamChips";
+import type { WorkstreamView } from "../lib/bindings";
 import {
   useProjectDetail,
-  useRenameWorkItem,
-  useSetWorkItemStage,
-  useWorkItems,
+  useRenameWorkstream,
+  useSetWorkstreamStage,
+  useWorkstreams,
 } from "../lib/queries";
 
 const DIFF_SIDEBAR_COLLAPSED = 56;
@@ -32,7 +32,7 @@ type StageKey = (typeof STAGES)[number]["key"];
 const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
 
 /** Backend stage is a plain string; anything unknown renders as general. */
-function stageOf(view: WorkItemView): StageKey {
+function stageOf(view: WorkstreamView): StageKey {
   return (STAGE_KEYS.has(view.item.stage) ? view.item.stage : "general") as StageKey;
 }
 
@@ -149,14 +149,14 @@ function clamp(value: number, min: number, max: number): number {
 export function ProjectPage() {
   const { projectPath } = useParams({ from: "/projects/$projectPath" });
   const detail = useProjectDetail(projectPath);
-  const workItems = useWorkItems(projectPath);
-  const renameItem = useRenameWorkItem(projectPath);
-  const setStage = useSetWorkItemStage(projectPath);
+  const workstreams = useWorkstreams(projectPath);
+  const renameItem = useRenameWorkstream(projectPath);
+  const setStage = useSetWorkstreamStage(projectPath);
 
   const search = useSearch({ from: "/projects/$projectPath" });
   const navigate = useNavigate({ from: "/projects/$projectPath" });
 
-  const storageKey = `hyprlayer:last-work-item:${projectPath}`;
+  const storageKey = `hyprlayer:last-workstream:${projectPath}`;
   // The URL (?item=) is the source of truth — it's what the sidebar tree
   // highlights and links to; localStorage only seeds the first visit.
   const [activeItemId, setActiveItemId] = useState<string | null>(
@@ -181,19 +181,15 @@ export function ProjectPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.create]);
-  // Drafts stay local until sessions land; keyed by work-item id.
+  // Drafts stay local until sessions land; keyed by workstream id.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [archiveTarget, setArchiveTarget] = useState<WorkItemView | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
   const [renameItemId, setRenameItemId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [diffCollapsed, setDiffCollapsed] = useState(false);
   const [diffWidth, setDiffWidth] = useState(360);
-
-  useEffect(() => {
-    setActiveItemId(localStorage.getItem(storageKey));
-  }, [storageKey]);
 
   useEffect(() => {
     if (!shellMenu) return;
@@ -209,7 +205,7 @@ export function ProjectPage() {
     };
   }, [shellMenu]);
 
-  if (detail.isLoading || workItems.isLoading) {
+  if (detail.isLoading || workstreams.isLoading) {
     return (
       <div className="flex justify-center p-12">
         <Spinner />
@@ -223,16 +219,16 @@ export function ProjectPage() {
       </div>
     );
   }
-  if (workItems.isError) {
+  if (workstreams.isError) {
     return (
       <div className="p-8">
-        <ErrorNote error={workItems.error} />
+        <ErrorNote error={workstreams.error} />
       </div>
     );
   }
 
   const project = detail.data!.project;
-  const views = (workItems.data ?? []).filter((view) => view.item.status === "active");
+  const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
   const activeView = views.find((view) => view.item.id === activeItemId) ?? views[0] ?? null;
   const contextView = shellMenu
     ? views.find((view) => view.item.id === shellMenu.itemId)
@@ -267,7 +263,7 @@ export function ProjectPage() {
     if (!activeView || key === stage) return;
     setStage.mutate({ id: activeView.item.id, stage: key });
   };
-  const openRename = (view: WorkItemView) => {
+  const openRename = (view: WorkstreamView) => {
     setRenameItemId(view.item.id);
     setRenameValue(view.item.title);
   };
@@ -292,7 +288,7 @@ export function ProjectPage() {
     const fallback = views[index - 1] ?? views[index + 1] ?? null;
     selectItem(fallback ? fallback.item.id : null);
   };
-  const copyShellTranscript = (view: WorkItemView) => {
+  const copyShellTranscript = (view: WorkstreamView) => {
     const mode = STAGES.find((s) => s.key === stageOf(view))?.label ?? view.item.stage;
     const transcript = [
       `# ${view.item.title}`,
@@ -385,15 +381,15 @@ export function ProjectPage() {
                     type="button"
                     onClick={() => setCreateOpen(true)}
                     className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
-                    title="New work item"
-                    aria-label="New work item"
+                    title="New workstream"
+                    aria-label="New workstream"
                   >
                     <PlusIcon />
                   </button>
                 </div>
                 {activeView && (
                   <div className="flex min-w-0 items-center gap-2">
-                    <WorkItemChips projectPath={projectPath} view={activeView} />
+                    <WorkstreamChips projectPath={projectPath} view={activeView} />
                     <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${modeStyle.badge}`}>
                       {currentStage.label}
                     </span>
@@ -416,7 +412,7 @@ export function ProjectPage() {
                   }}
                   className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink"
                 >
-                  Rename work item
+                  Rename workstream
                 </button>
                 <button
                   type="button"
@@ -436,11 +432,11 @@ export function ProjectPage() {
                   }}
                   className="block w-full rounded px-3 py-1.5 text-left text-sm text-bad hover:bg-bad/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Archive work item
+                  Archive workstream
                 </button>
               </div>
             )}
-            <Dialog open={Boolean(viewBeingRenamed)} onClose={closeRename} title="Rename work item">
+            <Dialog open={Boolean(viewBeingRenamed)} onClose={closeRename} title="Rename workstream">
               <form
                 className="space-y-3"
                 onSubmit={(e) => {
@@ -470,13 +466,13 @@ export function ProjectPage() {
                 </div>
               </form>
             </Dialog>
-            <CreateWorkItemDialog
+            <CreateWorkstreamDialog
               projectPath={projectPath}
               open={createOpen}
               onClose={() => setCreateOpen(false)}
               onCreated={(view) => selectItem(view.item.id)}
             />
-            <ArchiveWorkItemDialog
+            <ArchiveWorkstreamDialog
               projectPath={projectPath}
               target={archiveTarget}
               onClose={() => setArchiveTarget(null)}
@@ -499,9 +495,9 @@ export function ProjectPage() {
                   </div>
                 ) : (
                   <div className="rounded-lg border border-edge bg-panel p-6 text-center">
-                    <p className="text-base font-medium text-ink">Create your first work item</p>
+                    <p className="text-base font-medium text-ink">Create your first workstream</p>
                     <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink-dim">
-                      Each work item gets its own branch and worktree, so agents can research,
+                      Each workstream gets its own branch and worktree, so agents can research,
                       plan, and implement without touching your checkout.
                     </p>
                     <Button
@@ -510,7 +506,7 @@ export function ProjectPage() {
                       onClick={() => setCreateOpen(true)}
                     >
                       <PlusIcon />
-                      New work item
+                      New workstream
                     </Button>
                   </div>
                 )}
@@ -582,7 +578,7 @@ export function ProjectPage() {
         style={{ width: diffCollapsed ? DIFF_SIDEBAR_COLLAPSED : diffWidth }}
       >
         <DiffSidebar
-          workItemId={activeView?.item.id ?? null}
+          workstreamId={activeView?.item.id ?? null}
           collapsed={diffCollapsed}
           onToggleCollapsed={() => setDiffCollapsed((value) => !value)}
         />

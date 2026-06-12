@@ -7,7 +7,7 @@ use crate::error::Result;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
-pub struct WorkItem {
+pub struct Workstream {
     pub id: String,
     pub project_path: String,
     pub title: String,
@@ -28,14 +28,14 @@ pub struct WorkItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
-pub struct WorkItemDoc {
-    pub work_item_id: String,
+pub struct WorkstreamDoc {
+    pub workstream_id: String,
     pub doc_path: String,
     /// research | plan | other
     pub role: String,
 }
 
-pub struct NewWorkItem {
+pub struct NewWorkstream {
     pub project_path: String,
     pub title: String,
     pub slug: String,
@@ -44,8 +44,8 @@ pub struct NewWorkItem {
     pub base_branch: String,
 }
 
-fn row_to_item(row: &Row<'_>) -> rusqlite::Result<WorkItem> {
-    Ok(WorkItem {
+fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
+    Ok(Workstream {
         id: row.get("id")?,
         project_path: row.get("project_path")?,
         title: row.get("title")?,
@@ -66,9 +66,9 @@ const COLS: &str = "id, project_path, title, slug, branch, worktree_path, base_b
                     stage, status, pr_number, created_at, updated_at, archived_at";
 
 impl Db {
-    pub fn insert_work_item(&self, new: NewWorkItem) -> Result<WorkItem> {
+    pub fn insert_workstream(&self, new: NewWorkstream) -> Result<Workstream> {
         let now = now_ms();
-        let item = WorkItem {
+        let item = Workstream {
             id: uuid::Uuid::new_v4().to_string(),
             project_path: new.project_path,
             title: new.title,
@@ -85,7 +85,7 @@ impl Db {
         };
         self.with(|conn| {
             conn.execute(
-                "INSERT INTO work_items (id, project_path, title, slug, branch, worktree_path,
+                "INSERT INTO workstreams (id, project_path, title, slug, branch, worktree_path,
                                          base_branch, stage, status, pr_number, created_at,
                                          updated_at, archived_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
@@ -110,10 +110,10 @@ impl Db {
         Ok(item)
     }
 
-    pub fn get_work_item(&self, id: &str) -> Result<Option<WorkItem>> {
+    pub fn get_workstream(&self, id: &str) -> Result<Option<Workstream>> {
         self.with(|conn| {
             conn.query_row(
-                &format!("SELECT {COLS} FROM work_items WHERE id = ?1"),
+                &format!("SELECT {COLS} FROM workstreams WHERE id = ?1"),
                 params![id],
                 row_to_item,
             )
@@ -125,17 +125,17 @@ impl Db {
         })
     }
 
-    pub fn list_work_items(
+    pub fn list_workstreams(
         &self,
         project_path: &str,
         include_archived: bool,
-    ) -> Result<Vec<WorkItem>> {
+    ) -> Result<Vec<Workstream>> {
         self.with(|conn| {
             let sql = if include_archived {
-                format!("SELECT {COLS} FROM work_items WHERE project_path = ?1 ORDER BY created_at")
+                format!("SELECT {COLS} FROM workstreams WHERE project_path = ?1 ORDER BY created_at")
             } else {
                 format!(
-                    "SELECT {COLS} FROM work_items WHERE project_path = ?1 AND status = 'active'
+                    "SELECT {COLS} FROM workstreams WHERE project_path = ?1 AND status = 'active'
                      ORDER BY created_at"
                 )
             };
@@ -146,38 +146,38 @@ impl Db {
     }
 
     /// All non-archived items across projects (startup reconciliation).
-    pub fn list_active_work_items(&self) -> Result<Vec<WorkItem>> {
+    pub fn list_active_workstreams(&self) -> Result<Vec<Workstream>> {
         self.with(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {COLS} FROM work_items WHERE status = 'active' ORDER BY created_at"
+                "SELECT {COLS} FROM workstreams WHERE status = 'active' ORDER BY created_at"
             ))?;
             let rows = stmt.query_map([], row_to_item)?;
             rows.collect()
         })
     }
 
-    pub fn update_work_item_stage(&self, id: &str, stage: &str) -> Result<()> {
+    pub fn update_workstream_stage(&self, id: &str, stage: &str) -> Result<()> {
         self.touch(id, "stage", stage)
     }
 
-    pub fn update_work_item_title(&self, id: &str, title: &str) -> Result<()> {
+    pub fn update_workstream_title(&self, id: &str, title: &str) -> Result<()> {
         self.touch(id, "title", title)
     }
 
-    pub fn set_work_item_pr(&self, id: &str, pr_number: Option<u32>) -> Result<()> {
+    pub fn set_workstream_pr(&self, id: &str, pr_number: Option<u32>) -> Result<()> {
         self.with(|conn| {
             conn.execute(
-                "UPDATE work_items SET pr_number = ?2, updated_at = ?3 WHERE id = ?1",
+                "UPDATE workstreams SET pr_number = ?2, updated_at = ?3 WHERE id = ?1",
                 params![id, pr_number, now_ms()],
             )?;
             Ok(())
         })
     }
 
-    pub fn archive_work_item(&self, id: &str) -> Result<()> {
+    pub fn archive_workstream(&self, id: &str) -> Result<()> {
         self.with(|conn| {
             conn.execute(
-                "UPDATE work_items SET status = 'archived', archived_at = ?2, updated_at = ?2
+                "UPDATE workstreams SET status = 'archived', archived_at = ?2, updated_at = ?2
                  WHERE id = ?1",
                 params![id, now_ms()],
             )?;
@@ -189,48 +189,48 @@ impl Db {
         // column is a compile-time constant from the callers above.
         self.with(|conn| {
             conn.execute(
-                &format!("UPDATE work_items SET {column} = ?2, updated_at = ?3 WHERE id = ?1"),
+                &format!("UPDATE workstreams SET {column} = ?2, updated_at = ?3 WHERE id = ?1"),
                 params![id, value, now_ms()],
             )?;
             Ok(())
         })
     }
 
-    pub fn attach_work_item_doc(
+    pub fn attach_workstream_doc(
         &self,
-        work_item_id: &str,
+        workstream_id: &str,
         doc_path: &str,
         role: &str,
     ) -> Result<()> {
         self.with(|conn| {
             conn.execute(
-                "INSERT INTO work_item_docs (work_item_id, doc_path, role) VALUES (?1,?2,?3)
-                 ON CONFLICT(work_item_id, doc_path) DO UPDATE SET role = excluded.role",
-                params![work_item_id, doc_path, role],
+                "INSERT INTO workstream_docs (workstream_id, doc_path, role) VALUES (?1,?2,?3)
+                 ON CONFLICT(workstream_id, doc_path) DO UPDATE SET role = excluded.role",
+                params![workstream_id, doc_path, role],
             )?;
             Ok(())
         })
     }
 
-    pub fn detach_work_item_doc(&self, work_item_id: &str, doc_path: &str) -> Result<()> {
+    pub fn detach_workstream_doc(&self, workstream_id: &str, doc_path: &str) -> Result<()> {
         self.with(|conn| {
             conn.execute(
-                "DELETE FROM work_item_docs WHERE work_item_id = ?1 AND doc_path = ?2",
-                params![work_item_id, doc_path],
+                "DELETE FROM workstream_docs WHERE workstream_id = ?1 AND doc_path = ?2",
+                params![workstream_id, doc_path],
             )?;
             Ok(())
         })
     }
 
-    pub fn work_item_docs(&self, work_item_id: &str) -> Result<Vec<WorkItemDoc>> {
+    pub fn workstream_docs(&self, workstream_id: &str) -> Result<Vec<WorkstreamDoc>> {
         self.with(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT work_item_id, doc_path, role FROM work_item_docs
-                 WHERE work_item_id = ?1 ORDER BY doc_path",
+                "SELECT workstream_id, doc_path, role FROM workstream_docs
+                 WHERE workstream_id = ?1 ORDER BY doc_path",
             )?;
-            let rows = stmt.query_map(params![work_item_id], |row| {
-                Ok(WorkItemDoc {
-                    work_item_id: row.get(0)?,
+            let rows = stmt.query_map(params![workstream_id], |row| {
+                Ok(WorkstreamDoc {
+                    workstream_id: row.get(0)?,
                     doc_path: row.get(1)?,
                     role: row.get(2)?,
                 })
@@ -244,8 +244,8 @@ impl Db {
 mod tests {
     use super::*;
 
-    fn item(db: &Db, title: &str) -> WorkItem {
-        db.insert_work_item(NewWorkItem {
+    fn item(db: &Db, title: &str) -> Workstream {
+        db.insert_workstream(NewWorkstream {
             project_path: "/repo".into(),
             title: title.into(),
             slug: format!("{title}-abcd"),
@@ -257,55 +257,55 @@ mod tests {
     }
 
     #[test]
-    fn work_item_crud_round_trip() {
+    fn workstream_crud_round_trip() {
         let db = Db::open_in_memory().unwrap();
         let a = item(&db, "auth");
         let b = item(&db, "billing");
 
-        let listed = db.list_work_items("/repo", false).unwrap();
+        let listed = db.list_workstreams("/repo", false).unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, a.id);
         assert_eq!(listed[0].stage, "general");
 
-        db.update_work_item_stage(&a.id, "research").unwrap();
-        db.update_work_item_title(&a.id, "Auth revamp").unwrap();
-        let got = db.get_work_item(&a.id).unwrap().unwrap();
+        db.update_workstream_stage(&a.id, "research").unwrap();
+        db.update_workstream_title(&a.id, "Auth revamp").unwrap();
+        let got = db.get_workstream(&a.id).unwrap().unwrap();
         assert_eq!(got.stage, "research");
         assert_eq!(got.title, "Auth revamp");
         assert!(got.updated_at >= got.created_at);
 
-        db.archive_work_item(&b.id).unwrap();
-        assert_eq!(db.list_work_items("/repo", false).unwrap().len(), 1);
-        assert_eq!(db.list_work_items("/repo", true).unwrap().len(), 2);
+        db.archive_workstream(&b.id).unwrap();
+        assert_eq!(db.list_workstreams("/repo", false).unwrap().len(), 1);
+        assert_eq!(db.list_workstreams("/repo", true).unwrap().len(), 2);
         assert!(db
-            .get_work_item(&b.id)
+            .get_workstream(&b.id)
             .unwrap()
             .unwrap()
             .archived_at
             .is_some());
 
-        assert!(db.get_work_item("nope").unwrap().is_none());
+        assert!(db.get_workstream("nope").unwrap().is_none());
     }
 
     #[test]
     fn docs_attach_detach_and_cascade() {
         let db = Db::open_in_memory().unwrap();
         let a = item(&db, "auth");
-        db.attach_work_item_doc(&a.id, "/t/r.md", "research")
+        db.attach_workstream_doc(&a.id, "/t/r.md", "research")
             .unwrap();
-        db.attach_work_item_doc(&a.id, "/t/p.md", "plan").unwrap();
+        db.attach_workstream_doc(&a.id, "/t/p.md", "plan").unwrap();
         // upsert role
-        db.attach_work_item_doc(&a.id, "/t/r.md", "other").unwrap();
+        db.attach_workstream_doc(&a.id, "/t/r.md", "other").unwrap();
 
-        let docs = db.work_item_docs(&a.id).unwrap();
+        let docs = db.workstream_docs(&a.id).unwrap();
         assert_eq!(docs.len(), 2);
         assert_eq!(
             docs.iter().find(|d| d.doc_path == "/t/r.md").unwrap().role,
             "other"
         );
 
-        db.detach_work_item_doc(&a.id, "/t/p.md").unwrap();
-        assert_eq!(db.work_item_docs(&a.id).unwrap().len(), 1);
+        db.detach_workstream_doc(&a.id, "/t/p.md").unwrap();
+        assert_eq!(db.workstream_docs(&a.id).unwrap().len(), 1);
     }
 
     #[test]
@@ -318,6 +318,6 @@ mod tests {
         }
         // Re-open: migrations must not re-run / data must survive.
         let db = Db::open(&path).unwrap();
-        assert_eq!(db.list_work_items("/repo", false).unwrap().len(), 1);
+        assert_eq!(db.list_workstreams("/repo", false).unwrap().len(), 1);
     }
 }

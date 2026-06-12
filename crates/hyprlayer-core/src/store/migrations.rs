@@ -61,6 +61,15 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (pid, session_id)
     );
     ",
+    // v2: "work items" became "workstreams" — rename tables/columns in
+    // place; existing rows survive. (v1's SQL text above must never change:
+    // fresh installs run v1 then v2 and converge on the same schema.)
+    "
+    ALTER TABLE work_items RENAME TO workstreams;
+    ALTER TABLE work_item_docs RENAME TO workstream_docs;
+    ALTER TABLE workstream_docs RENAME COLUMN work_item_id TO workstream_id;
+    ALTER TABLE sessions RENAME COLUMN work_item_id TO workstream_id;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

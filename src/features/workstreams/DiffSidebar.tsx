@@ -100,18 +100,18 @@ function FileDiffSection({ file }: { file: FileDiff }) {
 }
 
 type Props = {
-  /** Active work item, or null when there are no work items. */
-  workItemId: string | null;
+  /** Active workstream, or null when there are no workstreams. */
+  workstreamId: string | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 };
 
 /**
  * Contents of the right diff sidebar (header + body). The diff query only
- * runs while the sidebar is expanded and a work item is active.
+ * runs while the sidebar is expanded and a workstream is active.
  */
-export function DiffSidebar({ workItemId, collapsed, onToggleCollapsed }: Props) {
-  const diff = useWorktreeDiff(workItemId ?? "", !collapsed);
+export function DiffSidebar({ workstreamId, collapsed, onToggleCollapsed }: Props) {
+  const diff = useWorktreeDiff(workstreamId ?? "", !collapsed);
   const fileCount = diff.data?.length ?? 0;
 
   return (
@@ -132,7 +132,7 @@ export function DiffSidebar({ workItemId, collapsed, onToggleCollapsed }: Props)
               <h2 className="text-sm font-semibold">Diff</h2>
               <div className="flex items-center gap-1.5">
                 <Badge tone="dim">{fileCount} {fileCount === 1 ? "file" : "files"}</Badge>
-                {workItemId !== null && (
+                {workstreamId !== null && (
                   <button
                     type="button"
                     onClick={() => void diff.refetch()}
@@ -155,11 +155,11 @@ export function DiffSidebar({ workItemId, collapsed, onToggleCollapsed }: Props)
         </div>
       ) : (
         <div className="h-[calc(100%-61px)] space-y-2 overflow-y-auto p-4">
-          {workItemId === null ? (
+          {workstreamId === null ? (
             <div className="rounded-lg border border-edge bg-panel-2 p-3">
-              <p className="text-sm font-medium">No work item selected</p>
+              <p className="text-sm font-medium">No workstream selected</p>
               <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-                Create a work item to see its worktree diff here.
+                Create a workstream to see its worktree diff here.
               </p>
             </div>
           ) : diff.isLoading ? (
@@ -172,7 +172,7 @@ export function DiffSidebar({ workItemId, collapsed, onToggleCollapsed }: Props)
             <div className="rounded-lg border border-edge bg-panel-2 p-3">
               <p className="text-sm font-medium">No changes yet</p>
               <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-                Edits in this work item&apos;s worktree will show up here.
+                Edits in this workstream&apos;s worktree will show up here.
               </p>
             </div>
           ) : (

@@ -1,24 +1,24 @@
 import { useState } from "react";
 
-import type { WorkItemView } from "../../lib/bindings";
+import type { WorkstreamView } from "../../lib/bindings";
 import { Button, Dialog, ErrorNote, TextInput } from "../../components/ui";
-import { useCreateWorkItem } from "../../lib/queries";
+import { useCreateWorkstream } from "../../lib/queries";
 
 type Props = {
   projectPath: string;
   open: boolean;
   onClose: () => void;
   /** Called with the freshly created item so the caller can select its tab. */
-  onCreated: (view: WorkItemView) => void;
+  onCreated: (view: WorkstreamView) => void;
 };
 
 /**
- * Title prompt for a new work item. Creation provisions a branch + worktree
+ * Title prompt for a new workstream. Creation provisions a branch + worktree
  * on disk (~1-3s), so the dialog stays open with a busy state until done.
  */
-export function CreateWorkItemDialog({ projectPath, open, onClose, onCreated }: Props) {
+export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }: Props) {
   const [title, setTitle] = useState("");
-  const create = useCreateWorkItem(projectPath);
+  const create = useCreateWorkstream(projectPath);
 
   const close = () => {
     if (create.isPending) return;
@@ -41,7 +41,7 @@ export function CreateWorkItemDialog({ projectPath, open, onClose, onCreated }: 
   };
 
   return (
-    <Dialog open={open} onClose={close} title="New work item">
+    <Dialog open={open} onClose={close} title="New workstream">
       <form
         className="space-y-3"
         onSubmit={(e) => {

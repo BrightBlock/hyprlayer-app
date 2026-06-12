@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use hyprlayer_core::gitops::FileDiff;
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::process::binaries::BinaryKind;
-use hyprlayer_core::store::{NewWorkItem, WorkItem, WorkItemDoc};
+use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{self, CreateSpec, RemovePolicy, WorktreeStatus};
 use hyprlayer_core::CoreError;
@@ -15,23 +15,23 @@ use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkItemView {
-    pub item: WorkItem,
+pub struct WorkstreamView {
+    pub item: Workstream,
     pub git: WorktreeStatus,
 }
 
 fn item_not_found(id: &str) -> AppError {
     AppError {
-        code: "work_item_not_found".into(),
-        message: format!("No work item with id {id}"),
+        code: "workstream_not_found".into(),
+        message: format!("No workstream with id {id}"),
         remedy: None,
     }
 }
 
-async fn load_item(state: &AppState, id: &str) -> CmdResult<WorkItem> {
+async fn load_item(state: &AppState, id: &str) -> CmdResult<Workstream> {
     let db = state.db.clone();
     let id_owned = id.to_string();
-    tauri::async_runtime::spawn_blocking(move || db.get_work_item(&id_owned))
+    tauri::async_runtime::spawn_blocking(move || db.get_workstream(&id_owned))
         .await
         .map_err(|e| AppError::internal(format!("db task: {e}")))?
         .map_err(AppError::from)?
@@ -39,10 +39,10 @@ async fn load_item(state: &AppState, id: &str) -> CmdResult<WorkItem> {
 }
 
 /// Live git + thoughts-link status for one item (blocking work).
-fn item_view(state: &AppState, item: WorkItem, link: Option<LinkStatus>) -> WorkItemView {
+fn item_view(state: &AppState, item: Workstream, link: Option<LinkStatus>) -> WorkstreamView {
     let _ = state;
     let git = worktree::status(Path::new(&item.worktree_path), &item.base_branch, link);
-    WorkItemView { item, git }
+    WorkstreamView { item, git }
 }
 
 async fn effective_for(
@@ -60,14 +60,14 @@ async fn effective_for(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_work_items(
+pub async fn list_workstreams(
     state: State<'_, AppState>,
     project_path: String,
     include_archived: bool,
-) -> CmdResult<Vec<WorkItemView>> {
+) -> CmdResult<Vec<WorkstreamView>> {
     let db = state.db.clone();
     let items = tauri::async_runtime::spawn_blocking(move || {
-        db.list_work_items(&project_path, include_archived)
+        db.list_workstreams(&project_path, include_archived)
     })
     .await
     .map_err(|e| AppError::internal(format!("db task: {e}")))?
@@ -88,7 +88,7 @@ pub async fn list_work_items(
                     .as_ref()
                     .map(|eff| thoughts_links::check_thoughts(Path::new(&item.worktree_path), eff));
                 let git = worktree::status(Path::new(&item.worktree_path), &item.base_branch, link);
-                WorkItemView { item, git }
+                WorkstreamView { item, git }
             })
             .collect::<Vec<_>>()
     })
@@ -97,12 +97,12 @@ pub async fn list_work_items(
     Ok(views)
 }
 
-/// Active work items across every project — feeds the sidebar tree.
+/// Active workstreams across every project — feeds the sidebar tree.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_all_work_items(state: State<'_, AppState>) -> CmdResult<Vec<WorkItemView>> {
+pub async fn list_all_workstreams(state: State<'_, AppState>) -> CmdResult<Vec<WorkstreamView>> {
     let db = state.db.clone();
-    let items = tauri::async_runtime::spawn_blocking(move || db.list_active_work_items())
+    let items = tauri::async_runtime::spawn_blocking(move || db.list_active_workstreams())
         .await
         .map_err(|e| AppError::internal(format!("db task: {e}")))?
         .map_err(AppError::from)?;
@@ -112,7 +112,7 @@ pub async fn list_all_work_items(state: State<'_, AppState>) -> CmdResult<Vec<Wo
             .into_iter()
             .map(|item| {
                 let git = worktree::status(Path::new(&item.worktree_path), &item.base_branch, None);
-                WorkItemView { item, git }
+                WorkstreamView { item, git }
             })
             .collect::<Vec<_>>()
     })
@@ -123,16 +123,16 @@ pub async fn list_all_work_items(state: State<'_, AppState>) -> CmdResult<Vec<Wo
 
 #[tauri::command]
 #[specta::specta]
-pub async fn create_work_item(
+pub async fn create_workstream(
     state: State<'_, AppState>,
     project_path: String,
     title: String,
-) -> CmdResult<WorkItemView> {
+) -> CmdResult<WorkstreamView> {
     let title = title.trim().to_string();
     if title.is_empty() {
         return Err(AppError {
             code: "invalid_title".into(),
-            message: "Work items need a title.".into(),
+            message: "Workstreams need a title.".into(),
             remedy: None,
         });
     }
@@ -209,7 +209,7 @@ pub async fn create_work_item(
     state.config.invalidate().await;
 
     let db = state.db.clone();
-    let new_item = NewWorkItem {
+    let new_item = NewWorkstream {
         project_path,
         title,
         slug: created.slug.clone(),
@@ -217,7 +217,7 @@ pub async fn create_work_item(
         worktree_path: created.path.clone(),
         base_branch: created.base_branch.clone(),
     };
-    let item = tauri::async_runtime::spawn_blocking(move || db.insert_work_item(new_item))
+    let item = tauri::async_runtime::spawn_blocking(move || db.insert_workstream(new_item))
         .await
         .map_err(|e| AppError::internal(format!("db task: {e}")))?
         .map_err(AppError::from)?;
@@ -227,7 +227,7 @@ pub async fn create_work_item(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_work_item(state: State<'_, AppState>, id: String) -> CmdResult<WorkItemView> {
+pub async fn get_workstream(state: State<'_, AppState>, id: String) -> CmdResult<WorkstreamView> {
     let item = load_item(&state, &id).await?;
     let effective = effective_for(&state, &item.project_path).await?;
     let link = thoughts_links::check_thoughts(Path::new(&item.worktree_path), &effective);
@@ -236,14 +236,14 @@ pub async fn get_work_item(state: State<'_, AppState>, id: String) -> CmdResult<
 
 #[tauri::command]
 #[specta::specta]
-pub async fn rename_work_item(
+pub async fn rename_workstream(
     state: State<'_, AppState>,
     id: String,
     title: String,
 ) -> CmdResult<()> {
     load_item(&state, &id).await?;
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || db.update_work_item_title(&id, title.trim()))
+    tauri::async_runtime::spawn_blocking(move || db.update_workstream_title(&id, title.trim()))
         .await
         .map_err(|e| AppError::internal(format!("db task: {e}")))?
         .map_err(AppError::from)
@@ -251,7 +251,7 @@ pub async fn rename_work_item(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_work_item_stage(
+pub async fn set_workstream_stage(
     state: State<'_, AppState>,
     id: String,
     stage: String,
@@ -273,7 +273,7 @@ pub async fn set_work_item_stage(
     }
     load_item(&state, &id).await?;
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || db.update_work_item_stage(&id, &stage))
+    tauri::async_runtime::spawn_blocking(move || db.update_workstream_stage(&id, &stage))
         .await
         .map_err(|e| AppError::internal(format!("db task: {e}")))?
         .map_err(AppError::from)
@@ -281,17 +281,17 @@ pub async fn set_work_item_stage(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn attach_work_item_doc(
+pub async fn attach_workstream_doc(
     state: State<'_, AppState>,
     id: String,
     doc_path: String,
     role: String,
-) -> CmdResult<Vec<WorkItemDoc>> {
+) -> CmdResult<Vec<WorkstreamDoc>> {
     load_item(&state, &id).await?;
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        db.attach_work_item_doc(&id, &doc_path, &role)?;
-        db.work_item_docs(&id)
+        db.attach_workstream_doc(&id, &doc_path, &role)?;
+        db.workstream_docs(&id)
     })
     .await
     .map_err(|e| AppError::internal(format!("db task: {e}")))?
@@ -300,16 +300,16 @@ pub async fn attach_work_item_doc(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn detach_work_item_doc(
+pub async fn detach_workstream_doc(
     state: State<'_, AppState>,
     id: String,
     doc_path: String,
-) -> CmdResult<Vec<WorkItemDoc>> {
+) -> CmdResult<Vec<WorkstreamDoc>> {
     load_item(&state, &id).await?;
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        db.detach_work_item_doc(&id, &doc_path)?;
-        db.work_item_docs(&id)
+        db.detach_workstream_doc(&id, &doc_path)?;
+        db.workstream_docs(&id)
     })
     .await
     .map_err(|e| AppError::internal(format!("db task: {e}")))?
@@ -318,12 +318,12 @@ pub async fn detach_work_item_doc(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_work_item_docs(
+pub async fn list_workstream_docs(
     state: State<'_, AppState>,
     id: String,
-) -> CmdResult<Vec<WorkItemDoc>> {
+) -> CmdResult<Vec<WorkstreamDoc>> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || db.work_item_docs(&id))
+    tauri::async_runtime::spawn_blocking(move || db.workstream_docs(&id))
         .await
         .map_err(|e| AppError::internal(format!("db task: {e}")))?
         .map_err(AppError::from)
@@ -334,7 +334,7 @@ pub async fn list_work_item_docs(
 /// UI re-asks with `discard: true`.
 #[tauri::command]
 #[specta::specta]
-pub async fn archive_work_item(
+pub async fn archive_workstream(
     state: State<'_, AppState>,
     id: String,
     discard: bool,
@@ -404,7 +404,7 @@ pub async fn archive_work_item(
     state.config.invalidate().await;
 
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || db.archive_work_item(&id))
+    tauri::async_runtime::spawn_blocking(move || db.archive_workstream(&id))
         .await
         .map_err(|e| AppError::internal(format!("db task: {e}")))?
         .map_err(AppError::from)
@@ -414,10 +414,10 @@ pub async fn archive_work_item(
 /// thoughts repo).
 #[tauri::command]
 #[specta::specta]
-pub async fn reprovision_work_item(
+pub async fn reprovision_workstream(
     state: State<'_, AppState>,
     id: String,
-) -> CmdResult<WorkItemView> {
+) -> CmdResult<WorkstreamView> {
     let item = load_item(&state, &id).await?;
     let effective = effective_for(&state, &item.project_path).await?;
     let link = thoughts_links::provision_thoughts(Path::new(&item.worktree_path), &effective)
@@ -438,6 +438,6 @@ pub async fn worktree_diff(state: State<'_, AppState>, id: String) -> CmdResult<
     .map_err(|e| AppError {
         code: "worktree_diff".into(),
         message: e.to_string(),
-        remedy: Some("The worktree may have been deleted; archive this work item.".into()),
+        remedy: Some("The worktree may have been deleted; archive this workstream.".into()),
     })
 }

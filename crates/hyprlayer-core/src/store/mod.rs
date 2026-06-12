@@ -1,13 +1,13 @@
 //! App-local persistence (SQLite via rusqlite, bundled).
 //!
-//! Holds only what the app itself owns: work items and (from phase 3)
+//! Holds only what the app itself owns: workstreams and (from phase 3)
 //! session records. Projects, documents, comments, and git state are always
 //! derived from their sources of truth, never stored here.
 
 mod migrations;
-mod work_items;
+mod workstreams;
 
-pub use work_items::*;
+pub use workstreams::*;
 
 use std::path::Path;
 use std::sync::Mutex;

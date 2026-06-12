@@ -126,7 +126,7 @@ async fn filter_worktree_mappings(state: &AppState, projects: &mut Vec<Project>)
     let db = state.db.clone();
     let known: std::collections::HashSet<String> =
         tauri::async_runtime::spawn_blocking(move || {
-            db.list_active_work_items()
+            db.list_active_workstreams()
                 .map(|items| items.into_iter().map(|i| i.worktree_path).collect())
         })
         .await

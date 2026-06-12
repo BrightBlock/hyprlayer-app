@@ -26,27 +26,27 @@ export const commands = {
 	createDoc: (input: CreateDocInput) => typedError<DocMeta, AppError>(__TAURI_INVOKE("create_doc", { input })),
 	revealDoc: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_doc", { id })),
 	getThoughtsGitStatus: (projectPath: string) => typedError<ThoughtsRepoStatus, AppError>(__TAURI_INVOKE("get_thoughts_git_status", { projectPath })),
-	listWorkItems: (projectPath: string, includeArchived: boolean) => typedError<WorkItemView[], AppError>(__TAURI_INVOKE("list_work_items", { projectPath, includeArchived })),
-	/**  Active work items across every project — feeds the sidebar tree. */
-	listAllWorkItems: () => typedError<WorkItemView[], AppError>(__TAURI_INVOKE("list_all_work_items")),
-	createWorkItem: (projectPath: string, title: string) => typedError<WorkItemView, AppError>(__TAURI_INVOKE("create_work_item", { projectPath, title })),
-	getWorkItem: (id: string) => typedError<WorkItemView, AppError>(__TAURI_INVOKE("get_work_item", { id })),
-	renameWorkItem: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_work_item", { id, title })),
-	setWorkItemStage: (id: string, stage: string) => typedError<null, AppError>(__TAURI_INVOKE("set_work_item_stage", { id, stage })),
-	attachWorkItemDoc: (id: string, docPath: string, role: string) => typedError<WorkItemDoc[], AppError>(__TAURI_INVOKE("attach_work_item_doc", { id, docPath, role })),
-	detachWorkItemDoc: (id: string, docPath: string) => typedError<WorkItemDoc[], AppError>(__TAURI_INVOKE("detach_work_item_doc", { id, docPath })),
-	listWorkItemDocs: (id: string) => typedError<WorkItemDoc[], AppError>(__TAURI_INVOKE("list_work_item_docs", { id })),
+	listWorkstreams: (projectPath: string, includeArchived: boolean) => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_workstreams", { projectPath, includeArchived })),
+	/**  Active workstreams across every project — feeds the sidebar tree. */
+	listAllWorkstreams: () => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_all_workstreams")),
+	createWorkstream: (projectPath: string, title: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title })),
+	getWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("get_workstream", { id })),
+	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
+	setWorkstreamStage: (id: string, stage: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
+	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
+	detachWorkstreamDoc: (id: string, docPath: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("detach_workstream_doc", { id, docPath })),
+	listWorkstreamDocs: (id: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("list_workstream_docs", { id })),
 	/**
 	 *  Archive an item. `discard: false` is the safe path — it fails with
 	 *  `worktree_dirty` / `worktree_unpushed` when work would be lost, and the
 	 *  UI re-asks with `discard: true`.
 	 */
-	archiveWorkItem: (id: string, discard: boolean) => typedError<null, AppError>(__TAURI_INVOKE("archive_work_item", { id, discard })),
+	archiveWorkstream: (id: string, discard: boolean) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id, discard })),
 	/**
 	 *  Re-create broken thoughts links (status shows `broken` after e.g. a moved
 	 *  thoughts repo).
 	 */
-	reprovisionWorkItem: (id: string) => typedError<WorkItemView, AppError>(__TAURI_INVOKE("reprovision_work_item", { id })),
+	reprovisionWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("reprovision_workstream", { id })),
 	/**  Working-tree diff vs HEAD (staged + unstaged), thoughts/ excluded. */
 	worktreeDiff: (id: string) => typedError<FileDiff[], AppError>(__TAURI_INVOKE("worktree_diff", { id })),
 	getBinariesStatus: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("get_binaries_status")),
@@ -344,7 +344,7 @@ export type ThoughtsRepoStatus = {
 	hasRemote: boolean,
 };
 
-export type WorkItem = {
+export type Workstream = {
 	id: string,
 	projectPath: string,
 	title: string,
@@ -362,15 +362,15 @@ export type WorkItem = {
 	archivedAt: number | null,
 };
 
-export type WorkItemDoc = {
-	workItemId: string,
+export type WorkstreamDoc = {
+	workstreamId: string,
 	docPath: string,
 	/**  research | plan | other */
 	role: string,
 };
 
-export type WorkItemView = {
-	item: WorkItem,
+export type WorkstreamView = {
+	item: Workstream,
 	git: WorktreeStatus,
 };
 

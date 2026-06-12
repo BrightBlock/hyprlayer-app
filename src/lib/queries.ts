@@ -7,7 +7,7 @@ import {
   type CreateDocInput,
   type FmPatchDto,
   type ThoughtQuery,
-  type WorkItemView,
+  type WorkstreamView,
 } from "./bindings";
 import { unwrap } from "./ipc";
 import { queryClient } from "./queryClient";
@@ -151,65 +151,65 @@ export function useSaveSettings() {
   });
 }
 
-/* ------------------------------- Work items ------------------------------ */
-// List cache lives at ["workItems", projectPath]; everything scoped to one
-// item (docs, diff, detail) lives under the ["workItem", id] prefix so a
+/* ------------------------------- Workstreams ------------------------------ */
+// List cache lives at ["workstreams", projectPath]; everything scoped to one
+// item (docs, diff, detail) lives under the ["workstream", id] prefix so a
 // single prefix invalidation refreshes the whole family.
 
-function invalidateWorkItem(_projectPath: string, id: string) {
-  // Whole ["workItems"] prefix: the project's list AND the sidebar's
+function invalidateWorkstream(_projectPath: string, id: string) {
+  // Whole ["workstreams"] prefix: the project's list AND the sidebar's
   // cross-project tree both refresh.
-  void queryClient.invalidateQueries({ queryKey: ["workItems"] });
-  void queryClient.invalidateQueries({ queryKey: ["workItem", id] });
+  void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+  void queryClient.invalidateQueries({ queryKey: ["workstream", id] });
 }
 
-export function useWorkItems(projectPath: string, includeArchived = false) {
+export function useWorkstreams(projectPath: string, includeArchived = false) {
   return useQuery({
     // includeArchived is part of the key; prefix invalidation on
-    // ["workItems", projectPath] still hits both variants.
-    queryKey: ["workItems", projectPath, { includeArchived }],
-    queryFn: () => unwrap(commands.listWorkItems(projectPath, includeArchived)),
+    // ["workstreams", projectPath] still hits both variants.
+    queryKey: ["workstreams", projectPath, { includeArchived }],
+    queryFn: () => unwrap(commands.listWorkstreams(projectPath, includeArchived)),
   });
 }
 
-/** Active work items across all projects — the sidebar tree. */
-export function useAllWorkItems(enabled = true) {
+/** Active workstreams across all projects — the sidebar tree. */
+export function useAllWorkstreams(enabled = true) {
   return useQuery({
-    queryKey: ["workItems", "@all"],
-    queryFn: () => unwrap(commands.listAllWorkItems()),
+    queryKey: ["workstreams", "@all"],
+    queryFn: () => unwrap(commands.listAllWorkstreams()),
     enabled,
   });
 }
 
-export function useCreateWorkItem(projectPath: string) {
+export function useCreateWorkstream(projectPath: string) {
   return useMutation({
-    mutationFn: (title: string) => unwrap(commands.createWorkItem(projectPath, title)),
+    mutationFn: (title: string) => unwrap(commands.createWorkstream(projectPath, title)),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["workItems"] });
+      void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
     },
   });
 }
 
-export function useRenameWorkItem(projectPath: string) {
+export function useRenameWorkstream(projectPath: string) {
   return useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
-      unwrap(commands.renameWorkItem(id, title)),
-    onSettled: (_data, _error, { id }) => invalidateWorkItem(projectPath, id),
+      unwrap(commands.renameWorkstream(id, title)),
+    onSettled: (_data, _error, { id }) => invalidateWorkstream(projectPath, id),
   });
 }
 
-export function useSetWorkItemStage(projectPath: string) {
+export function useSetWorkstreamStage(projectPath: string) {
   return useMutation({
     mutationFn: ({ id, stage }: { id: string; stage: string }) =>
-      unwrap(commands.setWorkItemStage(id, stage)),
+      unwrap(commands.setWorkstreamStage(id, stage)),
     // Optimistic: the stage drives the composer styling, so flip it instantly.
     onMutate: async ({ id, stage }) => {
-      await queryClient.cancelQueries({ queryKey: ["workItems", projectPath] });
-      const previous = queryClient.getQueriesData<WorkItemView[]>({
-        queryKey: ["workItems", projectPath],
+      await queryClient.cancelQueries({ queryKey: ["workstreams", projectPath] });
+      const previous = queryClient.getQueriesData<WorkstreamView[]>({
+        queryKey: ["workstreams", projectPath],
       });
-      queryClient.setQueriesData<WorkItemView[]>(
-        { queryKey: ["workItems", projectPath] },
+      queryClient.setQueriesData<WorkstreamView[]>(
+        { queryKey: ["workstreams", projectPath] },
         (views) =>
           views?.map((view) =>
             view.item.id === id ? { ...view, item: { ...view.item, stage } } : view,
@@ -222,56 +222,56 @@ export function useSetWorkItemStage(projectPath: string) {
         queryClient.setQueryData(key, data);
       }
     },
-    onSettled: (_data, _error, { id }) => invalidateWorkItem(projectPath, id),
+    onSettled: (_data, _error, { id }) => invalidateWorkstream(projectPath, id),
   });
 }
 
-export function useArchiveWorkItem(projectPath: string) {
+export function useArchiveWorkstream(projectPath: string) {
   return useMutation({
     mutationFn: ({ id, discard }: { id: string; discard: boolean }) =>
-      unwrap(commands.archiveWorkItem(id, discard)),
-    onSuccess: (_data, { id }) => invalidateWorkItem(projectPath, id),
+      unwrap(commands.archiveWorkstream(id, discard)),
+    onSuccess: (_data, { id }) => invalidateWorkstream(projectPath, id),
   });
 }
 
-export function useReprovisionWorkItem(projectPath: string) {
+export function useReprovisionWorkstream(projectPath: string) {
   return useMutation({
-    mutationFn: (id: string) => unwrap(commands.reprovisionWorkItem(id)),
-    onSettled: (_data, _error, id) => invalidateWorkItem(projectPath, id),
+    mutationFn: (id: string) => unwrap(commands.reprovisionWorkstream(id)),
+    onSettled: (_data, _error, id) => invalidateWorkstream(projectPath, id),
   });
 }
 
-export function useWorkItemDocs(id: string) {
+export function useWorkstreamDocs(id: string) {
   return useQuery({
-    queryKey: ["workItem", id, "docs"],
-    queryFn: () => unwrap(commands.listWorkItemDocs(id)),
+    queryKey: ["workstream", id, "docs"],
+    queryFn: () => unwrap(commands.listWorkstreamDocs(id)),
     enabled: id.length > 0,
   });
 }
 
-export function useAttachWorkItemDoc(id: string) {
+export function useAttachWorkstreamDoc(id: string) {
   return useMutation({
     mutationFn: ({ docPath, role }: { docPath: string; role: string }) =>
-      unwrap(commands.attachWorkItemDoc(id, docPath, role)),
+      unwrap(commands.attachWorkstreamDoc(id, docPath, role)),
     // The command returns the updated doc list — write it through directly.
     onSuccess: (docs) => {
-      queryClient.setQueryData(["workItem", id, "docs"], docs);
+      queryClient.setQueryData(["workstream", id, "docs"], docs);
     },
   });
 }
 
-export function useDetachWorkItemDoc(id: string) {
+export function useDetachWorkstreamDoc(id: string) {
   return useMutation({
-    mutationFn: (docPath: string) => unwrap(commands.detachWorkItemDoc(id, docPath)),
+    mutationFn: (docPath: string) => unwrap(commands.detachWorkstreamDoc(id, docPath)),
     onSuccess: (docs) => {
-      queryClient.setQueryData(["workItem", id, "docs"], docs);
+      queryClient.setQueryData(["workstream", id, "docs"], docs);
     },
   });
 }
 
 export function useWorktreeDiff(id: string, enabled = true) {
   return useQuery({
-    queryKey: ["workItem", id, "diff"],
+    queryKey: ["workstream", id, "diff"],
     queryFn: () => unwrap(commands.worktreeDiff(id)),
     enabled: enabled && id.length > 0,
     // Keep the previous file list on screen while a refetch resolves.

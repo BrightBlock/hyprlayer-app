@@ -1,12 +1,12 @@
-import type { WorkItemView } from "../../lib/bindings";
+import type { WorkstreamView } from "../../lib/bindings";
 import { Button, Dialog, ErrorNote } from "../../components/ui";
 import { isAppError } from "../../lib/ipc";
-import { useArchiveWorkItem } from "../../lib/queries";
+import { useArchiveWorkstream } from "../../lib/queries";
 
 type Props = {
   projectPath: string;
   /** The item being archived; null keeps the dialog closed. */
-  target: WorkItemView | null;
+  target: WorkstreamView | null;
   onClose: () => void;
   /** Called after a successful archive so the caller can fix tab selection. */
   onArchived: (id: string) => void;
@@ -19,8 +19,8 @@ const BLOCKING_CODES = new Set(["worktree_dirty", "worktree_unpushed"]);
  * refuses because work would be lost, surface its message + remedy and offer
  * the destructive retry (discard=true).
  */
-export function ArchiveWorkItemDialog({ projectPath, target, onClose, onArchived }: Props) {
-  const archive = useArchiveWorkItem(projectPath);
+export function ArchiveWorkstreamDialog({ projectPath, target, onClose, onArchived }: Props) {
+  const archive = useArchiveWorkstream(projectPath);
 
   const blocked = archive.isError && isAppError(archive.error) && BLOCKING_CODES.has(archive.error.code);
 
@@ -46,7 +46,7 @@ export function ArchiveWorkItemDialog({ projectPath, target, onClose, onArchived
   };
 
   return (
-    <Dialog open={target !== null} onClose={close} title="Archive work item?">
+    <Dialog open={target !== null} onClose={close} title="Archive workstream?">
       <div className="space-y-3">
         <p className="text-sm leading-relaxed text-ink-dim">
           {target && (

@@ -1,10 +1,10 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
-import { useAllWorkItems, useBootstrap } from "../lib/queries";
+import { useAllWorkstreams, useBootstrap } from "../lib/queries";
 import { Spinner } from "../components/ui";
-import { ArchiveWorkItemDialog } from "../features/work-items/ArchiveWorkItemDialog";
-import type { WorkItemView } from "../lib/bindings";
+import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
+import type { WorkstreamView } from "../lib/bindings";
 
 const PROJECT_SIDEBAR_COLLAPSED = 56;
 const PROJECT_SIDEBAR_MIN = 180;
@@ -165,8 +165,8 @@ function routeSection(pathname: string): string {
 const topIconClass =
   "inline-flex h-8 w-8 items-center justify-center rounded-md border border-edge bg-panel-2 text-ink-dim hover:bg-edge/60 hover:text-ink";
 
-/** Conductor-style status chip for a sidebar work-item row. */
-function WorkItemRowChip({ view }: { view: WorkItemView }) {
+/** Conductor-style status chip for a sidebar workstream row. */
+function WorkstreamRowChip({ view }: { view: WorkstreamView }) {
   if (view.git.dirty > 0) {
     return <span className="shrink-0 text-xs font-medium text-ok">+{view.git.dirty}</span>;
   }
@@ -193,15 +193,15 @@ export function Root() {
     : null;
   const currentSection = routeSection(pathname);
 
-  // The sidebar tree: every project's active work items, nested beneath it.
-  const allWorkItems = useAllWorkItems(projects.length > 0);
-  const itemsByProject = new Map<string, WorkItemView[]>();
-  for (const view of allWorkItems.data ?? []) {
+  // The sidebar tree: every project's active workstreams, nested beneath it.
+  const allWorkstreams = useAllWorkstreams(projects.length > 0);
+  const itemsByProject = new Map<string, WorkstreamView[]>();
+  for (const view of allWorkstreams.data ?? []) {
     const group = itemsByProject.get(view.item.projectPath) ?? [];
     group.push(view);
     itemsByProject.set(view.item.projectPath, group);
   }
-  const activeWorkItemId = currentProjectPath ? locationSearch.item : undefined;
+  const activeWorkstreamId = currentProjectPath ? locationSearch.item : undefined;
 
   // Right-click menu + archive flow for the worktree rows.
   const navigate = useNavigate();
@@ -209,11 +209,11 @@ export function Root() {
     x: number;
     y: number;
     projectPath: string;
-    view: WorkItemView;
+    view: WorkstreamView;
   } | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<{
     projectPath: string;
-    view: WorkItemView;
+    view: WorkstreamView;
   } | null>(null);
 
   useEffect(() => {
@@ -365,7 +365,7 @@ export function Root() {
             {projects.map((p) => {
               const children = itemsByProject.get(p.path) ?? [];
               const isCurrent = currentProjectPath === p.path;
-              const projectHighlight = isCurrent && !activeWorkItemId;
+              const projectHighlight = isCurrent && !activeWorkstreamId;
 
               if (collapsed) {
                 return (
@@ -412,15 +412,15 @@ export function Root() {
                       params={{ projectPath: p.path }}
                       search={{ create: true }}
                       className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-                      title={`New work item in ${p.mappedName}`}
-                      aria-label={`New work item in ${p.mappedName}`}
+                      title={`New workstream in ${p.mappedName}`}
+                      aria-label={`New workstream in ${p.mappedName}`}
                     >
                       <SidebarPlusIcon />
                     </Link>
                   </div>
 
                   {children.map((view) => {
-                    const isActiveItem = isCurrent && activeWorkItemId === view.item.id;
+                    const isActiveItem = isCurrent && activeWorkstreamId === view.item.id;
                     return (
                       <Link
                         key={view.item.id}
@@ -443,7 +443,7 @@ export function Root() {
                       >
                         <GitBranchIcon />
                         <span className="min-w-0 flex-1 truncate">{view.item.title}</span>
-                        <WorkItemRowChip view={view} />
+                        <WorkstreamRowChip view={view} />
                       </Link>
                     );
                   })}
@@ -559,18 +559,18 @@ export function Root() {
               setItemMenu(null);
             }}
           >
-            Archive work item…
+            Archive workstream…
           </button>
         </div>
       )}
 
-      <ArchiveWorkItemDialog
+      <ArchiveWorkstreamDialog
         projectPath={archiveTarget?.projectPath ?? ""}
         target={archiveTarget?.view ?? null}
         onClose={() => setArchiveTarget(null)}
         onArchived={(id) => {
           // If the archived item was the one selected, drop back to its project.
-          if (archiveTarget && currentProjectPath === archiveTarget.projectPath && activeWorkItemId === id) {
+          if (archiveTarget && currentProjectPath === archiveTarget.projectPath && activeWorkstreamId === id) {
             void navigate({
               to: "/projects/$projectPath",
               params: { projectPath: archiveTarget.projectPath },
