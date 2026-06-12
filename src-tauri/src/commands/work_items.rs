@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use hyprlayer_core::gitops::FileDiff;
+use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{NewWorkItem, WorkItem, WorkItemDoc};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
@@ -110,8 +111,7 @@ pub async fn list_all_work_items(state: State<'_, AppState>) -> CmdResult<Vec<Wo
         items
             .into_iter()
             .map(|item| {
-                let git =
-                    worktree::status(Path::new(&item.worktree_path), &item.base_branch, None);
+                let git = worktree::status(Path::new(&item.worktree_path), &item.base_branch, None);
                 WorkItemView { item, git }
             })
             .collect::<Vec<_>>()
@@ -163,19 +163,32 @@ pub async fn create_work_item(
         .await
         .map_err(AppError::from)?;
 
-    // Provision hyprlayer context inside the worktree. Failures here roll the
-    // worktree back so we never leave half-provisioned state behind.
+    // Provision hyprlayer context inside the worktree, CLI-first: `thoughts
+    // init --yes --directory <mapped>` creates the symlinks and maps the
+    // worktree to the SAME repo name, with the CLI owning its config write.
+    // Manual provisioning (which has the Windows junction fallback) is the
+    // fallback. Failures roll the worktree back so we never leave
+    // half-provisioned state behind.
     let worktree_path = PathBuf::from(&created.path);
-    let provision = (|| -> Result<LinkStatus, CoreError> {
-        let link = thoughts_links::provision_thoughts(&worktree_path, &effective)?;
-        thoughts_links::add_worktree_mapping(
-            state.config.path(),
-            &worktree_path,
-            &mapped,
-            effective.profile_name.as_deref(),
-        )?;
-        Ok(link)
-    })();
+    let cli_init = HyprCli::new(&state.binaries)
+        .thoughts_init(&worktree_path, &mapped, effective.profile_name.as_deref())
+        .await;
+    let provision = match cli_init {
+        Ok(_) => Ok(thoughts_links::check_thoughts(&worktree_path, &effective)),
+        Err(init_err) => {
+            log::warn!("thoughts init in worktree failed ({init_err}); provisioning manually");
+            (|| -> Result<LinkStatus, CoreError> {
+                let link = thoughts_links::provision_thoughts(&worktree_path, &effective)?;
+                thoughts_links::add_worktree_mapping(
+                    state.config.path(),
+                    &worktree_path,
+                    &mapped,
+                    effective.profile_name.as_deref(),
+                )?;
+                Ok(link)
+            })()
+        }
+    };
     let link = match provision {
         Ok(link) => link,
         Err(e) => {
@@ -337,13 +350,44 @@ pub async fn archive_work_item(
     } else {
         RemovePolicy::Safe
     };
+    let worktree_path = Path::new(&item.worktree_path);
+
+    // Safe gate FIRST — `thoughts uninit` tears down the worktree's links,
+    // so it must not run before we know the removal will be allowed.
+    if policy == RemovePolicy::Safe && worktree_path.exists() {
+        let status = worktree::status(worktree_path, &item.base_branch, None);
+        if status.dirty + status.untracked > 0 {
+            return Err(AppError::from(CoreError::WorktreeDirty(
+                status.dirty + status.untracked,
+            )));
+        }
+        if status.ahead > 0 {
+            return Err(AppError::from(CoreError::WorktreeUnpushed {
+                branch: item.branch.clone(),
+                count: status.ahead,
+            }));
+        }
+    }
+
+    // CLI-first teardown: uninit removes the thoughts/ links and the
+    // worktree's repoMappings entry. Direct mapping edit is the fallback.
+    let mut unmapped = false;
+    if worktree_path.exists() {
+        match HyprCli::new(&state.binaries)
+            .thoughts_uninit(worktree_path)
+            .await
+        {
+            Ok(_) => unmapped = true,
+            Err(e) => log::warn!("thoughts uninit in worktree failed: {e}"),
+        }
+    }
 
     state
         .worktrees
         .remove(
             &git,
             Path::new(&item.project_path),
-            Path::new(&item.worktree_path),
+            worktree_path,
             &item.branch,
             &item.base_branch,
             policy,
@@ -351,11 +395,11 @@ pub async fn archive_work_item(
         .await
         .map_err(AppError::from)?;
 
-    // Unmap after the worktree is gone; tolerate a missing entry.
-    if let Err(e) =
-        thoughts_links::remove_worktree_mapping(state.config.path(), Path::new(&item.worktree_path))
-    {
-        log::warn!("could not remove worktree mapping: {e}");
+    if !unmapped {
+        if let Err(e) = thoughts_links::remove_worktree_mapping(state.config.path(), worktree_path)
+        {
+            log::warn!("could not remove worktree mapping: {e}");
+        }
     }
     state.config.invalidate().await;
 

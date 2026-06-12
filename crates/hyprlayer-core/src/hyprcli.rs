@@ -134,6 +134,14 @@ impl<'a> HyprCli<'a> {
         self.exec(repo_path, &args, Duration::from_secs(120)).await
     }
 
+    /// `hyprlayer thoughts uninit`, run from a repo or worktree: removes its
+    /// `thoughts/` links and drops the cwd's repoMappings entry. Fully
+    /// non-interactive (verified against the CLI source).
+    pub async fn thoughts_uninit(&self, repo_path: &Path) -> Result<String> {
+        self.exec(repo_path, &["thoughts", "uninit"], Duration::from_secs(60))
+            .await
+    }
+
     /// `hyprlayer ai status --json` (loose shape; refined when the app
     /// grows AI-tool management UI).
     pub async fn ai_status(&self, cwd: &Path) -> Result<serde_json::Value> {

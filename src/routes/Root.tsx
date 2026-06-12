@@ -1,8 +1,9 @@
-import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { useAllWorkItems, useBootstrap } from "../lib/queries";
 import { Spinner } from "../components/ui";
+import { ArchiveWorkItemDialog } from "../features/work-items/ArchiveWorkItemDialog";
 import type { WorkItemView } from "../lib/bindings";
 
 const PROJECT_SIDEBAR_COLLAPSED = 56;
@@ -46,6 +47,30 @@ function SidebarPlusIcon() {
   return (
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function GitBranchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      className="shrink-0"
+    >
+      <circle cx="6" cy="5" r="2.3" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="6" cy="19" r="2.3" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="18" cy="8" r="2.3" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M6 7.5v9" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M18 10.5c0 3-2.5 4.5-5.5 4.5H9.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -177,6 +202,33 @@ export function Root() {
     itemsByProject.set(view.item.projectPath, group);
   }
   const activeWorkItemId = currentProjectPath ? locationSearch.item : undefined;
+
+  // Right-click menu + archive flow for the worktree rows.
+  const navigate = useNavigate();
+  const [itemMenu, setItemMenu] = useState<{
+    x: number;
+    y: number;
+    projectPath: string;
+    view: WorkItemView;
+  } | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<{
+    projectPath: string;
+    view: WorkItemView;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!itemMenu) return;
+    const close = () => setItemMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [itemMenu]);
   const contentOffset = Math.max(
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
     TOP_CHROME_MIN_CONTENT_OFFSET,
@@ -359,7 +411,7 @@ export function Root() {
                       to="/projects/$projectPath"
                       params={{ projectPath: p.path }}
                       search={{ create: true }}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim opacity-0 transition-opacity hover:bg-edge/60 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
                       title={`New work item in ${p.mappedName}`}
                       aria-label={`New work item in ${p.mappedName}`}
                     >
@@ -375,11 +427,21 @@ export function Root() {
                         to="/projects/$projectPath"
                         params={{ projectPath: p.path }}
                         search={{ item: view.item.id }}
-                        className={`flex items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-sm hover:bg-[#171a20] hover:text-ink ${
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setItemMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            projectPath: p.path,
+                            view,
+                          });
+                        }}
+                        className={`flex items-center gap-2 rounded-md py-1.5 pl-6 pr-2 text-sm hover:bg-[#171a20] hover:text-ink ${
                           isActiveItem ? "bg-[#242832] text-ink" : "text-ink-dim"
                         }`}
-                        title={view.item.title}
+                        title={`${view.item.title} · ${view.item.branch}`}
                       >
+                        <GitBranchIcon />
                         <span className="min-w-0 flex-1 truncate">{view.item.title}</span>
                         <WorkItemRowChip view={view} />
                       </Link>
@@ -466,6 +528,58 @@ export function Root() {
           <Outlet />
         </main>
       </div>
+
+      {itemMenu && (
+        <div
+          className="fixed z-50 min-w-44 rounded-md border border-edge bg-panel p-1 shadow-2xl"
+          style={{ left: itemMenu.x, top: itemMenu.y }}
+          role="menu"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="block w-full rounded px-2 py-1.5 text-left text-sm text-ink hover:bg-panel-2"
+            onClick={() => {
+              void navigate({
+                to: "/projects/$projectPath",
+                params: { projectPath: itemMenu.projectPath },
+                search: { item: itemMenu.view.item.id },
+              });
+              setItemMenu(null);
+            }}
+          >
+            Open
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="block w-full rounded px-2 py-1.5 text-left text-sm text-bad hover:bg-bad/10"
+            onClick={() => {
+              setArchiveTarget({ projectPath: itemMenu.projectPath, view: itemMenu.view });
+              setItemMenu(null);
+            }}
+          >
+            Archive work item…
+          </button>
+        </div>
+      )}
+
+      <ArchiveWorkItemDialog
+        projectPath={archiveTarget?.projectPath ?? ""}
+        target={archiveTarget?.view ?? null}
+        onClose={() => setArchiveTarget(null)}
+        onArchived={(id) => {
+          // If the archived item was the one selected, drop back to its project.
+          if (archiveTarget && currentProjectPath === archiveTarget.projectPath && activeWorkItemId === id) {
+            void navigate({
+              to: "/projects/$projectPath",
+              params: { projectPath: archiveTarget.projectPath },
+              search: {},
+            });
+          }
+          setArchiveTarget(null);
+        }}
+      />
     </div>
   );
 }

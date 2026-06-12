@@ -156,8 +156,10 @@ impl WorktreeManager {
         if worktree.exists() {
             if policy == RemovePolicy::Safe {
                 let status = status(worktree, base_branch, None);
-                if status.dirty > 0 {
-                    return Err(CoreError::WorktreeDirty(status.dirty));
+                // Untracked files (outside thoughts/) count too: removal
+                // deletes them just as surely as tracked edits.
+                if status.dirty + status.untracked > 0 {
+                    return Err(CoreError::WorktreeDirty(status.dirty + status.untracked));
                 }
                 if status.ahead > 0 {
                     return Err(CoreError::WorktreeUnpushed {
@@ -166,13 +168,11 @@ impl WorktreeManager {
                     });
                 }
             }
-            let mut args = vec!["worktree", "remove"];
-            if policy == RemovePolicy::ForceDiscard {
-                args.push("--force");
-            }
+            // Always --force the porcelain removal: the Safe gate above is
+            // the real protection, and leftover app infrastructure (the
+            // untracked thoughts/ links) would otherwise make git refuse.
             let wt = worktree.display().to_string();
-            args.push(&wt);
-            git_in(git, project_repo, &args)
+            git_in(git, project_repo, &["worktree", "remove", "--force", &wt])
                 .timeout(Duration::from_secs(60))
                 .run()
                 .await?;
@@ -424,6 +424,22 @@ mod tests {
         let st = status(&wt, &created.base_branch, None);
         assert!(st.exists);
         assert_eq!((st.dirty, st.untracked, st.ahead), (0, 0, 0));
+
+        // Untracked files (outside thoughts/) block Safe removal too.
+        std::fs::write(wt.join("scratch.txt"), "wip\n").unwrap();
+        let err = manager
+            .remove(
+                &git,
+                &repo,
+                &wt,
+                &created.branch,
+                &created.base_branch,
+                RemovePolicy::Safe,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "worktree_dirty");
+        std::fs::remove_file(wt.join("scratch.txt")).unwrap();
 
         // Tracked edit makes it dirty and blocks Safe removal.
         std::fs::write(wt.join("README.md"), "changed\n").unwrap();

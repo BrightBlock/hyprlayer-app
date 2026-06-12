@@ -134,7 +134,8 @@ async fn filter_worktree_mappings(state: &AppState, projects: &mut Vec<Project>)
         .and_then(|r| r.ok())
         .unwrap_or_default();
 
-    projects.retain(|p| !known.contains(&p.path) && !Path::new(&p.path).starts_with(&worktree_root));
+    projects
+        .retain(|p| !known.contains(&p.path) && !Path::new(&p.path).starts_with(&worktree_root));
 }
 
 async fn config_summary(state: &AppState) -> (ConfigSummary, Vec<Project>) {
