@@ -314,26 +314,6 @@ export function Root() {
           style={{ marginLeft: contentOffset }}
           data-tauri-drag-region
         >
-          <div className="mr-1 flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={() => window.history.back()}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
-              title="Back"
-              aria-label="Back"
-            >
-              <ArrowLeftIcon />
-            </button>
-            <button
-              type="button"
-              onClick={() => window.history.forward()}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
-              title="Forward"
-              aria-label="Forward"
-            >
-              <ArrowRightIcon />
-            </button>
-          </div>
           <div className="flex min-w-0 items-center gap-2 text-sm" data-tauri-drag-region>
             {currentProject ? (
               <>
@@ -355,8 +335,37 @@ export function Root() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.history.back()}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+              title="Back"
+              aria-label="Back"
+            >
+              <ArrowLeftIcon />
+            </button>
+            <button
+              type="button"
+              onClick={() => window.history.forward()}
+              className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+              title="Forward"
+              aria-label="Forward"
+            >
+              <ArrowRightIcon />
+            </button>
             {currentProject && (
               <>
+                {((activeWorkstream?.git.dirty ?? 0) > 0 ||
+                  (activeWorkstream?.git.ahead ?? 0) > 0) && (
+                  <button
+                    type="button"
+                    className="inline-flex h-8 items-center gap-2 rounded-md border border-edge bg-panel-2 px-3 text-sm font-medium text-ink hover:bg-edge/60"
+                    title="Create PR workflow is not connected yet"
+                  >
+                    <GitPullRequestIcon />
+                    Create PR
+                  </button>
+                )}
                 <Link
                   to="/projects/$projectPath/docs"
                   params={{ projectPath: currentProject.path }}
@@ -375,17 +384,6 @@ export function Root() {
                 >
                   <SettingsIcon size={20} />
                 </Link>
-                {((activeWorkstream?.git.dirty ?? 0) > 0 ||
-                  (activeWorkstream?.git.ahead ?? 0) > 0) && (
-                  <button
-                    type="button"
-                    className="ml-1 inline-flex h-8 items-center gap-2 rounded-md border border-edge bg-panel-2 px-3 text-sm font-medium text-ink hover:bg-edge/60"
-                    title="Create PR workflow is not connected yet"
-                  >
-                    <GitPullRequestIcon />
-                    Create PR
-                  </button>
-                )}
               </>
             )}
           </div>
