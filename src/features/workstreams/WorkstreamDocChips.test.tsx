@@ -1,43 +1,30 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { WorkstreamDocChips, chipLabel } from "./WorkstreamDocChips";
 
 // No vitest globals -> RTL can't register its own auto-cleanup; without this,
 // a previous test's mounted copy steals the next test's queries and clicks.
 afterEach(cleanup);
 
-import { WorkstreamDocChips, chipLabel } from "./WorkstreamDocChips";
-import { commands } from "../../lib/bindings";
-
-vi.mock("../../lib/bindings", () => ({
-  commands: {
-    listWorkstreamDocs: vi.fn(),
-    detachWorkstreamDoc: vi.fn(),
-  },
-}));
-
-const ok = <T,>(data: T) => Promise.resolve({ status: "ok" as const, data });
-
 const RESEARCH = {
-  workstreamId: "ws1",
-  docPath: "/t/repos/p/shared/research/2026-06-12-auth-research.md",
+  path: "/t/repos/p/shared/research/2026-06-12-auth-research.md",
   role: "research",
 };
 const PLAN = {
-  workstreamId: "ws1",
-  docPath: "/t/repos/p/shared/plans/2026-06-12-auth-plan.md",
+  path: "/t/repos/p/shared/plans/2026-06-12-auth-plan.md",
   role: "plan",
 };
 
-function renderChips(onOpenDoc = vi.fn(), onBrowse = vi.fn()) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderChips(docs = [RESEARCH, PLAN]) {
+  const onOpenDoc = vi.fn();
+  const onDetach = vi.fn();
+  const onBrowse = vi.fn();
   render(
-    <QueryClientProvider client={client}>
-      <WorkstreamDocChips workstreamId="ws1" onOpenDoc={onOpenDoc} onBrowse={onBrowse} />
-    </QueryClientProvider>,
+    <WorkstreamDocChips docs={docs} onOpenDoc={onOpenDoc} onDetach={onDetach} onBrowse={onBrowse} />,
   );
-  return { onOpenDoc, onBrowse };
+  return { onOpenDoc, onDetach, onBrowse };
 }
 
 describe("chipLabel", () => {
@@ -49,37 +36,28 @@ describe("chipLabel", () => {
 });
 
 describe("WorkstreamDocChips", () => {
-  beforeEach(() => {
-    vi.mocked(commands.listWorkstreamDocs).mockReturnValue(ok([RESEARCH, PLAN]) as never);
-    vi.mocked(commands.detachWorkstreamDoc).mockReturnValue(ok([PLAN]) as never);
-  });
-
-  it("renders one chip per attached doc", async () => {
+  it("renders one chip per attached doc of THIS tab", () => {
     renderChips();
-    expect(await screen.findByText("auth-research")).toBeTruthy();
+    expect(screen.getByText("auth-research")).toBeTruthy();
     expect(screen.getByText("auth-plan")).toBeTruthy();
-    // Attach affordance shows the short label once docs exist.
     expect(screen.getByText("Attach")).toBeTruthy();
   });
 
-  it("opens a doc when its chip is clicked", async () => {
+  it("opens a doc when its chip is clicked", () => {
     const { onOpenDoc } = renderChips();
-    fireEvent.click(await screen.findByText("auth-research"));
-    expect(onOpenDoc).toHaveBeenCalledWith(RESEARCH.docPath);
+    fireEvent.click(screen.getByText("auth-research"));
+    expect(onOpenDoc).toHaveBeenCalledWith(RESEARCH.path);
   });
 
-  it("detaches via the chip's close button", async () => {
-    renderChips();
-    fireEvent.click(await screen.findByLabelText("Detach auth-research"));
-    await waitFor(() =>
-      expect(commands.detachWorkstreamDoc).toHaveBeenCalledWith("ws1", RESEARCH.docPath),
-    );
+  it("detaches via the chip's close button", () => {
+    const { onDetach } = renderChips();
+    fireEvent.click(screen.getByLabelText("Detach auth-research"));
+    expect(onDetach).toHaveBeenCalledWith(RESEARCH.path);
   });
 
-  it("offers 'Attach context' and browse-jump when nothing is attached", async () => {
-    vi.mocked(commands.listWorkstreamDocs).mockReturnValue(ok([]) as never);
-    const { onBrowse } = renderChips();
-    fireEvent.click(await screen.findByText("Attach context"));
+  it("offers 'Attach context' and browse-jump when nothing is attached", () => {
+    const { onBrowse } = renderChips([]);
+    fireEvent.click(screen.getByText("Attach context"));
     expect(onBrowse).toHaveBeenCalled();
   });
 });

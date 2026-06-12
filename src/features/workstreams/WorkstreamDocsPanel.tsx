@@ -3,12 +3,7 @@ import { useMemo, useState } from "react";
 import { Badge, Button, ErrorNote, Select, Spinner, TextInput } from "../../components/ui";
 import { DOC_TYPES, STATUS_TONE } from "../library/constants";
 import type { DocMeta, ThoughtQuery } from "../../lib/bindings";
-import {
-  useAttachWorkstreamDoc,
-  useDetachWorkstreamDoc,
-  useDocs,
-  useWorkstreamDocs,
-} from "../../lib/queries";
+import { useDocs } from "../../lib/queries";
 
 /** Attachment role derived from the doc's type. */
 export function roleForDoc(doc: DocMeta): string {
@@ -20,18 +15,30 @@ function titleFor(doc: DocMeta): string {
 }
 
 type Props = {
-  workstreamId: string;
   /** Project mapped name; docs are scoped to it. */
   mappedName: string | null;
+  /** Title of the agent tab attachments will target (the last-active one). */
+  targetTitle: string | null;
+  /** Doc ids already attached to that tab. */
+  attachedPaths: string[];
+  onAttach: (id: string, role: string) => void;
+  onDetach: (id: string) => void;
   onOpenDoc: (id: string) => void;
 };
 
 /**
- * The pinned Docs tab: the project's thoughts docs, inline — browse, open,
- * and attach/detach them as context for the active workstream without
- * leaving the workstream view.
+ * The Docs view: the project's thoughts docs, inline — browse, open, and
+ * attach/detach them as context for the active agent tab without leaving
+ * the workstream.
  */
-export function WorkstreamDocsPanel({ workstreamId, mappedName, onOpenDoc }: Props) {
+export function WorkstreamDocsPanel({
+  mappedName,
+  targetTitle,
+  attachedPaths,
+  onAttach,
+  onDetach,
+  onOpenDoc,
+}: Props) {
   const [text, setText] = useState("");
   const [type, setType] = useState("");
 
@@ -54,11 +61,7 @@ export function WorkstreamDocsPanel({ workstreamId, mappedName, onOpenDoc }: Pro
     [mappedName, text, type],
   );
   const docs = useDocs(query, Boolean(mappedName));
-  const attached = useWorkstreamDocs(workstreamId);
-  const attach = useAttachWorkstreamDoc(workstreamId);
-  const detach = useDetachWorkstreamDoc(workstreamId);
-
-  const attachedPaths = new Set((attached.data ?? []).map((d) => d.docPath));
+  const attached = new Set(attachedPaths);
 
   return (
     <div className="mx-auto max-w-3xl space-y-3 p-5">
@@ -82,6 +85,11 @@ export function WorkstreamDocsPanel({ workstreamId, mappedName, onOpenDoc }: Pro
           ))}
         </Select>
       </div>
+      {targetTitle && (
+        <p className="text-xs text-ink-dim">
+          Attachments become context for <span className="font-medium text-ink">{targetTitle}</span>.
+        </p>
+      )}
 
       {docs.isError && <ErrorNote error={docs.error} />}
       {docs.isLoading && (
@@ -98,7 +106,7 @@ export function WorkstreamDocsPanel({ workstreamId, mappedName, onOpenDoc }: Pro
       {docs.data && docs.data.items.length > 0 && (
         <div className="overflow-hidden rounded-lg border border-edge bg-panel">
           {docs.data.items.map((doc) => {
-            const isAttached = attachedPaths.has(doc.id);
+            const isAttached = attached.has(doc.id);
             return (
               <div
                 key={doc.id}
@@ -121,11 +129,8 @@ export function WorkstreamDocsPanel({ workstreamId, mappedName, onOpenDoc }: Pro
                   )}
                   <Button
                     onClick={() =>
-                      isAttached
-                        ? detach.mutate(doc.id)
-                        : attach.mutate({ docPath: doc.id, role: roleForDoc(doc) })
+                      isAttached ? onDetach(doc.id) : onAttach(doc.id, roleForDoc(doc))
                     }
-                    busy={attach.isPending || detach.isPending}
                     className="px-2 py-1 text-xs"
                   >
                     {isAttached ? "Detach" : "Attach"}
@@ -135,9 +140,6 @@ export function WorkstreamDocsPanel({ workstreamId, mappedName, onOpenDoc }: Pro
             );
           })}
         </div>
-      )}
-      {(attach.isError || detach.isError) && (
-        <ErrorNote error={attach.isError ? attach.error : detach.error} />
       )}
     </div>
   );

@@ -32,16 +32,26 @@ function stageOf(view: WorkstreamView): StageKey {
   return (STAGE_KEYS.has(view.item.stage) ? view.item.stage : "general") as StageKey;
 }
 
+/** A doc attached as context to ONE agent tab. */
+export type AttachedDoc = {
+  path: string;
+  role: string;
+};
+
 /** A chat tab inside ONE workstream. Each workstream owns its own set;
- *  local state until phase 3 turns shells into persisted agent sessions. */
+ *  local state until phase 3 turns shells into persisted agent sessions.
+ *  Context docs are PER TAB — each agent carries its own context. */
 type ShellTab = {
   id: number;
   title: string;
   mode: StageKey;
   draft: string;
+  docs: AttachedDoc[];
 };
 
-const defaultShells = (): ShellTab[] => [{ id: 1, title: "Agent", mode: "general", draft: "" }];
+const defaultShells = (): ShellTab[] => [
+  { id: 1, title: "Agent", mode: "general", draft: "", docs: [] },
+];
 
 type ShellMenu = {
   shellId: number;
@@ -193,10 +203,12 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.create]);
   // Shell tabs are PER WORKSTREAM (1 workstream -> N tabs), keyed by
-  // workstream id so switching workstreams never mixes tabs. The selected
-  // tab is either a shell id or the pinned "docs" tab.
+  // workstream id so switching workstreams never mixes tabs. Shell selection
+  // survives opening the Docs view, so attaching docs targets the tab the
+  // user came from.
   const [shellsByWs, setShellsByWs] = useState<Record<string, ShellTab[]>>({});
-  const [selectedTabByWs, setSelectedTabByWs] = useState<Record<string, number | "docs">>({});
+  const [activeShellIdByWs, setActiveShellIdByWs] = useState<Record<string, number>>({});
+  const [docsOpenByWs, setDocsOpenByWs] = useState<Record<string, boolean>>({});
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
@@ -270,13 +282,15 @@ export function ProjectPage() {
 
   const project = detail.data!.project;
 
-  // The active workstream's own tabs (1 workstream -> N shells).
+  // The active workstream's own tabs (1 workstream -> N shells). The active
+  // shell stays resolved even while the Docs view is open — it's the
+  // attach target.
   const shells = wsId ? (shellsByWs[wsId] ?? defaultShells()) : [];
-  const selectedTab = wsId ? selectedTabByWs[wsId] : undefined;
-  const docsActive = selectedTab === "docs";
-  const activeShell = docsActive
-    ? null
-    : (shells.find((s) => s.id === selectedTab) ?? shells[0] ?? null);
+  const docsActive = wsId ? (docsOpenByWs[wsId] ?? false) : false;
+  const activeShell =
+    shells.find((s) => s.id === (wsId ? activeShellIdByWs[wsId] : undefined)) ??
+    shells[0] ??
+    null;
   const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
   const shellBeingRenamed = renameShellId
     ? shells.find((s) => s.id === renameShellId)
@@ -292,28 +306,36 @@ export function ProjectPage() {
     if (!wsId) return;
     setShellsByWs((all) => ({ ...all, [wsId]: updater(all[wsId] ?? defaultShells()) }));
   };
-  const patchShell = (shellId: number, patch: Partial<Pick<ShellTab, "title" | "mode" | "draft">>) => {
+  const patchShell = (
+    shellId: number,
+    patch: Partial<Pick<ShellTab, "title" | "mode" | "draft" | "docs">>,
+  ) => {
     updateShells((current) =>
       current.map((s) => (s.id === shellId ? { ...s, ...patch } : s)),
     );
   };
   const selectShell = (shellId: number) => {
     if (!wsId) return;
-    setSelectedTabByWs((all) => ({ ...all, [wsId]: shellId }));
+    setActiveShellIdByWs((all) => ({ ...all, [wsId]: shellId }));
+    setDocsOpenByWs((all) => ({ ...all, [wsId]: false }));
   };
   const selectDocsTab = () => {
     if (!wsId) return;
-    setSelectedTabByWs((all) => ({ ...all, [wsId]: "docs" }));
+    setDocsOpenByWs((all) => ({ ...all, [wsId]: true }));
   };
   const addShell = () => {
     if (!wsId) return;
     setShellsByWs((all) => {
       const current = all[wsId] ?? defaultShells();
       const nextId = Math.max(0, ...current.map((s) => s.id)) + 1;
-      setSelectedTabByWs((sel) => ({ ...sel, [wsId]: nextId }));
+      setActiveShellIdByWs((sel) => ({ ...sel, [wsId]: nextId }));
+      setDocsOpenByWs((open) => ({ ...open, [wsId]: false }));
       return {
         ...all,
-        [wsId]: [...current, { id: nextId, title: `Agent ${nextId}`, mode: "general", draft: "" }],
+        [wsId]: [
+          ...current,
+          { id: nextId, title: `Agent ${nextId}`, mode: "general", draft: "", docs: [] },
+        ],
       };
     });
   };
@@ -324,15 +346,27 @@ export function ProjectPage() {
       if (current.length === 1) return all;
       const index = current.findIndex((s) => s.id === shellId);
       const next = current.filter((s) => s.id !== shellId);
-      if ((selectedTabByWs[wsId] ?? current[0]?.id) === shellId) {
+      if ((activeShellIdByWs[wsId] ?? current[0]?.id) === shellId) {
         const fallback = next[Math.max(0, index - 1)] ?? next[0];
-        setSelectedTabByWs((sel) => ({ ...sel, [wsId]: fallback.id }));
+        setActiveShellIdByWs((sel) => ({ ...sel, [wsId]: fallback.id }));
       }
       return { ...all, [wsId]: next };
     });
   };
   const openDoc = (id: string) => {
     void navigate({ to: "/library/doc", search: { id, mode: "preview" } });
+  };
+  // Context docs are per agent tab: attach/detach mutate the ACTIVE shell.
+  const attachDocToShell = (path: string, role: string) => {
+    if (!activeShell) return;
+    const docs = activeShell.docs.some((d) => d.path === path)
+      ? activeShell.docs
+      : [...activeShell.docs, { path, role }];
+    patchShell(activeShell.id, { docs });
+  };
+  const detachDocFromShell = (path: string) => {
+    if (!activeShell) return;
+    patchShell(activeShell.id, { docs: activeShell.docs.filter((d) => d.path !== path) });
   };
 
   const selectItem = (id: string | null) => {
@@ -576,8 +610,11 @@ export function ProjectPage() {
             {docsActive && activeView ? (
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <WorkstreamDocsPanel
-                  workstreamId={activeView.item.id}
                   mappedName={project.mappedName}
+                  targetTitle={activeShell?.title ?? null}
+                  attachedPaths={(activeShell?.docs ?? []).map((d) => d.path)}
+                  onAttach={attachDocToShell}
+                  onDetach={detachDocFromShell}
                   onOpenDoc={openDoc}
                 />
               </div>
@@ -621,8 +658,9 @@ export function ProjectPage() {
               <div className="border-t border-edge bg-panel p-4">
                 <div className="mx-auto max-w-3xl">
                   <WorkstreamDocChips
-                    workstreamId={activeView.item.id}
+                    docs={activeShell?.docs ?? []}
                     onOpenDoc={openDoc}
+                    onDetach={detachDocFromShell}
                     onBrowse={selectDocsTab}
                   />
                   <textarea
