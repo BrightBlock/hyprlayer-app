@@ -4,6 +4,7 @@ import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "rea
 import { useAllWorkstreams, useBootstrap } from "../lib/queries";
 import { Spinner } from "../components/ui";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
+import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
 import type { WorkstreamView } from "../lib/bindings";
 
 const PROJECT_SIDEBAR_COLLAPSED = 56;
@@ -212,6 +213,10 @@ export function Root() {
     view: WorkstreamView;
   } | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<{
+    projectPath: string;
+    view: WorkstreamView;
+  } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
     projectPath: string;
     view: WorkstreamView;
   } | null>(null);
@@ -553,6 +558,17 @@ export function Root() {
           <button
             type="button"
             role="menuitem"
+            className="block w-full rounded px-2 py-1.5 text-left text-sm text-ink hover:bg-panel-2"
+            onClick={() => {
+              setRenameTarget({ projectPath: itemMenu.projectPath, view: itemMenu.view });
+              setItemMenu(null);
+            }}
+          >
+            Rename workstream…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
             className="block w-full rounded px-2 py-1.5 text-left text-sm text-bad hover:bg-bad/10"
             onClick={() => {
               setArchiveTarget({ projectPath: itemMenu.projectPath, view: itemMenu.view });
@@ -563,6 +579,12 @@ export function Root() {
           </button>
         </div>
       )}
+
+      <RenameWorkstreamDialog
+        projectPath={renameTarget?.projectPath ?? ""}
+        target={renameTarget?.view ?? null}
+        onClose={() => setRenameTarget(null)}
+      />
 
       <ArchiveWorkstreamDialog
         projectPath={archiveTarget?.projectPath ?? ""}

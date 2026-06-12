@@ -2,17 +2,11 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Badge, Button, Dialog, ErrorNote, TextInput, Spinner } from "../components/ui";
-import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { DiffSidebar } from "../features/workstreams/DiffSidebar";
 import { WorkstreamChips } from "../features/workstreams/WorkstreamChips";
 import type { WorkstreamView } from "../lib/bindings";
-import {
-  useProjectDetail,
-  useRenameWorkstream,
-  useSetWorkstreamStage,
-  useWorkstreams,
-} from "../lib/queries";
+import { useProjectDetail, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
 
 const DIFF_SIDEBAR_COLLAPSED = 56;
 const DIFF_SIDEBAR_MIN = 280;
@@ -36,8 +30,19 @@ function stageOf(view: WorkstreamView): StageKey {
   return (STAGE_KEYS.has(view.item.stage) ? view.item.stage : "general") as StageKey;
 }
 
+/** A chat tab inside ONE workstream. Each workstream owns its own set;
+ *  local state until phase 3 turns shells into persisted agent sessions. */
+type ShellTab = {
+  id: number;
+  title: string;
+  mode: StageKey;
+  draft: string;
+};
+
+const defaultShells = (): ShellTab[] => [{ id: 1, title: "Agent", mode: "general", draft: "" }];
+
 type ShellMenu = {
-  itemId: string;
+  shellId: number;
   x: number;
   y: number;
 };
@@ -150,7 +155,6 @@ export function ProjectPage() {
   const { projectPath } = useParams({ from: "/projects/$projectPath" });
   const detail = useProjectDetail(projectPath);
   const workstreams = useWorkstreams(projectPath);
-  const renameItem = useRenameWorkstream(projectPath);
   const setStage = useSetWorkstreamStage(projectPath);
 
   const search = useSearch({ from: "/projects/$projectPath" });
@@ -181,12 +185,13 @@ export function ProjectPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.create]);
-  // Drafts stay local until sessions land; keyed by workstream id.
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Shell tabs are PER WORKSTREAM (1 workstream -> N tabs), keyed by
+  // workstream id so switching workstreams never mixes tabs.
+  const [shellsByWs, setShellsByWs] = useState<Record<string, ShellTab[]>>({});
+  const [activeShellByWs, setActiveShellByWs] = useState<Record<string, number>>({});
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
-  const [renameItemId, setRenameItemId] = useState<string | null>(null);
+  const [renameShellId, setRenameShellId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [diffCollapsed, setDiffCollapsed] = useState(false);
   const [diffWidth, setDiffWidth] = useState(360);
@@ -230,16 +235,62 @@ export function ProjectPage() {
   const project = detail.data!.project;
   const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
   const activeView = views.find((view) => view.item.id === activeItemId) ?? views[0] ?? null;
-  const contextView = shellMenu
-    ? views.find((view) => view.item.id === shellMenu.itemId)
+  const wsId = activeView?.item.id ?? null;
+
+  // The active workstream's own tabs (1 workstream -> N shells).
+  const shells = wsId ? (shellsByWs[wsId] ?? defaultShells()) : [];
+  const activeShell =
+    shells.find((s) => s.id === (wsId ? activeShellByWs[wsId] : undefined)) ?? shells[0] ?? null;
+  const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
+  const shellBeingRenamed = renameShellId
+    ? shells.find((s) => s.id === renameShellId)
     : null;
-  const viewBeingRenamed = renameItemId
-    ? views.find((view) => view.item.id === renameItemId)
-    : null;
-  const stage: StageKey = activeView ? stageOf(activeView) : "general";
-  const currentStage = STAGES.find((s) => s.key === stage)!;
-  const modeStyle = MODE_STYLES[stage];
-  const draft = activeView ? (drafts[activeView.item.id] ?? "") : "";
+
+  const wsStage: StageKey = activeView ? stageOf(activeView) : "general";
+  const mode: StageKey = activeShell?.mode ?? "general";
+  const currentMode = STAGES.find((s) => s.key === mode)!;
+  const modeStyle = MODE_STYLES[mode];
+  const draft = activeShell?.draft ?? "";
+
+  const updateShells = (updater: (current: ShellTab[]) => ShellTab[]) => {
+    if (!wsId) return;
+    setShellsByWs((all) => ({ ...all, [wsId]: updater(all[wsId] ?? defaultShells()) }));
+  };
+  const patchShell = (shellId: number, patch: Partial<Pick<ShellTab, "title" | "mode" | "draft">>) => {
+    updateShells((current) =>
+      current.map((s) => (s.id === shellId ? { ...s, ...patch } : s)),
+    );
+  };
+  const selectShell = (shellId: number) => {
+    if (!wsId) return;
+    setActiveShellByWs((all) => ({ ...all, [wsId]: shellId }));
+  };
+  const addShell = () => {
+    if (!wsId) return;
+    setShellsByWs((all) => {
+      const current = all[wsId] ?? defaultShells();
+      const nextId = Math.max(0, ...current.map((s) => s.id)) + 1;
+      setActiveShellByWs((sel) => ({ ...sel, [wsId]: nextId }));
+      return {
+        ...all,
+        [wsId]: [...current, { id: nextId, title: `Agent ${nextId}`, mode: "general", draft: "" }],
+      };
+    });
+  };
+  const closeShell = (shellId: number) => {
+    if (!wsId) return;
+    setShellsByWs((all) => {
+      const current = all[wsId] ?? defaultShells();
+      if (current.length === 1) return all;
+      const index = current.findIndex((s) => s.id === shellId);
+      const next = current.filter((s) => s.id !== shellId);
+      if ((activeShellByWs[wsId] ?? current[0]?.id) === shellId) {
+        const fallback = next[Math.max(0, index - 1)] ?? next[0];
+        setActiveShellByWs((sel) => ({ ...sel, [wsId]: fallback.id }));
+      }
+      return { ...all, [wsId]: next };
+    });
+  };
 
   const selectItem = (id: string | null) => {
     setActiveItemId(id);
@@ -248,56 +299,46 @@ export function ProjectPage() {
     } else {
       localStorage.setItem(storageKey, id);
     }
-    // Keep the URL in sync so the sidebar highlight follows the tabs.
+    // Keep the URL in sync so the sidebar highlight follows.
     void navigate({
       search: (prev) => ({ ...prev, item: id ?? undefined }),
       replace: true,
     });
   };
   const updateDraft = (value: string) => {
-    if (!activeView) return;
-    const id = activeView.item.id;
-    setDrafts((current) => ({ ...current, [id]: value }));
+    if (activeShell) patchShell(activeShell.id, { draft: value });
   };
-  const changeStage = (key: StageKey) => {
-    if (!activeView || key === stage) return;
+  const changeMode = (key: StageKey) => {
+    if (!activeView || !activeShell || key === mode) return;
+    patchShell(activeShell.id, { mode: key });
+    // The workstream's pipeline position follows the latest mode choice.
     setStage.mutate({ id: activeView.item.id, stage: key });
   };
-  const openRename = (view: WorkstreamView) => {
-    setRenameItemId(view.item.id);
-    setRenameValue(view.item.title);
+  const openRenameShell = (shell: ShellTab) => {
+    setRenameShellId(shell.id);
+    setRenameValue(shell.title);
   };
-  const closeRename = () => {
-    setRenameItemId(null);
+  const closeRenameShell = () => {
+    setRenameShellId(null);
     setRenameValue("");
-    renameItem.reset();
   };
-  const commitRename = () => {
-    if (!viewBeingRenamed || renameItem.isPending) return;
+  const commitRenameShell = () => {
+    if (!shellBeingRenamed) return;
     const nextTitle = renameValue.trim();
     if (!nextTitle) return;
-    renameItem.mutate(
-      { id: viewBeingRenamed.item.id, title: nextTitle },
-      { onSuccess: closeRename },
-    );
+    patchShell(shellBeingRenamed.id, { title: nextTitle });
+    closeRenameShell();
   };
-  const handleArchived = (id: string) => {
-    setDrafts(({ [id]: _removed, ...rest }) => rest);
-    if (activeView?.item.id !== id) return;
-    const index = views.findIndex((view) => view.item.id === id);
-    const fallback = views[index - 1] ?? views[index + 1] ?? null;
-    selectItem(fallback ? fallback.item.id : null);
-  };
-  const copyShellTranscript = (view: WorkstreamView) => {
-    const mode = STAGES.find((s) => s.key === stageOf(view))?.label ?? view.item.stage;
+  const copyShellTranscript = (shell: ShellTab) => {
+    const modeLabel = STAGES.find((s) => s.key === shell.mode)?.label ?? shell.mode;
     const transcript = [
-      `# ${view.item.title}`,
+      `# ${activeView?.item.title ?? project.mappedName} — ${shell.title}`,
       `Project: ${project.mappedName}`,
-      `Branch: ${view.item.branch}`,
-      `Mode: ${mode}`,
+      `Branch: ${activeView?.item.branch ?? "—"}`,
+      `Mode: ${modeLabel}`,
       "",
       "Transcript is not connected yet. Current draft:",
-      drafts[view.item.id] || "(empty)",
+      shell.draft || "(empty)",
       "",
     ].join("\n");
     void navigator.clipboard.writeText(transcript);
@@ -342,63 +383,76 @@ export function ProjectPage() {
             <div className="border-b border-edge bg-panel px-5">
               <div className="flex min-w-0 items-center justify-between gap-4">
                 <div className="flex min-w-0 gap-1 overflow-x-auto py-2">
-                  {views.map((view) => (
-                    <div
-                      key={view.item.id}
-                      className={`inline-flex shrink-0 items-center rounded-md ${
-                        view.item.id === activeView?.item.id
-                          ? "bg-panel-2 text-ink"
-                          : "text-ink-dim hover:bg-panel-2 hover:text-ink"
-                      }`}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        selectItem(view.item.id);
-                        setShellMenu({ itemId: view.item.id, x: e.clientX, y: e.clientY });
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => selectItem(view.item.id)}
-                        className="px-3 py-1.5 text-sm font-medium"
-                      >
-                        {view.item.title}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setArchiveTarget(view);
+                  {activeView &&
+                    shells.map((shell) => (
+                      <div
+                        key={shell.id}
+                        className={`inline-flex shrink-0 items-center rounded-md ${
+                          shell.id === activeShell?.id
+                            ? "bg-panel-2 text-ink"
+                            : "text-ink-dim hover:bg-panel-2 hover:text-ink"
+                        }`}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          selectShell(shell.id);
+                          setShellMenu({ shellId: shell.id, x: e.clientX, y: e.clientY });
                         }}
-                        className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
-                        title={`Archive ${view.item.title}`}
-                        aria-label={`Archive ${view.item.title}`}
                       >
-                        <XIcon />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setCreateOpen(true)}
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
-                    title="New workstream"
-                    aria-label="New workstream"
-                  >
-                    <PlusIcon />
-                  </button>
+                        <button
+                          type="button"
+                          onClick={() => selectShell(shell.id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
+                        >
+                          <span className={`rounded p-0.5 ${MODE_STYLES[shell.mode].badge}`}>
+                            <ModeIcon mode={shell.mode} />
+                          </span>
+                          {shell.title}
+                        </button>
+                        {shells.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeShell(shell.id);
+                            }}
+                            className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
+                            title={`Close ${shell.title}`}
+                            aria-label={`Close ${shell.title}`}
+                          >
+                            <XIcon />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  {activeView && (
+                    <button
+                      type="button"
+                      onClick={addShell}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
+                      title="New tab"
+                      aria-label="New tab"
+                    >
+                      <PlusIcon />
+                    </button>
+                  )}
                 </div>
                 {activeView && (
                   <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium text-ink">
+                      {activeView.item.title}
+                    </span>
                     <WorkstreamChips projectPath={projectPath} view={activeView} />
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${modeStyle.badge}`}>
-                      {currentStage.label}
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${MODE_STYLES[wsStage].badge}`}
+                    >
+                      {STAGES.find((s) => s.key === wsStage)!.label}
                     </span>
                     <Badge tone="dim">idle</Badge>
                   </div>
                 )}
               </div>
             </div>
-            {shellMenu && contextView && (
+            {shellMenu && contextShell && (
               <div
                 className="fixed z-50 min-w-44 rounded-md border border-edge bg-panel p-1 shadow-2xl"
                 style={{ left: shellMenu.x, top: shellMenu.y }}
@@ -407,17 +461,17 @@ export function ProjectPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    openRename(contextView);
+                    openRenameShell(contextShell);
                     setShellMenu(null);
                   }}
                   className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink"
                 >
-                  Rename workstream
+                  Rename tab
                 </button>
                 <button
                   type="button"
                   onClick={() => {
-                    copyShellTranscript(contextView);
+                    copyShellTranscript(contextShell);
                     setShellMenu(null);
                   }}
                   className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink"
@@ -426,41 +480,35 @@ export function ProjectPage() {
                 </button>
                 <button
                   type="button"
+                  disabled={shells.length === 1}
                   onClick={() => {
-                    setArchiveTarget(contextView);
+                    closeShell(contextShell.id);
                     setShellMenu(null);
                   }}
-                  className="block w-full rounded px-3 py-1.5 text-left text-sm text-bad hover:bg-bad/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Archive workstream
+                  Close tab
                 </button>
               </div>
             )}
-            <Dialog open={Boolean(viewBeingRenamed)} onClose={closeRename} title="Rename workstream">
+            <Dialog open={Boolean(shellBeingRenamed)} onClose={closeRenameShell} title="Rename tab">
               <form
                 className="space-y-3"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  commitRename();
+                  commitRenameShell();
                 }}
               >
                 <TextInput
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   autoFocus
-                  disabled={renameItem.isPending}
                 />
-                {renameItem.isError && <ErrorNote error={renameItem.error} />}
                 <div className="flex justify-end gap-2">
-                  <Button type="button" onClick={closeRename} disabled={renameItem.isPending}>
+                  <Button type="button" onClick={closeRenameShell}>
                     Cancel
                   </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    busy={renameItem.isPending}
-                    disabled={!renameValue.trim()}
-                  >
+                  <Button type="submit" variant="primary" disabled={!renameValue.trim()}>
                     Rename
                   </Button>
                 </div>
@@ -471,12 +519,6 @@ export function ProjectPage() {
               open={createOpen}
               onClose={() => setCreateOpen(false)}
               onCreated={(view) => selectItem(view.item.id)}
-            />
-            <ArchiveWorkstreamDialog
-              projectPath={projectPath}
-              target={archiveTarget}
-              onClose={() => setArchiveTarget(null)}
-              onArchived={handleArchived}
             />
 
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -521,9 +563,9 @@ export function ProjectPage() {
                     onChange={(e) => updateDraft(e.target.value)}
                     rows={3}
                     placeholder={
-                      stage === "general"
+                      mode === "general"
                         ? "Ask the project agent…"
-                        : `Ask the ${currentStage.label.toLowerCase()} agent…`
+                        : `Ask the ${currentMode.label.toLowerCase()} agent…`
                     }
                     className={`selectable w-full resize-none rounded-md border bg-panel-2 px-3 py-2 text-sm text-ink placeholder:text-ink-dim/70 focus:outline-none ${modeStyle.composer}`}
                   />
@@ -535,9 +577,9 @@ export function ProjectPage() {
                           <button
                             key={s.key}
                             type="button"
-                            onClick={() => changeStage(s.key)}
+                            onClick={() => changeMode(s.key)}
                             className={`inline-flex h-8 w-8 items-center justify-center rounded-md border ${
-                              s.key === stage
+                              s.key === mode
                                 ? MODE_STYLES[s.key].activeButton
                                 : "border-edge bg-panel-2 text-ink-dim hover:bg-edge/60 hover:text-ink"
                             }`}
@@ -549,7 +591,7 @@ export function ProjectPage() {
                         ))}
                       </div>
                       <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${modeStyle.badge}`}>
-                        {currentStage.label}
+                        {currentMode.label}
                       </span>
                     </div>
                     <Button variant="primary" disabled={!draft.trim()}>
