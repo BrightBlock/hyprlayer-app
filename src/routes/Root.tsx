@@ -1,4 +1,11 @@
-import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  useCanGoBack,
+  useNavigate,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { useAllWorkstreams, useBootstrap } from "../lib/queries";
@@ -227,6 +234,22 @@ export function Root() {
   const crumb =
     currentSection === "Agent" ? (activeWorkstream?.item.title ?? "Workstreams") : currentSection;
 
+  // History arrows: hidden until there's somewhere to go. Back comes from
+  // the router; forward is tracked by counting BACK/FORWARD/PUSH actions
+  // (a PUSH truncates the forward stack).
+  const router = useRouter();
+  const canGoBack = useCanGoBack();
+  const [canGoForward, setCanGoForward] = useState(false);
+  useEffect(() => {
+    let forwardSteps = 0;
+    return router.history.subscribe(({ action }) => {
+      if (action.type === "BACK") forwardSteps += 1;
+      else if (action.type === "FORWARD") forwardSteps = Math.max(0, forwardSteps - 1);
+      else if (action.type === "PUSH") forwardSteps = 0;
+      setCanGoForward(forwardSteps > 0);
+    });
+  }, [router]);
+
   // Right-click menu + archive flow for the worktree rows.
   const navigate = useNavigate();
   const [itemMenu, setItemMenu] = useState<{
@@ -335,24 +358,30 @@ export function Root() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => window.history.back()}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
-              title="Back"
-              aria-label="Back"
-            >
-              <ArrowLeftIcon />
-            </button>
-            <button
-              type="button"
-              onClick={() => window.history.forward()}
-              className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
-              title="Forward"
-              aria-label="Forward"
-            >
-              <ArrowRightIcon />
-            </button>
+            {(canGoBack || canGoForward) && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => router.history.back()}
+                  disabled={!canGoBack}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+                  title="Back"
+                  aria-label="Back"
+                >
+                  <ArrowLeftIcon />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.history.forward()}
+                  disabled={!canGoForward}
+                  className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+                  title="Forward"
+                  aria-label="Forward"
+                >
+                  <ArrowRightIcon />
+                </button>
+              </>
+            )}
             {currentProject && (
               <>
                 {((activeWorkstream?.git.dirty ?? 0) > 0 ||

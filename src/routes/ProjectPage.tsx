@@ -5,6 +5,8 @@ import { Badge, Button, Dialog, ErrorNote, TextInput, Spinner } from "../compone
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { DiffSidebar } from "../features/workstreams/DiffSidebar";
 import { WorkstreamChips } from "../features/workstreams/WorkstreamChips";
+import { WorkstreamDocChips } from "../features/workstreams/WorkstreamDocChips";
+import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
 import type { WorkstreamView } from "../lib/bindings";
 import { useProjectDetail, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
 
@@ -86,6 +88,19 @@ const MODE_STYLES: Record<
     composer: "border-rose-400/40",
   },
 };
+
+function BookIcon() {
+  return (
+    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-1.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M8 7h6M8 11h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function PlusIcon() {
   return (
@@ -178,9 +193,10 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.create]);
   // Shell tabs are PER WORKSTREAM (1 workstream -> N tabs), keyed by
-  // workstream id so switching workstreams never mixes tabs.
+  // workstream id so switching workstreams never mixes tabs. The selected
+  // tab is either a shell id or the pinned "docs" tab.
   const [shellsByWs, setShellsByWs] = useState<Record<string, ShellTab[]>>({});
-  const [activeShellByWs, setActiveShellByWs] = useState<Record<string, number>>({});
+  const [selectedTabByWs, setSelectedTabByWs] = useState<Record<string, number | "docs">>({});
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
@@ -256,8 +272,11 @@ export function ProjectPage() {
 
   // The active workstream's own tabs (1 workstream -> N shells).
   const shells = wsId ? (shellsByWs[wsId] ?? defaultShells()) : [];
-  const activeShell =
-    shells.find((s) => s.id === (wsId ? activeShellByWs[wsId] : undefined)) ?? shells[0] ?? null;
+  const selectedTab = wsId ? selectedTabByWs[wsId] : undefined;
+  const docsActive = selectedTab === "docs";
+  const activeShell = docsActive
+    ? null
+    : (shells.find((s) => s.id === selectedTab) ?? shells[0] ?? null);
   const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
   const shellBeingRenamed = renameShellId
     ? shells.find((s) => s.id === renameShellId)
@@ -280,14 +299,18 @@ export function ProjectPage() {
   };
   const selectShell = (shellId: number) => {
     if (!wsId) return;
-    setActiveShellByWs((all) => ({ ...all, [wsId]: shellId }));
+    setSelectedTabByWs((all) => ({ ...all, [wsId]: shellId }));
+  };
+  const selectDocsTab = () => {
+    if (!wsId) return;
+    setSelectedTabByWs((all) => ({ ...all, [wsId]: "docs" }));
   };
   const addShell = () => {
     if (!wsId) return;
     setShellsByWs((all) => {
       const current = all[wsId] ?? defaultShells();
       const nextId = Math.max(0, ...current.map((s) => s.id)) + 1;
-      setActiveShellByWs((sel) => ({ ...sel, [wsId]: nextId }));
+      setSelectedTabByWs((sel) => ({ ...sel, [wsId]: nextId }));
       return {
         ...all,
         [wsId]: [...current, { id: nextId, title: `Agent ${nextId}`, mode: "general", draft: "" }],
@@ -301,12 +324,15 @@ export function ProjectPage() {
       if (current.length === 1) return all;
       const index = current.findIndex((s) => s.id === shellId);
       const next = current.filter((s) => s.id !== shellId);
-      if ((activeShellByWs[wsId] ?? current[0]?.id) === shellId) {
+      if ((selectedTabByWs[wsId] ?? current[0]?.id) === shellId) {
         const fallback = next[Math.max(0, index - 1)] ?? next[0];
-        setActiveShellByWs((sel) => ({ ...sel, [wsId]: fallback.id }));
+        setSelectedTabByWs((sel) => ({ ...sel, [wsId]: fallback.id }));
       }
       return { ...all, [wsId]: next };
     });
+  };
+  const openDoc = (id: string) => {
+    void navigate({ to: "/library/doc", search: { id, mode: "preview" } });
   };
 
   const selectItem = (id: string | null) => {
@@ -399,6 +425,21 @@ export function ProjectPage() {
             <div className="border-b border-edge bg-panel px-5">
               <div className="flex min-w-0 items-center justify-between gap-4">
                 <div className="flex min-w-0 gap-1 overflow-x-auto py-2">
+                  {activeView && (
+                    <button
+                      type="button"
+                      onClick={selectDocsTab}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${
+                        docsActive
+                          ? "bg-panel-2 text-ink"
+                          : "text-ink-dim hover:bg-panel-2 hover:text-ink"
+                      }`}
+                      title="Project documents"
+                    >
+                      <BookIcon />
+                      Docs
+                    </button>
+                  )}
                   {activeView &&
                     shells.map((shell) => (
                       <div
@@ -534,6 +575,15 @@ export function ProjectPage() {
               onCreated={(view) => selectItem(view.item.id)}
             />
 
+            {docsActive && activeView ? (
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <WorkstreamDocsPanel
+                  workstreamId={activeView.item.id}
+                  mappedName={project.mappedName}
+                  onOpenDoc={openDoc}
+                />
+              </div>
+            ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="mx-auto max-w-3xl space-y-4">
                 {activeView ? (
@@ -567,10 +617,16 @@ export function ProjectPage() {
                 )}
               </div>
             </div>
+            )}
 
-            {activeView && (
+            {activeView && !docsActive && (
               <div className="border-t border-edge bg-panel p-4">
                 <div className="mx-auto max-w-3xl">
+                  <WorkstreamDocChips
+                    workstreamId={activeView.item.id}
+                    onOpenDoc={openDoc}
+                    onBrowse={selectDocsTab}
+                  />
                   <textarea
                     value={draft}
                     onChange={(e) => updateDraft(e.target.value)}
