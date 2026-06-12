@@ -10,5 +10,7 @@ pub mod gitops;
 pub mod hyprcli;
 pub mod index;
 pub mod process;
+pub mod store;
+pub mod worktree;
 
 pub use error::CoreError;

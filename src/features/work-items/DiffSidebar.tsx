@@ -1,0 +1,185 @@
+import { useState } from "react";
+
+import type { FileDiff } from "../../lib/bindings";
+import { Badge, ErrorNote, Spinner, type BadgeTone } from "../../components/ui";
+import { useWorktreeDiff } from "../../lib/queries";
+import { countPatchStats, parsePatchLines, type PatchLineKind } from "./diff";
+
+function PanelRightIcon() {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M14 4v16" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+    >
+      <path d="m9 6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const CHANGE_TONES: Record<string, BadgeTone> = {
+  added: "ok",
+  modified: "accent",
+  deleted: "bad",
+  renamed: "warn",
+  other: "dim",
+};
+
+const LINE_CLASSES: Record<PatchLineKind, string> = {
+  add: "bg-emerald-400/10 text-emerald-300",
+  del: "bg-rose-400/10 text-rose-300",
+  hunk: "text-sky-300",
+  meta: "text-ink-dim/70",
+  context: "text-ink-dim",
+};
+
+function FileDiffSection({ file }: { file: FileDiff }) {
+  const [open, setOpen] = useState(false);
+  const stats = countPatchStats(file.patch);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-edge bg-panel-2">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-edge/40"
+      >
+        <ChevronIcon open={open} />
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink" title={file.path}>
+          {file.path}
+        </span>
+        {stats.additions > 0 && (
+          <span className="shrink-0 font-mono text-xs text-emerald-300">+{stats.additions}</span>
+        )}
+        {stats.deletions > 0 && (
+          <span className="shrink-0 font-mono text-xs text-rose-300">-{stats.deletions}</span>
+        )}
+        <Badge tone={CHANGE_TONES[file.change] ?? "dim"}>{file.change}</Badge>
+      </button>
+      {open && (
+        <pre className="selectable max-h-96 overflow-auto border-t border-edge p-2 font-mono text-[11px] leading-relaxed">
+          {parsePatchLines(file.patch).map((line, index) => (
+            <div key={index} className={`whitespace-pre px-1 ${LINE_CLASSES[line.kind]}`}>
+              {line.text || " "}
+            </div>
+          ))}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+type Props = {
+  /** Active work item, or null when there are no work items. */
+  workItemId: string | null;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+};
+
+/**
+ * Contents of the right diff sidebar (header + body). The diff query only
+ * runs while the sidebar is expanded and a work item is active.
+ */
+export function DiffSidebar({ workItemId, collapsed, onToggleCollapsed }: Props) {
+  const diff = useWorktreeDiff(workItemId ?? "", !collapsed);
+  const fileCount = diff.data?.length ?? 0;
+
+  return (
+    <>
+      <div className="flex h-[61px] items-center border-b border-edge px-3">
+        <div className={`flex w-full items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
+            title={collapsed ? "Expand diff sidebar" : "Collapse diff sidebar"}
+            aria-label={collapsed ? "Expand diff sidebar" : "Collapse diff sidebar"}
+          >
+            <PanelRightIcon />
+          </button>
+          {!collapsed && (
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold">Diff</h2>
+              <div className="flex items-center gap-1.5">
+                <Badge tone="dim">{fileCount} {fileCount === 1 ? "file" : "files"}</Badge>
+                {workItemId !== null && (
+                  <button
+                    type="button"
+                    onClick={() => void diff.refetch()}
+                    disabled={diff.isFetching}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Refresh diff"
+                    aria-label="Refresh diff"
+                  >
+                    {diff.isFetching ? <Spinner size={14} /> : <RefreshIcon />}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      {collapsed ? (
+        <div className="flex justify-center p-3">
+          <Badge tone="dim">{fileCount}</Badge>
+        </div>
+      ) : (
+        <div className="h-[calc(100%-61px)] space-y-2 overflow-y-auto p-4">
+          {workItemId === null ? (
+            <div className="rounded-lg border border-edge bg-panel-2 p-3">
+              <p className="text-sm font-medium">No work item selected</p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+                Create a work item to see its worktree diff here.
+              </p>
+            </div>
+          ) : diff.isLoading ? (
+            <div className="flex justify-center p-6">
+              <Spinner />
+            </div>
+          ) : diff.isError ? (
+            <ErrorNote error={diff.error} />
+          ) : fileCount === 0 ? (
+            <div className="rounded-lg border border-edge bg-panel-2 p-3">
+              <p className="text-sm font-medium">No changes yet</p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+                Edits in this work item&apos;s worktree will show up here.
+              </p>
+            </div>
+          ) : (
+            diff.data!.map((file) => <FileDiffSection key={file.path} file={file} />)
+          )}
+        </div>
+      )}
+    </>
+  );
+}

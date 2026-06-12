@@ -7,6 +7,7 @@ import {
   type CreateDocInput,
   type FmPatchDto,
   type ThoughtQuery,
+  type WorkItemView,
 } from "./bindings";
 import { unwrap } from "./ipc";
 import { queryClient } from "./queryClient";
@@ -147,5 +148,122 @@ export function useSaveSettings() {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
     },
+  });
+}
+
+/* ------------------------------- Work items ------------------------------ */
+// List cache lives at ["workItems", projectPath]; everything scoped to one
+// item (docs, diff, detail) lives under the ["workItem", id] prefix so a
+// single prefix invalidation refreshes the whole family.
+
+function invalidateWorkItem(projectPath: string, id: string) {
+  void queryClient.invalidateQueries({ queryKey: ["workItems", projectPath] });
+  void queryClient.invalidateQueries({ queryKey: ["workItem", id] });
+}
+
+export function useWorkItems(projectPath: string, includeArchived = false) {
+  return useQuery({
+    // includeArchived is part of the key; prefix invalidation on
+    // ["workItems", projectPath] still hits both variants.
+    queryKey: ["workItems", projectPath, { includeArchived }],
+    queryFn: () => unwrap(commands.listWorkItems(projectPath, includeArchived)),
+  });
+}
+
+export function useCreateWorkItem(projectPath: string) {
+  return useMutation({
+    mutationFn: (title: string) => unwrap(commands.createWorkItem(projectPath, title)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workItems", projectPath] });
+    },
+  });
+}
+
+export function useRenameWorkItem(projectPath: string) {
+  return useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) =>
+      unwrap(commands.renameWorkItem(id, title)),
+    onSettled: (_data, _error, { id }) => invalidateWorkItem(projectPath, id),
+  });
+}
+
+export function useSetWorkItemStage(projectPath: string) {
+  return useMutation({
+    mutationFn: ({ id, stage }: { id: string; stage: string }) =>
+      unwrap(commands.setWorkItemStage(id, stage)),
+    // Optimistic: the stage drives the composer styling, so flip it instantly.
+    onMutate: async ({ id, stage }) => {
+      await queryClient.cancelQueries({ queryKey: ["workItems", projectPath] });
+      const previous = queryClient.getQueriesData<WorkItemView[]>({
+        queryKey: ["workItems", projectPath],
+      });
+      queryClient.setQueriesData<WorkItemView[]>(
+        { queryKey: ["workItems", projectPath] },
+        (views) =>
+          views?.map((view) =>
+            view.item.id === id ? { ...view, item: { ...view.item, stage } } : view,
+          ),
+      );
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      for (const [key, data] of context?.previous ?? []) {
+        queryClient.setQueryData(key, data);
+      }
+    },
+    onSettled: (_data, _error, { id }) => invalidateWorkItem(projectPath, id),
+  });
+}
+
+export function useArchiveWorkItem(projectPath: string) {
+  return useMutation({
+    mutationFn: ({ id, discard }: { id: string; discard: boolean }) =>
+      unwrap(commands.archiveWorkItem(id, discard)),
+    onSuccess: (_data, { id }) => invalidateWorkItem(projectPath, id),
+  });
+}
+
+export function useReprovisionWorkItem(projectPath: string) {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.reprovisionWorkItem(id)),
+    onSettled: (_data, _error, id) => invalidateWorkItem(projectPath, id),
+  });
+}
+
+export function useWorkItemDocs(id: string) {
+  return useQuery({
+    queryKey: ["workItem", id, "docs"],
+    queryFn: () => unwrap(commands.listWorkItemDocs(id)),
+    enabled: id.length > 0,
+  });
+}
+
+export function useAttachWorkItemDoc(id: string) {
+  return useMutation({
+    mutationFn: ({ docPath, role }: { docPath: string; role: string }) =>
+      unwrap(commands.attachWorkItemDoc(id, docPath, role)),
+    // The command returns the updated doc list — write it through directly.
+    onSuccess: (docs) => {
+      queryClient.setQueryData(["workItem", id, "docs"], docs);
+    },
+  });
+}
+
+export function useDetachWorkItemDoc(id: string) {
+  return useMutation({
+    mutationFn: (docPath: string) => unwrap(commands.detachWorkItemDoc(id, docPath)),
+    onSuccess: (docs) => {
+      queryClient.setQueryData(["workItem", id, "docs"], docs);
+    },
+  });
+}
+
+export function useWorktreeDiff(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workItem", id, "diff"],
+    queryFn: () => unwrap(commands.worktreeDiff(id)),
+    enabled: enabled && id.length > 0,
+    // Keep the previous file list on screen while a refetch resolves.
+    placeholderData: keepPreviousData,
   });
 }

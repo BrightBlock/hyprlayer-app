@@ -2,7 +2,17 @@ import { useParams } from "@tanstack/react-router";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Badge, Button, Dialog, ErrorNote, TextInput, Spinner } from "../components/ui";
-import { useProjectDetail } from "../lib/queries";
+import { ArchiveWorkItemDialog } from "../features/work-items/ArchiveWorkItemDialog";
+import { CreateWorkItemDialog } from "../features/work-items/CreateWorkItemDialog";
+import { DiffSidebar } from "../features/work-items/DiffSidebar";
+import { WorkItemChips } from "../features/work-items/WorkItemChips";
+import type { WorkItemView } from "../lib/bindings";
+import {
+  useProjectDetail,
+  useRenameWorkItem,
+  useSetWorkItemStage,
+  useWorkItems,
+} from "../lib/queries";
 
 const DIFF_SIDEBAR_COLLAPSED = 56;
 const DIFF_SIDEBAR_MIN = 280;
@@ -18,15 +28,16 @@ const STAGES = [
 ] as const;
 
 type StageKey = (typeof STAGES)[number]["key"];
-type ShellTab = {
-  id: number;
-  title: string;
-  mode: StageKey;
-  draft: string;
-};
+
+const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
+
+/** Backend stage is a plain string; anything unknown renders as general. */
+function stageOf(view: WorkItemView): StageKey {
+  return (STAGE_KEYS.has(view.item.stage) ? view.item.stage : "general") as StageKey;
+}
 
 type ShellMenu = {
-  shellId: number;
+  itemId: string;
   x: number;
   y: number;
 };
@@ -70,19 +81,6 @@ const MODE_STYLES: Record<
     composer: "border-rose-400/40",
   },
 };
-
-function PanelRightIcon() {
-  return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path d="M14 4v16" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
 
 function PlusIcon() {
   return (
@@ -151,15 +149,27 @@ function clamp(value: number, min: number, max: number): number {
 export function ProjectPage() {
   const { projectPath } = useParams({ from: "/projects/$projectPath" });
   const detail = useProjectDetail(projectPath);
-  const [shells, setShells] = useState<ShellTab[]>([
-    { id: 1, title: "Agent", mode: "general", draft: "" },
-  ]);
-  const [activeShellId, setActiveShellId] = useState(1);
+  const workItems = useWorkItems(projectPath);
+  const renameItem = useRenameWorkItem(projectPath);
+  const setStage = useSetWorkItemStage(projectPath);
+
+  const storageKey = `hyprlayer:last-work-item:${projectPath}`;
+  const [activeItemId, setActiveItemId] = useState<string | null>(() =>
+    localStorage.getItem(storageKey),
+  );
+  // Drafts stay local until sessions land; keyed by work-item id.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
-  const [renameShellId, setRenameShellId] = useState<number | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<WorkItemView | null>(null);
+  const [renameItemId, setRenameItemId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [diffCollapsed, setDiffCollapsed] = useState(false);
   const [diffWidth, setDiffWidth] = useState(360);
+
+  useEffect(() => {
+    setActiveItemId(localStorage.getItem(storageKey));
+  }, [storageKey]);
 
   useEffect(() => {
     if (!shellMenu) return;
@@ -175,7 +185,7 @@ export function ProjectPage() {
     };
   }, [shellMenu]);
 
-  if (detail.isLoading) {
+  if (detail.isLoading || workItems.isLoading) {
     return (
       <div className="flex justify-center p-12">
         <Spinner />
@@ -189,70 +199,80 @@ export function ProjectPage() {
       </div>
     );
   }
+  if (workItems.isError) {
+    return (
+      <div className="p-8">
+        <ErrorNote error={workItems.error} />
+      </div>
+    );
+  }
 
   const project = detail.data!.project;
-  const activeShell = shells.find((shell) => shell.id === activeShellId) ?? shells[0];
-  const contextShell = shellMenu
-    ? shells.find((shell) => shell.id === shellMenu.shellId)
+  const views = (workItems.data ?? []).filter((view) => view.item.status === "active");
+  const activeView = views.find((view) => view.item.id === activeItemId) ?? views[0] ?? null;
+  const contextView = shellMenu
+    ? views.find((view) => view.item.id === shellMenu.itemId)
     : null;
-  const shellBeingRenamed = renameShellId
-    ? shells.find((shell) => shell.id === renameShellId)
+  const viewBeingRenamed = renameItemId
+    ? views.find((view) => view.item.id === renameItemId)
     : null;
-  const stage = activeShell.mode;
+  const stage: StageKey = activeView ? stageOf(activeView) : "general";
   const currentStage = STAGES.find((s) => s.key === stage)!;
   const modeStyle = MODE_STYLES[stage];
-  const updateActiveShell = (patch: Partial<Pick<ShellTab, "mode" | "draft">>) => {
-    setShells((current) =>
-      current.map((shell) => (shell.id === activeShell.id ? { ...shell, ...patch } : shell)),
-    );
+  const draft = activeView ? (drafts[activeView.item.id] ?? "") : "";
+
+  const selectItem = (id: string | null) => {
+    setActiveItemId(id);
+    if (id === null) {
+      localStorage.removeItem(storageKey);
+    } else {
+      localStorage.setItem(storageKey, id);
+    }
   };
-  const addShell = () => {
-    setShells((current) => {
-      const nextId = Math.max(0, ...current.map((shell) => shell.id)) + 1;
-      setActiveShellId(nextId);
-      return [
-        ...current,
-        { id: nextId, title: `Agent ${nextId}`, mode: "general", draft: "" },
-      ];
-    });
+  const updateDraft = (value: string) => {
+    if (!activeView) return;
+    const id = activeView.item.id;
+    setDrafts((current) => ({ ...current, [id]: value }));
   };
-  const closeShell = (id: number) => {
-    setShells((current) => {
-      if (current.length === 1) return current;
-      const index = current.findIndex((shell) => shell.id === id);
-      const next = current.filter((shell) => shell.id !== id);
-      if (id === activeShell.id) {
-        const fallback = next[Math.max(0, index - 1)] ?? next[0];
-        setActiveShellId(fallback.id);
-      }
-      return next;
-    });
+  const changeStage = (key: StageKey) => {
+    if (!activeView || key === stage) return;
+    setStage.mutate({ id: activeView.item.id, stage: key });
   };
-  const openRenameShell = (shell: ShellTab) => {
-    setRenameShellId(shell.id);
-    setRenameValue(shell.title);
+  const openRename = (view: WorkItemView) => {
+    setRenameItemId(view.item.id);
+    setRenameValue(view.item.title);
   };
-  const commitRenameShell = () => {
-    if (!shellBeingRenamed) return;
+  const closeRename = () => {
+    setRenameItemId(null);
+    setRenameValue("");
+    renameItem.reset();
+  };
+  const commitRename = () => {
+    if (!viewBeingRenamed || renameItem.isPending) return;
     const nextTitle = renameValue.trim();
     if (!nextTitle) return;
-    setShells((current) =>
-      current.map((item) =>
-        item.id === shellBeingRenamed.id ? { ...item, title: nextTitle } : item,
-      ),
+    renameItem.mutate(
+      { id: viewBeingRenamed.item.id, title: nextTitle },
+      { onSuccess: closeRename },
     );
-    setRenameShellId(null);
-    setRenameValue("");
   };
-  const copyShellTranscript = (shell: ShellTab) => {
-    const mode = STAGES.find((s) => s.key === shell.mode)?.label ?? shell.mode;
+  const handleArchived = (id: string) => {
+    setDrafts(({ [id]: _removed, ...rest }) => rest);
+    if (activeView?.item.id !== id) return;
+    const index = views.findIndex((view) => view.item.id === id);
+    const fallback = views[index - 1] ?? views[index + 1] ?? null;
+    selectItem(fallback ? fallback.item.id : null);
+  };
+  const copyShellTranscript = (view: WorkItemView) => {
+    const mode = STAGES.find((s) => s.key === stageOf(view))?.label ?? view.item.stage;
     const transcript = [
-      `# ${shell.title}`,
+      `# ${view.item.title}`,
       `Project: ${project.mappedName}`,
+      `Branch: ${view.item.branch}`,
       `Mode: ${mode}`,
       "",
       "Transcript is not connected yet. Current draft:",
-      shell.draft || "(empty)",
+      drafts[view.item.id] || "(empty)",
       "",
     ].join("\n");
     void navigator.clipboard.writeText(transcript);
@@ -297,62 +317,63 @@ export function ProjectPage() {
             <div className="border-b border-edge bg-panel px-5">
               <div className="flex min-w-0 items-center justify-between gap-4">
                 <div className="flex min-w-0 gap-1 overflow-x-auto py-2">
-                  {shells.map((shell) => (
+                  {views.map((view) => (
                     <div
-                      key={shell.id}
+                      key={view.item.id}
                       className={`inline-flex shrink-0 items-center rounded-md ${
-                        shell.id === activeShell.id
+                        view.item.id === activeView?.item.id
                           ? "bg-panel-2 text-ink"
                           : "text-ink-dim hover:bg-panel-2 hover:text-ink"
                       }`}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        setActiveShellId(shell.id);
-                        setShellMenu({ shellId: shell.id, x: e.clientX, y: e.clientY });
+                        selectItem(view.item.id);
+                        setShellMenu({ itemId: view.item.id, x: e.clientX, y: e.clientY });
                       }}
                     >
                       <button
                         type="button"
-                        onClick={() => setActiveShellId(shell.id)}
+                        onClick={() => selectItem(view.item.id)}
                         className="px-3 py-1.5 text-sm font-medium"
                       >
-                        {shell.title}
+                        {view.item.title}
                       </button>
-                      {shells.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            closeShell(shell.id);
-                          }}
-                          className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
-                          title={`Close ${shell.title}`}
-                          aria-label={`Close ${shell.title}`}
-                        >
-                          <XIcon />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setArchiveTarget(view);
+                        }}
+                        className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
+                        title={`Archive ${view.item.title}`}
+                        aria-label={`Archive ${view.item.title}`}
+                      >
+                        <XIcon />
+                      </button>
                     </div>
                   ))}
                   <button
                     type="button"
-                    onClick={addShell}
+                    onClick={() => setCreateOpen(true)}
                     className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
-                    title="New agent shell"
-                    aria-label="New agent shell"
+                    title="New work item"
+                    aria-label="New work item"
                   >
                     <PlusIcon />
                   </button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${modeStyle.badge}`}>
-                    {currentStage.label}
-                  </span>
-                  <Badge tone="dim">idle</Badge>
-                </div>
+                {activeView && (
+                  <div className="flex min-w-0 items-center gap-2">
+                    <WorkItemChips projectPath={projectPath} view={activeView} />
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${modeStyle.badge}`}>
+                      {currentStage.label}
+                    </span>
+                    <Badge tone="dim">idle</Badge>
+                  </div>
+                )}
               </div>
             </div>
-            {shellMenu && contextShell && (
+            {shellMenu && contextView && (
               <div
                 className="fixed z-50 min-w-44 rounded-md border border-edge bg-panel p-1 shadow-2xl"
                 style={{ left: shellMenu.x, top: shellMenu.y }}
@@ -361,17 +382,17 @@ export function ProjectPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    openRenameShell(contextShell);
+                    openRename(contextView);
                     setShellMenu(null);
                   }}
                   className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink"
                 >
-                  Rename chat
+                  Rename work item
                 </button>
                 <button
                   type="button"
                   onClick={() => {
-                    copyShellTranscript(contextShell);
+                    copyShellTranscript(contextView);
                     setShellMenu(null);
                   }}
                   className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink"
@@ -381,113 +402,138 @@ export function ProjectPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    closeShell(contextShell.id);
+                    setArchiveTarget(contextView);
                     setShellMenu(null);
                   }}
-                  disabled={shells.length === 1}
                   className="block w-full rounded px-3 py-1.5 text-left text-sm text-bad hover:bg-bad/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Close tab
+                  Archive work item
                 </button>
               </div>
             )}
-            <Dialog
-              open={Boolean(shellBeingRenamed)}
-              onClose={() => {
-                setRenameShellId(null);
-                setRenameValue("");
-              }}
-              title="Rename chat"
-            >
+            <Dialog open={Boolean(viewBeingRenamed)} onClose={closeRename} title="Rename work item">
               <form
                 className="space-y-3"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  commitRenameShell();
+                  commitRename();
                 }}
               >
                 <TextInput
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   autoFocus
+                  disabled={renameItem.isPending}
                 />
+                {renameItem.isError && <ErrorNote error={renameItem.error} />}
                 <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setRenameShellId(null);
-                      setRenameValue("");
-                    }}
-                  >
+                  <Button type="button" onClick={closeRename} disabled={renameItem.isPending}>
                     Cancel
                   </Button>
-                  <Button type="submit" variant="primary" disabled={!renameValue.trim()}>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    busy={renameItem.isPending}
+                    disabled={!renameValue.trim()}
+                  >
                     Rename
                   </Button>
                 </div>
               </form>
             </Dialog>
+            <CreateWorkItemDialog
+              projectPath={projectPath}
+              open={createOpen}
+              onClose={() => setCreateOpen(false)}
+              onCreated={(view) => selectItem(view.item.id)}
+            />
+            <ArchiveWorkItemDialog
+              projectPath={projectPath}
+              target={archiveTarget}
+              onClose={() => setArchiveTarget(null)}
+              onArchived={handleArchived}
+            />
 
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="mx-auto max-w-3xl space-y-4">
-                <div className="rounded-lg border border-edge bg-panel p-4">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Badge tone="accent">system</Badge>
-                    <span className="text-xs text-ink-dim">spec-driven flow</span>
+                {activeView ? (
+                  <div className="rounded-lg border border-edge bg-panel p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <Badge tone="accent">system</Badge>
+                      <span className="text-xs text-ink-dim">spec-driven flow</span>
+                    </div>
+                    <p className="text-sm leading-relaxed text-ink-dim">
+                      This is the project agent shell. Use the mode controls by the composer to run
+                      the next turn as general chat or as a Research, Plan, Implement, Validate, or
+                      Ship step.
+                    </p>
                   </div>
-                  <p className="text-sm leading-relaxed text-ink-dim">
-                    This is the project agent shell. Use the mode controls by the composer to run
-                    the next turn as general chat or as a Research, Plan, Implement, Validate, or
-                    Ship step.
-                  </p>
-                </div>
+                ) : (
+                  <div className="rounded-lg border border-edge bg-panel p-6 text-center">
+                    <p className="text-base font-medium text-ink">Create your first work item</p>
+                    <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink-dim">
+                      Each work item gets its own branch and worktree, so agents can research,
+                      plan, and implement without touching your checkout.
+                    </p>
+                    <Button
+                      variant="primary"
+                      className="mt-4"
+                      onClick={() => setCreateOpen(true)}
+                    >
+                      <PlusIcon />
+                      New work item
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="border-t border-edge bg-panel p-4">
-              <div className="mx-auto max-w-3xl">
-                <textarea
-                  value={activeShell.draft}
-                  onChange={(e) => updateActiveShell({ draft: e.target.value })}
-                  rows={3}
-                  placeholder={
-                    stage === "general"
-                      ? "Ask the project agent…"
-                      : `Ask the ${currentStage.label.toLowerCase()} agent…`
-                  }
-                  className={`selectable w-full resize-none rounded-md border bg-panel-2 px-3 py-2 text-sm text-ink placeholder:text-ink-dim/70 focus:outline-none ${modeStyle.composer}`}
-                />
-                <div className="mt-2 flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="shrink-0 text-xs text-ink-dim">Mode</span>
-                    <div className="flex flex-wrap gap-1">
-                      {STAGES.map((s) => (
-                        <button
-                          key={s.key}
-                          type="button"
-                          onClick={() => updateActiveShell({ mode: s.key })}
-                          className={`inline-flex h-8 w-8 items-center justify-center rounded-md border ${
-                            s.key === stage
-                              ? MODE_STYLES[s.key].activeButton
-                              : "border-edge bg-panel-2 text-ink-dim hover:bg-edge/60 hover:text-ink"
-                          }`}
-                          title={`${s.label} mode`}
-                          aria-label={`${s.label} mode`}
-                        >
-                          <ModeIcon mode={s.key} />
-                        </button>
-                      ))}
+            {activeView && (
+              <div className="border-t border-edge bg-panel p-4">
+                <div className="mx-auto max-w-3xl">
+                  <textarea
+                    value={draft}
+                    onChange={(e) => updateDraft(e.target.value)}
+                    rows={3}
+                    placeholder={
+                      stage === "general"
+                        ? "Ask the project agent…"
+                        : `Ask the ${currentStage.label.toLowerCase()} agent…`
+                    }
+                    className={`selectable w-full resize-none rounded-md border bg-panel-2 px-3 py-2 text-sm text-ink placeholder:text-ink-dim/70 focus:outline-none ${modeStyle.composer}`}
+                  />
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="shrink-0 text-xs text-ink-dim">Mode</span>
+                      <div className="flex flex-wrap gap-1">
+                        {STAGES.map((s) => (
+                          <button
+                            key={s.key}
+                            type="button"
+                            onClick={() => changeStage(s.key)}
+                            className={`inline-flex h-8 w-8 items-center justify-center rounded-md border ${
+                              s.key === stage
+                                ? MODE_STYLES[s.key].activeButton
+                                : "border-edge bg-panel-2 text-ink-dim hover:bg-edge/60 hover:text-ink"
+                            }`}
+                            title={`${s.label} mode`}
+                            aria-label={`${s.label} mode`}
+                          >
+                            <ModeIcon mode={s.key} />
+                          </button>
+                        ))}
+                      </div>
+                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${modeStyle.badge}`}>
+                        {currentStage.label}
+                      </span>
                     </div>
-                    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${modeStyle.badge}`}>
-                      {currentStage.label}
-                    </span>
+                    <Button variant="primary" disabled={!draft.trim()}>
+                      Start
+                    </Button>
                   </div>
-                  <Button variant="primary" disabled={!activeShell.draft.trim()}>
-                    Start
-                  </Button>
                 </div>
               </div>
-            </div>
+            )}
           </main>
         </div>
       </section>
@@ -506,39 +552,11 @@ export function ProjectPage() {
         className="min-w-0 shrink-0 border-l border-edge bg-panel"
         style={{ width: diffCollapsed ? DIFF_SIDEBAR_COLLAPSED : diffWidth }}
       >
-        <div className="flex h-[61px] items-center border-b border-edge px-3">
-          <div className={`flex w-full items-center gap-3 ${diffCollapsed ? "justify-center" : ""}`}>
-            <button
-              type="button"
-              onClick={() => setDiffCollapsed((value) => !value)}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
-              title={diffCollapsed ? "Expand diff sidebar" : "Collapse diff sidebar"}
-              aria-label={diffCollapsed ? "Expand diff sidebar" : "Collapse diff sidebar"}
-            >
-              <PanelRightIcon />
-            </button>
-            {!diffCollapsed && (
-              <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold">Diff</h2>
-                <Badge tone="dim">0 files</Badge>
-              </div>
-            )}
-          </div>
-        </div>
-        {diffCollapsed ? (
-          <div className="flex justify-center p-3">
-            <Badge tone="dim">0</Badge>
-          </div>
-        ) : (
-          <div className="space-y-4 p-4">
-            <div className="rounded-lg border border-edge bg-panel-2 p-3">
-              <p className="text-sm font-medium">No worktree diff yet</p>
-              <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-                Diffs will be computed from the project worktree when work items land.
-              </p>
-            </div>
-          </div>
-        )}
+        <DiffSidebar
+          workItemId={activeView?.item.id ?? null}
+          collapsed={diffCollapsed}
+          onToggleCollapsed={() => setDiffCollapsed((value) => !value)}
+        />
       </aside>
     </div>
   );

@@ -44,6 +44,15 @@ pub enum CoreError {
     #[error("failed to parse output of `{program}`: {detail}")]
     OutputParse { program: String, detail: String },
 
+    #[error("database error: {0}")]
+    Db(#[from] rusqlite::Error),
+
+    #[error("worktree has {0} uncommitted change(s)")]
+    WorktreeDirty(u32),
+
+    #[error("branch `{branch}` has {count} unpushed/unmerged commit(s)")]
+    WorktreeUnpushed { branch: String, count: u32 },
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -82,6 +91,12 @@ impl CoreError {
                     None
                 }
             }
+            CoreError::WorktreeDirty(_) => Some(
+                "Commit or discard the changes in the worktree first, or archive with 'discard changes'.".into(),
+            ),
+            CoreError::WorktreeUnpushed { .. } => Some(
+                "Push the branch (or merge it) first, or archive with 'discard changes' to drop the commits.".into(),
+            ),
             _ => None,
         }
     }
@@ -98,6 +113,9 @@ impl CoreError {
             CoreError::Exec { .. } => "exec_failed",
             CoreError::ExecTimeout { .. } => "exec_timeout",
             CoreError::OutputParse { .. } => "output_parse",
+            CoreError::Db(_) => "db",
+            CoreError::WorktreeDirty(_) => "worktree_dirty",
+            CoreError::WorktreeUnpushed { .. } => "worktree_unpushed",
             CoreError::Io(_) => "io",
         }
     }

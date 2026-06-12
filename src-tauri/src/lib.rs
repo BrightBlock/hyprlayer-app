@@ -34,6 +34,17 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::library::create_doc,
             commands::library::reveal_doc,
             commands::library::get_thoughts_git_status,
+            commands::work_items::list_work_items,
+            commands::work_items::create_work_item,
+            commands::work_items::get_work_item,
+            commands::work_items::rename_work_item,
+            commands::work_items::set_work_item_stage,
+            commands::work_items::attach_work_item_doc,
+            commands::work_items::detach_work_item_doc,
+            commands::work_items::list_work_item_docs,
+            commands::work_items::archive_work_item,
+            commands::work_items::reprovision_work_item,
+            commands::work_items::worktree_diff,
             commands::system::get_binaries_status,
             commands::system::set_binary_override,
             commands::system::redetect_binaries,
@@ -94,10 +105,24 @@ pub fn run() {
                     .collect();
             let binaries = Arc::new(BinaryResolver::initialize(overrides));
 
+            let db_path = app.path().app_data_dir()?.join("hyprlayer.db");
+            let db = Arc::new(hyprlayer_core::store::Db::open(&db_path)?);
+
+            let settings_snapshot = tauri::async_runtime::block_on(settings.get());
+            let worktree_root = settings_snapshot
+                .worktree_root
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(hyprlayer_core::worktree::default_worktree_root);
+
             app.manage(AppState {
                 config: config.clone(),
                 binaries: binaries.clone(),
                 settings,
+                db,
+                worktrees: Arc::new(hyprlayer_core::worktree::WorktreeManager::new(
+                    worktree_root,
+                )),
                 index: Arc::new(hyprlayer_core::index::ThoughtsIndex::new()),
                 index_watch: tokio::sync::Mutex::new(None),
             });

@@ -26,6 +26,27 @@ export const commands = {
 	createDoc: (input: CreateDocInput) => typedError<DocMeta, AppError>(__TAURI_INVOKE("create_doc", { input })),
 	revealDoc: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_doc", { id })),
 	getThoughtsGitStatus: (projectPath: string) => typedError<ThoughtsRepoStatus, AppError>(__TAURI_INVOKE("get_thoughts_git_status", { projectPath })),
+	listWorkItems: (projectPath: string, includeArchived: boolean) => typedError<WorkItemView[], AppError>(__TAURI_INVOKE("list_work_items", { projectPath, includeArchived })),
+	createWorkItem: (projectPath: string, title: string) => typedError<WorkItemView, AppError>(__TAURI_INVOKE("create_work_item", { projectPath, title })),
+	getWorkItem: (id: string) => typedError<WorkItemView, AppError>(__TAURI_INVOKE("get_work_item", { id })),
+	renameWorkItem: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_work_item", { id, title })),
+	setWorkItemStage: (id: string, stage: string) => typedError<null, AppError>(__TAURI_INVOKE("set_work_item_stage", { id, stage })),
+	attachWorkItemDoc: (id: string, docPath: string, role: string) => typedError<WorkItemDoc[], AppError>(__TAURI_INVOKE("attach_work_item_doc", { id, docPath, role })),
+	detachWorkItemDoc: (id: string, docPath: string) => typedError<WorkItemDoc[], AppError>(__TAURI_INVOKE("detach_work_item_doc", { id, docPath })),
+	listWorkItemDocs: (id: string) => typedError<WorkItemDoc[], AppError>(__TAURI_INVOKE("list_work_item_docs", { id })),
+	/**
+	 *  Archive an item. `discard: false` is the safe path — it fails with
+	 *  `worktree_dirty` / `worktree_unpushed` when work would be lost, and the
+	 *  UI re-asks with `discard: true`.
+	 */
+	archiveWorkItem: (id: string, discard: boolean) => typedError<null, AppError>(__TAURI_INVOKE("archive_work_item", { id, discard })),
+	/**
+	 *  Re-create broken thoughts links (status shows `broken` after e.g. a moved
+	 *  thoughts repo).
+	 */
+	reprovisionWorkItem: (id: string) => typedError<WorkItemView, AppError>(__TAURI_INVOKE("reprovision_work_item", { id })),
+	/**  Working-tree diff vs HEAD (staged + unstaged), thoughts/ excluded. */
+	worktreeDiff: (id: string) => typedError<FileDiff[], AppError>(__TAURI_INVOKE("worktree_diff", { id })),
 	getBinariesStatus: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("get_binaries_status")),
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
@@ -55,6 +76,8 @@ export type AppSettings = {
 	binaryOverrides?: Partial<{ [key in BinaryKind]: string }>,
 	onboardingComplete?: boolean,
 	lastProjectPath?: string | null,
+	/**  Where work-item worktrees live; default ~/hyprlayer/worktrees. */
+	worktreeRoot?: string | null,
 };
 
 /**  Where a document lives within its root's layout. */
@@ -146,6 +169,13 @@ export type DocMeta = {
 	sizeBytes: number | null,
 };
 
+export type FileDiff = {
+	path: string,
+	/**  added | modified | deleted | renamed | other */
+	change: string,
+	patch: string,
+};
+
 export type FmPatchDto = {
 	set?: FmSetEntry[],
 	remove?: string[],
@@ -194,6 +224,14 @@ export type HealthCheck = {
 export type HealthReport = {
 	checks: HealthCheck[],
 };
+
+export type LinkStatus = 
+/**  Links exist and resolve. */
+"ok" | 
+/**  Backend has no filesystem tree (notion/anytype) — nothing to link. */
+"unsupported" | 
+/**  Links missing or broken. */
+"broken";
 
 export type Project = {
 	/**  Absolute path of the code repository (the repoMappings key). */
@@ -302,6 +340,48 @@ export type ThoughtsRepoStatus = {
 	ahead: number,
 	behind: number,
 	hasRemote: boolean,
+};
+
+export type WorkItem = {
+	id: string,
+	projectPath: string,
+	title: string,
+	slug: string,
+	branch: string,
+	worktreePath: string,
+	baseBranch: string,
+	/**  general | research | plan | implement | validate | ship */
+	stage: string,
+	/**  active | archived */
+	status: string,
+	prNumber: number | null,
+	createdAt: number | null,
+	updatedAt: number | null,
+	archivedAt: number | null,
+};
+
+export type WorkItemDoc = {
+	workItemId: string,
+	docPath: string,
+	/**  research | plan | other */
+	role: string,
+};
+
+export type WorkItemView = {
+	item: WorkItem,
+	git: WorktreeStatus,
+};
+
+export type WorktreeStatus = {
+	exists: boolean,
+	branch: string | null,
+	/**  Tracked changes (staged + unstaged), excluding thoughts/. */
+	dirty: number,
+	/**  Untracked files, excluding thoughts/ (informational only). */
+	untracked: number,
+	ahead: number,
+	behind: number,
+	thoughts: LinkStatus,
 };
 
 /* Tauri Specta runtime */

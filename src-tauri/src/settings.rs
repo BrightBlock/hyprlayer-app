@@ -19,6 +19,8 @@ pub struct AppSettings {
     pub binary_overrides: HashMap<BinaryKind, String>,
     pub onboarding_complete: bool,
     pub last_project_path: Option<String>,
+    /// Where work-item worktrees live; default ~/hyprlayer/worktrees.
+    pub worktree_root: Option<String>,
 }
 
 pub struct SettingsStore {

@@ -67,9 +67,106 @@ pub fn thoughts_repo_status(repo_path: &Path) -> Result<ThoughtsRepoStatus> {
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    pub path: String,
+    /// added | modified | deleted | renamed | other
+    pub change: String,
+    pub patch: String,
+}
+
+/// Working-tree diff vs HEAD (staged + unstaged + untracked content), with
+/// the app-managed `thoughts/` tree excluded.
+pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
+    let repo = git2::Repository::open(worktree).map_err(|e| CoreError::OutputParse {
+        program: "git2 open".into(),
+        detail: format!("{}: {}", worktree.display(), e.message()),
+    })?;
+
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let mut opts = git2::DiffOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .show_untracked_content(true);
+    let diff = repo
+        .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
+        .map_err(|e| CoreError::OutputParse {
+            program: "git2 diff".into(),
+            detail: e.message().to_string(),
+        })?;
+
+    let mut files = Vec::new();
+    for (idx, delta) in diff.deltas().enumerate() {
+        let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if path == "thoughts" || path.starts_with("thoughts/") {
+            continue;
+        }
+        let change = match delta.status() {
+            git2::Delta::Added | git2::Delta::Untracked => "added",
+            git2::Delta::Deleted => "deleted",
+            git2::Delta::Renamed => "renamed",
+            git2::Delta::Modified => "modified",
+            _ => "other",
+        };
+        let patch = git2::Patch::from_diff(&diff, idx)
+            .ok()
+            .flatten()
+            .and_then(|mut p| p.to_buf().ok())
+            .map(|buf| String::from_utf8_lossy(&buf).to_string())
+            .unwrap_or_default();
+        files.push(FileDiff {
+            path,
+            change: change.to_string(),
+            patch,
+        });
+    }
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worktree_diff_reports_changes_and_skips_thoughts() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("a.md"), "one\n").unwrap();
+        {
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("a.md")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::now("t", "t@t").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
+        }
+
+        std::fs::write(dir.path().join("a.md"), "two\n").unwrap();
+        std::fs::write(dir.path().join("b.md"), "new\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("thoughts/jt")).unwrap();
+        std::fs::write(dir.path().join("thoughts/jt/x.md"), "skip\n").unwrap();
+
+        let files = worktree_diff(dir.path()).unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"a.md"));
+        assert!(paths.contains(&"b.md"));
+        assert!(!paths.iter().any(|p| p.starts_with("thoughts")));
+        let a = files.iter().find(|f| f.path == "a.md").unwrap();
+        assert_eq!(a.change, "modified");
+        assert!(a.patch.contains("-one") && a.patch.contains("+two"));
+        assert_eq!(
+            files.iter().find(|f| f.path == "b.md").unwrap().change,
+            "added"
+        );
+    }
 
     #[test]
     fn status_of_fresh_repo() {
