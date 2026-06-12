@@ -20,6 +20,15 @@ dirs.workspace = true
 tracing.workspace = true
 which = "7"
 shellexpand = "3"
+serde_yaml = "0.9"
+# Local-only git operations (status/ahead-behind); no network transports, so
+# no openssl. Network git stays with the system binary (credential helpers).
+git2 = { version = "0.19", default-features = false }
+memchr = "2"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+walkdir = "2"
+notify = "8"
+notify-debouncer-full = "0.5"
 specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"], optional = true }
 
 [dev-dependencies]

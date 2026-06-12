@@ -1,6 +1,13 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 
-import { commands, type AppSettings, type BinaryKind } from "./bindings";
+import {
+  commands,
+  type AppSettings,
+  type BinaryKind,
+  type CreateDocInput,
+  type FmPatchDto,
+  type ThoughtQuery,
+} from "./bindings";
 import { unwrap } from "./ipc";
 import { queryClient } from "./queryClient";
 
@@ -31,9 +38,84 @@ export function useSyncThoughts(path: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["project", path] });
       void queryClient.invalidateQueries({ queryKey: ["health", path] });
+      void queryClient.invalidateQueries({ queryKey: ["thoughtsGitStatus", path] });
       // A sync can rewrite the hyprlayer config (e.g. orphan-mapping cleanup),
       // which the sidebar renders from; don't wait for the watcher poll.
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    },
+  });
+}
+
+export function useDocs(query: ThoughtQuery, enabled = true) {
+  return useQuery({
+    queryKey: ["docs", query],
+    queryFn: () => unwrap(commands.queryDocs(query)),
+    enabled,
+    // Keep the previous list on screen while a new filter/search resolves.
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useDoc(id: string) {
+  return useQuery({
+    queryKey: ["doc", id],
+    queryFn: () => unwrap(commands.getDoc(id)),
+    enabled: id.length > 0,
+  });
+}
+
+export function useSaveDoc(id: string) {
+  return useMutation({
+    mutationFn: ({ content, baseMtimeMs }: { content: string; baseMtimeMs: number | null }) =>
+      unwrap(commands.saveDoc(id, content, baseMtimeMs)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["doc", id] });
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+    },
+  });
+}
+
+export function usePatchDocFrontmatter(id: string) {
+  return useMutation({
+    mutationFn: ({ patch, baseMtimeMs }: { patch: FmPatchDto; baseMtimeMs: number | null }) =>
+      unwrap(commands.patchDocFrontmatter(id, patch, baseMtimeMs)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["doc", id] });
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+    },
+  });
+}
+
+export function useCreateDoc() {
+  return useMutation({
+    mutationFn: (input: CreateDocInput) => unwrap(commands.createDoc(input)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+    },
+  });
+}
+
+export function useRevealDoc() {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.revealDoc(id)),
+  });
+}
+
+export function useThoughtsGitStatus(projectPath: string) {
+  return useQuery({
+    queryKey: ["thoughtsGitStatus", projectPath],
+    queryFn: () => unwrap(commands.getThoughtsGitStatus(projectPath)),
+  });
+}
+
+export function useAddProject() {
+  return useMutation({
+    mutationFn: (args: { path: string; directoryName: string | null; bootstrapUser: string | null }) =>
+      unwrap(commands.addProject(args.path, args.directoryName, args.bootstrapUser)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      void queryClient.invalidateQueries({ queryKey: ["project"] });
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
     },
   });
 }

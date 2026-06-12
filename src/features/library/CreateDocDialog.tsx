@@ -1,0 +1,140 @@
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "@tanstack/react-router";
+
+import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "../../components/ui";
+import { useBootstrap, useCreateDoc } from "../../lib/queries";
+import { DOC_SCOPES, DOC_TYPES } from "./constants";
+import { parseTagsInput } from "./text";
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  /** Preselect this project (mapped name), e.g. the library's active filter. */
+  initialProjectName?: string;
+};
+
+export function CreateDocDialog({ open, onClose, initialProjectName }: Props) {
+  // Remount the form on every open so state resets without effects.
+  if (!open) return null;
+  return <CreateDocForm onClose={onClose} initialProjectName={initialProjectName} />;
+}
+
+function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
+  const bootstrap = useBootstrap();
+  const createDoc = useCreateDoc();
+  const navigate = useNavigate();
+
+  const projects = bootstrap.data?.projects ?? [];
+
+  const [title, setTitle] = useState("");
+  const [docType, setDocType] = useState<string>("note");
+  const [scope, setScope] = useState<string>("user");
+  const [projectPath, setProjectPath] = useState(
+    () =>
+      projects.find((p) => p.mappedName === initialProjectName)?.path ?? projects[0]?.path ?? "",
+  );
+  const [ticket, setTicket] = useState("");
+  const [tags, setTags] = useState("");
+
+  const isGlobal = scope === "global";
+  const needsProject = !isGlobal && projectPath === "";
+  const canSubmit = title.trim().length > 0 && !needsProject && !createDoc.isPending;
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    createDoc.mutate(
+      {
+        projectRepoPath: isGlobal ? null : projectPath,
+        scope,
+        docType,
+        title: title.trim(),
+        date: new Date().toISOString().slice(0, 10),
+        ticket: ticket.trim() || null,
+        tags: parseTagsInput(tags),
+      },
+      {
+        onSuccess: (meta) => {
+          onClose();
+          void navigate({ to: "/library/doc", search: { id: meta.id, mode: "edit" } });
+        },
+      },
+    );
+  }
+
+  return (
+    <Dialog open onClose={onClose} title="New document">
+      <form onSubmit={submit} className="space-y-3">
+        <Field label="Title">
+          <TextInput
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="What is this document about?"
+            autoFocus
+            required
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Type">
+            <Select value={docType} onChange={(e) => setDocType(e.target.value)}>
+              {DOC_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Scope">
+            <Select value={scope} onChange={(e) => setScope(e.target.value)}>
+              {DOC_SCOPES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        {!isGlobal && (
+          <Field label="Project">
+            <Select value={projectPath} onChange={(e) => setProjectPath(e.target.value)}>
+              {projects.length === 0 && <option value="">No projects mapped</option>}
+              {projects.map((p) => (
+                <option key={p.path} value={p.path}>
+                  {p.mappedName}
+                </option>
+              ))}
+            </Select>
+            {projects.length === 0 && (
+              <p className="mt-1 text-xs text-warn">
+                Add a project first, or pick the global scope.
+              </p>
+            )}
+          </Field>
+        )}
+        <Field label="Ticket (optional)">
+          <TextInput
+            value={ticket}
+            onChange={(e) => setTicket(e.target.value)}
+            placeholder="ENG-1234"
+          />
+        </Field>
+        <Field label="Tags (comma-separated, optional)">
+          <TextInput
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="refactor, ipc, phase-1"
+          />
+        </Field>
+        {createDoc.isError && <ErrorNote error={createDoc.error} />}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={!canSubmit} busy={createDoc.isPending}>
+            Create
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}

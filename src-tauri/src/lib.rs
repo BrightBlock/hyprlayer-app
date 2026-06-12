@@ -24,8 +24,16 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::projects::get_bootstrap,
             commands::projects::list_projects,
             commands::projects::get_project,
+            commands::projects::add_project,
             commands::projects::sync_thoughts,
             commands::projects::run_backend_health,
+            commands::library::query_docs,
+            commands::library::get_doc,
+            commands::library::save_doc,
+            commands::library::patch_doc_frontmatter,
+            commands::library::create_doc,
+            commands::library::reveal_doc,
+            commands::library::get_thoughts_git_status,
             commands::system::get_binaries_status,
             commands::system::set_binary_override,
             commands::system::redetect_binaries,
@@ -34,7 +42,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             events::ConfigChanged,
-            events::BinariesChanged
+            events::BinariesChanged,
+            events::ThoughtsIndexUpdated
         ])
 }
 
@@ -89,12 +98,14 @@ pub fn run() {
                 config: config.clone(),
                 binaries: binaries.clone(),
                 settings,
+                index: Arc::new(hyprlayer_core::index::ThoughtsIndex::new()),
+                index_watch: tokio::sync::Mutex::new(None),
             });
 
             // 1. Fold the login-shell PATH in (GUI apps start with launchd's
-            //    bare PATH), THEN nudge the CLI to migrate a pre-v4 config —
-            //    chained, so the nudge sees the enriched PATH and never races
-            //    it. Both notify the UI when they change anything.
+            //    bare PATH), THEN nudge the CLI to migrate a pre-v4 config,
+            //    THEN build the thoughts index — chained, so each step sees
+            //    the previous one's effects and never races it.
             let handle = app.handle().clone();
             let binaries_bg = binaries.clone();
             let config_bg = config.clone();
@@ -103,11 +114,13 @@ pub fn run() {
                     let _ = events::BinariesChanged.emit(&handle);
                 }
                 migrate_config_if_needed(&binaries_bg, &config_bg, &handle).await;
+                rebuild_thoughts_index(handle.clone()).await;
             });
 
             // 2. Watch the config file for changes (the CLI owns writes); a
             //    cheap (mtime, len) poll is plenty at this cadence — length
             //    catches same-tick rewrites on coarse-mtime filesystems.
+            //    Config changes can move the thoughts roots → rebuild.
             let handle = app.handle().clone();
             let config_bg = config.clone();
             tauri::async_runtime::spawn(async move {
@@ -125,6 +138,7 @@ pub fn run() {
                         last = current;
                         config_bg.invalidate().await;
                         let _ = events::ConfigChanged.emit(&handle);
+                        rebuild_thoughts_index(handle.clone()).await;
                     }
                 }
             });
@@ -133,6 +147,71 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// (Re)build the thoughts index and its filesystem watcher from the current
+/// config. Called at startup, after config changes (roots may move), and
+/// after adding a project. Replacing the stored WatchHandle drops — and
+/// thereby stops — the previous watcher.
+pub(crate) async fn rebuild_thoughts_index(app: tauri::AppHandle) {
+    use tauri::Manager;
+
+    let state = app.state::<AppState>();
+    let roots = match state.config.load().await {
+        Ok(loaded) => hyprlayer_core::index::thoughts_roots(&loaded.config),
+        Err(_) => Vec::new(), // no config -> empty library, stop watching
+    };
+
+    let index = state.index.clone();
+    let scan_roots = roots.clone();
+    let stats = tauri::async_runtime::spawn_blocking(move || index.full_scan(&scan_roots)).await;
+    if let Ok(stats) = &stats {
+        log::info!(
+            "thoughts index: {} docs ({} skipped, {} errors) across {} roots",
+            stats.indexed,
+            stats.skipped,
+            stats.errors,
+            roots.len()
+        );
+    }
+
+    let watch = if roots.is_empty() {
+        None
+    } else {
+        let emit_handle = app.clone();
+        let callback = Box::new(move |event: hyprlayer_core::index::watcher::IndexEvent| {
+            use hyprlayer_core::index::watcher::IndexEvent;
+            let payload = match event {
+                IndexEvent::Updated { ids } => events::ThoughtsIndexUpdated {
+                    kind: "updated".into(),
+                    ids,
+                },
+                IndexEvent::Removed { ids } => events::ThoughtsIndexUpdated {
+                    kind: "removed".into(),
+                    ids,
+                },
+                IndexEvent::Rescanned => events::ThoughtsIndexUpdated {
+                    kind: "rescanned".into(),
+                    ids: Vec::new(),
+                },
+            };
+            let _ = payload.emit(&emit_handle);
+        });
+        match hyprlayer_core::index::watcher::watch_roots(state.index.clone(), roots, callback) {
+            Ok(handle) => Some(handle),
+            Err(e) => {
+                log::warn!("thoughts watcher failed to start: {e}");
+                None
+            }
+        }
+    };
+    *state.index_watch.lock().await = watch;
+
+    let _ = events::ThoughtsIndexUpdated {
+        kind: "rescanned".into(),
+        ids: Vec::new(),
+    }
+    .emit(&app);
 }
 
 /// If a direct config read fails because the file is pre-v4, run one cheap

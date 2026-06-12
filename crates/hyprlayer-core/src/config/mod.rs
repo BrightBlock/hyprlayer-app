@@ -66,6 +66,55 @@ pub struct LoadedConfig {
     pub len: u64,
 }
 
+/// TEMPORARY exception to the single-writer rule (ADR 0002): a true first run
+/// has no config at all, and `hyprlayer thoughts init --yes` refuses to run
+/// without one. Write the minimal v4 config (git backend defaults) and hand
+/// ownership straight back to the CLI. Refuses to touch an existing file.
+/// Delete once upstream `thoughts init` gains a `--user` flag.
+pub fn write_bootstrap_config(path: &Path, user: &str) -> Result<()> {
+    if path.exists() {
+        return Err(CoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!(
+                "refusing to overwrite existing config at {}",
+                path.display()
+            ),
+        )));
+    }
+    let user = user.trim();
+    if user.is_empty() {
+        return Err(CoreError::Io(std::io::Error::other(
+            "a username is required to bootstrap the hyprlayer config",
+        )));
+    }
+
+    let config = serde_json::json!({
+        "version": 4,
+        "thoughts": {
+            "user": user,
+            "backend": {
+                "kind": "git",
+                "thoughtsRepo": "~/thoughts",
+                "reposDir": "repos",
+                "globalDir": "global"
+            },
+            "repoMappings": {},
+            "profiles": {}
+        }
+    });
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(
+        &tmp,
+        serde_json::to_string_pretty(&config).expect("static json"),
+    )?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 /// Cached config reader. `load()` is cheap to call repeatedly: it re-reads
 /// the file only when its mtime changes.
 pub struct ConfigService {

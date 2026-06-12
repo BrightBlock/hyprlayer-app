@@ -6,6 +6,7 @@ use hyprlayer_core::process::binaries::{BinaryKind, BinaryState, BinaryStatus};
 use hyprlayer_core::CoreError;
 use serde::Serialize;
 use tauri::State;
+use tauri_specta::Event;
 
 use crate::error::{AppError, CmdResult};
 use crate::settings::AppSettings;
@@ -216,6 +217,73 @@ async fn effective_thoughts_root(state: &AppState, repo_path: &str) -> Option<St
         .backend
         .thoughts_root()
         .map(|p| p.display().to_string())
+}
+
+/// Add a repository as a hyprlayer project. Wraps `hyprlayer thoughts init
+/// --yes`; on a true first run (no config anywhere) it first writes the
+/// minimal bootstrap config — the documented ADR-0002 exception — and the CLI
+/// owns the file from then on.
+#[tauri::command]
+#[specta::specta]
+pub async fn add_project(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    directory_name: Option<String>,
+    bootstrap_user: Option<String>,
+) -> CmdResult<Project> {
+    let repo = Path::new(&path);
+    if !repo.is_dir() {
+        return Err(AppError {
+            code: "invalid_path".into(),
+            message: format!("{path} is not a directory"),
+            remedy: None,
+        });
+    }
+    if !repo.join(".git").exists() {
+        return Err(AppError {
+            code: "not_a_git_repo".into(),
+            message: format!("{path} is not a git repository"),
+            remedy: Some("hyprlayer projects must be git repositories (`git init` first).".into()),
+        });
+    }
+
+    if !state.config.exists() {
+        let user = bootstrap_user.unwrap_or_default();
+        if user.trim().is_empty() {
+            return Err(AppError {
+                code: "bootstrap_user_required".into(),
+                message: "No hyprlayer config exists yet; a username is needed to create one."
+                    .into(),
+                remedy: Some(
+                    "Enter the username your thought documents should be attributed to.".into(),
+                ),
+            });
+        }
+        hyprlayer_core::config::write_bootstrap_config(state.config.path(), &user)
+            .map_err(AppError::from)?;
+    }
+
+    let dir_name = directory_name
+        .filter(|d| !d.trim().is_empty())
+        .unwrap_or_else(|| {
+            repo.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unnamed_repo")
+                .to_string()
+        });
+
+    HyprCli::new(&state.binaries)
+        .thoughts_init(repo, &dir_name, None)
+        .await
+        .map_err(AppError::from)?;
+
+    state.config.invalidate().await;
+    let _ = crate::events::ConfigChanged.emit(&app);
+    crate::rebuild_thoughts_index(app.clone()).await;
+
+    let (_, projects) = config_summary(&state).await;
+    find_project(&projects, &path)
 }
 
 #[tauri::command]

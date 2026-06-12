@@ -4,8 +4,11 @@
 //! headless and fast. The Tauri shell (`src-tauri`) is a thin layer over it.
 
 pub mod config;
+pub mod docs;
 pub mod error;
+pub mod gitops;
 pub mod hyprcli;
+pub mod index;
 pub mod process;
 
 pub use error::CoreError;

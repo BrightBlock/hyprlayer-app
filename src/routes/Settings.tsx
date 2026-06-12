@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+
 import { useBootstrap, useRedetectBinaries } from "../lib/queries";
 import { Button, Card, CardTitle, ErrorNote, Spinner } from "../components/ui";
 import { BinaryCard } from "../features/system/BinaryCard";
@@ -51,6 +53,28 @@ export function Settings() {
         <p className="mt-2 text-xs text-ink-dim">
           The hyprlayer CLI owns this file; the app reads it and follows changes live.
         </p>
+      </Card>
+
+      <Card>
+        <CardTitle>Projects</CardTitle>
+        <div className="divide-y divide-edge/60">
+          {data.projects.map((project) => (
+            <Link
+              key={project.path}
+              to="/settings/projects/$projectPath"
+              params={{ projectPath: project.path }}
+              className="block py-2 text-sm hover:text-ink"
+            >
+              <span className="block text-ink">{project.mappedName}</span>
+              <span className="selectable block truncate font-mono text-xs text-ink-dim">
+                {project.path}
+              </span>
+            </Link>
+          ))}
+          {data.projects.length === 0 && (
+            <p className="py-2 text-sm text-ink-dim">No projects mapped.</p>
+          )}
+        </div>
       </Card>
     </div>
   );

@@ -10,8 +10,22 @@ export const commands = {
 	getBootstrap: () => typedError<Bootstrap, AppError>(__TAURI_INVOKE("get_bootstrap")),
 	listProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("list_projects")),
 	getProject: (path: string) => typedError<ProjectDetail, AppError>(__TAURI_INVOKE("get_project", { path })),
+	/**
+	 *  Add a repository as a hyprlayer project. Wraps `hyprlayer thoughts init
+	 *  --yes`; on a true first run (no config anywhere) it first writes the
+	 *  minimal bootstrap config — the documented ADR-0002 exception — and the CLI
+	 *  owns the file from then on.
+	 */
+	addProject: (path: string, directoryName: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("add_project", { path, directoryName, bootstrapUser })),
 	syncThoughts: (path: string, message: string | null) => typedError<SyncReport, AppError>(__TAURI_INVOKE("sync_thoughts", { path, message })),
 	runBackendHealth: (path: string) => typedError<HealthReport, AppError>(__TAURI_INVOKE("run_backend_health", { path })),
+	queryDocs: (query: ThoughtQuery) => typedError<QueryResult, AppError>(__TAURI_INVOKE("query_docs", { query })),
+	getDoc: (id: string) => typedError<DocContent, AppError>(__TAURI_INVOKE("get_doc", { id })),
+	saveDoc: (id: string, content: string, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("save_doc", { id, content, baseMtimeMs })),
+	patchDocFrontmatter: (id: string, patch: FmPatchDto, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("patch_doc_frontmatter", { id, patch, baseMtimeMs })),
+	createDoc: (input: CreateDocInput) => typedError<DocMeta, AppError>(__TAURI_INVOKE("create_doc", { input })),
+	revealDoc: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_doc", { id })),
+	getThoughtsGitStatus: (projectPath: string) => typedError<ThoughtsRepoStatus, AppError>(__TAURI_INVOKE("get_thoughts_git_status", { projectPath })),
 	getBinariesStatus: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("get_binaries_status")),
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
@@ -23,6 +37,7 @@ export const commands = {
 export const events = {
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
+	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
 };
 
 /* Types */
@@ -41,6 +56,15 @@ export type AppSettings = {
 	onboardingComplete?: boolean,
 	lastProjectPath?: string | null,
 };
+
+/**  Where a document lives within its root's layout. */
+export type Area = 
+/**  `<repos|global>/<…>/<user>/…` — a specific user's documents. */
+{ kind: "user"; name: string } | 
+/**  `<repos|global>/<…>/shared/…`. */
+{ kind: "shared" } | 
+/**  Anything outside the repos/global layout. */
+{ kind: "other" };
 
 /**  Binary statuses were re-probed (override set, redetect requested). */
 export type BinariesChanged = null;
@@ -80,6 +104,85 @@ export type ConfigSummary =
 /**  Config exists but can't be used (parse error, future schema, ...). */
 { state: "error"; path: string; code: string; message: string; remedy: string | null } | { state: "ready"; path: string; user: string; backendKind: string; configured: boolean };
 
+export type CreateDocInput = {
+	/**  Repo path of the project the doc belongs to (None for global scope). */
+	projectRepoPath: string | null,
+	scope: string,
+	docType: string,
+	title: string,
+	/**  Today's date from the user's locale, YYYY-MM-DD. */
+	date: string,
+	ticket: string | null,
+	tags?: string[],
+};
+
+export type DocContent = {
+	meta: DocMeta,
+	content: string,
+	mtimeMs: number | null,
+};
+
+/**  Everything the UI needs to list and filter a document, sans body. */
+export type DocMeta = {
+	/**  Absolute path string — the canonical unique id. */
+	id: string,
+	/**  Path relative to its root, `/`-separated on every platform. */
+	relPath: string,
+	/**  Mapped repo name when the doc lives under `<repos_dir>/<name>/…`. */
+	project: string | null,
+	area: Area,
+	/**
+	 *  `"user" | "shared" | "global"` derived from the path; for
+	 *  [`Area::Other`] falls back to `fm.scope` or `"shared"`.
+	 */
+	scope: string,
+	/**  Profile that owns the root, `None` for the default backend. */
+	profile: string | null,
+	/**  `"git" | "obsidian"`. */
+	backend: string,
+	fm: Frontmatter,
+	fmWarnings: string[],
+	mtimeMs: number | null,
+	sizeBytes: number | null,
+};
+
+export type FmPatchDto = {
+	set?: FmSetEntry[],
+	remove?: string[],
+};
+
+export type FmSetEntry = {
+	key: string,
+	value: FmValueDto,
+};
+
+export type FmValueDto = { kind: "str"; value: string } | { kind: "list"; values: string[] } | { kind: "null" };
+
+/**
+ *  The 10-field thought schema (hyprlayer-cli/src/backends/schema.rs), all
+ *  optional because the parser must tolerate anything.
+ */
+export type Frontmatter = {
+	title?: string | null,
+	type?: string | null,
+	date?: string | null,
+	status?: string | null,
+	ticket?: string | null,
+	project?: string | null,
+	scope?: string | null,
+	tags?: string[],
+	author?: string | null,
+	related?: string[],
+	/**
+	 *  Unknown keys, preserved for display and round-tripping.
+	 *  Unknown keys in display form: strings as-is, everything else compact
+	 *  JSON, null as "". Read-only context for the UI — the line-surgical
+	 *  patcher preserves the underlying bytes regardless. (Stringified
+	 *  because specta forbids serde_json::Value's i64 arm in IPC types.)
+	 */
+	extra?: { [key in string]: string },
+};
+
 export type HealthCheck = {
 	id: string,
 	label: string,
@@ -107,6 +210,12 @@ export type ProjectDetail = {
 	thoughtsRoot: string | null,
 };
 
+export type QueryResult = {
+	/**  Matches before limit/offset. */
+	total: number,
+	items: DocMeta[],
+};
+
 /**
  *  One field of the 10-field thought metadata schema
  *  (`hyprlayer-cli/src/backends/schema.rs`).
@@ -117,6 +226,10 @@ export type SchemaFieldInfo = {
 	options?: string[] | null,
 	required: boolean,
 };
+
+export type SortKey = 
+/**  Text-match score; without `text` this falls through to `Date`. */
+"relevance" | "date" | "mtime" | "title";
 
 /**  Payload of `hyprlayer storage info --json`. */
 export type StorageInfo = {
@@ -149,6 +262,46 @@ export type StorageSettings = {
 
 export type SyncReport = {
 	output: string,
+};
+
+/**  How multiple `tags` filters combine. */
+export type TagMode = "and" | "or";
+
+/**  A library query: filters AND across fields, OR within a field. */
+export type ThoughtQuery = {
+	text?: string | null,
+	types?: string[],
+	statuses?: string[],
+	projects?: string[],
+	scopes?: string[],
+	authors?: string[],
+	tags?: string[],
+	tagMode?: TagMode,
+	/**  Inclusive lexicographic bounds against `fm.date` (ISO dates sort). */
+	dateFrom?: string | null,
+	dateTo?: string | null,
+	sort?: SortKey,
+	limit?: number | null,
+	offset?: number | null,
+};
+
+/**
+ *  The thoughts index changed: docs were (re)indexed, removed, or the whole
+ *  tree was rescanned. `ids` are absolute-path doc ids (empty on rescans).
+ *  Open editors use this to detect external changes to their document.
+ */
+export type ThoughtsIndexUpdated = {
+	kind: string,
+	ids: string[],
+};
+
+export type ThoughtsRepoStatus = {
+	branch: string | null,
+	/**  Working-tree entries that differ from HEAD (staged + unstaged + untracked). */
+	dirty: number,
+	ahead: number,
+	behind: number,
+	hasRemote: boolean,
 };
 
 /* Tauri Specta runtime */

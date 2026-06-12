@@ -13,11 +13,17 @@
     "windows": [
       {
         "label": "main",
-        "title": "Hyprlayer",
+        "title": "Workspace",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
-        "minHeight": 620
+        "minHeight": 620,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 28
+        }
       }
     ],
     "security": {
