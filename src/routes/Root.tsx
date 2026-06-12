@@ -203,6 +203,13 @@ export function Root() {
     itemsByProject.set(view.item.projectPath, group);
   }
   const activeWorkstreamId = currentProjectPath ? locationSearch.item : undefined;
+  const activeWorkstream = activeWorkstreamId
+    ? (allWorkstreams.data ?? []).find((view) => view.item.id === activeWorkstreamId)
+    : undefined;
+  // Breadcrumb: prefer the selected workstream's name over the generic
+  // section label on project routes.
+  const crumb =
+    currentSection === "Agent" ? (activeWorkstream?.item.title ?? "Workstreams") : currentSection;
 
   // Right-click menu + archive flow for the worktree rows.
   const navigate = useNavigate();
@@ -304,7 +311,7 @@ export function Root() {
                 <span className="text-ink-dim">
                   <ChevronRightIcon />
                 </span>
-                <span className="truncate text-ink-dim">{currentSection}</span>
+                <span className="truncate text-ink-dim">{crumb}</span>
               </>
             ) : (
               <span className="truncate font-medium text-ink">{currentSection}</span>

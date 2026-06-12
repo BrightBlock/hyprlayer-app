@@ -210,6 +210,24 @@ export function ProjectPage() {
     };
   }, [shellMenu]);
 
+  // Hooks live above the early returns. Selection resolves to the URL's
+  // ?item= when valid, else the first active workstream.
+  const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
+  const activeView = views.find((view) => view.item.id === activeItemId) ?? views[0] ?? null;
+  const wsId = activeView?.item.id ?? null;
+
+  // When selection fell back (no/stale ?item=), write the resolved id into
+  // the URL so the sidebar highlight and header breadcrumb stay truthful.
+  useEffect(() => {
+    if (wsId && search.item !== wsId) {
+      void navigate({
+        search: (prev) => ({ ...prev, item: wsId }),
+        replace: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsId, search.item]);
+
   if (detail.isLoading || workstreams.isLoading) {
     return (
       <div className="flex justify-center p-12">
@@ -233,9 +251,6 @@ export function ProjectPage() {
   }
 
   const project = detail.data!.project;
-  const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
-  const activeView = views.find((view) => view.item.id === activeItemId) ?? views[0] ?? null;
-  const wsId = activeView?.item.id ?? null;
 
   // The active workstream's own tabs (1 workstream -> N shells).
   const shells = wsId ? (shellsByWs[wsId] ?? defaultShells()) : [];
@@ -438,9 +453,6 @@ export function ProjectPage() {
                 </div>
                 {activeView && (
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-medium text-ink">
-                      {activeView.item.title}
-                    </span>
                     <WorkstreamChips projectPath={projectPath} view={activeView} />
                     <span
                       className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${MODE_STYLES[wsStage].badge}`}
