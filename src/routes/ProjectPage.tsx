@@ -425,21 +425,6 @@ export function ProjectPage() {
             <div className="border-b border-edge bg-panel px-5">
               <div className="flex min-w-0 items-center justify-between gap-4">
                 <div className="flex min-w-0 gap-1 overflow-x-auto py-2">
-                  {activeView && (
-                    <button
-                      type="button"
-                      onClick={selectDocsTab}
-                      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
-                        docsActive
-                          ? "bg-panel-2 text-ink"
-                          : "text-ink-dim hover:bg-panel-2 hover:text-ink"
-                      }`}
-                      title="Project documents"
-                      aria-label="Project documents"
-                    >
-                      <BookIcon />
-                    </button>
-                  )}
                   {activeView &&
                     shells.map((shell) => (
                       <div
@@ -502,6 +487,19 @@ export function ProjectPage() {
                       {STAGES.find((s) => s.key === wsStage)!.label}
                     </span>
                     <Badge tone="dim">idle</Badge>
+                    <button
+                      type="button"
+                      onClick={selectDocsTab}
+                      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+                        docsActive
+                          ? "bg-panel-2 text-ink"
+                          : "text-ink-dim hover:bg-panel-2 hover:text-ink"
+                      }`}
+                      title="Project documents"
+                      aria-label="Project documents"
+                    >
+                      <BookIcon />
+                    </button>
                   </div>
                 )}
               </div>
