@@ -1,0 +1,28 @@
+{
+  "version": 4,
+  "thoughts": {
+    "user": "alice",
+    "backend": {
+      "kind": "git",
+      "thoughtsRepo": "~/thoughts",
+      "reposDir": "repos",
+      "globalDir": "global"
+    },
+    "repoMappings": {
+      "/work/repo-a": "repo-a",
+      "/work/repo-b": { "repo": "repo-b", "profile": "personal" },
+      "/work/repo-c": { "repo": "repo-c", "profile": "deleted-profile" }
+    },
+    "profiles": {
+      "personal": {
+        "backend": {
+          "kind": "obsidian",
+          "vaultPath": "~/Obsidian/Vault",
+          "vaultSubpath": "hyprlayer",
+          "reposDir": "repos",
+          "globalDir": "global"
+        }
+      }
+    }
+  }
+}
