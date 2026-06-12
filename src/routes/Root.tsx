@@ -1,8 +1,9 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
 
-import { useBootstrap } from "../lib/queries";
+import { useAllWorkItems, useBootstrap } from "../lib/queries";
 import { Spinner } from "../components/ui";
+import type { WorkItemView } from "../lib/bindings";
 
 const PROJECT_SIDEBAR_COLLAPSED = 56;
 const PROJECT_SIDEBAR_MIN = 180;
@@ -37,6 +38,14 @@ function BookOpenIcon() {
         strokeWidth="1.8"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function SidebarPlusIcon() {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -131,9 +140,23 @@ function routeSection(pathname: string): string {
 const topIconClass =
   "inline-flex h-8 w-8 items-center justify-center rounded-md border border-edge bg-panel-2 text-ink-dim hover:bg-edge/60 hover:text-ink";
 
+/** Conductor-style status chip for a sidebar work-item row. */
+function WorkItemRowChip({ view }: { view: WorkItemView }) {
+  if (view.git.dirty > 0) {
+    return <span className="shrink-0 text-xs font-medium text-ok">+{view.git.dirty}</span>;
+  }
+  if (view.git.ahead > 0) {
+    return <span className="shrink-0 text-xs font-medium text-accent">↑{view.git.ahead}</span>;
+  }
+  return null;
+}
+
 export function Root() {
   const bootstrap = useBootstrap();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const locationSearch = useRouterState({ select: (s) => s.location.search }) as {
+    item?: string;
+  };
   const [collapsed, setCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
 
@@ -144,6 +167,16 @@ export function Root() {
     ? projects.find((project) => project.path === currentProjectPath)
     : null;
   const currentSection = routeSection(pathname);
+
+  // The sidebar tree: every project's active work items, nested beneath it.
+  const allWorkItems = useAllWorkItems(projects.length > 0);
+  const itemsByProject = new Map<string, WorkItemView[]>();
+  for (const view of allWorkItems.data ?? []) {
+    const group = itemsByProject.get(view.item.projectPath) ?? [];
+    group.push(view);
+    itemsByProject.set(view.item.projectPath, group);
+  }
+  const activeWorkItemId = currentProjectPath ? locationSearch.item : undefined;
   const contentOffset = Math.max(
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
     TOP_CHROME_MIN_CONTENT_OFFSET,
@@ -277,33 +310,84 @@ export function Root() {
                 {configReady ? "No projects mapped yet." : "Setup required."}
               </p>
             )}
-            {projects.map((p) => (
-              <Link
-                key={p.path}
-                to="/projects/$projectPath"
-                params={{ projectPath: p.path }}
-                className={
-                  collapsed
-                    ? "mb-1 flex h-9 w-9 items-center justify-center rounded-md text-sm font-semibold text-ink-dim hover:bg-[#171a20] hover:text-ink data-[status=active]:bg-[#242832] data-[status=active]:text-ink"
-                    : "block rounded-md px-2 py-1.5 text-sm text-ink-dim hover:bg-[#171a20] hover:text-ink data-[status=active]:bg-[#242832] data-[status=active]:text-ink"
-                }
-                title={p.mappedName}
-                aria-label={p.mappedName}
-              >
-                {collapsed ? (
-                  projectInitial(p.mappedName)
-                ) : (
-                  <>
-                    <span className="block truncate">{p.mappedName}</span>
-                    <span className="block truncate text-xs opacity-60">
-                      {p.backendKind}
-                      {p.profile ? ` · ${p.profile}` : ""}
-                      {!p.existsOnDisk ? " · missing" : ""}
-                    </span>
-                  </>
-                )}
-              </Link>
-            ))}
+            {projects.map((p) => {
+              const children = itemsByProject.get(p.path) ?? [];
+              const isCurrent = currentProjectPath === p.path;
+              const projectHighlight = isCurrent && !activeWorkItemId;
+
+              if (collapsed) {
+                return (
+                  <Link
+                    key={p.path}
+                    to="/projects/$projectPath"
+                    params={{ projectPath: p.path }}
+                    className={`mb-1 flex h-9 w-9 items-center justify-center rounded-md text-sm font-semibold hover:bg-[#171a20] hover:text-ink ${
+                      isCurrent ? "bg-[#242832] text-ink" : "text-ink-dim"
+                    }`}
+                    title={p.mappedName}
+                    aria-label={p.mappedName}
+                  >
+                    {projectInitial(p.mappedName)}
+                  </Link>
+                );
+              }
+
+              return (
+                <div key={p.path} className="mb-0.5">
+                  <div
+                    className={`group flex items-center rounded-md pr-1 hover:bg-[#171a20] ${
+                      projectHighlight ? "bg-[#242832]" : ""
+                    }`}
+                  >
+                    <Link
+                      to="/projects/$projectPath"
+                      params={{ projectPath: p.path }}
+                      className={`flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-sm hover:text-ink ${
+                        projectHighlight ? "text-ink" : "text-ink-dim"
+                      }`}
+                      title={`${p.mappedName} · ${p.backendKind}${p.profile ? ` · ${p.profile}` : ""}`}
+                    >
+                      <span className="truncate">{p.mappedName}</span>
+                      {!p.existsOnDisk && (
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"
+                          title="Repository folder is missing on disk"
+                        />
+                      )}
+                    </Link>
+                    <Link
+                      to="/projects/$projectPath"
+                      params={{ projectPath: p.path }}
+                      search={{ create: true }}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim opacity-0 transition-opacity hover:bg-edge/60 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                      title={`New work item in ${p.mappedName}`}
+                      aria-label={`New work item in ${p.mappedName}`}
+                    >
+                      <SidebarPlusIcon />
+                    </Link>
+                  </div>
+
+                  {children.map((view) => {
+                    const isActiveItem = isCurrent && activeWorkItemId === view.item.id;
+                    return (
+                      <Link
+                        key={view.item.id}
+                        to="/projects/$projectPath"
+                        params={{ projectPath: p.path }}
+                        search={{ item: view.item.id }}
+                        className={`flex items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-sm hover:bg-[#171a20] hover:text-ink ${
+                          isActiveItem ? "bg-[#242832] text-ink" : "text-ink-dim"
+                        }`}
+                        title={view.item.title}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{view.item.title}</span>
+                        <WorkItemRowChip view={view} />
+                      </Link>
+                    );
+                  })}
+                </div>
+              );
+            })}
 
             {!collapsed && (
               <p className="px-2 pb-1 pt-4 text-xs font-medium uppercase tracking-wider text-ink-dim">

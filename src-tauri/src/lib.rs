@@ -35,6 +35,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::library::reveal_doc,
             commands::library::get_thoughts_git_status,
             commands::work_items::list_work_items,
+            commands::work_items::list_all_work_items,
             commands::work_items::create_work_item,
             commands::work_items::get_work_item,
             commands::work_items::rename_work_item,

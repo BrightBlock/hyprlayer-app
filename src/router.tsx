@@ -108,10 +108,21 @@ const docRoute = createRoute({
   }),
 });
 
+/** Work-item selection lives in the URL so the sidebar tree can highlight
+ *  and deep-link it; `create` pops the create dialog once, then is stripped. */
+export type ProjectSearch = {
+  item?: string;
+  create?: boolean;
+};
+
 const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectPath",
   component: ProjectPage,
+  validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
+    item: optionalString(search.item),
+    create: search.create === true || search.create === "true" || undefined,
+  }),
 });
 
 const projectDocsRoute = createRoute({

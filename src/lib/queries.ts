@@ -156,8 +156,10 @@ export function useSaveSettings() {
 // item (docs, diff, detail) lives under the ["workItem", id] prefix so a
 // single prefix invalidation refreshes the whole family.
 
-function invalidateWorkItem(projectPath: string, id: string) {
-  void queryClient.invalidateQueries({ queryKey: ["workItems", projectPath] });
+function invalidateWorkItem(_projectPath: string, id: string) {
+  // Whole ["workItems"] prefix: the project's list AND the sidebar's
+  // cross-project tree both refresh.
+  void queryClient.invalidateQueries({ queryKey: ["workItems"] });
   void queryClient.invalidateQueries({ queryKey: ["workItem", id] });
 }
 
@@ -170,11 +172,20 @@ export function useWorkItems(projectPath: string, includeArchived = false) {
   });
 }
 
+/** Active work items across all projects — the sidebar tree. */
+export function useAllWorkItems(enabled = true) {
+  return useQuery({
+    queryKey: ["workItems", "@all"],
+    queryFn: () => unwrap(commands.listAllWorkItems()),
+    enabled,
+  });
+}
+
 export function useCreateWorkItem(projectPath: string) {
   return useMutation({
     mutationFn: (title: string) => unwrap(commands.createWorkItem(projectPath, title)),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["workItems", projectPath] });
+      void queryClient.invalidateQueries({ queryKey: ["workItems"] });
     },
   });
 }

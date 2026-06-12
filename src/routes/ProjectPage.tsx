@@ -1,4 +1,4 @@
-import { useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Badge, Button, Dialog, ErrorNote, TextInput, Spinner } from "../components/ui";
@@ -153,10 +153,34 @@ export function ProjectPage() {
   const renameItem = useRenameWorkItem(projectPath);
   const setStage = useSetWorkItemStage(projectPath);
 
+  const search = useSearch({ from: "/projects/$projectPath" });
+  const navigate = useNavigate({ from: "/projects/$projectPath" });
+
   const storageKey = `hyprlayer:last-work-item:${projectPath}`;
-  const [activeItemId, setActiveItemId] = useState<string | null>(() =>
-    localStorage.getItem(storageKey),
+  // The URL (?item=) is the source of truth — it's what the sidebar tree
+  // highlights and links to; localStorage only seeds the first visit.
+  const [activeItemId, setActiveItemId] = useState<string | null>(
+    () => search.item ?? localStorage.getItem(storageKey),
   );
+
+  useEffect(() => {
+    if (search.item) {
+      setActiveItemId(search.item);
+      localStorage.setItem(storageKey, search.item);
+    }
+  }, [search.item, storageKey]);
+
+  // ?create=true (sidebar "+") pops the dialog once, then leaves the URL.
+  useEffect(() => {
+    if (search.create) {
+      setCreateOpen(true);
+      void navigate({
+        search: (prev) => ({ ...prev, create: undefined }),
+        replace: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.create]);
   // Drafts stay local until sessions land; keyed by work-item id.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
@@ -228,6 +252,11 @@ export function ProjectPage() {
     } else {
       localStorage.setItem(storageKey, id);
     }
+    // Keep the URL in sync so the sidebar highlight follows the tabs.
+    void navigate({
+      search: (prev) => ({ ...prev, item: id ?? undefined }),
+      replace: true,
+    });
   };
   const updateDraft = (value: string) => {
     if (!activeView) return;

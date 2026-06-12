@@ -27,6 +27,8 @@ export const commands = {
 	revealDoc: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_doc", { id })),
 	getThoughtsGitStatus: (projectPath: string) => typedError<ThoughtsRepoStatus, AppError>(__TAURI_INVOKE("get_thoughts_git_status", { projectPath })),
 	listWorkItems: (projectPath: string, includeArchived: boolean) => typedError<WorkItemView[], AppError>(__TAURI_INVOKE("list_work_items", { projectPath, includeArchived })),
+	/**  Active work items across every project — feeds the sidebar tree. */
+	listAllWorkItems: () => typedError<WorkItemView[], AppError>(__TAURI_INVOKE("list_all_work_items")),
 	createWorkItem: (projectPath: string, title: string) => typedError<WorkItemView, AppError>(__TAURI_INVOKE("create_work_item", { projectPath, title })),
 	getWorkItem: (id: string) => typedError<WorkItemView, AppError>(__TAURI_INVOKE("get_work_item", { id })),
 	renameWorkItem: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_work_item", { id, title })),

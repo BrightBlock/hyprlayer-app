@@ -96,6 +96,31 @@ pub async fn list_work_items(
     Ok(views)
 }
 
+/// Active work items across every project — feeds the sidebar tree.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_all_work_items(state: State<'_, AppState>) -> CmdResult<Vec<WorkItemView>> {
+    let db = state.db.clone();
+    let items = tauri::async_runtime::spawn_blocking(move || db.list_active_work_items())
+        .await
+        .map_err(|e| AppError::internal(format!("db task: {e}")))?
+        .map_err(AppError::from)?;
+
+    let views = tauri::async_runtime::spawn_blocking(move || {
+        items
+            .into_iter()
+            .map(|item| {
+                let git =
+                    worktree::status(Path::new(&item.worktree_path), &item.base_branch, None);
+                WorkItemView { item, git }
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| AppError::internal(format!("status task: {e}")))?;
+    Ok(views)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn create_work_item(
