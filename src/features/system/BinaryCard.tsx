@@ -12,7 +12,7 @@ const DESCRIPTIONS: Record<BinaryStatus["kind"], string> = {
   gh: "Optional — used to create and track pull requests.",
 };
 
-export function BinaryCard({ status, showOverride = false }: { status: BinaryStatus; showOverride?: boolean }) {
+export function BinaryCard({ status }: { status: BinaryStatus }) {
   const override = useSetBinaryOverride();
 
   const tone = status.state.state === "ok" ? "ok" : status.optional ? "warn" : "bad";
@@ -50,16 +50,14 @@ export function BinaryCard({ status, showOverride = false }: { status: BinarySta
           </p>
         )}
       </div>
-      {showOverride && (
-        <div className="flex shrink-0 gap-2">
-          <Button onClick={() => void pickBinary()} busy={override.isPending}>
-            Locate…
-          </Button>
-          {status.overridden && (
-            <Button onClick={() => override.mutate({ kind: status.kind, path: null })}>Reset</Button>
-          )}
-        </div>
-      )}
+      <div className="flex shrink-0 gap-2">
+        <Button onClick={() => void pickBinary()} busy={override.isPending}>
+          Locate…
+        </Button>
+        {status.overridden && (
+          <Button onClick={() => override.mutate({ kind: status.kind, path: null })}>Reset</Button>
+        )}
+      </div>
     </div>
   );
 }

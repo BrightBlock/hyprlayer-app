@@ -8,7 +8,6 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	getBootstrap: () => typedError<Bootstrap, AppError>(__TAURI_INVOKE("get_bootstrap")),
-	listProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("list_projects")),
 	getProject: (path: string) => typedError<ProjectDetail, AppError>(__TAURI_INVOKE("get_project", { path })),
 	/**
 	 *  Add a repository as a hyprlayer project. Wraps `hyprlayer thoughts init
@@ -30,7 +29,6 @@ export const commands = {
 	/**  Active workstreams across every project — feeds the sidebar tree. */
 	listAllWorkstreams: () => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_all_workstreams")),
 	createWorkstream: (projectPath: string, title: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title })),
-	getWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("get_workstream", { id })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
 	setWorkstreamStage: (id: string, stage: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
 	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
@@ -49,7 +47,6 @@ export const commands = {
 	reprovisionWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("reprovision_workstream", { id })),
 	/**  Working-tree diff vs HEAD (staged + unstaged), thoughts/ excluded. */
 	worktreeDiff: (id: string) => typedError<FileDiff[], AppError>(__TAURI_INVOKE("worktree_diff", { id })),
-	getBinariesStatus: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("get_binaries_status")),
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
 	getAppSettings: () => typedError<AppSettings, AppError>(__TAURI_INVOKE("get_app_settings")),
@@ -76,8 +73,6 @@ export type AppError = {
 
 export type AppSettings = {
 	binaryOverrides?: Partial<{ [key in BinaryKind]: string }>,
-	onboardingComplete?: boolean,
-	lastProjectPath?: string | null,
 	/**  Where work-item worktrees live; default ~/hyprlayer/worktrees. */
 	worktreeRoot?: string | null,
 };

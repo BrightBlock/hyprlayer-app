@@ -155,18 +155,7 @@ impl WorktreeManager {
     ) -> Result<()> {
         if worktree.exists() {
             if policy == RemovePolicy::Safe {
-                let status = status(worktree, base_branch, None);
-                // Untracked files (outside thoughts/) count too: removal
-                // deletes them just as surely as tracked edits.
-                if status.dirty + status.untracked > 0 {
-                    return Err(CoreError::WorktreeDirty(status.dirty + status.untracked));
-                }
-                if status.ahead > 0 {
-                    return Err(CoreError::WorktreeUnpushed {
-                        branch: branch.to_string(),
-                        count: status.ahead,
-                    });
-                }
+                ensure_removable(worktree, base_branch, branch)?;
             }
             // Always --force the porcelain removal: the Safe gate above is
             // the real protection, and leftover app infrastructure (the
@@ -204,6 +193,25 @@ impl WorktreeManager {
             .await?;
         Ok(())
     }
+}
+
+/// The Safe-removal gate: errors when removing the worktree would destroy
+/// work. Public so callers that must act between the gate and the removal
+/// (e.g. `thoughts uninit`) share the one definition of destroyable work.
+pub fn ensure_removable(worktree: &Path, base_branch: &str, branch: &str) -> Result<()> {
+    let status = status(worktree, base_branch, None);
+    // Untracked files (outside thoughts/) count too: removal deletes them
+    // just as surely as tracked edits.
+    if status.dirty + status.untracked > 0 {
+        return Err(CoreError::WorktreeDirty(status.dirty + status.untracked));
+    }
+    if status.ahead > 0 {
+        return Err(CoreError::WorktreeUnpushed {
+            branch: branch.to_string(),
+            count: status.ahead,
+        });
+    }
+    Ok(())
 }
 
 fn git_in(git: &Path, repo: &Path, args: &[&str]) -> Exec {
@@ -270,21 +278,15 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     if !worktree.exists() {
         return missing;
     }
-    let Ok(repo) = git2::Repository::open(worktree) else {
+    let Ok(repo) = crate::gitops::open_repo(worktree) else {
         return missing;
     };
 
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(false)
-        .exclude_submodules(true);
     let (mut dirty, mut untracked) = (0u32, 0u32);
-    if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+    if let Ok(statuses) = repo.statuses(Some(&mut crate::gitops::status_options())) {
         for entry in statuses.iter() {
             let path = entry.path().unwrap_or_default();
-            // The thoughts links (and anything under them) are app
-            // infrastructure, never part of the change set.
-            if path == "thoughts" || path.starts_with("thoughts/") {
+            if super::is_thoughts_path(path) {
                 continue;
             }
             if entry.status().intersects(git2::Status::WT_NEW) {
@@ -299,15 +301,10 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     let branch = head.as_ref().and_then(|h| h.shorthand()).map(String::from);
 
     let (ahead, behind) = (|| -> Option<(u32, u32)> {
-        let local = head.as_ref()?.target()?;
+        let head_ref = head.as_ref()?;
+        let local = head_ref.target()?;
         // Prefer the upstream once it exists; fall back to the base branch.
-        let upstream_oid = head
-            .as_ref()
-            .and_then(|h| h.shorthand())
-            .and_then(|name| repo.find_branch(name, git2::BranchType::Local).ok())
-            .and_then(|b| b.upstream().ok())
-            .and_then(|u| u.get().target());
-        let target = match upstream_oid {
+        let target = match crate::gitops::upstream_oid(&repo, head_ref) {
             Some(oid) => oid,
             None => repo
                 .revparse_single(base_branch)

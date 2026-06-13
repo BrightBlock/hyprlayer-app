@@ -1,3 +1,4 @@
+import { DocIcon, ModeIcon, XIcon } from "../../components/icons";
 import type { AttachedDoc } from "../../routes/ProjectPage";
 
 /** "2026-06-12-AUTH-1-auth-research.md" -> "AUTH-1-auth-research" */
@@ -8,28 +9,10 @@ export function chipLabel(docPath: string): string {
 }
 
 function RoleIcon({ role }: { role: string }) {
-  if (role === "research") {
-    return (
-      <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none">
-        <circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" strokeWidth="2" />
-        <path d="m15 15 4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-    );
+  if (role === "research" || role === "plan") {
+    return <ModeIcon mode={role} size={12} strokeWidth={2} />;
   }
-  if (role === "plan") {
-    return (
-      <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none">
-        <path d="M7 7h11M7 12h11M7 17h11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        <path d="m3.5 7 .8.8L6 6M3.5 12l.8.8L6 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  return (
-    <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none">
-      <path d="M6 3h8l4 4v14H6V3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M14 3v4h4" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-    </svg>
-  );
+  return <DocIcon />;
 }
 
 type Props = {
@@ -73,9 +56,7 @@ export function WorkstreamDocChips({ docs, onOpenDoc, onDetach, onBrowse }: Prop
             title="Detach from this tab"
             aria-label={`Detach ${chipLabel(doc.path)}`}
           >
-            <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none">
-              <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-            </svg>
+            <XIcon size={10} strokeWidth={2.4} />
           </button>
         </span>
       ))}

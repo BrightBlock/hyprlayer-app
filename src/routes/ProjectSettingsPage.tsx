@@ -1,7 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 
 import { useBackendHealth, useProjectDetail, useSyncThoughts } from "../lib/queries";
-import { Badge, Button, Card, CardTitle, ErrorNote, Spinner } from "../components/ui";
+import { Badge, Button, Card, CardTitle, ErrorNote, PageError, PageSpinner, Spinner } from "../components/ui";
 import type { CheckStatus, HealthCheck } from "../lib/bindings";
 
 const CHECK_TONE: Record<CheckStatus, "ok" | "warn" | "bad"> = {
@@ -35,20 +35,8 @@ export function ProjectSettingsPage() {
   const health = useBackendHealth(projectPath);
   const sync = useSyncThoughts(projectPath);
 
-  if (detail.isLoading) {
-    return (
-      <div className="flex justify-center p-12">
-        <Spinner />
-      </div>
-    );
-  }
-  if (detail.isError) {
-    return (
-      <div className="p-8">
-        <ErrorNote error={detail.error} />
-      </div>
-    );
-  }
+  if (detail.isLoading) return <PageSpinner />;
+  if (detail.isError) return <PageError error={detail.error} />;
 
   const d = detail.data!;
   const settings = d.storage.settings ?? {};

@@ -1,14 +1,26 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
-import { Badge, Button, Dialog, ErrorNote, TextInput, Spinner } from "../components/ui";
+import {
+  Badge,
+  Button,
+  ContextMenu,
+  ContextMenuItem,
+  Dialog,
+  IconButton,
+  PageError,
+  PageSpinner,
+  TextInput,
+} from "../components/ui";
+import { BookIcon, ModeIcon, PlusIcon, XIcon } from "../components/icons";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { DiffSidebar } from "../features/workstreams/DiffSidebar";
 import { WorkstreamChips } from "../features/workstreams/WorkstreamChips";
 import { WorkstreamDocChips } from "../features/workstreams/WorkstreamDocChips";
 import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
 import type { WorkstreamView } from "../lib/bindings";
-import { useProjectDetail, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
+import { useBootstrap, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
+import { startEdgeDrag } from "../lib/resize";
 
 const DIFF_SIDEBAR_COLLAPSED = 56;
 const DIFF_SIDEBAR_MIN = 280;
@@ -49,9 +61,20 @@ type ShellTab = {
   docs: AttachedDoc[];
 };
 
-const defaultShells = (): ShellTab[] => [
-  { id: 1, title: "Agent", mode: "general", draft: "", docs: [] },
-];
+/** One workstream's whole tab strip, updated atomically: its shells, the
+ *  selected shell (which survives opening the Docs view — it's the attach
+ *  target), and whether the Docs view is showing. */
+type WsTabState = {
+  shells: ShellTab[];
+  activeId: number;
+  docsOpen: boolean;
+};
+
+const defaultTabState = (): WsTabState => ({
+  shells: [{ id: 1, title: "Agent", mode: "general", draft: "", docs: [] }],
+  activeId: 1,
+  docsOpen: false,
+});
 
 type ShellMenu = {
   shellId: number;
@@ -99,86 +122,9 @@ const MODE_STYLES: Record<
   },
 };
 
-function BookIcon() {
-  return (
-    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path d="M8 7h6M8 11h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function XIcon() {
-  return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ModeIcon({ mode }: { mode: (typeof STAGES)[number]["key"] }) {
-  switch (mode) {
-    case "research":
-      return (
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" strokeWidth="1.8" />
-          <path d="m15 15 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
-      );
-    case "plan":
-      return (
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="M7 7h11M7 12h11M7 17h11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          <path d="m3.5 7 .8.8L6 6M3.5 12l.8.8L6 11M3.5 17l.8.8L6 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "implement":
-      return (
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="m9 8-4 4 4 4M15 8l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "validate":
-      return (
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="m5 12 4 4 10-10" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "ship":
-      return (
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="M12 3 7 13l5-2 5 2-5-10Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-          <path d="M8 17h8M10 21h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
-      );
-    case "general":
-      return (
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v6A2.5 2.5 0 0 1 16.5 15H11l-4 4v-4A2.5 2.5 0 0 1 5 12.5v-6Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-        </svg>
-      );
-  }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 export function ProjectPage() {
   const { projectPath } = useParams({ from: "/projects/$projectPath" });
-  const detail = useProjectDetail(projectPath);
+  const bootstrap = useBootstrap();
   const workstreams = useWorkstreams(projectPath);
   const setStage = useSetWorkstreamStage(projectPath);
 
@@ -191,6 +137,16 @@ export function ProjectPage() {
   // an infinite navigate loop when switching between two workstreams.)
   const activeItemId = search.item ?? localStorage.getItem(storageKey);
 
+  // Shell tabs are PER WORKSTREAM (1 workstream -> N tabs), keyed by
+  // workstream id so switching workstreams never mixes tabs.
+  const [tabsByWs, setTabsByWs] = useState<Record<string, WsTabState>>({});
+  const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [renameShellId, setRenameShellId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [diffCollapsed, setDiffCollapsed] = useState(false);
+  const [diffWidth, setDiffWidth] = useState(360);
+
   // ?create=true (sidebar "+") pops the dialog once, then leaves the URL.
   useEffect(() => {
     if (search.create) {
@@ -202,33 +158,6 @@ export function ProjectPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.create]);
-  // Shell tabs are PER WORKSTREAM (1 workstream -> N tabs), keyed by
-  // workstream id so switching workstreams never mixes tabs. Shell selection
-  // survives opening the Docs view, so attaching docs targets the tab the
-  // user came from.
-  const [shellsByWs, setShellsByWs] = useState<Record<string, ShellTab[]>>({});
-  const [activeShellIdByWs, setActiveShellIdByWs] = useState<Record<string, number>>({});
-  const [docsOpenByWs, setDocsOpenByWs] = useState<Record<string, boolean>>({});
-  const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [renameShellId, setRenameShellId] = useState<number | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [diffCollapsed, setDiffCollapsed] = useState(false);
-  const [diffWidth, setDiffWidth] = useState(360);
-
-  useEffect(() => {
-    if (!shellMenu) return;
-    const close = () => setShellMenu(null);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [shellMenu]);
 
   // Hooks live above the early returns. Selection resolves to the URL's
   // ?item= when it names a live workstream, else last-used, else the first.
@@ -258,39 +187,32 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId, search.item, storageKey, workstreams.isSuccess, workstreams.isFetching]);
 
-  if (detail.isLoading || workstreams.isLoading) {
+  if (bootstrap.isLoading || workstreams.isLoading) return <PageSpinner />;
+  if (bootstrap.isError) return <PageError error={bootstrap.error} />;
+  if (workstreams.isError) return <PageError error={workstreams.error} />;
+
+  // The bootstrap cache already names every project — no per-page
+  // `storage info` subprocess needed just for the mapped name.
+  const project = bootstrap.data!.projects.find((p) => p.path === projectPath);
+  if (!project) {
     return (
-      <div className="flex justify-center p-12">
-        <Spinner />
-      </div>
-    );
-  }
-  if (detail.isError) {
-    return (
-      <div className="p-8">
-        <ErrorNote error={detail.error} />
-      </div>
-    );
-  }
-  if (workstreams.isError) {
-    return (
-      <div className="p-8">
-        <ErrorNote error={workstreams.error} />
-      </div>
+      <PageError
+        error={{
+          code: "project_not_found",
+          message: `No hyprlayer project is mapped at ${projectPath}`,
+          remedy: "Add the repository as a project first.",
+        }}
+      />
     );
   }
 
-  const project = detail.data!.project;
-
-  // The active workstream's own tabs (1 workstream -> N shells). The active
-  // shell stays resolved even while the Docs view is open — it's the
-  // attach target.
-  const shells = wsId ? (shellsByWs[wsId] ?? defaultShells()) : [];
-  const docsActive = wsId ? (docsOpenByWs[wsId] ?? false) : false;
-  const activeShell =
-    shells.find((s) => s.id === (wsId ? activeShellIdByWs[wsId] : undefined)) ??
-    shells[0] ??
-    null;
+  // The active workstream's own tab strip (1 workstream -> N shells).
+  const tabs = wsId ? (tabsByWs[wsId] ?? defaultTabState()) : null;
+  const shells = tabs?.shells ?? [];
+  const docsActive = tabs?.docsOpen ?? false;
+  const activeShell = tabs
+    ? (tabs.shells.find((s) => s.id === tabs.activeId) ?? tabs.shells[0] ?? null)
+    : null;
   const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
   const shellBeingRenamed = renameShellId
     ? shells.find((s) => s.id === renameShellId)
@@ -302,55 +224,48 @@ export function ProjectPage() {
   const modeStyle = MODE_STYLES[mode];
   const draft = activeShell?.draft ?? "";
 
-  const updateShells = (updater: (current: ShellTab[]) => ShellTab[]) => {
+  const updateTabs = (updater: (current: WsTabState) => WsTabState) => {
     if (!wsId) return;
-    setShellsByWs((all) => ({ ...all, [wsId]: updater(all[wsId] ?? defaultShells()) }));
+    setTabsByWs((all) => ({ ...all, [wsId]: updater(all[wsId] ?? defaultTabState()) }));
   };
   const patchShell = (
     shellId: number,
     patch: Partial<Pick<ShellTab, "title" | "mode" | "draft" | "docs">>,
   ) => {
-    updateShells((current) =>
-      current.map((s) => (s.id === shellId ? { ...s, ...patch } : s)),
-    );
+    updateTabs((current) => ({
+      ...current,
+      shells: current.shells.map((s) => (s.id === shellId ? { ...s, ...patch } : s)),
+    }));
   };
   const selectShell = (shellId: number) => {
-    if (!wsId) return;
-    setActiveShellIdByWs((all) => ({ ...all, [wsId]: shellId }));
-    setDocsOpenByWs((all) => ({ ...all, [wsId]: false }));
+    updateTabs((current) => ({ ...current, activeId: shellId, docsOpen: false }));
   };
   const selectDocsTab = () => {
-    if (!wsId) return;
-    setDocsOpenByWs((all) => ({ ...all, [wsId]: true }));
+    updateTabs((current) => ({ ...current, docsOpen: true }));
   };
   const addShell = () => {
-    if (!wsId) return;
-    setShellsByWs((all) => {
-      const current = all[wsId] ?? defaultShells();
-      const nextId = Math.max(0, ...current.map((s) => s.id)) + 1;
-      setActiveShellIdByWs((sel) => ({ ...sel, [wsId]: nextId }));
-      setDocsOpenByWs((open) => ({ ...open, [wsId]: false }));
+    updateTabs((current) => {
+      const nextId = Math.max(0, ...current.shells.map((s) => s.id)) + 1;
       return {
-        ...all,
-        [wsId]: [
-          ...current,
+        shells: [
+          ...current.shells,
           { id: nextId, title: `Agent ${nextId}`, mode: "general", draft: "", docs: [] },
         ],
+        activeId: nextId,
+        docsOpen: false,
       };
     });
   };
   const closeShell = (shellId: number) => {
-    if (!wsId) return;
-    setShellsByWs((all) => {
-      const current = all[wsId] ?? defaultShells();
-      if (current.length === 1) return all;
-      const index = current.findIndex((s) => s.id === shellId);
-      const next = current.filter((s) => s.id !== shellId);
-      if ((activeShellIdByWs[wsId] ?? current[0]?.id) === shellId) {
-        const fallback = next[Math.max(0, index - 1)] ?? next[0];
-        setActiveShellIdByWs((sel) => ({ ...sel, [wsId]: fallback.id }));
-      }
-      return { ...all, [wsId]: next };
+    updateTabs((current) => {
+      if (current.shells.length === 1) return current;
+      const index = current.shells.findIndex((s) => s.id === shellId);
+      const remaining = current.shells.filter((s) => s.id !== shellId);
+      const activeId =
+        current.activeId === shellId
+          ? (remaining[Math.max(0, index - 1)] ?? remaining[0]).id
+          : current.activeId;
+      return { ...current, shells: remaining, activeId };
     });
   };
   const openDoc = (id: string) => {
@@ -369,15 +284,11 @@ export function ProjectPage() {
     patchShell(activeShell.id, { docs: activeShell.docs.filter((d) => d.path !== path) });
   };
 
-  const selectItem = (id: string | null) => {
-    if (id === null) {
-      localStorage.removeItem(storageKey);
-    } else {
-      localStorage.setItem(storageKey, id);
-    }
-    // The URL is the single source of truth; rendering derives from it.
+  // The URL is the single source of truth; the canonicalize effect persists
+  // the last-used id once the selection settles.
+  const selectItem = (id: string) => {
     void navigate({
-      search: (prev) => ({ ...prev, item: id ?? undefined }),
+      search: (prev) => ({ ...prev, item: id }),
       replace: true,
     });
   };
@@ -421,34 +332,13 @@ export function ProjectPage() {
   };
   const startDiffResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (diffCollapsed) return;
-
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = diffWidth;
-    const previousCursor = document.body.style.cursor;
-    const previousSelect = document.body.style.userSelect;
-
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      setDiffWidth(
-        clamp(
-          startWidth - (moveEvent.clientX - startX),
-          DIFF_SIDEBAR_MIN,
-          DIFF_SIDEBAR_MAX,
-        ),
-      );
-    };
-    const onPointerUp = () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousSelect;
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    };
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp, { once: true });
+    startEdgeDrag(event, {
+      startWidth: diffWidth,
+      min: DIFF_SIDEBAR_MIN,
+      max: DIFF_SIDEBAR_MAX,
+      direction: -1,
+      onResize: setDiffWidth,
+    });
   };
 
   return (
@@ -501,81 +391,60 @@ export function ProjectPage() {
                       </div>
                     ))}
                   {activeView && (
-                    <button
-                      type="button"
-                      onClick={addShell}
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
-                      title="New tab"
-                      aria-label="New tab"
-                    >
+                    <IconButton onClick={addShell} title="New tab" aria-label="New tab">
                       <PlusIcon />
-                    </button>
+                    </IconButton>
                   )}
                 </div>
                 {activeView && (
                   <div className="flex min-w-0 items-center gap-2">
-                    <WorkstreamChips projectPath={projectPath} view={activeView} />
+                    <WorkstreamChips view={activeView} />
                     <span
                       className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${MODE_STYLES[wsStage].badge}`}
                     >
                       {STAGES.find((s) => s.key === wsStage)!.label}
                     </span>
                     <Badge tone="dim">idle</Badge>
-                    <button
-                      type="button"
+                    <IconButton
                       onClick={selectDocsTab}
-                      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
-                        docsActive
-                          ? "bg-panel-2 text-ink"
-                          : "text-ink-dim hover:bg-panel-2 hover:text-ink"
-                      }`}
+                      active={docsActive}
                       title="Project documents"
                       aria-label="Project documents"
                     >
                       <BookIcon />
-                    </button>
+                    </IconButton>
                   </div>
                 )}
               </div>
             </div>
             {shellMenu && contextShell && (
-              <div
-                className="fixed z-50 min-w-44 rounded-md border border-edge bg-panel p-1 shadow-2xl"
-                style={{ left: shellMenu.x, top: shellMenu.y }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  type="button"
+              <ContextMenu position={shellMenu} onClose={() => setShellMenu(null)}>
+                <ContextMenuItem
                   onClick={() => {
                     openRenameShell(contextShell);
                     setShellMenu(null);
                   }}
-                  className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink"
                 >
                   Rename tab
-                </button>
-                <button
-                  type="button"
+                </ContextMenuItem>
+                <ContextMenuItem
                   onClick={() => {
                     copyShellTranscript(contextShell);
                     setShellMenu(null);
                   }}
-                  className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink"
                 >
                   Copy transcript
-                </button>
-                <button
-                  type="button"
+                </ContextMenuItem>
+                <ContextMenuItem
                   disabled={shells.length === 1}
                   onClick={() => {
                     closeShell(contextShell.id);
                     setShellMenu(null);
                   }}
-                  className="block w-full rounded px-3 py-1.5 text-left text-sm text-ink-dim hover:bg-panel-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Close tab
-                </button>
-              </div>
+                </ContextMenuItem>
+              </ContextMenu>
             )}
             <Dialog open={Boolean(shellBeingRenamed)} onClose={closeRenameShell} title="Rename tab">
               <form

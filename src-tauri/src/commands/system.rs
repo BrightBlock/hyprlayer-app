@@ -11,12 +11,6 @@ use crate::state::AppState;
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_binaries_status(state: State<'_, AppState>) -> CmdResult<Vec<BinaryStatus>> {
-    Ok(state.binaries.status_all().await)
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn set_binary_override(
     app: tauri::AppHandle,
     state: State<'_, AppState>,

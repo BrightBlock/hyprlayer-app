@@ -6,10 +6,12 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { useAllWorkstreams, useBootstrap } from "../lib/queries";
-import { Spinner } from "../components/ui";
+import { startEdgeDrag } from "../lib/resize";
+import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
+import { BookIcon, ChevronRightIcon, PlusIcon } from "../components/icons";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
 import type { WorkstreamView } from "../lib/bindings";
@@ -51,14 +53,6 @@ function BookOpenIcon() {
   );
 }
 
-function SidebarPlusIcon() {
-  return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function GitBranchIcon() {
   return (
     <svg
@@ -83,14 +77,6 @@ function GitBranchIcon() {
   );
 }
 
-function ChevronRightIcon() {
-  return (
-    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="m9 6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 function GitPullRequestIcon() {
   return (
     <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -99,15 +85,6 @@ function GitPullRequestIcon() {
       <path d="M6 8.5V18a3 3 0 0 0 3 3h1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path d="M18 15.5V10a4 4 0 0 0-4-4h-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path d="m14 3-3 3 3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function LibraryIcon() {
-  return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-1.5Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M8 7h6M8 11h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -145,10 +122,6 @@ function SetupIcon() {
 
 function projectInitial(name: string): string {
   return name.trim().slice(0, 1).toUpperCase() || "?";
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
 
 function decodePathSegment(value: string): string {
@@ -239,70 +212,30 @@ export function Root() {
     (pathname.startsWith("/projects/") && pathname.endsWith("/docs"));
   const showBack = canGoBack && onSecondaryView;
 
-  // Right-click menu + archive flow for the worktree rows.
+  // Right-click menu + archive flow for the worktree rows. The view itself
+  // carries its project path, so the targets are just the view.
   const navigate = useNavigate();
   const [itemMenu, setItemMenu] = useState<{
     x: number;
     y: number;
-    projectPath: string;
     view: WorkstreamView;
   } | null>(null);
-  const [archiveTarget, setArchiveTarget] = useState<{
-    projectPath: string;
-    view: WorkstreamView;
-  } | null>(null);
-  const [renameTarget, setRenameTarget] = useState<{
-    projectPath: string;
-    view: WorkstreamView;
-  } | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
+  const [renameTarget, setRenameTarget] = useState<WorkstreamView | null>(null);
 
-  useEffect(() => {
-    if (!itemMenu) return;
-    const close = () => setItemMenu(null);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [itemMenu]);
   const contentOffset = Math.max(
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
     TOP_CHROME_MIN_CONTENT_OFFSET,
   );
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (collapsed) return;
-
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = sidebarWidth;
-    const previousCursor = document.body.style.cursor;
-    const previousSelect = document.body.style.userSelect;
-
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      setSidebarWidth(
-        clamp(
-          startWidth + moveEvent.clientX - startX,
-          PROJECT_SIDEBAR_MIN,
-          PROJECT_SIDEBAR_MAX,
-        ),
-      );
-    };
-    const onPointerUp = () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousSelect;
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    };
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp, { once: true });
+    startEdgeDrag(event, {
+      startWidth: sidebarWidth,
+      min: PROJECT_SIDEBAR_MIN,
+      max: PROJECT_SIDEBAR_MAX,
+      direction: 1,
+      onResize: setSidebarWidth,
+    });
   };
 
   return (
@@ -400,7 +333,7 @@ export function Root() {
           className="flex shrink-0 flex-col border-r border-[#30343b] bg-[#08090b]"
           style={{ width: collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth }}
         >
-          <nav className={`flex-1 overflow-y-auto pt-3 ${collapsed ? "px-2" : "px-2"}`}>
+          <nav className="flex-1 overflow-y-auto px-2 pt-3">
             {!collapsed && (
               <p className="px-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-ink-dim">
                 Projects
@@ -469,7 +402,7 @@ export function Root() {
                       title={`New workstream in ${p.mappedName}`}
                       aria-label={`New workstream in ${p.mappedName}`}
                     >
-                      <SidebarPlusIcon />
+                      <PlusIcon size={14} />
                     </Link>
                   </div>
 
@@ -483,12 +416,7 @@ export function Root() {
                         search={{ item: view.item.id }}
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          setItemMenu({
-                            x: e.clientX,
-                            y: e.clientY,
-                            projectPath: p.path,
-                            view,
-                          });
+                          setItemMenu({ x: e.clientX, y: e.clientY, view });
                         }}
                         className={`flex items-center gap-2 rounded-md py-1.5 pl-6 pr-2 text-sm hover:bg-[#171a20] hover:text-ink ${
                           isActiveItem ? "bg-[#242832] text-ink" : "text-ink-dim"
@@ -520,7 +448,7 @@ export function Root() {
               title="Library"
               aria-label="Library"
             >
-              {collapsed ? <LibraryIcon /> : "Library"}
+              {collapsed ? <BookIcon size={18} /> : "Library"}
             </Link>
           </nav>
 
@@ -584,67 +512,54 @@ export function Root() {
       </div>
 
       {itemMenu && (
-        <div
-          className="fixed z-50 min-w-44 rounded-md border border-edge bg-panel p-1 shadow-2xl"
-          style={{ left: itemMenu.x, top: itemMenu.y }}
-          role="menu"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className="block w-full rounded px-2 py-1.5 text-left text-sm text-ink hover:bg-panel-2"
+        <ContextMenu position={itemMenu} onClose={() => setItemMenu(null)}>
+          <ContextMenuItem
             onClick={() => {
               void navigate({
                 to: "/projects/$projectPath",
-                params: { projectPath: itemMenu.projectPath },
+                params: { projectPath: itemMenu.view.item.projectPath },
                 search: { item: itemMenu.view.item.id },
               });
               setItemMenu(null);
             }}
           >
             Open
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="block w-full rounded px-2 py-1.5 text-left text-sm text-ink hover:bg-panel-2"
+          </ContextMenuItem>
+          <ContextMenuItem
             onClick={() => {
-              setRenameTarget({ projectPath: itemMenu.projectPath, view: itemMenu.view });
+              setRenameTarget(itemMenu.view);
               setItemMenu(null);
             }}
           >
             Rename workstream…
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="block w-full rounded px-2 py-1.5 text-left text-sm text-bad hover:bg-bad/10"
+          </ContextMenuItem>
+          <ContextMenuItem
+            danger
             onClick={() => {
-              setArchiveTarget({ projectPath: itemMenu.projectPath, view: itemMenu.view });
+              setArchiveTarget(itemMenu.view);
               setItemMenu(null);
             }}
           >
             Archive workstream…
-          </button>
-        </div>
+          </ContextMenuItem>
+        </ContextMenu>
       )}
 
-      <RenameWorkstreamDialog
-        projectPath={renameTarget?.projectPath ?? ""}
-        target={renameTarget?.view ?? null}
-        onClose={() => setRenameTarget(null)}
-      />
+      <RenameWorkstreamDialog target={renameTarget} onClose={() => setRenameTarget(null)} />
 
       <ArchiveWorkstreamDialog
-        projectPath={archiveTarget?.projectPath ?? ""}
-        target={archiveTarget?.view ?? null}
+        target={archiveTarget}
         onClose={() => setArchiveTarget(null)}
         onArchived={(id) => {
           // If the archived item was the one selected, drop back to its project.
-          if (archiveTarget && currentProjectPath === archiveTarget.projectPath && activeWorkstreamId === id) {
+          if (
+            archiveTarget &&
+            currentProjectPath === archiveTarget.item.projectPath &&
+            activeWorkstreamId === id
+          ) {
             void navigate({
               to: "/projects/$projectPath",
-              params: { projectPath: archiveTarget.projectPath },
+              params: { projectPath: archiveTarget.item.projectPath },
               search: {},
             });
           }

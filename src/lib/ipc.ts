@@ -22,12 +22,18 @@ export function isAppError(e: unknown): e is AppError {
 
 /** Human-readable message for anything a command can throw. */
 export function errorMessage(e: unknown): string {
-  if (isAppError(e)) return e.message;
   if (e instanceof Error) return e.message;
+  if (typeof e === "object" && e !== null && "message" in e) {
+    return String((e as { message: unknown }).message);
+  }
   return String(e);
 }
 
 /** Suggested fix, when the backend supplied one. */
 export function errorRemedy(e: unknown): string | null {
-  return isAppError(e) ? (e.remedy ?? null) : null;
+  if (typeof e === "object" && e !== null && "remedy" in e) {
+    const remedy = (e as { remedy: unknown }).remedy;
+    return remedy ? String(remedy) : null;
+  }
+  return null;
 }

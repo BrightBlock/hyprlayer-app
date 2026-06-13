@@ -22,19 +22,37 @@ pub struct ThoughtsRepoStatus {
     pub has_remote: bool,
 }
 
-pub fn thoughts_repo_status(repo_path: &Path) -> Result<ThoughtsRepoStatus> {
-    let repo = git2::Repository::open(repo_path).map_err(|e| CoreError::OutputParse {
+/// Open a repository, mapping the failure to a typed error.
+pub(crate) fn open_repo(path: &Path) -> Result<git2::Repository> {
+    git2::Repository::open(path).map_err(|e| CoreError::OutputParse {
         program: "git2 open".into(),
-        detail: format!("{}: {}", repo_path.display(), e.message()),
-    })?;
+        detail: format!("{}: {}", path.display(), e.message()),
+    })
+}
 
-    let mut status_opts = git2::StatusOptions::new();
-    status_opts
-        .include_untracked(true)
+/// Status options every status surface uses: untracked files as single
+/// entries, submodules excluded.
+pub(crate) fn status_options() -> git2::StatusOptions {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true)
         .recurse_untracked_dirs(false)
         .exclude_submodules(true);
+    opts
+}
+
+/// OID of HEAD's configured upstream branch, when one exists.
+pub(crate) fn upstream_oid(repo: &git2::Repository, head: &git2::Reference) -> Option<git2::Oid> {
+    head.shorthand()
+        .and_then(|name| repo.find_branch(name, git2::BranchType::Local).ok())
+        .and_then(|b| b.upstream().ok())
+        .and_then(|u| u.get().target())
+}
+
+pub fn thoughts_repo_status(repo_path: &Path) -> Result<ThoughtsRepoStatus> {
+    let repo = open_repo(repo_path)?;
+
     let dirty = repo
-        .statuses(Some(&mut status_opts))
+        .statuses(Some(&mut status_options()))
         .map(|s| s.len() as u32)
         .unwrap_or(0);
 
@@ -47,13 +65,8 @@ pub fn thoughts_repo_status(repo_path: &Path) -> Result<ThoughtsRepoStatus> {
     let (ahead, behind, has_remote) = (|| -> Option<(u32, u32, bool)> {
         let head_ref = head.as_ref()?;
         let local_oid = head_ref.target()?;
-        let branch_name = head_ref.shorthand()?;
-        let local_branch = repo
-            .find_branch(branch_name, git2::BranchType::Local)
-            .ok()?;
-        let upstream = local_branch.upstream().ok()?;
-        let upstream_oid = upstream.get().target()?;
-        let (a, b) = repo.graph_ahead_behind(local_oid, upstream_oid).ok()?;
+        let upstream = upstream_oid(&repo, head_ref)?;
+        let (a, b) = repo.graph_ahead_behind(local_oid, upstream).ok()?;
         Some((a as u32, b as u32, true))
     })()
     .unwrap_or((0, 0, false));
@@ -80,10 +93,7 @@ pub struct FileDiff {
 /// Working-tree diff vs HEAD (staged + unstaged + untracked content), with
 /// the app-managed `thoughts/` tree excluded.
 pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
-    let repo = git2::Repository::open(worktree).map_err(|e| CoreError::OutputParse {
-        program: "git2 open".into(),
-        detail: format!("{}: {}", worktree.display(), e.message()),
-    })?;
+    let repo = open_repo(worktree)?;
 
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let mut opts = git2::DiffOptions::new();
@@ -105,7 +115,7 @@ pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
             .or_else(|| delta.old_file().path())
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
-        if path == "thoughts" || path.starts_with("thoughts/") {
+        if crate::worktree::is_thoughts_path(&path) {
             continue;
         }
         let change = match delta.status() {

@@ -1,51 +1,25 @@
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
-import { Button, ErrorNote, Field, Select, Spinner, TextInput } from "../components/ui";
+import { Button, PageError, PageSpinner } from "../components/ui";
 import { CreateDocDialog } from "../features/library/CreateDocDialog";
-import { DOC_PAGE_SIZE, DocList } from "../features/library/DocList";
-import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES } from "../features/library/constants";
-import type { ThoughtQuery } from "../lib/bindings";
-import { useDocs, useProjectDetail } from "../lib/queries";
+import { DocCountSummary, DocFilterFields, docQueryFromSearch } from "../features/library/DocFilters";
+import { DocList } from "../features/library/DocList";
+import { useBootstrap, useDocs } from "../lib/queries";
 import type { ProjectDocsSearch } from "../router";
-
-function splitParam(value: string | undefined): string[] {
-  return value
-    ? value
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean)
-    : [];
-}
-
-function joinSingle(value: string): string | undefined {
-  return value.length > 0 ? value : undefined;
-}
 
 export function ProjectDocsPage() {
   const { projectPath } = useParams({ from: "/projects/$projectPath/docs" });
   const search = useSearch({ from: "/projects/$projectPath/docs" });
   const navigate = useNavigate({ from: "/projects/$projectPath/docs" });
-  const detail = useProjectDetail(projectPath);
+  const bootstrap = useBootstrap();
   const [createOpen, setCreateOpen] = useState(false);
 
-  const mappedName = detail.data?.project.mappedName;
-  const query: ThoughtQuery = useMemo(
-    () => ({
-      text: search.q ?? null,
-      types: splitParam(search.type),
-      statuses: splitParam(search.status),
-      projects: mappedName ? [mappedName] : [],
-      scopes: splitParam(search.scope),
-      authors: splitParam(search.author),
-      tags: splitParam(search.tag),
-      tagMode: "or",
-      sort: search.q ? "relevance" : "date",
-      limit: DOC_PAGE_SIZE,
-      offset: 0,
-    }),
-    [mappedName, search],
-  );
+  // The bootstrap cache already names every project — no per-page
+  // `storage info` subprocess needed just for the mapped name.
+  const project = bootstrap.data?.projects.find((p) => p.path === projectPath);
+  const mappedName = project?.mappedName;
+  const query = useMemo(() => docQueryFromSearch(search, mappedName), [mappedName, search]);
   const docs = useDocs(query, Boolean(mappedName));
 
   const update = (patch: Partial<ProjectDocsSearch>) =>
@@ -54,23 +28,19 @@ export function ProjectDocsPage() {
       replace: true,
     });
 
-  if (detail.isLoading) {
+  if (bootstrap.isLoading) return <PageSpinner />;
+  if (bootstrap.isError) return <PageError error={bootstrap.error} />;
+  if (!project) {
     return (
-      <div className="flex justify-center p-12">
-        <Spinner />
-      </div>
+      <PageError
+        error={{
+          code: "project_not_found",
+          message: `No hyprlayer project is mapped at ${projectPath}`,
+          remedy: "Add the repository as a project first.",
+        }}
+      />
     );
   }
-
-  if (detail.isError) {
-    return (
-      <div className="p-8">
-        <ErrorNote error={detail.error} />
-      </div>
-    );
-  }
-
-  const project = detail.data!.project;
 
   return (
     <div className="flex h-full min-h-0">
@@ -89,77 +59,7 @@ export function ProjectDocsPage() {
           </Button>
         </div>
 
-        <div className="mt-4 space-y-3">
-          <Field label="Search">
-            <TextInput
-              value={search.q ?? ""}
-              onChange={(e) => update({ q: joinSingle(e.target.value) })}
-              placeholder="Title, tag, or body"
-            />
-          </Field>
-          <Field label="Type">
-            <Select value={search.type ?? ""} onChange={(e) => update({ type: joinSingle(e.target.value) })}>
-              <option value="">All types</option>
-              {DOC_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Status">
-            <Select
-              value={search.status ?? ""}
-              onChange={(e) => update({ status: joinSingle(e.target.value) })}
-            >
-              <option value="">All statuses</option>
-              {DOC_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Scope">
-            <Select value={search.scope ?? ""} onChange={(e) => update({ scope: joinSingle(e.target.value) })}>
-              <option value="">All scopes</option>
-              {DOC_SCOPES.map((scope) => (
-                <option key={scope} value={scope}>
-                  {scope}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Author">
-            <TextInput
-              value={search.author ?? ""}
-              onChange={(e) => update({ author: joinSingle(e.target.value) })}
-              placeholder="Exact author"
-            />
-          </Field>
-          <Field label="Tag">
-            <TextInput
-              value={search.tag ?? ""}
-              onChange={(e) => update({ tag: joinSingle(e.target.value) })}
-              placeholder="Exact tag"
-            />
-          </Field>
-          <Button
-            className="w-full justify-center"
-            onClick={() =>
-              update({
-                q: undefined,
-                type: undefined,
-                status: undefined,
-                scope: undefined,
-                author: undefined,
-                tag: undefined,
-              })
-            }
-          >
-            Clear filters
-          </Button>
-        </div>
+        <DocFilterFields search={search} onUpdate={update} />
       </aside>
 
       <section className="min-w-0 flex-1 overflow-y-auto">
@@ -167,12 +67,7 @@ export function ProjectDocsPage() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-sm font-medium">{project.mappedName}</h2>
-              <p className="text-sm text-ink-dim">
-                {docs.data ? `${docs.data.total} document${docs.data.total === 1 ? "" : "s"}` : "Loading documents"}
-              </p>
-              {docs.data && docs.data.total > DOC_PAGE_SIZE && (
-                <p className="text-xs text-ink-dim">Showing first {DOC_PAGE_SIZE}; narrow the filters to refine.</p>
-              )}
+              <DocCountSummary result={docs.data} />
             </div>
             <Link
               to="/library"

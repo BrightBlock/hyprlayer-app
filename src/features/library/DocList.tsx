@@ -3,12 +3,9 @@ import { Link } from "@tanstack/react-router";
 import { Badge, Card, ErrorNote, Spinner } from "../../components/ui";
 import type { DocMeta, QueryResult } from "../../lib/bindings";
 import { STATUS_TONE } from "./constants";
+import { docTitle } from "./text";
 
 export const DOC_PAGE_SIZE = 50;
-
-function titleFor(meta: DocMeta): string {
-  return meta.fm.title ?? meta.relPath.split("/").pop() ?? meta.relPath;
-}
 
 function subtitleFor(meta: DocMeta): string {
   const parts = [meta.project ?? meta.fm.project, meta.fm.author, meta.fm.date].filter(Boolean);
@@ -24,7 +21,7 @@ export function DocRow({ doc }: { doc: DocMeta }) {
     >
       <div className="flex min-w-0 items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-ink">{titleFor(doc)}</p>
+          <p className="truncate text-sm font-medium text-ink">{docTitle(doc)}</p>
           <p className="selectable mt-0.5 truncate font-mono text-xs text-ink-dim">{doc.relPath}</p>
           <p className="mt-1 truncate text-xs text-ink-dim">{subtitleFor(doc)}</p>
         </div>

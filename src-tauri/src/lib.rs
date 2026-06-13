@@ -22,7 +22,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             commands::projects::get_bootstrap,
-            commands::projects::list_projects,
             commands::projects::get_project,
             commands::projects::add_project,
             commands::projects::sync_thoughts,
@@ -37,7 +36,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::list_workstreams,
             commands::workstreams::list_all_workstreams,
             commands::workstreams::create_workstream,
-            commands::workstreams::get_workstream,
             commands::workstreams::rename_workstream,
             commands::workstreams::set_workstream_stage,
             commands::workstreams::attach_workstream_doc,
@@ -46,7 +44,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::archive_workstream,
             commands::workstreams::reprovision_workstream,
             commands::workstreams::worktree_diff,
-            commands::system::get_binaries_status,
             commands::system::set_binary_override,
             commands::system::redetect_binaries,
             commands::system::get_app_settings,

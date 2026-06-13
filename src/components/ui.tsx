@@ -7,6 +7,8 @@ import type {
   SelectHTMLAttributes,
 } from "react";
 
+import { errorMessage, errorRemedy } from "../lib/ipc";
+
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
@@ -165,15 +167,102 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
 }
 
 export function ErrorNote({ error }: { error: unknown }) {
-  const message = error instanceof Object && "message" in error ? String((error as { message: unknown }).message) : String(error);
-  const remedy =
-    error instanceof Object && "remedy" in error && (error as { remedy: unknown }).remedy
-      ? String((error as { remedy: unknown }).remedy)
-      : null;
+  const remedy = errorRemedy(error);
   return (
     <div className="selectable rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
-      <p className="text-bad">{message}</p>
+      <p className="text-bad">{errorMessage(error)}</p>
       {remedy && <p className="mt-1 text-ink-dim">{remedy}</p>}
     </div>
+  );
+}
+
+/** Standard route-level loading shell. */
+export function PageSpinner() {
+  return (
+    <div className="flex justify-center p-12">
+      <Spinner />
+    </div>
+  );
+}
+
+/** Standard route-level error shell. */
+export function PageError({ error }: { error: unknown }) {
+  return (
+    <div className="p-8">
+      <ErrorNote error={error} />
+    </div>
+  );
+}
+
+type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  /** Highlighted "this panel is open" state. */
+  active?: boolean;
+};
+
+/** Square h-8 icon-only button, the standard chrome control size. */
+export function IconButton({ active, className, ...rest }: IconButtonProps) {
+  return (
+    <button
+      type="button"
+      className={cx(
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        active ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink",
+        className,
+      )}
+      {...rest}
+    />
+  );
+}
+
+type ContextMenuProps = {
+  position: { x: number; y: number };
+  onClose: () => void;
+  children: ReactNode;
+};
+
+/** Fixed-position right-click menu; any window click or Escape closes it. */
+export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("click", onClose);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", onClose);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      role="menu"
+      className="fixed z-50 min-w-44 rounded-md border border-edge bg-panel p-1 shadow-2xl"
+      style={{ left: position.x, top: position.y }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>
+  );
+}
+
+type ContextMenuItemProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  danger?: boolean;
+};
+
+export function ContextMenuItem({ danger, className, ...rest }: ContextMenuItemProps) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={cx(
+        "block w-full rounded px-2.5 py-1.5 text-left text-sm",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        danger ? "text-bad hover:bg-bad/10" : "text-ink hover:bg-panel-2",
+        className,
+      )}
+      {...rest}
+    />
   );
 }

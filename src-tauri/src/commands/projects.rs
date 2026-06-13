@@ -3,11 +3,13 @@ use std::path::Path;
 use hyprlayer_core::config::HyprlayerConfig;
 use hyprlayer_core::hyprcli::{HyprCli, StorageInfo};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryState, BinaryStatus};
+use hyprlayer_core::worktree::thoughts_links;
 use hyprlayer_core::CoreError;
 use serde::Serialize;
 use tauri::State;
 use tauri_specta::Event;
 
+use super::db_task;
 use crate::error::{AppError, CmdResult};
 use crate::settings::AppSettings;
 use crate::state::AppState;
@@ -118,21 +120,20 @@ fn projects_from_config(config: &HyprlayerConfig) -> Vec<Project> {
 
 /// Mapping entries the app itself added for work-item worktrees (ADR-0002
 /// exception #2) are skill-resolution infrastructure, not projects — drop
-/// them from every project listing. Two nets: known worktree paths from the
-/// store, plus anything under the worktree root (catches strays whose work
-/// item is already gone).
+/// them from every project listing. Two nets: worktree paths of every
+/// workstream row (archived rows included, so a mapping whose uninit failed
+/// stays filtered), plus anything under the worktree root (catches strays
+/// with no row at all). A store error degrades to the prefix net, loudly.
 async fn filter_worktree_mappings(state: &AppState, projects: &mut Vec<Project>) {
     let worktree_root = state.worktrees.root().to_path_buf();
-    let db = state.db.clone();
     let known: std::collections::HashSet<String> =
-        tauri::async_runtime::spawn_blocking(move || {
-            db.list_active_workstreams()
-                .map(|items| items.into_iter().map(|i| i.worktree_path).collect())
-        })
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or_default();
+        match db_task(state.db.clone(), |db| db.list_worktree_paths()).await {
+            Ok(paths) => paths.into_iter().collect(),
+            Err(e) => {
+                log::warn!("could not load workstream worktree paths: {}", e.message);
+                Default::default()
+            }
+        };
 
     projects
         .retain(|p| !known.contains(&p.path) && !Path::new(&p.path).starts_with(&worktree_root));
@@ -194,23 +195,12 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> CmdResult<Bootstrap> {
     })
 }
 
-#[tauri::command]
-#[specta::specta]
-pub async fn list_projects(state: State<'_, AppState>) -> CmdResult<Vec<Project>> {
-    let (_, projects) = config_summary(&state).await;
-    Ok(projects)
-}
-
 fn find_project(projects: &[Project], path: &str) -> CmdResult<Project> {
     projects
         .iter()
         .find(|p| p.path == path)
         .cloned()
-        .ok_or_else(|| AppError {
-            code: "project_not_found".into(),
-            message: format!("No hyprlayer project is mapped at {path}"),
-            remedy: Some("Add the repository as a project first.".into()),
-        })
+        .ok_or_else(|| AppError::project_not_found(path))
 }
 
 #[tauri::command]
@@ -332,9 +322,18 @@ pub async fn run_backend_health(
 ) -> CmdResult<HealthReport> {
     let mut checks = Vec::new();
 
-    // 1. Required binaries.
+    // 1. Required binaries — one concurrent probe pass for all four kinds,
+    // not four serialized probes (each can hit its full timeout cold).
+    let statuses = state.binaries.status_all().await;
+    let status_of = |kind: BinaryKind| {
+        statuses
+            .iter()
+            .find(|s| s.kind == kind)
+            .cloned()
+            .expect("status_all covers every binary kind")
+    };
     for kind in [BinaryKind::Hyprlayer, BinaryKind::Git, BinaryKind::Claude] {
-        let status = state.binaries.status(kind).await;
+        let status = status_of(kind);
         let (check_status, detail, remedy) = match &status.state {
             BinaryState::Ok => (
                 CheckStatus::Pass,
@@ -368,7 +367,7 @@ pub async fn run_backend_health(
     }
 
     // gh is optional: warn, never fail.
-    let gh = state.binaries.status(BinaryKind::Gh).await;
+    let gh = status_of(BinaryKind::Gh);
     checks.push(HealthCheck {
         id: "binary.gh".into(),
         label: "GitHub CLI (optional)".into(),
@@ -451,17 +450,10 @@ pub async fn run_backend_health(
                     });
                 }
 
-                // 4. Per-repo thoughts symlinks.
-                let repo_thoughts = Path::new(&path).join("thoughts");
-                let mut expected: Vec<String> = vec!["shared".into(), "global".into()];
-                if !effective.user.is_empty() {
-                    expected.insert(0, effective.user.clone());
-                }
-                let missing: Vec<String> = expected
-                    .iter()
-                    .filter(|name| !repo_thoughts.join(name.as_str()).exists())
-                    .cloned()
-                    .collect();
+                // 4. Per-repo thoughts symlinks — same definition of link
+                // health as the per-workstream status chips.
+                let repo_thoughts = Path::new(&path).join(hyprlayer_core::worktree::THOUGHTS_DIR);
+                let missing = thoughts_links::missing_thoughts_links(Path::new(&path), &effective);
                 checks.push(HealthCheck {
                     id: "thoughts.symlinks".into(),
                     label: "Repository thoughts/ links".into(),

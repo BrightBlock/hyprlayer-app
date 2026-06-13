@@ -16,14 +16,12 @@ export function attachEventListeners(): () => void {
     // detail depends on binaries too — it shells out to `hyprlayer`.
     events.binariesChanged.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-      void queryClient.invalidateQueries({ queryKey: ["binaries"] });
       void queryClient.invalidateQueries({ queryKey: ["health"] });
       void queryClient.invalidateQueries({ queryKey: ["project"] });
     }),
     // The thoughts index changed: docs were (re)indexed, removed, or the tree
-    // was rescanned. Refresh every list, the touched documents (all of them on
-    // a rescan, where ids is empty), and the repo git status (file changes move
-    // the dirty count).
+    // was rescanned. Refresh every list and the touched documents (all of
+    // them on a rescan, where ids is empty).
     events.thoughtsIndexUpdated.listen((event) => {
       void queryClient.invalidateQueries({ queryKey: ["docs"] });
       const { ids } = event.payload;
@@ -34,7 +32,6 @@ export function attachEventListeners(): () => void {
           void queryClient.invalidateQueries({ queryKey: ["doc", id] });
         }
       }
-      void queryClient.invalidateQueries({ queryKey: ["thoughtsGitStatus"] });
     }),
   ];
 

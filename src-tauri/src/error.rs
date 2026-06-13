@@ -29,6 +29,22 @@ impl AppError {
             remedy: None,
         }
     }
+
+    pub fn project_not_found(path: &str) -> Self {
+        Self {
+            code: "project_not_found".into(),
+            message: format!("No hyprlayer project is mapped at {path}"),
+            remedy: Some("Add the repository as a project first.".into()),
+        }
+    }
+
+    pub fn thoughts_not_configured() -> Self {
+        Self {
+            code: "config_missing".into(),
+            message: "Thoughts are not configured yet.".into(),
+            remedy: Some("Add the repository as a project first.".into()),
+        }
+    }
 }
 
 pub type CmdResult<T> = Result<T, AppError>;

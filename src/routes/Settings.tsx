@@ -1,27 +1,15 @@
 import { Link } from "@tanstack/react-router";
 
 import { useBootstrap, useRedetectBinaries } from "../lib/queries";
-import { Button, Card, CardTitle, ErrorNote, Spinner } from "../components/ui";
+import { Button, Card, CardTitle, PageError, PageSpinner } from "../components/ui";
 import { BinaryCard } from "../features/system/BinaryCard";
 
 export function Settings() {
   const bootstrap = useBootstrap();
   const redetect = useRedetectBinaries();
 
-  if (bootstrap.isLoading) {
-    return (
-      <div className="flex justify-center p-12">
-        <Spinner />
-      </div>
-    );
-  }
-  if (bootstrap.isError) {
-    return (
-      <div className="p-8">
-        <ErrorNote error={bootstrap.error} />
-      </div>
-    );
-  }
+  if (bootstrap.isLoading) return <PageSpinner />;
+  if (bootstrap.isError) return <PageError error={bootstrap.error} />;
 
   const data = bootstrap.data!;
 
@@ -42,7 +30,7 @@ export function Settings() {
         </p>
         <div className="mt-3 space-y-2">
           {data.binaries.map((b) => (
-            <BinaryCard key={b.kind} status={b} showOverride />
+            <BinaryCard key={b.kind} status={b} />
           ))}
         </div>
       </Card>

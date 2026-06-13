@@ -4,7 +4,6 @@ import { isAppError } from "../../lib/ipc";
 import { useArchiveWorkstream } from "../../lib/queries";
 
 type Props = {
-  projectPath: string;
   /** The item being archived; null keeps the dialog closed. */
   target: WorkstreamView | null;
   onClose: () => void;
@@ -19,8 +18,8 @@ const BLOCKING_CODES = new Set(["worktree_dirty", "worktree_unpushed"]);
  * refuses because work would be lost, surface its message + remedy and offer
  * the destructive retry (discard=true).
  */
-export function ArchiveWorkstreamDialog({ projectPath, target, onClose, onArchived }: Props) {
-  const archive = useArchiveWorkstream(projectPath);
+export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) {
+  const archive = useArchiveWorkstream();
 
   const blocked = archive.isError && isAppError(archive.error) && BLOCKING_CODES.has(archive.error.code);
 

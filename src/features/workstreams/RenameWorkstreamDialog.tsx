@@ -5,14 +5,13 @@ import { Button, Dialog, ErrorNote, TextInput } from "../../components/ui";
 import { useRenameWorkstream } from "../../lib/queries";
 
 type Props = {
-  projectPath: string;
   /** The workstream being renamed; null keeps the dialog closed. */
   target: WorkstreamView | null;
   onClose: () => void;
 };
 
-export function RenameWorkstreamDialog({ projectPath, target, onClose }: Props) {
-  const rename = useRenameWorkstream(projectPath);
+export function RenameWorkstreamDialog({ target, onClose }: Props) {
+  const rename = useRenameWorkstream();
   const [value, setValue] = useState("");
 
   useEffect(() => {

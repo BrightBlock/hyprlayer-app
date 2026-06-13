@@ -64,7 +64,7 @@ pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Resul
         global_dir
     });
 
-    let thoughts_dir = worktree.join("thoughts");
+    let thoughts_dir = worktree.join(super::THOUGHTS_DIR);
     std::fs::create_dir_all(&thoughts_dir)?;
 
     link_dir(
@@ -77,18 +77,28 @@ pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Resul
     Ok(check_thoughts(worktree, effective))
 }
 
+/// Expected entries under `<repo>/thoughts/` that are missing or dangling.
+/// The single definition of link health — status polling and the backend
+/// health checks both build on it.
+pub fn missing_thoughts_links(repo: &Path, effective: &EffectiveConfig) -> Vec<String> {
+    let thoughts_dir = repo.join(super::THOUGHTS_DIR);
+    let mut expected = vec!["shared".to_string(), "global".to_string()];
+    if !effective.user.is_empty() {
+        expected.insert(0, effective.user.clone());
+    }
+    // exists() follows links, so a dangling symlink reports missing.
+    expected
+        .into_iter()
+        .filter(|name| !thoughts_dir.join(name).exists())
+        .collect()
+}
+
 /// Current health of the links (used by status polling).
 pub fn check_thoughts(worktree: &Path, effective: &EffectiveConfig) -> LinkStatus {
     if !effective.backend.kind().uses_filesystem() {
         return LinkStatus::Unsupported;
     }
-    let thoughts_dir = worktree.join("thoughts");
-    let mut expected = vec!["shared".to_string(), "global".to_string()];
-    if !effective.user.is_empty() {
-        expected.push(effective.user.clone());
-    }
-    // exists() follows links, so a dangling symlink reports Broken.
-    if expected.iter().all(|name| thoughts_dir.join(name).exists()) {
+    if missing_thoughts_links(worktree, effective).is_empty() {
         LinkStatus::Ok
     } else {
         LinkStatus::Broken

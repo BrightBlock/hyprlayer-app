@@ -3,7 +3,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
-import { Badge, Button, ErrorNote, Spinner } from "../components/ui";
+import { Badge, Button, ErrorNote, PageError, PageSpinner } from "../components/ui";
 import { FrontmatterCard } from "../features/library/FrontmatterCard";
 import { FrontmatterForm } from "../features/library/FrontmatterForm";
 import { MarkdownPreview } from "../features/library/MarkdownPreview";
@@ -39,27 +39,14 @@ export function DocPage() {
 
   if (!search.id) {
     return (
-      <div className="p-8">
-        <ErrorNote error={{ code: "doc_missing", message: "No document id was supplied.", remedy: "Open a document from the library." }} />
-      </div>
+      <PageError
+        error={{ code: "doc_missing", message: "No document id was supplied.", remedy: "Open a document from the library." }}
+      />
     );
   }
 
-  if (doc.isLoading) {
-    return (
-      <div className="flex justify-center p-12">
-        <Spinner />
-      </div>
-    );
-  }
-
-  if (doc.isError) {
-    return (
-      <div className="p-8">
-        <ErrorNote error={doc.error} />
-      </div>
-    );
-  }
+  if (doc.isLoading) return <PageSpinner />;
+  if (doc.isError) return <PageError error={doc.error} />;
 
   if (!meta) {
     return null;

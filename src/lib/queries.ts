@@ -2,7 +2,6 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 
 import {
   commands,
-  type AppSettings,
   type BinaryKind,
   type CreateDocInput,
   type FmPatchDto,
@@ -39,7 +38,6 @@ export function useSyncThoughts(path: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["project", path] });
       void queryClient.invalidateQueries({ queryKey: ["health", path] });
-      void queryClient.invalidateQueries({ queryKey: ["thoughtsGitStatus", path] });
       // A sync can rewrite the hyprlayer config (e.g. orphan-mapping cleanup),
       // which the sidebar renders from; don't wait for the watcher poll.
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
@@ -102,13 +100,6 @@ export function useRevealDoc() {
   });
 }
 
-export function useThoughtsGitStatus(projectPath: string) {
-  return useQuery({
-    queryKey: ["thoughtsGitStatus", projectPath],
-    queryFn: () => unwrap(commands.getThoughtsGitStatus(projectPath)),
-  });
-}
-
 export function useAddProject() {
   return useMutation({
     mutationFn: (args: { path: string; directoryName: string | null; bootstrapUser: string | null }) =>
@@ -142,33 +133,22 @@ export function useRedetectBinaries() {
   });
 }
 
-export function useSaveSettings() {
-  return useMutation({
-    mutationFn: (settings: AppSettings) => unwrap(commands.setAppSettings(settings)),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-    },
-  });
-}
-
 /* ------------------------------- Workstreams ------------------------------ */
 // List cache lives at ["workstreams", projectPath]; everything scoped to one
 // item (docs, diff, detail) lives under the ["workstream", id] prefix so a
 // single prefix invalidation refreshes the whole family.
 
-function invalidateWorkstream(_projectPath: string, id: string) {
+function invalidateWorkstream(id: string) {
   // Whole ["workstreams"] prefix: the project's list AND the sidebar's
   // cross-project tree both refresh.
   void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
   void queryClient.invalidateQueries({ queryKey: ["workstream", id] });
 }
 
-export function useWorkstreams(projectPath: string, includeArchived = false) {
+export function useWorkstreams(projectPath: string) {
   return useQuery({
-    // includeArchived is part of the key; prefix invalidation on
-    // ["workstreams", projectPath] still hits both variants.
-    queryKey: ["workstreams", projectPath, { includeArchived }],
-    queryFn: () => unwrap(commands.listWorkstreams(projectPath, includeArchived)),
+    queryKey: ["workstreams", projectPath],
+    queryFn: () => unwrap(commands.listWorkstreams(projectPath, false)),
   });
 }
 
@@ -190,11 +170,11 @@ export function useCreateWorkstream(projectPath: string) {
   });
 }
 
-export function useRenameWorkstream(projectPath: string) {
+export function useRenameWorkstream() {
   return useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
       unwrap(commands.renameWorkstream(id, title)),
-    onSettled: (_data, _error, { id }) => invalidateWorkstream(projectPath, id),
+    onSettled: (_data, _error, { id }) => invalidateWorkstream(id),
   });
 }
 
@@ -222,50 +202,27 @@ export function useSetWorkstreamStage(projectPath: string) {
         queryClient.setQueryData(key, data);
       }
     },
-    onSettled: (_data, _error, { id }) => invalidateWorkstream(projectPath, id),
+    // Only this project's list needs the refetch safety net: a stage change
+    // alters nothing the sidebar tree or the diff family render, so don't
+    // trigger the cross-project git status fan-out for every mode click.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workstreams", projectPath] });
+    },
   });
 }
 
-export function useArchiveWorkstream(projectPath: string) {
+export function useArchiveWorkstream() {
   return useMutation({
     mutationFn: ({ id, discard }: { id: string; discard: boolean }) =>
       unwrap(commands.archiveWorkstream(id, discard)),
-    onSuccess: (_data, { id }) => invalidateWorkstream(projectPath, id),
+    onSuccess: (_data, { id }) => invalidateWorkstream(id),
   });
 }
 
-export function useReprovisionWorkstream(projectPath: string) {
+export function useReprovisionWorkstream() {
   return useMutation({
     mutationFn: (id: string) => unwrap(commands.reprovisionWorkstream(id)),
-    onSettled: (_data, _error, id) => invalidateWorkstream(projectPath, id),
-  });
-}
-
-export function useWorkstreamDocs(id: string) {
-  return useQuery({
-    queryKey: ["workstream", id, "docs"],
-    queryFn: () => unwrap(commands.listWorkstreamDocs(id)),
-    enabled: id.length > 0,
-  });
-}
-
-export function useAttachWorkstreamDoc(id: string) {
-  return useMutation({
-    mutationFn: ({ docPath, role }: { docPath: string; role: string }) =>
-      unwrap(commands.attachWorkstreamDoc(id, docPath, role)),
-    // The command returns the updated doc list — write it through directly.
-    onSuccess: (docs) => {
-      queryClient.setQueryData(["workstream", id, "docs"], docs);
-    },
-  });
-}
-
-export function useDetachWorkstreamDoc(id: string) {
-  return useMutation({
-    mutationFn: (docPath: string) => unwrap(commands.detachWorkstreamDoc(id, docPath)),
-    onSuccess: (docs) => {
-      queryClient.setQueryData(["workstream", id, "docs"], docs);
-    },
+    onSettled: (_data, _error, id) => invalidateWorkstream(id),
   });
 }
 

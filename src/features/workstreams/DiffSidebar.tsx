@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 
 import type { FileDiff } from "../../lib/bindings";
-import { Badge, ErrorNote, Spinner, type BadgeTone } from "../../components/ui";
+import { Badge, ErrorNote, IconButton, Spinner, type BadgeTone } from "../../components/ui";
+import { ChevronRightIcon } from "../../components/icons";
 import { useWorktreeDiff } from "../../lib/queries";
 import { countPatchStats, parsePatchLines, type PatchLineKind } from "./diff";
 
@@ -32,21 +33,6 @@ function RefreshIcon() {
   );
 }
 
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
-    >
-      <path d="m9 6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 const CHANGE_TONES: Record<string, BadgeTone> = {
   added: "ok",
   modified: "accent",
@@ -63,9 +49,12 @@ const LINE_CLASSES: Record<PatchLineKind, string> = {
   context: "text-ink-dim",
 };
 
-function FileDiffSection({ file }: { file: FileDiff }) {
+// Memoized: patch parsing is linear in diff size and the parent re-renders on
+// every pointermove while the sidebar is being resized.
+const FileDiffSection = memo(function FileDiffSection({ file }: { file: FileDiff }) {
   const [open, setOpen] = useState(false);
-  const stats = countPatchStats(file.patch);
+  const stats = useMemo(() => countPatchStats(file.patch), [file.patch]);
+  const lines = useMemo(() => (open ? parsePatchLines(file.patch) : []), [open, file.patch]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-edge bg-panel-2">
@@ -74,7 +63,10 @@ function FileDiffSection({ file }: { file: FileDiff }) {
         onClick={() => setOpen((value) => !value)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-edge/40"
       >
-        <ChevronIcon open={open} />
+        <ChevronRightIcon
+          size={12}
+          className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        />
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink" title={file.path}>
           {file.path}
         </span>
@@ -88,7 +80,7 @@ function FileDiffSection({ file }: { file: FileDiff }) {
       </button>
       {open && (
         <pre className="selectable max-h-96 overflow-auto border-t border-edge p-2 font-mono text-[11px] leading-relaxed">
-          {parsePatchLines(file.patch).map((line, index) => (
+          {lines.map((line, index) => (
             <div key={index} className={`whitespace-pre px-1 ${LINE_CLASSES[line.kind]}`}>
               {line.text || " "}
             </div>
@@ -97,7 +89,7 @@ function FileDiffSection({ file }: { file: FileDiff }) {
       )}
     </div>
   );
-}
+});
 
 type Props = {
   /** Active workstream, or null when there are no workstreams. */
@@ -118,31 +110,27 @@ export function DiffSidebar({ workstreamId, collapsed, onToggleCollapsed }: Prop
     <>
       <div className="flex h-[61px] items-center border-b border-edge px-3">
         <div className={`flex w-full items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
-          <button
-            type="button"
+          <IconButton
             onClick={onToggleCollapsed}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
             title={collapsed ? "Expand diff sidebar" : "Collapse diff sidebar"}
             aria-label={collapsed ? "Expand diff sidebar" : "Collapse diff sidebar"}
           >
             <PanelRightIcon />
-          </button>
+          </IconButton>
           {!collapsed && (
             <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
               <h2 className="text-sm font-semibold">Diff</h2>
               <div className="flex items-center gap-1.5">
                 <Badge tone="dim">{fileCount} {fileCount === 1 ? "file" : "files"}</Badge>
                 {workstreamId !== null && (
-                  <button
-                    type="button"
+                  <IconButton
                     onClick={() => void diff.refetch()}
                     disabled={diff.isFetching}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                     title="Refresh diff"
                     aria-label="Refresh diff"
                   >
                     {diff.isFetching ? <Spinner size={14} /> : <RefreshIcon />}
-                  </button>
+                  </IconButton>
                 )}
               </div>
             </div>

@@ -2,16 +2,13 @@ import { useMemo, useState } from "react";
 
 import { Badge, Button, ErrorNote, Select, Spinner, TextInput } from "../../components/ui";
 import { DOC_TYPES, STATUS_TONE } from "../library/constants";
+import { docTitle } from "../library/text";
 import type { DocMeta, ThoughtQuery } from "../../lib/bindings";
 import { useDocs } from "../../lib/queries";
 
 /** Attachment role derived from the doc's type. */
 export function roleForDoc(doc: DocMeta): string {
   return doc.fm.type === "research" || doc.fm.type === "plan" ? doc.fm.type : "other";
-}
-
-function titleFor(doc: DocMeta): string {
-  return doc.fm.title ?? doc.relPath.split("/").pop() ?? doc.relPath;
 }
 
 type Props = {
@@ -117,7 +114,7 @@ export function WorkstreamDocsPanel({
                   onClick={() => onOpenDoc(doc.id)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <p className="truncate text-sm font-medium text-ink">{titleFor(doc)}</p>
+                  <p className="truncate text-sm font-medium text-ink">{docTitle(doc)}</p>
                   <p className="selectable mt-0.5 truncate font-mono text-xs text-ink-dim">
                     {doc.relPath}
                   </p>

@@ -7,8 +7,8 @@ import { useReprovisionWorkstream } from "../../lib/queries";
  * ("●n ↑n ↓n", each only when non-zero), and a thoughts-broken warning with
  * an inline Fix (reprovision) action.
  */
-export function WorkstreamChips({ projectPath, view }: { projectPath: string; view: WorkstreamView }) {
-  const reprovision = useReprovisionWorkstream(projectPath);
+export function WorkstreamChips({ view }: { view: WorkstreamView }) {
+  const reprovision = useReprovisionWorkstream();
   const { git, item } = view;
 
   const counters: string[] = [];

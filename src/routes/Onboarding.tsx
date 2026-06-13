@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 
 import { useBootstrap, useRedetectBinaries } from "../lib/queries";
-import { Badge, Button, Card, CardTitle, EmptyState, ErrorNote, Spinner } from "../components/ui";
+import { Badge, Button, Card, CardTitle, EmptyState, ErrorNote, PageError, Spinner } from "../components/ui";
 import { BinaryCard } from "../features/system/BinaryCard";
 
 export function Onboarding() {
@@ -15,13 +15,7 @@ export function Onboarding() {
       </EmptyState>
     );
   }
-  if (bootstrap.isError) {
-    return (
-      <div className="p-8">
-        <ErrorNote error={bootstrap.error} />
-      </div>
-    );
-  }
+  if (bootstrap.isError) return <PageError error={bootstrap.error} />;
 
   const data = bootstrap.data!;
   const config = data.config;
@@ -47,7 +41,7 @@ export function Onboarding() {
         </div>
         <div className="mt-3 space-y-2">
           {data.binaries.map((b) => (
-            <BinaryCard key={b.kind} status={b} showOverride />
+            <BinaryCard key={b.kind} status={b} />
           ))}
         </div>
       </Card>

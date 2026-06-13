@@ -9,6 +9,7 @@ use serde::Serialize;
 use tauri::State;
 use tauri_specta::Event;
 
+use super::{blocking, effective_for};
 use crate::error::{AppError, CmdResult};
 use crate::events::ThoughtsIndexUpdated;
 use crate::state::AppState;
@@ -164,9 +165,7 @@ async fn root_for_doc(state: &AppState, abs: &Path) -> CmdResult<ThoughtsRoot> {
 #[specta::specta]
 pub async fn query_docs(state: State<'_, AppState>, query: ThoughtQuery) -> CmdResult<QueryResult> {
     let index = state.index.clone();
-    tauri::async_runtime::spawn_blocking(move || index.query(&query))
-        .await
-        .map_err(|e| AppError::internal(format!("query task: {e}")))
+    blocking("query", move || index.query(&query)).await
 }
 
 #[tauri::command]
@@ -239,11 +238,11 @@ pub async fn create_doc(
     input: CreateDocInput,
 ) -> CmdResult<DocMeta> {
     let loaded = state.config.load().await.map_err(AppError::from)?;
-    let thoughts = loaded.config.thoughts.as_ref().ok_or_else(|| AppError {
-        code: "config_missing".into(),
-        message: "Thoughts are not configured yet.".into(),
-        remedy: Some("Add a project first.".into()),
-    })?;
+    let thoughts = loaded
+        .config
+        .thoughts
+        .as_ref()
+        .ok_or_else(AppError::thoughts_not_configured)?;
 
     let (effective, mapped_name) = match (&input.project_repo_path, input.scope.as_str()) {
         (_, "global") | (None, _) => (thoughts.effective_config_for(""), None),
@@ -251,11 +250,7 @@ pub async fn create_doc(
             let eff = thoughts.effective_config_for(repo);
             let mapped = eff.mapped_name.clone();
             if mapped.is_none() {
-                return Err(AppError {
-                    code: "project_not_found".into(),
-                    message: format!("No hyprlayer project is mapped at {repo}"),
-                    remedy: Some("Add the repository as a project first.".into()),
-                });
+                return Err(AppError::project_not_found(repo));
             }
             (eff, mapped)
         }
@@ -346,13 +341,7 @@ pub async fn get_thoughts_git_status(
     state: State<'_, AppState>,
     project_path: String,
 ) -> CmdResult<ThoughtsRepoStatus> {
-    let loaded = state.config.load().await.map_err(AppError::from)?;
-    let thoughts = loaded.config.thoughts.as_ref().ok_or_else(|| AppError {
-        code: "config_missing".into(),
-        message: "Thoughts are not configured yet.".into(),
-        remedy: None,
-    })?;
-    let effective = thoughts.effective_config_for(&project_path);
+    let effective = effective_for(&state, &project_path).await?;
 
     match &effective.backend {
         hyprlayer_core::config::BackendConfig::Git(_) => {}
@@ -373,10 +362,9 @@ pub async fn get_thoughts_git_status(
         remedy: None,
     })?;
 
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking("status", move || {
         hyprlayer_core::gitops::thoughts_repo_status(&root)
     })
-    .await
-    .map_err(|e| AppError::internal(format!("status task: {e}")))?
+    .await?
     .map_err(AppError::from)
 }

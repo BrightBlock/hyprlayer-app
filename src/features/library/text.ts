@@ -9,6 +9,11 @@ export function splitFrontmatter(content: string): { frontmatter: string | null;
   return { frontmatter: match[1] ?? "", body: content.slice(match[0].length) };
 }
 
+/** Display title for a doc: frontmatter title, else its file name. */
+export function docTitle(meta: { relPath: string; fm: { title?: string | null } }): string {
+  return meta.fm.title ?? meta.relPath.split("/").pop() ?? meta.relPath;
+}
+
 /** Parse a comma-separated tags input into a trimmed, non-empty list. */
 export function parseTagsInput(input: string): string[] {
   return input

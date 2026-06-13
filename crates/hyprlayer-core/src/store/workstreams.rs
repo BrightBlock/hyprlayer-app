@@ -132,7 +132,9 @@ impl Db {
     ) -> Result<Vec<Workstream>> {
         self.with(|conn| {
             let sql = if include_archived {
-                format!("SELECT {COLS} FROM workstreams WHERE project_path = ?1 ORDER BY created_at")
+                format!(
+                    "SELECT {COLS} FROM workstreams WHERE project_path = ?1 ORDER BY created_at"
+                )
             } else {
                 format!(
                     "SELECT {COLS} FROM workstreams WHERE project_path = ?1 AND status = 'active'
@@ -141,6 +143,16 @@ impl Db {
             };
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params![project_path], row_to_item)?;
+            rows.collect()
+        })
+    }
+
+    /// Worktree paths of EVERY row, archived included — the durable record of
+    /// which repo mappings are workstream infrastructure rather than projects.
+    pub fn list_worktree_paths(&self) -> Result<Vec<String>> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare("SELECT worktree_path FROM workstreams")?;
+            let rows = stmt.query_map([], |row| row.get(0))?;
             rows.collect()
         })
     }
