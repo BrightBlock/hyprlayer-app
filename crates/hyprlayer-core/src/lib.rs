@@ -3,6 +3,7 @@
 //! This crate is deliberately free of Tauri dependencies so it can be tested
 //! headless and fast. The Tauri shell (`src-tauri`) is a thin layer over it.
 
+pub mod claude;
 pub mod config;
 pub mod docs;
 pub mod error;

@@ -1,0 +1,435 @@
+//! The long-lived `claude` session driver.
+//!
+//! Unlike one-shot [`crate::process::Exec`], a session is a long-running child
+//! we talk to over stdin/stdout for its whole life. [`ClaudeDriver::spawn`]
+//! starts the process and three background tasks:
+//!
+//! * **reader** — `claude` stdout NDJSON → [`SessionEvent`]s, broadcast to
+//!   subscribers (the UI Channel and the persistence writer both attach).
+//! * **stderr** — drained into a small ring buffer, so a crash can report the
+//!   tail (e.g. a `/login` hint).
+//! * **waiter** — `child.wait()` → classify the exit → final `Exited` event.
+//!
+//! Turns and control responses are written through an mpsc queue so writes from
+//! different callers serialize onto one stdin without interleaving.
+
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+
+use serde_json::json;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::{broadcast, mpsc};
+
+use super::events::{ExitOutcome, SessionEvent};
+use super::protocol::{self, Block, ParsedLine};
+use crate::error::{CoreError, Result};
+
+/// Per-stage permission posture (maps to claude's `--permission-mode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionMode {
+    Default,
+    AcceptEdits,
+    Plan,
+    BypassPermissions,
+}
+
+impl PermissionMode {
+    fn as_flag(self) -> &'static str {
+        match self {
+            PermissionMode::Default => "default",
+            PermissionMode::AcceptEdits => "acceptEdits",
+            PermissionMode::Plan => "plan",
+            PermissionMode::BypassPermissions => "bypassPermissions",
+        }
+    }
+}
+
+/// Everything needed to launch one session.
+pub struct SpawnConfig {
+    /// Absolute path to the resolved `claude` binary.
+    pub claude_bin: PathBuf,
+    /// Working directory — the workstream's worktree.
+    pub cwd: PathBuf,
+    /// App-generated session id (so resume bookkeeping survives a crash before
+    /// the init event lands).
+    pub session_id: String,
+    pub permission_mode: PermissionMode,
+    pub allowed_tools: Vec<String>,
+    pub disallowed_tools: Vec<String>,
+    /// Extra read/write roots (e.g. the thoughts root outside the worktree).
+    pub add_dirs: Vec<PathBuf>,
+    /// `--resume <claude_session_id>` to continue; cwd must match the original.
+    pub resume: Option<String>,
+    /// Branch a resumed session instead of continuing it.
+    pub fork: bool,
+    /// Cost circuit-breaker.
+    pub max_budget_usd: Option<f64>,
+    /// Override the model (else claude's default).
+    pub model: Option<String>,
+    /// Augmented PATH + any extra env for the child.
+    pub env: Vec<(String, String)>,
+}
+
+const STDERR_RING_LINES: usize = 200;
+const EVENT_CHANNEL_CAP: usize = 1024;
+
+/// A handle to a live session. Dropping it does NOT kill the child (the waiter
+/// task owns it); call [`ClaudeDriver::kill`] for a hard stop.
+pub struct ClaudeDriver {
+    session_id: String,
+    /// Serialized writes to the child's stdin (turns + control responses).
+    stdin_tx: mpsc::UnboundedSender<String>,
+    /// New subscribers clone this to receive the event stream.
+    events: broadcast::Sender<SessionEvent>,
+    /// Monotonic counter for app-initiated control requests.
+    control_seq: std::sync::atomic::AtomicU64,
+    /// Last 200 stderr lines (for crash diagnostics).
+    stderr_ring: Arc<StdMutex<Vec<String>>>,
+    /// Set when `kill` is called, so the waiter classifies the exit as an
+    /// app-initiated `Killed` rather than an unexpected `Crashed`.
+    killed: Arc<AtomicBool>,
+    /// Best-effort hard-kill hook (pid / process group).
+    killer: Killer,
+}
+
+impl ClaudeDriver {
+    pub fn spawn(config: SpawnConfig) -> Result<Self> {
+        let mut cmd = Command::new(&config.claude_bin);
+        cmd.arg("-p")
+            .args(["--output-format", "stream-json"])
+            .args(["--input-format", "stream-json"])
+            .arg("--verbose")
+            .arg("--include-partial-messages")
+            .args(["--permission-prompt-tool", "stdio"])
+            .args(["--permission-mode", config.permission_mode.as_flag()])
+            .args(["--session-id", &config.session_id]);
+
+        if let Some(resume) = &config.resume {
+            cmd.args(["--resume", resume]);
+            if config.fork {
+                cmd.arg("--fork-session");
+            }
+        }
+        if !config.allowed_tools.is_empty() {
+            cmd.args(["--allowedTools", &config.allowed_tools.join(" ")]);
+        }
+        if !config.disallowed_tools.is_empty() {
+            cmd.args(["--disallowedTools", &config.disallowed_tools.join(" ")]);
+        }
+        for dir in &config.add_dirs {
+            cmd.arg("--add-dir").arg(dir);
+        }
+        if let Some(budget) = config.max_budget_usd {
+            cmd.args(["--max-budget-usd", &budget.to_string()]);
+        }
+        if let Some(model) = &config.model {
+            cmd.args(["--model", model]);
+        }
+
+        cmd.current_dir(&config.cwd)
+            .env("CLAUDE_CODE_ENTRYPOINT", "hyprlayer-app")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        for (k, v) in &config.env {
+            cmd.env(k, v);
+        }
+
+        // Unix: own process group so we can signal the whole tree (claude spawns
+        // tool subprocesses). Windows job-object isolation is a follow-up.
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd.spawn().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                CoreError::BinaryMissing {
+                    name: "claude".into(),
+                }
+            } else {
+                CoreError::Io(e)
+            }
+        })?;
+
+        let pid = child.id();
+        let stdin = child.stdin.take().expect("stdin piped");
+        let stdout = child.stdout.take().expect("stdout piped");
+        let stderr = child.stderr.take().expect("stderr piped");
+
+        let (events_tx, _) = broadcast::channel(EVENT_CHANNEL_CAP);
+        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
+        let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let killed = Arc::new(AtomicBool::new(false));
+
+        // Writer task: drain the queue onto stdin, one line per message.
+        tokio::spawn(write_loop(stdin, stdin_rx));
+
+        // Stderr task: keep the last N lines.
+        tokio::spawn(stderr_loop(stderr, stderr_ring.clone()));
+
+        // Reader + waiter: parse stdout into events, then classify the exit.
+        tokio::spawn(read_and_wait(
+            child,
+            stdout,
+            events_tx.clone(),
+            stderr_ring.clone(),
+            killed.clone(),
+        ));
+
+        Ok(Self {
+            session_id: config.session_id,
+            stdin_tx,
+            events: events_tx,
+            control_seq: std::sync::atomic::AtomicU64::new(0),
+            stderr_ring,
+            killed,
+            killer: Killer { pid },
+        })
+    }
+
+    /// Subscribe to the event stream. Late subscribers miss earlier events —
+    /// the persistence layer attaches immediately and replays from SQLite.
+    pub fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
+        self.events.subscribe()
+    }
+
+    /// Send a user turn (the first prompt, or a follow-up). Stage-skill
+    /// invocations are just prompt text (e.g. `"/research_codebase …"`).
+    pub fn send_user_turn(&self, text: &str) -> Result<()> {
+        self.write_line(protocol::user_turn_json(&self.session_id, text))
+    }
+
+    /// Answer a `PermissionAsk`.
+    pub fn respond_permission(
+        &self,
+        request_id: &str,
+        allow: bool,
+        message: Option<&str>,
+    ) -> Result<()> {
+        self.write_line(protocol::permission_response_json(
+            request_id, allow, message,
+        ))
+    }
+
+    /// Graceful interrupt via the control protocol (portable; the process keeps
+    /// its pid). Falls back to a hard kill if claude doesn't ack.
+    pub fn interrupt(&self) -> Result<()> {
+        let id = self.next_control_id();
+        self.write_line(protocol::control_request_json(&id, "interrupt", json!({})))
+    }
+
+    /// Switch permission posture mid-session (e.g. plan → acceptEdits).
+    pub fn set_permission_mode(&self, mode: PermissionMode) -> Result<()> {
+        let id = self.next_control_id();
+        self.write_line(protocol::control_request_json(
+            &id,
+            "set_permission_mode",
+            json!({ "mode": mode.as_flag() }),
+        ))
+    }
+
+    /// Hard stop: kill the process (group on Unix). The waiter task observes the
+    /// exit and emits the terminal event (classified `Killed`).
+    pub fn kill(&self) {
+        self.killed.store(true, Ordering::SeqCst);
+        self.killer.kill();
+    }
+
+    /// Snapshot of the captured stderr tail (crash diagnostics).
+    pub fn stderr_tail(&self) -> String {
+        self.stderr_ring
+            .lock()
+            .map(|r| r.join("\n"))
+            .unwrap_or_default()
+    }
+
+    fn write_line(&self, mut line: String) -> Result<()> {
+        line.push('\n');
+        self.stdin_tx
+            .send(line)
+            .map_err(|_| CoreError::OutputParse {
+                program: "claude".into(),
+                detail: "session stdin is closed".into(),
+            })
+    }
+
+    fn next_control_id(&self) -> String {
+        let n = self
+            .control_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        format!("app-{}-{n}", self.session_id)
+    }
+}
+
+async fn write_loop(
+    mut stdin: tokio::process::ChildStdin,
+    mut rx: mpsc::UnboundedReceiver<String>,
+) {
+    while let Some(line) = rx.recv().await {
+        if stdin.write_all(line.as_bytes()).await.is_err() || stdin.flush().await.is_err() {
+            break; // child closed stdin; nothing more we can do
+        }
+    }
+}
+
+async fn stderr_loop(stderr: tokio::process::ChildStderr, ring: Arc<StdMutex<Vec<String>>>) {
+    let mut lines = BufReader::new(stderr).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if let Ok(mut ring) = ring.lock() {
+            ring.push(line);
+            let overflow = ring.len().saturating_sub(STDERR_RING_LINES);
+            if overflow > 0 {
+                ring.drain(0..overflow);
+            }
+        }
+    }
+}
+
+async fn read_and_wait(
+    mut child: tokio::process::Child,
+    stdout: tokio::process::ChildStdout,
+    events: broadcast::Sender<SessionEvent>,
+    stderr_ring: Arc<StdMutex<Vec<String>>>,
+    killed: Arc<AtomicBool>,
+) {
+    let mut saw_result = false;
+    let mut saw_error_result = false;
+    let mut lines = BufReader::new(stdout).lines();
+
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                let parsed = protocol::parse_line(&line);
+                if let ParsedLine::Result { is_error, .. } = &parsed {
+                    saw_result = true;
+                    saw_error_result |= *is_error;
+                }
+                for event in parsed_to_events(parsed) {
+                    let _ = events.send(event);
+                }
+            }
+            Ok(None) => break, // EOF: stdout closed, process is winding down
+            Err(_) => break,   // read error: treat as EOF
+        }
+    }
+
+    let status = child.wait().await;
+    let code = status.as_ref().ok().and_then(|s| s.code());
+    let stderr_tail = stderr_ring.lock().map(|r| r.join("\n")).unwrap_or_default();
+
+    // Classify: an app-initiated kill takes precedence; otherwise a clean
+    // terminal result + exit 0 is Completed and anything else is a crash.
+    let outcome = if killed.load(Ordering::SeqCst) {
+        ExitOutcome::Killed
+    } else {
+        match (&status, saw_result, saw_error_result) {
+            (Ok(s), true, false) if s.success() => ExitOutcome::Completed,
+            (Ok(_), _, _) => ExitOutcome::Crashed,
+            (Err(_), _, _) => ExitOutcome::SpawnFailed,
+        }
+    };
+
+    let _ = events.send(SessionEvent::Exited {
+        outcome,
+        code,
+        stderr_tail,
+    });
+}
+
+/// Translate one parsed stdout line into zero or more session events.
+fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
+    match parsed {
+        ParsedLine::Init {
+            claude_session_id,
+            model,
+            ..
+        } => vec![SessionEvent::Init {
+            claude_session_id: claude_session_id.unwrap_or_default(),
+            model,
+        }],
+        ParsedLine::PartialText { text } => vec![SessionEvent::PartialText { text }],
+        ParsedLine::Assistant { blocks } | ParsedLine::User { blocks } => {
+            blocks.into_iter().filter_map(block_to_event).collect()
+        }
+        ParsedLine::CanUseTool {
+            request_id,
+            tool_name,
+            input,
+        } => vec![SessionEvent::PermissionAsk {
+            request_id,
+            tool_name,
+            input,
+        }],
+        ParsedLine::Result {
+            total_cost_usd,
+            num_turns,
+            ..
+        } => vec![SessionEvent::TurnDone {
+            cost_usd: total_cost_usd,
+            num_turns,
+        }],
+        ParsedLine::Unknown { raw } => vec![SessionEvent::ProtocolError {
+            detail: "unrecognized stream-json line".into(),
+            raw,
+        }],
+        ParsedLine::System { .. } => Vec::new(),
+    }
+}
+
+fn block_to_event(block: Block) -> Option<SessionEvent> {
+    match block {
+        Block::Text { text } => Some(SessionEvent::AssistantText { text }),
+        Block::Thinking { text } => Some(SessionEvent::Thinking { text }),
+        Block::ToolUse { id, name, input } => Some(SessionEvent::ToolUse { id, name, input }),
+        Block::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+        } => Some(SessionEvent::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+        }),
+        Block::Other { .. } => None,
+    }
+}
+
+/// Best-effort process-tree killer. On Unix we signal the process group we put
+/// the child in; elsewhere we fall back to the pid (kill_on_drop covers the
+/// common case where the driver is dropped).
+struct Killer {
+    pid: Option<u32>,
+}
+
+impl Killer {
+    fn kill(&self) {
+        let Some(pid) = self.pid else { return };
+        #[cfg(unix)]
+        {
+            // Negative pid = the process group. SIGTERM first; the OS reaps.
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGTERM);
+            }
+        }
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .creation_flags(0x0800_0000)
+                .output();
+        }
+    }
+}
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt as _;

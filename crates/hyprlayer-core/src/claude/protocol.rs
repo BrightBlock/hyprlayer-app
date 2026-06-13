@@ -1,0 +1,286 @@
+//! The claude 2.1.x headless `stream-json` wire protocol.
+//!
+//! Shapes verified against the installed `claude` binary (2.1.173). Parsing is
+//! deliberately tolerant: every stdout line is read as a `serde_json::Value`
+//! first, then dispatched on its `type` field, so an unrecognized event kind
+//! degrades to [`ParsedLine::Unknown`] (→ a `ProtocolError` session event) and
+//! never crashes the reader. This is the single most important property for
+//! surviving a future claude release that adds event kinds.
+
+use serde_json::{json, Value};
+
+/// One parsed line of claude stdout. The variants cover only what the driver
+/// acts on; everything else is `Unknown` (kept raw for diagnostics).
+#[derive(Debug, Clone)]
+pub enum ParsedLine {
+    /// `{"type":"system","subtype":"init",...}` — session is up; carries the
+    /// claude-assigned session id, model, and tool/skill inventory.
+    Init {
+        claude_session_id: Option<String>,
+        model: Option<String>,
+        tools: Vec<String>,
+    },
+    /// Other `system` events (status heartbeats, etc.) — informational.
+    System { subtype: String },
+    /// A completed assistant turn (`type:"assistant"`), already de-chunked.
+    Assistant { blocks: Vec<Block> },
+    /// A user turn echoed back — in agent runs this carries tool results.
+    User { blocks: Vec<Block> },
+    /// A partial-message chunk (`type:"stream_event"`); only text deltas are
+    /// surfaced, for live streaming. Everything else here is ignored (the
+    /// completed `assistant` turn is the source of truth).
+    PartialText { text: String },
+    /// A permission prompt: claude asks whether a tool may run.
+    CanUseTool {
+        request_id: String,
+        tool_name: String,
+        input: Value,
+    },
+    /// Terminal `{"type":"result",...}` — carries cumulative cost/usage.
+    Result {
+        is_error: bool,
+        total_cost_usd: Option<f64>,
+        num_turns: Option<u32>,
+        stop_reason: Option<String>,
+    },
+    /// A line we don't model — kept verbatim so the driver can log it.
+    Unknown { raw: String },
+}
+
+/// A content block inside an assistant or user message.
+#[derive(Debug, Clone)]
+pub enum Block {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
+    /// A block kind we don't model (kept so callers can render generically).
+    Other {
+        kind: String,
+    },
+}
+
+/// Parse one stdout line. Never fails: a malformed or unrecognized line maps to
+/// [`ParsedLine::Unknown`].
+pub fn parse_line(line: &str) -> ParsedLine {
+    let trimmed = line.trim();
+    let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+        return ParsedLine::Unknown {
+            raw: trimmed.to_string(),
+        };
+    };
+    match v.get("type").and_then(Value::as_str) {
+        Some("system") => {
+            let subtype = v.get("subtype").and_then(Value::as_str).unwrap_or("");
+            if subtype == "init" {
+                ParsedLine::Init {
+                    claude_session_id: str_field(&v, "session_id"),
+                    model: str_field(&v, "model"),
+                    tools: string_list(v.get("tools")),
+                }
+            } else {
+                ParsedLine::System {
+                    subtype: subtype.to_string(),
+                }
+            }
+        }
+        Some("assistant") => ParsedLine::Assistant {
+            blocks: parse_blocks(v.get("message")),
+        },
+        Some("user") => ParsedLine::User {
+            blocks: parse_blocks(v.get("message")),
+        },
+        Some("stream_event") => parse_stream_event(&v),
+        Some("result") => ParsedLine::Result {
+            is_error: v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+            total_cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
+            num_turns: v.get("num_turns").and_then(Value::as_u64).map(|n| n as u32),
+            stop_reason: str_field(&v, "stop_reason"),
+        },
+        Some("control_request") => parse_control_request(&v),
+        // Known-but-ignored informational lines (don't surface as errors).
+        Some("rate_limit_event") => ParsedLine::System {
+            subtype: "rate_limit".into(),
+        },
+        // Any genuinely unrecognized kind: keep raw for the log.
+        _ => ParsedLine::Unknown {
+            raw: trimmed.to_string(),
+        },
+    }
+}
+
+fn parse_stream_event(v: &Value) -> ParsedLine {
+    // Only text deltas matter for live streaming.
+    let event = v.get("event");
+    let is_delta =
+        event.and_then(|e| e.get("type")).and_then(Value::as_str) == Some("content_block_delta");
+    let delta = event.and_then(|e| e.get("delta"));
+    let is_text = delta.and_then(|d| d.get("type")).and_then(Value::as_str) == Some("text_delta");
+    if is_delta && is_text {
+        if let Some(text) = delta.and_then(|d| d.get("text")).and_then(Value::as_str) {
+            return ParsedLine::PartialText {
+                text: text.to_string(),
+            };
+        }
+    }
+    ParsedLine::System {
+        subtype: "stream_event".into(),
+    }
+}
+
+fn parse_control_request(v: &Value) -> ParsedLine {
+    let request_id = str_field(v, "request_id").unwrap_or_default();
+    let request = v.get("request");
+    let subtype = request
+        .and_then(|r| r.get("subtype"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if subtype == "can_use_tool" {
+        let tool_name = request
+            .and_then(|r| r.get("tool_name"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let input = request
+            .and_then(|r| r.get("input"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        ParsedLine::CanUseTool {
+            request_id,
+            tool_name,
+            input,
+        }
+    } else {
+        ParsedLine::Unknown { raw: v.to_string() }
+    }
+}
+
+fn parse_blocks(message: Option<&Value>) -> Vec<Block> {
+    let Some(content) = message
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    content
+        .iter()
+        .map(|b| match b.get("type").and_then(Value::as_str) {
+            Some("text") => Block::Text {
+                text: b
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            },
+            Some("thinking") => Block::Thinking {
+                text: b
+                    .get("thinking")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            },
+            Some("tool_use") => Block::ToolUse {
+                id: str_field(b, "id").unwrap_or_default(),
+                name: str_field(b, "name").unwrap_or_default(),
+                input: b.get("input").cloned().unwrap_or(Value::Null),
+            },
+            Some("tool_result") => Block::ToolResult {
+                tool_use_id: str_field(b, "tool_use_id").unwrap_or_default(),
+                content: tool_result_text(b.get("content")),
+                is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+            },
+            Some(other) => Block::Other {
+                kind: other.to_string(),
+            },
+            None => Block::Other {
+                kind: "unknown".into(),
+            },
+        })
+        .collect()
+}
+
+/// A tool_result's `content` is either a string or an array of text blocks.
+fn tool_result_text(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+fn str_field(v: &Value, key: &str) -> Option<String> {
+    v.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+fn string_list(v: Option<&Value>) -> Vec<String> {
+    v.and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/* --------------------------- Outbound (stdin) ---------------------------- */
+
+/// A user turn, sent over stdin as one NDJSON line. The first prompt and every
+/// subsequent turn use this shape.
+pub fn user_turn_json(session_id: &str, text: &str) -> String {
+    json!({
+        "type": "user",
+        "message": { "role": "user", "content": text },
+        "parent_tool_use_id": null,
+        "session_id": session_id,
+    })
+    .to_string()
+}
+
+/// Reply to a `can_use_tool` control request.
+pub fn permission_response_json(request_id: &str, allow: bool, message: Option<&str>) -> String {
+    let mut behavior = json!({ "behavior": if allow { "allow" } else { "deny" } });
+    if let (false, Some(msg)) = (allow, message) {
+        behavior["message"] = json!(msg);
+    }
+    json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": request_id,
+            "response": behavior,
+        },
+    })
+    .to_string()
+}
+
+/// An app-initiated control request (interrupt / set_permission_mode).
+pub fn control_request_json(request_id: &str, subtype: &str, extra: Value) -> String {
+    let mut request = json!({ "subtype": subtype });
+    if let Value::Object(map) = extra {
+        for (k, v) in map {
+            request[k] = v;
+        }
+    }
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": request,
+    })
+    .to_string()
+}
