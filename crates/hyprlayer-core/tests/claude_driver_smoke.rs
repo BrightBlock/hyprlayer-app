@@ -15,7 +15,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     let cwd = std::env::temp_dir();
     let session_id = uuid::Uuid::new_v4().to_string();
 
-    let driver = ClaudeDriver::spawn(SpawnConfig {
+    let (driver, mut events) = ClaudeDriver::spawn(SpawnConfig {
         claude_bin: claude,
         cwd,
         session_id,
@@ -31,7 +31,6 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     })
     .expect("spawn claude");
 
-    let mut events = driver.subscribe();
     driver
         .send_user_turn("Reply with exactly the word: pong. Nothing else.")
         .expect("send turn");

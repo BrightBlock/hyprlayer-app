@@ -1,6 +1,7 @@
 mod commands;
 mod error;
 mod events;
+mod session_registry;
 mod settings;
 mod state;
 
@@ -44,6 +45,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::archive_workstream,
             commands::workstreams::reprovision_workstream,
             commands::workstreams::worktree_diff,
+            commands::sessions::start_stage_session,
+            commands::sessions::send_user_message,
+            commands::sessions::respond_permission,
+            commands::sessions::interrupt_session,
+            commands::sessions::kill_session,
+            commands::sessions::list_sessions,
+            commands::sessions::get_session_log,
+            commands::sessions::attach_session,
             commands::system::set_binary_override,
             commands::system::redetect_binaries,
             commands::system::get_app_settings,
@@ -52,7 +61,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             events::ConfigChanged,
             events::BinariesChanged,
-            events::ThoughtsIndexUpdated
+            events::ThoughtsIndexUpdated,
+            events::SessionLifecycle
         ])
 }
 
@@ -113,6 +123,20 @@ pub fn run() {
                 .map(PathBuf::from)
                 .unwrap_or_else(hyprlayer_core::worktree::default_worktree_root);
 
+            // Reap any orphan claude PIDs a previous crash left in the ledger,
+            // then clear it. (We log rather than blind-kill stale PIDs — a PID
+            // may have been reused; verified-kill is a follow-up.)
+            if let Ok(orphans) = db.list_orphans() {
+                if !orphans.is_empty() {
+                    log::warn!(
+                        "found {} orphan session PID(s) from a prior run: {:?}",
+                        orphans.len(),
+                        orphans
+                    );
+                    let _ = db.clear_all_orphans();
+                }
+            }
+
             app.manage(AppState {
                 config: config.clone(),
                 binaries: binaries.clone(),
@@ -123,6 +147,7 @@ pub fn run() {
                 )),
                 index: Arc::new(hyprlayer_core::index::ThoughtsIndex::new()),
                 index_watch: tokio::sync::Mutex::new(None),
+                sessions: Arc::new(session_registry::SessionRegistry::new(3)),
             });
 
             // 1. Fold the login-shell PATH in (GUI apps start with launchd's

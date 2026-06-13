@@ -1,5 +1,6 @@
 pub mod library;
 pub mod projects;
+pub mod sessions;
 pub mod system;
 pub mod workstreams;
 

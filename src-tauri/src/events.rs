@@ -18,3 +18,14 @@ pub struct ThoughtsIndexUpdated {
     pub kind: String,
     pub ids: Vec<String>,
 }
+
+/// Coarse session state change, for board/sidebar badges (the fine-grained
+/// transcript flows over the per-session Channel, not this global event).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLifecycle {
+    pub session_id: String,
+    pub workstream_id: String,
+    /// Matches the `sessions.state` column.
+    pub state: String,
+}

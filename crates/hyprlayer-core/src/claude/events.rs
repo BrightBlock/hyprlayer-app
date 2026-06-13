@@ -2,11 +2,10 @@
 //! persists. The Tauri shell forwards these over a per-session Channel and
 //! writes them to `session_events` for replay.
 
-use serde::Serialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 
 /// How a claude process ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum ExitOutcome {
@@ -23,8 +22,10 @@ pub enum ExitOutcome {
 }
 
 /// One event in a session's lifetime. Ordered; the sequence per session is
-/// monotonic. Serialized tagged so the frontend can switch on `kind`.
-#[derive(Debug, Clone, Serialize)]
+/// monotonic. Serialized tagged so the frontend can switch on `kind`. Tool
+/// inputs are carried as compact JSON strings (not `serde_json::Value`) so the
+/// type exports cleanly through specta; the UI parses them for display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
     tag = "kind",
@@ -44,11 +45,11 @@ pub enum SessionEvent {
     AssistantText { text: String },
     /// A completed thinking block (shown collapsed).
     Thinking { text: String },
-    /// The agent invoked a tool.
+    /// The agent invoked a tool. `input` is compact JSON.
     ToolUse {
         id: String,
         name: String,
-        input: Value,
+        input: String,
     },
     /// Result of a tool the agent ran.
     ToolResult {
@@ -57,11 +58,12 @@ pub enum SessionEvent {
         is_error: bool,
     },
     /// Permission prompt — the UI renders an Allow/Deny card; reply via the
-    /// driver's `respond_permission` with this `request_id`.
+    /// driver's `respond_permission` with this `request_id`. `input` is compact
+    /// JSON of the tool's arguments.
     PermissionAsk {
         request_id: String,
         tool_name: String,
-        input: Value,
+        input: String,
     },
     /// A turn finished; carries cumulative cost so far.
     TurnDone {

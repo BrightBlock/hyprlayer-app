@@ -97,7 +97,12 @@ pub struct ClaudeDriver {
 }
 
 impl ClaudeDriver {
-    pub fn spawn(config: SpawnConfig) -> Result<Self> {
+    /// Spawn a session. Returns the driver plus a receiver that is guaranteed to
+    /// observe every event (it's subscribed before the reader task can
+    /// broadcast, so the `init` event can't be missed). Additional subscribers
+    /// (re-attach) use [`ClaudeDriver::subscribe`] and replay from SQLite for
+    /// anything before they joined.
+    pub fn spawn(config: SpawnConfig) -> Result<(Self, broadcast::Receiver<SessionEvent>)> {
         let mut cmd = Command::new(&config.claude_bin);
         cmd.arg("-p")
             .args(["--output-format", "stream-json"])
@@ -167,6 +172,9 @@ impl ClaudeDriver {
         let stderr = child.stderr.take().expect("stderr piped");
 
         let (events_tx, _) = broadcast::channel(EVENT_CHANNEL_CAP);
+        // Subscribe BEFORE the reader task is spawned: the returned receiver
+        // can't miss the init event to a startup race.
+        let primary_rx = events_tx.subscribe();
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
         let killed = Arc::new(AtomicBool::new(false));
@@ -186,15 +194,18 @@ impl ClaudeDriver {
             killed.clone(),
         ));
 
-        Ok(Self {
-            session_id: config.session_id,
-            stdin_tx,
-            events: events_tx,
-            control_seq: std::sync::atomic::AtomicU64::new(0),
-            stderr_ring,
-            killed,
-            killer: Killer { pid },
-        })
+        Ok((
+            Self {
+                session_id: config.session_id,
+                stdin_tx,
+                events: events_tx,
+                control_seq: std::sync::atomic::AtomicU64::new(0),
+                stderr_ring,
+                killed,
+                killer: Killer { pid },
+            },
+            primary_rx,
+        ))
     }
 
     /// Subscribe to the event stream. Late subscribers miss earlier events —
@@ -243,6 +254,11 @@ impl ClaudeDriver {
     pub fn kill(&self) {
         self.killed.store(true, Ordering::SeqCst);
         self.killer.kill();
+    }
+
+    /// The child's OS process id, if it spawned (recorded in the orphan ledger).
+    pub fn pid(&self) -> Option<u32> {
+        self.killer.pid
     }
 
     /// Snapshot of the captured stderr tail (crash diagnostics).
@@ -368,7 +384,7 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
         } => vec![SessionEvent::PermissionAsk {
             request_id,
             tool_name,
-            input,
+            input: input.to_string(),
         }],
         ParsedLine::Result {
             total_cost_usd,
@@ -390,7 +406,11 @@ fn block_to_event(block: Block) -> Option<SessionEvent> {
     match block {
         Block::Text { text } => Some(SessionEvent::AssistantText { text }),
         Block::Thinking { text } => Some(SessionEvent::Thinking { text }),
-        Block::ToolUse { id, name, input } => Some(SessionEvent::ToolUse { id, name, input }),
+        Block::ToolUse { id, name, input } => Some(SessionEvent::ToolUse {
+            id,
+            name,
+            input: input.to_string(),
+        }),
         Block::ToolResult {
             tool_use_id,
             content,

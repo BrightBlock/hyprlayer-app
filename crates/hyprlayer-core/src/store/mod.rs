@@ -5,8 +5,10 @@
 //! derived from their sources of truth, never stored here.
 
 mod migrations;
+mod sessions;
 mod workstreams;
 
+pub use sessions::*;
 pub use workstreams::*;
 
 use std::path::Path;
