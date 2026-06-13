@@ -55,6 +55,47 @@ export function DocIcon({ size = 12, strokeWidth = 2 }: IconProps) {
   );
 }
 
+/** Upward arrow — the "send turn" affordance. */
+export function SendIcon({ size = 16, strokeWidth = 2 }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Filled square — interrupt / stop the running turn. */
+export function StopIcon({ size = 14 }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
+/** Wrench — a tool invocation. */
+export function WrenchIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M15 6.5a3.5 3.5 0 0 0-4.6 4.3l-5.1 5.1a1.6 1.6 0 0 0 2.3 2.3l5.1-5.1A3.5 3.5 0 0 0 17.5 9l-2 2-2-2 2-2Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Shield — a permission gate. */
+export function ShieldIcon({ size = 14, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path d="M12 3 5 6v5c0 4.2 2.8 7.6 7 9 4.2-1.4 7-4.8 7-9V6l-7-3Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** Glyph for a pipeline stage / agent mode; unknown modes render as general chat. */
 export function ModeIcon({ mode, size = 16, strokeWidth = 1.8 }: IconProps & { mode: string }) {
   switch (mode) {
