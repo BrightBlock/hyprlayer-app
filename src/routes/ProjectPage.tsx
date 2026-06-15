@@ -11,12 +11,13 @@ import {
   PageSpinner,
   TextInput,
 } from "../components/ui";
-import { BookIcon, ModeIcon, PlusIcon, XIcon } from "../components/icons";
+import { BookIcon, DocIcon, ModeIcon, PlusIcon, XIcon } from "../components/icons";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { DiffSidebar } from "../features/workstreams/DiffSidebar";
 import { SessionChat, SessionStatusBadge, SessionTabDot } from "../features/session/SessionChat";
-import { transcriptToText } from "../features/session/sessionStore";
-import { MODE_STYLES, STAGES, stageLabel, stageOf, type StageKey } from "../features/session/stages";
+import { DocPreviewTab } from "../features/session/DocPreviewTab";
+import { killSession, transcriptToText } from "../features/session/sessionStore";
+import { MODE_STYLES, stageLabel, stageOf, type StageKey } from "../features/session/stages";
 import {
   defaultTabState,
   updateWorkstreamTabs,
@@ -49,7 +50,14 @@ export type ShellTab = {
   mode: StageKey;
   draft: string;
   docs: AttachedDoc[];
+  /** Model + reasoning-effort keys chosen for the NEXT session this tab starts
+   *  (see models.ts); fixed at spawn. Undefined → the defaults. */
+  model?: string;
+  effort?: string;
   sessionId?: string;
+  /** When set, this tab is a read-only markdown preview of a doc (its path),
+   *  not an agent chat — opened from the diff sidebar, closed when done. */
+  docPreviewPath?: string;
 };
 
 type ShellMenu = {
@@ -164,7 +172,9 @@ export function ProjectPage() {
   };
   const patchShell = (
     shellId: number,
-    patch: Partial<Pick<ShellTab, "title" | "mode" | "draft" | "docs" | "sessionId">>,
+    patch: Partial<
+      Pick<ShellTab, "title" | "mode" | "draft" | "docs" | "model" | "effort" | "sessionId">
+    >,
   ) => {
     updateTabs((current) => ({
       ...current,
@@ -190,7 +200,30 @@ export function ProjectPage() {
       };
     });
   };
+  // Open an agent-created doc as a read-only preview tab in the agent strip —
+  // reuse an existing preview tab for the same doc rather than stacking dupes.
+  const openDocPreview = (path: string, title: string) => {
+    updateTabs((current) => {
+      const existing = current.shells.find((s) => s.docPreviewPath === path);
+      if (existing) return { ...current, activeId: existing.id, docsOpen: false };
+      const nextId = Math.max(0, ...current.shells.map((s) => s.id)) + 1;
+      return {
+        ...current,
+        shells: [
+          ...current.shells,
+          { id: nextId, title, mode: "general", draft: "", docs: [], docPreviewPath: path },
+        ],
+        activeId: nextId,
+        docsOpen: false,
+      };
+    });
+  };
   const closeShell = (shellId: number) => {
+    if (!tabs || tabs.shells.length === 1) return;
+    // Closing the tab ends its session — there's no End button; the window IS
+    // the handle. (No-op if the session already ended or was never started.)
+    const sid = tabs.shells.find((s) => s.id === shellId)?.sessionId;
+    if (sid) void killSession(sid);
     updateTabs((current) => {
       if (current.shells.length === 1) return current;
       const index = current.shells.findIndex((s) => s.id === shellId);
@@ -234,6 +267,12 @@ export function ProjectPage() {
     patchShell(activeShell.id, { mode: key });
     // The workstream's pipeline position follows the latest mode choice.
     setStage.mutate({ id: activeView.item.id, stage: key });
+  };
+  const changeModel = (key: string) => {
+    if (activeShell) patchShell(activeShell.id, { model: key });
+  };
+  const changeEffort = (key: string) => {
+    if (activeShell) patchShell(activeShell.id, { effort: key });
   };
   const openRenameShell = (shell: ShellTab) => {
     setRenameShellId(shell.id);
@@ -304,11 +343,17 @@ export function ProjectPage() {
                           onClick={() => selectShell(shell.id)}
                           className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
                         >
-                          <span className={`rounded p-0.5 ${MODE_STYLES[shell.mode].badge}`}>
-                            <ModeIcon mode={shell.mode} />
-                          </span>
+                          {shell.docPreviewPath ? (
+                            <span className="text-ink-dim">
+                              <DocIcon size={13} />
+                            </span>
+                          ) : (
+                            <span className={`rounded p-0.5 ${MODE_STYLES[shell.mode].badge}`}>
+                              <ModeIcon mode={shell.mode} />
+                            </span>
+                          )}
                           {shell.title}
-                          <SessionTabDot sessionId={shell.sessionId} />
+                          {!shell.docPreviewPath && <SessionTabDot sessionId={shell.sessionId} />}
                         </button>
                         {shells.length > 1 && (
                           <button
@@ -338,7 +383,7 @@ export function ProjectPage() {
                     <span
                       className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${MODE_STYLES[wsStage].badge}`}
                     >
-                      {STAGES.find((s) => s.key === wsStage)!.label}
+                      {stageLabel(wsStage)}
                     </span>
                     <SessionStatusBadge sessionId={activeShell?.sessionId} />
                     <IconButton
@@ -423,6 +468,12 @@ export function ProjectPage() {
                   onOpenDoc={openDoc}
                 />
               </div>
+            ) : activeView && activeShell?.docPreviewPath ? (
+              <DocPreviewTab
+                key={`${activeView.item.id}:${activeShell.id}`}
+                path={activeShell.docPreviewPath}
+                title={activeShell.title}
+              />
             ) : activeView && activeShell ? (
               <SessionChat
                 key={`${activeView.item.id}:${activeShell.id}`}
@@ -430,6 +481,8 @@ export function ProjectPage() {
                 shell={activeShell}
                 onDraftChange={updateDraft}
                 onModeChange={changeMode}
+                onModelChange={changeModel}
+                onEffortChange={changeEffort}
                 onSessionStarted={(sessionId) => patchShell(activeShell.id, { sessionId })}
                 onResetSession={() => patchShell(activeShell.id, { sessionId: undefined })}
                 onOpenDoc={openDoc}
@@ -475,6 +528,7 @@ export function ProjectPage() {
           workstreamId={activeView?.item.id ?? null}
           collapsed={diffCollapsed}
           onToggleCollapsed={() => setDiffCollapsed((value) => !value)}
+          onOpenDoc={openDocPreview}
         />
       </aside>
     </div>

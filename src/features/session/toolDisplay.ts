@@ -76,6 +76,19 @@ export function toolSummary(name: string, input: string): string {
 }
 
 /**
+ * A concise one-line preview of a tool's result, for the dimmed `⎿` line shown
+ * under a collapsed tool row. Strips the `N⇥` line-number prefix Read adds and
+ * skips blank leading lines so the preview is the first line that says something.
+ */
+export function resultPreview(content: string, isError: boolean): string {
+  const firstMeaningful = content.split("\n").find((line) => line.trim() !== "");
+  if (firstMeaningful === undefined) return isError ? "(error)" : "(no output)";
+  // `cat -n`-style "  12\tcode" → "code"; leave other content untouched.
+  const cleaned = firstMeaningful.replace(/^\s*\d+\t/, "").trim();
+  return cleaned || (isError ? "(error)" : "(no output)");
+}
+
+/**
  * The expanded view of a tool's input: pretty-printed JSON when it parses,
  * otherwise the raw string (so even a malformed payload is still inspectable).
  */
@@ -86,6 +99,43 @@ export function prettyToolInput(input: string): string {
   } catch {
     return input;
   }
+}
+
+export type DocKind = "research" | "plan";
+
+/**
+ * If a tool call wrote/edited a research or plan doc (a `.md` under a
+ * `…/research/…` or `…/plans/…` path), return its path + kind — used to surface
+ * agent-created docs in the diff sidebar. Other writes (code in the worktree)
+ * return null.
+ */
+export function docFromTool(name: string, input: string): { path: string; kind: DocKind } | null {
+  if (name !== "Write" && name !== "Edit" && name !== "MultiEdit") return null;
+  const obj = parseToolInput(input);
+  const path = str(obj?.file_path);
+  if (!path.endsWith(".md")) return null;
+  if (path.includes("/research/")) return { path, kind: "research" };
+  if (path.includes("/plans/") || path.includes("/plan/")) return { path, kind: "plan" };
+  return null;
+}
+
+/** A human title for a doc path: filename without the date prefix / extension. */
+export function docTitle(path: string): string {
+  const file = path.split("/").pop() ?? path;
+  return (
+    file
+      .replace(/\.md$/i, "")
+      .replace(/^\d{4}-\d{2}-\d{2}[-_]?/, "")
+      .replace(/[-_]+/g, " ")
+      .trim() || file
+  );
+}
+
+/** Compact token count: 24130 → "24.1k", 1_000_000 → "1.0M", 980 → "980". */
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
 
 /** Format a cumulative USD cost like the session footer ($0.0123). */

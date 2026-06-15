@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCost, parseToolInput, prettyToolInput, toolSummary } from "./toolDisplay";
+import {
+  docFromTool,
+  docTitle,
+  formatCost,
+  formatTokens,
+  parseToolInput,
+  prettyToolInput,
+  resultPreview,
+  toolSummary,
+} from "./toolDisplay";
 
 describe("parseToolInput", () => {
   it("parses a JSON object", () => {
@@ -58,6 +67,59 @@ describe("prettyToolInput", () => {
   it("returns the raw string for unparseable input", () => {
     expect(prettyToolInput("not json")).toBe("not json");
     expect(prettyToolInput("")).toBe("");
+  });
+});
+
+describe("resultPreview", () => {
+  it("strips cat -n line numbers and shows the first meaningful line", () => {
+    expect(resultPreview("  12\tuse anyhow::Result;", false)).toBe("use anyhow::Result;");
+    expect(resultPreview("\n\n   first real line\nsecond", false)).toBe("first real line");
+  });
+
+  it("falls back when there is no output", () => {
+    expect(resultPreview("", false)).toBe("(no output)");
+    expect(resultPreview("   \n  ", true)).toBe("(error)");
+  });
+
+  it("leaves ordinary content untouched", () => {
+    expect(resultPreview("Done (12 tool uses)", false)).toBe("Done (12 tool uses)");
+  });
+});
+
+describe("docFromTool", () => {
+  it("recognises research and plan docs written by the agent", () => {
+    expect(
+      docFromTool("Write", '{"file_path":"/Users/jt/thoughts/repos/x/shared/research/2026-06-15-auth.md"}'),
+    ).toEqual({ path: "/Users/jt/thoughts/repos/x/shared/research/2026-06-15-auth.md", kind: "research" });
+    expect(docFromTool("Edit", '{"file_path":"/t/shared/plans/big-refactor.md"}')).toEqual({
+      path: "/t/shared/plans/big-refactor.md",
+      kind: "plan",
+    });
+  });
+
+  it("ignores non-doc writes and non-write tools", () => {
+    expect(docFromTool("Write", '{"file_path":"/repo/src/main.rs"}')).toBeNull();
+    expect(docFromTool("Write", '{"file_path":"/t/shared/research/notes.txt"}')).toBeNull();
+    expect(docFromTool("Read", '{"file_path":"/t/shared/research/x.md"}')).toBeNull();
+    expect(docFromTool("Bash", '{"command":"ls"}')).toBeNull();
+  });
+});
+
+describe("docTitle", () => {
+  it("strips the date prefix and extension, humanizing the slug", () => {
+    expect(docTitle("/t/research/2026-06-15-libhyprlayer-crate-extraction.md")).toBe(
+      "libhyprlayer crate extraction",
+    );
+    expect(docTitle("/t/plans/big_refactor.md")).toBe("big refactor");
+  });
+});
+
+describe("formatTokens", () => {
+  it("scales to k and M", () => {
+    expect(formatTokens(980)).toBe("980");
+    expect(formatTokens(24130)).toBe("24.1k");
+    expect(formatTokens(269_500)).toBe("269.5k");
+    expect(formatTokens(1_000_000)).toBe("1.0M");
   });
 });
 

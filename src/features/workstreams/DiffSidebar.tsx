@@ -2,7 +2,9 @@ import { memo, useMemo, useState } from "react";
 
 import type { FileDiff } from "../../lib/bindings";
 import { Badge, ErrorNote, IconButton, Spinner, type BadgeTone } from "../../components/ui";
-import { ChevronRightIcon } from "../../components/icons";
+import { ChevronRightIcon, DocIcon } from "../../components/icons";
+import { useWorkstreamDocs } from "../session/sessionStore";
+import type { DocKind } from "../session/toolDisplay";
 import { useWorktreeDiff } from "../../lib/queries";
 import { countPatchStats, parsePatchLines, type PatchLineKind } from "./diff";
 
@@ -96,13 +98,54 @@ type Props = {
   workstreamId: string | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  /** Open an agent-created doc as an in-place preview tab. */
+  onOpenDoc: (path: string, title: string) => void;
 };
+
+const DOC_TONE: Record<DocKind, string> = {
+  research: "bg-sky-400/10 text-sky-300",
+  plan: "bg-amber-400/10 text-amber-300",
+};
+
+/** Research/plan docs the agent wrote — click to review in a preview tab. */
+function DocsSection({
+  workstreamId,
+  onOpenDoc,
+}: {
+  workstreamId: string;
+  onOpenDoc: (path: string, title: string) => void;
+}) {
+  const docs = useWorkstreamDocs(workstreamId);
+  if (docs.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-edge bg-panel-2 p-2">
+      <h3 className="px-1 pb-1.5 text-xs font-semibold text-ink-dim">Documents</h3>
+      <div className="space-y-0.5">
+        {docs.map((doc) => (
+          <button
+            key={doc.path}
+            type="button"
+            onClick={() => onOpenDoc(doc.path, doc.title)}
+            title={doc.path}
+            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
+          >
+            <DocIcon size={13} />
+            <span className="min-w-0 flex-1 truncate text-xs text-ink">{doc.title}</span>
+            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${DOC_TONE[doc.kind]}`}>
+              {doc.kind}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Contents of the right diff sidebar (header + body). The diff query only
  * runs while the sidebar is expanded and a workstream is active.
  */
-export function DiffSidebar({ workstreamId, collapsed, onToggleCollapsed }: Props) {
+export function DiffSidebar({ workstreamId, collapsed, onToggleCollapsed, onOpenDoc }: Props) {
   const diff = useWorktreeDiff(workstreamId ?? "", !collapsed);
   const fileCount = diff.data?.length ?? 0;
 
@@ -143,6 +186,7 @@ export function DiffSidebar({ workstreamId, collapsed, onToggleCollapsed }: Prop
         </div>
       ) : (
         <div className="h-[calc(100%-61px)] space-y-2 overflow-y-auto p-4">
+          {workstreamId !== null && <DocsSection workstreamId={workstreamId} onOpenDoc={onOpenDoc} />}
           {workstreamId === null ? (
             <div className="rounded-lg border border-edge bg-panel-2 p-3">
               <p className="text-sm font-medium">No workstream selected</p>
