@@ -40,7 +40,12 @@ jobs:
         run: cargo clippy --workspace --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --locked
+        # Windows can't *run* the src-tauri lib test binary: it links the
+        # webview runtime and the loader fails with STATUS_ENTRYPOINT_NOT_FOUND
+        # before any test executes. ADR 0001 only guarantees the headless core
+        # tests cross-OS; the app's lone test (the tauri-specta bindings export)
+        # runs on Linux/macOS, where the drift check below also lives.
+        run: cargo test ${{ matrix.os == 'windows-latest' && '-p hyprlayer-core' || '--workspace' }} --locked
 
       - name: Bindings are up to date
         if: matrix.os == 'ubuntu-latest'
