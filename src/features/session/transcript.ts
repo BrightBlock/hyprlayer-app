@@ -135,6 +135,25 @@ function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
   return copy;
 }
 
+/**
+ * Append a freshly-built item, allocating its deterministic id and advancing the
+ * counter — the close/allocate/append/increment plumbing every appending case
+ * shares. `closeAssistant` first finalizes the open streaming block (main-thread
+ * items do this; subagent items just nest). Returns the `items`/`counter` slice
+ * to spread; each case keeps its own `streaming`/`state` semantics explicit.
+ */
+function appended(
+  view: SessionView,
+  make: (id: string) => TranscriptItem,
+  closeAssistant = false,
+): Pick<SessionView, "items" | "counter"> {
+  const base = closeAssistant ? closeOpenAssistant(view.items) : view.items;
+  return {
+    items: [...base, make(`i${view.counter}`)],
+    counter: view.counter + 1,
+  };
+}
+
 /* -------------------------------- reducer -------------------------------- */
 
 export function reduceEvent(view: SessionView, event: SessionEvent): SessionView {
@@ -159,11 +178,9 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
         items[idx] = { ...block, text: block.text + event.text };
         return { ...view, items, streaming: true };
       }
-      const id = `i${view.counter}`;
       return {
         ...view,
-        items: [...view.items, { kind: "assistant", id, text: event.text, streaming: true }],
-        counter: view.counter + 1,
+        ...appended(view, (id) => ({ kind: "assistant", id, text: event.text, streaming: true })),
         streaming: true,
       };
     }
@@ -172,14 +189,15 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
       // Subagent text nests under its Task — append, never touch the main block.
       if (event.parentId) {
         if (!event.text.length) return view;
-        const id = `i${view.counter}`;
         return {
           ...view,
-          items: [
-            ...view.items,
-            { kind: "assistant", id, text: event.text, streaming: false, parentId: event.parentId },
-          ],
-          counter: view.counter + 1,
+          ...appended(view, (id) => ({
+            kind: "assistant",
+            id,
+            text: event.text,
+            streaming: false,
+            parentId: event.parentId,
+          })),
           streaming: true,
         };
       }
@@ -197,11 +215,9 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
         return { ...view, items, streaming: true };
       }
       if (!event.text.length) return view; // empty block, nothing open → ignore
-      const id = `i${view.counter}`;
       return {
         ...view,
-        items: [...view.items, { kind: "assistant", id, text: event.text, streaming: false }],
-        counter: view.counter + 1,
+        ...appended(view, (id) => ({ kind: "assistant", id, text: event.text, streaming: false })),
         streaming: true,
       };
     }
@@ -209,24 +225,23 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
     case "thinking": {
       if (!event.text.length) return view;
       // Main-thread blocks close the open assistant; subagent ones just nest.
-      const items = event.parentId ? view.items : closeOpenAssistant(view.items);
-      const id = `i${view.counter}`;
       return {
         ...view,
-        items: [...items, { kind: "thinking", id, text: event.text, parentId: event.parentId }],
-        counter: view.counter + 1,
+        ...appended(
+          view,
+          (id) => ({ kind: "thinking", id, text: event.text, parentId: event.parentId }),
+          !event.parentId,
+        ),
         streaming: true,
       };
     }
 
     case "toolUse": {
-      const items = event.parentId ? view.items : closeOpenAssistant(view.items);
-      const id = `i${view.counter}`;
       return {
         ...view,
-        items: [
-          ...items,
-          {
+        ...appended(
+          view,
+          (id) => ({
             kind: "tool",
             id,
             toolUseId: event.id,
@@ -234,9 +249,9 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
             input: event.input,
             result: null,
             parentId: event.parentId,
-          },
-        ],
-        counter: view.counter + 1,
+          }),
+          !event.parentId,
+        ),
         streaming: true,
       };
     }
@@ -252,43 +267,36 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
         }
       }
       // No matching tool_use (rare): surface the orphan result on its own.
-      const id = `i${view.counter}`;
       return {
         ...view,
-        items: [
-          ...view.items,
-          {
-            kind: "tool",
-            id,
-            toolUseId: event.toolUseId,
-            name: "result",
-            input: "",
-            result: { content: event.content, isError: event.isError },
-            parentId: event.parentId,
-          },
-        ],
-        counter: view.counter + 1,
+        ...appended(view, (id) => ({
+          kind: "tool",
+          id,
+          toolUseId: event.toolUseId,
+          name: "result",
+          input: "",
+          result: { content: event.content, isError: event.isError },
+          parentId: event.parentId,
+        })),
         streaming: true,
       };
     }
 
     case "permissionAsk": {
-      const items = closeOpenAssistant(view.items);
-      const id = `i${view.counter}`;
       return {
         ...view,
-        items: [
-          ...items,
-          {
+        ...appended(
+          view,
+          (id) => ({
             kind: "permission",
             id,
             requestId: event.requestId,
             toolName: event.toolName,
             input: event.input,
             decision: null,
-          },
-        ],
-        counter: view.counter + 1,
+          }),
+          true,
+        ),
         state: "awaiting_permission",
         streaming: true,
         pendingPermission: {
@@ -314,35 +322,30 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
         contextTokens: event.contextTokens ?? view.contextTokens,
       };
 
-    case "exited": {
-      const id = `i${view.counter}`;
+    case "exited":
       return {
         ...view,
-        items: [
-          ...closeOpenAssistant(view.items),
-          {
+        ...appended(
+          view,
+          (id) => ({
             kind: "exit",
             id,
             outcome: event.outcome,
             code: event.code,
             stderrTail: event.stderrTail,
-          },
-        ],
-        counter: view.counter + 1,
+          }),
+          true,
+        ),
         state: event.outcome,
         streaming: false,
         pendingPermission: null,
       };
-    }
 
-    case "protocolError": {
-      const id = `i${view.counter}`;
+    case "protocolError":
       return {
         ...view,
-        items: [...view.items, { kind: "error", id, detail: event.detail, raw: event.raw }],
-        counter: view.counter + 1,
+        ...appended(view, (id) => ({ kind: "error", id, detail: event.detail, raw: event.raw })),
       };
-    }
 
     default:
       return view;
@@ -357,12 +360,9 @@ export function addUserMessage(
   text: string,
   stage: string | null,
 ): SessionView {
-  const items = closeOpenAssistant(view.items);
-  const id = `i${view.counter}`;
   return {
     ...view,
-    items: [...items, { kind: "user", id, text, stage }],
-    counter: view.counter + 1,
+    ...appended(view, (id) => ({ kind: "user", id, text, stage }), true),
     streaming: true,
   };
 }

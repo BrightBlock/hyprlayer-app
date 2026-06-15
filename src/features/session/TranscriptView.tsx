@@ -89,6 +89,47 @@ function AssistantMessage({ text, streaming }: { text: string; streaming: boolea
   );
 }
 
+/** The shared button shell for a transcript working-step row (thinking, tool,
+ *  tool group, subagent) — a tight, full-bleed hover target. */
+const STEP_ROW =
+  "group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-panel-2";
+
+/** The disclosure chevron for a step row. `reveal="hover"` keeps it hidden until
+ *  the row is hovered or open (thinking/tool); `"always"` shows it (group/subagent). */
+function StepChevron({
+  open,
+  reveal = "always",
+  size = 12,
+}: {
+  open: boolean;
+  reveal?: "hover" | "always";
+  size?: number;
+}) {
+  const visibility =
+    reveal === "hover"
+      ? open
+        ? "rotate-90 text-ink-dim"
+        : "text-ink-dim/0 group-hover:text-ink-dim"
+      : `${open ? "rotate-90" : ""} text-ink-dim`;
+  return (
+    <ChevronRightIcon size={size} className={`ml-auto shrink-0 transition-all ${visibility}`} />
+  );
+}
+
+/** The expanded `<pre>` for a tool/subagent result — shared so error coloring,
+ *  max-height, and the empty-output fallback stay identical across both. */
+function ToolResultOutput({ result }: { result: { content: string; isError: boolean } }) {
+  return (
+    <pre
+      className={`selectable max-h-96 overflow-auto rounded p-2 font-mono text-[11px] leading-relaxed ${
+        result.isError ? "bg-bad/10 text-rose-300" : "bg-surface/60 text-ink-dim"
+      }`}
+    >
+      {result.content || (result.isError ? "(error, no output)" : "(no output)")}
+    </pre>
+  );
+}
+
 function Collapsible({
   open,
   onToggle,
@@ -128,16 +169,11 @@ function ThinkingBlock({ text }: { text: string }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left text-ink-dim hover:bg-panel-2"
+        className={`${STEP_ROW} text-ink-dim`}
       >
         <span className="shrink-0 font-medium">Thinking</span>
         {!open && preview && <span className="min-w-0 flex-1 truncate italic">{preview}</span>}
-        <ChevronRightIcon
-          size={11}
-          className={`ml-auto shrink-0 transition-transform ${
-            open ? "rotate-90 text-ink-dim" : "text-ink-dim/0 group-hover:text-ink-dim"
-          }`}
-        />
+        <StepChevron open={open} reveal="hover" size={11} />
       </button>
       {open && (
         <div className="selectable mt-1 whitespace-pre-wrap border-l border-edge pl-3 italic leading-relaxed text-ink-dim">
@@ -187,11 +223,7 @@ function ToolBlock({
 
   return (
     <div className="text-xs">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-panel-2"
-      >
+      <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">{item.name}</span>
@@ -200,10 +232,7 @@ function ToolBlock({
             {summary}
           </span>
         )}
-        <ChevronRightIcon
-          size={11}
-          className={`ml-auto shrink-0 text-ink-dim/0 transition-all group-hover:text-ink-dim ${open ? "rotate-90 text-ink-dim" : ""}`}
-        />
+        <StepChevron open={open} reveal="hover" size={11} />
       </button>
 
       {!open && preview && (
@@ -226,15 +255,7 @@ function ToolBlock({
               {prettyToolInput(item.input)}
             </pre>
           )}
-          {result && (
-            <pre
-              className={`selectable max-h-96 overflow-auto rounded p-2 font-mono text-[11px] leading-relaxed ${
-                result.isError ? "bg-bad/10 text-rose-300" : "bg-surface/60 text-ink-dim"
-              }`}
-            >
-              {result.content || (result.isError ? "(error, no output)" : "(no output)")}
-            </pre>
-          )}
+          {result && <ToolResultOutput result={result} />}
         </div>
       )}
     </div>
@@ -408,15 +429,12 @@ function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) 
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left text-ink-dim hover:bg-panel-2"
+        className={`${STEP_ROW} text-ink-dim`}
       >
         {running ? <Spinner size={12} /> : <WrenchIcon className="shrink-0 text-ink-dim" />}
         <span className="font-medium text-ink">{label}</span>
         {running && <span className="text-ink-dim">· working…</span>}
-        <ChevronRightIcon
-          size={12}
-          className={`ml-auto shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
-        />
+        <StepChevron open={open} />
       </button>
       {open && (
         <div className="mt-1 space-y-1 border-l border-edge pl-3">
@@ -479,11 +497,7 @@ function SubagentBlock({
   const running = busy && result === null;
   return (
     <div className="text-xs">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-panel-2"
-      >
+      <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">Subagent</span>
@@ -498,10 +512,7 @@ function SubagentBlock({
             {running && " · working…"}
           </span>
         )}
-        <ChevronRightIcon
-          size={12}
-          className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
-        />
+        <StepChevron open={open} />
       </button>
       {open && (
         <div className="mt-1 space-y-2 border-l border-edge pl-3">
@@ -516,13 +527,7 @@ function SubagentBlock({
               <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim/70">
                 Result
               </div>
-              <pre
-                className={`selectable max-h-96 overflow-auto rounded p-2 font-mono text-[11px] leading-relaxed ${
-                  result.isError ? "bg-bad/10 text-rose-300" : "bg-surface/60 text-ink-dim"
-                }`}
-              >
-                {result.content || (result.isError ? "(error, no output)" : "(no output)")}
-              </pre>
+              <ToolResultOutput result={result} />
             </div>
           )}
         </div>

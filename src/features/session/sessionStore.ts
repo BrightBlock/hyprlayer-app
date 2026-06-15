@@ -67,6 +67,34 @@ function setEntry(sessionId: string, next: SessionEntry): void {
   useSessionStore.setState((s) => ({ sessions: { ...s.sessions, [sessionId]: next } }));
 }
 
+/**
+ * A Tauri Channel that buffers events until we know which session they belong to.
+ * Events can arrive before the start/resume command resolves (and we learn the
+ * id), so they queue; `activate(id)` binds the channel and flushes the backlog in
+ * order. Call `activate` only AFTER the session's entry exists, so `dispatch`
+ * finds something to fold into. Shared by [`startSession`] and [`resumeSession`].
+ */
+function bufferedChannel(): {
+  channel: Channel<SessionEvent>;
+  activate: (sessionId: string) => void;
+} {
+  const buffer: SessionEvent[] = [];
+  let boundId: string | null = null;
+  const channel = new Channel<SessionEvent>();
+  channel.onmessage = (event) => {
+    if (boundId) dispatch(boundId, event);
+    else buffer.push(event);
+  };
+  return {
+    channel,
+    activate(sessionId) {
+      boundId = sessionId;
+      for (const event of buffer) dispatch(sessionId, event);
+      buffer.length = 0;
+    },
+  };
+}
+
 /** Fold one event into a session's transcript and run its side effects. */
 function dispatch(sessionId: string, event: SessionEvent): void {
   const current = entryOf(sessionId);
@@ -104,13 +132,7 @@ export async function startSession(args: {
   /** `--effort` level, or null/undefined for claude's default. */
   effort?: string | null;
 }): Promise<Session> {
-  const buffer: SessionEvent[] = [];
-  let boundId: string | null = null;
-  const channel = new Channel<SessionEvent>();
-  channel.onmessage = (event) => {
-    if (boundId) dispatch(boundId, event);
-    else buffer.push(event); // pre-id events; flushed once we know the session id
-  };
+  const { channel, activate } = bufferedChannel();
 
   const session = await unwrap(
     commands.startStageSession(
@@ -125,7 +147,6 @@ export async function startSession(args: {
   );
 
   // Synchronous from here: no `await`, so no buffered onmessage can interleave.
-  boundId = session.id;
   channels.set(session.id, channel);
 
   let view = initialSessionView("starting");
@@ -145,8 +166,7 @@ export async function startSession(args: {
     live: true,
   });
 
-  for (const event of buffer) dispatch(session.id, event);
-  buffer.length = 0;
+  activate(session.id); // bind + flush any events that raced the command
   return session;
 }
 
@@ -159,13 +179,7 @@ export async function resumeSession(sessionId: string): Promise<void> {
   const current = entryOf(sessionId);
   if (!current || channels.has(sessionId)) return;
 
-  const buffer: SessionEvent[] = [];
-  let bound = false;
-  const channel = new Channel<SessionEvent>();
-  channel.onmessage = (event) => {
-    if (bound) dispatch(sessionId, event);
-    else buffer.push(event);
-  };
+  const { channel, activate } = bufferedChannel();
   channels.set(sessionId, channel);
   setEntry(sessionId, { ...current, live: true, state: "starting" });
 
@@ -179,9 +193,7 @@ export async function resumeSession(sessionId: string): Promise<void> {
     throw e;
   }
 
-  bound = true;
-  for (const event of buffer) dispatch(sessionId, event);
-  buffer.length = 0;
+  activate(sessionId); // bind + flush events buffered during the resume call
 }
 
 /**
