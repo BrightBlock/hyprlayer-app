@@ -42,3 +42,39 @@ export function updateWorkstreamTabs(
 ): void {
   useWorkstreamTabsStore.setState((s) => ({ byWs: next(s.byWs) }));
 }
+
+/**
+ * Open (creating if absent) the dedicated Ship tab for a workstream, bind it to
+ * `sessionId`, and select it. Shipping reuses one tab per workstream rather than
+ * being a chosen chat mode (see `shipWorkstream` in [`sessionStore`]).
+ */
+export function openShipTab(workstreamId: string, sessionId: string): void {
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId] ?? defaultTabState();
+    const existing = current.shells.find((s) => s.mode === "ship");
+    if (existing) {
+      return {
+        ...all,
+        [workstreamId]: {
+          ...current,
+          shells: current.shells.map((s) => (s.id === existing.id ? { ...s, sessionId } : s)),
+          activeId: existing.id,
+          docsOpen: false,
+        },
+      };
+    }
+    const nextId = Math.max(0, ...current.shells.map((s) => s.id)) + 1;
+    return {
+      ...all,
+      [workstreamId]: {
+        ...current,
+        shells: [
+          ...current.shells,
+          { id: nextId, title: "Ship", mode: "ship", draft: "", docs: [], sessionId },
+        ],
+        activeId: nextId,
+        docsOpen: false,
+      },
+    };
+  });
+}

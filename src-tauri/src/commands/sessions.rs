@@ -45,6 +45,8 @@ pub async fn start_stage_session(
     stage: String,
     input: String,
     attached_docs: Vec<String>,
+    model: Option<String>,
+    effort: Option<String>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
     let ws = {
@@ -108,7 +110,8 @@ pub async fn start_stage_session(
         resume: None,
         fork: false,
         max_budget_usd: None,
-        model: None,
+        model,
+        effort,
         env,
     })
     .map_err(AppError::from)?;
@@ -136,10 +139,126 @@ pub async fn start_stage_session(
         workstream_id: ws.id.clone(),
         rx,
         permit,
+        start_seq: 0,
     });
 
     // Kick off the first turn (the composed skill prompt).
     driver.send_user_turn(&prompt).map_err(AppError::from)?;
+
+    Ok(session)
+}
+
+/// Resume a previously-started session that's no longer live (e.g. after an app
+/// restart) by re-spawning claude with `--resume`, so the conversation continues
+/// instead of forcing a new session. The event log appends after its existing
+/// tail. Returns the (existing) [`Session`] row.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn resume_session(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    model: Option<String>,
+    effort: Option<String>,
+    on_event: Channel<SessionEvent>,
+) -> CmdResult<Session> {
+    let session = {
+        let id = session_id.clone();
+        db_task(state.db.clone(), move |db| db.get_session(&id)).await?
+    }
+    .ok_or_else(|| session_not_found(&session_id))?;
+
+    // Already live (a race, or never actually died) — nothing to resume.
+    if state.sessions.get(&session_id).await.is_some() {
+        return Ok(session);
+    }
+
+    let ws = {
+        let id = session.workstream_id.clone();
+        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
+    }
+    .ok_or_else(|| AppError {
+        code: "workstream_not_found".into(),
+        message: format!("No workstream with id {}", session.workstream_id),
+        remedy: None,
+    })?;
+
+    let permit = state.sessions.try_acquire().ok_or_else(|| AppError {
+        code: "too_many_sessions".into(),
+        message: "The maximum number of concurrent agent sessions is already running.".into(),
+        remedy: Some("Wait for a session to finish, or stop one, then try again.".into()),
+    })?;
+
+    let claude = state
+        .binaries
+        .require(BinaryKind::Claude)
+        .await
+        .map_err(AppError::from)?;
+
+    let effective = effective_for(&state, &ws.project_path).await?;
+    let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
+
+    let stage = Stage::parse(&session.stage);
+    let policy = pipeline::policy_for(stage);
+
+    let path = state.binaries.augmented_path().await;
+    let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+
+    let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
+        claude_bin: claude,
+        cwd: PathBuf::from(&session.cwd),
+        session_id: session.id.clone(),
+        permission_mode: policy.permission_mode,
+        allowed_tools: policy.allowed_tools,
+        disallowed_tools: policy.disallowed_tools,
+        add_dirs,
+        // claude persisted the conversation under the id we passed as
+        // `--session-id`, so resume by that same id.
+        resume: Some(session.id.clone()),
+        fork: false,
+        max_budget_usd: None,
+        model,
+        effort,
+        env,
+    })
+    .map_err(AppError::from)?;
+
+    if let Some(pid) = driver.pid() {
+        let sid = session.id.clone();
+        let _ = db_task(state.db.clone(), move |db| {
+            db.record_orphan(pid as i64, &sid)
+        })
+        .await;
+    }
+
+    let driver = Arc::new(driver);
+    state
+        .sessions
+        .insert(session.id.clone(), driver.clone())
+        .await;
+
+    // Continue the persisted log after its existing tail.
+    let start_seq = {
+        let id = session.id.clone();
+        db_task(state.db.clone(), move |db| db.session_events(&id)).await?.len() as i64
+    };
+    {
+        let id = session.id.clone();
+        let _ = db_task(state.db.clone(), move |db| db.set_session_state(&id, "running")).await;
+    }
+
+    spawn_forwarder(ForwarderCtx {
+        app,
+        db: state.db.clone(),
+        registry: state.sessions.clone(),
+        channel: on_event,
+        session_id: session.id.clone(),
+        workstream_id: ws.id.clone(),
+        rx,
+        permit,
+        start_seq,
+    });
 
     Ok(session)
 }
@@ -270,6 +389,9 @@ struct ForwarderCtx {
     workstream_id: String,
     rx: broadcast::Receiver<SessionEvent>,
     permit: tokio::sync::OwnedSemaphorePermit,
+    /// First persisted-event sequence number — 0 for a fresh session, or the
+    /// existing event count when resuming (so the log appends, not collides).
+    start_seq: i64,
 }
 
 fn spawn_forwarder(ctx: ForwarderCtx) {
@@ -282,11 +404,12 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
         workstream_id,
         mut rx,
         permit,
+        start_seq,
     } = ctx;
 
     tauri::async_runtime::spawn(async move {
         let _permit = permit; // released when the session ends (loop break)
-        let mut seq: i64 = 0;
+        let mut seq: i64 = start_seq;
 
         loop {
             let event = match rx.recv().await {
@@ -298,7 +421,9 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
                 Err(broadcast::error::RecvError::Closed) => break,
             };
 
-            // Persist for replay.
+            // Persist for replay — usage pings included (tiny), so the context
+            // meter survives a restart even if the turn was interrupted before
+            // its result event ever landed.
             if let Ok(payload) = serde_json::to_string(&event) {
                 let _ = db.append_session_event(&session_id, seq, event_kind(&event), &payload);
                 seq += 1;
@@ -367,6 +492,7 @@ fn event_kind(event: &SessionEvent) -> &'static str {
         SessionEvent::ToolUse { .. } => "toolUse",
         SessionEvent::ToolResult { .. } => "toolResult",
         SessionEvent::PermissionAsk { .. } => "permissionAsk",
+        SessionEvent::Usage { .. } => "usage",
         SessionEvent::TurnDone { .. } => "turnDone",
         SessionEvent::ProtocolError { .. } => "protocolError",
         SessionEvent::Exited { .. } => "exited",

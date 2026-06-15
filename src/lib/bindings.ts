@@ -52,7 +52,14 @@ export const commands = {
 	 *  spawns the driver under the concurrency cap, and streams events back over
 	 *  `on_event`. Returns the persisted [`Session`] row.
 	 */
-	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, onEvent })),
+	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], model: string | null, effort: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, model, effort, onEvent })),
+	/**
+	 *  Resume a previously-started session that's no longer live (e.g. after an app
+	 *  restart) by re-spawning claude with `--resume`, so the conversation continues
+	 *  instead of forcing a new session. The event log appends after its existing
+	 *  tail. Returns the (existing) [`Session`] row.
+	 */
+	resumeSession: (sessionId: string, model: string | null, effort: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, onEvent })),
 	sendUserMessage: (sessionId: string, text: string) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	interruptSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_session", { sessionId })),
@@ -327,23 +334,35 @@ export type SessionEvent =
  *  Streaming text delta (live typing). Coalesced into `AssistantText` on
  *  turn completion — the UI shows partials, then replaces with the final.
  */
-{ kind: "partialText"; text: string } | 
+{ kind: "partialText"; text: string; parentId: string | null } | 
 /**  A completed assistant text block. */
-{ kind: "assistantText"; text: string } | 
+{ kind: "assistantText"; text: string; parentId: string | null } | 
 /**  A completed thinking block (shown collapsed). */
-{ kind: "thinking"; text: string } | 
-/**  The agent invoked a tool. `input` is compact JSON. */
-{ kind: "toolUse"; id: string; name: string; input: string } | 
+{ kind: "thinking"; text: string; parentId: string | null } | 
+/**
+ *  The agent invoked a tool. `input` is compact JSON. `parent_id` is the
+ *  `Task` tool-use id when this runs inside a subagent (else null).
+ */
+{ kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | 
 /**  Result of a tool the agent ran. */
-{ kind: "toolResult"; toolUseId: string; content: string; isError: boolean } | 
+{ kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | 
 /**
  *  Permission prompt — the UI renders an Allow/Deny card; reply via the
  *  driver's `respond_permission` with this `request_id`. `input` is compact
  *  JSON of the tool's arguments.
  */
 { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | 
-/**  A turn finished; carries cumulative cost so far. */
-{ kind: "turnDone"; costUsd: number | null; numTurns: number | null } | 
+/**
+ *  A live context-window reading (input tokens in context), emitted per
+ *  assistant message so the meter updates DURING a multi-tool turn — not
+ *  only at `TurnDone`. Transient: not persisted to the session log.
+ */
+{ kind: "usage"; contextTokens: number } | 
+/**
+ *  A turn finished; carries cumulative cost so far and the context-window
+ *  fill (input tokens in context for the turn) for the UI's context meter.
+ */
+{ kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null } | 
 /**  An unparseable / unknown stdout line — surfaced, never fatal. */
 { kind: "protocolError"; detail: string; raw: string } | 
 /**  The process ended. Terminal: no further events for this session. */

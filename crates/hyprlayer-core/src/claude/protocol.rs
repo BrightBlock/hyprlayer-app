@@ -23,13 +23,26 @@ pub enum ParsedLine {
     /// Other `system` events (status heartbeats, etc.) — informational.
     System { subtype: String },
     /// A completed assistant turn (`type:"assistant"`), already de-chunked.
-    Assistant { blocks: Vec<Block> },
+    /// `context_tokens` is the per-message context fill (for the live meter —
+    /// it updates each step of a multi-tool turn, not just at the final result).
+    /// `parent_id` is the `Task` tool-use id when this is a subagent's message.
+    Assistant {
+        blocks: Vec<Block>,
+        context_tokens: Option<u32>,
+        parent_id: Option<String>,
+    },
     /// A user turn echoed back — in agent runs this carries tool results.
-    User { blocks: Vec<Block> },
+    User {
+        blocks: Vec<Block>,
+        parent_id: Option<String>,
+    },
     /// A partial-message chunk (`type:"stream_event"`); only text deltas are
     /// surfaced, for live streaming. Everything else here is ignored (the
     /// completed `assistant` turn is the source of truth).
-    PartialText { text: String },
+    PartialText {
+        text: String,
+        parent_id: Option<String>,
+    },
     /// A permission prompt: claude asks whether a tool may run.
     CanUseTool {
         request_id: String,
@@ -42,6 +55,9 @@ pub enum ParsedLine {
         total_cost_usd: Option<f64>,
         num_turns: Option<u32>,
         stop_reason: Option<String>,
+        /// Input tokens in context for the final turn (incl. cache) — the
+        /// "context window fill" the UI's context meter shows.
+        context_tokens: Option<u32>,
     },
     /// A line we don't model — kept verbatim so the driver can log it.
     Unknown { raw: String },
@@ -98,9 +114,12 @@ pub fn parse_line(line: &str) -> ParsedLine {
         }
         Some("assistant") => ParsedLine::Assistant {
             blocks: parse_blocks(v.get("message")),
+            context_tokens: context_tokens(v.get("message").and_then(|m| m.get("usage"))),
+            parent_id: str_field(&v, "parent_tool_use_id"),
         },
         Some("user") => ParsedLine::User {
             blocks: parse_blocks(v.get("message")),
+            parent_id: str_field(&v, "parent_tool_use_id"),
         },
         Some("stream_event") => parse_stream_event(&v),
         Some("result") => ParsedLine::Result {
@@ -108,6 +127,7 @@ pub fn parse_line(line: &str) -> ParsedLine {
             total_cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
             num_turns: v.get("num_turns").and_then(Value::as_u64).map(|n| n as u32),
             stop_reason: str_field(&v, "stop_reason"),
+            context_tokens: context_tokens(v.get("usage")),
         },
         Some("control_request") => parse_control_request(&v),
         // Known-but-ignored informational lines (don't surface as errors).
@@ -132,6 +152,7 @@ fn parse_stream_event(v: &Value) -> ParsedLine {
         if let Some(text) = delta.and_then(|d| d.get("text")).and_then(Value::as_str) {
             return ParsedLine::PartialText {
                 text: text.to_string(),
+                parent_id: str_field(v, "parent_tool_use_id"),
             };
         }
     }
@@ -228,6 +249,28 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
+/// Context-window fill from a `usage` object: the input tokens in context for
+/// the request (fresh input + both cache tiers; output is generation, excluded).
+///
+/// A turn's top-level `usage` SUMS every internal iteration (each tool step
+/// re-reads the cached context), so summing it over a long turn balloons far
+/// past the real window. The actual fill is the LAST iteration's context, so we
+/// read `usage.iterations[last]` when present (the `result` event), else the
+/// object itself (a single assistant message). None if there's no usage.
+fn context_tokens(usage: Option<&Value>) -> Option<u32> {
+    let usage = usage?;
+    let source = usage
+        .get("iterations")
+        .and_then(Value::as_array)
+        .and_then(|iters| iters.last())
+        .unwrap_or(usage);
+    let field = |key: &str| source.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let total = field("input_tokens")
+        + field("cache_read_input_tokens")
+        + field("cache_creation_input_tokens");
+    (total > 0).then_some(total.min(u32::MAX as u64) as u32)
+}
+
 fn string_list(v: Option<&Value>) -> Vec<String> {
     v.and_then(Value::as_array)
         .map(|arr| {
@@ -252,18 +295,34 @@ pub fn user_turn_json(session_id: &str, text: &str) -> String {
     .to_string()
 }
 
-/// Reply to a `can_use_tool` control request.
-pub fn permission_response_json(request_id: &str, allow: bool, message: Option<&str>) -> String {
-    let mut behavior = json!({ "behavior": if allow { "allow" } else { "deny" } });
-    if let (false, Some(msg)) = (allow, message) {
-        behavior["message"] = json!(msg);
-    }
+/// Reply to a `can_use_tool` control request. claude's permission-result schema
+/// requires `updatedInput` on an allow (the tool input to run, which we echo
+/// back unchanged) and a `message` on a deny — omitting either is a ZodError
+/// that fails the tool. `updated_input` falls back to `{}` only if we somehow
+/// lost the cached input.
+pub fn permission_response_json(
+    request_id: &str,
+    allow: bool,
+    updated_input: Option<Value>,
+    message: Option<&str>,
+) -> String {
+    let inner = if allow {
+        json!({
+            "behavior": "allow",
+            "updatedInput": updated_input.unwrap_or_else(|| json!({})),
+        })
+    } else {
+        json!({
+            "behavior": "deny",
+            "message": message.unwrap_or("Denied by the user."),
+        })
+    };
     json!({
         "type": "control_response",
         "response": {
             "subtype": "success",
             "request_id": request_id,
-            "response": behavior,
+            "response": inner,
         },
     })
     .to_string()

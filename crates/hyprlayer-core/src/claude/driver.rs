@@ -13,13 +13,14 @@
 //! Turns and control responses are written through an mpsc queue so writes from
 //! different callers serialize onto one stdin without interleaving.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
-use serde_json::json;
+use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc};
@@ -70,6 +71,8 @@ pub struct SpawnConfig {
     pub max_budget_usd: Option<f64>,
     /// Override the model (else claude's default).
     pub model: Option<String>,
+    /// Reasoning effort level (`low|medium|high|xhigh|max`); else claude's default.
+    pub effort: Option<String>,
     /// Augmented PATH + any extra env for the child.
     pub env: Vec<(String, String)>,
 }
@@ -92,6 +95,9 @@ pub struct ClaudeDriver {
     /// Set when `kill` is called, so the waiter classifies the exit as an
     /// app-initiated `Killed` rather than an unexpected `Crashed`.
     killed: Arc<AtomicBool>,
+    /// Tool inputs from open `can_use_tool` requests, keyed by request id —
+    /// echoed back as `updatedInput` when allowing (claude's schema requires it).
+    pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
     /// Best-effort hard-kill hook (pid / process group).
     killer: Killer,
 }
@@ -110,14 +116,17 @@ impl ClaudeDriver {
             .arg("--verbose")
             .arg("--include-partial-messages")
             .args(["--permission-prompt-tool", "stdio"])
-            .args(["--permission-mode", config.permission_mode.as_flag()])
-            .args(["--session-id", &config.session_id]);
+            .args(["--permission-mode", config.permission_mode.as_flag()]);
 
+        // Fresh sessions pin our generated id; resuming continues an existing
+        // conversation by id (claude rejects --session-id together with --resume).
         if let Some(resume) = &config.resume {
             cmd.args(["--resume", resume]);
             if config.fork {
                 cmd.arg("--fork-session");
             }
+        } else {
+            cmd.args(["--session-id", &config.session_id]);
         }
         if !config.allowed_tools.is_empty() {
             cmd.args(["--allowedTools", &config.allowed_tools.join(" ")]);
@@ -133,6 +142,9 @@ impl ClaudeDriver {
         }
         if let Some(model) = &config.model {
             cmd.args(["--model", model]);
+        }
+        if let Some(effort) = &config.effort {
+            cmd.args(["--effort", effort]);
         }
 
         cmd.current_dir(&config.cwd)
@@ -178,6 +190,7 @@ impl ClaudeDriver {
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
         let killed = Arc::new(AtomicBool::new(false));
+        let pending_permissions = Arc::new(StdMutex::new(HashMap::<String, Value>::new()));
 
         // Writer task: drain the queue onto stdin, one line per message.
         tokio::spawn(write_loop(stdin, stdin_rx));
@@ -192,6 +205,7 @@ impl ClaudeDriver {
             events_tx.clone(),
             stderr_ring.clone(),
             killed.clone(),
+            pending_permissions.clone(),
         ));
 
         Ok((
@@ -202,6 +216,7 @@ impl ClaudeDriver {
                 control_seq: std::sync::atomic::AtomicU64::new(0),
                 stderr_ring,
                 killed,
+                pending_permissions,
                 killer: Killer { pid },
             },
             primary_rx,
@@ -220,15 +235,25 @@ impl ClaudeDriver {
         self.write_line(protocol::user_turn_json(&self.session_id, text))
     }
 
-    /// Answer a `PermissionAsk`.
+    /// Answer a `PermissionAsk`. On allow, claude's schema requires the tool's
+    /// `updatedInput` back — we echo the original input we cached from the
+    /// `can_use_tool` request (unchanged); on deny it requires a message.
     pub fn respond_permission(
         &self,
         request_id: &str,
         allow: bool,
         message: Option<&str>,
     ) -> Result<()> {
+        let updated_input = self
+            .pending_permissions
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(request_id));
         self.write_line(protocol::permission_response_json(
-            request_id, allow, message,
+            request_id,
+            allow,
+            updated_input,
+            message,
         ))
     }
 
@@ -317,6 +342,7 @@ async fn read_and_wait(
     events: broadcast::Sender<SessionEvent>,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
     killed: Arc<AtomicBool>,
+    pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
 ) {
     let mut saw_result = false;
     let mut saw_error_result = false;
@@ -326,9 +352,18 @@ async fn read_and_wait(
         match lines.next_line().await {
             Ok(Some(line)) => {
                 let parsed = protocol::parse_line(&line);
-                if let ParsedLine::Result { is_error, .. } = &parsed {
-                    saw_result = true;
-                    saw_error_result |= *is_error;
+                match &parsed {
+                    ParsedLine::Result { is_error, .. } => {
+                        saw_result = true;
+                        saw_error_result |= *is_error;
+                    }
+                    // Stash the tool input so an allow can echo it as updatedInput.
+                    ParsedLine::CanUseTool { request_id, input, .. } => {
+                        if let Ok(mut map) = pending_permissions.lock() {
+                            map.insert(request_id.clone(), input.clone());
+                        }
+                    }
+                    _ => {}
                 }
                 for event in parsed_to_events(parsed) {
                     let _ = events.send(event);
@@ -373,10 +408,32 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             claude_session_id: claude_session_id.unwrap_or_default(),
             model,
         }],
-        ParsedLine::PartialText { text } => vec![SessionEvent::PartialText { text }],
-        ParsedLine::Assistant { blocks } | ParsedLine::User { blocks } => {
-            blocks.into_iter().filter_map(block_to_event).collect()
+        ParsedLine::PartialText { text, parent_id } => {
+            vec![SessionEvent::PartialText { text, parent_id }]
         }
+        ParsedLine::Assistant {
+            blocks,
+            context_tokens,
+            parent_id,
+        } => {
+            // A live usage ping (main thread only — subagent usage is separate
+            // and shouldn't move the session's context meter).
+            let mut events: Vec<SessionEvent> = context_tokens
+                .filter(|_| parent_id.is_none())
+                .map(|t| SessionEvent::Usage { context_tokens: t })
+                .into_iter()
+                .collect();
+            events.extend(
+                blocks
+                    .into_iter()
+                    .filter_map(|b| block_to_event(b, parent_id.as_deref())),
+            );
+            events
+        }
+        ParsedLine::User { blocks, parent_id } => blocks
+            .into_iter()
+            .filter_map(|b| block_to_event(b, parent_id.as_deref()))
+            .collect(),
         ParsedLine::CanUseTool {
             request_id,
             tool_name,
@@ -389,10 +446,12 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
         ParsedLine::Result {
             total_cost_usd,
             num_turns,
+            context_tokens,
             ..
         } => vec![SessionEvent::TurnDone {
             cost_usd: total_cost_usd,
             num_turns,
+            context_tokens,
         }],
         ParsedLine::Unknown { raw } => vec![SessionEvent::ProtocolError {
             detail: "unrecognized stream-json line".into(),
@@ -402,14 +461,16 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
     }
 }
 
-fn block_to_event(block: Block) -> Option<SessionEvent> {
+fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<SessionEvent> {
+    let parent_id = parent_id.map(str::to_string);
     match block {
-        Block::Text { text } => Some(SessionEvent::AssistantText { text }),
-        Block::Thinking { text } => Some(SessionEvent::Thinking { text }),
+        Block::Text { text } => Some(SessionEvent::AssistantText { text, parent_id }),
+        Block::Thinking { text } => Some(SessionEvent::Thinking { text, parent_id }),
         Block::ToolUse { id, name, input } => Some(SessionEvent::ToolUse {
             id,
             name,
             input: input.to_string(),
+            parent_id,
         }),
         Block::ToolResult {
             tool_use_id,
@@ -419,6 +480,7 @@ fn block_to_event(block: Block) -> Option<SessionEvent> {
             tool_use_id,
             content,
             is_error,
+            parent_id,
         }),
         Block::Other { .. } => None,
     }

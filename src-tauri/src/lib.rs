@@ -46,6 +46,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::reprovision_workstream,
             commands::workstreams::worktree_diff,
             commands::sessions::start_stage_session,
+            commands::sessions::resume_session,
             commands::sessions::send_user_message,
             commands::sessions::respond_permission,
             commands::sessions::interrupt_session,

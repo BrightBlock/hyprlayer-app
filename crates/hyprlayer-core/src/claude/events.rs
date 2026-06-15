@@ -40,22 +40,34 @@ pub enum SessionEvent {
     },
     /// Streaming text delta (live typing). Coalesced into `AssistantText` on
     /// turn completion — the UI shows partials, then replaces with the final.
-    PartialText { text: String },
+    PartialText {
+        text: String,
+        parent_id: Option<String>,
+    },
     /// A completed assistant text block.
-    AssistantText { text: String },
+    AssistantText {
+        text: String,
+        parent_id: Option<String>,
+    },
     /// A completed thinking block (shown collapsed).
-    Thinking { text: String },
-    /// The agent invoked a tool. `input` is compact JSON.
+    Thinking {
+        text: String,
+        parent_id: Option<String>,
+    },
+    /// The agent invoked a tool. `input` is compact JSON. `parent_id` is the
+    /// `Task` tool-use id when this runs inside a subagent (else null).
     ToolUse {
         id: String,
         name: String,
         input: String,
+        parent_id: Option<String>,
     },
     /// Result of a tool the agent ran.
     ToolResult {
         tool_use_id: String,
         content: String,
         is_error: bool,
+        parent_id: Option<String>,
     },
     /// Permission prompt — the UI renders an Allow/Deny card; reply via the
     /// driver's `respond_permission` with this `request_id`. `input` is compact
@@ -65,10 +77,16 @@ pub enum SessionEvent {
         tool_name: String,
         input: String,
     },
-    /// A turn finished; carries cumulative cost so far.
+    /// A live context-window reading (input tokens in context), emitted per
+    /// assistant message so the meter updates DURING a multi-tool turn — not
+    /// only at `TurnDone`. Transient: not persisted to the session log.
+    Usage { context_tokens: u32 },
+    /// A turn finished; carries cumulative cost so far and the context-window
+    /// fill (input tokens in context for the turn) for the UI's context meter.
     TurnDone {
         cost_usd: Option<f64>,
         num_turns: Option<u32>,
+        context_tokens: Option<u32>,
     },
     /// An unparseable / unknown stdout line — surfaced, never fatal.
     ProtocolError { detail: String, raw: String },

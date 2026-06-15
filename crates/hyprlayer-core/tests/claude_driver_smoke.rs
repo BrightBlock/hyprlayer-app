@@ -27,6 +27,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         fork: false,
         max_budget_usd: Some(1.0),
         model: None,
+        effort: None,
         env: std::env::vars().collect(),
     })
     .expect("spawn claude");
@@ -49,8 +50,8 @@ async fn drives_a_real_no_tool_turn_to_completion() {
                 got_init = true;
                 println!("init: model={model:?}");
             }
-            Ok(Ok(SessionEvent::AssistantText { text: t })) => text.push_str(&t),
-            Ok(Ok(SessionEvent::PartialText { text: t })) => print!("{t}"),
+            Ok(Ok(SessionEvent::AssistantText { text: t, .. })) => text.push_str(&t),
+            Ok(Ok(SessionEvent::PartialText { text: t, .. })) => print!("{t}"),
             Ok(Ok(SessionEvent::TurnDone { cost_usd, .. })) => {
                 println!("\nturn done: cost={cost_usd:?}");
                 turn_done = true;

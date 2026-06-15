@@ -18,12 +18,17 @@
  * (the common zustand pattern for side-effecting async actions).
  */
 
+import { useMemo } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { create } from "zustand";
+import { useShallow } from "zustand/shallow";
 
 import { commands, type Session, type SessionEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { queryClient } from "../../lib/queryClient";
+import { docFromTool, docTitle, type DocKind } from "./toolDisplay";
+import { composeStagePrompt } from "./stages";
+import { openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
 import {
   addUserMessage,
   initialSessionView,
@@ -39,6 +44,9 @@ export type SessionEntry = SessionView & {
   stage: string;
   /** Tool names the user chose to auto-approve for the rest of this session. */
   autoAllow: string[];
+  /** Whether a live claude process is attached. False for a session restored
+   *  from the log after a restart — it resumes on the next message. */
+  live: boolean;
 };
 
 type State = { sessions: Record<string, SessionEntry> };
@@ -75,6 +83,8 @@ function dispatch(sessionId: string, event: SessionEvent): void {
   }
   if (event.kind === "exited") {
     channels.delete(sessionId);
+    const latest = entryOf(sessionId);
+    if (latest) setEntry(sessionId, { ...latest, live: false });
     // Ahead/behind and link status may have changed (commits, pushes).
     void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
   }
@@ -89,6 +99,10 @@ export async function startSession(args: {
   stage: string;
   input: string;
   attachedDocs: string[];
+  /** `--model` value, or null/undefined for claude's default. */
+  model?: string | null;
+  /** `--effort` level, or null/undefined for claude's default. */
+  effort?: string | null;
 }): Promise<Session> {
   const buffer: SessionEvent[] = [];
   let boundId: string | null = null;
@@ -99,7 +113,15 @@ export async function startSession(args: {
   };
 
   const session = await unwrap(
-    commands.startStageSession(args.workstreamId, args.stage, args.input, args.attachedDocs, channel),
+    commands.startStageSession(
+      args.workstreamId,
+      args.stage,
+      args.input,
+      args.attachedDocs,
+      args.model ?? null,
+      args.effort ?? null,
+      channel,
+    ),
   );
 
   // Synchronous from here: no `await`, so no buffered onmessage can interleave.
@@ -108,12 +130,19 @@ export async function startSession(args: {
 
   let view = initialSessionView("starting");
   view = { ...view, model: session.model, claudeSessionId: session.claudeSessionId };
-  view = addUserMessage(view, args.input, args.stage);
+  // Echo the composed prompt (skill command + input + docs), matching what the
+  // backend actually sends to claude — not just the raw input.
+  view = addUserMessage(
+    view,
+    composeStagePrompt(args.stage, args.input, args.attachedDocs),
+    args.stage,
+  );
   setEntry(session.id, {
     ...view,
     workstreamId: args.workstreamId,
     stage: args.stage,
     autoAllow: [],
+    live: true,
   });
 
   for (const event of buffer) dispatch(session.id, event);
@@ -121,11 +150,49 @@ export async function startSession(args: {
   return session;
 }
 
-/** Send a follow-up turn to a live session. */
+/**
+ * Re-attach a live claude process to a restored (detached) session via
+ * `--resume`, so the conversation continues after an app restart. Keeps the
+ * existing transcript; new events append. No-op if already live.
+ */
+export async function resumeSession(sessionId: string): Promise<void> {
+  const current = entryOf(sessionId);
+  if (!current || channels.has(sessionId)) return;
+
+  const buffer: SessionEvent[] = [];
+  let bound = false;
+  const channel = new Channel<SessionEvent>();
+  channel.onmessage = (event) => {
+    if (bound) dispatch(sessionId, event);
+    else buffer.push(event);
+  };
+  channels.set(sessionId, channel);
+  setEntry(sessionId, { ...current, live: true, state: "starting" });
+
+  try {
+    // Resume with claude's original session settings (model/effort null).
+    await unwrap(commands.resumeSession(sessionId, null, null, channel));
+  } catch (e) {
+    channels.delete(sessionId);
+    const latest = entryOf(sessionId);
+    if (latest) setEntry(sessionId, { ...latest, live: false, state: "idle" });
+    throw e;
+  }
+
+  bound = true;
+  for (const event of buffer) dispatch(sessionId, event);
+  buffer.length = 0;
+}
+
+/**
+ * Send a follow-up turn. If the session was restored from the log and isn't
+ * live (post-restart), transparently resume it first, then send.
+ */
 export async function sendMessage(sessionId: string, text: string): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
   setEntry(sessionId, { ...current, ...addUserMessage(current, text, null) });
+  if (!channels.has(sessionId)) await resumeSession(sessionId);
   await unwrap(commands.sendUserMessage(sessionId, text));
 }
 
@@ -164,9 +231,46 @@ export async function interruptSession(sessionId: string): Promise<void> {
   await unwrap(commands.interruptSession(sessionId));
 }
 
-/** Hard-stop the session (kills the process tree). */
+/** Hard-stop the session (kills the process tree). A detached (restored, not
+ *  live) session has no process — just mark it ended locally. */
 export async function killSession(sessionId: string): Promise<void> {
+  if (!channels.has(sessionId)) {
+    const current = entryOf(sessionId);
+    if (current) {
+      setEntry(sessionId, {
+        ...current,
+        ...reduceEvent(current, { kind: "exited", outcome: "killed", code: null, stderrTail: "" }),
+        live: false,
+      });
+    }
+    return;
+  }
   await unwrap(commands.killSession(sessionId));
+}
+
+/**
+ * Ship a workstream from the header action (rather than a chat mode): start a
+ * ship-stage session — commit, push, open a PR — in a dedicated, reusable
+ * "Ship" tab and select it. If a ship session is already running for this
+ * workstream, just focus its tab instead of spawning a second one.
+ */
+export async function shipWorkstream(workstreamId: string): Promise<void> {
+  const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
+  const shipTab = tabs?.shells.find((s) => s.mode === "ship");
+  if (shipTab?.sessionId) {
+    const entry = entryOf(shipTab.sessionId);
+    if (entry && !isTerminal(entry.state)) {
+      openShipTab(workstreamId, shipTab.sessionId); // re-select the live ship tab
+      return;
+    }
+  }
+  const session = await startSession({
+    workstreamId,
+    stage: "ship",
+    input: "",
+    attachedDocs: [],
+  });
+  openShipTab(workstreamId, session.id);
 }
 
 /**
@@ -175,10 +279,11 @@ export async function killSession(sessionId: string): Promise<void> {
  * tab binding survives in localStorage; the in-memory store does not).
  *
  * The claude child does not outlive the app (`kill_on_drop`), so a session we
- * don't already hold live is, by definition, historical: we replay the stored
- * events and force a terminal state if the log didn't already end on one (the
- * app was quit mid-session). No-op if we already hold the transcript or a live
- * channel, so this never duplicates or clobbers a running session.
+ * don't already hold live is detached. If its log already ended terminally
+ * (completed/crashed/killed) we keep it terminal; otherwise it was just left
+ * mid-conversation — we mark it `idle` and `live: false`, so the next message
+ * transparently resumes it (`--resume`) rather than forcing a new session. A
+ * no-op if we already hold the transcript or a live channel.
  */
 export async function restoreSessionIfNeeded(
   sessionId: string,
@@ -200,11 +305,9 @@ export async function restoreSessionIfNeeded(
         // A single corrupt row shouldn't sink the whole transcript.
       }
     }
-    if (!isTerminal(view.state)) {
-      // Process is gone (app was restarted) — close the session out.
-      view = reduceEvent(view, { kind: "exited", outcome: "killed", code: null, stderrTail: "" });
-    }
-    setEntry(sessionId, { ...view, workstreamId, stage, autoAllow: [] });
+    // Left mid-conversation (not a real terminal exit) → resumable, not ended.
+    if (!isTerminal(view.state)) view = { ...view, state: "idle", streaming: false };
+    setEntry(sessionId, { ...view, workstreamId, stage, autoAllow: [], live: false });
   } catch (error) {
     console.error(`failed to restore session ${sessionId}`, error);
   } finally {
@@ -221,4 +324,45 @@ export function transcriptToText(sessionId: string): string {
 /** Subscribe a component to one session's live state. */
 export function useSession(sessionId: string | undefined): SessionEntry | undefined {
   return useSessionStore((s) => (sessionId ? s.sessions[sessionId] : undefined));
+}
+
+export type CreatedDoc = { path: string; kind: DocKind; title: string };
+
+/**
+ * Research/plan docs the agent created across all of a workstream's sessions,
+ * newest last, deduped by path — derived from `Write`/`Edit` tool calls. Used to
+ * surface docs for in-app review without leaving the project.
+ */
+export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
+  // Select a flat list of "kind\tpath" keys with shallow equality so streaming
+  // events don't re-render this unless the set of docs actually changes.
+  const keys = useSessionStore(
+    useShallow((s) => {
+      if (!workstreamId) return [] as string[];
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const entry of Object.values(s.sessions)) {
+        if (entry.workstreamId !== workstreamId) continue;
+        for (const item of entry.items) {
+          if (item.kind !== "tool") continue;
+          const doc = docFromTool(item.name, item.input);
+          if (doc && !seen.has(doc.path)) {
+            seen.add(doc.path);
+            out.push(`${doc.kind}\t${doc.path}`);
+          }
+        }
+      }
+      return out;
+    }),
+  );
+  return useMemo(
+    () =>
+      keys.map((k) => {
+        const tab = k.indexOf("\t");
+        const kind = k.slice(0, tab) as DocKind;
+        const path = k.slice(tab + 1);
+        return { kind, path, title: docTitle(path) };
+      }),
+    [keys],
+  );
 }

@@ -132,24 +132,37 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
     }
 }
 
-/// Compose the first prompt for a stage: the matching skill invocation plus the
-/// user's input, with any attached context docs listed for the skill to pick up
-/// (e.g. `/create_plan` consuming the research doc produced by `/research_codebase`).
-pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> String {
-    let input = input.trim();
-    let skill = match stage {
-        Stage::General => return input.to_string(),
-        Stage::Research => "/research_codebase",
-        Stage::Plan => "/create_plan",
-        Stage::Implement => "/implement_plan",
-        Stage::Validate => "/validate_plan",
-        Stage::Ship => "/commit",
-    };
+/// The Ship directive: commit, push, and open a PR. Ship has no single skill,
+/// so it sends a plain instruction (the policy pre-approves push + `gh pr`).
+/// Kept byte-identical to the frontend `SHIP_PROMPT` (src/features/session/stages.ts)
+/// so the optimistic transcript echo matches what claude receives.
+pub const SHIP_PROMPT: &str = "Commit all changes in this worktree, push the branch to its remote, then open a \
+pull request against the default branch with a clear title and a summary of what changed.";
 
-    let mut prompt = if input.is_empty() {
+fn skill_prompt(skill: &str, input: &str) -> String {
+    if input.is_empty() {
         skill.to_string()
     } else {
         format!("{skill} {input}")
+    }
+}
+
+/// Compose the first prompt for a stage: the matching skill invocation plus the
+/// user's input, with any attached context docs listed for the skill to pick up
+/// (e.g. `/create_plan` consuming the research doc produced by `/research_codebase`).
+/// General is pure passthrough (plain chat); Ship sends the [`SHIP_PROMPT`]
+/// directive rather than a skill.
+pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> String {
+    let input = input.trim();
+    let mut prompt = match stage {
+        // Plain chat: verbatim, no skill and no doc list appended.
+        Stage::General => return input.to_string(),
+        Stage::Research => skill_prompt("/research_codebase", input),
+        Stage::Plan => skill_prompt("/create_plan", input),
+        Stage::Implement => skill_prompt("/implement_plan", input),
+        Stage::Validate => skill_prompt("/validate_plan", input),
+        Stage::Ship if input.is_empty() => SHIP_PROMPT.to_string(),
+        Stage::Ship => format!("{SHIP_PROMPT}\n\n{input}"),
     };
     if !attached_docs.is_empty() {
         prompt.push_str("\n\nRelevant documents:");
@@ -176,6 +189,11 @@ mod tests {
     #[test]
     fn general_passes_input_through_verbatim() {
         assert_eq!(compose_prompt(Stage::General, "  hello  ", &[]), "hello");
+        // Plain chat does not append a doc list, even when docs are attached.
+        assert_eq!(
+            compose_prompt(Stage::General, "hello", &["a.md".into()]),
+            "hello"
+        );
     }
 
     #[test]
@@ -204,6 +222,19 @@ mod tests {
             compose_prompt(Stage::Research, "", &[]),
             "/research_codebase"
         );
+    }
+
+    #[test]
+    fn ship_sends_the_directive_not_a_skill() {
+        // Button-driven ship has no input: the bare directive.
+        assert_eq!(compose_prompt(Stage::Ship, "", &[]), SHIP_PROMPT);
+        // Extra context is appended below the directive.
+        assert_eq!(
+            compose_prompt(Stage::Ship, "skip the changelog", &[]),
+            format!("{SHIP_PROMPT}\n\nskip the changelog"),
+        );
+        // It does not invoke /commit as a slash-command.
+        assert!(!compose_prompt(Stage::Ship, "", &[]).starts_with('/'));
     }
 
     #[test]
