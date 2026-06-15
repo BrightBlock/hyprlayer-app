@@ -25,43 +25,43 @@ function kinds(view: SessionView): TranscriptItem["kind"][] {
 describe("text coalescing", () => {
   it("accumulates partials into one streaming block, then the final replaces it", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "partialText", text: "Hel" });
-    view = reduceEvent(view, { kind: "partialText", text: "lo wor" });
+    view = reduceEvent(view, { kind: "partialText", text: "Hel", parentId: null });
+    view = reduceEvent(view, { kind: "partialText", text: "lo wor", parentId: null });
     expect(view.items).toHaveLength(1);
     expect(view.items[0]).toMatchObject({ kind: "assistant", text: "Hello wor", streaming: true });
 
-    view = reduceEvent(view, { kind: "assistantText", text: "Hello world." });
+    view = reduceEvent(view, { kind: "assistantText", text: "Hello world.", parentId: null });
     expect(view.items).toHaveLength(1);
     expect(view.items[0]).toMatchObject({ kind: "assistant", text: "Hello world.", streaming: false });
   });
 
   it("creates a finalized block when assistantText arrives with no partials", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "assistantText", text: "Direct." });
+    view = reduceEvent(view, { kind: "assistantText", text: "Direct.", parentId: null });
     expect(view.items).toHaveLength(1);
     expect(view.items[0]).toMatchObject({ kind: "assistant", text: "Direct.", streaming: false });
   });
 
   it("keeps accumulated text when the final block is empty", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "partialText", text: "streamed" });
-    view = reduceEvent(view, { kind: "assistantText", text: "" });
+    view = reduceEvent(view, { kind: "partialText", text: "streamed", parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: "", parentId: null });
     expect(view.items[0]).toMatchObject({ text: "streamed", streaming: false });
   });
 
   it("ignores empty finals and empty partials with nothing open", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "assistantText", text: "" });
-    view = reduceEvent(view, { kind: "partialText", text: "" });
+    view = reduceEvent(view, { kind: "assistantText", text: "", parentId: null });
+    view = reduceEvent(view, { kind: "partialText", text: "", parentId: null });
     expect(view.items).toHaveLength(0);
   });
 
   it("starts a fresh block after a tool interrupts the text", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "partialText", text: "first" });
-    view = reduceEvent(view, { kind: "assistantText", text: "first" });
-    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Read", input: "{}" });
-    view = reduceEvent(view, { kind: "partialText", text: "second" });
+    view = reduceEvent(view, { kind: "partialText", text: "first", parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: "first", parentId: null });
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Read", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "partialText", text: "second", parentId: null });
     expect(kinds(view)).toEqual(["assistant", "tool", "assistant"]);
     expect(view.items[2]).toMatchObject({ text: "second", streaming: true });
   });
@@ -70,10 +70,10 @@ describe("text coalescing", () => {
 describe("tool blocks", () => {
   it("pairs a tool_result with its tool_use by id", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "toolUse", id: "abc", name: "Bash", input: '{"command":"ls"}' });
+    view = reduceEvent(view, { kind: "toolUse", id: "abc", name: "Bash", input: '{"command":"ls"}', parentId: null });
     expect(view.items[0]).toMatchObject({ kind: "tool", toolUseId: "abc", result: null });
 
-    view = reduceEvent(view, { kind: "toolResult", toolUseId: "abc", content: "file.txt", isError: false });
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "abc", content: "file.txt", isError: false, parentId: null });
     expect(view.items).toHaveLength(1);
     expect(view.items[0]).toMatchObject({
       kind: "tool",
@@ -83,16 +83,16 @@ describe("tool blocks", () => {
 
   it("surfaces an orphan tool_result as its own block", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "toolResult", toolUseId: "ghost", content: "x", isError: true });
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "ghost", content: "x", isError: true, parentId: null });
     expect(view.items).toHaveLength(1);
     expect(view.items[0]).toMatchObject({ kind: "tool", name: "result", result: { isError: true } });
   });
 
   it("matches the right tool when several are open", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Read", input: "{}" });
-    view = reduceEvent(view, { kind: "toolUse", id: "t2", name: "Grep", input: "{}" });
-    view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "r1", isError: false });
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Read", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "toolUse", id: "t2", name: "Grep", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "r1", isError: false, parentId: null });
     const t1 = view.items.find((i) => i.kind === "tool" && i.toolUseId === "t1");
     const t2 = view.items.find((i) => i.kind === "tool" && i.toolUseId === "t2");
     expect(t1).toMatchObject({ result: { content: "r1" } });
@@ -103,10 +103,73 @@ describe("tool blocks", () => {
 describe("thinking", () => {
   it("adds a thinking block and closes any open assistant text", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "partialText", text: "hmm" });
-    view = reduceEvent(view, { kind: "thinking", text: "reasoning" });
+    view = reduceEvent(view, { kind: "partialText", text: "hmm", parentId: null });
+    view = reduceEvent(view, { kind: "thinking", text: "reasoning", parentId: null });
     expect(kinds(view)).toEqual(["assistant", "thinking"]);
     expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: false });
+  });
+});
+
+describe("subagent nesting", () => {
+  it("does not duplicate the main block when subagent steps interleave its stream", () => {
+    let view = initialSessionView("running");
+    // Main agent starts streaming a progress message…
+    view = reduceEvent(view, { kind: "partialText", text: "7 agents running. ", parentId: null });
+    // …a parallel subagent emits a step, landing after the open main block…
+    view = reduceEvent(view, { kind: "toolUse", id: "s1", name: "Read", input: "{}", parentId: "task1" });
+    // …the main agent keeps streaming, then finalizes.
+    view = reduceEvent(view, { kind: "partialText", text: "Waiting.", parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: "7 agents running. Waiting.", parentId: null });
+
+    const mainAssistants = view.items.filter(
+      (i) => i.kind === "assistant" && !("parentId" in i && i.parentId),
+    );
+    expect(mainAssistants).toHaveLength(1);
+    expect(mainAssistants[0]).toMatchObject({ text: "7 agents running. Waiting.", streaming: false });
+  });
+
+  it("tags subagent items with parentId and suppresses their partials", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "task1",
+      name: "Task",
+      input: '{"description":"research"}',
+      parentId: null,
+    });
+    // Subagent activity, all parented to the Task.
+    view = reduceEvent(view, { kind: "partialText", text: "streaming…", parentId: "task1" });
+    view = reduceEvent(view, { kind: "assistantText", text: "sub answer", parentId: "task1" });
+    view = reduceEvent(view, { kind: "toolUse", id: "s1", name: "Read", input: "{}", parentId: "task1" });
+    view = reduceEvent(view, {
+      kind: "toolResult",
+      toolUseId: "s1",
+      content: "data",
+      isError: false,
+      parentId: "task1",
+    });
+    // The Task's own result comes back on the main thread.
+    view = reduceEvent(view, {
+      kind: "toolResult",
+      toolUseId: "task1",
+      content: "report",
+      isError: false,
+      parentId: null,
+    });
+
+    const task = view.items.find((i) => i.kind === "tool" && i.toolUseId === "task1");
+    expect(task).toMatchObject({ result: { content: "report" }, parentId: null });
+    // Subagent text + tool are tagged with the parent and stay out of the main flow.
+    const subItems = view.items.filter(
+      (i): i is Extract<TranscriptItem, { parentId?: string | null }> =>
+        "parentId" in i && i.parentId === "task1",
+    );
+    expect(subItems.map((i) => i.kind)).toEqual(["assistant", "tool"]);
+    // The suppressed subagent partial created no main-thread assistant block.
+    const mainAssistants = view.items.filter(
+      (i) => i.kind === "assistant" && !("parentId" in i && i.parentId),
+    );
+    expect(mainAssistants).toHaveLength(0);
   });
 });
 
@@ -154,12 +217,18 @@ describe("permission flow", () => {
 describe("turn + exit lifecycle", () => {
   it("turnDone closes streaming and records cumulative cost/turns", () => {
     let view = initialSessionView("running");
-    view = reduceEvent(view, { kind: "partialText", text: "answer" });
-    view = reduceEvent(view, { kind: "turnDone", costUsd: 0.0123, numTurns: 2 });
+    view = reduceEvent(view, { kind: "partialText", text: "answer", parentId: null });
+    view = reduceEvent(view, {
+      kind: "turnDone",
+      costUsd: 0.0123,
+      numTurns: 2,
+      contextTokens: 24130,
+    });
     expect(view.streaming).toBe(false);
     expect(view.state).toBe("running");
     expect(view.costUsd).toBeCloseTo(0.0123);
     expect(view.numTurns).toBe(2);
+    expect(view.contextTokens).toBe(24130);
     expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: false });
   });
 
@@ -193,13 +262,13 @@ describe("replay determinism", () => {
   it("rebuilds the same transcript from a recorded stream", () => {
     const events: SessionEvent[] = [
       { kind: "init", claudeSessionId: "sess-x", model: "claude-opus-4-8" },
-      { kind: "partialText", text: "Look" },
-      { kind: "partialText", text: "ing…" },
-      { kind: "assistantText", text: "Looking…" },
-      { kind: "toolUse", id: "t1", name: "Bash", input: '{"command":"ls"}' },
-      { kind: "toolResult", toolUseId: "t1", content: "a.ts", isError: false },
-      { kind: "assistantText", text: "Done." },
-      { kind: "turnDone", costUsd: 0.02, numTurns: 1 },
+      { kind: "partialText", text: "Look", parentId: null },
+      { kind: "partialText", text: "ing…", parentId: null },
+      { kind: "assistantText", text: "Looking…", parentId: null },
+      { kind: "toolUse", id: "t1", name: "Bash", input: '{"command":"ls"}', parentId: null },
+      { kind: "toolResult", toolUseId: "t1", content: "a.ts", isError: false, parentId: null },
+      { kind: "assistantText", text: "Done.", parentId: null },
+      { kind: "turnDone", costUsd: 0.02, numTurns: 1, contextTokens: 12000 },
     ];
     const view = reduceAll(events, initialSessionView("starting"));
     expect(kinds(view)).toEqual(["assistant", "tool", "assistant"]);
@@ -215,7 +284,7 @@ describe("replay determinism", () => {
   it("does not mutate the input view", () => {
     const before = initialSessionView("running");
     const frozen = JSON.stringify(before);
-    reduceEvent(before, { kind: "partialText", text: "x" });
+    reduceEvent(before, { kind: "partialText", text: "x", parentId: null });
     expect(JSON.stringify(before)).toBe(frozen);
   });
 });
@@ -246,7 +315,7 @@ describe("derived helpers", () => {
   it("viewToText renders speakers and tools", () => {
     let view = initialSessionView("running");
     view = addUserMessage(view, "hi", null);
-    view = reduceEvent(view, { kind: "assistantText", text: "hello" });
+    view = reduceEvent(view, { kind: "assistantText", text: "hello", parentId: null });
     const text = viewToText(view);
     expect(text).toContain("## You");
     expect(text).toContain("## Assistant");

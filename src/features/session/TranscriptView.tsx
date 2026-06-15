@@ -5,7 +5,7 @@ import { ChevronRightIcon, ShieldIcon, WrenchIcon } from "../../components/icons
 import { MarkdownPreview } from "../library/MarkdownPreview";
 import { stageLabel } from "./stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
-import { prettyToolInput, toolSummary } from "./toolDisplay";
+import { prettyToolInput, resultPreview, toolSummary } from "./toolDisplay";
 
 export type PermissionHandlers = {
   onAllow: (requestId: string) => void;
@@ -120,16 +120,31 @@ function Collapsible({
 
 function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
+  // A one-line preview of the thought (Claude-Code / Conductor style), so a
+  // collapsed thinking block still hints at what the agent reasoned about.
+  const preview = text.split("\n").find((line) => line.trim() !== "") ?? "";
   return (
-    <Collapsible
-      open={open}
-      onToggle={() => setOpen((v) => !v)}
-      header={<span className="text-xs italic text-ink-dim">Thought for a moment</span>}
-    >
-      <div className="selectable whitespace-pre-wrap px-3 py-2 text-xs leading-relaxed text-ink-dim">
-        {text}
-      </div>
-    </Collapsible>
+    <div className="text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left text-ink-dim hover:bg-panel-2"
+      >
+        <span className="shrink-0 font-medium">Thinking</span>
+        {!open && preview && <span className="min-w-0 flex-1 truncate italic">{preview}</span>}
+        <ChevronRightIcon
+          size={11}
+          className={`ml-auto shrink-0 transition-transform ${
+            open ? "rotate-90 text-ink-dim" : "text-ink-dim/0 group-hover:text-ink-dim"
+          }`}
+        />
+      </button>
+      {open && (
+        <div className="selectable mt-1 whitespace-pre-wrap border-l border-edge pl-3 italic leading-relaxed text-ink-dim">
+          {text}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -152,6 +167,12 @@ function ToolStatusDot({
   return <span className="h-2 w-2 shrink-0 rounded-full bg-ink-dim/50" aria-hidden="true" />;
 }
 
+/**
+ * One tool call as a lightweight action row (not a boxed card) — the thing that
+ * keeps the transcript reading top-to-bottom like Claude Code: a compact
+ * `● Name  summary` line with a dimmed `⎿ result` line beneath it. Click to
+ * expand the full input/output.
+ */
 function ToolBlock({
   item,
   busy,
@@ -162,34 +183,44 @@ function ToolBlock({
   const [open, setOpen] = useState(false);
   const summary = toolSummary(item.name, item.input);
   const result = item.result;
+  const preview = result ? resultPreview(result.content, result.isError) : null;
 
   return (
-    <div className="overflow-hidden rounded-md border border-edge bg-panel-2">
+    <div className="text-xs">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-edge/40"
+        className="group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-panel-2"
       >
         <ToolStatusDot result={result} busy={busy} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
-        <span className="shrink-0 font-mono text-xs font-medium text-ink">{item.name}</span>
+        <span className="shrink-0 font-mono font-medium text-ink">{item.name}</span>
         {summary && (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-dim" title={summary}>
+          <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
             {summary}
           </span>
         )}
         <ChevronRightIcon
-          size={12}
-          className={`ml-auto shrink-0 text-ink-dim transition-transform ${open ? "rotate-90" : ""}`}
+          size={11}
+          className={`ml-auto shrink-0 text-ink-dim/0 transition-all group-hover:text-ink-dim ${open ? "rotate-90 text-ink-dim" : ""}`}
         />
       </button>
-      {!open && result && (
-        <div className="truncate border-t border-edge px-3 py-1.5 font-mono text-[11px] text-ink-dim">
-          {result.content.split("\n")[0] || (result.isError ? "(error)" : "(no output)")}
+
+      {!open && preview && (
+        <div className="flex gap-1.5 pl-[1.45rem] text-ink-dim">
+          <span aria-hidden="true" className="select-none text-ink-dim/50">
+            ⎿
+          </span>
+          <span
+            className={`truncate font-mono text-[11px] ${result?.isError ? "text-rose-300/90" : ""}`}
+          >
+            {preview}
+          </span>
         </div>
       )}
+
       {open && (
-        <div className="space-y-2 border-t border-edge p-2">
+        <div className="mt-1 space-y-2 border-l border-edge pl-3">
           {item.input && item.input !== "{}" && (
             <pre className="selectable max-h-48 overflow-auto rounded bg-surface/60 p-2 font-mono text-[11px] leading-relaxed text-ink-dim">
               {prettyToolInput(item.input)}
@@ -304,6 +335,252 @@ function ExitNotice({ item }: { item: Extract<TranscriptItem, { kind: "exit" }> 
 
 /* ------------------------------- transcript ------------------------------ */
 
+type ItemKind = TranscriptItem["kind"];
+
+/** "Quiet" items are the agent's working steps; they cluster/collapse together. */
+const isQuiet = (kind: ItemKind) => kind === "tool" || kind === "thinking";
+
+/**
+ * Vertical gap before a unit, by what it is and what precedes it — the rhythm
+ * that makes the stream read linearly: working steps pack tightly, while prose
+ * and new turns get room to breathe.
+ */
+function gapForKinds(prev: ItemKind | undefined, cur: ItemKind): string {
+  if (!prev) return "";
+  if (cur === "user") return "mt-5"; // a new turn
+  if (cur === "assistant") return "mt-4"; // a new block of prose
+  if (isQuiet(cur)) return isQuiet(prev) ? "mt-1" : "mt-2";
+  return "mt-3"; // permission / exit / error
+}
+
+/** A render unit: a standalone item, or a run of ≥2 working steps to collapse. */
+type Unit =
+  | { type: "single"; item: TranscriptItem }
+  | { type: "group"; id: string; items: TranscriptItem[] };
+
+const unitKind = (u: Unit): ItemKind => (u.type === "group" ? "tool" : u.item.kind);
+
+/** The subagent `Task` id an item belongs to (only assistant/thinking/tool carry it). */
+const parentIdOf = (it: TranscriptItem): string | null =>
+  it.kind === "tool" || it.kind === "assistant" || it.kind === "thinking"
+    ? (it.parentId ?? null)
+    : null;
+
+/** Fold a list into units: consecutive tool/thinking steps (≥2) become one
+ *  collapsible group; everything else stays inline. A tool with subagent
+ *  children stays standalone (`hasChildren`) so it renders as its own block. */
+function toUnits(items: TranscriptItem[], hasChildren: (it: TranscriptItem) => boolean): Unit[] {
+  const units: Unit[] = [];
+  let run: TranscriptItem[] = [];
+  const flush = () => {
+    if (run.length >= 2) units.push({ type: "group", id: run[0].id, items: run });
+    else if (run.length === 1) units.push({ type: "single", item: run[0] });
+    run = [];
+  };
+  for (const item of items) {
+    const groupable = isQuiet(item.kind) && !(item.kind === "tool" && hasChildren(item));
+    if (groupable) {
+      run.push(item);
+    } else {
+      flush();
+      units.push({ type: "single", item });
+    }
+  }
+  flush();
+  return units;
+}
+
+/**
+ * A collapsed run of working steps — "N tool calls", expand for the detail.
+ * Collapsed by default so a long research burst reads as one line; while the
+ * turn is live the header shows a spinner and the count grows.
+ */
+function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) {
+  const [open, setOpen] = useState(false);
+  const tools = items.filter((i) => i.kind === "tool");
+  const running = busy && tools.some((t) => t.kind === "tool" && t.result === null);
+  const label =
+    tools.length > 0
+      ? `${tools.length} tool call${tools.length === 1 ? "" : "s"}`
+      : `${items.length} steps`;
+  return (
+    <div className="text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left text-ink-dim hover:bg-panel-2"
+      >
+        {running ? <Spinner size={12} /> : <WrenchIcon className="shrink-0 text-ink-dim" />}
+        <span className="font-medium text-ink">{label}</span>
+        {running && <span className="text-ink-dim">· working…</span>}
+        <ChevronRightIcon
+          size={12}
+          className={`ml-auto shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="mt-1 space-y-1 border-l border-edge pl-3">
+          {items.map((item) => {
+            if (item.kind === "tool") return <ToolBlock key={item.id} item={item} busy={busy} />;
+            if (item.kind === "thinking") return <ThinkingBlock key={item.id} text={item.text} />;
+            return null;
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Render one standalone item (no grouping / nesting). */
+function renderSingle(item: TranscriptItem, busy: boolean, permission: PermissionHandlers) {
+  switch (item.kind) {
+    case "user":
+      return <UserMessage text={item.text} stage={item.stage} />;
+    case "assistant":
+      return <AssistantMessage text={item.text} streaming={item.streaming} />;
+    case "thinking":
+      return <ThinkingBlock text={item.text} />;
+    case "tool":
+      return <ToolBlock item={item} busy={busy} />;
+    case "permission":
+      return <PermissionCard item={item} handlers={permission} />;
+    case "error":
+      return <ProtocolErrorBlock detail={item.detail} raw={item.raw} />;
+    case "exit":
+      return <ExitNotice item={item} />;
+    default:
+      return null;
+  }
+}
+
+type ChildMap = Map<string, TranscriptItem[]>;
+
+/**
+ * A subagent (`Task`) and all of its work, collapsed by default — expand to see
+ * the nested transcript. Keeps subagent activity out of the main thread.
+ */
+function SubagentBlock({
+  item,
+  childItems,
+  childrenByParent,
+  busy,
+  permission,
+}: {
+  item: Extract<TranscriptItem, { kind: "tool" }>;
+  childItems: TranscriptItem[];
+  childrenByParent: ChildMap;
+  busy: boolean;
+  permission: PermissionHandlers;
+}) {
+  const [open, setOpen] = useState(false);
+  const summary = toolSummary(item.name, item.input);
+  const toolCount = childItems.filter((c) => c.kind === "tool").length;
+  const result = item.result;
+  const running = busy && result === null;
+  return (
+    <div className="text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-panel-2"
+      >
+        <ToolStatusDot result={result} busy={busy} />
+        <WrenchIcon className="shrink-0 text-ink-dim" />
+        <span className="shrink-0 font-mono font-medium text-ink">Subagent</span>
+        {summary && (
+          <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
+            {summary}
+          </span>
+        )}
+        {toolCount > 0 && (
+          <span className="ml-auto shrink-0 text-ink-dim">
+            {toolCount} tool{toolCount === 1 ? "" : "s"}
+            {running && " · working…"}
+          </span>
+        )}
+        <ChevronRightIcon
+          size={12}
+          className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="mt-1 space-y-2 border-l border-edge pl-3">
+          <ItemList
+            items={childItems}
+            childrenByParent={childrenByParent}
+            busy={busy}
+            permission={permission}
+          />
+          {result && (
+            <div>
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim/70">
+                Result
+              </div>
+              <pre
+                className={`selectable max-h-96 overflow-auto rounded p-2 font-mono text-[11px] leading-relaxed ${
+                  result.isError ? "bg-bad/10 text-rose-300" : "bg-surface/60 text-ink-dim"
+                }`}
+              >
+                {result.content || (result.isError ? "(error, no output)" : "(no output)")}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Render a list of items: groups working steps, nests subagents, spaces units. */
+function ItemList({
+  items,
+  childrenByParent,
+  busy,
+  permission,
+}: {
+  items: TranscriptItem[];
+  childrenByParent: ChildMap;
+  busy: boolean;
+  permission: PermissionHandlers;
+}) {
+  const hasChildren = (it: TranscriptItem) =>
+    it.kind === "tool" && childrenByParent.has(it.toolUseId);
+  const units = toUnits(items, hasChildren);
+  return (
+    <>
+      {units.map((unit, i) => {
+        const gap = gapForKinds(i > 0 ? unitKind(units[i - 1]) : undefined, unitKind(unit));
+        if (unit.type === "group") {
+          return (
+            <div key={`g:${unit.id}`} className={gap}>
+              <ToolGroup items={unit.items} busy={busy} />
+            </div>
+          );
+        }
+        const item = unit.item;
+        if (item.kind === "tool" && childrenByParent.has(item.toolUseId)) {
+          return (
+            <div key={item.id} className={gap}>
+              <SubagentBlock
+                item={item}
+                childItems={childrenByParent.get(item.toolUseId)!}
+                childrenByParent={childrenByParent}
+                busy={busy}
+                permission={permission}
+              />
+            </div>
+          );
+        }
+        return (
+          <div key={item.id} className={gap}>
+            {renderSingle(item, busy, permission)}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 type Props = {
   items: TranscriptItem[];
   /** A turn is in flight — drives the running-tool spinner. */
@@ -347,31 +624,29 @@ export const TranscriptView = memo(function TranscriptView({
     return () => cancelAnimationFrame(frame);
   }, [busy]);
 
+  // Subagent items nest under their `Task`; the main thread shows the rest.
+  const childrenByParent: ChildMap = new Map();
+  for (const item of items) {
+    const parent = parentIdOf(item);
+    if (parent) {
+      const arr = childrenByParent.get(parent);
+      if (arr) arr.push(item);
+      else childrenByParent.set(parent, [item]);
+    }
+  }
+  const topLevel = items.filter((item) => parentIdOf(item) === null);
+
   return (
     <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto p-5">
-      <div className="mx-auto max-w-3xl space-y-4">
-        {items.map((item) => {
-          switch (item.kind) {
-            case "user":
-              return <UserMessage key={item.id} text={item.text} stage={item.stage} />;
-            case "assistant":
-              return <AssistantMessage key={item.id} text={item.text} streaming={item.streaming} />;
-            case "thinking":
-              return <ThinkingBlock key={item.id} text={item.text} />;
-            case "tool":
-              return <ToolBlock key={item.id} item={item} busy={busy} />;
-            case "permission":
-              return <PermissionCard key={item.id} item={item} handlers={permission} />;
-            case "error":
-              return <ProtocolErrorBlock key={item.id} detail={item.detail} raw={item.raw} />;
-            case "exit":
-              return <ExitNotice key={item.id} item={item} />;
-            default:
-              return null;
-          }
-        })}
+      <div className="mx-auto w-4/5">
+        <ItemList
+          items={topLevel}
+          childrenByParent={childrenByParent}
+          busy={busy}
+          permission={permission}
+        />
         {connecting && (
-          <div className="flex items-center gap-2 text-sm text-ink-dim">
+          <div className="mt-3 flex items-center gap-2 text-sm text-ink-dim">
             <Spinner size={14} />
             Connecting to claude…
           </div>

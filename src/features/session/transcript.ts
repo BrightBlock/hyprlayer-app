@@ -26,18 +26,22 @@ export type SessionState =
 
 export type PermissionDecision = "allow" | "deny";
 
+/** Set on items produced inside a subagent (the `Task` tool-use id); the UI
+ *  nests them under that Task instead of inlining them in the main thread. */
+type Parented = { parentId?: string | null };
+
 export type TranscriptItem =
   | { kind: "user"; id: string; text: string; stage: string | null }
-  | { kind: "assistant"; id: string; text: string; streaming: boolean }
-  | { kind: "thinking"; id: string; text: string }
-  | {
+  | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
+  | ({ kind: "thinking"; id: string; text: string } & Parented)
+  | ({
       kind: "tool";
       id: string;
       toolUseId: string;
       name: string;
       input: string;
       result: { content: string; isError: boolean } | null;
-    }
+    } & Parented)
   | {
       kind: "permission";
       id: string;
@@ -64,6 +68,8 @@ export type SessionView = {
   streaming: boolean;
   costUsd: number | null;
   numTurns: number | null;
+  /** Input tokens in context as of the last finished turn (the meter's fill). */
+  contextTokens: number | null;
   model: string | null;
   claudeSessionId: string | null;
   /** The unanswered permission ask, if the session is parked on one. */
@@ -78,6 +84,7 @@ export function initialSessionView(state: SessionState = "idle"): SessionView {
     streaming: false,
     costUsd: null,
     numTurns: null,
+    contextTokens: null,
     model: null,
     claudeSessionId: null,
     pendingPermission: null,
@@ -104,15 +111,28 @@ export function isBusy(view: SessionView): boolean {
 
 /* ------------------------------- internals ------------------------------- */
 
-/** Mark the trailing still-streaming assistant block (if any) as finished. */
-function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
-  const last = items[items.length - 1];
-  if (last && last.kind === "assistant" && last.streaming) {
-    const copy = items.slice();
-    copy[copy.length - 1] = { ...last, streaming: false };
-    return copy;
+/**
+ * Index of the open main-thread streaming assistant block, or -1. Scans from
+ * the end (not just the last item) so it's still found when subagent steps were
+ * appended after it — the main agent streams progress text while parallel
+ * subagents run, interleaving their events with its partials.
+ */
+function openAssistantIndex(items: TranscriptItem[]): number {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "assistant" && it.streaming && !it.parentId) return i;
   }
-  return items;
+  return -1;
+}
+
+/** Mark the open streaming assistant block (if any) as finished. */
+function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
+  const idx = openAssistantIndex(items);
+  if (idx === -1) return items;
+  const block = items[idx] as Extract<TranscriptItem, { kind: "assistant" }>;
+  const copy = items.slice();
+  copy[idx] = { ...block, streaming: false };
+  return copy;
 }
 
 /* -------------------------------- reducer -------------------------------- */
@@ -129,11 +149,14 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
       };
 
     case "partialText": {
-      if (!event.text) return view;
-      const last = view.items[view.items.length - 1];
-      if (last && last.kind === "assistant" && last.streaming) {
+      // Subagent streaming is noise in the main thread; the completed subagent
+      // blocks get nested under the Task instead.
+      if (event.parentId || !event.text) return view;
+      const idx = openAssistantIndex(view.items);
+      if (idx !== -1) {
+        const block = view.items[idx] as Extract<TranscriptItem, { kind: "assistant" }>;
         const items = view.items.slice();
-        items[items.length - 1] = { ...last, text: last.text + event.text };
+        items[idx] = { ...block, text: block.text + event.text };
         return { ...view, items, streaming: true };
       }
       const id = `i${view.counter}`;
@@ -146,14 +169,29 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
     }
 
     case "assistantText": {
-      const last = view.items[view.items.length - 1];
-      if (last && last.kind === "assistant" && last.streaming) {
+      // Subagent text nests under its Task — append, never touch the main block.
+      if (event.parentId) {
+        if (!event.text.length) return view;
+        const id = `i${view.counter}`;
+        return {
+          ...view,
+          items: [
+            ...view.items,
+            { kind: "assistant", id, text: event.text, streaming: false, parentId: event.parentId },
+          ],
+          counter: view.counter + 1,
+          streaming: true,
+        };
+      }
+      const idx = openAssistantIndex(view.items);
+      if (idx !== -1) {
         // The completed block is authoritative; fall back to the streamed text
         // only if claude sent an empty final (it occasionally does).
+        const block = view.items[idx] as Extract<TranscriptItem, { kind: "assistant" }>;
         const items = view.items.slice();
-        items[items.length - 1] = {
-          ...last,
-          text: event.text.length ? event.text : last.text,
+        items[idx] = {
+          ...block,
+          text: event.text.length ? event.text : block.text,
           streaming: false,
         };
         return { ...view, items, streaming: true };
@@ -170,18 +208,19 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
 
     case "thinking": {
       if (!event.text.length) return view;
-      const items = closeOpenAssistant(view.items);
+      // Main-thread blocks close the open assistant; subagent ones just nest.
+      const items = event.parentId ? view.items : closeOpenAssistant(view.items);
       const id = `i${view.counter}`;
       return {
         ...view,
-        items: [...items, { kind: "thinking", id, text: event.text }],
+        items: [...items, { kind: "thinking", id, text: event.text, parentId: event.parentId }],
         counter: view.counter + 1,
         streaming: true,
       };
     }
 
     case "toolUse": {
-      const items = closeOpenAssistant(view.items);
+      const items = event.parentId ? view.items : closeOpenAssistant(view.items);
       const id = `i${view.counter}`;
       return {
         ...view,
@@ -194,6 +233,7 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
             name: event.name,
             input: event.input,
             result: null,
+            parentId: event.parentId,
           },
         ],
         counter: view.counter + 1,
@@ -224,6 +264,7 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
             name: "result",
             input: "",
             result: { content: event.content, isError: event.isError },
+            parentId: event.parentId,
           },
         ],
         counter: view.counter + 1,
@@ -258,6 +299,10 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
       };
     }
 
+    case "usage":
+      // A live context reading mid-turn — update the meter, touch nothing else.
+      return { ...view, contextTokens: event.contextTokens };
+
     case "turnDone":
       return {
         ...view,
@@ -266,6 +311,7 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
         streaming: false,
         costUsd: event.costUsd ?? view.costUsd,
         numTurns: event.numTurns ?? view.numTurns,
+        contextTokens: event.contextTokens ?? view.contextTokens,
       };
 
     case "exited": {
