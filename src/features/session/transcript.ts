@@ -103,10 +103,22 @@ export function isTerminal(state: SessionState): boolean {
   return TERMINAL.has(state);
 }
 
+/** True while any permission card is still unanswered. The turn is blocked on
+ *  the user, so the session counts as busy even if a stray `turnDone` (e.g. a
+ *  subagent finishing) tried to un-park it while sibling asks are outstanding. */
+export function hasPendingPermission(view: SessionView): boolean {
+  return view.items.some((it) => it.kind === "permission" && it.decision === null);
+}
+
 /** Whether the agent is actively working (drives spinners / disables Send). */
 export function isBusy(view: SessionView): boolean {
   if (isTerminal(view.state)) return false;
-  return view.state === "starting" || view.state === "awaiting_permission" || view.streaming;
+  return (
+    view.state === "starting" ||
+    view.state === "awaiting_permission" ||
+    view.streaming ||
+    hasPendingPermission(view)
+  );
 }
 
 /* ------------------------------- internals ------------------------------- */
@@ -311,16 +323,21 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
       // A live context reading mid-turn — update the meter, touch nothing else.
       return { ...view, contextTokens: event.contextTokens };
 
-    case "turnDone":
+    case "turnDone": {
+      // A turnDone can arrive (e.g. a subagent finishing) while the user still
+      // owes answers to outstanding permission asks — the real turn isn't done.
+      // Stay parked rather than dropping to "running" and looking idle.
+      const parked = hasPendingPermission(view);
       return {
         ...view,
         items: closeOpenAssistant(view.items),
-        state: isTerminal(view.state) ? view.state : "running",
+        state: isTerminal(view.state) ? view.state : parked ? "awaiting_permission" : "running",
         streaming: false,
         costUsd: event.costUsd ?? view.costUsd,
         numTurns: event.numTurns ?? view.numTurns,
         contextTokens: event.contextTokens ?? view.contextTokens,
       };
+    }
 
     case "exited":
       return {
@@ -382,12 +399,15 @@ export function resolvePermission(
       ? { ...item, decision }
       : item,
   );
+  // A subagent can have several asks open at once; only resume the turn once the
+  // last card is answered — until then the session is still parked.
+  const stillParked = items.some((it) => it.kind === "permission" && it.decision === null);
   const stillPending = view.pendingPermission?.requestId === requestId ? null : view.pendingPermission;
   return {
     ...view,
     items,
     pendingPermission: stillPending,
-    state: isTerminal(view.state) ? view.state : "running",
+    state: isTerminal(view.state) ? view.state : stillParked ? "awaiting_permission" : "running",
     streaming: true,
   };
 }

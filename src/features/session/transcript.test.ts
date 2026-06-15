@@ -4,6 +4,7 @@ import type { SessionEvent } from "../../lib/bindings";
 import {
   addUserMessage,
   describeState,
+  hasPendingPermission,
   initialSessionView,
   isBusy,
   isTerminal,
@@ -212,6 +213,34 @@ describe("permission flow", () => {
     view = resolvePermission(view, "req-1", "deny");
     expect(view.pendingPermission?.requestId).toBe("req-2");
   });
+
+  it("stays parked across parallel asks until the last is answered", () => {
+    // A subagent firing parallel Bash calls produces several open asks at once.
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-2", toolName: "Bash", input: "{}" });
+    expect(isBusy(view)).toBe(true);
+
+    view = resolvePermission(view, "req-1", "allow");
+    expect(view.state).toBe("awaiting_permission");
+    expect(hasPendingPermission(view)).toBe(true);
+    expect(isBusy(view)).toBe(true);
+
+    view = resolvePermission(view, "req-2", "allow");
+    expect(view.state).toBe("running");
+    expect(hasPendingPermission(view)).toBe(false);
+  });
+
+  it("a turnDone while an ask is open keeps the session parked, not idle", () => {
+    // Regression: a subagent finishing emitted turnDone and dropped the session
+    // to "running"/not-busy while permission cards were still unanswered, so the
+    // stop button vanished and the composer looked ready mid-block.
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null });
+    expect(view.state).toBe("awaiting_permission");
+    expect(isBusy(view)).toBe(true);
+  });
 });
 
 describe("turn + exit lifecycle", () => {
@@ -296,6 +325,15 @@ describe("derived helpers", () => {
     expect(isBusy({ ...initialSessionView("awaiting_permission") })).toBe(true);
     expect(isBusy({ ...initialSessionView("running"), streaming: false })).toBe(false);
     expect(isBusy({ ...initialSessionView("completed") })).toBe(false);
+  });
+
+  it("isBusy stays true while a permission is unanswered, even if state looks idle", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    // Force the not-busy shape a stray turnDone would have left behind.
+    view = { ...view, state: "running", streaming: false };
+    expect(hasPendingPermission(view)).toBe(true);
+    expect(isBusy(view)).toBe(true);
   });
 
   it("describeState refines running by streaming", () => {
