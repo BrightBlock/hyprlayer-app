@@ -159,7 +159,8 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
 /// so it sends a plain instruction (the policy pre-approves push + `gh pr`).
 /// Kept byte-identical to the frontend `SHIP_PROMPT` (src/features/session/stages.ts)
 /// so the optimistic transcript echo matches what claude receives.
-pub const SHIP_PROMPT: &str = "Commit all changes in this worktree, push the branch to its remote, then open a \
+pub const SHIP_PROMPT: &str =
+    "Commit all changes in this worktree, push the branch to its remote, then open a \
 pull request against the default branch with a clear title and a summary of what changed.";
 
 fn skill_prompt(skill: &str, input: &str) -> String {
@@ -183,7 +184,12 @@ pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> St
         Stage::Ship if input.is_empty() => SHIP_PROMPT.to_string(),
         Stage::Ship => format!("{SHIP_PROMPT}\n\n{input}"),
         // research/plan/implement/validate each invoke their skill.
-        _ => skill_prompt(stage.command().expect("non-ship/general stage has a command"), input),
+        _ => skill_prompt(
+            stage
+                .command()
+                .expect("non-ship/general stage has a command"),
+            input,
+        ),
     };
     if !attached_docs.is_empty() {
         prompt.push_str("\n\nRelevant documents:");

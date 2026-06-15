@@ -358,7 +358,9 @@ async fn read_and_wait(
                         saw_error_result |= *is_error;
                     }
                     // Stash the tool input so an allow can echo it as updatedInput.
-                    ParsedLine::CanUseTool { request_id, input, .. } => {
+                    ParsedLine::CanUseTool {
+                        request_id, input, ..
+                    } => {
                         if let Ok(mut map) = pending_permissions.lock() {
                             map.insert(request_id.clone(), input.clone());
                         }

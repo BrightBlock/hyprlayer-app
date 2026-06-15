@@ -132,8 +132,10 @@ fn parses_a_permission_request() {
 fn malformed_permission_request_is_unknown_not_an_empty_card() {
     // A can_use_tool we can't identify or reply to (no request_id / tool_name)
     // must surface as a protocol error, never an unanswerable permission card.
-    let no_id = r#"{"type":"control_request","request":{"subtype":"can_use_tool","tool_name":"Bash"}}"#;
-    let no_tool = r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool"}}"#;
+    let no_id =
+        r#"{"type":"control_request","request":{"subtype":"can_use_tool","tool_name":"Bash"}}"#;
+    let no_tool =
+        r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool"}}"#;
     for line in [no_id, no_tool] {
         assert!(
             matches!(parse_line(line), ParsedLine::Unknown { .. }),
@@ -178,7 +180,10 @@ fn outbound_shapes_are_well_formed() {
     ))
     .unwrap();
     assert_eq!(allow["response"]["response"]["behavior"], "allow");
-    assert_eq!(allow["response"]["response"]["updatedInput"]["command"], "ls");
+    assert_eq!(
+        allow["response"]["response"]["updatedInput"]["command"],
+        "ls"
+    );
     assert!(allow["response"]["response"].get("message").is_none());
 
     let interrupt: Value = serde_json::from_str(&control_request_json(

@@ -131,7 +131,10 @@ async fn launch_session(
     }
 
     let driver = Arc::new(driver);
-    state.sessions.insert(session.id.clone(), driver.clone()).await;
+    state
+        .sessions
+        .insert(session.id.clone(), driver.clone())
+        .await;
 
     spawn_forwarder(ForwarderCtx {
         app,
@@ -264,7 +267,10 @@ pub async fn resume_session(
     };
     {
         let id = session.id.clone();
-        let _ = db_task(state.db.clone(), move |db| db.set_session_state(&id, "running")).await;
+        let _ = db_task(state.db.clone(), move |db| {
+            db.set_session_state(&id, "running")
+        })
+        .await;
     }
 
     launch_session(

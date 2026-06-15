@@ -481,8 +481,9 @@ async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck
         } else {
             format!("missing: thoughts/{}", missing.join(", thoughts/"))
         }),
-        remedy: (!links_ok)
-            .then(|| "Run `hyprlayer thoughts init` in the repository to recreate the links.".into()),
+        remedy: (!links_ok).then(|| {
+            "Run `hyprlayer thoughts init` in the repository to recreate the links.".into()
+        }),
     });
 
     checks
