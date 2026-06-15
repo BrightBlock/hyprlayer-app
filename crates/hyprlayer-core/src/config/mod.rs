@@ -230,11 +230,12 @@ mod tests {
             BackendConfig::Obsidian(o) => {
                 assert_eq!(o.vault_path, "~/Obsidian/Vault");
                 assert_eq!(o.vault_subpath.as_deref(), Some("hyprlayer"));
+                // Path::ends_with matches whole components, so it's correct on
+                // Windows (backslashes) without a forward-slash string compare.
                 assert!(o
                     .content_root()
                     .unwrap()
-                    .to_string_lossy()
-                    .ends_with("Obsidian/Vault/hyprlayer"));
+                    .ends_with(Path::new("Obsidian/Vault/hyprlayer")));
             }
             other => panic!("expected obsidian backend, got {other:?}"),
         }

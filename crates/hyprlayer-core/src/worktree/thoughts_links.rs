@@ -107,15 +107,9 @@ pub fn check_thoughts(worktree: &Path, effective: &EffectiveConfig) -> LinkStatu
 
 fn link_dir(target: &Path, link: &Path) -> Result<()> {
     match std::fs::symlink_metadata(link) {
-        Ok(_) => {
-            // Replace whatever is there (broken link, stale dir) — the link
-            // location is app-owned inside an app-created worktree.
-            if link.is_dir() && link.symlink_metadata()?.file_type().is_dir() {
-                std::fs::remove_dir_all(link)?;
-            } else {
-                std::fs::remove_file(link)?;
-            }
-        }
+        // Replace whatever is there (broken link, stale dir) — the link
+        // location is app-owned inside an app-created worktree.
+        Ok(meta) => remove_existing_link(link, &meta)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.into()),
     }
@@ -138,6 +132,45 @@ fn link_dir(target: &Path, link: &Path) -> Result<()> {
             Err(e) => Err(e.into()),
         }
     }
+}
+
+/// Remove whatever occupies a link slot, without ever recursing into a link's
+/// target. Split by platform because a directory symlink/junction must be
+/// removed with `remove_dir` on Windows — `remove_file` there fails with
+/// "Access is denied", which broke idempotent re-provisioning.
+#[cfg(unix)]
+fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
+    // symlink_metadata: a symlink (even to a dir) is not is_dir(), so only a
+    // real directory takes the recursive branch.
+    if meta.is_dir() {
+        std::fs::remove_dir_all(link)?;
+    } else {
+        std::fs::remove_file(link)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+    let attrs = meta.file_attributes();
+    if attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        // A symlink or junction: drop only the link. Directory reparse points
+        // need remove_dir; file symlinks need remove_file.
+        if attrs & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            std::fs::remove_dir(link)?;
+        } else {
+            std::fs::remove_file(link)?;
+        }
+    } else if attrs & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        std::fs::remove_dir_all(link)?; // a real directory
+    } else {
+        std::fs::remove_file(link)?;
+    }
+    Ok(())
 }
 
 /// Add `repoMappings[worktree] = {repo, profile?}` (or plain string when no
