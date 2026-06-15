@@ -32,6 +32,7 @@ import { openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
 import {
   addUserMessage,
   initialSessionView,
+  isBusy,
   isTerminal,
   reduceEvent,
   resolvePermission,
@@ -241,6 +242,32 @@ export async function allowForSession(
 /** Gracefully interrupt the current turn (the session stays alive). */
 export async function interruptSession(sessionId: string): Promise<void> {
   await unwrap(commands.interruptSession(sessionId));
+}
+
+/** Grace period for a graceful interrupt to land before "stop" escalates to a
+ *  hard kill. A turn deep in a subagent may never ack the control-protocol
+ *  interrupt, so the stop button must always be able to actually stop. */
+const INTERRUPT_GRACE_MS = 4000;
+
+/**
+ * Stop the current turn for the composer's stop button. Tries a graceful
+ * interrupt first (keeps the process so the user can send another turn); if the
+ * turn is still running after a grace period — e.g. claude is wedged in a
+ * subagent and never acked — hard-kills the process tree. Sessions are
+ * resumable, so the kill is recoverable.
+ */
+export async function stopSession(sessionId: string): Promise<void> {
+  try {
+    await interruptSession(sessionId);
+  } catch {
+    // Interrupt couldn't be delivered (stdin already closed, etc.) — fall
+    // through to the kill below rather than leaving the turn wedged.
+  }
+  await new Promise((resolve) => setTimeout(resolve, INTERRUPT_GRACE_MS));
+  const current = entryOf(sessionId);
+  if (current && channels.has(sessionId) && isBusy(current)) {
+    await killSession(sessionId);
+  }
 }
 
 /** Hard-stop the session (kills the process tree). A detached (restored, not

@@ -20,11 +20,11 @@ import { formatCost, formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers } from "./TranscriptView";
 import {
   allowForSession,
-  interruptSession,
   respondPermission,
   restoreSessionIfNeeded,
   sendMessage,
   startSession,
+  stopSession,
   useSession,
 } from "./sessionStore";
 import { describeState, isBusy, isTerminal, type SessionState } from "./transcript";
@@ -448,8 +448,8 @@ export function SessionChat({
                     {busy && started ? (
                       <button
                         type="button"
-                        onClick={() => sid && void interruptSession(sid)}
-                        title="Interrupt the current turn"
+                        onClick={() => sid && void stopSession(sid)}
+                        title="Stop the current turn (interrupt, then force-stop if it doesn't respond)"
                         aria-label="Stop"
                         className="flex h-8 w-8 items-center justify-center rounded-md border border-bad/40 bg-bad/10 text-bad hover:bg-bad/20"
                       >
