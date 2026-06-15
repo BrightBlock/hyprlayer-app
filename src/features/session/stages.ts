@@ -20,7 +20,20 @@ export const STAGES = [
 
 export type StageKey = (typeof STAGES)[number]["key"];
 
+/** Stages a user can pick as an agent mode. Ship is excluded on purpose —
+ *  shipping is driven by the header "Ship" action (commit + push + PR), not
+ *  chosen as a chat mode. Ship stays in [`STAGES`] so its icon/colour/label
+ *  still resolve for the dedicated ship tab. */
+export const MODE_STAGES = STAGES.filter((s) => s.key !== "ship");
+
 const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
+
+/** The instruction the Ship action runs. Kept in lockstep with the backend
+ *  `compose_prompt` (crates/hyprlayer-core/src/pipeline.rs) so the optimistic
+ *  transcript echo matches what claude actually receives. */
+export const SHIP_PROMPT =
+  "Commit all changes in this worktree, push the branch to its remote, then open a " +
+  "pull request against the default branch with a clear title and a summary of what changed.";
 
 /** Backend stage is a plain string; anything unknown renders as general. */
 export function stageOf(view: WorkstreamView): StageKey {
@@ -34,6 +47,51 @@ export function asStageKey(stage: string): StageKey {
 
 export function stageLabel(stage: string): string {
   return STAGES.find((s) => s.key === asStageKey(stage))!.label;
+}
+
+/**
+ * The skill slash-command a stage invokes, or `null` for stages that send a
+ * plain prompt (general chat; ship sends a prose directive — see [`SHIP_PROMPT`]).
+ * Mirror of the backend `compose_prompt` (crates/hyprlayer-core/src/pipeline.rs);
+ * the backend is the source of truth for what's sent — this drives the composer
+ * hint and the optimistic transcript echo.
+ */
+export function stageCommand(stage: string): string | null {
+  switch (asStageKey(stage)) {
+    case "research":
+      return "/research_codebase";
+    case "plan":
+      return "/create_plan";
+    case "implement":
+      return "/implement_plan";
+    case "validate":
+      return "/validate_plan";
+    default:
+      return null; // general, ship
+  }
+}
+
+function appendDocs(prompt: string, docs: string[]): string {
+  if (docs.length === 0) return prompt;
+  return prompt + "\n\nRelevant documents:" + docs.map((d) => `\n- ${d}`).join("");
+}
+
+/**
+ * Compose the first-turn prompt for a stage exactly as the backend does, so the
+ * optimistic user bubble matches what claude actually receives. Mirror of
+ * `compose_prompt` in crates/hyprlayer-core/src/pipeline.rs — keep the two in
+ * sync (covered by stages.test.ts + the Rust unit tests).
+ */
+export function composeStagePrompt(stage: string, input: string, docs: string[]): string {
+  const trimmed = input.trim();
+  const key = asStageKey(stage);
+  // Plain chat (general): verbatim, no doc list — matches the backend.
+  if (key === "general") return trimmed;
+  if (key === "ship") {
+    return appendDocs(trimmed ? `${SHIP_PROMPT}\n\n${trimmed}` : SHIP_PROMPT, docs);
+  }
+  const command = stageCommand(key)!; // research/plan/implement/validate
+  return appendDocs(trimmed ? `${command} ${trimmed}` : command, docs);
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { useAllWorkstreams, useBootstrap } from "../lib/queries";
+import { shipWorkstream } from "../features/session/sessionStore";
 import { startEdgeDrag } from "../lib/resize";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
 import { BookIcon, ChevronRightIcon, PlusIcon } from "../components/icons";
@@ -173,6 +174,7 @@ export function Root() {
   };
   const [collapsed, setCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [shipping, setShipping] = useState(false);
 
   const projects = bootstrap.data?.projects ?? [];
   const configReady = bootstrap.data?.config.state === "ready";
@@ -293,17 +295,24 @@ export function Root() {
             )}
             {currentProject && (
               <>
-                {((activeWorkstream?.git.dirty ?? 0) > 0 ||
-                  (activeWorkstream?.git.ahead ?? 0) > 0) && (
-                  <button
-                    type="button"
-                    className="inline-flex h-8 items-center gap-2 rounded-md border border-edge bg-panel-2 px-3 text-sm font-medium text-ink hover:bg-edge/60"
-                    title="Create PR workflow is not connected yet"
-                  >
-                    <GitPullRequestIcon />
-                    Create PR
-                  </button>
-                )}
+                {activeWorkstream &&
+                  (activeWorkstream.git.dirty > 0 || activeWorkstream.git.ahead > 0) && (
+                    <button
+                      type="button"
+                      disabled={shipping}
+                      onClick={() => {
+                        setShipping(true);
+                        void shipWorkstream(activeWorkstream.item.id).finally(() =>
+                          setShipping(false),
+                        );
+                      }}
+                      className="inline-flex h-8 items-center gap-2 rounded-md border border-rose-400/40 bg-rose-400/10 px-3 text-sm font-medium text-rose-300 hover:bg-rose-400/20 disabled:opacity-60"
+                      title="Commit, push, and open a pull request"
+                    >
+                      <GitPullRequestIcon />
+                      Ship
+                    </button>
+                  )}
                 <Link
                   to="/projects/$projectPath/docs"
                   params={{ projectPath: currentProject.path }}

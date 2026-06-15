@@ -46,6 +46,40 @@ export function ChevronRightIcon({ size = 16, strokeWidth = 2, className }: Icon
   );
 }
 
+export function ChevronDownIcon({ size = 14, strokeWidth = 2, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Four-point sparkle — the model selector glyph. */
+export function SparkleIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M12 3c.4 3.6 1.4 4.6 5 5-3.6.4-4.6 1.4-5 5-.4-3.6-1.4-4.6-5-5 3.6-.4 4.6-1.4 5-5Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Ascending signal bars — the reasoning-effort glyph. */
+export function EffortIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <rect x="3" y="14" width="3.5" height="7" rx="1" />
+      <rect x="8.5" y="10" width="3.5" height="11" rx="1" />
+      <rect x="14" y="6" width="3.5" height="15" rx="1" />
+      <rect x="19.5" y="3" width="1.5" height="18" rx="0.75" opacity="0.55" />
+    </svg>
+  );
+}
+
 export function DocIcon({ size = 12, strokeWidth = 2 }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
