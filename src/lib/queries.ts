@@ -1,0 +1,237 @@
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+
+import {
+  commands,
+  type BinaryKind,
+  type CreateDocInput,
+  type FmPatchDto,
+  type ThoughtQuery,
+  type WorkstreamView,
+} from "./bindings";
+import { unwrap } from "./ipc";
+import { queryClient } from "./queryClient";
+
+export function useBootstrap() {
+  return useQuery({
+    queryKey: ["bootstrap"],
+    queryFn: () => unwrap(commands.getBootstrap()),
+  });
+}
+
+export function useProjectDetail(path: string) {
+  return useQuery({
+    queryKey: ["project", path],
+    queryFn: () => unwrap(commands.getProject(path)),
+  });
+}
+
+export function useBackendHealth(path: string) {
+  return useQuery({
+    queryKey: ["health", path],
+    queryFn: () => unwrap(commands.runBackendHealth(path)),
+  });
+}
+
+export function useSyncThoughts(path: string) {
+  return useMutation({
+    mutationFn: (message: string | null) => unwrap(commands.syncThoughts(path, message)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["project", path] });
+      void queryClient.invalidateQueries({ queryKey: ["health", path] });
+      // A sync can rewrite the hyprlayer config (e.g. orphan-mapping cleanup),
+      // which the sidebar renders from; don't wait for the watcher poll.
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    },
+  });
+}
+
+export function useDocs(query: ThoughtQuery, enabled = true) {
+  return useQuery({
+    queryKey: ["docs", query],
+    queryFn: () => unwrap(commands.queryDocs(query)),
+    enabled,
+    // Keep the previous list on screen while a new filter/search resolves.
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useDoc(id: string) {
+  return useQuery({
+    queryKey: ["doc", id],
+    queryFn: () => unwrap(commands.getDoc(id)),
+    enabled: id.length > 0,
+  });
+}
+
+export function useSaveDoc(id: string) {
+  return useMutation({
+    mutationFn: ({ content, baseMtimeMs }: { content: string; baseMtimeMs: number | null }) =>
+      unwrap(commands.saveDoc(id, content, baseMtimeMs)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["doc", id] });
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+    },
+  });
+}
+
+export function usePatchDocFrontmatter(id: string) {
+  return useMutation({
+    mutationFn: ({ patch, baseMtimeMs }: { patch: FmPatchDto; baseMtimeMs: number | null }) =>
+      unwrap(commands.patchDocFrontmatter(id, patch, baseMtimeMs)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["doc", id] });
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+    },
+  });
+}
+
+export function useCreateDoc() {
+  return useMutation({
+    mutationFn: (input: CreateDocInput) => unwrap(commands.createDoc(input)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+    },
+  });
+}
+
+export function useRevealDoc() {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.revealDoc(id)),
+  });
+}
+
+export function useAddProject() {
+  return useMutation({
+    mutationFn: (args: { path: string; directoryName: string | null; bootstrapUser: string | null }) =>
+      unwrap(commands.addProject(args.path, args.directoryName, args.bootstrapUser)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      void queryClient.invalidateQueries({ queryKey: ["project"] });
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+    },
+  });
+}
+
+export function useSetBinaryOverride() {
+  return useMutation({
+    mutationFn: ({ kind, path }: { kind: BinaryKind; path: string | null }) =>
+      unwrap(commands.setBinaryOverride(kind, path)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      void queryClient.invalidateQueries({ queryKey: ["health"] });
+    },
+  });
+}
+
+export function useRedetectBinaries() {
+  return useMutation({
+    mutationFn: () => unwrap(commands.redetectBinaries()),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      void queryClient.invalidateQueries({ queryKey: ["health"] });
+    },
+  });
+}
+
+/* ------------------------------- Workstreams ------------------------------ */
+// List cache lives at ["workstreams", projectPath]; everything scoped to one
+// item (docs, diff, detail) lives under the ["workstream", id] prefix so a
+// single prefix invalidation refreshes the whole family.
+
+function invalidateWorkstream(id: string) {
+  // Whole ["workstreams"] prefix: the project's list AND the sidebar's
+  // cross-project tree both refresh.
+  void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+  void queryClient.invalidateQueries({ queryKey: ["workstream", id] });
+}
+
+export function useWorkstreams(projectPath: string) {
+  return useQuery({
+    queryKey: ["workstreams", projectPath],
+    queryFn: () => unwrap(commands.listWorkstreams(projectPath, false)),
+  });
+}
+
+/** Active workstreams across all projects — the sidebar tree. */
+export function useAllWorkstreams(enabled = true) {
+  return useQuery({
+    queryKey: ["workstreams", "@all"],
+    queryFn: () => unwrap(commands.listAllWorkstreams()),
+    enabled,
+  });
+}
+
+export function useCreateWorkstream(projectPath: string) {
+  return useMutation({
+    mutationFn: (title: string) => unwrap(commands.createWorkstream(projectPath, title)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+    },
+  });
+}
+
+export function useRenameWorkstream() {
+  return useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) =>
+      unwrap(commands.renameWorkstream(id, title)),
+    onSettled: (_data, _error, { id }) => invalidateWorkstream(id),
+  });
+}
+
+export function useSetWorkstreamStage(projectPath: string) {
+  return useMutation({
+    mutationFn: ({ id, stage }: { id: string; stage: string }) =>
+      unwrap(commands.setWorkstreamStage(id, stage)),
+    // Optimistic: the stage drives the composer styling, so flip it instantly.
+    onMutate: async ({ id, stage }) => {
+      await queryClient.cancelQueries({ queryKey: ["workstreams", projectPath] });
+      const previous = queryClient.getQueriesData<WorkstreamView[]>({
+        queryKey: ["workstreams", projectPath],
+      });
+      queryClient.setQueriesData<WorkstreamView[]>(
+        { queryKey: ["workstreams", projectPath] },
+        (views) =>
+          views?.map((view) =>
+            view.item.id === id ? { ...view, item: { ...view.item, stage } } : view,
+          ),
+      );
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      for (const [key, data] of context?.previous ?? []) {
+        queryClient.setQueryData(key, data);
+      }
+    },
+    // Only this project's list needs the refetch safety net: a stage change
+    // alters nothing the sidebar tree or the diff family render, so don't
+    // trigger the cross-project git status fan-out for every mode click.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workstreams", projectPath] });
+    },
+  });
+}
+
+export function useArchiveWorkstream() {
+  return useMutation({
+    mutationFn: ({ id, discard }: { id: string; discard: boolean }) =>
+      unwrap(commands.archiveWorkstream(id, discard)),
+    onSuccess: (_data, { id }) => invalidateWorkstream(id),
+  });
+}
+
+export function useReprovisionWorkstream() {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.reprovisionWorkstream(id)),
+    onSettled: (_data, _error, id) => invalidateWorkstream(id),
+  });
+}
+
+export function useWorktreeDiff(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "diff"],
+    queryFn: () => unwrap(commands.worktreeDiff(id)),
+    enabled: enabled && id.length > 0,
+    // Keep the previous file list on screen while a refetch resolves.
+    placeholderData: keepPreviousData,
+  });
+}

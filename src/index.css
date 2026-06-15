@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #0b0d10;
+  --color-panel: #14171c;
+  --color-panel-2: #1b1f26;
+  --color-edge: #262b34;
+  --color-ink: #e8eaed;
+  --color-ink-dim: #9aa3af;
+  --color-accent: #08090b;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-surface text-ink antialiased;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+/* Text content areas opt back in to selection. */
+.selectable {
+  user-select: text;
+  cursor: auto;
+}

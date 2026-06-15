@@ -1,0 +1,31 @@
+{
+  "version": 4,
+  "lastVersionCheck": 1765400000,
+  "autoUpdate": false,
+  "disableUpdateCheck": false,
+  "thoughts": {
+    "user": "alice",
+    "backend": {
+      "kind": "git",
+      "thoughtsRepo": "~/thoughts",
+      "reposDir": "repos",
+      "globalDir": "global"
+    },
+    "repoMappings": {
+      "/Users/alice/code/myproj": "myproj"
+    },
+    "profiles": {}
+  },
+  "ai": {
+    "agentTool": "claude"
+  },
+  "telemetry": {
+    "mode": "anonymous",
+    "installationId": "a1b2c3d4-0000-0000-0000-000000000000",
+    "deviceSalt": "f00ba4",
+    "apiKeySource": "default",
+    "lastFlush": 0,
+    "lastConfigRefresh": 0,
+    "lastEnrollmentCheck": 0
+  }
+}

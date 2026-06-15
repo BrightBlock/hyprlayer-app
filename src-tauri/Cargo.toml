@@ -1,0 +1,38 @@
+[package]
+name = "hyprlayer-app"
+description = "Hyprlayer — native desktop app for spec-driven development"
+authors = ["BrightBlock"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# Distinct lib name to avoid bin/lib clashes on Windows.
+name = "hyprlayer_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+hyprlayer-core = { workspace = true, features = ["specta"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+dirs.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-single-instance = "2"
+specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
+specta-typescript = "0.0.12"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+log = "0.4"
+uuid = { version = "1.23.3", features = ["v4"] }
+# Not used directly: caps the transitive `time` version because time 0.3.48
+# added a `From` impl that breaks coherence in cookie 0.18.1 (E0119).
+# Remove once cookie ships a fix and tauri picks it up.
+time = { version = ">=0.3.36, <0.3.48", default-features = false }
