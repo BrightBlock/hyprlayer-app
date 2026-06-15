@@ -142,50 +142,46 @@ pub fn parse_line(line: &str) -> ParsedLine {
 }
 
 fn parse_stream_event(v: &Value) -> ParsedLine {
-    // Only text deltas matter for live streaming.
+    // Only a `content_block_delta` carrying a `text_delta` matters for live
+    // streaming; anything else is an ignored heartbeat. Walk the shape with
+    // combinators and bail to `System` the moment a step doesn't match.
     let event = v.get("event");
-    let is_delta =
-        event.and_then(|e| e.get("type")).and_then(Value::as_str) == Some("content_block_delta");
-    let delta = event.and_then(|e| e.get("delta"));
-    let is_text = delta.and_then(|d| d.get("type")).and_then(Value::as_str) == Some("text_delta");
-    if is_delta && is_text {
-        if let Some(text) = delta.and_then(|d| d.get("text")).and_then(Value::as_str) {
-            return ParsedLine::PartialText {
-                text: text.to_string(),
-                parent_id: str_field(v, "parent_tool_use_id"),
-            };
-        }
-    }
-    ParsedLine::System {
-        subtype: "stream_event".into(),
+    let text = event
+        .filter(|e| e.get("type").and_then(Value::as_str) == Some("content_block_delta"))
+        .and_then(|e| e.get("delta"))
+        .filter(|d| d.get("type").and_then(Value::as_str) == Some("text_delta"))
+        .and_then(|d| d.get("text"))
+        .and_then(Value::as_str);
+    match text {
+        Some(text) => ParsedLine::PartialText {
+            text: text.to_string(),
+            parent_id: str_field(v, "parent_tool_use_id"),
+        },
+        None => ParsedLine::System {
+            subtype: "stream_event".into(),
+        },
     }
 }
 
+fn request_field<'a>(request: &'a Value, key: &str) -> Option<&'a str> {
+    request.get(key).and_then(Value::as_str)
+}
+
 fn parse_control_request(v: &Value) -> ParsedLine {
-    let request_id = str_field(v, "request_id").unwrap_or_default();
-    let request = v.get("request");
-    let subtype = request
-        .and_then(|r| r.get("subtype"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if subtype == "can_use_tool" {
-        let tool_name = request
-            .and_then(|r| r.get("tool_name"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let input = request
-            .and_then(|r| r.get("input"))
-            .cloned()
-            .unwrap_or(Value::Null);
-        ParsedLine::CanUseTool {
-            request_id,
-            tool_name,
-            input,
-        }
-    } else {
-        ParsedLine::Unknown { raw: v.to_string() }
-    }
+    // Only `can_use_tool` is modelled; anything else — or a malformed line
+    // missing the `request_id`/`tool_name` we'd need to reply — is kept raw so
+    // it surfaces as a protocol error rather than an unanswerable permission card.
+    parse_can_use_tool(v).unwrap_or_else(|| ParsedLine::Unknown { raw: v.to_string() })
+}
+
+fn parse_can_use_tool(v: &Value) -> Option<ParsedLine> {
+    let request = v.get("request")?;
+    (request_field(request, "subtype") == Some("can_use_tool")).then_some(())?;
+    Some(ParsedLine::CanUseTool {
+        request_id: str_field(v, "request_id")?,
+        tool_name: request_field(request, "tool_name")?.to_string(),
+        input: request.get("input").cloned().unwrap_or(Value::Null),
+    })
 }
 
 fn parse_blocks(message: Option<&Value>) -> Vec<Block> {

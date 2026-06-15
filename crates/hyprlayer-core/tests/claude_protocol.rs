@@ -129,6 +129,26 @@ fn parses_a_permission_request() {
 }
 
 #[test]
+fn malformed_permission_request_is_unknown_not_an_empty_card() {
+    // A can_use_tool we can't identify or reply to (no request_id / tool_name)
+    // must surface as a protocol error, never an unanswerable permission card.
+    let no_id = r#"{"type":"control_request","request":{"subtype":"can_use_tool","tool_name":"Bash"}}"#;
+    let no_tool = r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool"}}"#;
+    for line in [no_id, no_tool] {
+        assert!(
+            matches!(parse_line(line), ParsedLine::Unknown { .. }),
+            "expected Unknown for malformed line: {line}"
+        );
+    }
+    // A well-formed request with no input is still valid (input defaults to null).
+    let no_input = r#"{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"TodoWrite"}}"#;
+    match parse_line(no_input) {
+        ParsedLine::CanUseTool { input, .. } => assert!(input.is_null()),
+        other => panic!("expected CanUseTool, got {other:?}"),
+    }
+}
+
+#[test]
 fn outbound_shapes_are_well_formed() {
     use hyprlayer_core::claude::protocol::{
         control_request_json, permission_response_json, user_turn_json,

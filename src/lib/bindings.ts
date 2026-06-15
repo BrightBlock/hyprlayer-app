@@ -355,7 +355,8 @@ export type SessionEvent =
 /**
  *  A live context-window reading (input tokens in context), emitted per
  *  assistant message so the meter updates DURING a multi-tool turn — not
- *  only at `TurnDone`. Transient: not persisted to the session log.
+ *  only at `TurnDone`. Persisted (it's tiny) so the meter survives a restart
+ *  even when a turn was interrupted before its `TurnDone` ever landed.
  */
 { kind: "usage"; contextTokens: number } | 
 /**

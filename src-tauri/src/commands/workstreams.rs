@@ -208,15 +208,7 @@ pub async fn set_workstream_stage(
     id: String,
     stage: String,
 ) -> CmdResult<()> {
-    const STAGES: [&str; 6] = [
-        "general",
-        "research",
-        "plan",
-        "implement",
-        "validate",
-        "ship",
-    ];
-    if !STAGES.contains(&stage.as_str()) {
+    if hyprlayer_core::pipeline::Stage::try_parse(&stage).is_none() {
         return Err(AppError {
             code: "invalid_stage".into(),
             message: format!("Unknown stage: {stage}"),

@@ -21,15 +21,24 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub fn parse(s: &str) -> Stage {
+    /// Strictly parse a stage string: `None` for anything unrecognized. Use this
+    /// to validate caller input; [`Stage::parse`] is the tolerant variant that
+    /// falls back to [`Stage::General`] for rendering.
+    pub fn try_parse(s: &str) -> Option<Stage> {
         match s {
-            "research" => Stage::Research,
-            "plan" => Stage::Plan,
-            "implement" => Stage::Implement,
-            "validate" => Stage::Validate,
-            "ship" => Stage::Ship,
-            _ => Stage::General,
+            "general" => Some(Stage::General),
+            "research" => Some(Stage::Research),
+            "plan" => Some(Stage::Plan),
+            "implement" => Some(Stage::Implement),
+            "validate" => Some(Stage::Validate),
+            "ship" => Some(Stage::Ship),
+            _ => None,
         }
+    }
+
+    /// Tolerant parse: an unknown value renders as plain chat ([`Stage::General`]).
+    pub fn parse(s: &str) -> Stage {
+        Stage::try_parse(s).unwrap_or(Stage::General)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -40,6 +49,20 @@ impl Stage {
             Stage::Implement => "implement",
             Stage::Validate => "validate",
             Stage::Ship => "ship",
+        }
+    }
+
+    /// The skill slash-command this stage invokes, or `None` for stages that send
+    /// a plain prompt (General chat; Ship sends [`SHIP_PROMPT`], not a skill).
+    /// Single source of truth for the command, mirrored by the frontend
+    /// `stageCommand` (src/features/session/stages.ts) for its optimistic echo.
+    pub fn command(self) -> Option<&'static str> {
+        match self {
+            Stage::Research => Some("/research_codebase"),
+            Stage::Plan => Some("/create_plan"),
+            Stage::Implement => Some("/implement_plan"),
+            Stage::Validate => Some("/validate_plan"),
+            Stage::General | Stage::Ship => None,
         }
     }
 }
@@ -157,12 +180,10 @@ pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> St
     let mut prompt = match stage {
         // Plain chat: verbatim, no skill and no doc list appended.
         Stage::General => return input.to_string(),
-        Stage::Research => skill_prompt("/research_codebase", input),
-        Stage::Plan => skill_prompt("/create_plan", input),
-        Stage::Implement => skill_prompt("/implement_plan", input),
-        Stage::Validate => skill_prompt("/validate_plan", input),
         Stage::Ship if input.is_empty() => SHIP_PROMPT.to_string(),
         Stage::Ship => format!("{SHIP_PROMPT}\n\n{input}"),
+        // research/plan/implement/validate each invoke their skill.
+        _ => skill_prompt(stage.command().expect("non-ship/general stage has a command"), input),
     };
     if !attached_docs.is_empty() {
         prompt.push_str("\n\nRelevant documents:");
@@ -184,6 +205,23 @@ mod tests {
         assert_eq!(Stage::parse("ship"), Stage::Ship);
         assert_eq!(Stage::parse("nonsense"), Stage::General);
         assert_eq!(Stage::Research.as_str(), "research");
+    }
+
+    #[test]
+    fn try_parse_is_strict_and_command_matches() {
+        // Strict: unknown is None, but every real stage round-trips.
+        assert_eq!(Stage::try_parse("general"), Some(Stage::General));
+        assert_eq!(Stage::try_parse("ship"), Some(Stage::Ship));
+        assert_eq!(Stage::try_parse("nonsense"), None);
+
+        // The command table is the single source compose_prompt reads from.
+        assert_eq!(Stage::Research.command(), Some("/research_codebase"));
+        assert_eq!(Stage::Validate.command(), Some("/validate_plan"));
+        assert_eq!(Stage::General.command(), None);
+        assert_eq!(Stage::Ship.command(), None);
+        // compose_prompt uses the command, so the two never drift.
+        let composed = compose_prompt(Stage::Plan, "x", &[]);
+        assert!(composed.starts_with(Stage::Plan.command().unwrap()));
     }
 
     #[test]

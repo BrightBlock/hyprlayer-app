@@ -417,18 +417,17 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             parent_id,
         } => {
             // A live usage ping (main thread only — subagent usage is separate
-            // and shouldn't move the session's context meter).
-            let mut events: Vec<SessionEvent> = context_tokens
+            // and shouldn't move the session's context meter), then the blocks.
+            context_tokens
                 .filter(|_| parent_id.is_none())
                 .map(|t| SessionEvent::Usage { context_tokens: t })
                 .into_iter()
-                .collect();
-            events.extend(
-                blocks
-                    .into_iter()
-                    .filter_map(|b| block_to_event(b, parent_id.as_deref())),
-            );
-            events
+                .chain(
+                    blocks
+                        .into_iter()
+                        .filter_map(|b| block_to_event(b, parent_id.as_deref())),
+                )
+                .collect()
         }
         ParsedLine::User { blocks, parent_id } => blocks
             .into_iter()

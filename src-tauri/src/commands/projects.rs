@@ -74,6 +74,15 @@ pub enum CheckStatus {
     Fail,
 }
 
+/// `Pass` when the condition holds, else `Fail` — the common health verdict.
+fn pass_if(ok: bool) -> CheckStatus {
+    if ok {
+        CheckStatus::Pass
+    } else {
+        CheckStatus::Fail
+    }
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HealthCheck {
@@ -393,11 +402,7 @@ pub async fn run_backend_health(
             checks.push(HealthCheck {
                 id: "project.mapped".into(),
                 label: "Project mapping".into(),
-                status: if info.mapped_name.is_some() {
-                    CheckStatus::Pass
-                } else {
-                    CheckStatus::Fail
-                },
+                status: pass_if(info.mapped_name.is_some()),
                 detail: info.mapped_name.clone(),
                 remedy: if info.mapped_name.is_some() {
                     None
@@ -426,56 +431,59 @@ pub async fn run_backend_health(
         }
     }
 
-    // 3. Thoughts root exists (filesystem backends only).
-    if let Ok(loaded) = state.config.load().await {
-        if let Some(thoughts) = loaded.config.thoughts.as_ref() {
-            let effective = thoughts.effective_config_for(&path);
-            if effective.backend.kind().uses_filesystem() {
-                if let Some(root) = effective.backend.thoughts_root() {
-                    let exists = root.is_dir();
-                    checks.push(HealthCheck {
-                        id: "thoughts.root".into(),
-                        label: "Thoughts storage root".into(),
-                        status: if exists {
-                            CheckStatus::Pass
-                        } else {
-                            CheckStatus::Fail
-                        },
-                        detail: Some(root.display().to_string()),
-                        remedy: if exists {
-                            None
-                        } else {
-                            Some("The configured thoughts directory does not exist. Re-run `hyprlayer thoughts init` or fix the path in the hyprlayer config.".into())
-                        },
-                    });
-                }
-
-                // 4. Per-repo thoughts symlinks — same definition of link
-                // health as the per-workstream status chips.
-                let repo_thoughts = Path::new(&path).join(hyprlayer_core::worktree::THOUGHTS_DIR);
-                let missing = thoughts_links::missing_thoughts_links(Path::new(&path), &effective);
-                checks.push(HealthCheck {
-                    id: "thoughts.symlinks".into(),
-                    label: "Repository thoughts/ links".into(),
-                    status: if missing.is_empty() {
-                        CheckStatus::Pass
-                    } else {
-                        CheckStatus::Fail
-                    },
-                    detail: if missing.is_empty() {
-                        Some(repo_thoughts.display().to_string())
-                    } else {
-                        Some(format!("missing: thoughts/{}", missing.join(", thoughts/")))
-                    },
-                    remedy: if missing.is_empty() {
-                        None
-                    } else {
-                        Some("Run `hyprlayer thoughts init` in the repository to recreate the links.".into())
-                    },
-                });
-            }
-        }
-    }
+    // 3 & 4. Thoughts root + per-repo symlinks (filesystem backends only).
+    checks.extend(thoughts_health_checks(&state, &path).await);
 
     Ok(HealthReport { checks })
+}
+
+/// The thoughts-storage health checks: the storage root exists, and the repo's
+/// `thoughts/` symlinks are intact. Empty for non-filesystem backends or when
+/// thoughts aren't configured — the early returns keep the happy path flat.
+async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck> {
+    let Ok(loaded) = state.config.load().await else {
+        return Vec::new();
+    };
+    let Some(thoughts) = loaded.config.thoughts.as_ref() else {
+        return Vec::new();
+    };
+    let effective = thoughts.effective_config_for(path);
+    if !effective.backend.kind().uses_filesystem() {
+        return Vec::new();
+    }
+
+    let mut checks = Vec::new();
+
+    // 3. Thoughts root exists.
+    if let Some(root) = effective.backend.thoughts_root() {
+        let exists = root.is_dir();
+        checks.push(HealthCheck {
+            id: "thoughts.root".into(),
+            label: "Thoughts storage root".into(),
+            status: pass_if(exists),
+            detail: Some(root.display().to_string()),
+            remedy: (!exists).then(|| "The configured thoughts directory does not exist. Re-run `hyprlayer thoughts init` or fix the path in the hyprlayer config.".into()),
+        });
+    }
+
+    // 4. Per-repo thoughts symlinks — same definition of link health as the
+    // per-workstream status chips.
+    let repo = Path::new(path);
+    let repo_thoughts = repo.join(hyprlayer_core::worktree::THOUGHTS_DIR);
+    let missing = thoughts_links::missing_thoughts_links(repo, &effective);
+    let links_ok = missing.is_empty();
+    checks.push(HealthCheck {
+        id: "thoughts.symlinks".into(),
+        label: "Repository thoughts/ links".into(),
+        status: pass_if(links_ok),
+        detail: Some(if links_ok {
+            repo_thoughts.display().to_string()
+        } else {
+            format!("missing: thoughts/{}", missing.join(", thoughts/"))
+        }),
+        remedy: (!links_ok)
+            .then(|| "Run `hyprlayer thoughts init` in the repository to recreate the links.".into()),
+    });
+
+    checks
 }

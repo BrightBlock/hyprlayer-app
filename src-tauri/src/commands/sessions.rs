@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use hyprlayer_core::claude::{ClaudeDriver, ExitOutcome, SessionEvent, SpawnConfig};
+use hyprlayer_core::claude::{ClaudeDriver, SessionEvent, SpawnConfig};
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent};
@@ -30,6 +30,122 @@ fn session_not_found(id: &str) -> AppError {
         message: format!("No live session with id {id}"),
         remedy: Some("The session may have ended; start a new one.".into()),
     }
+}
+
+fn too_many_sessions() -> AppError {
+    AppError {
+        code: "too_many_sessions".into(),
+        message: "The maximum number of concurrent agent sessions is already running.".into(),
+        remedy: Some("Wait for a session to finish, or stop one, then try again.".into()),
+    }
+}
+
+/// The live driver for a session, or `session_not_found`. The single lookup the
+/// turn/permission/interrupt/kill commands share instead of each poking
+/// `state.sessions` directly.
+async fn live_driver(state: &AppState, session_id: &str) -> CmdResult<Arc<ClaudeDriver>> {
+    state
+        .sessions
+        .get(session_id)
+        .await
+        .ok_or_else(|| session_not_found(session_id))
+}
+
+/// Everything `launch_session` needs that isn't shared. `resume` toggles
+/// `--resume` (continue claude's conversation) vs a fresh `--session-id`, and
+/// `start_seq` is where the persisted log should continue (0 fresh, else the
+/// existing event count so a resume appends rather than collides).
+struct LaunchParams {
+    app: tauri::AppHandle,
+    session: Session,
+    project_path: String,
+    model: Option<String>,
+    effort: Option<String>,
+    resume: bool,
+    start_seq: i64,
+    channel: Channel<SessionEvent>,
+}
+
+/// Spawn the claude driver for a session and wire up its forwarder — the launch
+/// pipeline shared by [`start_stage_session`] and [`resume_session`]. The caller
+/// holds the concurrency `permit` (so it can refuse before creating any state)
+/// and passes it through to the forwarder, which owns it until the session ends.
+async fn launch_session(
+    state: &AppState,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    params: LaunchParams,
+) -> CmdResult<Arc<ClaudeDriver>> {
+    let LaunchParams {
+        app,
+        session,
+        project_path,
+        model,
+        effort,
+        resume,
+        start_seq,
+        channel,
+    } = params;
+
+    let claude = state
+        .binaries
+        .require(BinaryKind::Claude)
+        .await
+        .map_err(AppError::from)?;
+
+    // Grant read access to the thoughts root (outside the worktree) so skills
+    // can write research/plan docs through the symlinks.
+    let effective = effective_for(state, &project_path).await?;
+    let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
+    let policy = pipeline::policy_for(Stage::parse(&session.stage));
+
+    // The child inherits our env; we only override PATH with the resolver's
+    // augmented PATH (login-shell + well-known dirs) so it finds git/gh/etc.
+    let path = state.binaries.augmented_path().await;
+    let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+
+    let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
+        claude_bin: claude,
+        cwd: PathBuf::from(&session.cwd),
+        session_id: session.id.clone(),
+        permission_mode: policy.permission_mode,
+        allowed_tools: policy.allowed_tools,
+        disallowed_tools: policy.disallowed_tools,
+        add_dirs,
+        // claude persisted the conversation under the id we passed as
+        // `--session-id`, so resume by that same id.
+        resume: resume.then(|| session.id.clone()),
+        fork: false,
+        max_budget_usd: None,
+        model,
+        effort,
+        env,
+    })
+    .map_err(AppError::from)?;
+
+    if let Some(pid) = driver.pid() {
+        let sid = session.id.clone();
+        let _ = db_task(state.db.clone(), move |db| {
+            db.record_orphan(pid as i64, &sid)
+        })
+        .await;
+    }
+
+    let driver = Arc::new(driver);
+    state.sessions.insert(session.id.clone(), driver.clone()).await;
+
+    spawn_forwarder(ForwarderCtx {
+        app,
+        db: state.db.clone(),
+        registry: state.sessions.clone(),
+        channel,
+        session_id: session.id.clone(),
+        workstream_id: session.workstream_id.clone(),
+        rx,
+        permit,
+        start_seq,
+    });
+
+    Ok(driver)
 }
 
 /// Start a session for a workstream stage. Composes the stage skill prompt,
@@ -59,34 +175,18 @@ pub async fn start_stage_session(
         remedy: None,
     })?;
 
-    // Reserve a slot up front: refuse rather than pile on concurrent agents.
-    let permit = state.sessions.try_acquire().ok_or_else(|| AppError {
-        code: "too_many_sessions".into(),
-        message: "The maximum number of concurrent agent sessions is already running.".into(),
-        remedy: Some("Wait for a session to finish, or stop one, then try again.".into()),
-    })?;
-
-    let claude = state
-        .binaries
-        .require(BinaryKind::Claude)
-        .await
-        .map_err(AppError::from)?;
-
-    // Grant read access to the thoughts root (outside the worktree) so skills
-    // can write research/plan docs through the symlinks.
-    let effective = effective_for(&state, &ws.project_path).await?;
-    let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
+    // Reserve a slot up front: refuse rather than pile on concurrent agents,
+    // before creating any session state.
+    let permit = state.sessions.try_acquire().ok_or_else(too_many_sessions)?;
 
     let stage_kind = Stage::parse(&stage);
-    let policy = pipeline::policy_for(stage_kind);
     let prompt = pipeline::compose_prompt(stage_kind, &input, &attached_docs);
 
     // Persist the session row before spawning, so a crash before init still
     // leaves a record.
-    let session_id = uuid::Uuid::new_v4().to_string();
     let session = {
         let new = NewSession {
-            id: session_id.clone(),
+            id: uuid::Uuid::new_v4().to_string(),
             workstream_id: ws.id.clone(),
             stage: stage_kind.as_str().to_string(),
             cwd: ws.worktree_path.clone(),
@@ -94,53 +194,21 @@ pub async fn start_stage_session(
         db_task(state.db.clone(), move |db| db.insert_session(new)).await?
     };
 
-    // The child inherits our env; we only override PATH with the resolver's
-    // augmented PATH (login-shell + well-known dirs) so it finds git/gh/etc.
-    let path = state.binaries.augmented_path().await;
-    let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-
-    let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
-        claude_bin: claude,
-        cwd: PathBuf::from(&ws.worktree_path),
-        session_id: session_id.clone(),
-        permission_mode: policy.permission_mode,
-        allowed_tools: policy.allowed_tools,
-        disallowed_tools: policy.disallowed_tools,
-        add_dirs,
-        resume: None,
-        fork: false,
-        max_budget_usd: None,
-        model,
-        effort,
-        env,
-    })
-    .map_err(AppError::from)?;
-
-    if let Some(pid) = driver.pid() {
-        let sid = session_id.clone();
-        let _ = db_task(state.db.clone(), move |db| {
-            db.record_orphan(pid as i64, &sid)
-        })
-        .await;
-    }
-
-    let driver = Arc::new(driver);
-    state
-        .sessions
-        .insert(session_id.clone(), driver.clone())
-        .await;
-
-    spawn_forwarder(ForwarderCtx {
-        app,
-        db: state.db.clone(),
-        registry: state.sessions.clone(),
-        channel: on_event,
-        session_id: session_id.clone(),
-        workstream_id: ws.id.clone(),
-        rx,
+    let driver = launch_session(
+        &state,
         permit,
-        start_seq: 0,
-    });
+        LaunchParams {
+            app,
+            session: session.clone(),
+            project_path: ws.project_path,
+            model,
+            effort,
+            resume: false,
+            start_seq: 0,
+            channel: on_event,
+        },
+    )
+    .await?;
 
     // Kick off the first turn (the composed skill prompt).
     driver.send_user_turn(&prompt).map_err(AppError::from)?;
@@ -184,81 +252,36 @@ pub async fn resume_session(
         remedy: None,
     })?;
 
-    let permit = state.sessions.try_acquire().ok_or_else(|| AppError {
-        code: "too_many_sessions".into(),
-        message: "The maximum number of concurrent agent sessions is already running.".into(),
-        remedy: Some("Wait for a session to finish, or stop one, then try again.".into()),
-    })?;
+    let permit = state.sessions.try_acquire().ok_or_else(too_many_sessions)?;
 
-    let claude = state
-        .binaries
-        .require(BinaryKind::Claude)
-        .await
-        .map_err(AppError::from)?;
-
-    let effective = effective_for(&state, &ws.project_path).await?;
-    let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
-
-    let stage = Stage::parse(&session.stage);
-    let policy = pipeline::policy_for(stage);
-
-    let path = state.binaries.augmented_path().await;
-    let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-
-    let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
-        claude_bin: claude,
-        cwd: PathBuf::from(&session.cwd),
-        session_id: session.id.clone(),
-        permission_mode: policy.permission_mode,
-        allowed_tools: policy.allowed_tools,
-        disallowed_tools: policy.disallowed_tools,
-        add_dirs,
-        // claude persisted the conversation under the id we passed as
-        // `--session-id`, so resume by that same id.
-        resume: Some(session.id.clone()),
-        fork: false,
-        max_budget_usd: None,
-        model,
-        effort,
-        env,
-    })
-    .map_err(AppError::from)?;
-
-    if let Some(pid) = driver.pid() {
-        let sid = session.id.clone();
-        let _ = db_task(state.db.clone(), move |db| {
-            db.record_orphan(pid as i64, &sid)
-        })
-        .await;
-    }
-
-    let driver = Arc::new(driver);
-    state
-        .sessions
-        .insert(session.id.clone(), driver.clone())
-        .await;
-
-    // Continue the persisted log after its existing tail.
+    // Continue the persisted log after its existing tail, and re-mark the row
+    // running while the resumed process spins back up.
     let start_seq = {
         let id = session.id.clone();
-        db_task(state.db.clone(), move |db| db.session_events(&id)).await?.len() as i64
+        db_task(state.db.clone(), move |db| db.session_events(&id))
+            .await?
+            .len() as i64
     };
     {
         let id = session.id.clone();
         let _ = db_task(state.db.clone(), move |db| db.set_session_state(&id, "running")).await;
     }
 
-    spawn_forwarder(ForwarderCtx {
-        app,
-        db: state.db.clone(),
-        registry: state.sessions.clone(),
-        channel: on_event,
-        session_id: session.id.clone(),
-        workstream_id: ws.id.clone(),
-        rx,
+    launch_session(
+        &state,
         permit,
-        start_seq,
-    });
+        LaunchParams {
+            app,
+            session: session.clone(),
+            project_path: ws.project_path,
+            model,
+            effort,
+            resume: true,
+            start_seq,
+            channel: on_event,
+        },
+    )
+    .await?;
 
     Ok(session)
 }
@@ -270,12 +293,10 @@ pub async fn send_user_message(
     session_id: String,
     text: String,
 ) -> CmdResult<()> {
-    let driver = state
-        .sessions
-        .get(&session_id)
-        .await
-        .ok_or_else(|| session_not_found(&session_id))?;
-    driver.send_user_turn(&text).map_err(AppError::from)
+    live_driver(&state, &session_id)
+        .await?
+        .send_user_turn(&text)
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -287,12 +308,8 @@ pub async fn respond_permission(
     allow: bool,
     message: Option<String>,
 ) -> CmdResult<()> {
-    let driver = state
-        .sessions
-        .get(&session_id)
-        .await
-        .ok_or_else(|| session_not_found(&session_id))?;
-    driver
+    live_driver(&state, &session_id)
+        .await?
         .respond_permission(&request_id, allow, message.as_deref())
         .map_err(AppError::from)
 }
@@ -300,23 +317,16 @@ pub async fn respond_permission(
 #[tauri::command]
 #[specta::specta]
 pub async fn interrupt_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
-    let driver = state
-        .sessions
-        .get(&session_id)
-        .await
-        .ok_or_else(|| session_not_found(&session_id))?;
-    driver.interrupt().map_err(AppError::from)
+    live_driver(&state, &session_id)
+        .await?
+        .interrupt()
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn kill_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
-    let driver = state
-        .sessions
-        .get(&session_id)
-        .await
-        .ok_or_else(|| session_not_found(&session_id))?;
-    driver.kill();
+    live_driver(&state, &session_id).await?.kill();
     Ok(())
 }
 
@@ -425,7 +435,7 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
             // meter survives a restart even if the turn was interrupted before
             // its result event ever landed.
             if let Ok(payload) = serde_json::to_string(&event) {
-                let _ = db.append_session_event(&session_id, seq, event_kind(&event), &payload);
+                let _ = db.append_session_event(&session_id, seq, event.kind(), &payload);
                 seq += 1;
             }
 
@@ -454,7 +464,7 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
                     stderr_tail,
                     ..
                 } => {
-                    let state = outcome_state(*outcome);
+                    let state = outcome.state();
                     let summary = (!stderr_tail.is_empty()).then_some(stderr_tail.as_str());
                     let _ = db.finish_session(&session_id, state, summary);
                     let _ = db.clear_orphans_for(&session_id);
@@ -480,31 +490,4 @@ fn emit_lifecycle(app: &tauri::AppHandle, session_id: &str, workstream_id: &str,
         state: state.to_string(),
     }
     .emit(app);
-}
-
-/// The stored `kind` tag, matching the serde tag on [`SessionEvent`].
-fn event_kind(event: &SessionEvent) -> &'static str {
-    match event {
-        SessionEvent::Init { .. } => "init",
-        SessionEvent::PartialText { .. } => "partialText",
-        SessionEvent::AssistantText { .. } => "assistantText",
-        SessionEvent::Thinking { .. } => "thinking",
-        SessionEvent::ToolUse { .. } => "toolUse",
-        SessionEvent::ToolResult { .. } => "toolResult",
-        SessionEvent::PermissionAsk { .. } => "permissionAsk",
-        SessionEvent::Usage { .. } => "usage",
-        SessionEvent::TurnDone { .. } => "turnDone",
-        SessionEvent::ProtocolError { .. } => "protocolError",
-        SessionEvent::Exited { .. } => "exited",
-    }
-}
-
-fn outcome_state(outcome: ExitOutcome) -> &'static str {
-    match outcome {
-        ExitOutcome::Completed => "completed",
-        ExitOutcome::Interrupted => "interrupted",
-        ExitOutcome::Crashed => "crashed",
-        ExitOutcome::Killed => "killed",
-        ExitOutcome::SpawnFailed => "spawn_failed",
-    }
 }

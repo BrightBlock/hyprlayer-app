@@ -21,6 +21,20 @@ pub enum ExitOutcome {
     SpawnFailed,
 }
 
+impl ExitOutcome {
+    /// The persisted `sessions.state` string for a terminal outcome. Lives next
+    /// to the enum so storage can't drift from the variants.
+    pub fn state(self) -> &'static str {
+        match self {
+            ExitOutcome::Completed => "completed",
+            ExitOutcome::Interrupted => "interrupted",
+            ExitOutcome::Crashed => "crashed",
+            ExitOutcome::Killed => "killed",
+            ExitOutcome::SpawnFailed => "spawn_failed",
+        }
+    }
+}
+
 /// One event in a session's lifetime. Ordered; the sequence per session is
 /// monotonic. Serialized tagged so the frontend can switch on `kind`. Tool
 /// inputs are carried as compact JSON strings (not `serde_json::Value`) so the
@@ -79,7 +93,8 @@ pub enum SessionEvent {
     },
     /// A live context-window reading (input tokens in context), emitted per
     /// assistant message so the meter updates DURING a multi-tool turn — not
-    /// only at `TurnDone`. Transient: not persisted to the session log.
+    /// only at `TurnDone`. Persisted (it's tiny) so the meter survives a restart
+    /// even when a turn was interrupted before its `TurnDone` ever landed.
     Usage { context_tokens: u32 },
     /// A turn finished; carries cumulative cost so far and the context-window
     /// fill (input tokens in context for the turn) for the UI's context meter.
@@ -96,4 +111,24 @@ pub enum SessionEvent {
         code: Option<i32>,
         stderr_tail: String,
     },
+}
+
+impl SessionEvent {
+    /// The stored `kind` tag — identical to this event's serde tag. Lives next to
+    /// the enum so the persisted log can't drift from the wire name.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            SessionEvent::Init { .. } => "init",
+            SessionEvent::PartialText { .. } => "partialText",
+            SessionEvent::AssistantText { .. } => "assistantText",
+            SessionEvent::Thinking { .. } => "thinking",
+            SessionEvent::ToolUse { .. } => "toolUse",
+            SessionEvent::ToolResult { .. } => "toolResult",
+            SessionEvent::PermissionAsk { .. } => "permissionAsk",
+            SessionEvent::Usage { .. } => "usage",
+            SessionEvent::TurnDone { .. } => "turnDone",
+            SessionEvent::ProtocolError { .. } => "protocolError",
+            SessionEvent::Exited { .. } => "exited",
+        }
+    }
 }

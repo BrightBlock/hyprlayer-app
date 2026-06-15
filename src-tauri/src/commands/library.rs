@@ -112,6 +112,16 @@ fn file_mtime_ms(path: &Path) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Optimistic-concurrency guard for doc writes: fail if the file changed on disk
+/// since the caller read it (mtime drifted more than rounding noise). Shared by
+/// every mutating doc command so the conflict policy lives in one place.
+fn ensure_not_stale(abs: &Path, base_mtime_ms: f64) -> CmdResult<()> {
+    if (file_mtime_ms(abs) - base_mtime_ms).abs() > 0.5 {
+        return Err(doc_conflict());
+    }
+    Ok(())
+}
+
 /// Atomic write + immediate re-index + change event (no waiting on the
 /// filesystem watcher debounce).
 async fn write_and_reindex(
@@ -194,9 +204,7 @@ pub async fn save_doc(
 ) -> CmdResult<DocMeta> {
     state.index.get(&id).ok_or_else(|| not_indexed(&id))?;
     let abs = PathBuf::from(&id);
-    if (file_mtime_ms(&abs) - base_mtime_ms).abs() > 0.5 {
-        return Err(doc_conflict());
-    }
+    ensure_not_stale(&abs, base_mtime_ms)?;
     let root = root_for_doc(&state, &abs).await?;
     write_and_reindex(&app, &state, abs, root, content).await
 }
@@ -212,9 +220,7 @@ pub async fn patch_doc_frontmatter(
 ) -> CmdResult<DocMeta> {
     state.index.get(&id).ok_or_else(|| not_indexed(&id))?;
     let abs = PathBuf::from(&id);
-    if (file_mtime_ms(&abs) - base_mtime_ms).abs() > 0.5 {
-        return Err(doc_conflict());
-    }
+    ensure_not_stale(&abs, base_mtime_ms)?;
     let original = tokio::fs::read_to_string(&abs)
         .await
         .map_err(|e| AppError::internal(format!("read doc: {e}")))?;
