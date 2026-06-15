@@ -285,32 +285,35 @@ fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> 
 
 fn well_known_dirs() -> Vec<PathBuf> {
     let home = dirs::home_dir().unwrap_or_default();
-    let mut dirs = vec![
-        home.join(".local/bin"),
-        home.join(".cargo/bin"),
-        home.join(".claude/local"),
-        home.join(".bun/bin"),
-        home.join(".volta/bin"),
-    ];
+    let common = [
+        ".local/bin",
+        ".cargo/bin",
+        ".claude/local",
+        ".bun/bin",
+        ".volta/bin",
+    ]
+    .into_iter()
+    .map(|seg| home.join(seg));
+
     #[cfg(target_os = "macos")]
-    {
-        dirs.push(PathBuf::from("/opt/homebrew/bin"));
-        dirs.push(PathBuf::from("/usr/local/bin"));
-    }
+    let platform = [
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
     #[cfg(target_os = "windows")]
-    {
-        if let Some(local) = dirs::data_local_dir() {
-            // scoop shims + standard npm global prefix
-            dirs.push(local.join("Programs"));
-        }
-        if let Some(profile) = dirs::home_dir() {
-            dirs.push(profile.join("scoop").join("shims"));
-        }
-        if let Some(appdata) = dirs::data_dir() {
-            dirs.push(appdata.join("npm"));
-        }
-    }
-    dirs
+    // scoop shims + standard npm global prefix
+    let platform = [
+        dirs::data_local_dir().map(|local| local.join("Programs")),
+        dirs::home_dir().map(|profile| profile.join("scoop").join("shims")),
+        dirs::data_dir().map(|appdata| appdata.join("npm")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let platform: [PathBuf; 0] = [];
+
+    common.chain(platform).collect()
 }
 
 /// Ask the user's login shell for its PATH. Interactive (`-i`) so rc files

@@ -171,6 +171,3 @@ fn tail(s: &str, max_chars: usize) -> String {
         trimmed.chars().skip(skip).collect()
     }
 }
-
-#[cfg(windows)]
-use std::os::windows::process::CommandExt as _;
