@@ -11,6 +11,7 @@ import { useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useAllWorkstreams, useBootstrap } from "../lib/queries";
 import { shipWorkstream } from "../features/session/sessionStore";
 import { startEdgeDrag } from "../lib/resize";
+import { IS_MACOS } from "../lib/platform";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
 import { BookIcon, ChevronRightIcon, PlusIcon } from "../components/icons";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
@@ -20,6 +21,8 @@ import type { WorkstreamView } from "../lib/bindings";
 const PROJECT_SIDEBAR_COLLAPSED = 56;
 const PROJECT_SIDEBAR_MIN = 180;
 const PROJECT_SIDEBAR_MAX = 360;
+// macOS only: keep the header's left content clear of the overlaid traffic
+// lights + the collapse button. Other platforms don't float controls here.
 const TOP_CHROME_MIN_CONTENT_OFFSET = 148;
 
 function PanelLeftIcon() {
@@ -227,7 +230,7 @@ export function Root() {
 
   const contentOffset = Math.max(
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
-    TOP_CHROME_MIN_CONTENT_OFFSET,
+    IS_MACOS ? TOP_CHROME_MIN_CONTENT_OFFSET : 0,
   );
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (collapsed) return;
@@ -249,7 +252,9 @@ export function Root() {
         <button
           type="button"
           onClick={() => setCollapsed((value) => !value)}
-          className="absolute left-[92px] top-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+          className={`absolute top-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink ${
+            IS_MACOS ? "left-[92px]" : "left-3"
+          }`}
           title={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
           aria-label={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
         >
