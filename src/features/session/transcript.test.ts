@@ -411,6 +411,44 @@ describe("turn + exit lifecycle", () => {
   });
 });
 
+describe("connecting state (leaves 'starting' on first sign of life)", () => {
+  it("init clears 'starting'", () => {
+    const view = reduceEvent(initialSessionView("starting"), {
+      kind: "init",
+      claudeSessionId: "sess-x",
+      model: "claude-opus-4-8",
+    });
+    expect(view.state).toBe("running");
+  });
+
+  it("streamed text clears 'starting' even with no init (a re-tailed live session)", () => {
+    // After an HMR/UI reload the backend re-tails the still-live process without
+    // re-emitting `init`; the next streamed event must drop the connecting state.
+    let view = reduceEvent(initialSessionView("starting"), {
+      kind: "partialText",
+      text: "Resuming…",
+      parentId: null,
+    });
+    expect(view.state).toBe("running");
+    expect(view.streaming).toBe(true);
+
+    view = reduceEvent(initialSessionView("starting"), {
+      kind: "toolUse",
+      id: "t1",
+      name: "Edit",
+      input: "{}",
+      parentId: null,
+    });
+    expect(view.state).toBe("running");
+  });
+
+  it("a fresh 'starting' view with no events stays connecting", () => {
+    // Nothing has streamed yet — the spinner should still show.
+    expect(initialSessionView("starting").state).toBe("starting");
+    expect(initialSessionView("starting").streaming).toBe(false);
+  });
+});
+
 describe("replay determinism", () => {
   it("rebuilds the same transcript from a recorded stream", () => {
     const events: SessionEvent[] = [

@@ -242,8 +242,14 @@ pub async fn resume_session(
     }
     .ok_or_else(|| session_not_found(&session_id))?;
 
-    // Already live (a race, or never actually died) — nothing to resume.
-    if state.sessions.get(&session_id).await.is_some() {
+    // Already live (a race, an HMR/UI reload that dropped the frontend's channel
+    // while the backend process survived, or a session that never actually
+    // died): don't re-spawn — re-wire the caller's new channel to the running
+    // event stream so events flow again. Without this the new channel gets
+    // nothing and the UI is pinned on "Connecting to claude…" forever even
+    // though the turn runs fine.
+    if let Some(driver) = state.sessions.get(&session_id).await {
+        tail_live(driver, on_event);
         return Ok(session);
     }
 
@@ -398,23 +404,34 @@ pub async fn attach_session(
     // Still live? Tail it (forward-only — the original forwarder owns
     // persistence and the concurrency permit).
     if let Some(driver) = state.sessions.get(&session_id).await {
-        let mut rx = driver.subscribe();
-        tauri::async_runtime::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        let terminal = matches!(event, SessionEvent::Exited { .. });
-                        if on_event.send(event).is_err() || terminal {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
+        tail_live(driver, on_event);
     }
     Ok(())
+}
+
+/// Forward a live session's broadcast events onto a fresh Channel, forward-only:
+/// the owning forwarder still handles persistence, state, and the concurrency
+/// permit. Stops at the first terminal event or once the UI channel closes.
+/// Shared by [`attach_session`] (after replaying the log) and [`resume_session`]
+/// when the backend session is still live — e.g. an HMR/UI reload dropped the
+/// frontend's channel but the claude process survived, so there's nothing to
+/// re-spawn; we just re-wire the new channel to the running stream.
+fn tail_live(driver: Arc<ClaudeDriver>, on_event: Channel<SessionEvent>) {
+    let mut rx = driver.subscribe();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    let terminal = matches!(event, SessionEvent::Exited { .. });
+                    if on_event.send(event).is_err() || terminal {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /* ------------------------------ Forwarder ------------------------------- */
