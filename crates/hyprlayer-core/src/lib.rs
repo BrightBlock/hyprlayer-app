@@ -12,6 +12,7 @@ pub mod hyprcli;
 pub mod index;
 pub mod pipeline;
 pub mod process;
+pub mod repos;
 pub mod store;
 pub mod worktree;
 

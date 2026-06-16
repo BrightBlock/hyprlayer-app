@@ -1,13 +1,15 @@
 //! App-local persistence (SQLite via rusqlite, bundled).
 //!
-//! Holds only what the app itself owns: workstreams and (from phase 3)
-//! session records. Projects, documents, comments, and git state are always
-//! derived from their sources of truth, never stored here.
+//! Holds what the app itself owns: the project registry, workstreams, and
+//! session records. Documents, comments, and git state are always derived from
+//! their sources of truth, never stored here.
 
 mod migrations;
+mod projects;
 mod sessions;
 mod workstreams;
 
+pub use projects::*;
 pub use sessions::*;
 pub use workstreams::*;
 

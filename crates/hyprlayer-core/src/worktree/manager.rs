@@ -357,7 +357,12 @@ mod tests {
     use super::*;
 
     fn sh(repo: &Path, args: &[&str]) {
+        // `-c commit.gpgsign=false`: keep test commits hermetic from the user's
+        // global git config (e.g. a 1Password SSH signing key that can't sign
+        // in a non-interactive test run).
         let out = std::process::Command::new("git")
+            .arg("-c")
+            .arg("commit.gpgsign=false")
             .arg("-C")
             .arg(repo)
             .args(args)
