@@ -5,7 +5,7 @@ import { ChevronRightIcon, ShieldIcon, WrenchIcon } from "../../components/icons
 import { MarkdownPreview } from "../library/MarkdownPreview";
 import { stageLabel } from "./stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
-import { prettyToolInput, resultPreview, toolSummary } from "./toolDisplay";
+import { formatElapsed, prettyToolInput, resultPreview, toolSummary } from "./toolDisplay";
 
 export type PermissionHandlers = {
   onAllow: (requestId: string) => void;
@@ -354,6 +354,24 @@ function ExitNotice({ item }: { item: Extract<TranscriptItem, { kind: "exit" }> 
   );
 }
 
+/**
+ * The live "time working" readout pinned to the bottom-left of the transcript
+ * (Conductor-style) — it sits at the end of the scrolling content, so it rides
+ * the bottom of the chat. Ticks ~10×/s so the tenths advance smoothly; it
+ * unmounts the moment the turn ends (`since` goes null), which clears the timer.
+ */
+function ElapsedCounter({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [since]);
+  return (
+    <div className="mt-3 font-mono text-xs tabular-nums text-ink-dim">{formatElapsed(now - since)}</div>
+  );
+}
+
 /* ------------------------------- transcript ------------------------------ */
 
 type ItemKind = TranscriptItem["kind"];
@@ -592,6 +610,9 @@ type Props = {
   busy: boolean;
   /** True before the first event lands, to show a connecting spinner. */
   connecting: boolean;
+  /** Epoch ms when the current working stretch began, or null when idle —
+   *  drives the bottom-left elapsed counter. */
+  workingSince: number | null;
   permission: PermissionHandlers;
 };
 
@@ -599,6 +620,7 @@ export const TranscriptView = memo(function TranscriptView({
   items,
   busy,
   connecting,
+  workingSince,
   permission,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -656,6 +678,7 @@ export const TranscriptView = memo(function TranscriptView({
             Connecting to claude…
           </div>
         )}
+        {workingSince !== null && <ElapsedCounter since={workingSince} />}
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import {
   docFromTool,
   docTitle,
   formatCost,
+  formatElapsed,
   formatTokens,
   parseToolInput,
   prettyToolInput,
@@ -134,5 +135,28 @@ describe("formatCost", () => {
     expect(formatCost(null)).toBeNull();
     expect(formatCost(undefined)).toBeNull();
     expect(formatCost(Number.NaN)).toBeNull();
+  });
+});
+
+describe("formatElapsed", () => {
+  it("shows tenths of a second under a minute", () => {
+    expect(formatElapsed(0)).toBe("0.0s");
+    expect(formatElapsed(19_300)).toBe("19.3s");
+    expect(formatElapsed(59_900)).toBe("59.9s");
+  });
+
+  it("switches to minutes + zero-padded seconds at a minute", () => {
+    expect(formatElapsed(60_000)).toBe("1m 00s");
+    expect(formatElapsed(83_000)).toBe("1m 23s");
+    expect(formatElapsed(605_000)).toBe("10m 05s");
+  });
+
+  it("switches to hours + minutes past an hour", () => {
+    expect(formatElapsed(3_600_000)).toBe("1h 00m");
+    expect(formatElapsed(3_840_000)).toBe("1h 04m");
+  });
+
+  it("clamps negative inputs to zero", () => {
+    expect(formatElapsed(-500)).toBe("0.0s");
   });
 });

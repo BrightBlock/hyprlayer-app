@@ -310,6 +310,7 @@ export function SessionChat({
           items={session?.items ?? []}
           busy={busy}
           connecting={!session || session.state === "starting"}
+          workingSince={session?.workingSince ?? null}
           permission={permission}
         />
       ) : (
