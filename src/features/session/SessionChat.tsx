@@ -54,17 +54,31 @@ const DOT_COLOR: Record<ReturnType<typeof describeState>["tone"], string> = {
   accent: "bg-sky-400",
 };
 
-/** A tiny live status dot for an agent tab (none until a session is started). */
+/** A tiny status dot for an agent tab encoding the session's tone (none until a
+ *  session is started). Motion lives on the tab icon's glow, so this stays
+ *  steady — it carries the color, not the "live" signal. */
 export function SessionTabDot({ sessionId }: { sessionId?: string }) {
   const session = useSession(sessionId);
   if (!session) return null;
   const { tone } = describeState(session.state, session.streaming);
-  const pulse = session.streaming || session.state === "starting";
   return (
     <span
-      className={`ml-0.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${DOT_COLOR[tone]} ${pulse ? "animate-pulse" : ""}`}
+      className={`ml-0.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${DOT_COLOR[tone]}`}
       aria-hidden="true"
     />
+  );
+}
+
+/** The mode badge that leads an agent tab. Glows while the session is working
+ *  (same `isBusy` signal as the elapsed counter) and goes quiet when the turn
+ *  completes. Subscribes per-session so only this tab re-renders on deltas. */
+export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?: string }) {
+  const session = useSession(sessionId);
+  const busy = session ? isBusy(session) : false;
+  return (
+    <span className={`rounded p-0.5 ${MODE_STYLES[mode].badge} ${busy ? "animate-tab-glow" : ""}`}>
+      <ModeIcon mode={mode} />
+    </span>
   );
 }
 

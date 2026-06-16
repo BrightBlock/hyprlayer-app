@@ -45,3 +45,24 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Soft breathing halo for an agent tab icon while its session is working.
+   Uses currentColor so the glow matches each mode's accent automatically. */
+@keyframes tab-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 2px 0 currentColor;
+  }
+  50% {
+    box-shadow: 0 0 8px 1px currentColor;
+  }
+}
+.animate-tab-glow {
+  animation: tab-glow 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-tab-glow {
+    animation: none;
+    box-shadow: 0 0 5px 0 currentColor;
+  }
+}

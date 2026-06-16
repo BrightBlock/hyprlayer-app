@@ -11,13 +11,13 @@ import {
   PageSpinner,
   TextInput,
 } from "../components/ui";
-import { BookIcon, DocIcon, ModeIcon, PlusIcon, XIcon } from "../components/icons";
+import { BookIcon, DocIcon, PlusIcon, XIcon } from "../components/icons";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { DiffSidebar } from "../features/workstreams/DiffSidebar";
-import { SessionChat, SessionTabDot } from "../features/session/SessionChat";
+import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { killSession, transcriptToText } from "../features/session/sessionStore";
-import { MODE_STYLES, stageLabel, type StageKey } from "../features/session/stages";
+import { stageLabel, type StageKey } from "../features/session/stages";
 import {
   defaultTabState,
   updateWorkstreamTabs,
@@ -346,9 +346,7 @@ export function ProjectPage() {
                               <DocIcon size={13} />
                             </span>
                           ) : (
-                            <span className={`rounded p-0.5 ${MODE_STYLES[shell.mode].badge}`}>
-                              <ModeIcon mode={shell.mode} />
-                            </span>
+                            <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
                           )}
                           {shell.title}
                           {!shell.docPreviewPath && <SessionTabDot sessionId={shell.sessionId} />}
