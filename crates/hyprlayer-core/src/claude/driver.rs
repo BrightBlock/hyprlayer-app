@@ -230,8 +230,17 @@ impl ClaudeDriver {
     }
 
     /// Send a user turn (the first prompt, or a follow-up). Stage-skill
-    /// invocations are just prompt text (e.g. `"/research_codebase …"`).
-    pub fn send_user_turn(&self, text: &str) -> Result<()> {
+    /// invocations are just prompt text (e.g. `"/research_codebase …"`). `stage`
+    /// is the stage label for the opening prompt, else `None` for a follow-up.
+    ///
+    /// Emits a [`SessionEvent::UserMessage`] first so the turn is persisted and
+    /// replays after a restart — claude never echoes the human prompt on stdout,
+    /// so without this the user's side of the conversation is lost on reload.
+    pub fn send_user_turn(&self, text: &str, stage: Option<&str>) -> Result<()> {
+        let _ = self.events.send(SessionEvent::UserMessage {
+            text: text.to_string(),
+            stage: stage.map(str::to_string),
+        });
         self.write_line(protocol::user_turn_json(&self.session_id, text))
     }
 

@@ -214,7 +214,9 @@ pub async fn start_stage_session(
     .await?;
 
     // Kick off the first turn (the composed skill prompt).
-    driver.send_user_turn(&prompt).map_err(AppError::from)?;
+    driver
+        .send_user_turn(&prompt, Some(&session.stage))
+        .map_err(AppError::from)?;
 
     Ok(session)
 }
@@ -301,7 +303,7 @@ pub async fn send_user_message(
 ) -> CmdResult<()> {
     live_driver(&state, &session_id)
         .await?
-        .send_user_turn(&text)
+        .send_user_turn(&text, None)
         .map_err(AppError::from)
 }
 
@@ -506,7 +508,12 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
                 _ => {}
             }
 
-            let _ = channel.send(event);
+            // `UserMessage` is persist-only: the UI already showed it optimistically
+            // when the user sent it, so forwarding it would double-stamp the turn.
+            // Every other event drives the live transcript.
+            if !matches!(event, SessionEvent::UserMessage { .. }) {
+                let _ = channel.send(event);
+            }
             if terminal {
                 break;
             }

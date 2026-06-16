@@ -367,6 +367,15 @@ export type SessionEvent =
 /**  Session is up; claude assigned its own id (used for `--resume`). */
 { kind: "init"; claudeSessionId: string; model: string | null } | 
 /**
+ *  A user turn the app sent to claude. claude never echoes the human prompt
+ *  on stdout (it's input), so the driver emits this itself purely so the turn
+ *  is persisted and replays after a restart. It is NOT forwarded to the live
+ *  UI (which already shows the message optimistically) — persist-only, so the
+ *  live transcript isn't double-stamped. `stage` is the stage label for the
+ *  session's opening prompt, else null (a follow-up).
+ */
+{ kind: "userMessage"; text: string; stage: string | null } | 
+/**
  *  Streaming text delta (live typing). Coalesced into `AssistantText` on
  *  turn completion — the UI shows partials, then replaces with the final.
  */

@@ -10,6 +10,7 @@ import {
   SendIcon,
   SparkleIcon,
   StopIcon,
+  XIcon,
 } from "../../components/icons";
 import { errorMessage } from "../../lib/ipc";
 import type { WorkstreamView } from "../../lib/bindings";
@@ -22,6 +23,7 @@ import { TranscriptView, type PermissionHandlers } from "./TranscriptView";
 import {
   allowForSession,
   answerQuestion,
+  cancelQueuedMessage,
   respondPermission,
   restoreSessionIfNeeded,
   sendMessage,
@@ -29,7 +31,7 @@ import {
   stopSession,
   useSession,
 } from "./sessionStore";
-import { describeState, isBusy, isTerminal, type PendingQuestion } from "./transcript";
+import { describeState, isBusy, isTerminal, isWorking, type PendingQuestion } from "./transcript";
 
 const STAGE_INTRO: Record<StageKey, string> = {
   general: "Chat with the project agent in this worktree. Pick a stage below to run a spec-driven step.",
@@ -71,14 +73,16 @@ export function SessionTabDot({ sessionId }: { sessionId?: string }) {
   );
 }
 
-/** The mode badge that leads an agent tab. Glows while the session is working
- *  (same `isBusy` signal as the elapsed counter) and goes quiet when the turn
- *  completes. Subscribes per-session so only this tab re-renders on deltas. */
+/** The mode badge that leads an agent tab. Glows while the session is actively
+ *  working (same `isWorking` signal as the elapsed counter) and goes quiet when
+ *  the turn completes OR pauses for the user — a session awaiting a permission
+ *  shows the warn-toned dot, not a "working" pulse. Subscribes per-session so
+ *  only this tab re-renders on deltas. */
 export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?: string }) {
   const session = useSession(sessionId);
-  const busy = session ? isBusy(session) : false;
+  const working = session ? isWorking(session) : false;
   return (
-    <span className={`rounded p-0.5 ${MODE_STYLES[mode].badge} ${busy ? "animate-tab-glow" : ""}`}>
+    <span className={`rounded p-0.5 ${MODE_STYLES[mode].badge} ${working ? "animate-tab-glow" : ""}`}>
       <ModeIcon mode={mode} />
     </span>
   );
@@ -228,6 +232,41 @@ function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: numb
  * "Skip" sends no answer, which the agent handles by asking again in prose.
  * Remounted per prompt (keyed on requestId) so state never leaks between asks.
  */
+/** Messages typed while a turn was running, shown above the composer until the
+ *  turn finishes and they're delivered. Each can be cancelled before it sends. */
+function QueuedMessages({
+  messages,
+  onCancel,
+}: {
+  messages: string[];
+  onCancel: (index: number) => void;
+}) {
+  return (
+    <div className="mb-2 space-y-1">
+      {messages.map((text, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5"
+        >
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-ink-dim/70">
+            Queued
+          </span>
+          <span className="flex-1 truncate text-xs text-ink">{text}</span>
+          <button
+            type="button"
+            onClick={() => onCancel(i)}
+            title="Cancel queued message"
+            aria-label="Cancel queued message"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+          >
+            <XIcon size={12} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function QuestionPrompt({
   pending,
   onSubmit,
@@ -423,6 +462,12 @@ export function SessionChat({
   }, [shell.sessionId, hasEntry, view.item.id, shell.mode]);
 
   const busy = session ? isBusy(session) : started;
+  // `working` (actively computing) drives the transcript's running-tool spinner
+  // and smooth-scroll; `busy` (which also covers "blocked on the user") gates
+  // the composer. They diverge while a session is held on a permission/question.
+  // Falls back to false (not `started`) so a tab still rebuilding from the log
+  // after a restart shows the "Connecting…" spinner, not a fake running turn.
+  const working = session ? isWorking(session) : false;
   const terminal = session ? isTerminal(session.state) : false;
   const pendingQuestion = session?.pendingQuestion ?? null;
   const draft = shell.draft;
@@ -454,7 +499,9 @@ export function SessionChat({
 
   const handleSend = async () => {
     const text = draft.trim();
-    if (!text || !sid || busy) return;
+    // No `busy` guard: while a turn is in flight `sendMessage` queues the message
+    // and delivers it when the turn finishes (conversation steering).
+    if (!text || !sid) return;
     setError(null);
     try {
       await sendMessage(sid, text);
@@ -483,7 +530,7 @@ export function SessionChat({
       {started ? (
         <TranscriptView
           items={session?.items ?? []}
-          busy={busy}
+          busy={working}
           connecting={!session || session.state === "starting"}
           workingSince={session?.workingSince ?? null}
           permission={permission}
@@ -540,6 +587,14 @@ export function SessionChat({
                   }
                 />
               )}
+              {session && session.queued.length > 0 && (
+                <QueuedMessages
+                  messages={session.queued}
+                  onCancel={(i) => {
+                    if (sid) cancelQueuedMessage(sid, i);
+                  }}
+                />
+              )}
               <div className="rounded-xl bg-panel-2">
                 <textarea
                   value={draft}
@@ -554,7 +609,9 @@ export function SessionChat({
                         ? mode === "general"
                           ? "Ask the project agent…  (Enter to start, Shift+Enter for a newline)"
                           : `Brief the ${stageLabel(mode).toLowerCase()} agent…  (Enter to start)`
-                        : "Reply to the agent…  (Enter to send)"
+                        : busy
+                          ? "Send a follow-up — it'll queue until the turn finishes…"
+                          : "Reply to the agent…  (Enter to send)"
                   }
                   className="selectable block w-full resize-none bg-transparent px-3.5 py-3 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
                 />
@@ -616,7 +673,9 @@ export function SessionChat({
                     {session?.contextTokens != null && (
                       <ContextMeter tokens={session.contextTokens} windowSize={model.contextWindow} />
                     )}
-                    {busy && started ? (
+                    {/* Stop stays available while a turn runs; Send stays too, so
+                        a follow-up can be queued mid-turn (conversation steering). */}
+                    {busy && started && (
                       <button
                         type="button"
                         onClick={() => sid && void stopSession(sid)}
@@ -626,18 +685,23 @@ export function SessionChat({
                       >
                         <StopIcon />
                       </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={!canSubmit || starting}
-                        onClick={() => (started ? void handleSend() : void handleStart())}
-                        title={started ? "Send" : "Start session"}
-                        aria-label={started ? "Send" : "Start"}
-                        className="flex h-8 w-8 items-center justify-center rounded-md border border-edge bg-edge/70 text-ink hover:bg-edge disabled:opacity-40 disabled:hover:bg-edge/70"
-                      >
-                        {starting ? <Spinner size={14} /> : <SendIcon size={15} />}
-                      </button>
                     )}
+                    <button
+                      type="button"
+                      disabled={!canSubmit || starting || Boolean(pendingQuestion)}
+                      onClick={() => (started ? void handleSend() : void handleStart())}
+                      title={
+                        !started
+                          ? "Start session"
+                          : busy
+                            ? "Queue message — sends when the turn finishes"
+                            : "Send"
+                      }
+                      aria-label={!started ? "Start" : busy ? "Queue message" : "Send"}
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-edge bg-edge/70 text-ink hover:bg-edge disabled:opacity-40 disabled:hover:bg-edge/70"
+                    >
+                      {starting ? <Spinner size={14} /> : <SendIcon size={15} />}
+                    </button>
                   </div>
                 </div>
               </div>

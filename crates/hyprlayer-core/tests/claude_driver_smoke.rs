@@ -33,7 +33,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     .expect("spawn claude");
 
     driver
-        .send_user_turn("Reply with exactly the word: pong. Nothing else.")
+        .send_user_turn("Reply with exactly the word: pong. Nothing else.", None)
         .expect("send turn");
 
     // A stream-json session stays alive between turns, so the turn completes at

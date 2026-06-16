@@ -8,10 +8,12 @@ import {
   initialSessionView,
   isBusy,
   isTerminal,
+  isWorking,
   parseQuestions,
   reduceEvent,
   resolvePermission,
   resolveQuestion,
+  restoredView,
   viewToText,
   type SessionView,
   type TranscriptItem,
@@ -112,6 +114,39 @@ describe("tool blocks", () => {
     const t2 = view.items.find((i) => i.kind === "tool" && i.toolUseId === "t2");
     expect(t1).toMatchObject({ result: { content: "r1" } });
     expect(t2).toMatchObject({ result: null });
+  });
+
+  it("an AskUserQuestion result clears the pending question (it was answered)", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "toolUse", id: "auq1", name: "AskUserQuestion", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+    expect(view.state).toBe("awaiting_question");
+
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "auq1", content: "answered", isError: false, parentId: null });
+    expect(view.pendingQuestion).toBeNull();
+    expect(view.state).toBe("running");
+  });
+
+  it("a gated tool's result resolves its open permission card (it was answered)", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    expect(view.state).toBe("awaiting_permission");
+
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "ok", isError: false, parentId: null });
+    expect(hasPendingPermission(view)).toBe(false);
+    expect(view.pendingPermission).toBeNull();
+    expect(view.state).toBe("running");
+  });
+
+  it("a sibling tool's result leaves an unrelated open permission card intact", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Read", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    // A different tool finishing must not un-park a Bash permission.
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "ok", isError: false, parentId: null });
+    expect(hasPendingPermission(view)).toBe(true);
+    expect(view.state).toBe("awaiting_permission");
   });
 });
 
@@ -425,6 +460,143 @@ describe("derived helpers", () => {
     expect(isBusy(view)).toBe(true);
   });
 
+  it("isWorking is true only while computing — not while parked on the user", () => {
+    expect(isWorking({ ...initialSessionView("starting") })).toBe(true);
+    expect(isWorking({ ...initialSessionView("running"), streaming: true })).toBe(true);
+    expect(isWorking({ ...initialSessionView("running"), streaming: false })).toBe(false);
+    // Parked on a permission/question is busy but NOT working (blocked on you),
+    // even though the reducer leaves `streaming` true on the ask.
+    expect(isWorking({ ...initialSessionView("awaiting_permission"), streaming: true })).toBe(false);
+    expect(isWorking({ ...initialSessionView("awaiting_question"), streaming: true })).toBe(false);
+    expect(isWorking({ ...initialSessionView("completed") })).toBe(false);
+  });
+
+  it("isWorking ignores a stray streaming flag while a permission card is open", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    view = { ...view, state: "running", streaming: true }; // stray turnDone shape
+    expect(hasPendingPermission(view)).toBe(true);
+    expect(isWorking(view)).toBe(false);
+  });
+});
+
+describe("restoredView (rebuild after an app restart)", () => {
+  it("holds a session parked on a permission instead of faking a running turn", () => {
+    // Replay a log that ends mid-turn on a permission ask (the app was closed
+    // before the user answered).
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "claude-opus-4-8" });
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+
+    const restored = restoredView(view);
+
+    // HELD: the conversation pauses for the user, the card stays answerable…
+    expect(restored.state).toBe("awaiting_permission");
+    expect(hasPendingPermission(restored)).toBe(true);
+    expect(restored.pendingPermission?.requestId).toBe("req-1");
+    expect(isBusy(restored)).toBe(true);
+    // …but it is NOT shown as a running turn — this is the restart bug.
+    expect(restored.streaming).toBe(false);
+    expect(isWorking(restored)).toBe(false);
+  });
+
+  it("holds a session parked on a question", () => {
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+    const restored = restoredView(view);
+    expect(restored.state).toBe("awaiting_question");
+    expect(restored.pendingQuestion?.requestId).toBe("q-1");
+    expect(isWorking(restored)).toBe(false);
+  });
+
+  it("settles a session cut off mid-stream to idle (no fake working)", () => {
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
+    view = reduceEvent(view, { kind: "partialText", text: "thinking…", parentId: null });
+    expect(view.streaming).toBe(true);
+
+    const restored = restoredView(view);
+    expect(restored.state).toBe("idle");
+    expect(restored.streaming).toBe(false);
+    expect(isBusy(restored)).toBe(false);
+    expect(isWorking(restored)).toBe(false);
+  });
+
+  it("leaves a terminally-exited session terminal", () => {
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
+    view = reduceEvent(view, { kind: "exited", outcome: "completed", code: 0, stderrTail: "" });
+    const restored = restoredView(view);
+    expect(restored.state).toBe("completed");
+    expect(isTerminal(restored.state)).toBe(true);
+    expect(isWorking(restored)).toBe(false);
+  });
+
+  it("does not re-show an already-answered question after a restart", () => {
+    // Mirrors the bug report: two AskUserQuestion calls, both answered, then the
+    // turn completes with a recap. On reload nothing should be pending and the
+    // composer must not be locked on a stale question.
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
+    for (const [tool, req] of [
+      ["auq1", "q-1"],
+      ["auq2", "q-2"],
+    ] as const) {
+      view = reduceEvent(view, { kind: "toolUse", id: tool, name: "AskUserQuestion", input: "{}", parentId: null });
+      view = reduceEvent(view, { kind: "questionAsk", requestId: req, questions: TABS_QUESTION });
+      view = reduceEvent(view, { kind: "toolResult", toolUseId: tool, content: "answered", isError: false, parentId: null });
+    }
+    view = reduceEvent(view, { kind: "assistantText", text: "All five answered.", parentId: null });
+    view = reduceEvent(view, { kind: "turnDone", costUsd: 0.1, numTurns: 1, contextTokens: 29400 });
+
+    const restored = restoredView(view);
+    expect(restored.pendingQuestion).toBeNull();
+    expect(restored.state).toBe("idle");
+    expect(isBusy(restored)).toBe(false);
+  });
+
+  it("does not re-show an already-answered permission after a restart", () => {
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "ok", isError: false, parentId: null });
+    view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null });
+
+    const restored = restoredView(view);
+    expect(hasPendingPermission(restored)).toBe(false);
+    expect(restored.pendingPermission).toBeNull();
+    expect(restored.state).toBe("idle");
+    expect(isBusy(restored)).toBe(false);
+  });
+
+  it("replays persisted user turns so the prompts survive a restart", () => {
+    // The user's side of the conversation is persisted as `userMessage` events
+    // (claude never echoes the prompt); replaying must rebuild both sides.
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "userMessage", text: "/research_codebase widgets", stage: "research" });
+    view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
+    view = reduceEvent(view, { kind: "assistantText", text: "Here's what I found…", parentId: null });
+    view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null });
+    view = reduceEvent(view, { kind: "userMessage", text: "now go deeper", stage: null });
+    view = reduceEvent(view, { kind: "assistantText", text: "Going deeper.", parentId: null });
+    view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: 2, contextTokens: null });
+
+    const restored = restoredView(view);
+    const speakers = restored.items.map((i) => i.kind);
+    expect(speakers).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(restored.items[0]).toMatchObject({
+      kind: "user",
+      text: "/research_codebase widgets",
+      stage: "research",
+    });
+    expect(restored.items[2]).toMatchObject({ kind: "user", text: "now go deeper", stage: null });
+    expect(restored.state).toBe("idle");
+  });
+});
+
+describe("display + actions", () => {
   it("describeState refines running by streaming", () => {
     expect(describeState("running", true).label).toBe("working");
     expect(describeState("running", false).label).toBe("ready");

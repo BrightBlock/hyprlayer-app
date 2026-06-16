@@ -180,14 +180,111 @@ export function isBusy(view: SessionView): boolean {
   );
 }
 
+/**
+ * Whether claude is actively *computing* — drives the "time working" elapsed
+ * counter and the tab's breathing glow. Deliberately narrower than [`isBusy`]: a
+ * session parked on a permission or question is busy (you can't take a new turn)
+ * but it is NOT working — it's blocked on you. Treating "waiting on the user" as
+ * "working" is what made a restored, permission-held session look like a running
+ * turn after an app restart; it also means the counter/glow now correctly pause
+ * while a *live* session waits for your approval and resume once you answer.
+ */
+export function isWorking(view: SessionView): boolean {
+  if (isTerminal(view.state)) return false;
+  if (view.state === "awaiting_permission" || view.state === "awaiting_question") return false;
+  if (hasPendingPermission(view) || view.pendingQuestion !== null) return false;
+  return view.state === "starting" || view.streaming;
+}
+
 /** The state a non-terminal turn should rest in given outstanding user prompts:
  *  a question takes precedence, then an open permission card, else it's running.
  *  Shared by `turnDone` and the answer/permission resolvers so they stay in sync. */
-function parkedState(view: SessionView): SessionState {
+export function parkedState(view: SessionView): SessionState {
   if (isTerminal(view.state)) return view.state;
   if (view.pendingQuestion !== null) return "awaiting_question";
   if (hasPendingPermission(view)) return "awaiting_permission";
   return "running";
+}
+
+/**
+ * Finalize a view rebuilt by replaying a session's persisted log after an app
+ * restart. The claude child doesn't outlive the app (`kill_on_drop`), so a
+ * replayed session is never live — settle it into a consistent resting state:
+ *
+ *  - already terminal (completed / crashed / killed / …) → leave it;
+ *  - parked on a permission or question → keep it HELD (state stays
+ *    `awaiting_*`, the card and pending prompt stay) so the conversation pauses
+ *    for the user instead of looking like a running turn — answering it resumes
+ *    the process (claude re-issues the ask);
+ *  - otherwise it was cut off mid-turn → settle to `idle`.
+ *
+ * `streaming` is always cleared: nothing is actively streaming after a restart.
+ * Crucially this never leaves the buggy "idle but an unresolved permission card
+ * is still open" shape, which read as busy/working forever.
+ */
+export function restoredView(view: SessionView): SessionView {
+  if (isTerminal(view.state)) return { ...view, streaming: false };
+  if (view.pendingQuestion !== null || hasPendingPermission(view)) {
+    return { ...view, state: parkedState(view), streaming: false };
+  }
+  return {
+    ...view,
+    state: "idle",
+    streaming: false,
+    pendingPermission: null,
+    pendingQuestion: null,
+  };
+}
+
+/**
+ * Settle the prompt that a just-completed main-thread tool was gating. A
+ * permission decision and an `AskUserQuestion` answer are both frontend-only
+ * actions — neither emits an event of its own — so the tool's *result* is the
+ * only thing persisted to the log that proves the user already answered. Without
+ * this, replaying the log after a restart re-surfaces an answered card and locks
+ * the composer on a stale prompt (the conversation looks paused when it isn't).
+ *
+ *  - `AskUserQuestion` finishing → the questions were answered → drop the
+ *    pending question;
+ *  - any other tool finishing → mark its still-open permission card resolved
+ *    (matched by tool name — within a turn a tool either always gates or never
+ *    does, and answered tools' results land before any later ask, so this can't
+ *    clear a genuinely-pending card).
+ *
+ * Idempotent with the live resolvers, which already cleared the prompt before
+ * the result arrives; on replay this is the mechanism that clears it.
+ */
+function settleAnsweredPrompt(
+  view: SessionView,
+  items: TranscriptItem[],
+  toolName: string,
+): SessionView {
+  let nextItems = items;
+  let pendingPermission = view.pendingPermission;
+  let pendingQuestion = view.pendingQuestion;
+
+  if (toolName === "AskUserQuestion") {
+    pendingQuestion = null;
+  } else {
+    for (let i = nextItems.length - 1; i >= 0; i -= 1) {
+      const it = nextItems[i];
+      if (it.kind === "permission" && it.decision === null && it.toolName === toolName) {
+        nextItems = nextItems.slice();
+        nextItems[i] = { ...it, decision: "allow" };
+        if (pendingPermission?.requestId === it.requestId) pendingPermission = null;
+        break;
+      }
+    }
+  }
+
+  const next: SessionView = {
+    ...view,
+    items: nextItems,
+    pendingPermission,
+    pendingQuestion,
+    streaming: true,
+  };
+  return { ...next, state: parkedState(next) };
 }
 
 /* ------------------------------- internals ------------------------------- */
@@ -246,6 +343,16 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
         streaming: true,
         claudeSessionId: event.claudeSessionId || view.claudeSessionId,
         model: event.model ?? view.model,
+      };
+
+    case "userMessage":
+      // Persisted user turn, seen only when replaying the log on restart (the
+      // backend doesn't forward it live — the optimistic `addUserMessage` already
+      // showed it). Rebuilds the user's side of the conversation.
+      return {
+        ...view,
+        ...appended(view, (id) => ({ kind: "user", id, text: event.text, stage: event.stage }), true),
+        streaming: true,
       };
 
     case "partialText": {
@@ -344,7 +451,13 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
         if (item.kind === "tool" && item.toolUseId === event.toolUseId && item.result === null) {
           const items = view.items.slice();
           items[i] = { ...item, result: { content: event.content, isError: event.isError } };
-          return { ...view, items, streaming: true };
+          // A finished main-thread tool is our persisted proof that the prompt
+          // gating it was answered — settle it so a replay doesn't re-surface an
+          // already-answered card. (Subagent results gate nothing on the main
+          // thread.)
+          return event.parentId
+            ? { ...view, items, streaming: true }
+            : settleAnsweredPrompt(view, items, item.name);
         }
       }
       // No matching tool_use (rare): surface the orphan result on its own.

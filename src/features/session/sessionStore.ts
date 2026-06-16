@@ -34,9 +34,11 @@ import {
   initialSessionView,
   isBusy,
   isTerminal,
+  isWorking,
   reduceEvent,
   resolvePermission,
   resolveQuestion,
+  restoredView,
   viewToText,
   type SessionView,
 } from "./transcript";
@@ -49,6 +51,9 @@ export type SessionEntry = SessionView & {
   /** Whether a live claude process is attached. False for a session restored
    *  from the log after a restart — it resumes on the next message. */
   live: boolean;
+  /** Messages the user sent while a turn was still in flight, awaiting delivery.
+   *  Delivered one-per-turn as each turn finishes (conversation steering). */
+  queued: string[];
   /** Epoch ms when the current working stretch began, or null when idle —
    *  drives the live "time working" counter. Maintained outside the pure
    *  reducer (it needs a clock) by `setEntry`, so every mutation keeps it right. */
@@ -79,14 +84,19 @@ function setEntry(sessionId: string, next: SessionEntry): void {
 
 /**
  * The working-start timestamp for the elapsed counter: stamp `now` the moment a
- * session begins working, keep it untouched while it stays busy, clear it the
+ * session begins working, keep it untouched while it stays working, clear it the
  * moment it stops. Recomputed on every `setEntry` so it's correct whichever path
  * changed the entry — live events, an optimistic send, or a permission answer.
+ *
+ * Keyed on [`isWorking`] (actively computing), not [`isBusy`]: a session parked
+ * on a permission/question is busy but not working, so the counter pauses while
+ * it waits on the user — and a restored, permission-held session never shows a
+ * ticking timer (the restart bug).
  */
 function nextWorkingSince(prev: SessionEntry | undefined, next: SessionEntry): number | null {
-  if (!isBusy(next)) return null;
-  const wasBusy = prev ? isBusy(prev) : false;
-  return wasBusy ? (prev?.workingSince ?? Date.now()) : Date.now();
+  if (!isWorking(next)) return null;
+  const wasWorking = prev ? isWorking(prev) : false;
+  return wasWorking ? (prev?.workingSince ?? Date.now()) : Date.now();
 }
 
 /**
@@ -130,6 +140,10 @@ function dispatch(sessionId: string, event: SessionEvent): void {
   if (event.kind === "turnDone" || event.kind === "exited") {
     // The agent likely touched the worktree; refresh its diff.
     void queryClient.invalidateQueries({ queryKey: ["workstream", current.workstreamId, "diff"] });
+  }
+  if (event.kind === "turnDone") {
+    // The turn is free — deliver the next message queued while it ran.
+    flushQueuedMessage(sessionId);
   }
   if (event.kind === "exited") {
     channels.delete(sessionId);
@@ -187,6 +201,7 @@ export async function startSession(args: {
     autoAllow: [],
     live: true,
     workingSince: null,
+    queued: [],
   });
 
   activate(session.id); // bind + flush any events that raced the command
@@ -220,15 +235,51 @@ export async function resumeSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Send a follow-up turn. If the session was restored from the log and isn't
- * live (post-restart), transparently resume it first, then send.
+ * Send a follow-up turn — or, if a live turn is already in flight, queue it for
+ * delivery when that turn finishes, so the user can keep steering the
+ * conversation without waiting (à la Claude Code / Conductor). A detached
+ * (restored) session has nothing running to queue behind, so it's delivered
+ * immediately, resuming the process first.
  */
 export async function sendMessage(sessionId: string, text: string): Promise<void> {
+  const current = entryOf(sessionId);
+  if (!current) return;
+  if (channels.has(sessionId) && isBusy(current)) {
+    setEntry(sessionId, { ...current, queued: [...current.queued, text] });
+    return;
+  }
+  await deliverMessage(sessionId, text);
+}
+
+/** Actually send a turn: optimistic user bubble, resume if detached, hand to the
+ *  driver. The delivery half of [`sendMessage`]; also used to flush the queue. */
+async function deliverMessage(sessionId: string, text: string): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
   setEntry(sessionId, { ...current, ...addUserMessage(current, text, null) });
   if (!channels.has(sessionId)) await resumeSession(sessionId);
   await unwrap(commands.sendUserMessage(sessionId, text));
+}
+
+/**
+ * Deliver the next queued message once a turn finishes (conversation steering).
+ * One per turn so each queued message gets its own turn, in order; a no-op while
+ * the session is still parked on a permission/question (the user owes an answer
+ * first) — it retries on the next `turnDone`.
+ */
+function flushQueuedMessage(sessionId: string): void {
+  const entry = entryOf(sessionId);
+  if (!entry || entry.queued.length === 0 || isBusy(entry)) return;
+  const [next, ...rest] = entry.queued;
+  setEntry(sessionId, { ...entry, queued: rest });
+  void deliverMessage(sessionId, next);
+}
+
+/** Drop a still-queued message before it's delivered (the user changed course). */
+export function cancelQueuedMessage(sessionId: string, index: number): void {
+  const current = entryOf(sessionId);
+  if (!current) return;
+  setEntry(sessionId, { ...current, queued: current.queued.filter((_, i) => i !== index) });
 }
 
 /** Answer a pending permission ask. */
@@ -244,6 +295,14 @@ export async function respondPermission(
       ...current,
       ...resolvePermission(current, requestId, allow ? "allow" : "deny"),
     });
+  }
+  // A restored (post-restart) session has no live process and its original
+  // request id is dead, so the answer can't be delivered to it. Resume instead:
+  // claude re-establishes the turn and re-issues the ask — auto-allowed if the
+  // user chose "allow for this agent" (the tool is already in `autoAllow`).
+  if (!channels.has(sessionId)) {
+    await resumeSession(sessionId);
+    return;
   }
   await unwrap(commands.respondPermission(sessionId, requestId, allow, message));
 }
@@ -262,6 +321,13 @@ export async function answerQuestion(
   const current = entryOf(sessionId);
   if (current) {
     setEntry(sessionId, { ...current, ...resolveQuestion(current, requestId) });
+  }
+  // Restored sessions are detached (see `respondPermission`): resume so claude
+  // re-issues the question rather than sending an answer its dead process can't
+  // receive.
+  if (!channels.has(sessionId)) {
+    await resumeSession(sessionId);
+    return;
   }
   await unwrap(commands.answerQuestion(sessionId, requestId, JSON.stringify(answers)));
 }
@@ -384,21 +450,22 @@ export async function restoreSessionIfNeeded(
         // A single corrupt row shouldn't sink the whole transcript.
       }
     }
-    // Left mid-conversation (not a real terminal exit) → resumable, not ended.
-    // Any permission/question the dead process was parked on can't be answered
-    // now — its request id died with the process — so drop it, otherwise the
-    // composer stays wedged on a stale prompt that resolves to nothing. claude
-    // re-issues the ask after `--resume` if it still needs the input.
-    if (!isTerminal(view.state)) {
-      view = {
-        ...view,
-        state: "idle",
-        streaming: false,
-        pendingPermission: null,
-        pendingQuestion: null,
-      };
-    }
-    setEntry(sessionId, { ...view, workstreamId, stage, autoAllow: [], live: false, workingSince: null });
+    // Settle the replayed transcript into a consistent resting state: a session
+    // parked on a permission/question stays HELD (so the conversation pauses for
+    // the user, rather than looking like a running turn); one cut off mid-turn
+    // settles to idle. Answering a held prompt resumes the process — the request
+    // id died with the old process, so the answer can't reach it directly, but
+    // `respondPermission`/`answerQuestion` resume first and claude re-issues.
+    view = restoredView(view);
+    setEntry(sessionId, {
+      ...view,
+      workstreamId,
+      stage,
+      autoAllow: [],
+      live: false,
+      workingSince: null,
+      queued: [],
+    });
   } catch (error) {
     console.error(`failed to restore session ${sessionId}`, error);
   } finally {

@@ -52,6 +52,13 @@ pub enum SessionEvent {
         claude_session_id: String,
         model: Option<String>,
     },
+    /// A user turn the app sent to claude. claude never echoes the human prompt
+    /// on stdout (it's input), so the driver emits this itself purely so the turn
+    /// is persisted and replays after a restart. It is NOT forwarded to the live
+    /// UI (which already shows the message optimistically) — persist-only, so the
+    /// live transcript isn't double-stamped. `stage` is the stage label for the
+    /// session's opening prompt, else null (a follow-up).
+    UserMessage { text: String, stage: Option<String> },
     /// Streaming text delta (live typing). Coalesced into `AssistantText` on
     /// turn completion — the UI shows partials, then replaces with the final.
     PartialText {
@@ -128,6 +135,7 @@ impl SessionEvent {
     pub fn kind(&self) -> &'static str {
         match self {
             SessionEvent::Init { .. } => "init",
+            SessionEvent::UserMessage { .. } => "userMessage",
             SessionEvent::PartialText { .. } => "partialText",
             SessionEvent::AssistantText { .. } => "assistantText",
             SessionEvent::Thinking { .. } => "thinking",

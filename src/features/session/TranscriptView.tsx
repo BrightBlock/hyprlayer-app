@@ -606,7 +606,8 @@ function ItemList({
 
 type Props = {
   items: TranscriptItem[];
-  /** A turn is in flight — drives the running-tool spinner. */
+  /** claude is actively computing (`isWorking`) — drives the running-tool
+   *  spinner and the smooth scroll-to-bottom. False while parked on the user. */
   busy: boolean;
   /** True before the first event lands, to show a connecting spinner. */
   connecting: boolean;
