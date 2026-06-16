@@ -12,6 +12,7 @@ import { useAllWorkstreams, useBootstrap } from "../lib/queries";
 import { shipWorkstream } from "../features/session/sessionStore";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
+import { useUiStore } from "../lib/uiStore";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
 import { RepoAvatar } from "../components/RepoAvatar";
 import { BookIcon, ChevronRightIcon, PlusIcon } from "../components/icons";
@@ -27,34 +28,49 @@ const PROJECT_SIDEBAR_MAX = 360;
 // lights + the collapse button. Other platforms don't float controls here.
 const TOP_CHROME_MIN_CONTENT_OFFSET = 148;
 
+// Cross-platform vector icons (Lucide family / native-style), currentColor so
+// they theme with the bar and stay pixel-crisp at every DPI on macOS + Windows.
 function PanelLeftIcon() {
   return (
     <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
       <path
-        d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
+        d="M5.5 4.5H9v15H5.5A2.5 2.5 0 0 1 3 17V7a2.5 2.5 0 0 1 2.5-2.5Z"
+        fill="currentColor"
+        opacity="0.9"
       />
-      <path d="M10 4v16" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function PanelRightIcon() {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M18.5 4.5H15v15h3.5A2.5 2.5 0 0 0 21 17V7a2.5 2.5 0 0 0-2.5-2.5Z"
+        fill="currentColor"
+        opacity="0.9"
+      />
     </svg>
   );
 }
 
 function BookOpenIcon() {
   return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5v-16Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 7v14" />
+      <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />
     </svg>
   );
 }
@@ -105,14 +121,19 @@ function ArrowLeftIcon() {
 
 function SettingsIcon({ size = 18 }: { size?: number }) {
   return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <path d="M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="m18 13 .8.6-1.5 2.6-1-.4a6 6 0 0 1-1.2.7l-.2 1.1h-3l-.2-1.1a6 6 0 0 1-1.2-.7l-1 .4-1.5-2.6.8-.6a6 6 0 0 1 0-1.8l-.8-.6L9.5 8l1 .4a6 6 0 0 1 1.2-.7l.2-1.1h3l.2 1.1a6 6 0 0 1 1.2.7l1-.4 1.5 2.6-.8.6a6 6 0 0 1 0 1.8Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
@@ -154,7 +175,7 @@ function routeSection(pathname: string): string {
 }
 
 const topIconClass =
-  "inline-flex h-8 w-8 items-center justify-center rounded-md border border-edge bg-panel-2 text-ink-dim hover:bg-edge/60 hover:text-ink";
+  "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink";
 
 /** Conductor-style status chip for a sidebar workstream row. */
 function WorkstreamRowChip({ view }: { view: WorkstreamView }) {
@@ -226,6 +247,8 @@ export function Root() {
   const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
   const [renameTarget, setRenameTarget] = useState<WorkstreamView | null>(null);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const diffHidden = useUiStore((state) => state.diffHidden);
+  const toggleDiff = useUiStore((state) => state.toggleDiff);
 
   const contentOffset = Math.max(
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
@@ -244,14 +267,19 @@ export function Root() {
 
   return (
     <div className="flex h-full flex-col bg-surface">
+      {/* A tall toolbar with the breadcrumb + window controls vertically
+          centered, leaving padding above and below. On macOS the traffic lights
+          are pushed down to this bar's center via trafficLightPosition
+          (tauri.conf.json y ≈ header height / 2) so they line up with the
+          centered content. */}
       <header
-        className="relative flex h-14 shrink-0 items-center border-b border-edge bg-[#101113]"
+        className="relative flex h-11 shrink-0 items-center border-b border-edge bg-[#101113]"
         data-tauri-drag-region
       >
         <button
           type="button"
           onClick={() => setCollapsed((value) => !value)}
-          className={`absolute top-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink ${
+          className={`absolute top-1/2 inline-flex h-7 w-7 shrink-0 -translate-y-1/2 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink ${
             IS_MACOS ? "left-[92px]" : "left-3"
           }`}
           title={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
@@ -290,7 +318,7 @@ export function Root() {
               <button
                 type="button"
                 onClick={() => router.history.back()}
-                className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+                className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
                 title="Back"
                 aria-label="Back"
               >
@@ -310,13 +338,24 @@ export function Root() {
                           setShipping(false),
                         );
                       }}
-                      className="inline-flex h-8 items-center gap-2 rounded-md border border-rose-400/40 bg-rose-400/10 px-3 text-sm font-medium text-rose-300 hover:bg-rose-400/20 disabled:opacity-60"
+                      className="inline-flex h-7 items-center gap-2 rounded-md border border-rose-400/40 bg-rose-400/10 px-3 text-sm font-medium text-rose-300 hover:bg-rose-400/20 disabled:opacity-60"
                       title="Commit, push, and open a pull request"
                     >
                       <GitPullRequestIcon />
                       Ship
                     </button>
                   )}
+                {currentSection === "Agent" && (
+                  <button
+                    type="button"
+                    onClick={toggleDiff}
+                    className={topIconClass}
+                    title={diffHidden ? "Show changes sidebar" : "Hide changes sidebar"}
+                    aria-label={diffHidden ? "Show changes sidebar" : "Hide changes sidebar"}
+                  >
+                    <PanelRightIcon />
+                  </button>
+                )}
                 <Link
                   to="/projects/$projectPath/docs"
                   params={{ projectPath: currentProject.path }}
@@ -333,7 +372,7 @@ export function Root() {
                   title="Project settings"
                   aria-label="Project settings"
                 >
-                  <SettingsIcon size={20} />
+                  <SettingsIcon size={18} />
                 </Link>
               </>
             )}
