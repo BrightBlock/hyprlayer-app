@@ -37,3 +37,11 @@ body {
   user-select: text;
   cursor: auto;
 }
+
+/* Scrollable that still scrolls (trackpad/shift-wheel) but shows no bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
