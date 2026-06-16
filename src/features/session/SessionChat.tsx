@@ -16,7 +16,7 @@ import { WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, type StageKey } from "./stages";
 import { EFFORTS, MODELS, effortOption, modelOption } from "./models";
-import { formatCost, formatTokens } from "./toolDisplay";
+import { formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers } from "./TranscriptView";
 import {
   allowForSession,
@@ -27,7 +27,7 @@ import {
   stopSession,
   useSession,
 } from "./sessionStore";
-import { describeState, isBusy, isTerminal, type SessionState } from "./transcript";
+import { describeState, isBusy, isTerminal } from "./transcript";
 
 const STAGE_INTRO: Record<StageKey, string> = {
   general: "Chat with the project agent in this worktree. Pick a stage below to run a spec-driven step.",
@@ -329,25 +329,8 @@ export function SessionChat({
         </div>
       )}
 
-      <div className="border-t border-edge bg-panel p-4">
+      <div className="p-4">
         <div className="mx-auto w-4/5">
-          {session && (
-            <div className="mb-2 flex min-w-0 items-center gap-2 text-xs text-ink-dim">
-              {session.model && (
-                <span className="truncate font-mono" title={session.model}>
-                  {session.model}
-                </span>
-              )}
-              <SessionInlineState state={session.state} streaming={session.streaming} />
-              {session.costUsd !== null && <span>· {formatCost(session.costUsd)}</span>}
-              {session.numTurns !== null && (
-                <span>
-                  · {session.numTurns} {session.numTurns === 1 ? "turn" : "turns"}
-                </span>
-              )}
-            </div>
-          )}
-
           {error && (
             <div className="mb-2">
               <ErrorNote error={{ code: "session", message: error, remedy: null }} />
@@ -373,7 +356,7 @@ export function SessionChat({
                   onBrowse={onBrowseDocs}
                 />
               )}
-              <div className="rounded-xl border border-edge bg-panel-2 transition-colors focus-within:border-ink-dim/40">
+              <div className="rounded-xl bg-panel-2">
                 <textarea
                   value={draft}
                   onChange={(e) => onDraftChange(e.target.value)}
@@ -477,9 +460,4 @@ export function SessionChat({
       </div>
     </div>
   );
-}
-
-function SessionInlineState({ state, streaming }: { state: SessionState; streaming: boolean }) {
-  const { label } = describeState(state, streaming);
-  return <span>{label}</span>;
 }
