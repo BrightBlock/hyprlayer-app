@@ -269,7 +269,9 @@ export function useWorktreeDiff(id: string, enabled = true) {
     queryKey: ["workstream", id, "diff"],
     queryFn: () => unwrap(commands.worktreeDiff(id)),
     enabled: enabled && id.length > 0,
-    // Keep the previous file list on screen while a refetch resolves.
-    placeholderData: keepPreviousData,
+    // Do NOT use keepPreviousData here: it would show a different workstream's
+    // files while the new workstream's query is in-flight. React Query keeps
+    // the current data visible during same-key refetches by default, so the
+    // refresh-button spinner still works without it.
   });
 }

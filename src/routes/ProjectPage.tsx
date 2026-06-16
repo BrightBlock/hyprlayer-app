@@ -304,7 +304,6 @@ export function ProjectPage() {
     void navigator.clipboard.writeText(transcript);
   };
   const startDiffResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (diffHidden) return;
     startEdgeDrag(event, {
       startWidth: diffWidth,
       min: DIFF_SIDEBAR_MIN,
