@@ -75,8 +75,7 @@ impl Db {
 
     pub fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
         self.with(|conn| {
-            let mut stmt =
-                conn.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
+            let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM projects ORDER BY name"))?;
             let rows = stmt.query_map([], row_to_project)?;
             rows.collect()
         })

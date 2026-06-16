@@ -34,10 +34,7 @@ pub fn repo_name_from_url(source: &str) -> Option<String> {
     let trimmed = source.trim().trim_end_matches('/');
     // Both URL and scp-style (`host:owner/repo`) sources end with the repo
     // after the final `/` or `:`.
-    let last = trimmed
-        .rsplit(['/', ':'])
-        .next()
-        .unwrap_or(trimmed);
+    let last = trimmed.rsplit(['/', ':']).next().unwrap_or(trimmed);
     let name = last.strip_suffix(".git").unwrap_or(last).trim();
     // Keep it to a single safe path component — never one that could escape
     // the repos root.
@@ -144,13 +141,22 @@ mod tests {
     #[test]
     fn names_from_various_source_shapes() {
         let name = |s: &str| repo_name_from_url(s);
-        assert_eq!(name("https://github.com/acme/repo.git").as_deref(), Some("repo"));
-        assert_eq!(name("https://github.com/acme/repo").as_deref(), Some("repo"));
+        assert_eq!(
+            name("https://github.com/acme/repo.git").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            name("https://github.com/acme/repo").as_deref(),
+            Some("repo")
+        );
         assert_eq!(
             name("git@github.com:acme/Cloud-Director.git").as_deref(),
             Some("Cloud-Director")
         );
-        assert_eq!(name("ssh://git@github.com/acme/repo.git/").as_deref(), Some("repo"));
+        assert_eq!(
+            name("ssh://git@github.com/acme/repo.git/").as_deref(),
+            Some("repo")
+        );
         assert_eq!(name("/Users/jt/code/myrepo/").as_deref(), Some("myrepo"));
         // Nothing usable / nothing that could escape the root.
         assert_eq!(name(""), None);
@@ -174,7 +180,11 @@ mod tests {
             .env("GIT_COMMITTER_EMAIL", "t@t")
             .output()
             .expect("git runs");
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     #[tokio::test]
@@ -189,8 +199,13 @@ mod tests {
 
         let git = which::which("git").unwrap();
         let dest = dir.path().join("clones").join("myproj");
-        clone_repo(&git, source.to_str().unwrap(), &dest).await.unwrap();
-        assert!(dest.join("README.md").exists(), "clone checked out the tree");
+        clone_repo(&git, source.to_str().unwrap(), &dest)
+            .await
+            .unwrap();
+        assert!(
+            dest.join("README.md").exists(),
+            "clone checked out the tree"
+        );
 
         // The clone tracks the source as its origin.
         assert_eq!(
