@@ -555,6 +555,10 @@ export type WorktreeStatus = {
 	branch: string | null,
 	/**  Tracked changes (staged + unstaged), excluding thoughts/. */
 	dirty: number,
+	/**  Added lines in the working-tree diff vs HEAD, excluding thoughts/. */
+	additions: number,
+	/**  Deleted lines in the working-tree diff vs HEAD, excluding thoughts/. */
+	deletions: number,
 	/**  Untracked files, excluding thoughts/ (informational only). */
 	untracked: number,
 	ahead: number,

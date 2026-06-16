@@ -90,22 +90,55 @@ pub struct FileDiff {
     pub patch: String,
 }
 
-/// Working-tree diff vs HEAD (staged + unstaged + untracked content), with
-/// the app-managed `thoughts/` tree excluded.
-pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
-    let repo = open_repo(worktree)?;
-
+/// The working-tree-vs-HEAD diff that every "what changed" surface is built
+/// from (the diff panel and the sidebar line counters), so they share one
+/// definition: untracked content included; `thoughts/` filtered by callers.
+fn worktree_diff_raw(repo: &git2::Repository) -> Result<git2::Diff<'_>> {
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let mut opts = git2::DiffOptions::new();
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
         .show_untracked_content(true);
-    let diff = repo
-        .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
+    repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
         .map_err(|e| CoreError::OutputParse {
             program: "git2 diff".into(),
             detail: e.message().to_string(),
-        })?;
+        })
+}
+
+/// Total added/deleted line counts for the working-tree diff vs HEAD,
+/// excluding `thoughts/`. Summed from the same per-file patches the diff panel
+/// renders, so the sidebar counter and the panel can never disagree.
+pub fn worktree_diff_line_counts(repo: &git2::Repository) -> (u32, u32) {
+    let Ok(diff) = worktree_diff_raw(repo) else {
+        return (0, 0);
+    };
+    let (mut additions, mut deletions) = (0u32, 0u32);
+    for (idx, delta) in diff.deltas().enumerate() {
+        let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if crate::worktree::is_thoughts_path(&path) {
+            continue;
+        }
+        if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, idx) {
+            if let Ok((_context, adds, dels)) = patch.line_stats() {
+                additions += adds as u32;
+                deletions += dels as u32;
+            }
+        }
+    }
+    (additions, deletions)
+}
+
+/// Working-tree diff vs HEAD (staged + unstaged + untracked content), with
+/// the app-managed `thoughts/` tree excluded.
+pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
+    let repo = open_repo(worktree)?;
+    let diff = worktree_diff_raw(&repo)?;
 
     let mut files = Vec::new();
     for (idx, delta) in diff.deltas().enumerate() {
@@ -176,6 +209,33 @@ mod tests {
             files.iter().find(|f| f.path == "b.md").unwrap().change,
             "added"
         );
+    }
+
+    #[test]
+    fn line_counts_sum_diff_and_skip_thoughts() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("a.md"), "one\ntwo\nthree\n").unwrap();
+        {
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("a.md")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::now("t", "t@t").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
+        }
+
+        // a.md: drop "two", append "four"+"five" -> 2 additions, 1 deletion.
+        std::fs::write(dir.path().join("a.md"), "one\nthree\nfour\nfive\n").unwrap();
+        // b.md untracked: 2 added lines.
+        std::fs::write(dir.path().join("b.md"), "x\ny\n").unwrap();
+        // thoughts/ must not contribute.
+        std::fs::create_dir_all(dir.path().join("thoughts/jt")).unwrap();
+        std::fs::write(dir.path().join("thoughts/jt/x.md"), "skip\nskip\n").unwrap();
+
+        let (additions, deletions) = worktree_diff_line_counts(&repo);
+        assert_eq!((additions, deletions), (4, 1));
     }
 
     #[test]

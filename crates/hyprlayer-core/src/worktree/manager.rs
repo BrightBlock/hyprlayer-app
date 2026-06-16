@@ -50,6 +50,10 @@ pub struct WorktreeStatus {
     pub branch: Option<String>,
     /// Tracked changes (staged + unstaged), excluding thoughts/.
     pub dirty: u32,
+    /// Added lines in the working-tree diff vs HEAD, excluding thoughts/.
+    pub additions: u32,
+    /// Deleted lines in the working-tree diff vs HEAD, excluding thoughts/.
+    pub deletions: u32,
     /// Untracked files, excluding thoughts/ (informational only).
     pub untracked: u32,
     pub ahead: u32,
@@ -270,6 +274,8 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         exists: false,
         branch: None,
         dirty: 0,
+        additions: 0,
+        deletions: 0,
         untracked: 0,
         ahead: 0,
         behind: 0,
@@ -297,6 +303,10 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         }
     }
 
+    // Line-level counts come from the same diff the panel renders, so the
+    // sidebar's "+adds −dels" always matches what's listed there.
+    let (additions, deletions) = crate::gitops::worktree_diff_line_counts(&repo);
+
     let head = repo.head().ok();
     let branch = head.as_ref().and_then(|h| h.shorthand()).map(String::from);
 
@@ -322,6 +332,8 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         exists: true,
         branch,
         dirty,
+        additions,
+        deletions,
         untracked,
         ahead,
         behind,

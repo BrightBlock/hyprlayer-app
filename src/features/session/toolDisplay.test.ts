@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  baseName,
   docFromTool,
   docTitle,
   formatCost,
@@ -9,6 +10,7 @@ import {
   parseToolInput,
   prettyToolInput,
   resultPreview,
+  toolFilePath,
   toolSummary,
 } from "./toolDisplay";
 
@@ -66,6 +68,30 @@ describe("toolSummary", () => {
 
   it("is empty when input does not parse", () => {
     expect(toolSummary("Bash", "garbage")).toBe("");
+  });
+});
+
+describe("toolFilePath", () => {
+  it("returns the path for file-targeting tools", () => {
+    expect(toolFilePath("Read", '{"file_path":"/a/b.ts"}')).toBe("/a/b.ts");
+    expect(toolFilePath("Edit", '{"file_path":"/a/b.ts","old_string":"x"}')).toBe("/a/b.ts");
+    expect(toolFilePath("Write", '{"path":"/a/c.md"}')).toBe("/a/c.md");
+    expect(toolFilePath("NotebookEdit", '{"notebook_path":"/a/n.ipynb"}')).toBe("/a/n.ipynb");
+  });
+
+  it("returns null for non-file tools and unparseable input", () => {
+    expect(toolFilePath("Bash", '{"command":"ls"}')).toBeNull();
+    expect(toolFilePath("Grep", '{"pattern":"foo","path":"src"}')).toBeNull();
+    expect(toolFilePath("Read", "garbage")).toBeNull();
+    expect(toolFilePath("Read", "{}")).toBeNull();
+  });
+});
+
+describe("baseName", () => {
+  it("returns the final path segment", () => {
+    expect(baseName("/Users/jt/repo/src/main.rs")).toBe("main.rs");
+    expect(baseName("file.ts")).toBe("file.ts");
+    expect(baseName("/a/b/")).toBe("b");
   });
 });
 

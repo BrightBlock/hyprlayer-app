@@ -81,6 +81,28 @@ export function toolSummary(name: string, input: string): string {
   }
 }
 
+/** Tools whose summary is a single filesystem path the transcript can show as
+ *  a compact basename chip instead of the full absolute path. */
+const FILE_PATH_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
+/**
+ * For a file-targeting tool, the absolute path it acts on (else null). Lets the
+ * transcript render a compact filename chip while keeping the full path on hover
+ * and in the expanded view.
+ */
+export function toolFilePath(name: string, input: string): string | null {
+  if (!FILE_PATH_TOOLS.has(name)) return null;
+  const obj = parseToolInput(input);
+  if (!obj) return null;
+  return str(obj.file_path) || str(obj.path) || str(obj.notebook_path) || null;
+}
+
+/** Final path segment (`/a/b/c.ts` → `c.ts`), tolerating trailing slashes. */
+export function baseName(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  return trimmed.slice(trimmed.lastIndexOf("/") + 1) || trimmed;
+}
+
 /**
  * A concise one-line preview of a tool's result, for the dimmed `⎿` line shown
  * under a collapsed tool row. Strips the `N⇥` line-number prefix Read adds and

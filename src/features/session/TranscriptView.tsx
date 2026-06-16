@@ -5,7 +5,14 @@ import { ChevronRightIcon, ShieldIcon, WrenchIcon } from "../../components/icons
 import { MarkdownPreview } from "../library/MarkdownPreview";
 import { stageLabel } from "./stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
-import { formatElapsed, prettyToolInput, resultPreview, toolSummary } from "./toolDisplay";
+import {
+  baseName,
+  formatElapsed,
+  prettyToolInput,
+  resultPreview,
+  toolFilePath,
+  toolSummary,
+} from "./toolDisplay";
 
 export type PermissionHandlers = {
   onAllow: (requestId: string) => void;
@@ -203,6 +210,33 @@ function ToolStatusDot({
   return <span className="h-2 w-2 shrink-0 rounded-full bg-ink-dim/50" aria-hidden="true" />;
 }
 
+/** A compact filename chip for file-targeting tools (Read/Write/Edit/…): shows
+ *  just the basename, with the full absolute path on hover. */
+function FileChip({ path }: { path: string }) {
+  return (
+    <span
+      className="min-w-0 shrink truncate rounded bg-edge/60 px-1.5 py-0.5 font-mono text-[11px] text-ink-dim"
+      title={path}
+    >
+      {baseName(path)}
+    </span>
+  );
+}
+
+/** The one-line argument shown after a tool's name: a filename chip for file
+ *  tools, otherwise the plain Claude-Code-style summary text. */
+function ToolArg({ name, input }: { name: string; input: string }) {
+  const filePath = toolFilePath(name, input);
+  if (filePath) return <FileChip path={filePath} />;
+  const summary = toolSummary(name, input);
+  if (!summary) return null;
+  return (
+    <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
+      {summary}
+    </span>
+  );
+}
+
 /**
  * One tool call as a lightweight action row (not a boxed card) — the thing that
  * keeps the transcript reading top-to-bottom like Claude Code: a compact
@@ -217,7 +251,6 @@ function ToolBlock({
   busy: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const summary = toolSummary(item.name, item.input);
   const result = item.result;
   const preview = result ? resultPreview(result.content, result.isError) : null;
 
@@ -227,11 +260,7 @@ function ToolBlock({
         <ToolStatusDot result={result} busy={busy} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">{item.name}</span>
-        {summary && (
-          <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
-            {summary}
-          </span>
-        )}
+        <ToolArg name={item.name} input={item.input} />
         <StepChevron open={open} reveal="hover" size={11} />
       </button>
 
@@ -269,6 +298,7 @@ function PermissionCard({
   item: Extract<TranscriptItem, { kind: "permission" }>;
   handlers: PermissionHandlers;
 }) {
+  const filePath = toolFilePath(item.toolName, item.input);
   const summary = toolSummary(item.toolName, item.input);
 
   if (item.decision !== null) {
@@ -287,10 +317,14 @@ function PermissionCard({
         <ShieldIcon />
         <span className="text-sm font-medium">Permission required</span>
       </div>
-      <div className="mt-2 rounded-md border border-amber-400/20 bg-surface/40 px-2.5 py-2">
-        <span className="font-mono text-xs font-medium text-ink">{item.toolName}</span>
-        {summary && (
-          <span className="ml-1.5 break-all font-mono text-xs text-ink-dim">{summary}</span>
+      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-amber-400/20 bg-surface/40 px-2.5 py-2">
+        <span className="shrink-0 font-mono text-xs font-medium text-ink">{item.toolName}</span>
+        {filePath ? (
+          <FileChip path={filePath} />
+        ) : (
+          summary && (
+            <span className="min-w-0 break-all font-mono text-xs text-ink-dim">{summary}</span>
+          )
         )}
       </div>
       <div className="mt-2.5 flex flex-wrap gap-2">
