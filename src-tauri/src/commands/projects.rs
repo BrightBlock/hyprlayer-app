@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use hyprlayer_core::config::HyprlayerConfig;
 use hyprlayer_core::hyprcli::{HyprCli, StorageInfo};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryState, BinaryStatus};
+use hyprlayer_core::repos;
+use hyprlayer_core::store::NewProject;
 use hyprlayer_core::worktree::thoughts_links;
 use hyprlayer_core::CoreError;
 use serde::Serialize;
@@ -17,12 +18,16 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
-    /// Absolute path of the code repository (the repoMappings key).
+    /// Absolute path of the app-owned clone (`~/hyprlayer/repos/<name>`).
     pub path: String,
     pub mapped_name: String,
     pub profile: Option<String>,
     pub backend_kind: String,
     pub exists_on_disk: bool,
+    /// The git source this clone tracks; None for a local-only repo.
+    pub origin_url: Option<String>,
+    /// `clone` | `disk` — how it was added.
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -105,55 +110,48 @@ pub struct SyncReport {
     pub output: String,
 }
 
-fn projects_from_config(config: &HyprlayerConfig) -> Vec<Project> {
-    let Some(thoughts) = &config.thoughts else {
-        return Vec::new();
+/// The project list: the app's explicit registry — NOT the thoughts config's
+/// `repoMappings`, which also carry every worktree's `thoughts init` entry.
+/// Each row is enriched with its backend/profile from the effective config,
+/// best-effort (a missing/locked config just yields the git default).
+async fn registry_projects(state: &AppState) -> Vec<Project> {
+    let records = match db_task(state.db.clone(), |db| db.list_projects()).await {
+        Ok(records) => records,
+        Err(e) => {
+            log::warn!("could not load project registry: {}", e.message);
+            return Vec::new();
+        }
     };
-    let mut projects: Vec<Project> = thoughts
-        .repo_mappings
-        .iter()
-        .map(|(path, mapping)| {
-            let effective = thoughts.effective_config_for(path);
+    let loaded = state.config.load().await.ok();
+    let thoughts = loaded.as_ref().and_then(|l| l.config.thoughts.as_ref());
+    records
+        .into_iter()
+        .map(|r| {
+            let eff = thoughts.map(|t| t.effective_config_for(&r.path));
+            let profile = eff.as_ref().and_then(|e| e.profile_name.clone());
+            let backend_kind = eff
+                .as_ref()
+                .map(|e| e.backend.kind().as_str().to_string())
+                .unwrap_or_else(|| "git".to_string());
             Project {
-                path: path.clone(),
-                mapped_name: mapping.repo().to_string(),
-                profile: effective.profile_name.clone(),
-                backend_kind: effective.backend.kind().as_str().to_string(),
-                exists_on_disk: Path::new(path).is_dir(),
+                exists_on_disk: Path::new(&r.path).is_dir(),
+                path: r.path,
+                mapped_name: r.name,
+                profile,
+                backend_kind,
+                origin_url: r.origin_url,
+                source: r.source,
             }
         })
-        .collect();
-    projects.sort_by(|a, b| a.mapped_name.cmp(&b.mapped_name));
-    projects
+        .collect()
 }
 
-/// Mapping entries the app itself added for work-item worktrees (ADR-0002
-/// exception #2) are skill-resolution infrastructure, not projects — drop
-/// them from every project listing. Two nets: worktree paths of every
-/// workstream row (archived rows included, so a mapping whose uninit failed
-/// stays filtered), plus anything under the worktree root (catches strays
-/// with no row at all). A store error degrades to the prefix net, loudly.
-async fn filter_worktree_mappings(state: &AppState, projects: &mut Vec<Project>) {
-    let worktree_root = state.worktrees.root().to_path_buf();
-    let known: std::collections::HashSet<String> =
-        match db_task(state.db.clone(), |db| db.list_worktree_paths()).await {
-            Ok(paths) => paths.into_iter().collect(),
-            Err(e) => {
-                log::warn!("could not load workstream worktree paths: {}", e.message);
-                Default::default()
-            }
-        };
-
-    projects
-        .retain(|p| !known.contains(&p.path) && !Path::new(&p.path).starts_with(&worktree_root));
-}
-
-async fn config_summary(state: &AppState) -> (ConfigSummary, Vec<Project>) {
+/// The config health summary shown during onboarding. The project list is
+/// derived separately now — see [`registry_projects`].
+async fn config_summary(state: &AppState) -> ConfigSummary {
     let path = state.config.path().display().to_string();
     match state.config.load().await {
         Ok(loaded) => {
-            let mut projects = projects_from_config(&loaded.config);
-            filter_worktree_mappings(state, &mut projects).await;
             let (user, backend_kind, configured) = loaded
                 .config
                 .thoughts
@@ -166,28 +164,22 @@ async fn config_summary(state: &AppState) -> (ConfigSummary, Vec<Project>) {
                     )
                 })
                 .unwrap_or_else(|| (String::new(), "git".into(), false));
-            (
-                ConfigSummary::Ready {
-                    path,
-                    user,
-                    backend_kind,
-                    configured,
-                },
-                projects,
-            )
+            ConfigSummary::Ready {
+                path,
+                user,
+                backend_kind,
+                configured,
+            }
         }
-        Err(CoreError::ConfigMissing { .. }) => (ConfigSummary::Missing { path }, Vec::new()),
+        Err(CoreError::ConfigMissing { .. }) => ConfigSummary::Missing { path },
         Err(err) => {
             let app_err = AppError::from(err);
-            (
-                ConfigSummary::Error {
-                    path,
-                    code: app_err.code,
-                    message: app_err.message,
-                    remedy: app_err.remedy,
-                },
-                Vec::new(),
-            )
+            ConfigSummary::Error {
+                path,
+                code: app_err.code,
+                message: app_err.message,
+                remedy: app_err.remedy,
+            }
         }
     }
 }
@@ -195,10 +187,9 @@ async fn config_summary(state: &AppState) -> (ConfigSummary, Vec<Project>) {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_bootstrap(state: State<'_, AppState>) -> CmdResult<Bootstrap> {
-    let (config, projects) = config_summary(&state).await;
     Ok(Bootstrap {
-        config,
-        projects,
+        config: config_summary(&state).await,
+        projects: registry_projects(&state).await,
         binaries: state.binaries.status_all().await,
         settings: state.settings.get().await,
     })
@@ -215,8 +206,7 @@ fn find_project(projects: &[Project], path: &str) -> CmdResult<Project> {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_project(state: State<'_, AppState>, path: String) -> CmdResult<ProjectDetail> {
-    let (_, projects) = config_summary(&state).await;
-    let project = find_project(&projects, &path)?;
+    let project = find_project(&registry_projects(&state).await, &path)?;
 
     let storage = HyprCli::new(&state.binaries)
         .storage_info(Path::new(&path))
@@ -241,10 +231,121 @@ async fn effective_thoughts_root(state: &AppState, repo_path: &str) -> Option<St
         .map(|p| p.display().to_string())
 }
 
-/// Add a repository as a hyprlayer project. Wraps `hyprlayer thoughts init
-/// --yes`; on a true first run (no config anywhere) it first writes the
-/// minimal bootstrap config — the documented ADR-0002 exception — and the CLI
-/// owns the file from then on.
+/// Ensure a hyprlayer config exists before the CLI runs (the ADR-0002
+/// bootstrap exception): on a true first run, write the minimal v4 config from
+/// the supplied username, then hand ownership back to the CLI.
+async fn ensure_config(state: &AppState, bootstrap_user: Option<String>) -> CmdResult<()> {
+    if state.config.exists() {
+        return Ok(());
+    }
+    let user = bootstrap_user.unwrap_or_default();
+    if user.trim().is_empty() {
+        return Err(AppError {
+            code: "bootstrap_user_required".into(),
+            message: "No hyprlayer config exists yet; a username is needed to create one.".into(),
+            remedy: Some(
+                "Enter the username your thought documents should be attributed to.".into(),
+            ),
+        });
+    }
+    hyprlayer_core::config::write_bootstrap_config(state.config.path(), &user)
+        .map_err(AppError::from)
+}
+
+/// Where new project clones land: an explicit per-call `location`, else the
+/// configured repos root, else `~/hyprlayer/repos`.
+async fn repos_root(state: &AppState, location: Option<&str>) -> PathBuf {
+    if let Some(l) = location.map(str::trim).filter(|l| !l.is_empty()) {
+        return PathBuf::from(l);
+    }
+    state
+        .settings
+        .get()
+        .await
+        .repos_root
+        .map(PathBuf::from)
+        .unwrap_or_else(repos::default_repos_root)
+}
+
+/// A project directory name: an explicit override, else derived from the
+/// source URL, else the on-disk folder name.
+fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> String {
+    directory_name
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty())
+        .or_else(|| repos::repo_name_from_url(source))
+        .unwrap_or_else(|| {
+            repo.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unnamed_repo")
+                .to_string()
+        })
+}
+
+/// Clone `source` into the repos root as `<name>`, provision thoughts inside
+/// the clone, and register it. The clone is rolled back if provisioning or
+/// registration fails, so a half-set-up project never lingers.
+async fn provision_project(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    source: &str,
+    name: &str,
+    kind: &str,
+    location: Option<&str>,
+) -> CmdResult<Project> {
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+
+    let dest = repos_root(state, location).await.join(name);
+    if dest.exists() {
+        return Err(AppError {
+            code: "repo_exists".into(),
+            message: format!("{} already exists", dest.display()),
+            remedy: Some("Remove it first, or choose a different name or location.".into()),
+        });
+    }
+
+    repos::clone_repo(&git, source, &dest)
+        .await
+        .map_err(AppError::from)?;
+
+    // Provision thoughts in the clone; roll the clone back on failure so we
+    // never leave an unregistered directory behind.
+    if let Err(e) = HyprCli::new(&state.binaries)
+        .thoughts_init(&dest, name, None)
+        .await
+    {
+        let _ = std::fs::remove_dir_all(&dest);
+        return Err(AppError::from(e));
+    }
+
+    let origin = repos::origin_url(&git, &dest).await;
+    let path = dest.display().to_string();
+    let row = NewProject {
+        path: path.clone(),
+        name: name.to_string(),
+        origin_url: origin,
+        source: kind.to_string(),
+    };
+    if let Err(e) = db_task(state.db.clone(), move |db| db.insert_project(row)).await {
+        let _ = std::fs::remove_dir_all(&dest);
+        return Err(e);
+    }
+
+    state.config.invalidate().await;
+    let _ = crate::events::ConfigChanged.emit(app);
+    crate::rebuild_thoughts_index(app.clone()).await;
+
+    find_project(&registry_projects(state).await, &path)
+}
+
+/// Import a project from a local git repo on disk: re-clone it from its
+/// `origin` (so the app's copy tracks the same hosted source) into
+/// `~/hyprlayer/repos`, or — for a local-only repo with no remote — clone the
+/// directory itself. Worktrees are then always cut from that stable clone.
 #[tauri::command]
 #[specta::specta]
 pub async fn add_project(
@@ -270,42 +371,117 @@ pub async fn add_project(
         });
     }
 
-    if !state.config.exists() {
-        let user = bootstrap_user.unwrap_or_default();
-        if user.trim().is_empty() {
-            return Err(AppError {
-                code: "bootstrap_user_required".into(),
-                message: "No hyprlayer config exists yet; a username is needed to create one."
-                    .into(),
-                remedy: Some(
-                    "Enter the username your thought documents should be attributed to.".into(),
-                ),
-            });
-        }
-        hyprlayer_core::config::write_bootstrap_config(state.config.path(), &user)
-            .map_err(AppError::from)?;
-    }
+    ensure_config(&state, bootstrap_user).await?;
 
-    let dir_name = directory_name
-        .filter(|d| !d.trim().is_empty())
-        .unwrap_or_else(|| {
-            repo.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unnamed_repo")
-                .to_string()
-        });
-
-    HyprCli::new(&state.binaries)
-        .thoughts_init(repo, &dir_name, None)
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
         .await
         .map_err(AppError::from)?;
+    // Prefer the repo's own origin as the clone source so the app's copy tracks
+    // the same hosted remote; fall back to the local directory for a repo with
+    // no remote.
+    let source = repos::origin_url(&git, repo)
+        .await
+        .unwrap_or_else(|| path.clone());
+
+    let name = project_name(directory_name, &source, repo);
+    provision_project(&app, &state, &source, &name, "disk", None).await
+}
+
+/// Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
+/// register it as a project.
+#[tauri::command]
+#[specta::specta]
+pub async fn clone_project(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    location: Option<String>,
+    name: Option<String>,
+    bootstrap_user: Option<String>,
+) -> CmdResult<Project> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err(AppError {
+            code: "invalid_url".into(),
+            message: "A repository URL is required.".into(),
+            remedy: None,
+        });
+    }
+
+    ensure_config(&state, bootstrap_user).await?;
+
+    let name = name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .or_else(|| repos::repo_name_from_url(&url))
+        .ok_or_else(|| AppError {
+            code: "invalid_url".into(),
+            message: format!("Couldn't derive a project name from {url}."),
+            remedy: Some("Add an explicit name, or check the URL.".into()),
+        })?;
+
+    provision_project(&app, &state, &url, &name, "clone", location.as_deref()).await
+}
+
+/// Remove a project from the registry. With `delete_files`, also delete the
+/// clone from disk — but only when it sits inside the repos root and has no
+/// active workstreams, so we never destroy a repo whose worktrees are live.
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_project(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    delete_files: bool,
+) -> CmdResult<()> {
+    let repo = PathBuf::from(&path);
+
+    // Drop the thoughts repoMapping (best-effort; the directory may be gone).
+    if repo.is_dir() {
+        let _ = HyprCli::new(&state.binaries).thoughts_uninit(&repo).await;
+    }
+
+    let path_for_db = path.clone();
+    db_task(state.db.clone(), move |db| db.delete_project(&path_for_db)).await?;
+
+    if delete_files && repo.is_dir() {
+        let root = repos_root(&state, None).await;
+        let path_for_count = path.clone();
+        let active = db_task(state.db.clone(), move |db| {
+            db.list_workstreams(&path_for_count, false)
+        })
+        .await
+        .map(|w| w.len())
+        .unwrap_or(usize::MAX); // unknown → don't delete
+        if repo.starts_with(&root) && active == 0 {
+            let _ = std::fs::remove_dir_all(&repo);
+        }
+    }
 
     state.config.invalidate().await;
     let _ = crate::events::ConfigChanged.emit(&app);
     crate::rebuild_thoughts_index(app.clone()).await;
+    Ok(())
+}
 
-    let (_, projects) = config_summary(&state).await;
-    find_project(&projects, &path)
+/// The user's GitHub repos for the clone dialog's "Recent repos" list. Returns
+/// an empty list (never an error) when gh is missing or unauthenticated — the
+/// URL field still works, so recents are purely a convenience.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repos::GithubRepo>> {
+    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
+        return Ok(Vec::new());
+    };
+    match repos::github_repos(&gh, 100).await {
+        Ok(list) => Ok(list),
+        Err(e) => {
+            log::debug!("gh repo list unavailable: {e}");
+            Ok(Vec::new())
+        }
+    }
 }
 
 #[tauri::command]

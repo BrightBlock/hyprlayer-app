@@ -13,9 +13,11 @@ import { shipWorkstream } from "../features/session/sessionStore";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
+import { RepoAvatar } from "../components/RepoAvatar";
 import { BookIcon, ChevronRightIcon, PlusIcon } from "../components/icons";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
+import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import type { WorkstreamView } from "../lib/bindings";
 
 const PROJECT_SIDEBAR_COLLAPSED = 56;
@@ -124,10 +126,6 @@ function SetupIcon() {
   );
 }
 
-function projectInitial(name: string): string {
-  return name.trim().slice(0, 1).toUpperCase() || "?";
-}
-
 function decodePathSegment(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -227,6 +225,7 @@ export function Root() {
   } | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
   const [renameTarget, setRenameTarget] = useState<WorkstreamView | null>(null);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
 
   const contentOffset = Math.max(
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
@@ -348,10 +347,29 @@ export function Root() {
           style={{ width: collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth }}
         >
           <nav className="flex-1 overflow-y-auto px-2 pt-3">
-            {!collapsed && (
-              <p className="px-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-ink-dim">
-                Projects
-              </p>
+            {!collapsed ? (
+              <div className="flex items-center justify-between pb-1 pl-2 pr-1 pt-2">
+                <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Projects</p>
+                <button
+                  type="button"
+                  onClick={() => setAddProjectOpen(true)}
+                  className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+                  title="Add project"
+                  aria-label="Add project"
+                >
+                  <PlusIcon size={14} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAddProjectOpen(true)}
+                className="mb-1 flex h-9 w-9 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+                title="Add project"
+                aria-label="Add project"
+              >
+                <PlusIcon size={16} />
+              </button>
             )}
             {bootstrap.isLoading && (
               <div className="flex justify-center py-4">
@@ -374,13 +392,18 @@ export function Root() {
                     key={p.path}
                     to="/projects/$projectPath"
                     params={{ projectPath: p.path }}
-                    className={`mb-1 flex h-9 w-9 items-center justify-center rounded-md text-sm font-semibold hover:bg-[#171a20] hover:text-ink ${
-                      isCurrent ? "bg-[#242832] text-ink" : "text-ink-dim"
+                    className={`mb-1 flex h-9 w-9 items-center justify-center rounded-md hover:bg-[#171a20] ${
+                      isCurrent ? "bg-[#242832]" : ""
                     }`}
                     title={p.mappedName}
                     aria-label={p.mappedName}
                   >
-                    {projectInitial(p.mappedName)}
+                    <RepoAvatar
+                      source={p.originUrl}
+                      name={p.mappedName}
+                      size={22}
+                      className="rounded-md"
+                    />
                   </Link>
                 );
               }
@@ -400,6 +423,7 @@ export function Root() {
                       }`}
                       title={`${p.mappedName} · ${p.backendKind}${p.profile ? ` · ${p.profile}` : ""}`}
                     >
+                      <RepoAvatar source={p.originUrl} name={p.mappedName} size={18} />
                       <span className="truncate">{p.mappedName}</span>
                       {!p.existsOnDisk && (
                         <span
@@ -558,6 +582,18 @@ export function Root() {
           </ContextMenuItem>
         </ContextMenu>
       )}
+
+      <AddProjectDialog
+        open={addProjectOpen}
+        onClose={() => setAddProjectOpen(false)}
+        onAdded={(project) =>
+          void navigate({
+            to: "/projects/$projectPath",
+            params: { projectPath: project.path },
+            search: {},
+          })
+        }
+      />
 
       <RenameWorkstreamDialog target={renameTarget} onClose={() => setRenameTarget(null)} />
 
