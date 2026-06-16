@@ -17,8 +17,8 @@ pub struct Session {
     /// claude's own session id (set on the init event; drives `--resume`).
     pub claude_session_id: Option<String>,
     pub cwd: String,
-    /// starting | running | awaiting_permission | completed | interrupted |
-    /// crashed | killed | spawn_failed
+    /// starting | running | awaiting_permission | awaiting_question | completed |
+    /// interrupted | crashed | killed | spawn_failed
     pub state: String,
     pub model: Option<String>,
     /// Cumulative cost reported by the latest `result` event.

@@ -130,6 +130,27 @@ export function ShieldIcon({ size = 14, strokeWidth = 1.8 }: IconProps) {
   );
 }
 
+/** Speech bubble with a question mark — the agent is asking the user something. */
+export function QuestionIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M20 4H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3v3.5L11.5 17H20a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.6 8.6a2.4 2.4 0 0 1 4.4 1.3c0 1.6-2 1.8-2 3.2"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <circle cx="12" cy="15.4" r="0.6" fill="currentColor" stroke="currentColor" strokeWidth="0.4" />
+    </svg>
+  );
+}
+
 /** Glyph for a pipeline stage / agent mode; unknown modes render as general chat. */
 export function ModeIcon({ mode, size = 16, strokeWidth = 1.8 }: IconProps & { mode: string }) {
   switch (mode) {

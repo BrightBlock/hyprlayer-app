@@ -22,9 +22,62 @@ export type SessionState =
   | "starting"
   | "running"
   | "awaiting_permission"
+  | "awaiting_question"
   | ExitOutcome;
 
 export type PermissionDecision = "allow" | "deny";
+
+/** One selectable answer to an `AskUserQuestion` question. */
+export type QuestionOption = { label: string; description: string };
+
+/** A single question from an `AskUserQuestion` call. */
+export type Question = {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: QuestionOption[];
+};
+
+/** The unanswered `AskUserQuestion` prompt the session is parked on — rendered
+ *  interactively above the composer (not as a transcript card). */
+export type PendingQuestion = { requestId: string; questions: Question[] };
+
+/**
+ * Parse the `questions` JSON string from a `questionAsk` event into typed
+ * questions, dropping anything malformed so a bad payload can't crash the UI.
+ */
+export function parseQuestions(json: string): Question[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(raw)) return [];
+  const out: Question[] = [];
+  for (const q of raw) {
+    if (q === null || typeof q !== "object") continue;
+    const obj = q as Record<string, unknown>;
+    const question = typeof obj.question === "string" ? obj.question : "";
+    if (!question) continue;
+    const options: QuestionOption[] = Array.isArray(obj.options)
+      ? obj.options
+          .filter((o): o is Record<string, unknown> => o !== null && typeof o === "object")
+          .map((o) => ({
+            label: typeof o.label === "string" ? o.label : "",
+            description: typeof o.description === "string" ? o.description : "",
+          }))
+          .filter((o) => o.label !== "")
+      : [];
+    out.push({
+      question,
+      header: typeof obj.header === "string" ? obj.header : "",
+      multiSelect: obj.multiSelect === true,
+      options,
+    });
+  }
+  return out;
+}
 
 /** Set on items produced inside a subagent (the `Task` tool-use id); the UI
  *  nests them under that Task instead of inlining them in the main thread. */
@@ -74,6 +127,8 @@ export type SessionView = {
   claudeSessionId: string | null;
   /** The unanswered permission ask, if the session is parked on one. */
   pendingPermission: { requestId: string; toolName: string; input: string } | null;
+  /** The unanswered `AskUserQuestion`, if the session is parked on one. */
+  pendingQuestion: PendingQuestion | null;
 };
 
 export function initialSessionView(state: SessionState = "idle"): SessionView {
@@ -88,6 +143,7 @@ export function initialSessionView(state: SessionState = "idle"): SessionView {
     model: null,
     claudeSessionId: null,
     pendingPermission: null,
+    pendingQuestion: null,
   };
 }
 
@@ -110,15 +166,28 @@ export function hasPendingPermission(view: SessionView): boolean {
   return view.items.some((it) => it.kind === "permission" && it.decision === null);
 }
 
-/** Whether the agent is actively working (drives spinners / disables Send). */
+/** Whether the agent is actively working (drives spinners / disables Send). A
+ *  pending question blocks the turn on the user, so it counts as busy too. */
 export function isBusy(view: SessionView): boolean {
   if (isTerminal(view.state)) return false;
   return (
     view.state === "starting" ||
     view.state === "awaiting_permission" ||
+    view.state === "awaiting_question" ||
     view.streaming ||
-    hasPendingPermission(view)
+    hasPendingPermission(view) ||
+    view.pendingQuestion !== null
   );
+}
+
+/** The state a non-terminal turn should rest in given outstanding user prompts:
+ *  a question takes precedence, then an open permission card, else it's running.
+ *  Shared by `turnDone` and the answer/permission resolvers so they stay in sync. */
+function parkedState(view: SessionView): SessionState {
+  if (isTerminal(view.state)) return view.state;
+  if (view.pendingQuestion !== null) return "awaiting_question";
+  if (hasPendingPermission(view)) return "awaiting_permission";
+  return "running";
 }
 
 /* ------------------------------- internals ------------------------------- */
@@ -319,19 +388,35 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
       };
     }
 
+    case "questionAsk": {
+      // The matching `AskUserQuestion` tool block (its toolUse) is already in the
+      // transcript; the questions render interactively above the composer, so we
+      // only park the session and stash them — no transcript item to add here.
+      return {
+        ...view,
+        items: closeOpenAssistant(view.items),
+        state: "awaiting_question",
+        streaming: true,
+        pendingQuestion: {
+          requestId: event.requestId,
+          questions: parseQuestions(event.questions),
+        },
+      };
+    }
+
     case "usage":
       // A live context reading mid-turn — update the meter, touch nothing else.
       return { ...view, contextTokens: event.contextTokens };
 
     case "turnDone": {
       // A turnDone can arrive (e.g. a subagent finishing) while the user still
-      // owes answers to outstanding permission asks — the real turn isn't done.
-      // Stay parked rather than dropping to "running" and looking idle.
-      const parked = hasPendingPermission(view);
+      // owes an answer to a question or an outstanding permission ask — the real
+      // turn isn't done. Stay parked rather than dropping to "running" and
+      // looking idle.
       return {
         ...view,
         items: closeOpenAssistant(view.items),
-        state: isTerminal(view.state) ? view.state : parked ? "awaiting_permission" : "running",
+        state: parkedState(view),
         streaming: false,
         costUsd: event.costUsd ?? view.costUsd,
         numTurns: event.numTurns ?? view.numTurns,
@@ -356,6 +441,7 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
         state: event.outcome,
         streaming: false,
         pendingPermission: null,
+        pendingQuestion: null,
       };
 
     case "protocolError":
@@ -400,16 +486,23 @@ export function resolvePermission(
       : item,
   );
   // A subagent can have several asks open at once; only resume the turn once the
-  // last card is answered — until then the session is still parked.
-  const stillParked = items.some((it) => it.kind === "permission" && it.decision === null);
-  const stillPending = view.pendingPermission?.requestId === requestId ? null : view.pendingPermission;
-  return {
-    ...view,
-    items,
-    pendingPermission: stillPending,
-    state: isTerminal(view.state) ? view.state : stillParked ? "awaiting_permission" : "running",
-    streaming: true,
-  };
+  // last card is answered (and no question is outstanding) — until then the
+  // session is still parked (see `parkedState`).
+  const pendingPermission =
+    view.pendingPermission?.requestId === requestId ? null : view.pendingPermission;
+  const next = { ...view, items, pendingPermission };
+  return { ...next, state: parkedState(next), streaming: true };
+}
+
+/**
+ * Apply the user's answer to an `AskUserQuestion` prompt (no backend event —
+ * the driver just resumes once the answer is sent). Clears the pending question
+ * and un-parks the session so the turn can continue.
+ */
+export function resolveQuestion(view: SessionView, requestId: string): SessionView {
+  if (view.pendingQuestion?.requestId !== requestId) return view;
+  const next = { ...view, pendingQuestion: null };
+  return { ...next, state: parkedState(next), streaming: true };
 }
 
 /* -------------------------------- display -------------------------------- */
@@ -432,6 +525,8 @@ export function describeState(
         : { label: "ready", tone: "ok" };
     case "awaiting_permission":
       return { label: "needs approval", tone: "warn" };
+    case "awaiting_question":
+      return { label: "needs answer", tone: "warn" };
     case "completed":
       return { label: "done", tone: "ok" };
     case "interrupted":

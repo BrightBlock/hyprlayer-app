@@ -91,6 +91,15 @@ pub enum SessionEvent {
         tool_name: String,
         input: String,
     },
+    /// The agent invoked `AskUserQuestion` — rather than a yes/no permission
+    /// gate, the UI renders the questions interactively above the composer and
+    /// the user picks answers; reply via the driver's `answer_question` with this
+    /// `request_id`. `questions` is compact JSON of the `questions` array (each:
+    /// `question`/`header`/`multiSelect`/`options[]{label,description}`).
+    QuestionAsk {
+        request_id: String,
+        questions: String,
+    },
     /// A live context-window reading (input tokens in context), emitted per
     /// assistant message so the meter updates DURING a multi-tool turn — not
     /// only at `TurnDone`. Persisted (it's tiny) so the meter survives a restart
@@ -125,6 +134,7 @@ impl SessionEvent {
             SessionEvent::ToolUse { .. } => "toolUse",
             SessionEvent::ToolResult { .. } => "toolResult",
             SessionEvent::PermissionAsk { .. } => "permissionAsk",
+            SessionEvent::QuestionAsk { .. } => "questionAsk",
             SessionEvent::Usage { .. } => "usage",
             SessionEvent::TurnDone { .. } => "turnDone",
             SessionEvent::ProtocolError { .. } => "protocolError",

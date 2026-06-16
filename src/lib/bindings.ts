@@ -79,6 +79,12 @@ export const commands = {
 	resumeSession: (sessionId: string, model: string | null, effort: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, onEvent })),
 	sendUserMessage: (sessionId: string, text: string) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
+	/**
+	 *  Answer an `AskUserQuestion` prompt. `answers` is a JSON object mapping each
+	 *  question's text to the chosen answer string (multi-select choices joined by
+	 *  ", "); an empty object means the user dismissed without answering.
+	 */
+	answerQuestion: (sessionId: string, requestId: string, answers: string) => typedError<null, AppError>(__TAURI_INVOKE("answer_question", { sessionId, requestId, answers })),
 	interruptSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_session", { sessionId })),
 	killSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("kill_session", { sessionId })),
 	listSessions: (workstreamId: string) => typedError<Session[], AppError>(__TAURI_INVOKE("list_sessions", { workstreamId })),
@@ -339,8 +345,8 @@ export type Session = {
 	claudeSessionId: string | null,
 	cwd: string,
 	/**
-	 *  starting | running | awaiting_permission | completed | interrupted |
-	 *  crashed | killed | spawn_failed
+	 *  starting | running | awaiting_permission | awaiting_question | completed |
+	 *  interrupted | crashed | killed | spawn_failed
 	 */
 	state: string,
 	model: string | null,
@@ -382,6 +388,14 @@ export type SessionEvent =
  *  JSON of the tool's arguments.
  */
 { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | 
+/**
+ *  The agent invoked `AskUserQuestion` — rather than a yes/no permission
+ *  gate, the UI renders the questions interactively above the composer and
+ *  the user picks answers; reply via the driver's `answer_question` with this
+ *  `request_id`. `questions` is compact JSON of the `questions` array (each:
+ *  `question`/`header`/`multiSelect`/`options[]{label,description}`).
+ */
+{ kind: "questionAsk"; requestId: string; questions: string } | 
 /**
  *  A live context-window reading (input tokens in context), emitted per
  *  assistant message so the meter updates DURING a multi-tool turn — not

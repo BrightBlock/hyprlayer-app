@@ -36,6 +36,7 @@ import {
   isTerminal,
   reduceEvent,
   resolvePermission,
+  resolveQuestion,
   viewToText,
   type SessionView,
 } from "./transcript";
@@ -247,6 +248,24 @@ export async function respondPermission(
   await unwrap(commands.respondPermission(sessionId, requestId, allow, message));
 }
 
+/**
+ * Answer an `AskUserQuestion` prompt. `answers` maps each question's text to the
+ * chosen answer string (multi-select choices joined by ", "); an empty map means
+ * the user dismissed without answering. Optimistically un-parks the session,
+ * then sends the answer to the driver.
+ */
+export async function answerQuestion(
+  sessionId: string,
+  requestId: string,
+  answers: Record<string, string>,
+): Promise<void> {
+  const current = entryOf(sessionId);
+  if (current) {
+    setEntry(sessionId, { ...current, ...resolveQuestion(current, requestId) });
+  }
+  await unwrap(commands.answerQuestion(sessionId, requestId, JSON.stringify(answers)));
+}
+
 /** Allow this ask AND auto-approve future asks for the same tool this session. */
 export async function allowForSession(
   sessionId: string,
@@ -366,7 +385,19 @@ export async function restoreSessionIfNeeded(
       }
     }
     // Left mid-conversation (not a real terminal exit) → resumable, not ended.
-    if (!isTerminal(view.state)) view = { ...view, state: "idle", streaming: false };
+    // Any permission/question the dead process was parked on can't be answered
+    // now — its request id died with the process — so drop it, otherwise the
+    // composer stays wedged on a stale prompt that resolves to nothing. claude
+    // re-issues the ask after `--resume` if it still needs the input.
+    if (!isTerminal(view.state)) {
+      view = {
+        ...view,
+        state: "idle",
+        streaming: false,
+        pendingPermission: null,
+        pendingQuestion: null,
+      };
+    }
     setEntry(sessionId, { ...view, workstreamId, stage, autoAllow: [], live: false, workingSince: null });
   } catch (error) {
     console.error(`failed to restore session ${sessionId}`, error);

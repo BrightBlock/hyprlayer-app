@@ -50,6 +50,15 @@ describe("toolSummary", () => {
     expect(toolSummary("TodoWrite", '{"todos":[{},{},{}]}')).toBe("3 items");
   });
 
+  it("surfaces the question text for AskUserQuestion", () => {
+    expect(toolSummary("AskUserQuestion", '{"questions":[{"question":"Tabs or spaces?"}]}')).toBe(
+      "Tabs or spaces?",
+    );
+    expect(
+      toolSummary("AskUserQuestion", '{"questions":[{"question":"A?"},{"question":"B?"}]}'),
+    ).toBe("A? (+1 more)");
+  });
+
   it("falls back to the first string arg for unknown tools", () => {
     expect(toolSummary("Mystery", '{"n":1,"label":"hello"}')).toBe("hello");
     expect(toolSummary("Mystery", '{"n":1}')).toBe("");

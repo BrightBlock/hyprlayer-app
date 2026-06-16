@@ -66,6 +66,12 @@ export function toolSummary(name: string, input: string): string {
       return str(obj.query);
     case "TodoWrite":
       return Array.isArray(obj.todos) ? `${obj.todos.length} items` : "";
+    case "AskUserQuestion": {
+      const questions = Array.isArray(obj.questions) ? obj.questions : [];
+      const first = questions[0] as { question?: unknown } | undefined;
+      const text = firstLine(str(first?.question));
+      return questions.length > 1 ? `${text} (+${questions.length - 1} more)` : text;
+    }
     case "KillBash":
       return str(obj.shell_id);
     default: {

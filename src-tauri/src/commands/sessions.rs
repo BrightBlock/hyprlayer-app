@@ -320,6 +320,27 @@ pub async fn respond_permission(
         .map_err(AppError::from)
 }
 
+/// Answer an `AskUserQuestion` prompt. `answers` is a JSON object mapping each
+/// question's text to the chosen answer string (multi-select choices joined by
+/// ", "); an empty object means the user dismissed without answering.
+#[tauri::command]
+#[specta::specta]
+pub async fn answer_question(
+    state: State<'_, AppState>,
+    session_id: String,
+    request_id: String,
+    answers: String,
+) -> CmdResult<()> {
+    let answers = serde_json::from_str::<serde_json::Value>(&answers)
+        .ok()
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    live_driver(&state, &session_id)
+        .await?
+        .answer_question(&request_id, answers)
+        .map_err(AppError::from)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn interrupt_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
@@ -458,6 +479,10 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
                 SessionEvent::PermissionAsk { .. } => {
                     let _ = db.set_session_state(&session_id, "awaiting_permission");
                     emit_lifecycle(&app, &session_id, &workstream_id, "awaiting_permission");
+                }
+                SessionEvent::QuestionAsk { .. } => {
+                    let _ = db.set_session_state(&session_id, "awaiting_question");
+                    emit_lifecycle(&app, &session_id, &workstream_id, "awaiting_question");
                 }
                 SessionEvent::TurnDone { cost_usd, .. } => {
                     if let Some(cost) = cost_usd {

@@ -338,7 +338,7 @@ export function Root() {
                           setShipping(false),
                         );
                       }}
-                      className="inline-flex h-7 items-center gap-2 rounded-md border border-rose-400/40 bg-rose-400/10 px-3 text-sm font-medium text-rose-300 hover:bg-rose-400/20 disabled:opacity-60"
+                      className="inline-flex h-7 items-center gap-2 rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 text-sm font-medium text-emerald-300 hover:bg-emerald-400/20 disabled:opacity-60"
                       title="Commit, push, and open a pull request"
                     >
                       <GitPullRequestIcon />

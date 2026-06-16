@@ -8,12 +8,26 @@ import {
   initialSessionView,
   isBusy,
   isTerminal,
+  parseQuestions,
   reduceEvent,
   resolvePermission,
+  resolveQuestion,
   viewToText,
   type SessionView,
   type TranscriptItem,
 } from "./transcript";
+
+const TABS_QUESTION = JSON.stringify([
+  {
+    question: "Tabs or spaces?",
+    header: "Indentation",
+    multiSelect: false,
+    options: [
+      { label: "Tabs", description: "Tab characters." },
+      { label: "Spaces", description: "Space characters." },
+    ],
+  },
+]);
 
 function reduceAll(events: SessionEvent[], start = initialSessionView("starting")): SessionView {
   return events.reduce(reduceEvent, start);
@@ -240,6 +254,81 @@ describe("permission flow", () => {
     view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null });
     expect(view.state).toBe("awaiting_permission");
     expect(isBusy(view)).toBe(true);
+  });
+});
+
+describe("question flow", () => {
+  it("parks the session on a parsed AskUserQuestion (no transcript card)", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+    expect(view.state).toBe("awaiting_question");
+    expect(isBusy(view)).toBe(true);
+    expect(view.pendingQuestion).toEqual({
+      requestId: "q-1",
+      questions: [
+        {
+          question: "Tabs or spaces?",
+          header: "Indentation",
+          multiSelect: false,
+          options: [
+            { label: "Tabs", description: "Tab characters." },
+            { label: "Spaces", description: "Space characters." },
+          ],
+        },
+      ],
+    });
+    // The questions render above the composer, not as a transcript item.
+    expect(view.items).toHaveLength(0);
+  });
+
+  it("resolveQuestion clears the pending question and resumes", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+    view = resolveQuestion(view, "q-1");
+    expect(view.pendingQuestion).toBeNull();
+    expect(view.state).toBe("running");
+    expect(view.streaming).toBe(true);
+  });
+
+  it("a stale resolve leaves an unrelated pending question intact", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-2", questions: TABS_QUESTION });
+    view = resolveQuestion(view, "q-1");
+    expect(view.pendingQuestion?.requestId).toBe("q-2");
+    expect(view.state).toBe("awaiting_question");
+  });
+
+  it("a turnDone while a question is open keeps the session parked, not idle", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+    view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null });
+    expect(view.state).toBe("awaiting_question");
+    expect(isBusy(view)).toBe(true);
+  });
+
+  it("exit clears a pending question", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+    view = reduceEvent(view, { kind: "exited", outcome: "killed", code: null, stderrTail: "" });
+    expect(view.pendingQuestion).toBeNull();
+    expect(isBusy(view)).toBe(false);
+  });
+
+  it("parseQuestions drops malformed payloads instead of throwing", () => {
+    expect(parseQuestions("not json")).toEqual([]);
+    expect(parseQuestions(JSON.stringify({ not: "an array" }))).toEqual([]);
+    // A question with no text is skipped; valid siblings survive.
+    const mixed = JSON.stringify([
+      { header: "x", options: [] },
+      { question: "Real?", options: [{ label: "Yes" }, { bogus: true }] },
+    ]);
+    expect(parseQuestions(mixed)).toEqual([
+      { question: "Real?", header: "", multiSelect: false, options: [{ label: "Yes", description: "" }] },
+    ]);
+  });
+
+  it("describeState labels a pending question as needing an answer", () => {
+    expect(describeState("awaiting_question", true)).toEqual({ label: "needs answer", tone: "warn" });
   });
 });
 

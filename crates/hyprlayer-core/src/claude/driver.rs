@@ -257,6 +257,29 @@ impl ClaudeDriver {
         ))
     }
 
+    /// Answer an `AskUserQuestion` prompt. claude's AskUserQuestion executor
+    /// reads the user's choices from `updatedInput.answers` (a map of question
+    /// text → selected label(s), comma-joined for multi-select), so we merge
+    /// `answers` into the cached tool input and allow. An empty `answers` map is
+    /// claude's "the user didn't answer" signal (it then asks again in prose).
+    pub fn answer_question(&self, request_id: &str, answers: Value) -> Result<()> {
+        let mut input = self
+            .pending_permissions
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(request_id))
+            .unwrap_or_else(|| json!({}));
+        if let Value::Object(map) = &mut input {
+            map.insert("answers".to_string(), answers);
+        }
+        self.write_line(protocol::permission_response_json(
+            request_id,
+            true,
+            Some(input),
+            None,
+        ))
+    }
+
     /// Graceful interrupt via the control protocol (portable; the process keeps
     /// its pid). Falls back to a hard kill if claude doesn't ack.
     pub fn interrupt(&self) -> Result<()> {
@@ -439,11 +462,27 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             request_id,
             tool_name,
             input,
-        } => vec![SessionEvent::PermissionAsk {
-            request_id,
-            tool_name,
-            input: input.to_string(),
-        }],
+        } => {
+            // AskUserQuestion isn't a yes/no gate — surface its questions so the
+            // UI can render them interactively (answered via `answer_question`).
+            // Fall back to a normal permission card if `questions` is missing or
+            // not a non-empty array (a malformed shape we can't render as a prompt).
+            let questions = (tool_name == "AskUserQuestion")
+                .then(|| input.get("questions"))
+                .flatten()
+                .filter(|q| q.as_array().is_some_and(|a| !a.is_empty()));
+            match questions {
+                Some(questions) => vec![SessionEvent::QuestionAsk {
+                    request_id,
+                    questions: questions.to_string(),
+                }],
+                None => vec![SessionEvent::PermissionAsk {
+                    request_id,
+                    tool_name,
+                    input: input.to_string(),
+                }],
+            }
+        }
         ParsedLine::Result {
             total_cost_usd,
             num_turns,
@@ -516,3 +555,80 @@ impl Killer {
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt as _;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// AskUserQuestion is surfaced as an interactive `QuestionAsk` (carrying the
+    /// questions JSON), not a yes/no `PermissionAsk`.
+    #[test]
+    fn ask_user_question_becomes_a_question_ask() {
+        let questions = json!([{
+            "question": "Tabs or spaces?",
+            "header": "Indentation",
+            "multiSelect": false,
+            "options": [
+                { "label": "Tabs", "description": "Tab characters." },
+                { "label": "Spaces", "description": "Space characters." }
+            ]
+        }]);
+        let events = parsed_to_events(ParsedLine::CanUseTool {
+            request_id: "req-1".into(),
+            tool_name: "AskUserQuestion".into(),
+            input: json!({ "questions": questions }),
+        });
+        match events.as_slice() {
+            [SessionEvent::QuestionAsk {
+                request_id,
+                questions: q,
+            }] => {
+                assert_eq!(request_id, "req-1");
+                // The serialized questions round-trip back to the same value.
+                assert_eq!(serde_json::from_str::<Value>(q).unwrap(), questions);
+            }
+            other => panic!("expected one QuestionAsk, got {other:?}"),
+        }
+    }
+
+    /// Every other tool keeps the normal Allow/Deny permission gate.
+    #[test]
+    fn other_tools_remain_permission_asks() {
+        let events = parsed_to_events(ParsedLine::CanUseTool {
+            request_id: "req-2".into(),
+            tool_name: "Bash".into(),
+            input: json!({ "command": "ls" }),
+        });
+        assert!(matches!(
+            events.as_slice(),
+            [SessionEvent::PermissionAsk { tool_name, .. }] if tool_name == "Bash"
+        ));
+    }
+
+    /// Defensive: an AskUserQuestion whose `questions` is missing OR present but
+    /// malformed (null, non-array, or empty) falls back to a permission card
+    /// rather than emitting an unanswerable/blank question prompt.
+    #[test]
+    fn ask_user_question_with_bad_questions_falls_back_to_permission() {
+        for bad in [
+            json!({}), // missing entirely
+            json!({ "questions": null }),
+            json!({ "questions": "nope" }), // not an array
+            json!({ "questions": [] }),     // empty array
+        ] {
+            let events = parsed_to_events(ParsedLine::CanUseTool {
+                request_id: "req-3".into(),
+                tool_name: "AskUserQuestion".into(),
+                input: bad.clone(),
+            });
+            assert!(
+                matches!(
+                    events.as_slice(),
+                    [SessionEvent::PermissionAsk { tool_name, .. }] if tool_name == "AskUserQuestion"
+                ),
+                "expected PermissionAsk fallback for input {bad}"
+            );
+        }
+    }
+}

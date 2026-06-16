@@ -6,6 +6,7 @@ import {
   EffortIcon,
   ModeIcon,
   PlusIcon,
+  QuestionIcon,
   SendIcon,
   SparkleIcon,
   StopIcon,
@@ -20,6 +21,7 @@ import { formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers } from "./TranscriptView";
 import {
   allowForSession,
+  answerQuestion,
   respondPermission,
   restoreSessionIfNeeded,
   sendMessage,
@@ -27,7 +29,7 @@ import {
   stopSession,
   useSession,
 } from "./sessionStore";
-import { describeState, isBusy, isTerminal } from "./transcript";
+import { describeState, isBusy, isTerminal, type PendingQuestion } from "./transcript";
 
 const STAGE_INTRO: Record<StageKey, string> = {
   general: "Chat with the project agent in this worktree. Pick a stage below to run a spec-driven step.",
@@ -217,6 +219,164 @@ function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: numb
   );
 }
 
+/**
+ * The interactive answer panel for an `AskUserQuestion`, pinned just above the
+ * composer. Questions are asked one at a time (a stepper): each question shows
+ * its options (single- or multi-select), "Next" advances, and the last question's
+ * "Submit" sends every collected answer back to the agent in one go. Selections
+ * accumulate across steps (keyed by question text) and "Back" revisits them.
+ * "Skip" sends no answer, which the agent handles by asking again in prose.
+ * Remounted per prompt (keyed on requestId) so state never leaks between asks.
+ */
+function QuestionPrompt({
+  pending,
+  onSubmit,
+}: {
+  pending: PendingQuestion;
+  onSubmit: (answers: Record<string, string>) => void;
+}) {
+  const [selections, setSelections] = useState<Record<string, string[]>>({});
+  const [step, setStep] = useState(0);
+  // Latch on the first submit/skip so a double-click can't answer twice (the
+  // panel unmounts once the optimistic resolve clears the pending question).
+  const [submitted, setSubmitted] = useState(false);
+
+  const send = (answers: Record<string, string>) => {
+    if (submitted) return;
+    setSubmitted(true);
+    onSubmit(answers);
+  };
+
+  const total = pending.questions.length;
+  const question = pending.questions[step];
+
+  // Defensive: a malformed payload can parse to zero questions — don't wedge the
+  // session, let the user dismiss it (the agent then re-asks in prose).
+  if (!question) {
+    return (
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-sky-400/30 bg-sky-400/[0.06] p-3.5">
+        <span className="text-sm text-ink-dim">
+          The agent asked a question that couldn’t be displayed.
+        </span>
+        <Button disabled={submitted} onClick={() => send({})}>
+          Dismiss
+        </Button>
+      </div>
+    );
+  }
+
+  const chosen = selections[question.question] ?? [];
+  const currentAnswered = chosen.length > 0;
+  const isLast = step === total - 1;
+
+  const toggle = (label: string) => {
+    setSelections((prev) => {
+      const current = prev[question.question] ?? [];
+      if (question.multiSelect) {
+        const next = current.includes(label)
+          ? current.filter((l) => l !== label)
+          : [...current, label];
+        return { ...prev, [question.question]: next };
+      }
+      return { ...prev, [question.question]: [label] };
+    });
+  };
+
+  const submitAll = () => {
+    const answers: Record<string, string> = {};
+    for (const q of pending.questions) {
+      const picks = selections[q.question] ?? [];
+      if (picks.length > 0) answers[q.question] = picks.join(", ");
+    }
+    send(answers);
+  };
+
+  // "Next" until the last question, which becomes "Submit"; both need an answer.
+  const advance = () => {
+    if (!currentAnswered) return;
+    if (isLast) submitAll();
+    else setStep((s) => s + 1);
+  };
+
+  return (
+    <div className="mb-2 rounded-xl border border-sky-400/30 bg-sky-400/[0.06] p-3.5">
+      <div className="mb-2.5 flex items-center gap-2 text-sky-200">
+        <QuestionIcon size={15} />
+        <span className="text-sm font-medium">The agent is asking</span>
+        {total > 1 && (
+          <span className="ml-auto text-xs font-normal tabular-nums text-ink-dim">
+            {step + 1} of {total}
+          </span>
+        )}
+      </div>
+
+      {question.header && (
+        <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-ink-dim">
+          {question.header}
+        </span>
+      )}
+      <p className="text-sm font-medium text-ink">{question.question}</p>
+      {question.multiSelect && (
+        <p className="mt-0.5 text-xs text-ink-dim">Select all that apply.</p>
+      )}
+      <div className="mt-2 space-y-1.5">
+        {question.options.map((opt) => {
+          const selected = chosen.includes(opt.label);
+          return (
+            <button
+              key={opt.label}
+              type="button"
+              disabled={submitted}
+              onClick={() => toggle(opt.label)}
+              aria-pressed={selected}
+              className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+                selected
+                  ? "border-accent bg-accent/15"
+                  : "border-edge bg-panel-2 hover:border-edge hover:bg-edge/50"
+              }`}
+            >
+              <span
+                className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border ${
+                  question.multiSelect ? "rounded" : "rounded-full"
+                } ${selected ? "border-accent bg-accent" : "border-ink-dim/50"}`}
+                aria-hidden="true"
+              >
+                {selected && (
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                    <path d="m2.5 6 2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink" />
+                  </svg>
+                )}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm text-ink">{opt.label}</span>
+                {opt.description && (
+                  <span className="mt-0.5 block text-xs leading-snug text-ink-dim">
+                    {opt.description}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        {step > 0 && (
+          <Button disabled={submitted} onClick={() => setStep((s) => s - 1)}>
+            Back
+          </Button>
+        )}
+        <Button variant="primary" disabled={!currentAnswered || submitted} onClick={advance}>
+          {isLast ? (total > 1 ? "Submit answers" : "Submit answer") : "Next"}
+        </Button>
+        <Button disabled={submitted} onClick={() => send({})}>
+          Skip
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 type Props = {
   view: WorkstreamView;
   shell: ShellTab;
@@ -264,6 +424,7 @@ export function SessionChat({
 
   const busy = session ? isBusy(session) : started;
   const terminal = session ? isTerminal(session.state) : false;
+  const pendingQuestion = session?.pendingQuestion ?? null;
   const draft = shell.draft;
   const canSubmit = draft.trim().length > 0;
   const sid = shell.sessionId;
@@ -370,20 +531,32 @@ export function SessionChat({
                   onBrowse={onBrowseDocs}
                 />
               )}
+              {pendingQuestion && (
+                <QuestionPrompt
+                  key={pendingQuestion.requestId}
+                  pending={pendingQuestion}
+                  onSubmit={(answers) =>
+                    sid && void answerQuestion(sid, pendingQuestion.requestId, answers)
+                  }
+                />
+              )}
               <div className="rounded-xl bg-panel-2">
                 <textarea
                   value={draft}
                   onChange={(e) => onDraftChange(e.target.value)}
                   onKeyDown={onKeyDown}
                   rows={3}
+                  disabled={Boolean(pendingQuestion)}
                   placeholder={
-                    !started
-                      ? mode === "general"
-                        ? "Ask the project agent…  (Enter to start, Shift+Enter for a newline)"
-                        : `Brief the ${stageLabel(mode).toLowerCase()} agent…  (Enter to start)`
-                      : "Reply to the agent…  (Enter to send)"
+                    pendingQuestion
+                      ? "Answer the question above to continue…"
+                      : !started
+                        ? mode === "general"
+                          ? "Ask the project agent…  (Enter to start, Shift+Enter for a newline)"
+                          : `Brief the ${stageLabel(mode).toLowerCase()} agent…  (Enter to start)`
+                        : "Reply to the agent…  (Enter to send)"
                   }
-                  className="selectable block w-full resize-none bg-transparent px-3.5 py-3 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none"
+                  className="selectable block w-full resize-none bg-transparent px-3.5 py-3 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
                 />
                 <div className="flex items-center gap-0.5 px-2 pb-2">
                   {/* Mode is fixed at spawn → a badge once running; a picker before. */}
