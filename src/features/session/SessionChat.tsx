@@ -2,8 +2,11 @@ import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Badge, Button, ErrorNote, Spinner } from "../../components/ui";
 import {
+  BookIcon,
   ChevronDownIcon,
+  DocIcon,
   EffortIcon,
+  ImageIcon,
   ModeIcon,
   PlusIcon,
   QuestionIcon,
@@ -143,6 +146,60 @@ function ComposerMenu({
                 <span className="font-medium">{it.label}</span>
                 {it.hint && <span className="text-ink-dim">{it.hint}</span>}
                 {it.key === activeKey && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The composer "+" — opens upward into a small action menu for attaching
+ *  context: library docs (centered modal) or files / screenshots (native OS
+ *  file dialog). Unlike ComposerMenu these items are one-shot actions. */
+function AttachMenu({
+  onLibrary,
+  onFiles,
+  onScreenshots,
+}: {
+  onLibrary: () => void;
+  onFiles: () => void;
+  onScreenshots: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const items = [
+    { key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary },
+    { key: "files", label: "Add files…", icon: <DocIcon size={14} />, run: onFiles },
+    { key: "shots", label: "Add screenshots…", icon: <ImageIcon size={14} />, run: onScreenshots },
+  ];
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Attach context"
+        aria-label="Attach context"
+        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/50 hover:text-ink"
+      >
+        <PlusIcon />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="absolute bottom-full right-0 z-30 mb-1.5 min-w-[200px] overflow-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
+            {items.map((it) => (
+              <button
+                key={it.key}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  it.run();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim hover:bg-edge/50 hover:text-ink"
+              >
+                <span className="shrink-0">{it.icon}</span>
+                <span className="font-medium">{it.label}</span>
               </button>
             ))}
           </div>
@@ -382,7 +439,7 @@ function QuestionPrompt({
               >
                 {selected && (
                   <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-                    <path d="m2.5 6 2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink" />
+                    <path d="m2.5 6 2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent-ink" />
                   </svg>
                 )}
               </span>
@@ -427,7 +484,12 @@ type Props = {
   onResetSession: () => void;
   onOpenDoc: (id: string) => void;
   onDetachDoc: (path: string) => void;
+  /** Open the library picker (centered modal) to attach context docs. */
   onBrowseDocs: () => void;
+  /** Native OS file dialog → attach the chosen files as context. */
+  onAddFiles: () => void;
+  /** Native OS file dialog filtered to images → attach screenshots. */
+  onAddScreenshots: () => void;
 };
 
 export function SessionChat({
@@ -442,6 +504,8 @@ export function SessionChat({
   onOpenDoc,
   onDetachDoc,
   onBrowseDocs,
+  onAddFiles,
+  onAddScreenshots,
 }: Props) {
   const session = useSession(shell.sessionId);
   const [starting, setStarting] = useState(false);
@@ -660,15 +724,11 @@ export function SessionChat({
 
                   <div className="ml-auto flex items-center gap-1">
                     {!started && (
-                      <button
-                        type="button"
-                        onClick={onBrowseDocs}
-                        title="Attach context docs"
-                        aria-label="Attach context docs"
-                        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/50 hover:text-ink"
-                      >
-                        <PlusIcon />
-                      </button>
+                      <AttachMenu
+                        onLibrary={onBrowseDocs}
+                        onFiles={onAddFiles}
+                        onScreenshots={onAddScreenshots}
+                      />
                     )}
                     {session?.contextTokens != null && (
                       <ContextMeter tokens={session.contextTokens} windowSize={model.contextWindow} />

@@ -285,13 +285,13 @@ export function Root() {
           (tauri.conf.json y ≈ header height / 2) so they line up with the
           centered content. */}
       <header
-        className="relative flex h-11 shrink-0 items-center border-b border-edge bg-[#101113]"
+        className="relative flex h-11 shrink-0 items-center border-b border-edge bg-panel"
         data-tauri-drag-region
       >
         <button
           type="button"
           onClick={() => setCollapsed((value) => !value)}
-          className={`absolute top-1/2 inline-flex h-7 w-7 shrink-0 -translate-y-1/2 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink ${
+          className={`absolute top-1/2 inline-flex h-7 w-7 shrink-0 -translate-y-1/2 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink ${
             IS_MACOS ? "left-[92px]" : "left-3"
           }`}
           title={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
@@ -330,7 +330,7 @@ export function Root() {
               <button
                 type="button"
                 onClick={() => router.history.back()}
-                className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
+                className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
                 title="Back"
                 aria-label="Back"
               >
@@ -394,34 +394,31 @@ export function Root() {
 
       <div className="flex min-h-0 flex-1">
         <aside
-          className="flex shrink-0 flex-col border-r border-[#30343b] bg-[#08090b]"
+          className="flex shrink-0 flex-col border-r border-edge bg-surface"
           style={{ width: collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth }}
         >
-          <nav className="flex-1 overflow-y-auto px-2 pt-3">
-            {!collapsed ? (
-              <div className="flex items-center justify-between pb-1 pl-2 pr-1 pt-2">
-                <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Projects</p>
-                <button
-                  type="button"
-                  onClick={() => setAddProjectOpen(true)}
-                  className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-                  title="Add project"
-                  aria-label="Add project"
-                >
-                  <PlusIcon size={14} />
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setAddProjectOpen(true)}
-                className="mb-1 flex h-9 w-9 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
-                title="Add project"
-                aria-label="Add project"
-              >
-                <PlusIcon size={16} />
-              </button>
+          {/* Header band, height-matched to the agent bar (h-9) so the
+              "Projects" label + add button sit vertically centered alongside
+              it — and the bottom border lines up across the sidebar/pane seam. */}
+          <div
+            className={`flex h-9 shrink-0 items-center border-b border-edge ${
+              collapsed ? "justify-center px-1" : "justify-between pl-4 pr-3"
+            }`}
+          >
+            {!collapsed && (
+              <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Projects</p>
             )}
+            <button
+              type="button"
+              onClick={() => setAddProjectOpen(true)}
+              className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+              title="Add project"
+              aria-label="Add project"
+            >
+              <PlusIcon size={14} />
+            </button>
+          </div>
+          <nav className="flex-1 overflow-y-auto px-2 pt-2">
             {bootstrap.isLoading && (
               <div className="flex justify-center py-4">
                 <Spinner />
@@ -443,8 +440,8 @@ export function Root() {
                     key={p.path}
                     to="/projects/$projectPath"
                     params={{ projectPath: p.path }}
-                    className={`mb-1 flex h-9 w-9 items-center justify-center rounded-md hover:bg-[#171a20] ${
-                      isCurrent ? "bg-[#242832]" : ""
+                    className={`mb-1 flex h-9 w-9 items-center justify-center rounded-md hover:bg-edge/60 ${
+                      isCurrent ? "bg-edge" : ""
                     }`}
                     title={p.mappedName}
                     aria-label={p.mappedName}
@@ -462,8 +459,8 @@ export function Root() {
               return (
                 <div key={p.path} className="mb-0.5">
                   <div
-                    className={`group flex items-center rounded-md pr-1 hover:bg-[#171a20] ${
-                      projectHighlight ? "bg-[#242832]" : ""
+                    className={`group flex items-center rounded-md pr-1 hover:bg-edge/60 ${
+                      projectHighlight ? "bg-edge" : ""
                     }`}
                   >
                     <Link
@@ -507,8 +504,8 @@ export function Root() {
                           e.preventDefault();
                           setItemMenu({ x: e.clientX, y: e.clientY, view });
                         }}
-                        className={`flex items-center gap-2 rounded-md py-1.5 pl-6 pr-2 text-sm hover:bg-[#171a20] hover:text-ink ${
-                          isActiveItem ? "bg-[#242832] text-ink" : "text-ink-dim"
+                        className={`flex items-center gap-2 rounded-md py-1.5 pl-6 pr-2 text-sm hover:bg-edge/60 hover:text-ink ${
+                          isActiveItem ? "bg-edge text-ink" : "text-ink-dim"
                         }`}
                         title={`${view.item.title} · ${view.item.branch}`}
                       >
@@ -531,8 +528,8 @@ export function Root() {
               to="/library"
               className={
                 collapsed
-                  ? "mt-3 flex h-9 w-9 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink data-[status=active]:bg-[#242832] data-[status=active]:text-ink"
-                  : "block rounded-md px-2 py-1.5 text-sm text-ink-dim hover:bg-[#171a20] hover:text-ink data-[status=active]:bg-[#242832] data-[status=active]:text-ink"
+                  ? "mt-3 flex h-9 w-9 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink data-[status=active]:bg-edge data-[status=active]:text-ink"
+                  : "block rounded-md px-2 py-1.5 text-sm text-ink-dim hover:bg-edge/60 hover:text-ink data-[status=active]:bg-edge data-[status=active]:text-ink"
               }
               title="Library"
               aria-label="Library"
@@ -541,13 +538,13 @@ export function Root() {
             </Link>
           </nav>
 
-        <div className="border-t border-[#181b20] p-2">
+        <div className="border-t border-edge p-2">
           <Link
             to="/onboarding"
             className={
               collapsed
-                ? "mb-1 flex h-9 w-9 items-center justify-center rounded-md text-ink-dim hover:bg-[#171a20] hover:text-ink"
-                : "block rounded-md px-2 py-1.5 text-sm text-ink-dim hover:bg-[#171a20] hover:text-ink"
+                ? "mb-1 flex h-9 w-9 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
+                : "block rounded-md px-2 py-1.5 text-sm text-ink-dim hover:bg-edge/60 hover:text-ink"
             }
             title="Setup"
             aria-label="Setup"
@@ -574,8 +571,8 @@ export function Root() {
               collapsed
                 ? "flex h-9 w-9 items-center justify-center rounded-md"
                 : "block rounded-md px-2 py-1.5 text-sm"
-            } hover:bg-[#171a20] hover:text-ink ${
-              pathname.startsWith("/settings") ? "bg-[#242832] text-ink" : "text-ink-dim"
+            } hover:bg-edge/60 hover:text-ink ${
+              pathname.startsWith("/settings") ? "bg-edge text-ink" : "text-ink-dim"
             }`}
             title="Settings"
             aria-label="Settings"
@@ -590,7 +587,7 @@ export function Root() {
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize project sidebar"
-            className="-ml-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+            className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
             onPointerDown={startSidebarResize}
           />
         )}

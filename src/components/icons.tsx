@@ -25,6 +25,43 @@ export function XIcon({ size = 14, strokeWidth = 2 }: IconProps) {
   );
 }
 
+export function SplitIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+    >
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M12 5v14" stroke="currentColor" strokeWidth={strokeWidth} strokeDasharray="2 2" />
+    </svg>
+  );
+}
+
+export function ImageIcon({ size = 15, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <circle cx="8.5" cy="9.5" r="1.6" />
+      <path d="m4 17 4.5-4.5a1.5 1.5 0 0 1 2 0L17 19" />
+    </svg>
+  );
+}
+
 export function BookIcon({ size = 15, strokeWidth = 1.8 }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">

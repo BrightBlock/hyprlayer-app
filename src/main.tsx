@@ -6,8 +6,12 @@ import { RouterProvider } from "@tanstack/react-router";
 import { attachEventListeners } from "./lib/events";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
+import { initTheme } from "./lib/theme";
 import "./index.css";
 
+// Apply the persisted color theme before the first paint to avoid a flash of
+// the default palette.
+initTheme();
 attachEventListeners();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

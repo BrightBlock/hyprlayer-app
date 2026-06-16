@@ -12,20 +12,30 @@ import { persist } from "zustand/middleware";
 
 import type { ShellTab } from "../../routes/ProjectPage";
 
-/** One workstream's whole tab strip, updated atomically: its shells, the
- *  selected shell (which survives opening the Docs view — it's the attach
- *  target), and whether the Docs view is showing. */
+/** One workstream's whole tab strip, updated atomically.
+ *
+ *  A workstream can run a side-by-side split: each shell carries a `panel`
+ *  ("main" | "right"), and the two panes track their own active shell —
+ *  `activeId` for the main pane, `rightActiveId` for the right one. `rightSplit`
+ *  is whether the right pane is open; `activePane` is the focused pane (only its
+ *  active tab reads as fully selected). Mirrors termic's right-split model. */
 export type WsTabState = {
   shells: ShellTab[];
   activeId: number;
-  docsOpen: boolean;
+  rightSplit?: boolean;
+  rightActiveId?: number;
+  activePane?: "main" | "right";
 };
 
 export const defaultTabState = (): WsTabState => ({
-  shells: [{ id: 1, title: "Agent", mode: "general", draft: "", docs: [] }],
+  shells: [{ id: 1, title: "Agent", mode: "general", draft: "", docs: [], panel: "main" }],
   activeId: 1,
-  docsOpen: false,
 });
+
+/** Next free shell id for a workstream — ids only ever grow, so a tab's id is
+ *  stable for its lifetime even as siblings come and go. */
+export const nextShellId = (shells: ShellTab[]): number =>
+  Math.max(0, ...shells.map((s) => s.id)) + 1;
 
 type TabsStore = { byWs: Record<string, WsTabState> };
 
@@ -53,27 +63,30 @@ export function openShipTab(workstreamId: string, sessionId: string): void {
     const current = all[workstreamId] ?? defaultTabState();
     const existing = current.shells.find((s) => s.mode === "ship");
     if (existing) {
+      const inRightPane = existing.panel === "right";
       return {
         ...all,
         [workstreamId]: {
           ...current,
           shells: current.shells.map((s) => (s.id === existing.id ? { ...s, sessionId } : s)),
-          activeId: existing.id,
-          docsOpen: false,
+          activeId: inRightPane ? current.activeId : existing.id,
+          rightActiveId: inRightPane ? existing.id : current.rightActiveId,
+          rightSplit: inRightPane ? true : current.rightSplit,
+          activePane: inRightPane ? "right" : "main",
         },
       };
     }
-    const nextId = Math.max(0, ...current.shells.map((s) => s.id)) + 1;
+    const nextId = nextShellId(current.shells);
     return {
       ...all,
       [workstreamId]: {
         ...current,
         shells: [
           ...current.shells,
-          { id: nextId, title: "Ship", mode: "ship", draft: "", docs: [], sessionId },
+          { id: nextId, title: "Ship", mode: "ship", draft: "", docs: [], sessionId, panel: "main" },
         ],
         activeId: nextId,
-        docsOpen: false,
+        activePane: "main",
       },
     };
   });

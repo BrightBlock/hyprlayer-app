@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import {
   Button,
@@ -11,22 +11,26 @@ import {
   PageSpinner,
   TextInput,
 } from "../components/ui";
-import { BookIcon, DocIcon, PlusIcon, XIcon } from "../components/icons";
+import { open } from "@tauri-apps/plugin-dialog";
+
+import { DocIcon, PlusIcon, SplitIcon, XIcon } from "../components/icons";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { DiffSidebar } from "../features/workstreams/DiffSidebar";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
+import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
 import { killSession, transcriptToText } from "../features/session/sessionStore";
 import { stageLabel, type StageKey } from "../features/session/stages";
 import {
   defaultTabState,
+  nextShellId,
   updateWorkstreamTabs,
   useWorkstreamTabsStore,
   type WsTabState,
 } from "../features/session/workstreamTabs";
 import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
 import { useBootstrap, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
-import { startEdgeDrag } from "../lib/resize";
+import { clamp, startEdgeDrag } from "../lib/resize";
 import { useUiStore } from "../lib/uiStore";
 
 const DIFF_SIDEBAR_MIN = 280;
@@ -57,6 +61,9 @@ export type ShellTab = {
   /** When set, this tab is a read-only markdown preview of a doc (its path),
    *  not an agent chat — opened from the diff sidebar, closed when done. */
   docPreviewPath?: string;
+  /** Which pane this shell lives in. Absent/"main" → the main pane; "right" →
+   *  the side-by-side right split. */
+  panel?: "main" | "right";
 };
 
 type ShellMenu = {
@@ -88,9 +95,21 @@ export function ProjectPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  // Which shell's "+" opened the library picker modal (null = closed).
+  const [docsModalShellId, setDocsModalShellId] = useState<number | null>(null);
   // Hidden state lives in a shared store so the top-bar toggle controls it.
   const diffHidden = useUiStore((state) => state.diffHidden);
   const [diffWidth, setDiffWidth] = useState(360);
+  // Right-split width as a fraction of the agent area (0..1). Local, like
+  // diffWidth — the split's open/closed state and pane assignments persist in
+  // the tab store, but the exact ratio resets to a sane default per visit.
+  const [rightRatio, setRightRatio] = useState(0.5);
+  const splitRowRef = useRef<HTMLDivElement>(null);
+  // Tab drag (reorder within a pane + move across the split). The hook must run
+  // before this component's early returns, so it reaches the action closures
+  // (defined later) through a ref.
+  const dragHandlersRef = useRef<TabDragHandlers>({ reorder: () => {}, move: () => {} });
+  const { drag, dropPane, suppressClickRef, startDrag } = useTabDrag(dragHandlersRef);
 
   // ?create=true (sidebar "+") pops the dialog once, then leaves the URL.
   useEffect(() => {
@@ -154,16 +173,27 @@ export function ProjectPage() {
   // The active workstream's own tab strip (1 workstream -> N shells).
   const tabs = wsId ? (tabsByWs[wsId] ?? defaultTabState()) : null;
   const shells = tabs?.shells ?? [];
-  const docsActive = tabs?.docsOpen ?? false;
+  // The split partitions a workstream's shells into the main pane and the
+  // right pane by their `panel`; each pane tracks its own active shell.
+  const isMainShell = (s: ShellTab) => (s.panel ?? "main") !== "right";
+  const isRightShell = (s: ShellTab) => s.panel === "right";
+  const mainShells = shells.filter(isMainShell);
+  const rightShells = shells.filter(isRightShell);
+  const rightSplit = (tabs?.rightSplit ?? false) && rightShells.length > 0;
+  const activePane: "main" | "right" = tabs?.activePane ?? "main";
   const activeShell = tabs
-    ? (tabs.shells.find((s) => s.id === tabs.activeId) ?? tabs.shells[0] ?? null)
+    ? (mainShells.find((s) => s.id === tabs.activeId) ?? mainShells[0] ?? null)
     : null;
+  const rightActiveShell =
+    rightShells.find((s) => s.id === tabs?.rightActiveId) ?? rightShells[0] ?? null;
+  // The shell whose composer "+" opened the library picker — the modal's
+  // attach target, stable while the modal is open.
+  const docsModalShell =
+    docsModalShellId !== null ? (shells.find((s) => s.id === docsModalShellId) ?? null) : null;
   const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
   const shellBeingRenamed = renameShellId
     ? shells.find((s) => s.id === renameShellId)
     : null;
-
-  const mode: StageKey = activeShell?.mode ?? "general";
 
   const updateTabs = (updater: (current: WsTabState) => WsTabState) => {
     if (!wsId) return;
@@ -181,55 +211,173 @@ export function ProjectPage() {
     }));
   };
   const selectShell = (shellId: number) => {
-    updateTabs((current) => ({ ...current, activeId: shellId, docsOpen: false }));
+    updateTabs((current) => ({ ...current, activeId: shellId, activePane: "main" }));
   };
-  const selectDocsTab = () => {
-    updateTabs((current) => ({ ...current, docsOpen: true }));
+  const selectRightShell = (shellId: number) => {
+    updateTabs((current) => ({ ...current, rightActiveId: shellId, activePane: "right" }));
+  };
+  const setActivePane = (pane: "main" | "right") => {
+    updateTabs((current) => (current.activePane === pane ? current : { ...current, activePane: pane }));
+  };
+  const makeShell = (id: number, panel: "main" | "right"): ShellTab => ({
+    id,
+    title: `Agent ${id}`,
+    mode: "general",
+    draft: "",
+    docs: [],
+    panel,
+  });
+  // Append a fresh agent to the right pane and focus it (opening the split).
+  const spawnRightShell = (current: WsTabState): WsTabState => {
+    const id = nextShellId(current.shells);
+    return {
+      ...current,
+      shells: [...current.shells, makeShell(id, "right")],
+      rightActiveId: id,
+      rightSplit: true,
+      activePane: "right",
+    };
   };
   const addShell = () => {
     updateTabs((current) => {
-      const nextId = Math.max(0, ...current.shells.map((s) => s.id)) + 1;
+      const id = nextShellId(current.shells);
       return {
-        shells: [
-          ...current.shells,
-          { id: nextId, title: `Agent ${nextId}`, mode: "general", draft: "", docs: [] },
-        ],
-        activeId: nextId,
-        docsOpen: false,
+        ...current,
+        shells: [...current.shells, makeShell(id, "main")],
+        activeId: id,
+        activePane: "main",
       };
     });
   };
+  const addRightShell = () => updateTabs(spawnRightShell);
+  // The split toggle in the tab strip: open the right pane (seeding a fresh
+  // agent the first time) or hide it. Hiding keeps the right shells around.
+  const toggleRightSplit = () => {
+    updateTabs((current) => {
+      if (current.rightSplit) return { ...current, rightSplit: false, activePane: "main" };
+      if (current.shells.some(isRightShell)) {
+        return { ...current, rightSplit: true, activePane: "right" };
+      }
+      return spawnRightShell(current);
+    });
+  };
+  // The X on the right strip tears the split down: end its agents and drop the
+  // right shells entirely (vs. the toggle, which just hides the pane).
+  const closeRightSplit = () => {
+    for (const s of rightShells) if (s.sessionId) void killSession(s.sessionId);
+    updateTabs((current) => ({
+      ...current,
+      shells: current.shells.filter(isMainShell),
+      rightSplit: false,
+      rightActiveId: undefined,
+      activePane: "main",
+    }));
+  };
+  const moveShellToPane = (shellId: number, toPane: "main" | "right") => {
+    updateTabs((current) => {
+      const shell = current.shells.find((s) => s.id === shellId);
+      if (!shell || (shell.panel ?? "main") === toPane) return current;
+      if (toPane === "right") {
+        const mains = current.shells.filter(isMainShell);
+        if (mains.length <= 1) return current; // never empty the main pane
+        return {
+          ...current,
+          shells: current.shells.map((s) =>
+            s.id === shellId ? { ...s, panel: "right" as const } : s,
+          ),
+          activeId:
+            current.activeId === shellId
+              ? (mains.find((m) => m.id !== shellId)?.id ?? current.activeId)
+              : current.activeId,
+          rightSplit: true,
+          rightActiveId: shellId,
+          activePane: "right",
+        };
+      }
+      const shellsNext = current.shells.map((s) =>
+        s.id === shellId ? { ...s, panel: "main" as const } : s,
+      );
+      const stillRight = shellsNext.some(isRightShell);
+      return {
+        ...current,
+        shells: shellsNext,
+        activeId: shellId,
+        activePane: "main",
+        rightSplit: stillRight ? current.rightSplit : false,
+        rightActiveId:
+          current.rightActiveId === shellId
+            ? shellsNext.find(isRightShell)?.id
+            : current.rightActiveId,
+      };
+    });
+  };
+  // Reorder a shell within its own pane to `toIndex` (an index among that
+  // pane's shells). The other pane's shells keep their slots — we only shuffle
+  // the dragged pane's members back into the positions they occupied.
+  const reorderShellInPane = (shellId: number, pane: "main" | "right", toIndex: number) => {
+    updateTabs((current) => {
+      const inPane = (s: ShellTab) =>
+        pane === "right" ? s.panel === "right" : (s.panel ?? "main") !== "right";
+      const members = current.shells.filter(inPane);
+      const from = members.findIndex((s) => s.id === shellId);
+      if (from < 0) return current;
+      const reordered = [...members];
+      const [moved] = reordered.splice(from, 1);
+      reordered.splice(clamp(toIndex, 0, reordered.length), 0, moved);
+      if (reordered.every((s, i) => s.id === members[i].id)) return current; // no-op
+      let i = 0;
+      return { ...current, shells: current.shells.map((s) => (inPane(s) ? reordered[i++] : s)) };
+    });
+  };
+  // Keep the drag hook pointed at the latest action closures.
+  dragHandlersRef.current = { reorder: reorderShellInPane, move: moveShellToPane };
   // Open an agent-created doc as a read-only preview tab in the agent strip —
   // reuse an existing preview tab for the same doc rather than stacking dupes.
   const openDocPreview = (path: string, title: string) => {
     updateTabs((current) => {
       const existing = current.shells.find((s) => s.docPreviewPath === path);
-      if (existing) return { ...current, activeId: existing.id, docsOpen: false };
-      const nextId = Math.max(0, ...current.shells.map((s) => s.id)) + 1;
+      if (existing) return { ...current, activeId: existing.id, activePane: "main" };
+      const nextId = nextShellId(current.shells);
       return {
         ...current,
         shells: [
           ...current.shells,
-          { id: nextId, title, mode: "general", draft: "", docs: [], docPreviewPath: path },
+          { id: nextId, title, mode: "general", draft: "", docs: [], panel: "main", docPreviewPath: path },
         ],
         activeId: nextId,
-        docsOpen: false,
+        activePane: "main",
       };
     });
   };
   const closeShell = (shellId: number) => {
-    if (!tabs || tabs.shells.length === 1) return;
+    if (!tabs) return;
+    const shell = tabs.shells.find((s) => s.id === shellId);
+    if (!shell) return;
+    const onRight = isRightShell(shell);
+    // The main pane must always keep at least one shell.
+    if (!onRight && tabs.shells.filter(isMainShell).length === 1) return;
     // Closing the tab ends its session — there's no End button; the window IS
     // the handle. (No-op if the session already ended or was never started.)
-    const sid = tabs.shells.find((s) => s.id === shellId)?.sessionId;
-    if (sid) void killSession(sid);
+    if (shell.sessionId) void killSession(shell.sessionId);
     updateTabs((current) => {
-      if (current.shells.length === 1) return current;
-      const index = current.shells.findIndex((s) => s.id === shellId);
       const remaining = current.shells.filter((s) => s.id !== shellId);
+      if (onRight) {
+        const rights = remaining.filter(isRightShell);
+        return {
+          ...current,
+          shells: remaining,
+          rightActiveId:
+            current.rightActiveId === shellId
+              ? rights[rights.length - 1]?.id
+              : current.rightActiveId,
+          rightSplit: rights.length > 0 ? current.rightSplit : false,
+          activePane: rights.length > 0 ? current.activePane : "main",
+        };
+      }
+      const mains = remaining.filter(isMainShell);
       const activeId =
         current.activeId === shellId
-          ? (remaining[Math.max(0, index - 1)] ?? remaining[0]).id
+          ? (mains[mains.length - 1]?.id ?? current.activeId)
           : current.activeId;
       return { ...current, shells: remaining, activeId };
     });
@@ -237,17 +385,17 @@ export function ProjectPage() {
   const openDoc = (id: string) => {
     void navigate({ to: "/library/doc", search: { id, mode: "preview" } });
   };
-  // Context docs are per agent tab: attach/detach mutate the ACTIVE shell.
+  // Library attach/detach mutate the shell whose composer opened the modal.
   const attachDocToShell = (path: string, role: string) => {
-    if (!activeShell) return;
-    const docs = activeShell.docs.some((d) => d.path === path)
-      ? activeShell.docs
-      : [...activeShell.docs, { path, role }];
-    patchShell(activeShell.id, { docs });
+    if (!docsModalShell) return;
+    const docs = docsModalShell.docs.some((d) => d.path === path)
+      ? docsModalShell.docs
+      : [...docsModalShell.docs, { path, role }];
+    patchShell(docsModalShell.id, { docs });
   };
   const detachDocFromShell = (path: string) => {
-    if (!activeShell) return;
-    patchShell(activeShell.id, { docs: activeShell.docs.filter((d) => d.path !== path) });
+    if (!docsModalShell) return;
+    patchShell(docsModalShell.id, { docs: docsModalShell.docs.filter((d) => d.path !== path) });
   };
 
   // The URL is the single source of truth; the canonicalize effect persists
@@ -258,21 +406,54 @@ export function ProjectPage() {
       replace: true,
     });
   };
-  const updateDraft = (value: string) => {
-    if (activeShell) patchShell(activeShell.id, { draft: value });
-  };
-  const changeMode = (key: StageKey) => {
-    if (!activeView || !activeShell || key === mode) return;
-    patchShell(activeShell.id, { mode: key });
+  const changeShellMode = (shell: ShellTab, key: StageKey) => {
+    if (!activeView || key === shell.mode) return;
+    patchShell(shell.id, { mode: key });
     // The workstream's pipeline position follows the latest mode choice.
     setStage.mutate({ id: activeView.item.id, stage: key });
   };
-  const changeModel = (key: string) => {
-    if (activeShell) patchShell(activeShell.id, { model: key });
+  // Attach files (or, filtered to images, screenshots) to a shell via the
+  // native OS file dialog. The chosen paths join the shell's context docs and
+  // are passed to the agent at spawn, same as library docs.
+  const addFilesToShell = async (shellId: number, role: string, imagesOnly: boolean) => {
+    const selected = await open({
+      multiple: true,
+      directory: false,
+      title: imagesOnly ? "Add screenshots" : "Add files",
+      filters: imagesOnly
+        ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic"] }]
+        : undefined,
+    });
+    if (!selected) return;
+    const paths = Array.isArray(selected) ? selected : [selected];
+    updateTabs((current) => ({
+      ...current,
+      shells: current.shells.map((s) => {
+        if (s.id !== shellId) return s;
+        const have = new Set(s.docs.map((d) => d.path));
+        const added = paths.filter((p) => !have.has(p)).map((path) => ({ path, role }));
+        return added.length ? { ...s, docs: [...s.docs, ...added] } : s;
+      }),
+    }));
   };
-  const changeEffort = (key: string) => {
-    if (activeShell) patchShell(activeShell.id, { effort: key });
-  };
+  // The full set of SessionChat callbacks scoped to ONE shell, so the main and
+  // right panes each drive their own agent independently.
+  const shellChatProps = (shell: ShellTab) => ({
+    view: activeView!,
+    shell,
+    onDraftChange: (value: string) => patchShell(shell.id, { draft: value }),
+    onModeChange: (key: StageKey) => changeShellMode(shell, key),
+    onModelChange: (key: string) => patchShell(shell.id, { model: key }),
+    onEffortChange: (key: string) => patchShell(shell.id, { effort: key }),
+    onSessionStarted: (sessionId: string) => patchShell(shell.id, { sessionId }),
+    onResetSession: () => patchShell(shell.id, { sessionId: undefined }),
+    onOpenDoc: openDoc,
+    onDetachDoc: (path: string) =>
+      patchShell(shell.id, { docs: shell.docs.filter((d) => d.path !== path) }),
+    onBrowseDocs: () => setDocsModalShellId(shell.id),
+    onAddFiles: () => void addFilesToShell(shell.id, "file", false),
+    onAddScreenshots: () => void addFilesToShell(shell.id, "screenshot", true),
+  });
   const openRenameShell = (shell: ShellTab) => {
     setRenameShellId(shell.id);
     setRenameValue(shell.title);
@@ -312,61 +493,130 @@ export function ProjectPage() {
       onResize: setDiffWidth,
     });
   };
+  const startSplitResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const rowW = splitRowRef.current?.clientWidth ?? 800;
+    startEdgeDrag(event, {
+      startWidth: rightRatio * rowW,
+      min: 280,
+      max: Math.max(280, rowW - 280),
+      // Dragging the divider left grows the right pane.
+      direction: -1,
+      onResize: (width) => setRightRatio(clamp(width / rowW, 0.2, 0.8)),
+    });
+  };
+
+  // One tab pill, shared by both pane strips. `paneFocused` is true when this
+  // pill's pane holds focus — only then does its active tab read as fully
+  // selected, so across a split only one tab looks active at a time.
+  const renderTabPill = (
+    shell: ShellTab,
+    opts: {
+      active: boolean;
+      paneFocused: boolean;
+      pane: "main" | "right";
+      onSelect: () => void;
+      closable: boolean;
+    },
+  ) => (
+    <div
+      key={shell.id}
+      data-tab-id={shell.id}
+      role="tab"
+      aria-selected={opts.active}
+      onPointerDown={(e) =>
+        startDrag(e, { id: shell.id, title: shell.title, fromPane: opts.pane })
+      }
+      onClick={() => {
+        if (!suppressClickRef.current) opts.onSelect();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        opts.onSelect();
+        setShellMenu({ shellId: shell.id, x: e.clientX, y: e.clientY });
+      }}
+      className={`inline-flex shrink-0 cursor-pointer select-none items-center rounded-md ${
+        drag?.id === shell.id ? "opacity-40" : ""
+      } ${
+        opts.active
+          ? opts.paneFocused
+            ? "bg-panel-2 text-ink"
+            : "bg-panel-2/50 text-ink-dim"
+          : "text-ink-dim hover:bg-panel-2 hover:text-ink"
+      }`}
+    >
+      <span className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium">
+        {shell.docPreviewPath ? (
+          <span className="text-ink-dim">
+            <DocIcon size={13} />
+          </span>
+        ) : (
+          <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
+        )}
+        {shell.title}
+        {!shell.docPreviewPath && <SessionTabDot sessionId={shell.sessionId} />}
+      </span>
+      {opts.closable && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            closeShell(shell.id);
+          }}
+          className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
+          title={`Close ${shell.title}`}
+          aria-label={`Close ${shell.title}`}
+        >
+          <XIcon />
+        </button>
+      )}
+    </div>
+  );
+
+  // The body of one pane: a doc preview, an agent chat, or a placeholder.
+  const renderPaneContent = (shell: ShellTab | null) => {
+    if (!activeView || !shell) {
+      return (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-ink-dim">
+          No agent in this pane
+        </div>
+      );
+    }
+    if (shell.docPreviewPath) {
+      return (
+        <DocPreviewTab
+          key={`${activeView.item.id}:${shell.id}`}
+          path={shell.docPreviewPath}
+          title={shell.title}
+        />
+      );
+    }
+    return <SessionChat key={`${activeView.item.id}:${shell.id}`} {...shellChatProps(shell)} />;
+  };
 
   return (
     <div className="flex h-full min-h-0 bg-surface">
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
           <main className="flex min-w-0 flex-1 flex-col">
-            <div className="flex h-[61px] items-center border-b border-edge bg-panel px-5">
-              <div className="flex w-full min-w-0 items-center justify-between gap-4">
-                <div className="no-scrollbar flex min-w-0 gap-1 overflow-x-auto py-2">
+            <div className="flex h-9 items-stretch border-b border-edge bg-panel">
+              {/* Main-pane tab strip + the split / docs controls. */}
+              <div
+                data-pane="main"
+                className={`flex min-w-0 flex-1 items-center justify-between gap-3 px-5 ${
+                  dropPane === "main" ? "bg-accent/10" : ""
+                }`}
+              >
+                <div className="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto">
                   {activeView &&
-                    shells.map((shell) => (
-                      <div
-                        key={shell.id}
-                        className={`inline-flex shrink-0 items-center rounded-md ${
-                          shell.id === activeShell?.id
-                            ? "bg-panel-2 text-ink"
-                            : "text-ink-dim hover:bg-panel-2 hover:text-ink"
-                        }`}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          selectShell(shell.id);
-                          setShellMenu({ shellId: shell.id, x: e.clientX, y: e.clientY });
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => selectShell(shell.id)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium"
-                        >
-                          {shell.docPreviewPath ? (
-                            <span className="text-ink-dim">
-                              <DocIcon size={13} />
-                            </span>
-                          ) : (
-                            <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
-                          )}
-                          {shell.title}
-                          {!shell.docPreviewPath && <SessionTabDot sessionId={shell.sessionId} />}
-                        </button>
-                        {shells.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              closeShell(shell.id);
-                            }}
-                            className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
-                            title={`Close ${shell.title}`}
-                            aria-label={`Close ${shell.title}`}
-                          >
-                            <XIcon />
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                    mainShells.map((shell) =>
+                      renderTabPill(shell, {
+                        active: shell.id === activeShell?.id,
+                        paneFocused: !rightSplit || activePane === "main",
+                        pane: "main",
+                        onSelect: () => selectShell(shell.id),
+                        closable: mainShells.length > 1,
+                      }),
+                    )}
                   {activeView && (
                     <IconButton onClick={addShell} title="New tab" aria-label="New tab">
                       <PlusIcon />
@@ -375,15 +625,45 @@ export function ProjectPage() {
                 </div>
                 {activeView && (
                   <IconButton
-                    onClick={selectDocsTab}
-                    active={docsActive}
-                    title="Project documents"
-                    aria-label="Project documents"
+                    onClick={toggleRightSplit}
+                    active={rightSplit}
+                    title={rightSplit ? "Close split" : "Split agent right"}
+                    aria-label={rightSplit ? "Close split" : "Split agent right"}
+                    className="shrink-0"
                   >
-                    <BookIcon />
+                    <SplitIcon className={rightSplit ? "text-accent" : undefined} />
                   </IconButton>
                 )}
               </div>
+              {/* Right-pane tab strip, sized + bordered to sit over the right
+                  pane below so the two read as one continuous column. */}
+              {activeView && rightSplit && (
+                <div
+                  data-pane="right"
+                  className={`flex shrink-0 items-center gap-1 border-l border-edge px-3 ${
+                    dropPane === "right" ? "bg-accent/10" : ""
+                  }`}
+                  style={{ width: `${rightRatio * 100}%` }}
+                >
+                  <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+                    {rightShells.map((shell) =>
+                      renderTabPill(shell, {
+                        active: shell.id === rightActiveShell?.id,
+                        paneFocused: activePane === "right",
+                        pane: "right",
+                        onSelect: () => selectRightShell(shell.id),
+                        closable: true,
+                      }),
+                    )}
+                    <IconButton onClick={addRightShell} title="New tab" aria-label="New tab">
+                      <PlusIcon />
+                    </IconButton>
+                  </div>
+                  <IconButton onClick={closeRightSplit} title="Close split" aria-label="Close split">
+                    <XIcon />
+                  </IconButton>
+                </div>
+              )}
             </div>
             {shellMenu && contextShell && (
               <ContextMenu position={shellMenu} onClose={() => setShellMenu(null)}>
@@ -403,8 +683,28 @@ export function ProjectPage() {
                 >
                   Copy transcript
                 </ContextMenuItem>
+                {contextShell.panel === "right" ? (
+                  <ContextMenuItem
+                    onClick={() => {
+                      moveShellToPane(contextShell.id, "main");
+                      setShellMenu(null);
+                    }}
+                  >
+                    Move to main pane
+                  </ContextMenuItem>
+                ) : (
+                  <ContextMenuItem
+                    disabled={mainShells.length <= 1}
+                    onClick={() => {
+                      moveShellToPane(contextShell.id, "right");
+                      setShellMenu(null);
+                    }}
+                  >
+                    Move to right split
+                  </ContextMenuItem>
+                )}
                 <ContextMenuItem
-                  disabled={shells.length === 1}
+                  disabled={(contextShell.panel ?? "main") !== "right" && mainShells.length === 1}
                   onClick={() => {
                     closeShell(contextShell.id);
                     setShellMenu(null);
@@ -444,38 +744,43 @@ export function ProjectPage() {
               onCreated={(view) => selectItem(view.item.id)}
             />
 
-            {docsActive && activeView ? (
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <WorkstreamDocsPanel
-                  mappedName={project.mappedName}
-                  targetTitle={activeShell?.title ?? null}
-                  attachedPaths={(activeShell?.docs ?? []).map((d) => d.path)}
-                  onAttach={attachDocToShell}
-                  onDetach={detachDocFromShell}
-                  onOpenDoc={openDoc}
-                />
+            {activeView ? (
+              <div ref={splitRowRef} className="flex min-h-0 flex-1">
+                <div
+                  data-pane="main"
+                  className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${
+                    dropPane === "main" ? "ring-2 ring-inset ring-accent/60" : ""
+                  }`}
+                  onPointerDownCapture={() => {
+                    if (rightSplit && activePane !== "main") setActivePane("main");
+                  }}
+                >
+                  {renderPaneContent(activeShell)}
+                </div>
+                {rightSplit && (
+                  <>
+                    <div
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label="Resize agent split"
+                      className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+                      onPointerDown={startSplitResize}
+                    />
+                    <div
+                      data-pane="right"
+                      className={`relative flex min-h-0 flex-col border-l border-edge ${
+                        dropPane === "right" ? "ring-2 ring-inset ring-accent/60" : ""
+                      }`}
+                      style={{ width: `${rightRatio * 100}%` }}
+                      onPointerDownCapture={() => {
+                        if (activePane !== "right") setActivePane("right");
+                      }}
+                    >
+                      {renderPaneContent(rightActiveShell)}
+                    </div>
+                  </>
+                )}
               </div>
-            ) : activeView && activeShell?.docPreviewPath ? (
-              <DocPreviewTab
-                key={`${activeView.item.id}:${activeShell.id}`}
-                path={activeShell.docPreviewPath}
-                title={activeShell.title}
-              />
-            ) : activeView && activeShell ? (
-              <SessionChat
-                key={`${activeView.item.id}:${activeShell.id}`}
-                view={activeView}
-                shell={activeShell}
-                onDraftChange={updateDraft}
-                onModeChange={changeMode}
-                onModelChange={changeModel}
-                onEffortChange={changeEffort}
-                onSessionStarted={(sessionId) => patchShell(activeShell.id, { sessionId })}
-                onResetSession={() => patchShell(activeShell.id, { sessionId: undefined })}
-                onOpenDoc={openDoc}
-                onDetachDoc={detachDocFromShell}
-                onBrowseDocs={selectDocsTab}
-              />
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto p-5">
                 <div className="mx-auto max-w-3xl space-y-4">
@@ -503,7 +808,7 @@ export function ProjectPage() {
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize diff sidebar"
-            className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+            className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
             onPointerDown={startDiffResize}
           />
           <aside
@@ -513,6 +818,34 @@ export function ProjectPage() {
             <DiffSidebar workstreamId={activeView?.item.id ?? null} onOpenDoc={openDocPreview} />
           </aside>
         </>
+      )}
+
+      {/* Library picker — opened from a composer's "+" menu. Centered modal so
+          attaching context docs never replaces the agent view. */}
+      <Dialog
+        open={docsModalShellId !== null}
+        onClose={() => setDocsModalShellId(null)}
+        title="Attach context from library"
+        className="max-w-2xl"
+      >
+        <WorkstreamDocsPanel
+          mappedName={project.mappedName}
+          targetTitle={docsModalShell?.title ?? null}
+          attachedPaths={(docsModalShell?.docs ?? []).map((d) => d.path)}
+          onAttach={attachDocToShell}
+          onDetach={detachDocFromShell}
+          onOpenDoc={openDoc}
+        />
+      </Dialog>
+
+      {/* Floating label that trails the cursor while dragging a tab. */}
+      {drag && (
+        <div
+          className="pointer-events-none fixed z-50 rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs font-medium text-ink shadow-lg"
+          style={{ left: drag.x + 12, top: drag.y + 12 }}
+        >
+          {drag.title}
+        </div>
       )}
     </div>
   );

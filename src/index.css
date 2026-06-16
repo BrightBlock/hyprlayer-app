@@ -1,16 +1,93 @@
 @import "tailwindcss";
 
+/* ────────────────────────────────────────────────────────────────────────
+   Color themes — ported from termic (github.com/simion/termic).
+
+   Every surface/text/border in the app is bound to one of the theme tokens
+   below, so a theme is just a re-assignment of those CSS variables. The
+   `@theme` block is the DARK+ palette (the app's default look); the
+   `html.<name>` blocks below override the same tokens for the other themes.
+   `applyTheme()` (src/lib/theme.ts) toggles the matching class on <html>.
+   ──────────────────────────────────────────────────────────────────────── */
+
 @theme {
-  --color-surface: #0b0d10;
-  --color-panel: #14171c;
-  --color-panel-2: #1b1f26;
-  --color-edge: #262b34;
-  --color-ink: #e8eaed;
-  --color-ink-dim: #9aa3af;
-  --color-accent: #08090b;
-  --color-ok: #4ade80;
-  --color-warn: #fbbf24;
-  --color-bad: #f87171;
+  /* "Dark+" — neutral charcoal surfaces with the terracotta accent. This is
+     the default palette; the @theme block IS the dark theme (no html class). */
+  --color-surface: #0c0c0c;
+  --color-panel: #141414;
+  --color-panel-2: #1c1c1c;
+  --color-edge: #333333;
+  --color-ink: #e8e6e2;
+  --color-ink-dim: #a8a6a2;
+  --color-accent: #d97757;
+  --color-accent-ink: #0c0c0c;
+  /* Status hues are shared across every theme (defined once, not per-theme,
+     so OK/WARN/BAD read consistently no matter the surface). */
+  --color-ok: #4caf50;
+  --color-warn: #f0b13a;
+  --color-bad: #ef5350;
+}
+
+/* Light — warm neutral creams + ivories, terracotta accent shifted darker so
+   it keeps contrast on the light surface. */
+html.light {
+  --color-surface: #faf9f6;
+  --color-panel: #f3f1ec;
+  --color-panel-2: #ebe8e1;
+  --color-edge: #d4d0c8;
+  --color-ink: #1c1b1a;
+  --color-ink-dim: #55534f;
+  --color-accent: #c25e3d;
+  color-scheme: light;
+}
+
+/* Claude — warm charcoal palette (terax-ai's "Claude"). Chrome sits one stop
+   lighter than the main content area. */
+html.claude {
+  --color-surface: #1f1e1d;
+  --color-panel: #262624;
+  --color-panel-2: #2a2926;
+  --color-edge: rgba(245, 244, 238, 0.1);
+  --color-ink: #f5f4ee;
+  --color-ink-dim: #b0a89a;
+  --color-accent: #d97757;
+}
+
+/* Cobalt — Wes Bos's Cobalt 2. Deep navy surfaces, bright sky-blue accent. */
+html.cobalt {
+  --color-surface: #193549;
+  --color-panel: #1f4662;
+  --color-panel-2: #234a6a;
+  --color-edge: #4a7ba8;
+  --color-ink: #e1efff;
+  --color-ink-dim: #aacdee;
+  --color-accent: #66c4ff;
+}
+
+/* Matrix — CRT phosphor vibe. Near-black green-tinted surfaces, calm green
+   accent (not retina-burning #00ff41), warm off-white text for readability. */
+html.matrix {
+  --color-surface: #050905;
+  --color-panel: #0d130d;
+  --color-panel-2: #161e16;
+  --color-edge: #2a322a;
+  --color-ink: #c8cdc4;
+  --color-ink-dim: #8b918a;
+  --color-accent: #3fb950;
+}
+
+/* Solarized Dark — Ethan Schoonover's palette (base03/02 + base0/1), with the
+   accent shifted to solarized orange (#cb4b16) since terracotta clashes with
+   the cool teal base. */
+html.solarized {
+  --color-surface: #002b36;
+  --color-panel: #073642;
+  --color-panel-2: #0a4756;
+  --color-edge: #1c5566;
+  --color-ink: #93a1a1;
+  --color-ink-dim: #839496;
+  --color-accent: #cb4b16;
+  --color-accent-ink: #ffffff;
 }
 
 html,

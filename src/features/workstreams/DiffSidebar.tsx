@@ -136,7 +136,7 @@ export function DiffSidebar({ workstreamId, onOpenDoc }: Props) {
 
   return (
     <>
-      <div className="flex h-[61px] items-center border-b border-edge px-3">
+      <div className="flex h-9 items-center border-b border-edge px-3">
         <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">Diff</h2>
           <div className="flex items-center gap-1.5">
@@ -154,7 +154,7 @@ export function DiffSidebar({ workstreamId, onOpenDoc }: Props) {
           </div>
         </div>
       </div>
-      <div className="h-[calc(100%-61px)] space-y-2 overflow-y-auto p-4">
+      <div className="h-[calc(100%-36px)] space-y-2 overflow-y-auto p-4">
         {workstreamId !== null && <DocsSection workstreamId={workstreamId} onOpenDoc={onOpenDoc} />}
         {workstreamId === null ? (
           <div className="rounded-lg border border-edge bg-panel-2 p-3">

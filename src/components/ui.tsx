@@ -24,7 +24,7 @@ export function Button({ variant = "ghost", busy, className, children, disabled,
       className={cx(
         "inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
         "disabled:cursor-not-allowed disabled:opacity-50",
-        variant === "primary" && "border border-edge bg-accent text-ink hover:bg-panel-2",
+        variant === "primary" && "border border-edge bg-accent text-accent-ink hover:bg-panel-2",
         variant === "ghost" && "border border-edge bg-panel-2 hover:bg-edge/60",
         variant === "danger" && "border border-bad/40 text-bad hover:bg-bad/10",
         className,
