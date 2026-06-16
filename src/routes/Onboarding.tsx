@@ -1,12 +1,16 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { useBootstrap, useRedetectBinaries } from "../lib/queries";
 import { Badge, Button, Card, CardTitle, EmptyState, ErrorNote, PageError, Spinner } from "../components/ui";
 import { BinaryCard } from "../features/system/BinaryCard";
+import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 
 export function Onboarding() {
   const bootstrap = useBootstrap();
   const redetect = useRedetectBinaries();
+  const navigate = useNavigate();
+  const [addOpen, setAddOpen] = useState(false);
 
   if (bootstrap.isLoading) {
     return (
@@ -72,10 +76,8 @@ export function Onboarding() {
             </p>
             <p className="text-ink-dim">
               No hyprlayer config was found at{" "}
-              <span className="selectable font-mono text-xs">{config.path}</span>. Run{" "}
-              <code className="selectable rounded bg-panel-2 px-1">hyprlayer thoughts init</code> in a
-              repository to set up your thoughts storage — the app will pick it up automatically.
-              In-app setup lands in the next milestone.
+              <span className="selectable font-mono text-xs">{config.path}</span>. Add your first
+              project below — the app sets up your thoughts storage automatically.
             </p>
           </div>
         )}
@@ -85,9 +87,14 @@ export function Onboarding() {
       </Card>
 
       <Card>
-        <CardTitle>Projects</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="mb-0">Projects</CardTitle>
+          <Button variant="primary" onClick={() => setAddOpen(true)}>
+            Add project
+          </Button>
+        </div>
         {data.projects.length > 0 ? (
-          <ul className="space-y-1 text-sm">
+          <ul className="mt-3 space-y-1 text-sm">
             {data.projects.map((p) => (
               <li key={p.path} className="flex items-center gap-2">
                 <Badge tone={p.existsOnDisk ? "ok" : "warn"}>{p.backendKind}</Badge>
@@ -97,10 +104,8 @@ export function Onboarding() {
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-ink-dim">
-            No repositories are mapped yet. Run{" "}
-            <code className="selectable rounded bg-panel-2 px-1">hyprlayer thoughts init</code> inside a
-            repository, and it will appear here.
+          <p className="mt-3 text-sm text-ink-dim">
+            No projects yet — clone a repo from GitHub or open one from disk to get started.
           </p>
         )}
       </Card>
@@ -112,6 +117,18 @@ export function Onboarding() {
           </Link>
         </div>
       )}
+
+      <AddProjectDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onAdded={(project) =>
+          void navigate({
+            to: "/projects/$projectPath",
+            params: { projectPath: project.path },
+            search: {},
+          })
+        }
+      />
     </div>
   );
 }

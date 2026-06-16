@@ -70,6 +70,19 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE workstream_docs RENAME COLUMN work_item_id TO workstream_id;
     ALTER TABLE sessions RENAME COLUMN work_item_id TO workstream_id;
     ",
+    // v3: the project registry. A project is an explicit, app-owned clone the
+    // user added (cloned from a URL or imported from disk) — the source of
+    // truth for the project list, replacing the old derive-from-repoMappings
+    // approach (which surfaced every worktree's `thoughts init` as a project).
+    "
+    CREATE TABLE projects (
+        path        TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        origin_url  TEXT,
+        source      TEXT NOT NULL DEFAULT 'clone',
+        created_at  REAL NOT NULL
+    );
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

@@ -19,6 +19,8 @@ pub struct AppSettings {
     pub binary_overrides: HashMap<BinaryKind, String>,
     /// Where work-item worktrees live; default ~/hyprlayer/worktrees.
     pub worktree_root: Option<String>,
+    /// Where app-owned project clones live; default ~/hyprlayer/repos.
+    pub repos_root: Option<String>,
 }
 
 pub struct SettingsStore {

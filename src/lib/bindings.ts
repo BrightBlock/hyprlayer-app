@@ -10,12 +10,29 @@ export const commands = {
 	getBootstrap: () => typedError<Bootstrap, AppError>(__TAURI_INVOKE("get_bootstrap")),
 	getProject: (path: string) => typedError<ProjectDetail, AppError>(__TAURI_INVOKE("get_project", { path })),
 	/**
-	 *  Add a repository as a hyprlayer project. Wraps `hyprlayer thoughts init
-	 *  --yes`; on a true first run (no config anywhere) it first writes the
-	 *  minimal bootstrap config — the documented ADR-0002 exception — and the CLI
-	 *  owns the file from then on.
+	 *  Import a project from a local git repo on disk: re-clone it from its
+	 *  `origin` (so the app's copy tracks the same hosted source) into
+	 *  `~/hyprlayer/repos`, or — for a local-only repo with no remote — clone the
+	 *  directory itself. Worktrees are then always cut from that stable clone.
 	 */
 	addProject: (path: string, directoryName: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("add_project", { path, directoryName, bootstrapUser })),
+	/**
+	 *  Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
+	 *  register it as a project.
+	 */
+	cloneProject: (url: string, location: string | null, name: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, location, name, bootstrapUser })),
+	/**
+	 *  Remove a project from the registry. With `delete_files`, also delete the
+	 *  clone from disk — but only when it sits inside the repos root and has no
+	 *  active workstreams, so we never destroy a repo whose worktrees are live.
+	 */
+	removeProject: (path: string, deleteFiles: boolean) => typedError<null, AppError>(__TAURI_INVOKE("remove_project", { path, deleteFiles })),
+	/**
+	 *  The user's GitHub repos for the clone dialog's "Recent repos" list. Returns
+	 *  an empty list (never an error) when gh is missing or unauthenticated — the
+	 *  URL field still works, so recents are purely a convenience.
+	 */
+	listRecentRepos: () => typedError<GithubRepo[], AppError>(__TAURI_INVOKE("list_recent_repos")),
 	syncThoughts: (path: string, message: string | null) => typedError<SyncReport, AppError>(__TAURI_INVOKE("sync_thoughts", { path, message })),
 	runBackendHealth: (path: string) => typedError<HealthReport, AppError>(__TAURI_INVOKE("run_backend_health", { path })),
 	queryDocs: (query: ThoughtQuery) => typedError<QueryResult, AppError>(__TAURI_INVOKE("query_docs", { query })),
@@ -101,6 +118,8 @@ export type AppSettings = {
 	binaryOverrides?: Partial<{ [key in BinaryKind]: string }>,
 	/**  Where work-item worktrees live; default ~/hyprlayer/worktrees. */
 	worktreeRoot?: string | null,
+	/**  Where app-owned project clones live; default ~/hyprlayer/repos. */
+	reposRoot?: string | null,
 };
 
 /**  Where a document lives within its root's layout. */
@@ -249,6 +268,13 @@ export type Frontmatter = {
 	extra?: { [key in string]: string },
 };
 
+/**  One of the user's GitHub repos, for the clone dialog's "Recent repos" list. */
+export type GithubRepo = {
+	nameWithOwner: string,
+	description?: string | null,
+	url: string,
+};
+
 export type HealthCheck = {
 	id: string,
 	label: string,
@@ -270,12 +296,16 @@ export type LinkStatus =
 "broken";
 
 export type Project = {
-	/**  Absolute path of the code repository (the repoMappings key). */
+	/**  Absolute path of the app-owned clone (`~/hyprlayer/repos/<name>`). */
 	path: string,
 	mappedName: string,
 	profile: string | null,
 	backendKind: string,
 	existsOnDisk: boolean,
+	/**  The git source this clone tracks; None for a local-only repo. */
+	originUrl: string | null,
+	/**  `clone` | `disk` — how it was added. */
+	source: string,
 };
 
 export type ProjectDetail = {

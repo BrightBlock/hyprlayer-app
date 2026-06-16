@@ -11,25 +11,24 @@ import {
   PageSpinner,
   TextInput,
 } from "../components/ui";
-import { BookIcon, DocIcon, ModeIcon, PlusIcon, XIcon } from "../components/icons";
+import { BookIcon, DocIcon, PlusIcon, XIcon } from "../components/icons";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { DiffSidebar } from "../features/workstreams/DiffSidebar";
-import { SessionChat, SessionStatusBadge, SessionTabDot } from "../features/session/SessionChat";
+import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { killSession, transcriptToText } from "../features/session/sessionStore";
-import { MODE_STYLES, stageLabel, stageOf, type StageKey } from "../features/session/stages";
+import { stageLabel, type StageKey } from "../features/session/stages";
 import {
   defaultTabState,
   updateWorkstreamTabs,
   useWorkstreamTabsStore,
   type WsTabState,
 } from "../features/session/workstreamTabs";
-import { WorkstreamChips } from "../features/workstreams/WorkstreamChips";
 import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
 import { useBootstrap, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
 import { startEdgeDrag } from "../lib/resize";
+import { useUiStore } from "../lib/uiStore";
 
-const DIFF_SIDEBAR_COLLAPSED = 56;
 const DIFF_SIDEBAR_MIN = 280;
 const DIFF_SIDEBAR_MAX = 560;
 
@@ -89,7 +88,8 @@ export function ProjectPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [diffCollapsed, setDiffCollapsed] = useState(false);
+  // Hidden state lives in a shared store so the top-bar toggle controls it.
+  const diffHidden = useUiStore((state) => state.diffHidden);
   const [diffWidth, setDiffWidth] = useState(360);
 
   // ?create=true (sidebar "+") pops the dialog once, then leaves the URL.
@@ -163,7 +163,6 @@ export function ProjectPage() {
     ? shells.find((s) => s.id === renameShellId)
     : null;
 
-  const wsStage: StageKey = activeView ? stageOf(activeView) : "general";
   const mode: StageKey = activeShell?.mode ?? "general";
 
   const updateTabs = (updater: (current: WsTabState) => WsTabState) => {
@@ -305,7 +304,6 @@ export function ProjectPage() {
     void navigator.clipboard.writeText(transcript);
   };
   const startDiffResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (diffCollapsed) return;
     startEdgeDrag(event, {
       startWidth: diffWidth,
       min: DIFF_SIDEBAR_MIN,
@@ -322,7 +320,7 @@ export function ProjectPage() {
           <main className="flex min-w-0 flex-1 flex-col">
             <div className="border-b border-edge bg-panel px-5">
               <div className="flex min-w-0 items-center justify-between gap-4">
-                <div className="flex min-w-0 gap-1 overflow-x-auto py-2">
+                <div className="no-scrollbar flex min-w-0 gap-1 overflow-x-auto py-2">
                   {activeView &&
                     shells.map((shell) => (
                       <div
@@ -348,9 +346,7 @@ export function ProjectPage() {
                               <DocIcon size={13} />
                             </span>
                           ) : (
-                            <span className={`rounded p-0.5 ${MODE_STYLES[shell.mode].badge}`}>
-                              <ModeIcon mode={shell.mode} />
-                            </span>
+                            <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
                           )}
                           {shell.title}
                           {!shell.docPreviewPath && <SessionTabDot sessionId={shell.sessionId} />}
@@ -378,23 +374,14 @@ export function ProjectPage() {
                   )}
                 </div>
                 {activeView && (
-                  <div className="flex min-w-0 items-center gap-2">
-                    <WorkstreamChips view={activeView} />
-                    <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${MODE_STYLES[wsStage].badge}`}
-                    >
-                      {stageLabel(wsStage)}
-                    </span>
-                    <SessionStatusBadge sessionId={activeShell?.sessionId} />
-                    <IconButton
-                      onClick={selectDocsTab}
-                      active={docsActive}
-                      title="Project documents"
-                      aria-label="Project documents"
-                    >
-                      <BookIcon />
-                    </IconButton>
-                  </div>
+                  <IconButton
+                    onClick={selectDocsTab}
+                    active={docsActive}
+                    title="Project documents"
+                    aria-label="Project documents"
+                  >
+                    <BookIcon />
+                  </IconButton>
                 )}
               </div>
             </div>
@@ -510,27 +497,23 @@ export function ProjectPage() {
         </div>
       </section>
 
-      {!diffCollapsed && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize diff sidebar"
-          className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
-          onPointerDown={startDiffResize}
-        />
+      {!diffHidden && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize diff sidebar"
+            className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+            onPointerDown={startDiffResize}
+          />
+          <aside
+            className="min-w-0 shrink-0 border-l border-edge bg-panel"
+            style={{ width: diffWidth }}
+          >
+            <DiffSidebar workstreamId={activeView?.item.id ?? null} onOpenDoc={openDocPreview} />
+          </aside>
+        </>
       )}
-
-      <aside
-        className="min-w-0 shrink-0 border-l border-edge bg-panel"
-        style={{ width: diffCollapsed ? DIFF_SIDEBAR_COLLAPSED : diffWidth }}
-      >
-        <DiffSidebar
-          workstreamId={activeView?.item.id ?? null}
-          collapsed={diffCollapsed}
-          onToggleCollapsed={() => setDiffCollapsed((value) => !value)}
-          onOpenDoc={openDocPreview}
-        />
-      </aside>
     </div>
   );
 }

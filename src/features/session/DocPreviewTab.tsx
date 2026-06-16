@@ -4,7 +4,9 @@ import { commands } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { ErrorNote, Spinner } from "../../components/ui";
 import { DocIcon } from "../../components/icons";
+import { FrontmatterCard } from "../library/FrontmatterCard";
 import { MarkdownPreview } from "../library/MarkdownPreview";
+import { splitFrontmatter } from "../library/text";
 
 /**
  * Read-only preview of an agent-created research/plan doc, shown in its own
@@ -38,7 +40,10 @@ export function DocPreviewTab({ path, title }: { path: string; title: string }) 
         ) : doc.isError ? (
           <ErrorNote error={doc.error} />
         ) : (
-          <MarkdownPreview body={doc.data!.content} />
+          <div className="space-y-4">
+            <FrontmatterCard meta={doc.data!.meta} />
+            <MarkdownPreview body={splitFrontmatter(doc.data!.content).body} />
+          </div>
         )}
       </div>
     </div>

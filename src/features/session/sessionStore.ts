@@ -48,6 +48,10 @@ export type SessionEntry = SessionView & {
   /** Whether a live claude process is attached. False for a session restored
    *  from the log after a restart — it resumes on the next message. */
   live: boolean;
+  /** Epoch ms when the current working stretch began, or null when idle —
+   *  drives the live "time working" counter. Maintained outside the pure
+   *  reducer (it needs a clock) by `setEntry`, so every mutation keeps it right. */
+  workingSince: number | null;
 };
 
 type State = { sessions: Record<string, SessionEntry> };
@@ -65,7 +69,23 @@ function entryOf(sessionId: string): SessionEntry | undefined {
 }
 
 function setEntry(sessionId: string, next: SessionEntry): void {
-  useSessionStore.setState((s) => ({ sessions: { ...s.sessions, [sessionId]: next } }));
+  useSessionStore.setState((s) => {
+    const prev = s.sessions[sessionId];
+    const workingSince = nextWorkingSince(prev, next);
+    return { sessions: { ...s.sessions, [sessionId]: { ...next, workingSince } } };
+  });
+}
+
+/**
+ * The working-start timestamp for the elapsed counter: stamp `now` the moment a
+ * session begins working, keep it untouched while it stays busy, clear it the
+ * moment it stops. Recomputed on every `setEntry` so it's correct whichever path
+ * changed the entry — live events, an optimistic send, or a permission answer.
+ */
+function nextWorkingSince(prev: SessionEntry | undefined, next: SessionEntry): number | null {
+  if (!isBusy(next)) return null;
+  const wasBusy = prev ? isBusy(prev) : false;
+  return wasBusy ? (prev?.workingSince ?? Date.now()) : Date.now();
 }
 
 /**
@@ -165,6 +185,7 @@ export async function startSession(args: {
     stage: args.stage,
     autoAllow: [],
     live: true,
+    workingSince: null,
   });
 
   activate(session.id); // bind + flush any events that raced the command
@@ -346,7 +367,7 @@ export async function restoreSessionIfNeeded(
     }
     // Left mid-conversation (not a real terminal exit) → resumable, not ended.
     if (!isTerminal(view.state)) view = { ...view, state: "idle", streaming: false };
-    setEntry(sessionId, { ...view, workstreamId, stage, autoAllow: [], live: false });
+    setEntry(sessionId, { ...view, workstreamId, stage, autoAllow: [], live: false, workingSince: null });
   } catch (error) {
     console.error(`failed to restore session ${sessionId}`, error);
   } finally {

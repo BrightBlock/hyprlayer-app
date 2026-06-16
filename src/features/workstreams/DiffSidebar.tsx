@@ -8,19 +8,6 @@ import type { DocKind } from "../session/toolDisplay";
 import { useWorktreeDiff } from "../../lib/queries";
 import { countPatchStats, parsePatchLines, type PatchLineKind } from "./diff";
 
-function PanelRightIcon() {
-  return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path d="M14 4v16" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
 function RefreshIcon() {
   return (
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -96,8 +83,6 @@ const FileDiffSection = memo(function FileDiffSection({ file }: { file: FileDiff
 type Props = {
   /** Active workstream, or null when there are no workstreams. */
   workstreamId: string | null;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
   /** Open an agent-created doc as an in-place preview tab. */
   onOpenDoc: (path: string, title: string) => void;
 };
@@ -145,73 +130,56 @@ function DocsSection({
  * Contents of the right diff sidebar (header + body). The diff query only
  * runs while the sidebar is expanded and a workstream is active.
  */
-export function DiffSidebar({ workstreamId, collapsed, onToggleCollapsed, onOpenDoc }: Props) {
-  const diff = useWorktreeDiff(workstreamId ?? "", !collapsed);
+export function DiffSidebar({ workstreamId, onOpenDoc }: Props) {
+  const diff = useWorktreeDiff(workstreamId ?? "", workstreamId !== null);
   const fileCount = diff.data?.length ?? 0;
 
   return (
     <>
       <div className="flex h-[61px] items-center border-b border-edge px-3">
-        <div className={`flex w-full items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
-          <IconButton
-            onClick={onToggleCollapsed}
-            title={collapsed ? "Expand diff sidebar" : "Collapse diff sidebar"}
-            aria-label={collapsed ? "Expand diff sidebar" : "Collapse diff sidebar"}
-          >
-            <PanelRightIcon />
-          </IconButton>
-          {!collapsed && (
-            <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold">Diff</h2>
-              <div className="flex items-center gap-1.5">
-                <Badge tone="dim">{fileCount} {fileCount === 1 ? "file" : "files"}</Badge>
-                {workstreamId !== null && (
-                  <IconButton
-                    onClick={() => void diff.refetch()}
-                    disabled={diff.isFetching}
-                    title="Refresh diff"
-                    aria-label="Refresh diff"
-                  >
-                    {diff.isFetching ? <Spinner size={14} /> : <RefreshIcon />}
-                  </IconButton>
-                )}
-              </div>
-            </div>
-          )}
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">Diff</h2>
+          <div className="flex items-center gap-1.5">
+            <Badge tone="dim">{fileCount} {fileCount === 1 ? "file" : "files"}</Badge>
+            {workstreamId !== null && (
+              <IconButton
+                onClick={() => void diff.refetch()}
+                disabled={diff.isFetching}
+                title="Refresh diff"
+                aria-label="Refresh diff"
+              >
+                {diff.isFetching ? <Spinner size={14} /> : <RefreshIcon />}
+              </IconButton>
+            )}
+          </div>
         </div>
       </div>
-      {collapsed ? (
-        <div className="flex justify-center p-3">
-          <Badge tone="dim">{fileCount}</Badge>
-        </div>
-      ) : (
-        <div className="h-[calc(100%-61px)] space-y-2 overflow-y-auto p-4">
-          {workstreamId !== null && <DocsSection workstreamId={workstreamId} onOpenDoc={onOpenDoc} />}
-          {workstreamId === null ? (
-            <div className="rounded-lg border border-edge bg-panel-2 p-3">
-              <p className="text-sm font-medium">No workstream selected</p>
-              <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-                Create a workstream to see its worktree diff here.
-              </p>
-            </div>
-          ) : diff.isLoading ? (
-            <div className="flex justify-center p-6">
-              <Spinner />
-            </div>
-          ) : diff.isError ? (
-            <ErrorNote error={diff.error} />
-          ) : fileCount === 0 ? (
-            <div className="rounded-lg border border-edge bg-panel-2 p-3">
-              <p className="text-sm font-medium">No changes yet</p>
-              <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-                Edits in this workstream&apos;s worktree will show up here.
-              </p>
-            </div>
-          ) : (
-            diff.data!.map((file) => <FileDiffSection key={file.path} file={file} />)
-          )}
-        </div>
-      )}
+      <div className="h-[calc(100%-61px)] space-y-2 overflow-y-auto p-4">
+        {workstreamId !== null && <DocsSection workstreamId={workstreamId} onOpenDoc={onOpenDoc} />}
+        {workstreamId === null ? (
+          <div className="rounded-lg border border-edge bg-panel-2 p-3">
+            <p className="text-sm font-medium">No workstream selected</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+              Create a workstream to see its worktree diff here.
+            </p>
+          </div>
+        ) : diff.isLoading ? (
+          <div className="flex justify-center p-6">
+            <Spinner />
+          </div>
+        ) : diff.isError ? (
+          <ErrorNote error={diff.error} />
+        ) : fileCount === 0 ? (
+          <div className="rounded-lg border border-edge bg-panel-2 p-3">
+            <p className="text-sm font-medium">No changes yet</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+              Edits in this workstream&apos;s worktree will show up here.
+            </p>
+          </div>
+        ) : (
+          diff.data!.map((file) => <FileDiffSection key={file.path} file={file} />)
+        )}
+      </div>
     </>
   );
 }

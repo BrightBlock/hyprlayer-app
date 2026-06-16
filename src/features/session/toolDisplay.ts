@@ -144,3 +144,19 @@ export function formatCost(usd: number | null | undefined): string | null {
   // Sub-cent costs still read as $0.0042; round to 4dp and trim nothing.
   return `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
 }
+
+/**
+ * A live "time working" label for the elapsed counter (Conductor-style): tenths
+ * of a second under a minute (19.3s), then minutes + zero-padded seconds
+ * (1m 23s), then hours + minutes for a rare long run (1h 04m). Negative inputs
+ * clamp to zero.
+ */
+export function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, ms) / 1000;
+  if (totalSec < 60) return `${totalSec.toFixed(1)}s`;
+  const totalMin = Math.floor(totalSec / 60);
+  if (totalMin < 60) {
+    return `${totalMin}m ${String(Math.floor(totalSec % 60)).padStart(2, "0")}s`;
+  }
+  return `${Math.floor(totalMin / 60)}h ${String(totalMin % 60).padStart(2, "0")}m`;
+}

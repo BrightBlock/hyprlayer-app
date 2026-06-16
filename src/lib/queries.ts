@@ -100,15 +100,53 @@ export function useRevealDoc() {
   });
 }
 
+/** Refresh everything a project add/remove touches: the sidebar/onboarding
+ *  list, per-project detail, the doc index, and the cross-project workstream
+ *  tree (a removed project drops its workstreams from the sidebar). */
+function invalidateProjects() {
+  void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+  void queryClient.invalidateQueries({ queryKey: ["project"] });
+  void queryClient.invalidateQueries({ queryKey: ["docs"] });
+  void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+}
+
+/** Import a project from a local git repo on disk (cloned into the repos root). */
 export function useAddProject() {
   return useMutation({
     mutationFn: (args: { path: string; directoryName: string | null; bootstrapUser: string | null }) =>
       unwrap(commands.addProject(args.path, args.directoryName, args.bootstrapUser)),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-      void queryClient.invalidateQueries({ queryKey: ["project"] });
-      void queryClient.invalidateQueries({ queryKey: ["docs"] });
-    },
+    onSettled: invalidateProjects,
+  });
+}
+
+/** Clone a hosted repo (a GitHub URL) into the repos root and register it. */
+export function useCloneProject() {
+  return useMutation({
+    mutationFn: (args: {
+      url: string;
+      location: string | null;
+      name: string | null;
+      bootstrapUser: string | null;
+    }) => unwrap(commands.cloneProject(args.url, args.location, args.name, args.bootstrapUser)),
+    onSettled: invalidateProjects,
+  });
+}
+
+export function useRemoveProject() {
+  return useMutation({
+    mutationFn: (args: { path: string; deleteFiles: boolean }) =>
+      unwrap(commands.removeProject(args.path, args.deleteFiles)),
+    onSettled: invalidateProjects,
+  });
+}
+
+/** The user's GitHub repos for the clone dialog (empty when gh is unavailable). */
+export function useRecentRepos(enabled = true) {
+  return useQuery({
+    queryKey: ["recent-repos"],
+    queryFn: () => unwrap(commands.listRecentRepos()),
+    enabled,
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -231,7 +269,9 @@ export function useWorktreeDiff(id: string, enabled = true) {
     queryKey: ["workstream", id, "diff"],
     queryFn: () => unwrap(commands.worktreeDiff(id)),
     enabled: enabled && id.length > 0,
-    // Keep the previous file list on screen while a refetch resolves.
-    placeholderData: keepPreviousData,
+    // Do NOT use keepPreviousData here: it would show a different workstream's
+    // files while the new workstream's query is in-flight. React Query keeps
+    // the current data visible during same-key refetches by default, so the
+    // refresh-button spinner still works without it.
   });
 }
