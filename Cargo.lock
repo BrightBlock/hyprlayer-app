@@ -1835,7 +1835,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-app"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dirs 5.0.1",
  "hyprlayer-core",
@@ -1861,7 +1861,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dirs 5.0.1",
  "git2",

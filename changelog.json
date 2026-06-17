@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.1.2",
+      "date": "2026-06-17",
+      "summary": "A git source-control panel with staging, rich diffs, and themed file icons.",
+      "notes": [
+        "Stage, unstage, and discard files from a new Changes panel.",
+        "Click a change to open a rich unified or side-by-side diff.",
+        "Browse the worktree in an All Files tree; scrollbars now match the theme."
+      ]
+    },
+    {
       "version": "0.1.1",
       "date": "2026-06-17",
       "summary": "File tool calls now show as pin cards with hover-to-preview diffs.",
