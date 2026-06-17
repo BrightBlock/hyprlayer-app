@@ -106,5 +106,6 @@ git commit -m "release: v$NEW"
 git tag "v$NEW"
 
 echo ""
-echo "✓ Tagged v$NEW. Push to trigger CI:"
-echo "    git push && git push --tags"
+echo "✓ Tagged v$NEW."
+echo "  CI release (all platforms):  git push && git push --tags"
+echo "  Local release (macOS arm64): ./scripts/release-local.sh"
