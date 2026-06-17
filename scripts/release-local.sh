@@ -118,7 +118,7 @@ git push origin main
 git push origin "$TAG"
 
 # ─── 3. GitHub Release (binaries only, on the PUBLIC releases repo) ──
-say "Creating GitHub Release on $RELEASES_REPO…"
+say "Creating GitHub Release on ${RELEASES_REPO}…"
 NOTES="$(cat <<EOF
 ## Install
 
@@ -150,7 +150,7 @@ fi
 ok "Release published"
 
 # ─── 4. updater manifest + changelog on brightblock.ai ──────────────
-say "Writing updater manifest to $WEBSITE_REPO…"
+say "Writing updater manifest to ${WEBSITE_REPO}…"
 SITE="$(mktemp -d)"; TMPDIRS+=("$SITE")
 gh repo clone "$WEBSITE_REPO" "$SITE" -- --depth 1
 BASE="https://github.com/$RELEASES_REPO/releases/download/$TAG"
@@ -183,7 +183,7 @@ fi
 ok "Updater manifest live (Vercel redeploys within its cache TTL)"
 
 # ─── 5. Homebrew cask bump ──────────────────────────────────────────
-say "Bumping Homebrew cask in $TAP_REPO…"
+say "Bumping Homebrew cask in ${TAP_REPO}…"
 TAP="$(mktemp -d)"; TMPDIRS+=("$TAP")
 gh repo clone "$TAP_REPO" "$TAP" -- --depth 1
 CASK="$TAP/$CASK_PATH"
