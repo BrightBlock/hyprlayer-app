@@ -1,5 +1,5 @@
 /**
- * Color themes, ported from termic (github.com/simion/termic).
+ * Color themes.
  *
  * A theme is just a set of CSS variables (defined in index.css under either
  * `@theme` for the default Dark+ palette or an `html.<name>` block). This
@@ -17,7 +17,7 @@ export type ThemeMode = "system" | "dark" | "light" | "claude" | "cobalt" | "mat
 /** What `system` resolves to, and the set of palettes index.css defines. */
 export type ResolvedTheme = "dark" | "light" | "claude" | "cobalt" | "matrix" | "solarized";
 
-/** Picker order + labels. Mirrors termic's theme menu. */
+/** Picker order + labels for the theme menu. */
 export const THEMES: ReadonlyArray<{ id: ThemeMode; label: string }> = [
   { id: "system", label: "System" },
   { id: "light", label: "Light" },

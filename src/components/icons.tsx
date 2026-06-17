@@ -135,6 +135,28 @@ export function SendIcon({ size = 16, strokeWidth = 2 }: IconProps) {
   );
 }
 
+/** Down-arrow into a tray — download / install an update. */
+export function DownloadIcon({ size = 14, strokeWidth = 1.9, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 3v12" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M5 21h14" />
+    </svg>
+  );
+}
+
 /** Filled square — interrupt / stop the running turn. */
 export function StopIcon({ size = 14 }: IconProps) {
   return (

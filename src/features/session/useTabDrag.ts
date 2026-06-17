@@ -1,6 +1,6 @@
 /**
- * Pointer-drag for agent tabs, ported from termic. Pointer-based rather than
- * HTML5 drag-and-drop — WebKit/Tauri intercept native drags for file drops, so
+ * Pointer-drag for agent tabs. Pointer-based rather than HTML5
+ * drag-and-drop — WebKit/Tauri intercept native drags for file drops, so
  * they're unreliable for in-app reordering.
  *
  * Two behaviors, both off the same gesture:

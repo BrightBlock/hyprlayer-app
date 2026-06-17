@@ -98,6 +98,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build unsigned debug bundle
-        run: pnpm tauri build --debug
+        # Override createUpdaterArtifacts → false: this smoke job has no signing
+        # key, and Tauri errors ("public key found, but no private key") when
+        # asked to produce updater artifacts unsigned. Signing is exercised by
+        # the release workflow, which has the key. shell: bash keeps the inline
+        # JSON quoting identical on the Windows runner (default pwsh would not).
+        shell: bash
+        run: pnpm tauri build --debug --config '{"bundle":{"createUpdaterArtifacts":false}}'
         env:
           CI: true

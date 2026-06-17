@@ -43,6 +43,7 @@
     "active": true,
     "targets": "all",
     "category": "DeveloperTool",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -50,5 +51,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://brightblock.ai/hyprlayer/updates/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY0NzU2MkZENTE2QTQzQzEKUldUQlEycFIvV0oxOUVhR0pUVG9KamlFNENvcVpURi8yY2RZNWVLV2JZNmFneUp0VnlDZk84ZFgK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

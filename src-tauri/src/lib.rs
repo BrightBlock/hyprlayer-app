@@ -104,6 +104,12 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        // In-app self-update. Reads its endpoint + pubkey from tauri.conf.json
+        // → plugins.updater; the frontend (src/lib/updater.ts) drives it via
+        // @tauri-apps/plugin-updater. `process` provides the relaunch() the
+        // frontend calls after an update installs.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

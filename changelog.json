@@ -1,0 +1,13 @@
+{
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-06-17",
+      "summary": "First public build of Hyprlayer with in-app self-update.",
+      "notes": [
+        "Native desktop app for spec-driven development.",
+        "Automatic, signed in-app updates on macOS and Windows."
+      ]
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import { useBootstrap, useRedetectBinaries } from "../lib/queries";
 import { Badge, Button, Card, CardTitle, ErrorNote, PageError, PageSpinner } from "../components/ui";
 import { BinaryCard } from "../features/system/BinaryCard";
+import { UpdatesCard } from "../features/system/updates";
 import { THEMES, useThemeStore } from "../lib/theme";
 
 /** [surface, panel-2, accent] preview colors per theme. Kept explicit (rather
@@ -76,6 +77,8 @@ export function Settings() {
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-8">
       <h1 className="text-xl font-semibold">Settings</h1>
+
+      <UpdatesCard />
 
       <AppearanceCard />
 

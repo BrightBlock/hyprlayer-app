@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ────────────────────────────────────────────────────────────────────────
-   Color themes — ported from termic (github.com/simion/termic).
+   Color themes.
 
    Every surface/text/border in the app is bound to one of the theme tokens
    below, so a theme is just a re-assignment of those CSS variables. The

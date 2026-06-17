@@ -20,6 +20,7 @@ import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstre
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
+import { UpdatePill } from "../features/system/updates";
 import type { Project, WorkstreamView } from "../lib/bindings";
 
 // One-shot guard (module scope, so it survives re-renders but resets on a cold
@@ -192,7 +193,7 @@ function routeSection(pathname: string): string {
 const topIconClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink";
 
-/** Bottom-bar icon button (Library / Settings), Termic-style. */
+/** Bottom-bar icon button (Library / Settings). */
 const footerIconClass = (active: boolean): string =>
   `inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-edge/60 hover:text-ink ${
     active ? "bg-edge text-ink" : "text-ink-dim"
@@ -571,27 +572,30 @@ export function Root() {
 
           </nav>
 
-        <div
-          className={`border-t border-edge p-2 ${
-            collapsed ? "flex flex-col items-center gap-1" : "flex items-center justify-between"
-          }`}
-        >
-          <Link
-            to="/library"
-            className={footerIconClass(pathname.startsWith("/library"))}
-            title="Library"
-            aria-label="Library"
+        <div className="flex flex-col gap-2 border-t border-edge p-2">
+          <UpdatePill collapsed={collapsed} />
+          <div
+            className={
+              collapsed ? "flex flex-col items-center gap-1" : "flex items-center justify-between"
+            }
           >
-            <BookIcon size={18} />
-          </Link>
-          <Link
-            to="/settings"
-            className={footerIconClass(pathname.startsWith("/settings"))}
-            title="Settings"
-            aria-label="Settings"
-          >
-            <SettingsIcon />
-          </Link>
+            <Link
+              to="/library"
+              className={footerIconClass(pathname.startsWith("/library"))}
+              title="Library"
+              aria-label="Library"
+            >
+              <BookIcon size={18} />
+            </Link>
+            <Link
+              to="/settings"
+              className={footerIconClass(pathname.startsWith("/settings"))}
+              title="Settings"
+              aria-label="Settings"
+            >
+              <SettingsIcon />
+            </Link>
+          </div>
         </div>
         </aside>
 

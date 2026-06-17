@@ -7,12 +7,15 @@ import { attachEventListeners } from "./lib/events";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
 import { initTheme } from "./lib/theme";
+import { useUpdate } from "./lib/updater";
 import "./index.css";
 
 // Apply the persisted color theme before the first paint to avoid a flash of
 // the default palette.
 initTheme();
 attachEventListeners();
+// Probe for a newer signed release on launch (and every 6h thereafter).
+useUpdate.getState().init();
 
 // Suppress the webview's native right-click menu app-wide so the app doesn't
 // feel like a web page. Editable surfaces (inputs, textareas, the CodeMirror

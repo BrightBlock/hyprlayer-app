@@ -18,7 +18,7 @@ import type { ShellTab } from "../../routes/ProjectPage";
  *  ("main" | "right"), and the two panes track their own active shell —
  *  `activeId` for the main pane, `rightActiveId` for the right one. `rightSplit`
  *  is whether the right pane is open; `activePane` is the focused pane (only its
- *  active tab reads as fully selected). Mirrors termic's right-split model. */
+ *  active tab reads as fully selected). */
 export type WsTabState = {
   shells: ShellTab[];
   activeId: number;
