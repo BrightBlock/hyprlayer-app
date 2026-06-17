@@ -6,9 +6,11 @@ import { MarkdownPreview } from "../library/MarkdownPreview";
 import { stageLabel } from "./stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
 import { AttachmentCards } from "./AttachmentCard";
+import { FileCard } from "./FileCard";
 import type { Attachment } from "./attachments";
 import {
   baseName,
+  editDiffFromTool,
   formatElapsed,
   prettyToolInput,
   resultPreview,
@@ -240,7 +242,11 @@ function FileChip({ path }: { path: string }) {
  *  tools, otherwise the plain Claude-Code-style summary text. */
 function ToolArg({ name, input }: { name: string; input: string }) {
   const filePath = toolFilePath(name, input);
-  if (filePath) return <FileChip path={filePath} />;
+  if (filePath) {
+    // Every file tool gets the same pin card; Edit/MultiEdit also carry a diff
+    // the card previews on hover (other file tools pass diff=null → no popover).
+    return <FileCard path={filePath} diff={editDiffFromTool(name, input)} />;
+  }
   const summary = toolSummary(name, input);
   if (!summary) return null;
   return (
@@ -265,7 +271,14 @@ function ToolBlock({
 }) {
   const [open, setOpen] = useState(false);
   const result = item.result;
-  const preview = result ? resultPreview(result.content, result.isError) : null;
+  // Edit/MultiEdit already show the change in the card (basename + hover diff),
+  // so their "file … updated successfully" confirmation is redundant noise — and
+  // it re-leaks the full path. Suppress that preview on success; keep it on error.
+  const isEdit = item.name === "Edit" || item.name === "MultiEdit";
+  const preview =
+    result && !(isEdit && !result.isError)
+      ? resultPreview(result.content, result.isError)
+      : null;
 
   return (
     <div className="text-xs">
@@ -315,11 +328,15 @@ function PermissionCard({
   const summary = toolSummary(item.toolName, item.input);
 
   if (item.decision !== null) {
+    // An approved permission is immediately followed by the actual tool call row,
+    // so re-showing "Tool — allowed" is redundant. Only a denial (where the tool
+    // never runs, so there's no tool row) is worth surfacing.
+    if (item.decision === "allow") return null;
     return (
       <div className="flex items-center gap-2 text-xs text-ink-dim">
         <ShieldIcon size={12} />
         <span className="font-mono text-ink">{item.toolName}</span>
-        <span>{item.decision === "allow" ? "— allowed" : "— denied"}</span>
+        <span>— denied</span>
       </div>
     );
   }
@@ -446,6 +463,12 @@ type Unit =
 
 const unitKind = (u: Unit): ItemKind => (u.type === "group" ? "tool" : u.item.kind);
 
+/** A file-targeting step (Read/Write/Edit/…) renders a per-file chip or card, so
+ *  it never folds into a collapsed "N tool calls" group — every file the agent
+ *  touches stays its own visible row. */
+const isFileUnit = (it: TranscriptItem): boolean =>
+  it.kind === "tool" && toolFilePath(it.name, it.input) !== null;
+
 /** The subagent `Task` id an item belongs to (only assistant/thinking/tool carry it). */
 const parentIdOf = (it: TranscriptItem): string | null =>
   it.kind === "tool" || it.kind === "assistant" || it.kind === "thinking"
@@ -464,7 +487,10 @@ function toUnits(items: TranscriptItem[], hasChildren: (it: TranscriptItem) => b
     run = [];
   };
   for (const item of items) {
-    const groupable = isQuiet(item.kind) && !(item.kind === "tool" && hasChildren(item));
+    const groupable =
+      isQuiet(item.kind) &&
+      !(item.kind === "tool" && hasChildren(item)) &&
+      !isFileUnit(item);
     if (groupable) {
       run.push(item);
     } else {
@@ -615,7 +641,10 @@ function ItemList({
 }) {
   const hasChildren = (it: TranscriptItem) =>
     it.kind === "tool" && childrenByParent.has(it.toolUseId);
-  const units = toUnits(items, hasChildren);
+  // An approved permission renders nothing (the tool row that follows conveys it),
+  // so drop it before layout — otherwise its empty wrapper leaves a phantom gap.
+  const visible = items.filter((it) => it.kind !== "permission" || it.decision !== "allow");
+  const units = toUnits(visible, hasChildren);
   return (
     <>
       {units.map((unit, i) => {

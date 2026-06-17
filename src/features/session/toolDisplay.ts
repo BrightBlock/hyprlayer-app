@@ -6,6 +6,8 @@
  * (the bash command, the file path, the search pattern, …).
  */
 
+import { diffStrings, type PatchLine } from "../workstreams/diff";
+
 /** Parse a tool's `input` (compact JSON string) into an object, or null. */
 export function parseToolInput(input: string): Record<string, unknown> | null {
   if (!input) return null;
@@ -95,6 +97,48 @@ export function toolFilePath(name: string, input: string): string | null {
   const obj = parseToolInput(input);
   if (!obj) return null;
   return str(obj.file_path) || str(obj.path) || str(obj.notebook_path) || null;
+}
+
+export type EditDiff = { lines: PatchLine[]; additions: number; deletions: number };
+
+/**
+ * The line-level diff an Edit / MultiEdit tool call applies, derived from its
+ * `old_string` / `new_string` payload — lets the transcript preview the change on
+ * hover instead of just naming the file. MultiEdit's edits are stacked, separated
+ * by a hunk marker. Returns null for other tools or an unparseable / empty input.
+ */
+export function editDiffFromTool(name: string, input: string): EditDiff | null {
+  if (name !== "Edit" && name !== "MultiEdit") return null;
+  const obj = parseToolInput(input);
+  if (!obj) return null;
+
+  const pairs: Array<{ oldText: string; newText: string }> = [];
+  if (name === "Edit") {
+    pairs.push({ oldText: str(obj.old_string), newText: str(obj.new_string) });
+  } else if (Array.isArray(obj.edits)) {
+    for (const edit of obj.edits) {
+      if (edit && typeof edit === "object") {
+        const rec = edit as Record<string, unknown>;
+        pairs.push({ oldText: str(rec.old_string), newText: str(rec.new_string) });
+      }
+    }
+  }
+  if (pairs.length === 0) return null;
+
+  const lines: PatchLine[] = [];
+  pairs.forEach((pair, index) => {
+    if (index > 0) lines.push({ kind: "hunk", text: "@@" });
+    lines.push(...diffStrings(pair.oldText, pair.newText));
+  });
+  if (lines.length === 0) return null;
+
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.kind === "add") additions += 1;
+    else if (line.kind === "del") deletions += 1;
+  }
+  return { lines, additions, deletions };
 }
 
 /** Final path segment (`/a/b/c.ts` → `c.ts`), tolerating trailing slashes and

@@ -6,7 +6,7 @@ import { ChevronRightIcon, DocIcon } from "../../components/icons";
 import { useWorkstreamDocs } from "../session/sessionStore";
 import type { DocKind } from "../session/toolDisplay";
 import { useWorktreeDiff } from "../../lib/queries";
-import { countPatchStats, parsePatchLines, type PatchLineKind } from "./diff";
+import { countPatchStats, parsePatchLines, PATCH_LINE_CLASSES } from "./diff";
 
 function RefreshIcon() {
   return (
@@ -28,14 +28,6 @@ const CHANGE_TONES: Record<string, BadgeTone> = {
   deleted: "bad",
   renamed: "warn",
   other: "dim",
-};
-
-const LINE_CLASSES: Record<PatchLineKind, string> = {
-  add: "bg-emerald-400/10 text-emerald-300",
-  del: "bg-rose-400/10 text-rose-300",
-  hunk: "text-sky-300",
-  meta: "text-ink-dim/70",
-  context: "text-ink-dim",
 };
 
 // Memoized: patch parsing is linear in diff size and the parent re-renders on
@@ -70,7 +62,7 @@ const FileDiffSection = memo(function FileDiffSection({ file }: { file: FileDiff
       {open && (
         <pre className="selectable max-h-96 overflow-auto border-t border-edge p-2 font-mono text-[11px] leading-relaxed">
           {lines.map((line, index) => (
-            <div key={index} className={`whitespace-pre px-1 ${LINE_CLASSES[line.kind]}`}>
+            <div key={index} className={`whitespace-pre px-1 ${PATCH_LINE_CLASSES[line.kind]}`}>
               {line.text || " "}
             </div>
           ))}

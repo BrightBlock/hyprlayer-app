@@ -126,6 +126,27 @@ export function DocIcon({ size = 12, strokeWidth = 2 }: IconProps) {
   );
 }
 
+/** Pencil — a file edit. */
+export function PencilIcon({ size = 12, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17.5V20Z" />
+      <path d="m14 8 2.5 2.5" />
+    </svg>
+  );
+}
+
 /** Upward arrow — the "send turn" affordance. */
 export function SendIcon({ size = 16, strokeWidth = 2 }: IconProps) {
   return (

@@ -4,6 +4,7 @@ import {
   baseName,
   docFromTool,
   docTitle,
+  editDiffFromTool,
   formatCost,
   formatElapsed,
   formatTokens,
@@ -84,6 +85,53 @@ describe("toolFilePath", () => {
     expect(toolFilePath("Grep", '{"pattern":"foo","path":"src"}')).toBeNull();
     expect(toolFilePath("Read", "garbage")).toBeNull();
     expect(toolFilePath("Read", "{}")).toBeNull();
+  });
+});
+
+describe("editDiffFromTool", () => {
+  it("derives a diff from an Edit's old/new strings", () => {
+    const diff = editDiffFromTool(
+      "Edit",
+      JSON.stringify({ file_path: "/a/b.ts", old_string: "a\nold\nc", new_string: "a\nnew\nc" }),
+    );
+    expect(diff).toEqual({
+      lines: [
+        { kind: "context", text: " a" },
+        { kind: "del", text: "-old" },
+        { kind: "add", text: "+new" },
+        { kind: "context", text: " c" },
+      ],
+      additions: 1,
+      deletions: 1,
+    });
+  });
+
+  it("stacks a MultiEdit's edits with a hunk separator", () => {
+    const diff = editDiffFromTool(
+      "MultiEdit",
+      JSON.stringify({
+        file_path: "/a/b.ts",
+        edits: [
+          { old_string: "x", new_string: "y" },
+          { old_string: "p", new_string: "q" },
+        ],
+      }),
+    );
+    expect(diff?.additions).toBe(2);
+    expect(diff?.deletions).toBe(2);
+    expect(diff?.lines.map((l) => l.kind)).toEqual([
+      "del",
+      "add",
+      "hunk",
+      "del",
+      "add",
+    ]);
+  });
+
+  it("returns null for non-edit tools and unparseable input", () => {
+    expect(editDiffFromTool("Read", '{"file_path":"/a/b.ts"}')).toBeNull();
+    expect(editDiffFromTool("Edit", "garbage")).toBeNull();
+    expect(editDiffFromTool("MultiEdit", '{"file_path":"/a/b.ts"}')).toBeNull();
   });
 });
 

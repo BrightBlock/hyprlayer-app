@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyPatchLine, countPatchStats, parsePatchLines } from "./diff";
+import { classifyPatchLine, countPatchStats, diffStrings, parsePatchLines } from "./diff";
 
 const SAMPLE_PATCH = [
   "diff --git a/src/app.ts b/src/app.ts",
@@ -74,5 +74,40 @@ describe("parsePatchLines", () => {
   it("keeps interior blank lines as context", () => {
     const lines = parsePatchLines("+a\n\n-b\n");
     expect(lines.map((l) => l.kind)).toEqual(["add", "context", "del"]);
+  });
+});
+
+describe("diffStrings", () => {
+  it("keeps unchanged lines as context and prefixes them with a space", () => {
+    const lines = diffStrings("a\nb\nc", "a\nb\nc");
+    expect(lines.map((l) => l.kind)).toEqual(["context", "context", "context"]);
+    expect(lines.map((l) => l.text)).toEqual([" a", " b", " c"]);
+  });
+
+  it("marks a single changed line as a del followed by an add", () => {
+    const lines = diffStrings("a\nold\nc", "a\nnew\nc");
+    expect(lines).toEqual([
+      { kind: "context", text: " a" },
+      { kind: "del", text: "-old" },
+      { kind: "add", text: "+new" },
+      { kind: "context", text: " c" },
+    ]);
+  });
+
+  it("reports pure insertions and deletions", () => {
+    expect(diffStrings("", "x")).toEqual([
+      { kind: "del", text: "-" },
+      { kind: "add", text: "+x" },
+    ]);
+    expect(diffStrings("a\nb", "a")).toEqual([
+      { kind: "context", text: " a" },
+      { kind: "del", text: "-b" },
+    ]);
+  });
+
+  it("counts add/del lines the same way countPatchStats does", () => {
+    const lines = diffStrings("one\ntwo\nthree", "one\nTWO\nthree\nfour");
+    const text = lines.map((l) => l.text).join("\n");
+    expect(countPatchStats(text)).toEqual({ additions: 2, deletions: 1 });
   });
 });
