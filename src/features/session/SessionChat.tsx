@@ -103,6 +103,7 @@ function ComposerMenu({
   activeKey,
   onSelect,
   title,
+  custom,
 }: {
   leading: ReactNode;
   label: string;
@@ -111,13 +112,46 @@ function ComposerMenu({
   activeKey: string;
   onSelect: (key: string) => void;
   title: string;
+  /** When set, appends a free-text row so the user can enter a value that isn't
+   *  one of `items` — used by the model picker to accept ANY `--model` the CLI
+   *  takes (an alias or a full id). Submitting calls `onSelect` with the text. */
+  custom?: { label: string; placeholder?: string };
 }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  // The active selection is "custom" when it matches none of the preset items.
+  const customActive = custom != null && !items.some((it) => it.key === activeKey);
+
+  const close = () => {
+    setOpen(false);
+    setEditing(false);
+    setText("");
+  };
+  const beginCustom = () => {
+    setText(customActive ? activeKey : "");
+    setEditing(true);
+  };
+  const commitCustom = () => {
+    const value = text.trim();
+    if (value) onSelect(value);
+    close();
+  };
+  const onCustomKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitCustom();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setEditing(false);
+    }
+  };
+
   return (
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? close() : setOpen(true))}
         title={title}
         className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-ink-dim hover:bg-edge/50 hover:text-ink"
       >
@@ -128,7 +162,7 @@ function ComposerMenu({
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="fixed inset-0 z-20" onClick={close} aria-hidden="true" />
           <div className="absolute bottom-full left-0 z-30 mb-1.5 min-w-[190px] overflow-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
             {items.map((it) => (
               <button
@@ -136,7 +170,7 @@ function ComposerMenu({
                 type="button"
                 onClick={() => {
                   onSelect(it.key);
-                  setOpen(false);
+                  close();
                 }}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
                   it.key === activeKey ? "text-ink" : "text-ink-dim"
@@ -148,6 +182,36 @@ function ComposerMenu({
                 {it.key === activeKey && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
               </button>
             ))}
+            {custom && (
+              <>
+                <div className="my-1 border-t border-edge" />
+                {editing ? (
+                  <div className="px-2 py-1">
+                    <input
+                      autoFocus
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      onKeyDown={onCustomKey}
+                      onBlur={commitCustom}
+                      placeholder={custom.placeholder}
+                      spellCheck={false}
+                      className="w-full rounded-md border border-edge bg-base px-2 py-1 text-xs text-ink placeholder:text-ink-dim focus:border-accent focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={beginCustom}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
+                      customActive ? "text-ink" : "text-ink-dim"
+                    }`}
+                  >
+                    <span className="font-medium">{customActive ? activeKey : custom.label}</span>
+                    {customActive && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </>
       )}
@@ -712,6 +776,7 @@ export function SessionChat({
                     items={MODELS.map((m) => ({ key: m.key, label: m.label, hint: m.hint }))}
                     activeKey={model.key}
                     onSelect={onModelChange}
+                    custom={{ label: "Custom…", placeholder: "alias or claude-…" }}
                   />
                   <ComposerMenu
                     title="Reasoning effort"

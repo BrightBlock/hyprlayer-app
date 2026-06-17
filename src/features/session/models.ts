@@ -22,17 +22,50 @@ export type ModelOption = {
   contextWindow: number;
 };
 
+/**
+ * Mirrors the models the `claude` CLI's own `/model` picker offers (extracted
+ * from the binary — the CLI exposes no command to enumerate them). The picker's
+ * `value` is exactly our `flag`; the `[1m]` suffix variants unlock the 1M
+ * context window. This list is CLI-version-specific and must be refreshed when
+ * `claude` adds models — the composer's "Custom…" field is the escape hatch for
+ * anything not listed here (e.g. a dated id like `claude-opus-4-7-20...`).
+ */
 export const MODELS: ModelOption[] = [
+  // Latest aliases (the default, Opus, leaves --model unset).
   { key: "opus", label: "Opus 4.8", hint: "1M", flag: null, contextWindow: 1_000_000 },
   { key: "sonnet", label: "Sonnet 4.6", flag: "sonnet", contextWindow: 200_000 },
+  { key: "sonnet-1m", label: "Sonnet 4.6", hint: "1M", flag: "sonnet[1m]", contextWindow: 1_000_000 },
   { key: "haiku", label: "Haiku 4.5", flag: "haiku", contextWindow: 200_000 },
   { key: "fable", label: "Fable 5", flag: "fable", contextWindow: 200_000 },
+  // Previous Opus versions (full ids — these have no short alias).
+  { key: "opus-4-7", label: "Opus 4.7", flag: "claude-opus-4-7", contextWindow: 200_000 },
+  { key: "opus-4-7-1m", label: "Opus 4.7", hint: "1M", flag: "claude-opus-4-7[1m]", contextWindow: 1_000_000 },
+  { key: "opus-4-6", label: "Opus 4.6", flag: "claude-opus-4-6", contextWindow: 200_000 },
+  { key: "opus-4-6-1m", label: "Opus 4.6", hint: "1M", flag: "claude-opus-4-6[1m]", contextWindow: 1_000_000 },
+  { key: "opus-4-1", label: "Opus 4.1", flag: "claude-opus-4-1", contextWindow: 200_000 },
 ];
 
 export const DEFAULT_MODEL_KEY = "opus";
 
+/** Resolve a stored model key to its option. The presets above are matched by
+ *  key; an empty/undefined key falls back to the default (Opus). Any other
+ *  non-empty value is treated as a CUSTOM model the user typed — an alias
+ *  (`haiku`) or full id (`claude-opus-4-7`) the CLI's `--model` accepts. For a
+ *  custom value the string IS both the flag and its own label, since we can't
+ *  know a friendly name for an arbitrary id. */
 export function modelOption(key: string | undefined): ModelOption {
-  return MODELS.find((m) => m.key === key) ?? MODELS[0];
+  if (!key) return MODELS[0];
+  const preset = MODELS.find((m) => m.key === key);
+  if (preset) return preset;
+  return {
+    key,
+    label: key,
+    flag: key,
+    // Full ids carry an explicit `[1m]` suffix when they unlock the 1M window;
+    // everything else is the standard 200k. The session's init event is the
+    // source of truth, but this keeps the meter sane before the model reports.
+    contextWindow: key.includes("[1m]") ? 1_000_000 : 200_000,
+  };
 }
 
 /** A reasoning-effort level. The `key` IS the `--effort` value the CLI accepts
