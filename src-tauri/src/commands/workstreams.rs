@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use hyprlayer_core::gitops::FileDiff;
+use hyprlayer_core::gitops::{DirEntry, FileSides, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
@@ -344,18 +344,127 @@ pub async fn reprovision_workstream(
     Ok(item_view(item, Some(link)))
 }
 
-/// Working-tree diff vs HEAD (staged + unstaged), thoughts/ excluded.
+/// Run a blocking git operation against a workstream's worktree: load the item,
+/// hand its worktree path to `f` on the blocking pool, and map any core error to
+/// an `AppError` tagged with `op` (the stable code the frontend branches on).
+/// Every command below is a one-line call to this.
+async fn with_worktree<T, F>(
+    state: &State<'_, AppState>,
+    id: &str,
+    op: &'static str,
+    f: F,
+) -> CmdResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Path) -> Result<T, CoreError> + Send + 'static,
+{
+    let item = load_item(state, id).await?;
+    blocking(op, move || f(Path::new(&item.worktree_path)))
+        .await?
+        .map_err(|e| AppError {
+            code: op.to_string(),
+            message: e.to_string(),
+            remedy: Some("The worktree may have been deleted; archive this workstream.".into()),
+        })
+}
+
+/// Split staged/unstaged status for the source-control panel (thoughts/ and
+/// .hyprlayer/ excluded).
 #[tauri::command]
 #[specta::specta]
-pub async fn worktree_diff(state: State<'_, AppState>, id: String) -> CmdResult<Vec<FileDiff>> {
-    let item = load_item(&state, &id).await?;
-    blocking("diff", move || {
-        hyprlayer_core::gitops::worktree_diff(Path::new(&item.worktree_path))
+pub async fn worktree_git_status(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<WorktreeGitStatus> {
+    with_worktree(&state, &id, "worktree_git_status", |p| {
+        hyprlayer_core::gitops::worktree_git_status(p)
     })
-    .await?
-    .map_err(|e| AppError {
-        code: "worktree_diff".into(),
-        message: e.to_string(),
-        remedy: Some("The worktree may have been deleted; archive this workstream.".into()),
+    .await
+}
+
+/// Stage the given worktree-relative paths (HEAD→index).
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_stage(
+    state: State<'_, AppState>,
+    id: String,
+    paths: Vec<String>,
+) -> CmdResult<()> {
+    with_worktree(&state, &id, "worktree_stage", move |p| {
+        hyprlayer_core::gitops::stage_files(p, &paths)
     })
+    .await
+}
+
+/// Unstage the given paths (reset index entries back to HEAD).
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_unstage(
+    state: State<'_, AppState>,
+    id: String,
+    paths: Vec<String>,
+) -> CmdResult<()> {
+    with_worktree(&state, &id, "worktree_unstage", move |p| {
+        hyprlayer_core::gitops::unstage_files(p, &paths)
+    })
+    .await
+}
+
+/// Discard working-tree changes for the given paths (restore tracked to HEAD,
+/// delete untracked). Destructive — the UI confirms first.
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_discard(
+    state: State<'_, AppState>,
+    id: String,
+    paths: Vec<String>,
+) -> CmdResult<()> {
+    with_worktree(&state, &id, "worktree_discard", move |p| {
+        hyprlayer_core::gitops::discard_files(p, &paths)
+    })
+    .await
+}
+
+/// The two file texts the diff viewer compares (HEAD/index/working-tree depending
+/// on `staged`).
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_file_sides(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    staged: bool,
+) -> CmdResult<FileSides> {
+    with_worktree(&state, &id, "worktree_file_sides", move |p| {
+        hyprlayer_core::gitops::worktree_file_sides(p, &path, staged)
+    })
+    .await
+}
+
+/// Immediate children of a directory in the worktree (lazy "All Files" tree).
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_list_dir(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> CmdResult<Vec<DirEntry>> {
+    with_worktree(&state, &id, "worktree_list_dir", move |p| {
+        hyprlayer_core::gitops::list_dir(p, &path)
+    })
+    .await
+}
+
+/// Read a worktree file as text for the read-only viewer.
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_read_file(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> CmdResult<String> {
+    with_worktree(&state, &id, "worktree_read_file", move |p| {
+        hyprlayer_core::gitops::read_text_file(p, &path)
+    })
+    .await
 }

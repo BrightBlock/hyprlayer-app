@@ -264,14 +264,72 @@ export function useReprovisionWorkstream() {
   });
 }
 
-export function useWorktreeDiff(id: string, enabled = true) {
+// ── Source-control panel ──────────────────────────────────────────────────
+
+/** Invalidate the things a staging action changes: the split status and the
+ *  workstream's own view (its dirty/line counts in the sidebar tree). */
+function invalidateWorktreeGit(id: string) {
+  void queryClient.invalidateQueries({ queryKey: ["workstream", id, "git-status"] });
+  void queryClient.invalidateQueries({ queryKey: ["workstream", id, "file-sides"] });
+  invalidateWorkstream(id);
+}
+
+export function useWorktreeGitStatus(id: string, enabled = true) {
   return useQuery({
-    queryKey: ["workstream", id, "diff"],
-    queryFn: () => unwrap(commands.worktreeDiff(id)),
+    queryKey: ["workstream", id, "git-status"],
+    queryFn: () => unwrap(commands.worktreeGitStatus(id)),
     enabled: enabled && id.length > 0,
-    // Do NOT use keepPreviousData here: it would show a different workstream's
-    // files while the new workstream's query is in-flight. React Query keeps
-    // the current data visible during same-key refetches by default, so the
-    // refresh-button spinner still works without it.
+    // No keepPreviousData: it would show another workstream's files while the
+    // new one's query is in-flight. Same-key refetches keep data visible by
+    // default, so the refresh spinner still works.
+  });
+}
+
+/** Two sides of a file for the merge-view diff. Keyed by (id, path, staged) so
+ *  the staged and working diffs of the same file cache separately. */
+export function useFileSides(id: string, path: string, staged: boolean) {
+  return useQuery({
+    queryKey: ["workstream", id, "file-sides", path, staged],
+    queryFn: () => unwrap(commands.worktreeFileSides(id, path, staged)),
+    enabled: id.length > 0 && path.length > 0,
+  });
+}
+
+/** One level of the "All Files" tree. Each expanded directory is its own query. */
+export function useWorktreeDir(id: string, relPath: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "dir", relPath],
+    queryFn: () => unwrap(commands.worktreeListDir(id, relPath)),
+    enabled: enabled && id.length > 0,
+  });
+}
+
+/** Contents of a worktree file for the read-only viewer tab. */
+export function useWorktreeFile(id: string, path: string) {
+  return useQuery({
+    queryKey: ["workstream", id, "file", path],
+    queryFn: () => unwrap(commands.worktreeReadFile(id, path)),
+    enabled: id.length > 0 && path.length > 0,
+  });
+}
+
+export function useStageFiles(id: string) {
+  return useMutation({
+    mutationFn: (paths: string[]) => unwrap(commands.worktreeStage(id, paths)),
+    onSettled: () => invalidateWorktreeGit(id),
+  });
+}
+
+export function useUnstageFiles(id: string) {
+  return useMutation({
+    mutationFn: (paths: string[]) => unwrap(commands.worktreeUnstage(id, paths)),
+    onSettled: () => invalidateWorktreeGit(id),
+  });
+}
+
+export function useDiscardFiles(id: string) {
+  return useMutation({
+    mutationFn: (paths: string[]) => unwrap(commands.worktreeDiscard(id, paths)),
+    onSettled: () => invalidateWorktreeGit(id),
   });
 }

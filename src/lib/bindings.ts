@@ -62,8 +62,29 @@ export const commands = {
 	 *  thoughts repo).
 	 */
 	reprovisionWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("reprovision_workstream", { id })),
-	/**  Working-tree diff vs HEAD (staged + unstaged), thoughts/ excluded. */
-	worktreeDiff: (id: string) => typedError<FileDiff[], AppError>(__TAURI_INVOKE("worktree_diff", { id })),
+	/**
+	 *  Split staged/unstaged status for the source-control panel (thoughts/ and
+	 *  .hyprlayer/ excluded).
+	 */
+	worktreeGitStatus: (id: string) => typedError<WorktreeGitStatus, AppError>(__TAURI_INVOKE("worktree_git_status", { id })),
+	/**  Stage the given worktree-relative paths (HEAD→index). */
+	worktreeStage: (id: string, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("worktree_stage", { id, paths })),
+	/**  Unstage the given paths (reset index entries back to HEAD). */
+	worktreeUnstage: (id: string, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("worktree_unstage", { id, paths })),
+	/**
+	 *  Discard working-tree changes for the given paths (restore tracked to HEAD,
+	 *  delete untracked). Destructive — the UI confirms first.
+	 */
+	worktreeDiscard: (id: string, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("worktree_discard", { id, paths })),
+	/**
+	 *  The two file texts the diff viewer compares (HEAD/index/working-tree depending
+	 *  on `staged`).
+	 */
+	worktreeFileSides: (id: string, path: string, staged: boolean) => typedError<FileSides, AppError>(__TAURI_INVOKE("worktree_file_sides", { id, path, staged })),
+	/**  Immediate children of a directory in the worktree (lazy "All Files" tree). */
+	worktreeListDir: (id: string, path: string) => typedError<DirEntry[], AppError>(__TAURI_INVOKE("worktree_list_dir", { id, path })),
+	/**  Read a worktree file as text for the read-only viewer. */
+	worktreeReadFile: (id: string, path: string) => typedError<string, AppError>(__TAURI_INVOKE("worktree_read_file", { id, path })),
 	/**
 	 *  Start a session for a workstream stage. Composes the stage skill prompt,
 	 *  spawns the driver under the concurrency cap, and streams events back over
@@ -197,6 +218,17 @@ export type CreateDocInput = {
 	tags?: string[],
 };
 
+/**
+ *  One immediate child of a directory in the "All Files" tree. `path` is
+ *  relative to the worktree root (forward-slashed), suitable for the read/diff
+ *  commands.
+ */
+export type DirEntry = {
+	name: string,
+	path: string,
+	isDir: boolean,
+};
+
 export type DocContent = {
 	meta: DocMeta,
 	content: string,
@@ -240,11 +272,17 @@ export type ExitOutcome =
 /**  Failed to spawn / disappeared immediately. */
 "spawn_failed";
 
-export type FileDiff = {
-	path: string,
-	/**  added | modified | deleted | renamed | other */
-	change: string,
-	patch: string,
+/**
+ *  The two texts a CodeMirror merge view diffs. The frontend computes the diff,
+ *  so we hand it whole-file contents rather than a patch. The `*_exists` flags
+ *  distinguish an empty file from an absent one (added/deleted), which the
+ *  viewer uses to force unified mode.
+ */
+export type FileSides = {
+	original: string,
+	modified: string,
+	originalExists: boolean,
+	modifiedExists: boolean,
 };
 
 export type FmPatchDto = {
@@ -282,6 +320,16 @@ export type Frontmatter = {
 	 *  because specta forbids serde_json::Value's i64 arm in IPC types.)
 	 */
 	extra?: { [key in string]: string },
+};
+
+/**
+ *  One changed file within a worktree, as it appears in the staged or unstaged
+ *  list. `change` is one of: added | modified | deleted | renamed | untracked |
+ *  typechange | conflict.
+ */
+export type GitFileEntry = {
+	path: string,
+	change: string,
 };
 
 /**  One of the user's GitHub repos, for the clone dialog's "Recent repos" list. */
@@ -558,6 +606,16 @@ export type WorkstreamDoc = {
 export type WorkstreamView = {
 	item: Workstream,
 	git: WorktreeStatus,
+};
+
+/**
+ *  A worktree's working state split the way the panel renders it: what's in the
+ *  index (staged) vs. what differs between index and working tree (unstaged). A
+ *  partially-staged file legitimately appears in both lists.
+ */
+export type WorktreeGitStatus = {
+	staged: GitFileEntry[],
+	unstaged: GitFileEntry[],
 };
 
 export type WorktreeStatus = {

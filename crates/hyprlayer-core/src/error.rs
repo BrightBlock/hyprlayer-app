@@ -53,6 +53,9 @@ pub enum CoreError {
     #[error("branch `{branch}` has {count} unpushed/unmerged commit(s)")]
     WorktreeUnpushed { branch: String, count: u32 },
 
+    #[error("unsafe or out-of-worktree path: {path}")]
+    InvalidPath { path: String },
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -116,6 +119,7 @@ impl CoreError {
             CoreError::Db(_) => "db",
             CoreError::WorktreeDirty(_) => "worktree_dirty",
             CoreError::WorktreeUnpushed { .. } => "worktree_unpushed",
+            CoreError::InvalidPath { .. } => "invalid_path",
             CoreError::Io(_) => "io",
         }
     }

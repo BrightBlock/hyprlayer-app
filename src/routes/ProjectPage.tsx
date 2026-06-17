@@ -13,9 +13,11 @@ import {
 } from "../components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { DocIcon, PlusIcon, SplitIcon, XIcon } from "../components/icons";
+import { DiffIcon, DocIcon, PlusIcon, SplitIcon, XIcon } from "../components/icons";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
-import { DiffSidebar } from "../features/workstreams/DiffSidebar";
+import { ChangesPanel } from "../features/workstreams/ChangesPanel";
+import { DiffTab } from "../features/workstreams/DiffTab";
+import { FileViewerTab } from "../features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
@@ -35,6 +37,7 @@ import {
 } from "../features/session/workstreamTabs";
 import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
 import { useBootstrap, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
+import { basename } from "../lib/path";
 import { clamp, startEdgeDrag } from "../lib/resize";
 import { useUiStore } from "../lib/uiStore";
 
@@ -70,6 +73,12 @@ export type ShellTab = {
   /** When set, this tab is a read-only markdown preview of a doc (its path),
    *  not an agent chat — opened from the diff sidebar, closed when done. */
   docPreviewPath?: string;
+  /** When set, this tab is a rich diff of a worktree file (its path), against
+   *  either its staged or working version. Opened from the Changes panel. */
+  diffView?: { path: string; staged: boolean };
+  /** When set, this tab is a read-only view of a worktree file (its path).
+   *  Opened from the Files tree. */
+  filePath?: string;
   /** Which pane this shell lives in. Absent/"main" → the main pane; "right" →
    *  the side-by-side right split. */
   panel?: "main" | "right";
@@ -80,6 +89,12 @@ type ShellMenu = {
   x: number;
   y: number;
 };
+
+/** A read-only viewer tab (doc preview, diff, or file) rather than an agent
+ *  chat — these carry no session, so the strip shows a doc icon and no dot. */
+function isViewerShell(shell: ShellTab): boolean {
+  return !!(shell.docPreviewPath || shell.diffView || shell.filePath);
+}
 
 export function ProjectPage() {
   const { projectPath } = useParams({ from: "/projects/$projectPath" });
@@ -347,33 +362,47 @@ export function ProjectPage() {
   };
   // Keep the drag hook pointed at the latest action closures.
   dragHandlersRef.current = { reorder: reorderShellInPane, move: moveShellToPane };
-  // Open an agent-created doc as a read-only preview tab in the agent strip —
-  // reuse an existing preview tab for the same doc rather than stacking dupes.
-  const openDocPreview = (path: string, title: string) => {
+  // Open (or re-focus) a read-only viewer tab in the main pane. `match` finds an
+  // already-open tab for the same target so we re-focus instead of stacking
+  // dupes; `fields` carries the discriminator + title for a fresh tab. All three
+  // viewer kinds (doc preview, diff, file) go through this.
+  const openViewerTab = (
+    match: (shell: ShellTab) => boolean,
+    title: string,
+    fields: Partial<ShellTab>,
+  ) => {
     updateTabs((current) => {
-      const existing = current.shells.find((s) => s.docPreviewPath === path);
+      const existing = current.shells.find(match);
       if (existing) return { ...current, activeId: existing.id, activePane: "main" };
       const nextId = nextShellId(current.shells);
+      const shell: ShellTab = {
+        id: nextId,
+        title,
+        mode: "general",
+        draft: "",
+        docs: [],
+        attachments: [],
+        panel: "main",
+        ...fields,
+      };
       return {
         ...current,
-        shells: [
-          ...current.shells,
-          {
-            id: nextId,
-            title,
-            mode: "general",
-            draft: "",
-            docs: [],
-            attachments: [],
-            panel: "main",
-            docPreviewPath: path,
-          },
-        ],
+        shells: [...current.shells, shell],
         activeId: nextId,
         activePane: "main",
       };
     });
   };
+  const openDocPreview = (path: string, title: string) =>
+    openViewerTab((s) => s.docPreviewPath === path, title, { docPreviewPath: path });
+  const openDiff = (path: string, staged: boolean) =>
+    openViewerTab(
+      (s) => s.diffView?.path === path && s.diffView?.staged === staged,
+      basename(path),
+      { diffView: { path, staged } },
+    );
+  const openFile = (path: string) =>
+    openViewerTab((s) => s.filePath === path, basename(path), { filePath: path });
   const closeShell = (shellId: number) => {
     if (!tabs) return;
     const shell = tabs.shells.find((s) => s.id === shellId);
@@ -582,7 +611,11 @@ export function ProjectPage() {
       }`}
     >
       <span className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium">
-        {shell.docPreviewPath ? (
+        {shell.diffView ? (
+          <span className="text-ink-dim" title="Diff view">
+            <DiffIcon size={13} />
+          </span>
+        ) : isViewerShell(shell) ? (
           <span className="text-ink-dim">
             <DocIcon size={13} />
           </span>
@@ -590,7 +623,7 @@ export function ProjectPage() {
           <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
         )}
         {shell.title}
-        {!shell.docPreviewPath && <SessionTabDot sessionId={shell.sessionId} />}
+        {!isViewerShell(shell) && <SessionTabDot sessionId={shell.sessionId} />}
       </span>
       {opts.closable && (
         <button
@@ -624,6 +657,25 @@ export function ProjectPage() {
           key={`${activeView.item.id}:${shell.id}`}
           path={shell.docPreviewPath}
           title={shell.title}
+        />
+      );
+    }
+    if (shell.diffView) {
+      return (
+        <DiffTab
+          key={`${activeView.item.id}:${shell.id}`}
+          id={activeView.item.id}
+          path={shell.diffView.path}
+          staged={shell.diffView.staged}
+        />
+      );
+    }
+    if (shell.filePath) {
+      return (
+        <FileViewerTab
+          key={`${activeView.item.id}:${shell.id}`}
+          id={activeView.item.id}
+          path={shell.filePath}
         />
       );
     }
@@ -852,7 +904,12 @@ export function ProjectPage() {
             className="min-w-0 shrink-0 border-l border-edge bg-panel"
             style={{ width: diffWidth }}
           >
-            <DiffSidebar workstreamId={activeView?.item.id ?? null} onOpenDoc={openDocPreview} />
+            <ChangesPanel
+              workstreamId={activeView?.item.id ?? null}
+              onOpenDoc={openDocPreview}
+              onOpenDiff={openDiff}
+              onOpenFile={openFile}
+            />
           </aside>
         </>
       )}
