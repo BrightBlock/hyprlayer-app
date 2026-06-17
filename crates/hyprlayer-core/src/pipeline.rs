@@ -178,9 +178,10 @@ fn skill_prompt(skill: &str, input: &str) -> String {
 /// directive rather than a skill.
 pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> String {
     let input = input.trim();
-    let mut prompt = match stage {
-        // Plain chat: verbatim, no skill and no doc list appended.
-        Stage::General => return input.to_string(),
+    let prompt = match stage {
+        // Plain chat: the input verbatim — no skill prefix. Explicitly attached
+        // docs/screenshots are still listed below (the user asked for them).
+        Stage::General => input.to_string(),
         Stage::Ship if input.is_empty() => SHIP_PROMPT.to_string(),
         Stage::Ship => format!("{SHIP_PROMPT}\n\n{input}"),
         // research/plan/implement/validate each invoke their skill.
@@ -191,6 +192,15 @@ pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> St
             input,
         ),
     };
+    append_docs(prompt, attached_docs)
+}
+
+/// Append the `Relevant documents:` block listing `attached_docs` (a no-op when
+/// empty). The single source of truth for that wire format — shared by the
+/// session-start [`compose_prompt`] and the follow-up turn path
+/// (`send_user_message`), so a screenshot dropped mid-conversation reaches the
+/// agent the same way one attached at spawn does.
+pub fn append_docs(mut prompt: String, attached_docs: &[String]) -> String {
     if !attached_docs.is_empty() {
         prompt.push_str("\n\nRelevant documents:");
         for doc in attached_docs {
@@ -233,10 +243,11 @@ mod tests {
     #[test]
     fn general_passes_input_through_verbatim() {
         assert_eq!(compose_prompt(Stage::General, "  hello  ", &[]), "hello");
-        // Plain chat does not append a doc list, even when docs are attached.
+        // Plain chat sends no skill prefix, but explicitly attached docs (e.g. a
+        // pasted screenshot) are still listed so the agent can read them.
         assert_eq!(
-            compose_prompt(Stage::General, "hello", &["a.md".into()]),
-            "hello"
+            compose_prompt(Stage::General, "hello", &["a.png".into()]),
+            "hello\n\nRelevant documents:\n- a.png"
         );
     }
 

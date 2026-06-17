@@ -38,38 +38,25 @@ describe("stageCommand", () => {
 // (crates/hyprlayer-core/src/pipeline.rs); keep both in sync.
 describe("composeStagePrompt", () => {
   it("passes general input through verbatim (trimmed)", () => {
-    expect(composeStagePrompt("general", "  hello  ", [])).toBe("hello");
-  });
-
-  it("does not append a doc list for plain chat", () => {
-    expect(composeStagePrompt("general", "hello", ["a.md"])).toBe("hello");
+    expect(composeStagePrompt("general", "  hello  ")).toBe("hello");
   });
 
   it("prepends the skill command for spec stages", () => {
-    expect(composeStagePrompt("research", "how does auth work?", [])).toBe(
+    expect(composeStagePrompt("research", "how does auth work?")).toBe(
       "/research_codebase how does auth work?",
     );
   });
 
   it("invokes the bare skill when input is empty", () => {
-    expect(composeStagePrompt("research", "", [])).toBe("/research_codebase");
-  });
-
-  it("lists attached docs after the prompt", () => {
-    const prompt = composeStagePrompt("plan", "build it", [
-      "repos/p/shared/research/2026-auth.md",
-    ]);
-    expect(prompt.startsWith("/create_plan build it")).toBe(true);
-    expect(prompt).toContain("\n\nRelevant documents:");
-    expect(prompt).toContain("\n- repos/p/shared/research/2026-auth.md");
+    expect(composeStagePrompt("research", "")).toBe("/research_codebase");
   });
 
   it("ships with the standalone directive when there is no input", () => {
-    expect(composeStagePrompt("ship", "", [])).toBe(SHIP_PROMPT);
+    expect(composeStagePrompt("ship", "")).toBe(SHIP_PROMPT);
   });
 
   it("appends extra ship context below the directive", () => {
-    const prompt = composeStagePrompt("ship", "skip the changelog", []);
+    const prompt = composeStagePrompt("ship", "skip the changelog");
     expect(prompt).toBe(`${SHIP_PROMPT}\n\nskip the changelog`);
   });
 });

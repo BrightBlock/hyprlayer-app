@@ -58,6 +58,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::list_sessions,
             commands::sessions::get_session_log,
             commands::sessions::attach_session,
+            commands::attachments::import_attachment,
+            commands::attachments::save_attachment,
             commands::system::set_binary_override,
             commands::system::redetect_binaries,
             commands::system::get_app_settings,
@@ -140,6 +142,17 @@ pub fn run() {
                     );
                     let _ = db.clear_all_orphans();
                 }
+            }
+
+            // Let the webview load image attachments (worktree
+            // `.hyprlayer/attachments/`) through the asset protocol. Allowing
+            // the worktree root at runtime is more reliable than a `$VAR` glob
+            // in tauri.conf.json, which doesn't expand for the asset scope.
+            if let Err(e) = app
+                .asset_protocol_scope()
+                .allow_directory(&worktree_root, true)
+            {
+                log::warn!("could not register worktree root with the asset scope: {e}");
             }
 
             app.manage(AppState {

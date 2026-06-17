@@ -27,6 +27,7 @@ import { commands, type Session, type SessionEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { queryClient } from "../../lib/queryClient";
 import { docFromTool, docTitle, type DocKind } from "./toolDisplay";
+import { type Attachment } from "./attachments";
 import { composeStagePrompt } from "./stages";
 import { openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
 import {
@@ -52,13 +53,17 @@ export type SessionEntry = SessionView & {
    *  from the log after a restart — it resumes on the next message. */
   live: boolean;
   /** Messages the user sent while a turn was still in flight, awaiting delivery.
-   *  Delivered one-per-turn as each turn finishes (conversation steering). */
-  queued: string[];
+   *  Delivered one-per-turn as each turn finishes (conversation steering). Each
+   *  carries its own staged attachments. */
+  queued: QueuedMessage[];
   /** Epoch ms when the current working stretch began, or null when idle —
    *  drives the live "time working" counter. Maintained outside the pure
    *  reducer (it needs a clock) by `setEntry`, so every mutation keeps it right. */
   workingSince: number | null;
 };
+
+/** A follow-up turn the user sent mid-turn, held until the current turn ends. */
+export type QueuedMessage = { text: string; attachments: Attachment[] };
 
 type State = { sessions: Record<string, SessionEntry> };
 
@@ -162,20 +167,23 @@ export async function startSession(args: {
   workstreamId: string;
   stage: string;
   input: string;
-  attachedDocs: string[];
+  /** Files/library docs attached to the first turn. Their paths go to the
+   *  backend prompt; they render as pin cards in the echo so no raw path shows. */
+  attachments?: Attachment[];
   /** `--model` value, or null/undefined for claude's default. */
   model?: string | null;
   /** `--effort` level, or null/undefined for claude's default. */
   effort?: string | null;
 }): Promise<Session> {
   const { channel, activate } = bufferedChannel();
+  const attachments = args.attachments ?? [];
 
   const session = await unwrap(
     commands.startStageSession(
       args.workstreamId,
       args.stage,
       args.input,
-      args.attachedDocs,
+      attachments.map((a) => a.path),
       args.model ?? null,
       args.effort ?? null,
       channel,
@@ -187,13 +195,10 @@ export async function startSession(args: {
 
   let view = initialSessionView("starting");
   view = { ...view, model: session.model, claudeSessionId: session.claudeSessionId };
-  // Echo the composed prompt (skill command + input + docs), matching what the
-  // backend actually sends to claude — not just the raw input.
-  view = addUserMessage(
-    view,
-    composeStagePrompt(args.stage, args.input, args.attachedDocs),
-    args.stage,
-  );
+  // Echo the composed prompt (skill command + input) — but NOT the doc/path
+  // list the backend appends; those render as pin cards instead, so the agent's
+  // raw paths never appear in the user bubble.
+  view = addUserMessage(view, composeStagePrompt(args.stage, args.input), args.stage, attachments);
   setEntry(session.id, {
     ...view,
     workstreamId: args.workstreamId,
@@ -241,24 +246,35 @@ export async function resumeSession(sessionId: string): Promise<void> {
  * (restored) session has nothing running to queue behind, so it's delivered
  * immediately, resuming the process first.
  */
-export async function sendMessage(sessionId: string, text: string): Promise<void> {
+export async function sendMessage(
+  sessionId: string,
+  text: string,
+  attachments: Attachment[] = [],
+): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
   if (channels.has(sessionId) && isBusy(current)) {
-    setEntry(sessionId, { ...current, queued: [...current.queued, text] });
+    setEntry(sessionId, { ...current, queued: [...current.queued, { text, attachments }] });
     return;
   }
-  await deliverMessage(sessionId, text);
+  await deliverMessage(sessionId, text, attachments);
 }
 
-/** Actually send a turn: optimistic user bubble, resume if detached, hand to the
- *  driver. The delivery half of [`sendMessage`]; also used to flush the queue. */
-async function deliverMessage(sessionId: string, text: string): Promise<void> {
+/** Actually send a turn: optimistic user bubble (text + attachment cards),
+ *  resume if detached, hand to the driver. Attachment paths go to the backend
+ *  as `attached_docs` (composed into the prompt server-side, so the agent can
+ *  read them) but never into the bubble. The delivery half of [`sendMessage`];
+ *  also used to flush the queue. */
+async function deliverMessage(
+  sessionId: string,
+  text: string,
+  attachments: Attachment[] = [],
+): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
-  setEntry(sessionId, { ...current, ...addUserMessage(current, text, null) });
+  setEntry(sessionId, { ...current, ...addUserMessage(current, text, null, attachments) });
   if (!channels.has(sessionId)) await resumeSession(sessionId);
-  await unwrap(commands.sendUserMessage(sessionId, text));
+  await unwrap(commands.sendUserMessage(sessionId, text, attachments.map((a) => a.path)));
 }
 
 /**
@@ -272,7 +288,7 @@ function flushQueuedMessage(sessionId: string): void {
   if (!entry || entry.queued.length === 0 || isBusy(entry)) return;
   const [next, ...rest] = entry.queued;
   setEntry(sessionId, { ...entry, queued: rest });
-  void deliverMessage(sessionId, next);
+  void deliverMessage(sessionId, next.text, next.attachments);
 }
 
 /** Drop a still-queued message before it's delivered (the user changed course). */
@@ -413,7 +429,6 @@ export async function shipWorkstream(workstreamId: string): Promise<void> {
     workstreamId,
     stage: "ship",
     input: "",
-    attachedDocs: [],
   });
   openShipTab(workstreamId, session.id);
 }

@@ -306,10 +306,15 @@ pub async fn send_user_message(
     state: State<'_, AppState>,
     session_id: String,
     text: String,
+    attached_docs: Vec<String>,
 ) -> CmdResult<()> {
+    // Compose the doc list server-side (same `Relevant documents:` format as
+    // session start) so the wire format lives only in `pipeline`, not in the
+    // frontend. The optimistic bubble still shows just `text` + pin cards.
+    let prompt = pipeline::append_docs(text, &attached_docs);
     live_driver(&state, &session_id)
         .await?
-        .send_user_turn(&text, None)
+        .send_user_turn(&prompt, None)
         .map_err(AppError::from)
 }
 

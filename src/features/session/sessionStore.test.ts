@@ -54,13 +54,12 @@ async function startBusySession(): Promise<string> {
     workstreamId: "ws1",
     stage: "general",
     input: "kick off",
-    attachedDocs: [],
   });
   return session.id;
 }
 
 function queued(id: string): string[] {
-  return useSessionStore.getState().sessions[id]?.queued ?? [];
+  return (useSessionStore.getState().sessions[id]?.queued ?? []).map((m) => m.text);
 }
 
 beforeEach(() => {
@@ -89,12 +88,12 @@ describe("conversation steering (mid-turn message queue)", () => {
     emit(INIT);
     emit(TURN_DONE); // first turn done → flush "A"
     await Promise.resolve();
-    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A");
+    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A", []);
     expect(queued(id)).toEqual(["B"]);
 
     emit(TURN_DONE); // "A"'s turn done → flush "B"
     await Promise.resolve();
-    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B");
+    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B", []);
     expect(queued(id)).toEqual([]);
   });
 

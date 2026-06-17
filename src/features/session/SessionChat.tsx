@@ -1,4 +1,12 @@
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import { Badge, Button, ErrorNote, Spinner } from "../../components/ui";
 import {
@@ -17,7 +25,9 @@ import {
 } from "../../components/icons";
 import { errorMessage } from "../../lib/ipc";
 import type { WorkstreamView } from "../../lib/bindings";
-import { WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
+import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
+import { AttachmentCards } from "./AttachmentCard";
+import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, type StageKey } from "./stages";
 import { EFFORTS, MODELS, effortOption, modelOption } from "./models";
@@ -33,6 +43,7 @@ import {
   startSession,
   stopSession,
   useSession,
+  type QueuedMessage,
 } from "./sessionStore";
 import { describeState, isBusy, isTerminal, isWorking, type PendingQuestion } from "./transcript";
 
@@ -226,14 +237,20 @@ function AttachMenu({
   onLibrary,
   onFiles,
   onScreenshots,
+  showLibrary = true,
 }: {
   onLibrary: () => void;
   onFiles: () => void;
   onScreenshots: () => void;
+  /** Library docs are first-turn context, so the option only shows before a
+   *  session starts; files/screenshots can be attached to any turn. */
+  showLibrary?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const items = [
-    { key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary },
+    ...(showLibrary
+      ? [{ key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary }]
+      : []),
     { key: "files", label: "Add files…", icon: <DocIcon size={14} />, run: onFiles },
     { key: "shots", label: "Add screenshots…", icon: <ImageIcon size={14} />, run: onScreenshots },
   ];
@@ -359,12 +376,14 @@ function QueuedMessages({
   messages,
   onCancel,
 }: {
-  messages: string[];
+  messages: QueuedMessage[];
   onCancel: (index: number) => void;
 }) {
   return (
     <div className="mb-2 space-y-1">
-      {messages.map((text, i) => (
+      {messages.map((msg, i) => {
+        const n = msg.attachments.length;
+        return (
         <div
           key={i}
           className="flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5"
@@ -372,7 +391,10 @@ function QueuedMessages({
           <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-ink-dim/70">
             Queued
           </span>
-          <span className="flex-1 truncate text-xs text-ink">{text}</span>
+          <span className="flex-1 truncate text-xs text-ink">
+            {msg.text || (n > 0 ? `${n} attachment(s)` : "")}
+          </span>
+          {n > 0 && msg.text && <span className="shrink-0 text-[10px] text-ink-dim">📎{n}</span>}
           <button
             type="button"
             onClick={() => onCancel(i)}
@@ -383,7 +405,8 @@ function QueuedMessages({
             <XIcon size={12} />
           </button>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -554,6 +577,12 @@ type Props = {
   onAddFiles: () => void;
   /** Native OS file dialog filtered to images → attach screenshots. */
   onAddScreenshots: () => void;
+  /** Stage dropped/pasted attachments on this tab's composer. */
+  onAddAttachments: (attachments: Attachment[]) => void;
+  /** Remove one staged attachment by path. */
+  onRemoveAttachment: (path: string) => void;
+  /** Clear all staged attachments (after a turn is sent). */
+  onClearAttachments: () => void;
 };
 
 export function SessionChat({
@@ -570,10 +599,20 @@ export function SessionChat({
   onBrowseDocs,
   onAddFiles,
   onAddScreenshots,
+  onAddAttachments,
+  onRemoveAttachment,
+  onClearAttachments,
 }: Props) {
   const session = useSession(shell.sessionId);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+  // The add-attachments callback changes identity each render; keep the latest
+  // in a ref so the window-level drag-drop subscription can stay mounted once.
+  const addAttachmentsRef = useRef(onAddAttachments);
+  addAttachmentsRef.current = onAddAttachments;
+  const workstreamId = view.item.id;
 
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
@@ -589,6 +628,71 @@ export function SessionChat({
     }
   }, [shell.sessionId, hasEntry, view.item.id, shell.mode]);
 
+  // Drag-and-drop. Tauri intercepts OS file drops at the window level (HTML5
+  // drop events never fire), so we subscribe to the webview's drag-drop stream
+  // and hit-test the drop position (physical px → CSS px) against THIS pane's
+  // container — each pane handles only drops that land on it.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    const within = (pos?: { x: number; y: number }) => {
+      const el = dropRef.current;
+      if (!el || !pos) return false;
+      const r = el.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const x = pos.x / dpr;
+      const y = pos.y / dpr;
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const p = event.payload;
+        if (p.type === "enter" || p.type === "over") {
+          setDragOver(within(p.position));
+        } else if (p.type === "drop") {
+          const hit = within(p.position);
+          setDragOver(false);
+          if (hit && p.paths.length > 0) {
+            void importDroppedPaths(workstreamId, p.paths).then((atts) => {
+              if (atts.length) addAttachmentsRef.current(atts);
+            });
+          }
+        } else {
+          setDragOver(false);
+        }
+      })
+      .then((un) => {
+        if (cancelled) un();
+        else unlisten = un;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [workstreamId]);
+
+  // Paste an image straight from the clipboard (e.g. Cmd-Shift-Ctrl-4 screen
+  // grabs). The bytes are persisted into the worktree so the agent can read
+  // them; the paste of image data doesn't also insert text.
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const images: File[] = [];
+    for (let i = 0; i < items.length; i += 1) {
+      const it = items[i];
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        const file = it.getAsFile();
+        if (file) images.push(file);
+      }
+    }
+    if (images.length === 0) return;
+    e.preventDefault();
+    void Promise.all(images.map((f) => saveClipboardImage(workstreamId, f))).then((res) => {
+      const atts = res.filter((a): a is Attachment => a !== null);
+      if (atts.length) onAddAttachments(atts);
+    });
+  };
+
   const busy = session ? isBusy(session) : started;
   // `working` (actively computing) drives the transcript's running-tool spinner
   // and smooth-scroll; `busy` (which also covers "blocked on the user") gates
@@ -599,25 +703,36 @@ export function SessionChat({
   const terminal = session ? isTerminal(session.state) : false;
   const pendingQuestion = session?.pendingQuestion ?? null;
   const draft = shell.draft;
-  const canSubmit = draft.trim().length > 0;
+  // Tabs persisted before attachments existed rehydrate without the field; the
+  // store migration backfills it, but default here too so a stale in-memory tab
+  // can't crash on `.length` before the next reload.
+  const attachments = shell.attachments ?? [];
+  const canSubmit = draft.trim().length > 0 || attachments.length > 0;
   const sid = shell.sessionId;
 
   const handleStart = async () => {
     const input = draft.trim();
-    if (!input || starting) return;
+    if (!canSubmit || starting) return;
     setStarting(true);
     setError(null);
     try {
+      // Library docs and staged files/screenshots both ride along as pin cards
+      // in the echo (so no raw path shows) and as paths in the backend prompt.
+      const atts: Attachment[] = [
+        ...shell.docs.map((d) => ({ path: d.path, name: chipLabel(d.path), kind: "file" as const })),
+        ...attachments,
+      ];
       const created = await startSession({
         workstreamId: view.item.id,
         stage: shell.mode,
         input,
-        attachedDocs: shell.docs.map((d) => d.path),
+        attachments: atts,
         model: model.flag,
         effort: effort.key,
       });
       onSessionStarted(created.id);
       onDraftChange("");
+      onClearAttachments();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -629,11 +744,12 @@ export function SessionChat({
     const text = draft.trim();
     // No `busy` guard: while a turn is in flight `sendMessage` queues the message
     // and delivers it when the turn finishes (conversation steering).
-    if (!text || !sid) return;
+    if ((!text && attachments.length === 0) || !sid) return;
     setError(null);
     try {
-      await sendMessage(sid, text);
+      await sendMessage(sid, text, attachments);
       onDraftChange("");
+      onClearAttachments();
     } catch (e) {
       setError(errorMessage(e));
     }
@@ -654,7 +770,15 @@ export function SessionChat({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div ref={dropRef} className="relative flex min-h-0 flex-1 flex-col">
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-40 m-2 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/10">
+          <div className="flex items-center gap-2 rounded-lg bg-panel px-3.5 py-2 text-sm font-medium text-ink shadow-lg">
+            <ImageIcon size={16} />
+            Drop to attach
+          </div>
+        </div>
+      )}
       {started ? (
         <TranscriptView
           items={session?.items ?? []}
@@ -724,10 +848,16 @@ export function SessionChat({
                 />
               )}
               <div className="rounded-xl bg-panel-2">
+                {attachments.length > 0 && (
+                  <div className="px-3.5 pt-3">
+                    <AttachmentCards attachments={attachments} onRemove={onRemoveAttachment} />
+                  </div>
+                )}
                 <textarea
                   value={draft}
                   onChange={(e) => onDraftChange(e.target.value)}
                   onKeyDown={onKeyDown}
+                  onPaste={onPaste}
                   rows={3}
                   disabled={Boolean(pendingQuestion)}
                   placeholder={
@@ -788,13 +918,13 @@ export function SessionChat({
                   />
 
                   <div className="ml-auto flex items-center gap-1">
-                    {!started && (
-                      <AttachMenu
-                        onLibrary={onBrowseDocs}
-                        onFiles={onAddFiles}
-                        onScreenshots={onAddScreenshots}
-                      />
-                    )}
+                    <AttachMenu
+                      onLibrary={onBrowseDocs}
+                      onFiles={onAddFiles}
+                      onScreenshots={onAddScreenshots}
+                      showLibrary={!started}
+                    />
+                    {/* Drop or paste a screenshot anytime — see the pane drop overlay. */}
                     {session?.contextTokens != null && (
                       <ContextMeter tokens={session.contextTokens} windowSize={model.contextWindow} />
                     )}

@@ -5,6 +5,8 @@ import { ChevronRightIcon, ShieldIcon, WrenchIcon } from "../../components/icons
 import { MarkdownPreview } from "../library/MarkdownPreview";
 import { stageLabel } from "./stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
+import { AttachmentCards } from "./AttachmentCard";
+import type { Attachment } from "./attachments";
 import {
   baseName,
   formatElapsed,
@@ -22,7 +24,15 @@ export type PermissionHandlers = {
 
 /* -------------------------------- pieces --------------------------------- */
 
-function UserMessage({ text, stage }: { text: string; stage: string | null }) {
+function UserMessage({
+  text,
+  stage,
+  attachments,
+}: {
+  text: string;
+  stage: string | null;
+  attachments: Attachment[];
+}) {
   return (
     <div className="flex justify-end">
       <div className="max-w-[85%] rounded-lg border border-edge bg-panel-2 px-3.5 py-2.5">
@@ -31,7 +41,10 @@ function UserMessage({ text, stage }: { text: string; stage: string | null }) {
             {stageLabel(stage)}
           </span>
         )}
-        <p className="selectable whitespace-pre-wrap break-words text-sm text-ink">{text}</p>
+        {text && (
+          <p className="selectable whitespace-pre-wrap break-words text-sm text-ink">{text}</p>
+        )}
+        <AttachmentCards attachments={attachments} className={text ? "mt-2" : ""} />
       </div>
     </div>
   );
@@ -505,7 +518,7 @@ function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) 
 function renderSingle(item: TranscriptItem, busy: boolean, permission: PermissionHandlers) {
   switch (item.kind) {
     case "user":
-      return <UserMessage text={item.text} stage={item.stage} />;
+      return <UserMessage text={item.text} stage={item.stage} attachments={item.attachments} />;
     case "assistant":
       return <AssistantMessage text={item.text} streaming={item.streaming} />;
     case "thinking":

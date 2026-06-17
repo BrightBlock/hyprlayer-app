@@ -71,27 +71,19 @@ export function stageCommand(stage: string): string | null {
   }
 }
 
-function appendDocs(prompt: string, docs: string[]): string {
-  if (docs.length === 0) return prompt;
-  return prompt + "\n\nRelevant documents:" + docs.map((d) => `\n- ${d}`).join("");
-}
-
 /**
- * Compose the first-turn prompt for a stage exactly as the backend does, so the
- * optimistic user bubble matches what claude actually receives. Mirror of
- * `compose_prompt` in crates/hyprlayer-core/src/pipeline.rs — keep the two in
- * sync (covered by stages.test.ts + the Rust unit tests).
+ * The skill-prefixed prompt the optimistic user bubble echoes — the skill
+ * command + the user's input, matching the head of the backend `compose_prompt`
+ * (crates/hyprlayer-core/src/pipeline.rs). Attached docs are NOT echoed here:
+ * they render as pin cards and the backend owns the `Relevant documents:` tail.
  */
-export function composeStagePrompt(stage: string, input: string, docs: string[]): string {
+export function composeStagePrompt(stage: string, input: string): string {
   const trimmed = input.trim();
   const key = asStageKey(stage);
-  // Plain chat (general): verbatim, no doc list — matches the backend.
-  if (key === "general") return trimmed;
-  if (key === "ship") {
-    return appendDocs(trimmed ? `${SHIP_PROMPT}\n\n${trimmed}` : SHIP_PROMPT, docs);
-  }
+  if (key === "general") return trimmed; // plain chat: no skill prefix
+  if (key === "ship") return trimmed ? `${SHIP_PROMPT}\n\n${trimmed}` : SHIP_PROMPT;
   const command = stageCommand(key)!; // research/plan/implement/validate
-  return appendDocs(trimmed ? `${command} ${trimmed}` : command, docs);
+  return trimmed ? `${command} ${trimmed}` : command;
 }
 
 /**

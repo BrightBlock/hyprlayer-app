@@ -97,10 +97,12 @@ export function toolFilePath(name: string, input: string): string | null {
   return str(obj.file_path) || str(obj.path) || str(obj.notebook_path) || null;
 }
 
-/** Final path segment (`/a/b/c.ts` → `c.ts`), tolerating trailing slashes. */
+/** Final path segment (`/a/b/c.ts` → `c.ts`), tolerating trailing slashes and
+ *  Windows `\` separators (dropped-file paths can use either). */
 export function baseName(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  return trimmed.slice(trimmed.lastIndexOf("/") + 1) || trimmed;
+  const trimmed = path.replace(/[/\\]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return trimmed.slice(cut + 1) || trimmed;
 }
 
 /**

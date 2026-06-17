@@ -92,6 +92,13 @@ pub struct FileDiff {
 
 /// The working-tree-vs-HEAD diff that every "what changed" surface is built
 /// from (the diff panel and the sidebar line counters), so they share one
+/// App-managed scratch inside a worktree (`.hyprlayer/`, e.g. prompt
+/// attachments). Self-ignored from git, but filtered from the diff too so a
+/// dropped screenshot never reads as a working-tree change.
+fn is_hyprlayer_internal(path: &str) -> bool {
+    path == ".hyprlayer" || path.starts_with(".hyprlayer/")
+}
+
 /// definition: untracked content included; `thoughts/` filtered by callers.
 fn worktree_diff_raw(repo: &git2::Repository) -> Result<git2::Diff<'_>> {
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
@@ -121,7 +128,7 @@ pub fn worktree_diff_line_counts(repo: &git2::Repository) -> (u32, u32) {
             .or_else(|| delta.old_file().path())
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
-        if crate::worktree::is_thoughts_path(&path) {
+        if crate::worktree::is_thoughts_path(&path) || is_hyprlayer_internal(&path) {
             continue;
         }
         if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, idx) {
@@ -148,7 +155,7 @@ pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
             .or_else(|| delta.old_file().path())
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
-        if crate::worktree::is_thoughts_path(&path) {
+        if crate::worktree::is_thoughts_path(&path) || is_hyprlayer_internal(&path) {
             continue;
         }
         let change = match delta.status() {

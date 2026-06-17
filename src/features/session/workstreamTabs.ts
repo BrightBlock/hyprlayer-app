@@ -28,7 +28,9 @@ export type WsTabState = {
 };
 
 export const defaultTabState = (): WsTabState => ({
-  shells: [{ id: 1, title: "Agent", mode: "general", draft: "", docs: [], panel: "main" }],
+  shells: [
+    { id: 1, title: "Agent", mode: "general", draft: "", docs: [], attachments: [], panel: "main" },
+  ],
   activeId: 1,
 });
 
@@ -42,7 +44,21 @@ type TabsStore = { byWs: Record<string, WsTabState> };
 export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
     name: "hyprlayer:workstream-tabs",
-    version: 1,
+    // v2 added `attachments` to every shell — backfill it on rehydrate so tabs
+    // persisted by an older build don't crash on `shell.attachments.length`.
+    version: 2,
+    migrate: (persisted) => {
+      const state = persisted as TabsStore | undefined;
+      if (!state?.byWs) return { byWs: {} };
+      for (const ws of Object.values(state.byWs)) {
+        ws.shells = (ws.shells ?? []).map((s) => ({
+          ...s,
+          docs: s.docs ?? [],
+          attachments: s.attachments ?? [],
+        }));
+      }
+      return state;
+    },
   }),
 );
 
@@ -83,7 +99,16 @@ export function openShipTab(workstreamId: string, sessionId: string): void {
         ...current,
         shells: [
           ...current.shells,
-          { id: nextId, title: "Ship", mode: "ship", draft: "", docs: [], sessionId, panel: "main" },
+          {
+            id: nextId,
+            title: "Ship",
+            mode: "ship",
+            draft: "",
+            docs: [],
+            attachments: [],
+            sessionId,
+            panel: "main",
+          },
         ],
         activeId: nextId,
         activePane: "main",

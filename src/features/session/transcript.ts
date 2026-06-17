@@ -16,6 +16,7 @@
  */
 
 import type { ExitOutcome, SessionEvent } from "../../lib/bindings";
+import type { Attachment } from "./attachments";
 
 export type SessionState =
   | "idle"
@@ -84,7 +85,15 @@ export function parseQuestions(json: string): Question[] {
 type Parented = { parentId?: string | null };
 
 export type TranscriptItem =
-  | { kind: "user"; id: string; text: string; stage: string | null }
+  | {
+      kind: "user";
+      id: string;
+      text: string;
+      stage: string | null;
+      /** Files/screenshots attached to this turn — rendered as pin cards, while
+       *  the path the agent actually received stays out of the bubble. */
+      attachments: Attachment[];
+    }
   | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
   | ({ kind: "thinking"; id: string; text: string } & Parented)
   | ({
@@ -366,7 +375,11 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       // showed it). Rebuilds the user's side of the conversation.
       return {
         ...view,
-        ...appended(view, (id) => ({ kind: "user", id, text: event.text, stage: event.stage }), true),
+        ...appended(
+          view,
+          (id) => ({ kind: "user", id, text: event.text, stage: event.stage, attachments: [] }),
+          true,
+        ),
         streaming: true,
       };
 
@@ -590,10 +603,11 @@ export function addUserMessage(
   view: SessionView,
   text: string,
   stage: string | null,
+  attachments: Attachment[] = [],
 ): SessionView {
   return {
     ...view,
-    ...appended(view, (id) => ({ kind: "user", id, text, stage }), true),
+    ...appended(view, (id) => ({ kind: "user", id, text, stage, attachments }), true),
     streaming: true,
   };
 }
@@ -687,9 +701,13 @@ export function viewToText(view: SessionView): string {
   const lines: string[] = [];
   for (const item of view.items) {
     switch (item.kind) {
-      case "user":
-        lines.push(`## You${item.stage && item.stage !== "general" ? ` (${item.stage})` : ""}`, item.text, "");
+      case "user": {
+        const heading = `## You${item.stage && item.stage !== "general" ? ` (${item.stage})` : ""}`;
+        lines.push(heading, item.text);
+        for (const att of item.attachments ?? []) lines.push(`📎 ${att.name}`);
+        lines.push("");
         break;
+      }
       case "assistant":
         lines.push("## Assistant", item.text, "");
         break;

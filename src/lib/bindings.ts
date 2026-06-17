@@ -77,7 +77,7 @@ export const commands = {
 	 *  tail. Returns the (existing) [`Session`] row.
 	 */
 	resumeSession: (sessionId: string, model: string | null, effort: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, onEvent })),
-	sendUserMessage: (sessionId: string, text: string) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text })),
+	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	/**
 	 *  Answer an `AskUserQuestion` prompt. `answers` is a JSON object mapping each
@@ -95,6 +95,16 @@ export const commands = {
 	 *  navigated away from without losing history.
 	 */
 	attachSession: (sessionId: string, onEvent: Channel<SessionEvent>) => typedError<null, AppError>(__TAURI_INVOKE("attach_session", { sessionId, onEvent })),
+	/**
+	 *  Copy a dropped file (often a volatile screenshot temp file) into the
+	 *  workstream's attachments dir. Returns the new stable absolute path.
+	 */
+	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
+	/**
+	 *  Write raw bytes (a pasted clipboard image) into the workstream's attachments
+	 *  dir under `file_name`. Returns the new stable absolute path.
+	 */
+	saveAttachment: (workstreamId: string, fileName: string, data: number[]) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
 	getAppSettings: () => typedError<AppSettings, AppError>(__TAURI_INVOKE("get_app_settings")),

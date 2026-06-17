@@ -20,6 +20,11 @@ import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
 import { killSession, transcriptToText } from "../features/session/sessionStore";
+import {
+  importDroppedPaths,
+  IMAGE_EXTENSIONS,
+  type Attachment,
+} from "../features/session/attachments";
 import { stageLabel, type StageKey } from "../features/session/stages";
 import {
   defaultTabState,
@@ -53,6 +58,10 @@ export type ShellTab = {
   mode: StageKey;
   draft: string;
   docs: AttachedDoc[];
+  /** Files/screenshots staged in this tab's composer (dropped, pasted, or picked
+   *  from the file dialog). Volatile sources are copied into the worktree's
+   *  `.hyprlayer/attachments/` first; sent with the next turn, then cleared. */
+  attachments: Attachment[];
   /** Model + reasoning-effort keys chosen for the NEXT session this tab starts
    *  (see models.ts); fixed at spawn. Undefined → the defaults. */
   model?: string;
@@ -199,17 +208,23 @@ export function ProjectPage() {
     if (!wsId) return;
     updateWorkstreamTabs((all) => ({ ...all, [wsId]: updater(all[wsId] ?? defaultTabState()) }));
   };
+  // Replace one shell by id via a transform — the single "map the shells, touch
+  // the matching one" primitive the per-shell mutators build on.
+  const modifyShell = (shellId: number, transform: (shell: ShellTab) => ShellTab) => {
+    updateTabs((current) => ({
+      ...current,
+      shells: current.shells.map((s) => (s.id === shellId ? transform(s) : s)),
+    }));
+  };
   const patchShell = (
     shellId: number,
     patch: Partial<
-      Pick<ShellTab, "title" | "mode" | "draft" | "docs" | "model" | "effort" | "sessionId">
+      Pick<
+        ShellTab,
+        "title" | "mode" | "draft" | "docs" | "attachments" | "model" | "effort" | "sessionId"
+      >
     >,
-  ) => {
-    updateTabs((current) => ({
-      ...current,
-      shells: current.shells.map((s) => (s.id === shellId ? { ...s, ...patch } : s)),
-    }));
-  };
+  ) => modifyShell(shellId, (s) => ({ ...s, ...patch }));
   const selectShell = (shellId: number) => {
     updateTabs((current) => ({ ...current, activeId: shellId, activePane: "main" }));
   };
@@ -225,6 +240,7 @@ export function ProjectPage() {
     mode: "general",
     draft: "",
     docs: [],
+    attachments: [],
     panel,
   });
   // Append a fresh agent to the right pane and focus it (opening the split).
@@ -342,7 +358,16 @@ export function ProjectPage() {
         ...current,
         shells: [
           ...current.shells,
-          { id: nextId, title, mode: "general", draft: "", docs: [], panel: "main", docPreviewPath: path },
+          {
+            id: nextId,
+            title,
+            mode: "general",
+            draft: "",
+            docs: [],
+            attachments: [],
+            panel: "main",
+            docPreviewPath: path,
+          },
         ],
         activeId: nextId,
         activePane: "main",
@@ -412,29 +437,38 @@ export function ProjectPage() {
     // The workstream's pipeline position follows the latest mode choice.
     setStage.mutate({ id: activeView.item.id, stage: key });
   };
-  // Attach files (or, filtered to images, screenshots) to a shell via the
-  // native OS file dialog. The chosen paths join the shell's context docs and
-  // are passed to the agent at spawn, same as library docs.
-  const addFilesToShell = async (shellId: number, role: string, imagesOnly: boolean) => {
+  // Stage attachments (dropped, pasted, or dialog-picked) on a shell's composer,
+  // deduped by path. Sent with the next turn (start or follow-up), then cleared.
+  const addAttachmentsToShell = (shellId: number, atts: Attachment[]) => {
+    if (atts.length === 0) return;
+    modifyShell(shellId, (s) => {
+      const existing = s.attachments ?? [];
+      const have = new Set(existing.map((a) => a.path));
+      const added = atts.filter((a) => !have.has(a.path));
+      return added.length ? { ...s, attachments: [...existing, ...added] } : s;
+    });
+  };
+  const removeAttachmentFromShell = (shellId: number, path: string) =>
+    modifyShell(shellId, (s) => ({
+      ...s,
+      attachments: (s.attachments ?? []).filter((a) => a.path !== path),
+    }));
+  const clearShellAttachments = (shellId: number) => patchShell(shellId, { attachments: [] });
+  // Attach files (or, filtered to images, screenshots) to a shell via the native
+  // OS file dialog. Images are copied into the worktree's attachments dir (same
+  // as a drop); other files are referenced in place.
+  const addFilesToShell = async (shellId: number, imagesOnly: boolean) => {
+    if (!wsId) return;
     const selected = await open({
       multiple: true,
       directory: false,
       title: imagesOnly ? "Add screenshots" : "Add files",
-      filters: imagesOnly
-        ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic"] }]
-        : undefined,
+      filters: imagesOnly ? [{ name: "Images", extensions: IMAGE_EXTENSIONS }] : undefined,
     });
     if (!selected) return;
     const paths = Array.isArray(selected) ? selected : [selected];
-    updateTabs((current) => ({
-      ...current,
-      shells: current.shells.map((s) => {
-        if (s.id !== shellId) return s;
-        const have = new Set(s.docs.map((d) => d.path));
-        const added = paths.filter((p) => !have.has(p)).map((path) => ({ path, role }));
-        return added.length ? { ...s, docs: [...s.docs, ...added] } : s;
-      }),
-    }));
+    const atts = await importDroppedPaths(wsId, paths);
+    addAttachmentsToShell(shellId, atts);
   };
   // The full set of SessionChat callbacks scoped to ONE shell, so the main and
   // right panes each drive their own agent independently.
@@ -451,8 +485,11 @@ export function ProjectPage() {
     onDetachDoc: (path: string) =>
       patchShell(shell.id, { docs: shell.docs.filter((d) => d.path !== path) }),
     onBrowseDocs: () => setDocsModalShellId(shell.id),
-    onAddFiles: () => void addFilesToShell(shell.id, "file", false),
-    onAddScreenshots: () => void addFilesToShell(shell.id, "screenshot", true),
+    onAddFiles: () => void addFilesToShell(shell.id, false),
+    onAddScreenshots: () => void addFilesToShell(shell.id, true),
+    onAddAttachments: (atts: Attachment[]) => addAttachmentsToShell(shell.id, atts),
+    onRemoveAttachment: (path: string) => removeAttachmentFromShell(shell.id, path),
+    onClearAttachments: () => clearShellAttachments(shell.id),
   });
   const openRenameShell = (shell: ShellTab) => {
     setRenameShellId(shell.id);
