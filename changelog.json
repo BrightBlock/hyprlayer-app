@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.1.1",
+      "date": "2026-06-17",
+      "summary": "File tool calls now show as pin cards with hover-to-preview diffs.",
+      "notes": [
+        "Read/Write/Edit calls render as compact file cards instead of raw paths.",
+        "Hover an edit card to preview its line-level diff."
+      ]
+    },
+    {
       "version": "0.1.0",
       "date": "2026-06-17",
       "summary": "First public build of Hyprlayer with in-app self-update.",
