@@ -28,8 +28,11 @@ env:
   # them unauthenticated).
   RELEASES_REPO: BrightBlock/hyprlayer-releases
   WEBSITE_REPO: jtsiros/brightblock.ai
-  WEBSITE_MANIFEST_PATH: public/hyprlayer/updates/latest.json
-  WEBSITE_CHANGELOG_PATH: public/hyprlayer/updates/changelog.json
+  # The site uses Astro base:/hyprlayer + a Vercel rewrite (/hyprlayer/:p -> /:p),
+  # so a file at public/updates/X is served at /hyprlayer/updates/X — which is
+  # the endpoint in tauri.conf.json. Do NOT add a hyprlayer/ segment here.
+  WEBSITE_MANIFEST_PATH: public/updates/latest.json
+  WEBSITE_CHANGELOG_PATH: public/updates/changelog.json
 
 jobs:
   # Cheap fast-fail: type-check the frontend before spinning up the slower
@@ -300,8 +303,11 @@ jobs:
           }
           JSON
           cp ../app/changelog.json "${{ env.WEBSITE_CHANGELOG_PATH }}"
-          git config user.name  "hyprlayer-bot"
-          git config user.email "hyprlayer-bot@users.noreply.github.com"
+          # Vercel only deploys commits whose author email is tied to a Vercel
+          # account; a bot/noreply author makes the deploy fail with a "set your
+          # commit email" status. Use the project owner's email so it deploys.
+          git config user.name  "jtsiros"
+          git config user.email "jon@brightblock.ai"
           git add "${{ env.WEBSITE_MANIFEST_PATH }}" "${{ env.WEBSITE_CHANGELOG_PATH }}"
           git commit -m "hyprlayer: updater bump to $VERSION + changelog"
           git push
