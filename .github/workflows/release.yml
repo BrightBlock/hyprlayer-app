@@ -77,7 +77,7 @@ jobs:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
       - run: pnpm install --frozen-lockfile
       - name: Configure Apple signing & notarization (optional)
         # No certs yet → ad-hoc signing ('-'). Add the APPLE_* repo secrets
@@ -120,7 +120,7 @@ jobs:
       - name: Locate updater tarball + read signature
         id: hashes
         run: |
-          BUNDLE_DIR=src-tauri/target/universal-apple-darwin/release/bundle
+          BUNDLE_DIR=target/universal-apple-darwin/release/bundle
           ls -la "$BUNDLE_DIR/macos" "$BUNDLE_DIR/dmg"
           # Glob the tarball (always <productName>.app.tar.gz) rather than
           # hardcoding the product name, mirroring how the Windows job finds
@@ -133,9 +133,9 @@ jobs:
         with:
           name: hyprlayer-${{ steps.meta.outputs.version }}-mac
           path: |
-            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
   # ─── Windows x64 (NSIS) ───────────────────────────────────────────
   # --bundles nsis: the NSIS installer is the only Windows format the updater
@@ -162,7 +162,7 @@ jobs:
         with: { targets: x86_64-pc-windows-msvc }
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
       - run: pnpm install --frozen-lockfile
       - name: Build & sign (NSIS)
         env:
@@ -173,7 +173,7 @@ jobs:
         id: find
         shell: bash
         run: |
-          BUNDLE_DIR=src-tauri/target/release/bundle/nsis
+          BUNDLE_DIR=target/release/bundle/nsis
           ls -la "$BUNDLE_DIR"
           SETUP=$(ls "$BUNDLE_DIR"/*-setup.exe | head -n1)
           echo "setup_name=$(basename "$SETUP")" >> "$GITHUB_OUTPUT"
@@ -188,8 +188,8 @@ jobs:
         with:
           name: hyprlayer-${{ steps.meta.outputs.version }}-windows
           path: |
-            src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/nsis/*-setup.exe.sig
 
   # ─── Stitch artifacts into a GitHub Release ───────────────────────
   release:
