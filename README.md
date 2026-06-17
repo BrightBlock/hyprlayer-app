@@ -1,31 +1,54 @@
-# Hyprlayer (desktop app)
+# Hyprlayer: Desktop App for Spec-Driven AI Development
 
-Native macOS + Windows companion app for [hyprlayer](https://brightblock.ai/hyprlayer) —
-spec-driven development with AI agents, without bouncing between tools. Research, plan,
-implement, validate, and ship from one place, with your knowledge base (thoughts) and your
-team's collaboration riding the storage backend you already use.
+## Overview
 
-**Status: pre-alpha.** Current milestone (Phase 0): environment bootstrap — the app reads your
-hyprlayer CLI config, lists mapped projects, verifies the toolchain (`hyprlayer`, `claude`,
-`git`, `gh`), runs backend health checks, and can sync thoughts. Knowledge library, work
-items with isolated worktrees, embedded Claude Code sessions, document review/comments, and
-PR shipping land in the next phases — see `docs/` and the implementation plan.
+Hyprlayer is a native desktop app for spec-driven development with AI coding
+agents — research, plan, implement, validate, and ship without bouncing between
+tools. Each piece of work runs in its own isolated git worktree with an embedded
+Claude Code session, while your knowledge base (thoughts) and your team's
+collaboration ride the storage backend you already use.
 
-## Architecture
+It pairs with the [hyprlayer](https://brightblock.ai/hyprlayer) CLI: the CLI owns
+your config and your thoughts storage; the app gives you a workspace on top of it.
 
-- **Tauri 2** shell (`src-tauri/`): thin IPC layer; commands/events exported to TypeScript via
-  [tauri-specta](https://github.com/specta-rs/tauri-specta) into `src/lib/bindings.ts`
-  (generated — do not edit).
-- **`crates/hyprlayer-core`**: all real logic, no Tauri dependencies. Re-declares the hyprlayer
-  CLI's config schema (the CLI has no lib target), resolves binaries (GUI apps don't inherit
-  your shell PATH), and wraps `hyprlayer` CLI invocations.
-- **React 19 + TypeScript** frontend (`src/`): TanStack Router + Query, zustand, Tailwind v4.
+## Key Features
 
-Ownership rules worth knowing:
+**The Pipeline:**
+- Spec-driven stages — research → plan → implement → validate → ship — each
+  backed by a Claude Code skill
+- One isolated git worktree per work item, provisioned and torn down for you
+- One-click Ship: commit the worktree, push the branch, and open a pull request
+- Per-session model and reasoning-effort choices (Opus, Sonnet, Haiku, Fable),
+  including 1M-context variants
 
-- The hyprlayer **CLI owns its config file**; the app reads and watches it.
-- The app never edits thought documents behind your back; documents live in your thoughts
-  storage (git repo / Obsidian vault), never in the app.
+**Embedded Agent Sessions:**
+- Claude Code runs in-app with a live transcript, tool calls, and a context meter
+- Permission prompts, agent questions, interrupt, resume, and kill — all in the UI
+- Attach knowledge documents to a work item so the agent starts with context
+- File and image attachments for prompts
+
+**Knowledge Library:**
+- Browse, search, and edit your thoughts as first-class documents with frontmatter
+- Templated document creation and a Markdown preview with GitHub-flavored rendering
+- Knowledge graph view to discover how documents connect
+
+**Git & Review:**
+- Fork-style Git panel for staging, unstaging, and discarding changes
+- Side-by-side and unified diffs with an in-app file viewer
+- Per-worktree status so you always see exactly what an agent changed
+
+**Storage Backends:**
+- Bring your own backend: Git, Obsidian, Notion, or Anytype
+- The app reads and watches the CLI's config so your projects and thoughts stay
+  in sync
+
+## Platform Support
+
+- **macOS** — universal binary, signed, with in-app auto-updates
+- **Windows** — signed installer (Tauri 2 + WebView2), with in-app auto-updates
+
+Running apps poll a signed manifest and install updates in place; there is no
+separate update step to run.
 
 ## Development
 
@@ -41,9 +64,12 @@ pnpm typecheck && pnpm lint && pnpm test   # frontend checks
 pnpm tauri build        # production bundle
 ```
 
-To exercise the app against real data, install the hyprlayer CLI and initialize a repository:
+To exercise the app against real data, install the hyprlayer CLI and initialize
+a repository:
 
 ```sh
 brew install brightblock/tap/hyprlayer   # or scoop/winget on Windows
 cd ~/code/your-repo && hyprlayer thoughts init
 ```
+
+See `docs/RELEASING.md` for how releases and in-app updates are published.
