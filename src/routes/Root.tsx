@@ -15,8 +15,9 @@ import { IS_MACOS } from "../lib/platform";
 import { useUiStore } from "../lib/uiStore";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
 import { RepoAvatar } from "../components/RepoAvatar";
-import { BookIcon, ChevronRightIcon, PlusIcon } from "../components/icons";
+import { BookIcon, ChevronRightIcon, GitPullRequestIcon, PlusIcon } from "../components/icons";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
+import { PrStatusBar } from "../features/workstreams/PrStatusBar";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
@@ -102,18 +103,6 @@ function GitBranchIcon() {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
-    </svg>
-  );
-}
-
-function GitPullRequestIcon() {
-  return (
-    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <circle cx="6" cy="6" r="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <circle cx="18" cy="18" r="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M6 8.5V18a3 3 0 0 0 3 3h1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M18 15.5V10a4 4 0 0 0-4-4h-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="m14 3-3 3 3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -406,6 +395,7 @@ export function Root() {
                       Ship
                     </button>
                   )}
+                <PrStatusBar view={activeWorkstream ?? null} onArchive={setArchiveTarget} />
                 {currentSection === "Agent" && (
                   <button
                     type="button"

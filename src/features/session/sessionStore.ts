@@ -26,6 +26,7 @@ import { useShallow } from "zustand/shallow";
 import { commands, type Session, type SessionEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { queryClient } from "../../lib/queryClient";
+import { invalidateWorktreeGit } from "../../lib/queries";
 import { docFromTool, docTitle, type DocKind } from "./toolDisplay";
 import { type Attachment } from "./attachments";
 import { composeStagePrompt } from "./stages";
@@ -143,8 +144,9 @@ function dispatch(sessionId: string, event: SessionEvent): void {
     void respondPermission(sessionId, event.requestId, true, null);
   }
   if (event.kind === "turnDone" || event.kind === "exited") {
-    // The agent likely touched the worktree; refresh its diff.
-    void queryClient.invalidateQueries({ queryKey: ["workstream", current.workstreamId, "diff"] });
+    // The agent likely touched the worktree; refresh the Changes panel
+    // (git-status), any open diffs (file-sides), and the sidebar's line counts.
+    invalidateWorktreeGit(current.workstreamId);
   }
   if (event.kind === "turnDone") {
     // The turn is free — deliver the next message queued while it ran.
@@ -429,6 +431,46 @@ export async function shipWorkstream(workstreamId: string): Promise<void> {
     workstreamId,
     stage: "ship",
     input: "",
+  });
+  openShipTab(workstreamId, session.id);
+}
+
+/**
+ * Hand PR feedback back to the agent on the same branch. CI failures and
+ * requested changes both route here from the PR status bar. Reuses the
+ * workstream's "PR conversation" (the ship tab): if its session is still live,
+ * the instruction is sent as a verbatim follow-up turn (preserving context);
+ * otherwise a fresh `revise`-stage session is started (its first prompt is the
+ * REVISE_PROMPT directive, never SHIP_PROMPT, so the agent won't open a 2nd PR).
+ */
+export async function addressPrFeedback(
+  workstreamId: string,
+  kind: "ci" | "comments",
+  prNumber: number,
+): Promise<void> {
+  const instruction =
+    kind === "ci"
+      ? `CI checks are failing on PR #${prNumber}. Investigate the failures ` +
+        "(`gh pr checks`, `gh run view --log-failed`), fix them, then commit and " +
+        "push to this branch."
+      : `Address the review feedback on PR #${prNumber}. Read it with ` +
+        "`gh pr view --comments`, make the requested changes, then commit and push " +
+        "to this branch.";
+
+  const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
+  const shipTab = tabs?.shells.find((s) => s.mode === "ship");
+  if (shipTab?.sessionId) {
+    const entry = entryOf(shipTab.sessionId);
+    if (entry && !isTerminal(entry.state)) {
+      openShipTab(workstreamId, shipTab.sessionId); // focus the PR conversation
+      await sendMessage(shipTab.sessionId, instruction);
+      return;
+    }
+  }
+  const session = await startSession({
+    workstreamId,
+    stage: "revise",
+    input: instruction,
   });
   openShipTab(workstreamId, session.id);
 }

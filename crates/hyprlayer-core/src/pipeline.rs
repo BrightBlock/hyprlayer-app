@@ -18,6 +18,7 @@ pub enum Stage {
     Implement,
     Validate,
     Ship,
+    Revise,
 }
 
 impl Stage {
@@ -32,6 +33,7 @@ impl Stage {
             "implement" => Some(Stage::Implement),
             "validate" => Some(Stage::Validate),
             "ship" => Some(Stage::Ship),
+            "revise" => Some(Stage::Revise),
             _ => None,
         }
     }
@@ -49,6 +51,7 @@ impl Stage {
             Stage::Implement => "implement",
             Stage::Validate => "validate",
             Stage::Ship => "ship",
+            Stage::Revise => "revise",
         }
     }
 
@@ -62,7 +65,7 @@ impl Stage {
             Stage::Plan => Some("/create_plan"),
             Stage::Implement => Some("/implement_plan"),
             Stage::Validate => Some("/validate_plan"),
-            Stage::General | Stage::Ship => None,
+            Stage::General | Stage::Ship | Stage::Revise => None,
         }
     }
 }
@@ -138,8 +141,10 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
             allowed_tools: allow(&[]),
             disallowed_tools: deny(&["Write", "Edit", "Bash(git commit:*)"]),
         },
-        // Ship is where pushing and PR creation are unlocked.
-        Stage::Ship => StagePolicy {
+        // Ship and Revise both push to the branch and talk to `gh`; Revise
+        // addresses PR feedback (CI failures, review comments) on a branch that
+        // already has a PR, so it shares Ship's posture.
+        Stage::Ship | Stage::Revise => StagePolicy {
             permission_mode: PermissionMode::Default,
             allowed_tools: allow(&[
                 "Write",
@@ -163,6 +168,14 @@ pub const SHIP_PROMPT: &str =
     "Commit all changes in this worktree, push the branch to its remote, then open a \
 pull request against the default branch with a clear title and a summary of what changed.";
 
+/// The Revise directive: address PR feedback on a branch that already has a PR.
+/// The specific feedback (failing CI vs. requested changes) rides in the input.
+/// Explicitly tells the agent NOT to open a second PR. Kept byte-identical to the
+/// frontend `REVISE_PROMPT` (src/features/session/stages.ts).
+pub const REVISE_PROMPT: &str =
+    "A pull request already exists for this branch. Address the outstanding feedback, then \
+commit and push the fixes to the same branch. Do not open a new pull request.";
+
 fn skill_prompt(skill: &str, input: &str) -> String {
     if input.is_empty() {
         skill.to_string()
@@ -182,8 +195,20 @@ pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> St
         // Plain chat: the input verbatim — no skill prefix. Explicitly attached
         // docs/screenshots are still listed below (the user asked for them).
         Stage::General => input.to_string(),
-        Stage::Ship if input.is_empty() => SHIP_PROMPT.to_string(),
-        Stage::Ship => format!("{SHIP_PROMPT}\n\n{input}"),
+        // Ship/Revise send a prose directive (not a skill); extra context, if
+        // any, is appended below it.
+        Stage::Ship | Stage::Revise => {
+            let base = if stage == Stage::Ship {
+                SHIP_PROMPT
+            } else {
+                REVISE_PROMPT
+            };
+            if input.is_empty() {
+                base.to_string()
+            } else {
+                format!("{base}\n\n{input}")
+            }
+        }
         // research/plan/implement/validate each invoke their skill.
         _ => skill_prompt(
             stage
@@ -290,6 +315,24 @@ mod tests {
         );
         // It does not invoke /commit as a slash-command.
         assert!(!compose_prompt(Stage::Ship, "", &[]).starts_with('/'));
+    }
+
+    #[test]
+    fn revise_addresses_feedback_without_a_skill() {
+        assert_eq!(Stage::parse("revise"), Stage::Revise);
+        assert_eq!(Stage::Revise.as_str(), "revise");
+        assert_eq!(Stage::Revise.command(), None);
+        // Bare directive when there's no extra context...
+        assert_eq!(compose_prompt(Stage::Revise, "", &[]), REVISE_PROMPT);
+        // ...the specific feedback is appended below it.
+        assert_eq!(
+            compose_prompt(Stage::Revise, "CI is failing", &[]),
+            format!("{REVISE_PROMPT}\n\nCI is failing"),
+        );
+        // Revise shares Ship's push/gh posture.
+        let revise = policy_for(Stage::Revise);
+        assert!(revise.allowed_tools.iter().any(|t| t.contains("git push")));
+        assert!(revise.allowed_tools.iter().any(|t| t.contains("gh pr")));
     }
 
     #[test]

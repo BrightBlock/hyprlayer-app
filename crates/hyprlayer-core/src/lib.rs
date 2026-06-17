@@ -11,6 +11,7 @@ pub mod gitops;
 pub mod hyprcli;
 pub mod index;
 pub mod pipeline;
+pub mod pr;
 pub mod process;
 pub mod repos;
 pub mod store;

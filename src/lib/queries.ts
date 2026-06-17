@@ -5,6 +5,7 @@ import {
   type BinaryKind,
   type CreateDocInput,
   type FmPatchDto,
+  type MergeMethod,
   type ThoughtQuery,
   type WorkstreamView,
 } from "./bindings";
@@ -264,11 +265,43 @@ export function useReprovisionWorkstream() {
   });
 }
 
+// ── Pull request (derived live from gh) ─────────────────────────────────────
+
+/** The branch's PR (or null), derived live from `gh`. Polls while checks are
+ *  still running so the bar advances from "running" → pass/fail on its own; a
+ *  settled PR (no PR, merged/closed, or checks done) stops polling. */
+export function useWorkstreamPr(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "pr"],
+    queryFn: () => unwrap(commands.workstreamPrStatus(id)),
+    enabled: enabled && id.length > 0,
+    // Reuse cached status across rapid workstream switches instead of re-running
+    // the `gh` subprocess each time; matches the poll cadence below.
+    staleTime: 8000,
+    refetchInterval: (query) => {
+      const pr = query.state.data;
+      return pr && pr.state === "open" && pr.checks === "pending" ? 8000 : false;
+    },
+  });
+}
+
+export function useMergePr(id: string) {
+  return useMutation({
+    mutationFn: (method: MergeMethod) => unwrap(commands.mergeWorkstreamPr(id, method)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstream(id);
+    },
+  });
+}
+
 // ── Source-control panel ──────────────────────────────────────────────────
 
 /** Invalidate the things a staging action changes: the split status and the
- *  workstream's own view (its dirty/line counts in the sidebar tree). */
-function invalidateWorktreeGit(id: string) {
+ *  workstream's own view (its dirty/line counts in the sidebar tree). Exported
+ *  so the session store can refresh the Changes panel after an agent turn edits
+ *  the worktree. */
+export function invalidateWorktreeGit(id: string) {
   void queryClient.invalidateQueries({ queryKey: ["workstream", id, "git-status"] });
   void queryClient.invalidateQueries({ queryKey: ["workstream", id, "file-sides"] });
   invalidateWorkstream(id);

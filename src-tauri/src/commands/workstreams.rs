@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use hyprlayer_core::gitops::{DirEntry, FileSides, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
+use hyprlayer_core::pr::{self, MergeMethod, PrStatus};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
@@ -467,4 +468,46 @@ pub async fn worktree_read_file(
         hyprlayer_core::gitops::read_text_file(p, &path)
     })
     .await
+}
+
+/// The pull request for a workstream's branch, or `None` when there's no PR yet.
+/// Derived live from `gh`. Degrades to `None` (never an error) when gh is
+/// missing/unauthenticated or the call fails — the PR bar simply stays hidden,
+/// matching `list_recent_repos`.
+#[tauri::command]
+#[specta::specta]
+pub async fn workstream_pr_status(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Option<PrStatus>> {
+    let item = load_item(&state, &id).await?;
+    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
+        return Ok(None);
+    };
+    match pr::pr_status(&gh, Path::new(&item.worktree_path), &item.branch).await {
+        Ok(status) => Ok(status),
+        Err(e) => {
+            log::debug!("gh pr status unavailable for {}: {e}", item.branch);
+            Ok(None)
+        }
+    }
+}
+
+/// Merge a workstream's PR with the chosen method (squash/merge/rebase).
+#[tauri::command]
+#[specta::specta]
+pub async fn merge_workstream_pr(
+    state: State<'_, AppState>,
+    id: String,
+    method: MergeMethod,
+) -> CmdResult<()> {
+    let item = load_item(&state, &id).await?;
+    let gh = state
+        .binaries
+        .require(BinaryKind::Gh)
+        .await
+        .map_err(AppError::from)?;
+    pr::merge_pr(&gh, Path::new(&item.worktree_path), &item.branch, method)
+        .await
+        .map_err(AppError::from)
 }

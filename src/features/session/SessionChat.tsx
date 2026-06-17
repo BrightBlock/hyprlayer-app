@@ -54,6 +54,7 @@ const STAGE_INTRO: Record<StageKey, string> = {
   implement: "Runs /implement_plan to make the changes in this worktree, committing as it goes.",
   validate: "Runs /validate_plan to check the work against the plan and the project's tests.",
   ship: "Runs /commit, then helps push the branch and open a pull request.",
+  revise: "Addresses PR feedback — failing CI or requested changes — then pushes fixes to the branch.",
 };
 
 /** The live session-state chip shown in the workstream header for a tab. */

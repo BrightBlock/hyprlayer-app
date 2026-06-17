@@ -16,15 +16,16 @@ export const STAGES = [
   { key: "implement", label: "Implement" },
   { key: "validate", label: "Validate" },
   { key: "ship", label: "Ship" },
+  { key: "revise", label: "Revise" },
 ] as const;
 
 export type StageKey = (typeof STAGES)[number]["key"];
 
-/** Stages a user can pick as an agent mode. Ship is excluded on purpose —
- *  shipping is driven by the header "Ship" action (commit + push + PR), not
- *  chosen as a chat mode. Ship stays in [`STAGES`] so its icon/colour/label
- *  still resolve for the dedicated ship tab. */
-export const MODE_STAGES = STAGES.filter((s) => s.key !== "ship");
+/** Stages a user can pick as an agent mode. Ship and Revise are excluded on
+ *  purpose — both are driven by the PR workflow (the header "Ship" action and
+ *  the PR bar's feedback actions), not chosen as a chat mode. They stay in
+ *  [`STAGES`] so their icon/colour/label still resolve for the ship tab. */
+export const MODE_STAGES = STAGES.filter((s) => s.key !== "ship" && s.key !== "revise");
 
 const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
 
@@ -34,6 +35,14 @@ const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
 export const SHIP_PROMPT =
   "Commit all changes in this worktree, push the branch to its remote, then open a " +
   "pull request against the default branch with a clear title and a summary of what changed.";
+
+/** The instruction the PR-feedback actions (Fix CI / Address comments) run when
+ *  they start a fresh session. Kept byte-identical to the backend `REVISE_PROMPT`
+ *  (crates/hyprlayer-core/src/pipeline.rs); the specific feedback rides in the
+ *  per-action input appended below it. */
+export const REVISE_PROMPT =
+  "A pull request already exists for this branch. Address the outstanding feedback, then " +
+  "commit and push the fixes to the same branch. Do not open a new pull request.";
 
 /** Backend stage is a plain string; anything unknown renders as general. */
 export function stageOf(view: WorkstreamView): StageKey {
@@ -82,6 +91,7 @@ export function composeStagePrompt(stage: string, input: string): string {
   const key = asStageKey(stage);
   if (key === "general") return trimmed; // plain chat: no skill prefix
   if (key === "ship") return trimmed ? `${SHIP_PROMPT}\n\n${trimmed}` : SHIP_PROMPT;
+  if (key === "revise") return trimmed ? `${REVISE_PROMPT}\n\n${trimmed}` : REVISE_PROMPT;
   const command = stageCommand(key)!; // research/plan/implement/validate
   return trimmed ? `${command} ${trimmed}` : command;
 }
@@ -128,5 +138,10 @@ export const MODE_STYLES: Record<
     activeButton: "border-rose-400/40 bg-rose-400/10 text-rose-300",
     badge: "bg-rose-400/10 text-rose-300",
     composer: "border-rose-400/40",
+  },
+  revise: {
+    activeButton: "border-purple-400/40 bg-purple-400/10 text-purple-300",
+    badge: "bg-purple-400/10 text-purple-300",
+    composer: "border-purple-400/40",
   },
 };

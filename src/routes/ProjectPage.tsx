@@ -16,6 +16,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { DiffIcon, DocIcon, PlusIcon, SplitIcon, XIcon } from "../components/icons";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { ChangesPanel } from "../features/workstreams/ChangesPanel";
+import { PrChecksPanel } from "../features/workstreams/PrChecksPanel";
 import { DiffTab } from "../features/workstreams/DiffTab";
 import { FileViewerTab } from "../features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
@@ -901,15 +902,18 @@ export function ProjectPage() {
             onPointerDown={startDiffResize}
           />
           <aside
-            className="min-w-0 shrink-0 border-l border-edge bg-panel"
+            className="flex min-w-0 shrink-0 flex-col border-l border-edge bg-panel"
             style={{ width: diffWidth }}
           >
-            <ChangesPanel
-              workstreamId={activeView?.item.id ?? null}
-              onOpenDoc={openDocPreview}
-              onOpenDiff={openDiff}
-              onOpenFile={openFile}
-            />
+            <div className="flex min-h-0 flex-1 flex-col">
+              <ChangesPanel
+                workstreamId={activeView?.item.id ?? null}
+                onOpenDoc={openDocPreview}
+                onOpenDiff={openDiff}
+                onOpenFile={openFile}
+              />
+            </div>
+            <PrChecksPanel view={activeView ?? null} />
           </aside>
         </>
       )}

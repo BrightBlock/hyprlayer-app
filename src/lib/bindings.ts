@@ -86,6 +86,33 @@ export const commands = {
 	/**  Read a worktree file as text for the read-only viewer. */
 	worktreeReadFile: (id: string, path: string) => typedError<string, AppError>(__TAURI_INVOKE("worktree_read_file", { id, path })),
 	/**
+	 *  The pull request for a workstream's branch, or `None` when there's no PR yet.
+	 *  Derived live from `gh`. Degrades to `None` (never an error) when gh is
+	 *  missing/unauthenticated or the call fails — the PR bar simply stays hidden,
+	 *  matching `list_recent_repos`.
+	 */
+	workstreamPrStatus: (id: string) => typedError<{
+	number: number,
+	url: string,
+	title: string,
+	state: PrState,
+	/**  GitHub reports the PR cleanly mergeable (no conflicts). */
+	mergeable: boolean,
+	checks: ChecksState,
+	checksTotal: number,
+	checksPassed: number,
+	checksFailed: number,
+	/**  The individual checks, for the "which ran?" breakdown popover. */
+	checksList: PrCheck[],
+	/**
+	 *  `APPROVED` | `CHANGES_REQUESTED` | `REVIEW_REQUIRED`, or None when the PR
+	 *  requires no review / has no decision yet.
+	 */
+	reviewDecision: string | null,
+} | null, AppError>(__TAURI_INVOKE("workstream_pr_status", { id })),
+	/**  Merge a workstream's PR with the chosen method (squash/merge/rebase). */
+	mergeWorkstreamPr: (id: string, method: MergeMethod) => typedError<null, AppError>(__TAURI_INVOKE("merge_workstream_pr", { id, method })),
+	/**
 	 *  Start a session for a workstream stage. Composes the stage skill prompt,
 	 *  spawns the driver under the concurrency cap, and streams events back over
 	 *  `on_event`. Returns the persisted [`Session`] row.
@@ -193,6 +220,17 @@ export type Bootstrap = {
 };
 
 export type CheckStatus = "pass" | "warn" | "fail";
+
+/**  The rolled-up state of the PR's CI checks, derived from `statusCheckRollup`. */
+export type ChecksState = 
+/**  No checks configured/reported for the head commit. */
+"none" | 
+/**  At least one check still queued or running. */
+"pending" | 
+/**  Every check completed successfully (or neutral/skipped). */
+"passing" | 
+/**  At least one check failed, errored, or timed out. */
+"failing";
 
 /**
  *  The hyprlayer CLI config file changed on disk (the CLI rewrote it, or the
@@ -358,6 +396,42 @@ export type LinkStatus =
 "unsupported" | 
 /**  Links missing or broken. */
 "broken";
+
+/**  How the Merge button merges — picked per-PR by the user. */
+export type MergeMethod = "squash" | "merge" | "rebase";
+
+/**  One CI check on the PR's head commit, for the per-check breakdown popover. */
+export type PrCheck = {
+	name: string,
+	/**  Per-check outcome — only `Pending`/`Passing`/`Failing` (never `None`). */
+	state: ChecksState,
+	/**  Link to the check's run/details page, when GitHub provides one. */
+	url: string | null,
+};
+
+/**  Open/merged/closed — the PR's lifecycle state from `gh`'s `state` field. */
+export type PrState = "open" | "merged" | "closed";
+
+/**  A branch's pull request as the PR status bar renders it. */
+export type PrStatus = {
+	number: number,
+	url: string,
+	title: string,
+	state: PrState,
+	/**  GitHub reports the PR cleanly mergeable (no conflicts). */
+	mergeable: boolean,
+	checks: ChecksState,
+	checksTotal: number,
+	checksPassed: number,
+	checksFailed: number,
+	/**  The individual checks, for the "which ran?" breakdown popover. */
+	checksList: PrCheck[],
+	/**
+	 *  `APPROVED` | `CHANGES_REQUESTED` | `REVIEW_REQUIRED`, or None when the PR
+	 *  requires no review / has no decision yet.
+	 */
+	reviewDecision: string | null,
+};
 
 export type Project = {
 	/**  Absolute path of the app-owned clone (`~/hyprlayer/repos/<name>`). */
