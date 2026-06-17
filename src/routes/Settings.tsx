@@ -1,7 +1,5 @@
-import { Link } from "@tanstack/react-router";
-
 import { useBootstrap, useRedetectBinaries } from "../lib/queries";
-import { Button, Card, CardTitle, PageError, PageSpinner } from "../components/ui";
+import { Badge, Button, Card, CardTitle, ErrorNote, PageError, PageSpinner } from "../components/ui";
 import { BinaryCard } from "../features/system/BinaryCard";
 import { THEMES, useThemeStore } from "../lib/theme";
 
@@ -101,32 +99,43 @@ export function Settings() {
 
       <Card>
         <CardTitle>Hyprlayer config</CardTitle>
-        <p className="selectable font-mono text-xs text-ink-dim">{data.config.path}</p>
-        <p className="mt-2 text-xs text-ink-dim">
-          The hyprlayer CLI owns this file; the app reads it and follows changes live.
-        </p>
-      </Card>
-
-      <Card>
-        <CardTitle>Projects</CardTitle>
-        <div className="divide-y divide-edge/60">
-          {data.projects.map((project) => (
-            <Link
-              key={project.path}
-              to="/settings/projects/$projectPath"
-              params={{ projectPath: project.path }}
-              className="block py-2 text-sm hover:text-ink"
-            >
-              <span className="block text-ink">{project.mappedName}</span>
-              <span className="selectable block truncate font-mono text-xs text-ink-dim">
-                {project.path}
+        {data.config.state === "ready" && (
+          <div className="space-y-1 text-sm">
+            <p>
+              <Badge tone="ok">Found</Badge>
+              <span className="selectable ml-2 font-mono text-xs text-ink-dim">
+                {data.config.path}
               </span>
-            </Link>
-          ))}
-          {data.projects.length === 0 && (
-            <p className="py-2 text-sm text-ink-dim">No projects mapped.</p>
-          )}
-        </div>
+            </p>
+            <p className="text-ink-dim">
+              User <span className="font-mono text-ink">{data.config.user || "—"}</span> · default
+              backend <span className="font-mono text-ink">{data.config.backendKind}</span>
+              {!data.config.configured && (
+                <span className="ml-2">
+                  <Badge tone="warn">incomplete</Badge>
+                </span>
+              )}
+            </p>
+            <p className="mt-2 text-xs text-ink-dim">
+              The hyprlayer CLI owns this file; the app reads it and follows changes live.
+            </p>
+          </div>
+        )}
+        {data.config.state === "missing" && (
+          <div className="space-y-2 text-sm">
+            <p>
+              <Badge tone="warn">Not set up yet</Badge>
+            </p>
+            <p className="text-ink-dim">
+              No hyprlayer config was found at{" "}
+              <span className="selectable font-mono text-xs">{data.config.path}</span>. Add your
+              first project from the dashboard — the app sets up your thoughts storage automatically.
+            </p>
+          </div>
+        )}
+        {data.config.state === "error" && (
+          <ErrorNote error={{ message: data.config.message, remedy: data.config.remedy }} />
+        )}
       </Card>
     </div>
   );

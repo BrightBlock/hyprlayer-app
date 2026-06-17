@@ -14,6 +14,22 @@ import "./index.css";
 initTheme();
 attachEventListeners();
 
+// Suppress the webview's native right-click menu app-wide so the app doesn't
+// feel like a web page. Editable surfaces (inputs, textareas, the CodeMirror
+// contenteditable) keep the native menu so copy/paste/spellcheck still work, as
+// does anything that opts in with `data-native-menu`. The `instanceof Element`
+// guard avoids throwing when the event targets a non-Element node.
+const NATIVE_MENU_SELECTOR =
+  "input, textarea, [contenteditable]:not([contenteditable='false']), [data-native-menu]";
+window.addEventListener("contextmenu", (e) => {
+  const target = e.target;
+  if (target instanceof Element && target.closest(NATIVE_MENU_SELECTOR)) return;
+  e.preventDefault();
+  // The webview word-selects under the cursor when opening a context menu; with
+  // the native menu suppressed that highlight would just linger, so clear it.
+  window.getSelection()?.removeAllRanges();
+});
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

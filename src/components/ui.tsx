@@ -221,15 +221,25 @@ type ContextMenuProps = {
   children: ReactNode;
 };
 
-/** Fixed-position right-click menu; any window click or Escape closes it. */
+/** The currently-open menu's closer, so opening a new one (even via right-click,
+ *  which doesn't fire a `click`) dismisses any other — only one menu at a time. */
+let closeActiveContextMenu: (() => void) | null = null;
+
+/** Fixed-position right-click menu; any window click or Escape closes it, and
+ *  opening another menu closes this one. */
 export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
   useEffect(() => {
+    // Mounting (or repositioning) closes whatever other menu was open.
+    if (closeActiveContextMenu && closeActiveContextMenu !== onClose) closeActiveContextMenu();
+    closeActiveContextMenu = onClose;
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("click", onClose);
     window.addEventListener("keydown", onKey);
     return () => {
+      if (closeActiveContextMenu === onClose) closeActiveContextMenu = null;
       window.removeEventListener("click", onClose);
       window.removeEventListener("keydown", onKey);
     };

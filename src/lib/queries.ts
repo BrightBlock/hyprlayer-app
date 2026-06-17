@@ -100,9 +100,9 @@ export function useRevealDoc() {
   });
 }
 
-/** Refresh everything a project add/remove touches: the sidebar/onboarding
- *  list, per-project detail, the doc index, and the cross-project workstream
- *  tree (a removed project drops its workstreams from the sidebar). */
+/** Refresh everything a project add/remove touches: the sidebar list,
+ *  per-project detail, the doc index, and the cross-project workstream tree
+ *  (a removed project drops its workstreams from the sidebar). */
 function invalidateProjects() {
   void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
   void queryClient.invalidateQueries({ queryKey: ["project"] });

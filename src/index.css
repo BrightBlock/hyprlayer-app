@@ -26,6 +26,11 @@
   --color-ok: #4caf50;
   --color-warn: #f0b13a;
   --color-bad: #ef5350;
+  /* Brand accent — the blue/violet of the Hyprlayer logo + dashboard
+     highlights. Theme-independent (the brand mark stays constant across
+     themes), so it lives in the shared @theme block rather than per-theme. */
+  --color-brand: #60a5fa;
+  --color-brand-soft: #7dd3fc;
 }
 
 /* Light — warm neutral creams + ivories, terracotta accent shifted darker so

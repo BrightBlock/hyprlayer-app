@@ -6,7 +6,7 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { useAllWorkstreams, useBootstrap } from "../lib/queries";
 import { shipWorkstream } from "../features/session/sessionStore";
@@ -19,7 +19,13 @@ import { BookIcon, ChevronRightIcon, PlusIcon } from "../components/icons";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
-import type { WorkstreamView } from "../lib/bindings";
+import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
+import type { Project, WorkstreamView } from "../lib/bindings";
+
+// One-shot guard (module scope, so it survives re-renders but resets on a cold
+// app load): on launch we land on the dashboard even if the webview restored a
+// deeper route from the previous session.
+let launchedToHome = false;
 
 const PROJECT_SIDEBAR_COLLAPSED = 56;
 const PROJECT_SIDEBAR_MIN = 180;
@@ -138,11 +144,22 @@ function SettingsIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-function SetupIcon() {
+function HomeIcon() {
   return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M12 3v5M12 16v5M5 12h5M14 12h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
+      <path d="M9.5 21v-6h5v6" />
     </svg>
   );
 }
@@ -156,9 +173,8 @@ function decodePathSegment(value: string): string {
 }
 
 function routeProjectPath(pathname: string): string | null {
-  const prefixes = ["/projects/", "/settings/projects/"];
-  const prefix = prefixes.find((item) => pathname.startsWith(item));
-  if (!prefix) return null;
+  const prefix = "/projects/";
+  if (!pathname.startsWith(prefix)) return null;
   const segment = pathname.slice(prefix.length).split("/")[0];
   return segment ? decodePathSegment(segment) : null;
 }
@@ -166,16 +182,21 @@ function routeProjectPath(pathname: string): string | null {
 function routeSection(pathname: string): string {
   if (pathname.startsWith("/projects/") && pathname.endsWith("/docs")) return "Docs";
   if (pathname.startsWith("/projects/")) return "Agent";
-  if (pathname.startsWith("/settings/projects/")) return "Settings";
   if (pathname.startsWith("/library/doc")) return "Document";
   if (pathname.startsWith("/library")) return "Library";
   if (pathname.startsWith("/settings")) return "Settings";
-  if (pathname.startsWith("/onboarding")) return "Setup";
+  if (pathname === "/") return "Home";
   return "Workspace";
 }
 
 const topIconClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink";
+
+/** Bottom-bar icon button (Library / Settings), Termic-style. */
+const footerIconClass = (active: boolean): string =>
+  `inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-edge/60 hover:text-ink ${
+    active ? "bg-edge text-ink" : "text-ink-dim"
+  }`;
 
 /** Conductor-style status chip for a sidebar workstream row: added/deleted
  *  line counts (matching the diff panel), falling back to an ahead-of-base
@@ -207,7 +228,8 @@ export function Root() {
     item?: string;
   };
   const [collapsed, setCollapsed] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(240);
+  // Default to the widest we allow; the user can drag it narrower if desired.
+  const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
   const [shipping, setShipping] = useState(false);
 
   const projects = bootstrap.data?.projects ?? [];
@@ -244,13 +266,21 @@ export function Root() {
   const onSecondaryView =
     pathname.startsWith("/library") ||
     pathname.startsWith("/settings") ||
-    pathname.startsWith("/onboarding") ||
     (pathname.startsWith("/projects/") && pathname.endsWith("/docs"));
   const showBack = canGoBack && onSecondaryView;
 
   // Right-click menu + archive flow for the worktree rows. The view itself
   // carries its project path, so the targets are just the view.
   const navigate = useNavigate();
+
+  // Make the dashboard the launch view: once per cold start, if we opened on a
+  // restored deeper route, redirect home. In-session navigation is untouched.
+  useEffect(() => {
+    if (launchedToHome) return;
+    launchedToHome = true;
+    if (pathname !== "/") void navigate({ to: "/", replace: true });
+  }, [navigate, pathname]);
+
   const [itemMenu, setItemMenu] = useState<{
     x: number;
     y: number;
@@ -259,6 +289,10 @@ export function Root() {
   const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
   const [renameTarget, setRenameTarget] = useState<WorkstreamView | null>(null);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [projectMenu, setProjectMenu] = useState<{ x: number; y: number; project: Project } | null>(
+    null,
+  );
+  const [settingsProject, setSettingsProject] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
 
@@ -288,17 +322,31 @@ export function Root() {
         className="relative flex h-11 shrink-0 items-center border-b border-edge bg-panel"
         data-tauri-drag-region
       >
-        <button
-          type="button"
-          onClick={() => setCollapsed((value) => !value)}
-          className={`absolute top-1/2 inline-flex h-7 w-7 shrink-0 -translate-y-1/2 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink ${
+        <div
+          className={`absolute top-1/2 flex -translate-y-1/2 items-center gap-1 ${
             IS_MACOS ? "left-[92px]" : "left-3"
           }`}
-          title={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
-          aria-label={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
         >
-          <PanelLeftIcon />
-        </button>
+          <button
+            type="button"
+            onClick={() => setCollapsed((value) => !value)}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
+            title={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
+            aria-label={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
+          >
+            <PanelLeftIcon />
+          </button>
+          <Link
+            to="/"
+            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-edge/60 hover:text-ink ${
+              pathname === "/" ? "bg-edge text-ink" : "text-ink-dim"
+            }`}
+            title="Dashboard"
+            aria-label="Dashboard"
+          >
+            <HomeIcon />
+          </Link>
+        </div>
 
         <div
           className="flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3"
@@ -377,15 +425,6 @@ export function Root() {
                 >
                   <BookOpenIcon />
                 </Link>
-                <Link
-                  to="/settings/projects/$projectPath"
-                  params={{ projectPath: currentProject.path }}
-                  className={topIconClass}
-                  title="Project settings"
-                  aria-label="Project settings"
-                >
-                  <SettingsIcon size={18} />
-                </Link>
               </>
             )}
           </div>
@@ -440,6 +479,11 @@ export function Root() {
                     key={p.path}
                     to="/projects/$projectPath"
                     params={{ projectPath: p.path }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setItemMenu(null);
+                      setProjectMenu({ x: e.clientX, y: e.clientY, project: p });
+                    }}
                     className={`mb-1 flex h-9 w-9 items-center justify-center rounded-md hover:bg-edge/60 ${
                       isCurrent ? "bg-edge" : ""
                     }`}
@@ -459,6 +503,11 @@ export function Root() {
               return (
                 <div key={p.path} className="mb-0.5">
                   <div
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setItemMenu(null);
+                      setProjectMenu({ x: e.clientX, y: e.clientY, project: p });
+                    }}
                     className={`group flex items-center rounded-md pr-1 hover:bg-edge/60 ${
                       projectHighlight ? "bg-edge" : ""
                     }`}
@@ -502,6 +551,7 @@ export function Root() {
                         search={{ item: view.item.id }}
                         onContextMenu={(e) => {
                           e.preventDefault();
+                          setProjectMenu(null);
                           setItemMenu({ x: e.clientX, y: e.clientY, view });
                         }}
                         className={`flex items-center gap-2 rounded-md py-1.5 pl-6 pr-2 text-sm hover:bg-edge/60 hover:text-ink ${
@@ -519,65 +569,28 @@ export function Root() {
               );
             })}
 
-            {!collapsed && (
-              <p className="px-2 pb-1 pt-4 text-xs font-medium uppercase tracking-wider text-ink-dim">
-                Workspace
-              </p>
-            )}
-            <Link
-              to="/library"
-              className={
-                collapsed
-                  ? "mt-3 flex h-9 w-9 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink data-[status=active]:bg-edge data-[status=active]:text-ink"
-                  : "block rounded-md px-2 py-1.5 text-sm text-ink-dim hover:bg-edge/60 hover:text-ink data-[status=active]:bg-edge data-[status=active]:text-ink"
-              }
-              title="Library"
-              aria-label="Library"
-            >
-              {collapsed ? <BookIcon size={18} /> : "Library"}
-            </Link>
           </nav>
 
-        <div className="border-t border-edge p-2">
+        <div
+          className={`border-t border-edge p-2 ${
+            collapsed ? "flex flex-col items-center gap-1" : "flex items-center justify-between"
+          }`}
+        >
           <Link
-            to="/onboarding"
-            className={
-              collapsed
-                ? "mb-1 flex h-9 w-9 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
-                : "block rounded-md px-2 py-1.5 text-sm text-ink-dim hover:bg-edge/60 hover:text-ink"
-            }
-            title="Setup"
-            aria-label="Setup"
+            to="/library"
+            className={footerIconClass(pathname.startsWith("/library"))}
+            title="Library"
+            aria-label="Library"
           >
-            {collapsed ? (
-              <span className="relative">
-                <SetupIcon />
-                {!configReady && bootstrap.data && (
-                  <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-warn" />
-                )}
-              </span>
-            ) : (
-              <>
-                Setup
-                {!configReady && bootstrap.data && (
-                  <span className="ml-2 inline-block h-2 w-2 rounded-full bg-warn align-middle" />
-                )}
-              </>
-            )}
+            <BookIcon size={18} />
           </Link>
           <Link
             to="/settings"
-            className={`${
-              collapsed
-                ? "flex h-9 w-9 items-center justify-center rounded-md"
-                : "block rounded-md px-2 py-1.5 text-sm"
-            } hover:bg-edge/60 hover:text-ink ${
-              pathname.startsWith("/settings") ? "bg-edge text-ink" : "text-ink-dim"
-            }`}
+            className={footerIconClass(pathname.startsWith("/settings"))}
             title="Settings"
             aria-label="Settings"
           >
-            {collapsed ? <SettingsIcon /> : "Settings"}
+            <SettingsIcon />
           </Link>
         </div>
         </aside>
@@ -631,6 +644,43 @@ export function Root() {
         </ContextMenu>
       )}
 
+      {projectMenu && (
+        <ContextMenu position={projectMenu} onClose={() => setProjectMenu(null)}>
+          <ContextMenuItem
+            onClick={() => {
+              void navigate({
+                to: "/projects/$projectPath",
+                params: { projectPath: projectMenu.project.path },
+                search: {},
+              });
+              setProjectMenu(null);
+            }}
+          >
+            Open
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              void navigate({
+                to: "/projects/$projectPath",
+                params: { projectPath: projectMenu.project.path },
+                search: { create: true },
+              });
+              setProjectMenu(null);
+            }}
+          >
+            New workstream…
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              setSettingsProject(projectMenu.project);
+              setProjectMenu(null);
+            }}
+          >
+            Project settings…
+          </ContextMenuItem>
+        </ContextMenu>
+      )}
+
       <AddProjectDialog
         open={addProjectOpen}
         onClose={() => setAddProjectOpen(false)}
@@ -642,6 +692,13 @@ export function Root() {
           })
         }
       />
+
+      {settingsProject && (
+        <ProjectSettingsDialog
+          projectPath={settingsProject.path}
+          onClose={() => setSettingsProject(null)}
+        />
+      )}
 
       <RenameWorkstreamDialog target={renameTarget} onClose={() => setRenameTarget(null)} />
 

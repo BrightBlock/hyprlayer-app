@@ -7,6 +7,13 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# The binary is named "Hyprlayer" (not the package name) so the dev menu bar /
+# Dock label reads "Hyprlayer" — in `tauri dev` the bare executable's name is
+# what macOS shows; productName only renames the packaged .app.
+[[bin]]
+name = "Hyprlayer"
+path = "src/main.rs"
+
 [lib]
 # Distinct lib name to avoid bin/lib clashes on Windows.
 name = "hyprlayer_app_lib"

@@ -49,8 +49,8 @@ export function resolveTheme(mode: ThemeMode): ResolvedTheme {
 }
 
 type ThemeStore = {
-  /** The user's selection (may be "system"). Default is the app's classic
-   *  look — Dark+ — so existing users see no change until they pick another. */
+  /** The user's selection (may be "system"). Defaults to the Claude palette;
+   *  a persisted choice (below) overrides it for users who've picked another. */
   mode: ThemeMode;
   setMode: (mode: ThemeMode) => void;
 };
@@ -58,7 +58,7 @@ type ThemeStore = {
 export const useThemeStore = create<ThemeStore>()(
   persist(
     (set) => ({
-      mode: "dark",
+      mode: "claude",
       setMode: (mode) => set({ mode }),
     }),
     {

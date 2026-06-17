@@ -1,18 +1,10 @@
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  redirect,
-} from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 
-import { commands } from "./lib/bindings";
-import { unwrap } from "./lib/ipc";
 import { Root } from "./routes/Root";
-import { Onboarding } from "./routes/Onboarding";
+import { Dashboard } from "./routes/Dashboard";
 import { Settings } from "./routes/Settings";
 import { ProjectPage } from "./routes/ProjectPage";
 import { ProjectDocsPage } from "./routes/ProjectDocsPage";
-import { ProjectSettingsPage } from "./routes/ProjectSettingsPage";
 import { LibraryPage } from "./routes/LibraryPage";
 import { DocPage } from "./routes/DocPage";
 
@@ -47,40 +39,16 @@ const rootRoute = createRootRoute({ component: Root });
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  // Land somewhere useful: a ready setup goes to the first project,
-  // everything else goes to onboarding.
-  beforeLoad: async () => {
-    let target: { to: string; params?: Record<string, string> } = { to: "/onboarding" };
-    try {
-      const bootstrap = await unwrap(commands.getBootstrap());
-      const requiredOk = bootstrap.binaries.every((b) => b.optional || b.state.state === "ok");
-      const first = bootstrap.projects[0];
-      if (requiredOk && bootstrap.config.state === "ready" && first) {
-        target = { to: "/projects/$projectPath", params: { projectPath: first.path } };
-      }
-    } catch {
-      // fall through to onboarding
-    }
-    throw redirect(target as Parameters<typeof redirect>[0]);
-  },
-});
-
-const onboardingRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/onboarding",
-  component: Onboarding,
+  // The home dashboard is the landing surface. We deliberately do NOT block in
+  // beforeLoad on a bootstrap IPC — that delayed first paint. The shell renders
+  // instantly. Setup/config lives under Settings now.
+  component: Dashboard,
 });
 
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
   component: Settings,
-});
-
-const projectSettingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/settings/projects/$projectPath",
-  component: ProjectSettingsPage,
 });
 
 const libraryRoute = createRoute({
@@ -141,9 +109,7 @@ const projectDocsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  onboardingRoute,
   settingsRoute,
-  projectSettingsRoute,
   libraryRoute,
   docRoute,
   projectDocsRoute,
