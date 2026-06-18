@@ -89,15 +89,16 @@ const StreamCursor = () => (
 function AssistantMessage({ text, streaming }: { text: string; streaming: boolean }) {
   const shown = useSmoothText(text, streaming);
 
-  // While streaming, render plain text (cheap, and avoids markdown structures
-  // "snapping" as their closing tokens arrive); format on completion.
+  // Render markdown live as the text streams in (react-markdown handles
+  // partial/unterminated structures gracefully), so the user sees formatted
+  // output instead of raw markdown until the turn completes.
   if (streaming) {
     return (
-      <div className="selectable text-sm leading-relaxed text-ink">
+      <div className="selectable">
         {shown ? (
-          <span className="whitespace-pre-wrap break-words">{shown}</span>
+          <MarkdownPreview body={shown} />
         ) : (
-          <span className="text-ink-dim">…</span>
+          <span className="text-sm leading-relaxed text-ink-dim">…</span>
         )}
         <StreamCursor />
       </div>
