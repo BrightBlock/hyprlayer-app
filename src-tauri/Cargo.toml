@@ -44,6 +44,7 @@ specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 specta-typescript = "0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 log = "0.4"
+base64 = "0.22"
 uuid = { version = "1.23.3", features = ["v4"] }
 # Not used directly: caps the transitive `time` version because time 0.3.48
 # added a `From` impl that breaks coherence in cookie 0.18.1 (E0119).

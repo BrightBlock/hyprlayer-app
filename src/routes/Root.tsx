@@ -6,16 +6,36 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
+import { openPath } from "@tauri-apps/plugin-opener";
 
-import { useAllWorkstreams, useBootstrap } from "../lib/queries";
+import { useAllWorkstreams, useBootstrap, useEditorTargets } from "../lib/queries";
+import { useElementWidth } from "../lib/useElementWidth";
 import { shipWorkstream } from "../features/session/sessionStore";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
 import { useUiStore } from "../lib/uiStore";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
 import { RepoAvatar } from "../components/RepoAvatar";
-import { BookIcon, ChevronRightIcon, GitPullRequestIcon, PlusIcon } from "../components/icons";
+import {
+  BookIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ClipboardIcon,
+  CodeIcon,
+  FolderIcon,
+  GitPullRequestIcon,
+  PlusIcon,
+  TerminalIcon,
+} from "../components/icons";
+import type { EditorTarget } from "../lib/bindings";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { PrStatusBar } from "../features/workstreams/PrStatusBar";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
@@ -211,6 +231,132 @@ function WorkstreamRowChip({ view }: { view: WorkstreamView }) {
   return null;
 }
 
+/** A row/trigger icon for a detected app: its real rendered icon when the
+ *  backend could rasterize one, otherwise a glyph standing in for its kind.
+ *  App icons are full-bleed squircles, so they read heavier than the thin
+ *  stroke glyphs beside them — render them at the exact target size (no
+ *  upscaling) so they sit at the same optical weight. */
+function appIcon(app: EditorTarget, size = 16): ReactNode {
+  if (app.iconDataUrl) {
+    return (
+      <img
+        src={app.iconDataUrl}
+        alt=""
+        className="block shrink-0 rounded-[4px]"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  switch (app.kind) {
+    case "files":
+      return <FolderIcon size={size} />;
+    case "terminal":
+      return <TerminalIcon size={size} />;
+    default:
+      return <CodeIcon size={size} />;
+  }
+}
+
+/** Top-bar dropdown that opens the active worktree (or project) directory in
+ *  any installed editor / terminal — detected by the backend so only apps the
+ *  user actually has are listed — plus a Copy path fallback. Sits just left of
+ *  the changes-sidebar toggle. */
+function OpenInMenu({ dir }: { dir: string }) {
+  const [open, setOpen] = useState(false);
+  const targets = useEditorTargets();
+
+  const items = useMemo(() => {
+    const apps = (targets.data ?? []).map((app) => ({
+      key: app.id,
+      label: app.name,
+      icon: appIcon(app),
+      run: (): void => {
+        // Best-effort: a wrong/uninstalled handler shouldn't surface a scary
+        // error for a convenience action, but log so failures are debuggable.
+        const p = app.openWith ? openPath(dir, app.openWith) : openPath(dir);
+        void p.catch((e) => console.error(`Open in ${app.name} failed`, e));
+      },
+    }));
+    return [
+      ...apps,
+      {
+        key: "copy-path",
+        label: "Copy path",
+        icon: <ClipboardIcon size={16} />,
+        run: (): void => {
+          void navigator.clipboard.writeText(dir);
+        },
+      },
+    ];
+  }, [targets.data, dir]);
+
+  // While open, number keys (1–9) trigger the matching row, mirroring the
+  // accelerators shown at the right of each item; Escape closes.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      const n = Number(e.key);
+      if (Number.isInteger(n) && n >= 1 && n <= Math.min(items.length, 9)) {
+        e.preventDefault();
+        setOpen(false);
+        items[n - 1].run();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, items]);
+
+  // The trigger wears the default editor's icon (first detected editor, else
+  // the first openable app), Conductor-style, so it reads as "open in editor".
+  const apps = targets.data ?? [];
+  const defaultApp = apps.find((a) => a.kind === "editor") ?? apps.find((a) => a.id !== "files");
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-7 items-center gap-0.5 rounded-md pl-1.5 pr-1 text-ink-dim hover:bg-edge/60 hover:text-ink"
+        title="Open in editor or terminal"
+        aria-label="Open working directory in editor or terminal"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        {defaultApp ? appIcon(defaultApp, 16) : <CodeIcon size={16} />}
+        <ChevronDownIcon size={12} className="text-ink-dim/80" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="absolute right-0 top-full z-30 mt-1.5 min-w-[220px] overflow-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
+            {items.map((it, i) => (
+              <button
+                key={it.key}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  it.run();
+                }}
+                className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-ink-dim hover:bg-edge/50 hover:text-ink"
+              >
+                <span className="shrink-0">{it.icon}</span>
+                <span className="flex-1 font-medium">{it.label}</span>
+                {i < 9 && (
+                  <span className="shrink-0 font-mono text-[10px] text-ink-dim/60">{i + 1}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Root() {
   const bootstrap = useBootstrap();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -285,11 +431,23 @@ export function Root() {
   const [settingsProject, setSettingsProject] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
+  const diffWidth = useUiStore((state) => state.diffWidth);
 
   const contentOffset = Math.max(
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
     IS_MACOS ? TOP_CHROME_MIN_CONTENT_OFFSET : 0,
   );
+  // Inset the right-side controls (file opener + changes toggle, etc.) so they
+  // sit at the agent pane's right margin, mirroring how the breadcrumb tracks
+  // the left sidebar. Only the agent view has the diff sidebar, and only while
+  // it's shown; everywhere else the controls stay flush to the window edge.
+  const rightOffset = currentSection === "Agent" && !diffHidden ? diffWidth : 0;
+  // Collapse the labelled header controls (the "Ship" button) to icon-only when
+  // the toolbar gets crowded — measured off the header's content row so it
+  // accounts for the sidebar width, not just the window.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const headerWidth = useElementWidth(headerRef);
+  const compactHeader = headerWidth > 0 && headerWidth < 680;
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (collapsed) return;
     startEdgeDrag(event, {
@@ -339,6 +497,7 @@ export function Root() {
         </div>
 
         <div
+          ref={headerRef}
           className="flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3"
           style={{ marginLeft: contentOffset }}
           data-tauri-drag-region
@@ -363,7 +522,10 @@ export function Root() {
             )}
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div
+            className="flex shrink-0 items-center gap-2"
+            style={{ marginRight: rightOffset }}
+          >
             {showBack && (
               <button
                 type="button"
@@ -390,12 +552,14 @@ export function Root() {
                       }}
                       className="inline-flex h-7 items-center gap-2 rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 text-sm font-medium text-emerald-300 hover:bg-emerald-400/20 disabled:opacity-60"
                       title="Commit, push, and open a pull request"
+                      aria-label="Ship"
                     >
                       <GitPullRequestIcon />
-                      Ship
+                      {!compactHeader && "Ship"}
                     </button>
                   )}
                 <PrStatusBar view={activeWorkstream ?? null} onArchive={setArchiveTarget} />
+                <OpenInMenu dir={activeWorkstream?.item.worktreePath ?? currentProject.path} />
                 {currentSection === "Agent" && (
                   <button
                     type="button"

@@ -1,4 +1,5 @@
 mod commands;
+mod editors;
 mod error;
 mod events;
 mod session_registry;
@@ -73,6 +74,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::redetect_binaries,
             commands::system::get_app_settings,
             commands::system::set_app_settings,
+            commands::system::detect_editors,
         ])
         .events(collect_events![
             events::ConfigChanged,

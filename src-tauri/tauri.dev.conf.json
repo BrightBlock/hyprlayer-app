@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Hyprlayer Dev",
+  "identifier": "ai.brightblock.hyprlayer.dev",
+  "build": {
+    "beforeDevCommand": "pnpm exec vite --port 1430",
+    "devUrl": "http://localhost:1430"
+  }
+}

@@ -4,7 +4,8 @@ use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use tauri::State;
 use tauri_specta::Event;
 
-use crate::error::CmdResult;
+use crate::editors::{self, EditorTarget};
+use crate::error::{AppError, CmdResult};
 use crate::events::BinariesChanged;
 use crate::settings::AppSettings;
 use crate::state::AppState;
@@ -70,4 +71,17 @@ pub async fn set_app_settings(
 ) -> CmdResult<AppSettings> {
     state.settings.set(settings).await?;
     Ok(state.settings.get().await)
+}
+
+/// Installed editors/terminals plus the OS file manager, for the "Open in…"
+/// menu. Pure filesystem probing (no child processes), so it's safe to call on
+/// every menu open; the frontend caches it anyway.
+#[tauri::command]
+#[specta::specta]
+pub async fn detect_editors() -> CmdResult<Vec<EditorTarget>> {
+    // Detection rasterizes app icons via `sips`, so keep it off the async
+    // runtime's worker threads.
+    tokio::task::spawn_blocking(editors::detect)
+        .await
+        .map_err(|e| AppError::internal(format!("editor detection failed: {e}")))
 }

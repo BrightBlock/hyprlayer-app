@@ -168,6 +168,12 @@ export const commands = {
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
 	getAppSettings: () => typedError<AppSettings, AppError>(__TAURI_INVOKE("get_app_settings")),
 	setAppSettings: (settings: AppSettings) => typedError<AppSettings, AppError>(__TAURI_INVOKE("set_app_settings", { settings })),
+	/**
+	 *  Installed editors/terminals plus the OS file manager, for the "Open in…"
+	 *  menu. Pure filesystem probing (no child processes), so it's safe to call on
+	 *  every menu open; the frontend caches it anyway.
+	 */
+	detectEditors: () => typedError<EditorTarget[], AppError>(__TAURI_INVOKE("detect_editors")),
 };
 
 /** Events */
@@ -306,6 +312,25 @@ export type DocMeta = {
 	fmWarnings: string[],
 	mtimeMs: number | null,
 	sizeBytes: number | null,
+};
+
+/**  What sort of app an entry is, so the menu can group/label sensibly. */
+export type EditorKind = 
+/**  The OS file manager (Finder / Explorer / default handler). */
+"files" | "editor" | "terminal";
+
+/**
+ *  One installed app the user can open a directory in. `openWith` is the value
+ *  the frontend passes to `openPath(dir, openWith)`; `None` means "open with
+ *  the OS default handler for a directory" (the file manager). `iconDataUrl` is
+ *  a `data:image/png` of the app's real icon when we could rasterize one.
+ */
+export type EditorTarget = {
+	id: string,
+	name: string,
+	kind: EditorKind,
+	openWith: string | null,
+	iconDataUrl: string | null,
 };
 
 /**  How a claude process ended. */

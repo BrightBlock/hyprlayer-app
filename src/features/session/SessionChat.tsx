@@ -26,6 +26,7 @@ import {
   XIcon,
 } from "../../components/icons";
 import { errorMessage } from "../../lib/ipc";
+import { useElementWidth } from "../../lib/useElementWidth";
 import type { WorkstreamView } from "../../lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
 import { AttachmentCards } from "./AttachmentCard";
@@ -127,6 +128,7 @@ function ComposerMenu({
   onSelect,
   title,
   custom,
+  compact = false,
 }: {
   leading: ReactNode;
   label: string;
@@ -139,6 +141,9 @@ function ComposerMenu({
    *  one of `items` — used by the model picker to accept ANY `--model` the CLI
    *  takes (an alias or a full id). Submitting calls `onSelect` with the text. */
   custom?: { label: string; placeholder?: string };
+  /** Icon-only trigger (label/hint/chevron hidden) when the composer is too
+   *  narrow to fit them — the dropdown contents are unchanged. */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -177,15 +182,19 @@ function ComposerMenu({
       <button
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
-        title={title}
+        title={compact ? `${title}: ${label}` : title}
         className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-edge/50 ${
           activeDanger ? "text-bad hover:text-bad" : "text-ink-dim hover:text-ink"
         }`}
       >
         <span className="shrink-0">{leading}</span>
-        <span className={`font-medium ${activeDanger ? "text-bad" : "text-ink"}`}>{label}</span>
-        {hint && <span className={activeDanger ? "text-bad/80" : "text-ink-dim"}>{hint}</span>}
-        <ChevronDownIcon size={12} />
+        {!compact && (
+          <>
+            <span className={`font-medium ${activeDanger ? "text-bad" : "text-ink"}`}>{label}</span>
+            {hint && <span className={activeDanger ? "text-bad/80" : "text-ink-dim"}>{hint}</span>}
+            <ChevronDownIcon size={12} />
+          </>
+        )}
       </button>
       {open && (
         <>
@@ -632,6 +641,12 @@ export function SessionChat({
   addAttachmentsRef.current = onAddAttachments;
   const workstreamId = view.item.id;
 
+  // Collapse the composer toolbar to icon-only when the pane is too narrow to
+  // fit the picker labels (e.g. a split pane, or a small window). Measured off
+  // the pane root so it tracks the actual available width, not the window.
+  const paneWidth = useElementWidth(dropRef);
+  const compactComposer = paneWidth > 0 && paneWidth < 560;
+
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
   const mode = asStageKey(shell.mode);
@@ -917,10 +932,11 @@ export function SessionChat({
                   {/* Mode is fixed at spawn → a badge once running; a picker before. */}
                   {started ? (
                     <span
+                      title={compactComposer ? stageLabel(mode) : undefined}
                       className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium ${MODE_STYLES[mode].badge}`}
                     >
                       <ModeIcon mode={mode} size={13} />
-                      {stageLabel(mode)}
+                      {!compactComposer && stageLabel(mode)}
                     </span>
                   ) : (
                     <ComposerMenu
@@ -934,6 +950,7 @@ export function SessionChat({
                       }))}
                       activeKey={mode}
                       onSelect={(k) => onModeChange(k as StageKey)}
+                      compact={compactComposer}
                     />
                   )}
                   {/* Model + effort stay visible/selectable; mid-session changes
@@ -947,6 +964,7 @@ export function SessionChat({
                     activeKey={model.key}
                     onSelect={onModelChange}
                     custom={{ label: "Custom…", placeholder: "alias or claude-…" }}
+                    compact={compactComposer}
                   />
                   <ComposerMenu
                     title="Reasoning effort"
@@ -955,6 +973,7 @@ export function SessionChat({
                     items={EFFORTS.map((e) => ({ key: e.key, label: e.label }))}
                     activeKey={effort.key}
                     onSelect={onEffortChange}
+                    compact={compactComposer}
                   />
                   {/* Permission posture for the next session this tab starts.
                       "Bypass permissions" runs claude with no approval prompts —
@@ -973,6 +992,7 @@ export function SessionChat({
                     }))}
                     activeKey={permissionMode.key}
                     onSelect={(k) => void handlePermissionModeChange(k)}
+                    compact={compactComposer}
                   />
 
                   <div className="ml-auto flex items-center gap-1">

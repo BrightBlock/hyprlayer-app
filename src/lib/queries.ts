@@ -19,6 +19,16 @@ export function useBootstrap() {
   });
 }
 
+/** Installed editors/terminals for the "Open in…" menu. Apps rarely come and
+ *  go mid-session, so this is fetched once and kept until the app reloads. */
+export function useEditorTargets() {
+  return useQuery({
+    queryKey: ["editor-targets"],
+    queryFn: () => unwrap(commands.detectEditors()),
+    staleTime: Infinity,
+  });
+}
+
 export function useProjectDetail(path: string) {
   return useQuery({
     queryKey: ["project", path],

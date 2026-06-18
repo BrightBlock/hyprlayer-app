@@ -42,12 +42,6 @@ import { basename } from "../lib/path";
 import { clamp, startEdgeDrag } from "../lib/resize";
 import { useUiStore } from "../lib/uiStore";
 
-// The diff/changes sidebar is fixed-width: it's either open at this width or
-// hidden entirely (top-bar toggle). No drag-resize. Matched to the left project
-// sidebar's default width (Root's PROJECT_SIDEBAR_MAX) so the two flank the
-// workspace symmetrically.
-const DIFF_SIDEBAR_WIDTH = 360;
-
 /** A doc attached as context to ONE agent tab. */
 export type AttachedDoc = {
   path: string;
@@ -130,6 +124,10 @@ export function ProjectPage() {
   const [docsModalShellId, setDocsModalShellId] = useState<number | null>(null);
   // Hidden state lives in a shared store so the top-bar toggle controls it.
   const diffHidden = useUiStore((state) => state.diffHidden);
+  // Width lives in the same store so the Root header can inset its right-side
+  // controls to the agent pane's right margin (and track this if it ever
+  // becomes drag-resizable).
+  const diffWidth = useUiStore((state) => state.diffWidth);
   // Right-split width as a fraction of the agent area (0..1). The split's
   // open/closed state and pane assignments persist in the tab store, but the
   // exact ratio resets to a sane default per visit.
@@ -616,7 +614,7 @@ export function ProjectPage() {
           : "text-ink-dim hover:bg-panel-2 hover:text-ink"
       }`}
     >
-      <span className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium">
+      <span className="flex min-w-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium">
         {shell.diffView ? (
           <span className="text-ink-dim" title="Diff view">
             <DiffIcon size={13} />
@@ -628,7 +626,9 @@ export function ProjectPage() {
         ) : (
           <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
         )}
-        {shell.title}
+        <span className="max-w-[160px] truncate" title={shell.title}>
+          {shell.title}
+        </span>
         {!isViewerShell(shell) && <SessionTabDot sessionId={shell.sessionId} />}
       </span>
       {opts.closable && (
@@ -901,7 +901,7 @@ export function ProjectPage() {
         <>
           <aside
             className="flex min-w-0 shrink-0 flex-col border-l border-edge bg-panel"
-            style={{ width: DIFF_SIDEBAR_WIDTH }}
+            style={{ width: diffWidth }}
           >
             <div className="flex min-h-0 flex-1 flex-col">
               <ChangesPanel
