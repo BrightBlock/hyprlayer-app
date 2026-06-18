@@ -699,6 +699,40 @@ export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
 }
 
 /**
+ * The most recently created doc of `kind` in a workstream, or null.
+ * Recency is defined by traversal order (session insertion order → transcript
+ * order within a session) — the last matching write/edit wins. This is
+ * deliberately NOT derived from `useWorkstreamDocs`: that selector dedups by
+ * keeping the *first* occurrence of a path, whereas here a re-edited older doc
+ * must win over a newer one of the same kind, so the two cannot be unified
+ * without changing which doc gets suggested.
+ */
+export function useMostRecentDoc(
+  workstreamId: string | null,
+  kind: DocKind | null,
+): CreatedDoc | null {
+  const key = useSessionStore(
+    useShallow((s) => {
+      if (!workstreamId || !kind) return null;
+      let last: string | null = null;
+      for (const entry of Object.values(s.sessions)) {
+        if (entry.workstreamId !== workstreamId) continue;
+        for (const item of entry.items) {
+          if (item.kind !== "tool") continue;
+          const doc = docFromTool(item.name, item.input);
+          if (doc && doc.kind === kind) last = doc.path;
+        }
+      }
+      return last;
+    }),
+  );
+  return useMemo(
+    () => (key ? { kind: kind as DocKind, path: key, title: docTitle(key) } : null),
+    [key, kind],
+  );
+}
+
+/**
  * The single live-activity signal for a whole workstream, folded from the states
  * of every session bound to it. Drives the sidebar/list activity dot so you can
  * see at a glance which workstreams are running, which are blocked on you, and

@@ -8,6 +8,7 @@
  */
 
 import type { WorkstreamView } from "../../lib/bindings";
+import type { DocKind } from "./toolDisplay";
 
 export const STAGES = [
   { key: "general", label: "General" },
@@ -69,6 +70,20 @@ export function asStageKey(stage: string): StageKey {
 
 export function stageLabel(stage: string): string {
   return STAGES.find((s) => s.key === asStageKey(stage))!.label;
+}
+
+/** Which doc kind a pane in this stage should suggest, or null for none. */
+export function suggestedDocKind(stage: string): DocKind | null {
+  switch (asStageKey(stage)) {
+    case "plan":
+      return "research"; // planning builds on research
+    case "implement":
+      return "plan"; // implementing builds on a plan
+    case "validate":
+      return "plan"; // validating checks against a plan
+    default:
+      return null; // general, research → no suggestion
+  }
 }
 
 /**

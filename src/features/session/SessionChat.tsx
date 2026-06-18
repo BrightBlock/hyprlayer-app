@@ -33,7 +33,7 @@ import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips
 import { AttachmentCards } from "./AttachmentCard";
 import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
 import type { ShellTab } from "../../routes/ProjectPage";
-import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, type StageKey } from "./stages";
+import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, suggestedDocKind, type StageKey } from "./stages";
 import { EFFORTS, MODELS, effortOption, modelOption } from "./models";
 import { PERMISSION_MODES, permissionModeOption } from "./permissions";
 import { formatTokens } from "./toolDisplay";
@@ -50,6 +50,7 @@ import {
   startSession,
   stopSession,
   useSession,
+  useMostRecentDoc,
   type QueuedMessage,
 } from "./sessionStore";
 import { describeState, isBusy, isTerminal, isWorking, type PendingQuestion } from "./transcript";
@@ -604,7 +605,10 @@ type Props = {
   onSessionStarted: (sessionId: string) => void;
   onResetSession: () => void;
   onOpenDoc: (id: string) => void;
+  /** Remove a doc — detaches a manual doc, dismisses (and records) a suggested one. */
   onDetachDoc: (path: string) => void;
+  /** Reconcile the pane's auto-suggested doc (called by the mode-suggestion effect). */
+  onSuggestDoc: (path: string | null, role: string) => void;
   /** Open the library picker (centered modal) to attach context docs. */
   onBrowseDocs: () => void;
   /** Native OS file dialog → attach the chosen files as context. */
@@ -631,6 +635,7 @@ export function SessionChat({
   onResetSession,
   onOpenDoc,
   onDetachDoc,
+  onSuggestDoc,
   onBrowseDocs,
   onAddFiles,
   onAddScreenshots,
@@ -700,6 +705,18 @@ export function SessionChat({
       void restoreSessionIfNeeded(shell.sessionId, view.item.id, shell.mode, permissionMode.flag);
     }
   }, [shell.sessionId, hasEntry, view.item.id, shell.mode, permissionMode.flag]);
+
+  // Mode-aware suggestion: auto-attach the most recent relevant doc (research
+  // for plan-mode, plan for implement/validate) as a "suggested" chip while the
+  // session hasn't started yet. The selector is cheap (single-string key, shallow
+  // equality) and the effect runs only on [started, recent?.path, mode] changes.
+  const suggestKind = suggestedDocKind(mode);
+  const recent = useMostRecentDoc(workstreamId, suggestKind);
+  useEffect(() => {
+    if (started) return; // suggestions only apply before a session is launched
+    onSuggestDoc(recent?.path ?? null, recent?.kind ?? "other");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, recent?.path, mode]);
 
   // Drag-and-drop. Tauri intercepts OS file drops at the window level (HTML5
   // drop events never fire), so we subscribe to the webview's drag-drop stream

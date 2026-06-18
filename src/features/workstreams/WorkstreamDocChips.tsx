@@ -20,7 +20,7 @@ type Props = {
   docs: AttachedDoc[];
   /** Open a doc (absolute-path id) in the doc viewer. */
   onOpenDoc: (id: string) => void;
-  /** Detach a doc from this tab's context. */
+  /** Remove a doc from this tab — detaches a manual doc, dismisses a suggested one. */
   onDetach: (id: string) => void;
   /** Jump to the Docs view to attach more context. */
   onBrowse: () => void;
@@ -33,33 +33,43 @@ type Props = {
 export function WorkstreamDocChips({ docs, onOpenDoc, onDetach, onBrowse }: Props) {
   return (
     <div className="mb-2 flex flex-wrap items-center gap-1.5">
-      {docs.map((doc) => (
-        <span
-          key={doc.path}
-          className="inline-flex max-w-56 items-center gap-1 rounded-md border border-edge bg-panel-2 pl-1.5 text-xs text-ink-dim"
-        >
-          <span className="shrink-0 text-accent">
-            <RoleIcon role={doc.role} />
+      {docs.map((doc) => {
+        const verb = doc.suggested ? "Dismiss" : "Detach";
+        return (
+          <span
+            key={doc.path}
+            className={`inline-flex max-w-56 items-center gap-1 rounded-md border bg-panel-2 pl-1.5 text-xs text-ink-dim ${
+              doc.suggested ? "border-dashed border-edge/70" : "border-edge"
+            }`}
+          >
+            <span className="shrink-0 text-accent">
+              <RoleIcon role={doc.role} />
+            </span>
+            <button
+              type="button"
+              onClick={() => onOpenDoc(doc.path)}
+              className="min-w-0 truncate py-1 hover:text-ink"
+              title={doc.path}
+            >
+              {chipLabel(doc.path)}
+            </button>
+            {doc.suggested && (
+              <span className="shrink-0 rounded px-1 py-0.5 text-[10px] leading-none text-ink-dim/60">
+                Suggested
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => onDetach(doc.path)}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-edge hover:text-ink"
+              title={doc.suggested ? "Dismiss suggestion" : "Detach from this tab"}
+              aria-label={`${verb} ${chipLabel(doc.path)}`}
+            >
+              <XIcon size={10} strokeWidth={2.4} />
+            </button>
           </span>
-          <button
-            type="button"
-            onClick={() => onOpenDoc(doc.path)}
-            className="min-w-0 truncate py-1 hover:text-ink"
-            title={doc.path}
-          >
-            {chipLabel(doc.path)}
-          </button>
-          <button
-            type="button"
-            onClick={() => onDetach(doc.path)}
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-edge hover:text-ink"
-            title="Detach from this tab"
-            aria-label={`Detach ${chipLabel(doc.path)}`}
-          >
-            <XIcon size={10} strokeWidth={2.4} />
-          </button>
-        </span>
-      ))}
+        );
+      })}
       <button
         type="button"
         onClick={onBrowse}

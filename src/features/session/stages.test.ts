@@ -6,6 +6,7 @@ import {
   STAGES,
   composeStagePrompt,
   stageCommand,
+  suggestedDocKind,
 } from "./stages";
 
 describe("stage modes", () => {
@@ -16,6 +17,30 @@ describe("stage modes", () => {
     for (const mode of MODE_STAGES) {
       expect(STAGES.find((s) => s.key === mode.key)).toBeDefined();
     }
+  });
+});
+
+describe("suggestedDocKind", () => {
+  it("plan stage suggests research docs", () => {
+    expect(suggestedDocKind("plan")).toBe("research");
+  });
+
+  it("implement stage suggests plan docs", () => {
+    expect(suggestedDocKind("implement")).toBe("plan");
+  });
+
+  it("validate stage suggests plan docs", () => {
+    expect(suggestedDocKind("validate")).toBe("plan");
+  });
+
+  it("general and research stages suggest nothing", () => {
+    expect(suggestedDocKind("general")).toBeNull();
+    expect(suggestedDocKind("research")).toBeNull();
+  });
+
+  it("unknown stages suggest nothing", () => {
+    expect(suggestedDocKind("nonsense")).toBeNull();
+    expect(suggestedDocKind("")).toBeNull();
   });
 });
 

@@ -44,9 +44,10 @@ type TabsStore = { byWs: Record<string, WsTabState> };
 export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
     name: "hyprlayer:workstream-tabs",
-    // v2 added `attachments` to every shell — backfill it on rehydrate so tabs
-    // persisted by an older build don't crash on `shell.attachments.length`.
-    version: 2,
+    // v2 added `attachments` to every shell.
+    // v3 added `dismissedSuggestions` to every shell — backfill it on rehydrate
+    // so tabs persisted by an older build don't crash on accessing the field.
+    version: 3,
     migrate: (persisted) => {
       const state = persisted as TabsStore | undefined;
       if (!state?.byWs) return { byWs: {} };
@@ -55,6 +56,7 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
           ...s,
           docs: s.docs ?? [],
           attachments: s.attachments ?? [],
+          dismissedSuggestions: s.dismissedSuggestions ?? [],
         }));
       }
       return state;

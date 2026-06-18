@@ -46,6 +46,8 @@ import { DIFF_SIDEBAR_MAX, DIFF_SIDEBAR_MIN, useUiStore } from "../lib/uiStore";
 export type AttachedDoc = {
   path: string;
   role: string;
+  /** Auto-suggested by the pane's mode (not user-attached). */
+  suggested?: boolean;
 };
 
 /** A chat tab inside ONE workstream. Each workstream owns its own set.
@@ -59,6 +61,9 @@ export type ShellTab = {
   mode: StageKey;
   draft: string;
   docs: AttachedDoc[];
+  /** Paths of suggested docs the user explicitly dismissed in this pane; never
+   *  re-suggested for the lifetime of the tab even if the mode switches back. */
+  dismissedSuggestions?: string[];
   /** Files/screenshots staged in this tab's composer (dropped, pasted, or picked
    *  from the file dialog). Volatile sources are copied into the worktree's
    *  `.hyprlayer/attachments/` first; sent with the next turn, then cleared. */
@@ -512,6 +517,28 @@ export function ProjectPage() {
     const atts = await importDroppedPaths(wsId, paths);
     addAttachmentsToShell(shellId, atts);
   };
+  // Reconcile the pane's *suggested* doc to `path` (or clear it when path is
+  // null). Never touches user-attached docs (those have suggested !== true).
+  const suggestDocToShell = (shellId: number, path: string | null, role: string) =>
+    modifyShell(shellId, (s) => {
+      const dismissed = s.dismissedSuggestions ?? [];
+      const manual = s.docs.filter((d) => !d.suggested);
+      const alreadyManual = path != null && manual.some((d) => d.path === path);
+      const keepSuggested =
+        path && !alreadyManual && !dismissed.includes(path)
+          ? [{ path, role, suggested: true as const }]
+          : [];
+      return { ...s, docs: [...manual, ...keepSuggested] };
+    });
+
+  // Remove a suggested doc and record the path so it never re-adds for this pane.
+  const dismissSuggestion = (shellId: number, path: string) =>
+    modifyShell(shellId, (s) => ({
+      ...s,
+      docs: s.docs.filter((d) => d.path !== path),
+      dismissedSuggestions: [...new Set([...(s.dismissedSuggestions ?? []), path])],
+    }));
+
   // The full set of SessionChat callbacks scoped to ONE shell, so the main and
   // right panes each drive their own agent independently.
   const shellChatProps = (shell: ShellTab) => ({
@@ -525,8 +552,17 @@ export function ProjectPage() {
     onSessionStarted: (sessionId: string) => patchShell(shell.id, { sessionId }),
     onResetSession: () => patchShell(shell.id, { sessionId: undefined }),
     onOpenDoc: openDoc,
-    onDetachDoc: (path: string) =>
-      patchShell(shell.id, { docs: shell.docs.filter((d) => d.path !== path) }),
+    // Detaching a suggested chip records the dismissal so it does not re-add;
+    // detaching a manually-attached doc just removes it.
+    onDetachDoc: (path: string) => {
+      const doc = shell.docs.find((d) => d.path === path);
+      if (doc?.suggested) {
+        dismissSuggestion(shell.id, path);
+      } else {
+        patchShell(shell.id, { docs: shell.docs.filter((d) => d.path !== path) });
+      }
+    },
+    onSuggestDoc: (path: string | null, role: string) => suggestDocToShell(shell.id, path, role),
     onBrowseDocs: () => setDocsModalShellId(shell.id),
     onAddFiles: () => void addFilesToShell(shell.id, false),
     onAddScreenshots: () => void addFilesToShell(shell.id, true),
