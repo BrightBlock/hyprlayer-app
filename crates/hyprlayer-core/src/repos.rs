@@ -1,11 +1,12 @@
-//! Project repositories: the app's own canonical clones.
+//! Project repositories.
 //!
-//! A *project* is a real git clone the app owns under `~/hyprlayer/repos`,
-//! created either by cloning a hosted repo (a GitHub URL) or by importing a
-//! repo from disk — in which case we re-clone it from its `origin` so the
-//! app's copy tracks the same source the user already pushes to. Worktrees are
-//! always cut from these clones, never from another worktree, so a project
-//! never breaks when a worktree is merged or removed.
+//! A *project* is a real git repo the app drives worktrees from. It comes from
+//! one of two paths: cloning a hosted repo (a GitHub URL) into
+//! `~/hyprlayer/repos`, or importing an existing repo from disk — which is
+//! registered *in place*, never copied, so the app shares the user's working
+//! copy instead of duplicating it. Worktrees are always cut from the project
+//! repo, never from another worktree, so a project never breaks when a worktree
+//! is merged or removed.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

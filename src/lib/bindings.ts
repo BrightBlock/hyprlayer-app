@@ -10,10 +10,11 @@ export const commands = {
 	getBootstrap: () => typedError<Bootstrap, AppError>(__TAURI_INVOKE("get_bootstrap")),
 	getProject: (path: string) => typedError<ProjectDetail, AppError>(__TAURI_INVOKE("get_project", { path })),
 	/**
-	 *  Import a project from a local git repo on disk: re-clone it from its
-	 *  `origin` (so the app's copy tracks the same hosted source) into
-	 *  `~/hyprlayer/repos`, or — for a local-only repo with no remote — clone the
-	 *  directory itself. Worktrees are then always cut from that stable clone.
+	 *  Import a project from a local git repo on disk: register it *in place* and
+	 *  link it in the project view. We deliberately do not re-clone or copy it —
+	 *  duplicating the repo under `~/hyprlayer/repos` only wastes disk and diverges
+	 *  from the working copy the user already maintains. Worktrees are cut directly
+	 *  from this repo via `git worktree add`, which keeps them in sync with it.
 	 */
 	addProject: (path: string, directoryName: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("add_project", { path, directoryName, bootstrapUser })),
 	/**

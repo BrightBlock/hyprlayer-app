@@ -23,9 +23,9 @@ type Props = {
 
 /**
  * Add a project — either by cloning a hosted repo (a GitHub URL or one of the
- * user's recent repos) or by importing a local repo from disk. Both land an
- * app-owned clone under the repos root, so worktrees always branch off a stable
- * copy rather than a transient checkout.
+ * user's recent repos) into the repos root, or by importing a local repo from
+ * disk. A disk import is registered in place (never copied), so worktrees
+ * branch off the user's existing repo rather than a duplicate.
  */
 export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
   const bootstrap = useBootstrap();
@@ -111,8 +111,6 @@ export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
     }
   };
 
-  const locationDisplay = location.trim() || "~/hyprlayer/repos";
-
   return (
     <Dialog open={isOpen} onClose={close} title="Add project" className="max-w-lg">
       <form
@@ -196,9 +194,8 @@ export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
               </Button>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-              Re-cloned from its origin into{" "}
-              <span className="font-mono">{locationDisplay}</span>, so worktrees branch off a stable
-              copy.
+              Added in place — hyprlayer references this repo directly and never copies it. Worktrees
+              branch off it.
             </p>
           </Field>
         )}

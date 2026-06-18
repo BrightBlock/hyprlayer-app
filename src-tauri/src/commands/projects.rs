@@ -282,6 +282,56 @@ fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> St
         })
 }
 
+/// Provision thoughts inside `repo`, register it as a project, and surface it.
+///
+/// `owned` says whether the app created `repo` (a fresh clone) or merely
+/// references it (an in-place disk import). On failure we roll back so a
+/// half-set-up project never lingers: an owned clone is deleted outright; an
+/// in-place repo is *never* deleted — that's the user's working copy — so we
+/// only undo the thoughts provisioning.
+async fn register_repo(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    git: &Path,
+    repo: &Path,
+    name: &str,
+    kind: &str,
+    owned: bool,
+) -> CmdResult<Project> {
+    if let Err(e) = HyprCli::new(&state.binaries)
+        .thoughts_init(repo, name, None)
+        .await
+    {
+        if owned {
+            let _ = std::fs::remove_dir_all(repo);
+        }
+        return Err(AppError::from(e));
+    }
+
+    let origin = repos::origin_url(git, repo).await;
+    let path = repo.display().to_string();
+    let row = NewProject {
+        path: path.clone(),
+        name: name.to_string(),
+        origin_url: origin,
+        source: kind.to_string(),
+    };
+    if let Err(e) = db_task(state.db.clone(), move |db| db.insert_project(row)).await {
+        if owned {
+            let _ = std::fs::remove_dir_all(repo);
+        } else {
+            let _ = HyprCli::new(&state.binaries).thoughts_uninit(repo).await;
+        }
+        return Err(e);
+    }
+
+    state.config.invalidate().await;
+    let _ = crate::events::ConfigChanged.emit(app);
+    crate::rebuild_thoughts_index(app.clone()).await;
+
+    find_project(&registry_projects(state).await, &path)
+}
+
 /// Clone `source` into the repos root as `<name>`, provision thoughts inside
 /// the clone, and register it. The clone is rolled back if provisioning or
 /// registration fails, so a half-set-up project never lingers.
@@ -312,40 +362,14 @@ async fn provision_project(
         .await
         .map_err(AppError::from)?;
 
-    // Provision thoughts in the clone; roll the clone back on failure so we
-    // never leave an unregistered directory behind.
-    if let Err(e) = HyprCli::new(&state.binaries)
-        .thoughts_init(&dest, name, None)
-        .await
-    {
-        let _ = std::fs::remove_dir_all(&dest);
-        return Err(AppError::from(e));
-    }
-
-    let origin = repos::origin_url(&git, &dest).await;
-    let path = dest.display().to_string();
-    let row = NewProject {
-        path: path.clone(),
-        name: name.to_string(),
-        origin_url: origin,
-        source: kind.to_string(),
-    };
-    if let Err(e) = db_task(state.db.clone(), move |db| db.insert_project(row)).await {
-        let _ = std::fs::remove_dir_all(&dest);
-        return Err(e);
-    }
-
-    state.config.invalidate().await;
-    let _ = crate::events::ConfigChanged.emit(app);
-    crate::rebuild_thoughts_index(app.clone()).await;
-
-    find_project(&registry_projects(state).await, &path)
+    register_repo(app, state, &git, &dest, name, kind, true).await
 }
 
-/// Import a project from a local git repo on disk: re-clone it from its
-/// `origin` (so the app's copy tracks the same hosted source) into
-/// `~/hyprlayer/repos`, or — for a local-only repo with no remote — clone the
-/// directory itself. Worktrees are then always cut from that stable clone.
+/// Import a project from a local git repo on disk: register it *in place* and
+/// link it in the project view. We deliberately do not re-clone or copy it —
+/// duplicating the repo under `~/hyprlayer/repos` only wastes disk and diverges
+/// from the working copy the user already maintains. Worktrees are cut directly
+/// from this repo via `git worktree add`, which keeps them in sync with it.
 #[tauri::command]
 #[specta::specta]
 pub async fn add_project(
@@ -378,15 +402,12 @@ pub async fn add_project(
         .require(BinaryKind::Git)
         .await
         .map_err(AppError::from)?;
-    // Prefer the repo's own origin as the clone source so the app's copy tracks
-    // the same hosted remote; fall back to the local directory for a repo with
-    // no remote.
-    let source = repos::origin_url(&git, repo)
-        .await
-        .unwrap_or_else(|| path.clone());
 
-    let name = project_name(directory_name, &source, repo);
-    provision_project(&app, &state, &source, &name, "disk", None).await
+    // Canonicalize so the registered path is stable (no trailing slash, symlinks
+    // resolved), which keeps later lookups and removals matching exactly.
+    let repo = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let name = project_name(directory_name, &repo.to_string_lossy(), &repo);
+    register_repo(&app, &state, &git, &repo, &name, "disk", false).await
 }
 
 /// Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
