@@ -114,8 +114,8 @@ export const commands = {
 	mergeWorkstreamPr: (id: string, method: MergeMethod) => typedError<null, AppError>(__TAURI_INVOKE("merge_workstream_pr", { id, method })),
 	/**
 	 *  Start a session for a workstream stage. Composes the stage skill prompt,
-	 *  spawns the driver under the concurrency cap, and streams events back over
-	 *  `on_event`. Returns the persisted [`Session`] row.
+	 *  spawns the driver, and streams events back over `on_event`. Returns the
+	 *  persisted [`Session`] row.
 	 */
 	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], model: string | null, effort: string | null, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, model, effort, permissionMode, onEvent })),
 	/**

@@ -16,7 +16,7 @@ pub struct AppState {
     pub db: Arc<Db>,
     pub worktrees: Arc<WorktreeManager>,
     pub index: Arc<ThoughtsIndex>,
-    /// Live agent sessions (running claude drivers) + concurrency cap.
+    /// Live agent sessions (running claude drivers), keyed by session id.
     pub sessions: Arc<SessionRegistry>,
     /// Live filesystem watcher over the thoughts roots; rebuilt whenever the
     /// hyprlayer config changes (roots may move). Guarded so rebuilds replace

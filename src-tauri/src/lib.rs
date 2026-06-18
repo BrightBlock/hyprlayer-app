@@ -185,7 +185,7 @@ pub fn run() {
                 )),
                 index: Arc::new(hyprlayer_core::index::ThoughtsIndex::new()),
                 index_watch: tokio::sync::Mutex::new(None),
-                sessions: Arc::new(session_registry::SessionRegistry::new(3)),
+                sessions: Arc::new(session_registry::SessionRegistry::new()),
             });
 
             // 1. Fold the login-shell PATH in (GUI apps start with launchd's

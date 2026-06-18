@@ -32,11 +32,19 @@ fn session_not_found(id: &str) -> AppError {
     }
 }
 
-fn too_many_sessions() -> AppError {
-    AppError {
-        code: "too_many_sessions".into(),
-        message: "The maximum number of concurrent agent sessions is already running.".into(),
-        remedy: Some("Wait for a session to finish, or stop one, then try again.".into()),
+/// Kill a live session (if any) and wait — bounded — until its forwarder
+/// observes the exit and removes it from the registry. Shared by
+/// [`restart_session`] (so a relaunch can't race the still-dying process) and
+/// [`crate::commands::workstreams::archive_workstream`] (so archiving tears the
+/// session down instead of leaking a process + driver against a deleted worktree).
+pub(crate) async fn kill_and_await_exit(state: &AppState, session_id: &str) {
+    if let Some(driver) = state.sessions.get(session_id).await {
+        driver.kill();
+        let mut waited_ms = 0u64;
+        while state.sessions.get(session_id).await.is_some() && waited_ms < 10_000 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            waited_ms += 50;
+        }
     }
 }
 
@@ -70,12 +78,9 @@ struct LaunchParams {
 }
 
 /// Spawn the claude driver for a session and wire up its forwarder — the launch
-/// pipeline shared by [`start_stage_session`] and [`resume_session`]. The caller
-/// holds the concurrency `permit` (so it can refuse before creating any state)
-/// and passes it through to the forwarder, which owns it until the session ends.
+/// pipeline shared by [`start_stage_session`] and [`resume_session`].
 async fn launch_session(
     state: &AppState,
-    permit: tokio::sync::OwnedSemaphorePermit,
     params: LaunchParams,
 ) -> CmdResult<Arc<ClaudeDriver>> {
     let LaunchParams {
@@ -152,7 +157,6 @@ async fn launch_session(
         session_id: session.id.clone(),
         workstream_id: session.workstream_id.clone(),
         rx,
-        permit,
         start_seq,
     });
 
@@ -160,8 +164,8 @@ async fn launch_session(
 }
 
 /// Start a session for a workstream stage. Composes the stage skill prompt,
-/// spawns the driver under the concurrency cap, and streams events back over
-/// `on_event`. Returns the persisted [`Session`] row.
+/// spawns the driver, and streams events back over `on_event`. Returns the
+/// persisted [`Session`] row.
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::too_many_arguments)]
@@ -189,10 +193,6 @@ pub async fn start_stage_session(
         remedy: None,
     })?;
 
-    // Reserve a slot up front: refuse rather than pile on concurrent agents,
-    // before creating any session state.
-    let permit = state.sessions.try_acquire().ok_or_else(too_many_sessions)?;
-
     let stage_kind = Stage::parse(&stage);
     let prompt = pipeline::compose_prompt(stage_kind, &input, &attached_docs);
 
@@ -210,7 +210,6 @@ pub async fn start_stage_session(
 
     let driver = launch_session(
         &state,
-        permit,
         LaunchParams {
             app,
             session: session.clone(),
@@ -281,8 +280,6 @@ pub async fn resume_session(
         remedy: None,
     })?;
 
-    let permit = state.sessions.try_acquire().ok_or_else(too_many_sessions)?;
-
     // Continue the persisted log after its existing tail, and re-mark the row
     // running while the resumed process spins back up.
     let start_seq = {
@@ -301,7 +298,6 @@ pub async fn resume_session(
 
     launch_session(
         &state,
-        permit,
         LaunchParams {
             app,
             session: session.clone(),
@@ -349,16 +345,9 @@ pub async fn restart_session(
     .ok_or_else(|| session_not_found(&session_id))?;
 
     // Kill the live process (if any) and wait until the forwarder removes it from
-    // the registry — i.e. it has truly exited and released its permit — before we
-    // re-spawn. Bounded so a wedged process can't hang the restart forever.
-    if let Some(driver) = state.sessions.get(&session_id).await {
-        driver.kill();
-        let mut waited_ms = 0u64;
-        while state.sessions.get(&session_id).await.is_some() && waited_ms < 10_000 {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            waited_ms += 50;
-        }
-    }
+    // the registry — i.e. it has truly exited — before we re-spawn, so the
+    // frontend can't race the resume onto the still-dying old process.
+    kill_and_await_exit(&state, &session_id).await;
 
     let ws = {
         let id = session.workstream_id.clone();
@@ -370,7 +359,6 @@ pub async fn restart_session(
         remedy: None,
     })?;
 
-    let permit = state.sessions.try_acquire().ok_or_else(too_many_sessions)?;
     let start_seq = {
         let id = session.id.clone();
         db_task(state.db.clone(), move |db| db.session_events(&id))
@@ -387,7 +375,6 @@ pub async fn restart_session(
 
     launch_session(
         &state,
-        permit,
         LaunchParams {
             app,
             session: session.clone(),
@@ -514,7 +501,7 @@ pub async fn attach_session(
     }
 
     // Still live? Tail it (forward-only — the original forwarder owns
-    // persistence and the concurrency permit).
+    // persistence and registry bookkeeping).
     if let Some(driver) = state.sessions.get(&session_id).await {
         tail_live(driver, on_event);
     }
@@ -522,8 +509,8 @@ pub async fn attach_session(
 }
 
 /// Forward a live session's broadcast events onto a fresh Channel, forward-only:
-/// the owning forwarder still handles persistence, state, and the concurrency
-/// permit. Stops at the first terminal event or once the UI channel closes.
+/// the owning forwarder still handles persistence, state, and registry
+/// bookkeeping. Stops at the first terminal event or once the UI channel closes.
 /// Shared by [`attach_session`] (after replaying the log) and [`resume_session`]
 /// when the backend session is still live — e.g. an HMR/UI reload dropped the
 /// frontend's channel but the claude process survived, so there's nothing to
@@ -556,7 +543,6 @@ struct ForwarderCtx {
     session_id: String,
     workstream_id: String,
     rx: broadcast::Receiver<SessionEvent>,
-    permit: tokio::sync::OwnedSemaphorePermit,
     /// First persisted-event sequence number — 0 for a fresh session, or the
     /// existing event count when resuming (so the log appends, not collides).
     start_seq: i64,
@@ -571,12 +557,10 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
         session_id,
         workstream_id,
         mut rx,
-        permit,
         start_seq,
     } = ctx;
 
     tauri::async_runtime::spawn(async move {
-        let _permit = permit; // released when the session ends (loop break)
         let mut seq: i64 = start_seq;
 
         loop {

@@ -11,6 +11,7 @@ use hyprlayer_core::CoreError;
 use serde::Serialize;
 use tauri::State;
 
+use super::sessions::kill_and_await_exit;
 use super::{blocking, db_task, effective_for};
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
@@ -277,6 +278,22 @@ pub async fn archive_workstream(
     discard: bool,
 ) -> CmdResult<()> {
     let item = load_item(&state, &id).await?;
+
+    // Tear down any live agent sessions for this workstream BEFORE removing the
+    // worktree. Otherwise the claude process keeps running against a deleted cwd
+    // and its driver + forwarder task leak (they only exit on the process's own
+    // `Exited` event, which archive never triggers). Kill each and wait — bounded
+    // — for the forwarder to drop it from the live registry.
+    let sessions = {
+        let id = id.clone();
+        db_task(state.db.clone(), move |db| db.list_sessions(&id))
+            .await
+            .unwrap_or_default()
+    };
+    for session in &sessions {
+        kill_and_await_exit(&state, &session.id).await;
+    }
+
     let git = state
         .binaries
         .require(BinaryKind::Git)
