@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.1.7",
+      "date": "2026-06-18",
+      "summary": "Choose the base branch when creating a workstream.",
+      "notes": [
+        "The New workstream dialog now has a base-branch picker, defaulting to the repo's detected default branch.",
+        "Base a workstream off a release line or feature branch instead of always branching from main."
+      ]
+    },
+    {
       "version": "0.1.6",
       "date": "2026-06-18",
       "summary": "Workstream activity dots, in-place project imports, and split-pane drop and composer toolbar fixes.",
