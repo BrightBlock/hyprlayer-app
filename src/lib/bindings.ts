@@ -114,8 +114,16 @@ export const commands = {
 	url: string,
 	title: string,
 	state: PrState,
-	/**  GitHub reports the PR cleanly mergeable (no conflicts). */
+	/**
+	 *  GitHub reports the PR cleanly mergeable (no conflicts). True only for
+	 *  `MERGEABLE`; the Merge button gates on this.
+	 */
 	mergeable: boolean,
+	/**
+	 *  GitHub's full mergeability verdict. Carries the `CONFLICTING` distinction
+	 *  `mergeable` discards, so the checks panel can show a merge-conflict row.
+	 */
+	mergeableState: MergeableState,
 	checks: ChecksState,
 	checksTotal: number,
 	checksPassed: number,
@@ -540,6 +548,20 @@ export type LinkStatus =
 /**  How the Merge button merges — picked per-PR by the user. */
 export type MergeMethod = "squash" | "merge" | "rebase";
 
+/**
+ *  GitHub's mergeability verdict for the PR, from `gh`'s `mergeable` field.
+ *  Distinguishes a clean merge from a conflicting branch — which we surface as a
+ *  row in the checks panel — and from GitHub's transient `UNKNOWN` (still being
+ *  computed server-side).
+ */
+export type MergeableState = 
+/**  No conflicts — the PR can merge cleanly. */
+"mergeable" | 
+/**  The branch conflicts with its base and must be resolved before merging. */
+"conflicting" | 
+/**  GitHub hasn't finished computing mergeability yet (transient). */
+"unknown";
+
 /**  One CI check on the PR's head commit, for the per-check breakdown popover. */
 export type PrCheck = {
 	name: string,
@@ -558,8 +580,16 @@ export type PrStatus = {
 	url: string,
 	title: string,
 	state: PrState,
-	/**  GitHub reports the PR cleanly mergeable (no conflicts). */
+	/**
+	 *  GitHub reports the PR cleanly mergeable (no conflicts). True only for
+	 *  `MERGEABLE`; the Merge button gates on this.
+	 */
 	mergeable: boolean,
+	/**
+	 *  GitHub's full mergeability verdict. Carries the `CONFLICTING` distinction
+	 *  `mergeable` discards, so the checks panel can show a merge-conflict row.
+	 */
+	mergeableState: MergeableState,
 	checks: ChecksState,
 	checksTotal: number,
 	checksPassed: number,

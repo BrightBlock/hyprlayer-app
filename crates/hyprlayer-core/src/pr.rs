@@ -39,6 +39,32 @@ pub enum ChecksState {
     Failing,
 }
 
+/// GitHub's mergeability verdict for the PR, from `gh`'s `mergeable` field.
+/// Distinguishes a clean merge from a conflicting branch — which we surface as a
+/// row in the checks panel — and from GitHub's transient `UNKNOWN` (still being
+/// computed server-side).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum MergeableState {
+    /// No conflicts — the PR can merge cleanly.
+    Mergeable,
+    /// The branch conflicts with its base and must be resolved before merging.
+    Conflicting,
+    /// GitHub hasn't finished computing mergeability yet (transient).
+    Unknown,
+}
+
+impl MergeableState {
+    fn parse(raw: &str) -> Self {
+        match raw {
+            s if s.eq_ignore_ascii_case("MERGEABLE") => MergeableState::Mergeable,
+            s if s.eq_ignore_ascii_case("CONFLICTING") => MergeableState::Conflicting,
+            _ => MergeableState::Unknown,
+        }
+    }
+}
+
 /// How the Merge button merges — picked per-PR by the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -80,8 +106,12 @@ pub struct PrStatus {
     pub url: String,
     pub title: String,
     pub state: PrState,
-    /// GitHub reports the PR cleanly mergeable (no conflicts).
+    /// GitHub reports the PR cleanly mergeable (no conflicts). True only for
+    /// `MERGEABLE`; the Merge button gates on this.
     pub mergeable: bool,
+    /// GitHub's full mergeability verdict. Carries the `CONFLICTING` distinction
+    /// `mergeable` discards, so the checks panel can show a merge-conflict row.
+    pub mergeable_state: MergeableState,
     pub checks: ChecksState,
     pub checks_total: u32,
     pub checks_passed: u32,
@@ -248,6 +278,7 @@ fn parse_pr(stdout: &str) -> Result<PrStatus> {
         title: raw.title,
         state: parse_state(&raw.state),
         mergeable: raw.mergeable.eq_ignore_ascii_case("MERGEABLE"),
+        mergeable_state: MergeableState::parse(&raw.mergeable),
         checks,
         checks_total,
         checks_passed,
@@ -377,6 +408,7 @@ mod tests {
         assert_eq!(pr.checks, ChecksState::Passing);
         assert_eq!((pr.checks_total, pr.checks_passed), (3, 3));
         assert!(pr.mergeable);
+        assert_eq!(pr.mergeable_state, MergeableState::Mergeable);
         assert_eq!(pr.review_decision.as_deref(), Some("APPROVED"));
     }
 
@@ -394,6 +426,9 @@ mod tests {
         assert_eq!(pr.checks, ChecksState::Failing);
         assert_eq!((pr.checks_passed, pr.checks_failed), (1, 1));
         assert!(!pr.mergeable);
+        // CONFLICTING is preserved distinctly so the checks panel can flag it,
+        // rather than being flattened into the `mergeable` bool.
+        assert_eq!(pr.mergeable_state, MergeableState::Conflicting);
         assert_eq!(pr.review_decision, None); // empty string filtered out
 
         // The per-check breakdown carries each check's name, state, and link —
@@ -442,6 +477,18 @@ mod tests {
         // No `/job/` segment (older/foreign shapes) → no id; caller falls back.
         assert_eq!(check_run_id("https://github.com/o/r/runs/42"), None);
         assert_eq!(check_run_id("https://ext.example/build"), None);
+    }
+
+    #[test]
+    fn mergeable_state_parses_all_arms() {
+        assert_eq!(MergeableState::parse("MERGEABLE"), MergeableState::Mergeable);
+        assert_eq!(
+            MergeableState::parse("conflicting"),
+            MergeableState::Conflicting
+        );
+        // UNKNOWN and any unexpected value fall back to Unknown (transient).
+        assert_eq!(MergeableState::parse("UNKNOWN"), MergeableState::Unknown);
+        assert_eq!(MergeableState::parse(""), MergeableState::Unknown);
     }
 
     #[test]
