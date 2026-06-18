@@ -519,7 +519,7 @@ export function Root() {
             setCommitting(true);
             void commitWorkstream(activeWorkstream.item.id).finally(() => setCommitting(false));
           }}
-          className="inline-flex h-7 items-center gap-2 rounded-md border border-teal-400/40 bg-teal-400/10 px-3 text-sm font-medium text-teal-300 hover:bg-teal-400/20 disabled:opacity-60"
+          className="inline-flex h-7 items-center gap-2 rounded-md border border-commit/50 bg-commit/15 px-3 text-sm font-medium text-commit hover:bg-commit/25 disabled:opacity-60"
           title="Commit this worktree's changes (no push or pull request)"
           aria-label="Commit"
         >
@@ -537,7 +537,7 @@ export function Root() {
             setShipping(true);
             void shipWorkstream(activeWorkstream.item.id).finally(() => setShipping(false));
           }}
-          className="inline-flex h-7 items-center gap-2 rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 text-sm font-medium text-emerald-300 hover:bg-emerald-400/20 disabled:opacity-60"
+          className="inline-flex h-7 items-center gap-2 rounded-md border border-ship/50 bg-ship/15 px-3 text-sm font-medium text-ship hover:bg-ship/25 disabled:opacity-60"
           title="Commit, push, and open a pull request"
           aria-label="Ship"
         >

@@ -4,6 +4,7 @@ use hyprlayer_core::gitops::{DirEntry, FileSides, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::pr::{self, MergeMethod, PrStatus};
 use hyprlayer_core::process::binaries::BinaryKind;
+use hyprlayer_core::skills::SlashCommand;
 use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{self, CreateSpec, RemovePolicy, WorktreeStatus};
@@ -488,6 +489,36 @@ pub async fn worktree_read_file(
 ) -> CmdResult<String> {
     with_worktree(&state, &id, "worktree_read_file", move |p| {
         hyprlayer_core::gitops::read_text_file(p, &path)
+    })
+    .await
+}
+
+/// Slash commands available in this worktree (project + user `.claude`), for the
+/// composer's `/skill` autocomplete and highlight.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_slash_commands(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Vec<SlashCommand>> {
+    with_worktree(&state, &id, "list_slash_commands", |p| {
+        Ok(hyprlayer_core::skills::list_slash_commands(p))
+    })
+    .await
+}
+
+/// Worktree-relative file paths matching `query`, for the composer's `@file`
+/// autocomplete. Returns at most `limit` results.
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_search_files(
+    state: State<'_, AppState>,
+    id: String,
+    query: String,
+    limit: u32,
+) -> CmdResult<Vec<String>> {
+    with_worktree(&state, &id, "worktree_search_files", move |p| {
+        hyprlayer_core::gitops::search_files(p, &query, limit as usize)
     })
     .await
 }

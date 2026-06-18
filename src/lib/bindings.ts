@@ -86,6 +86,16 @@ export const commands = {
 	/**  Read a worktree file as text for the read-only viewer. */
 	worktreeReadFile: (id: string, path: string) => typedError<string, AppError>(__TAURI_INVOKE("worktree_read_file", { id, path })),
 	/**
+	 *  Slash commands available in this worktree (project + user `.claude`), for the
+	 *  composer's `/skill` autocomplete and highlight.
+	 */
+	listSlashCommands: (id: string) => typedError<SlashCommand[], AppError>(__TAURI_INVOKE("list_slash_commands", { id })),
+	/**
+	 *  Worktree-relative file paths matching `query`, for the composer's `@file`
+	 *  autocomplete. Returns at most `limit` results.
+	 */
+	worktreeSearchFiles: (id: string, query: string, limit: number) => typedError<string[], AppError>(__TAURI_INVOKE("worktree_search_files", { id, query, limit })),
+	/**
 	 *  The pull request for a workstream's branch, or `None` when there's no PR yet.
 	 *  Derived live from `gh`. Degrades to `None` (never an error) when gh is
 	 *  missing/unauthenticated or the call fails — the PR bar simply stays hidden,
@@ -639,6 +649,16 @@ export type SessionLifecycle = {
 	workstreamId: string,
 	/**  Matches the `sessions.state` column. */
 	state: string,
+};
+
+/**  One slash command offered in the composer's `/` autocomplete. */
+export type SlashCommand = {
+	/**  What the user types after `/`, e.g. `research_codebase`. */
+	name: string,
+	/**  One-line summary from the file's frontmatter (or first prose line). */
+	description: string,
+	/**  `project` | `user` — which `.claude` root supplied it (for the label). */
+	source: string,
 };
 
 export type SortKey = 

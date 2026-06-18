@@ -15,6 +15,7 @@ import {
   ChevronDownIcon,
   DocIcon,
   EffortIcon,
+  EraserIcon,
   ImageIcon,
   ModeIcon,
   PlusIcon,
@@ -42,6 +43,7 @@ import {
   answerQuestion,
   applyPermissionMode,
   cancelQueuedMessage,
+  killSession,
   respondPermission,
   restoreSessionIfNeeded,
   sendMessage,
@@ -51,6 +53,11 @@ import {
   type QueuedMessage,
 } from "./sessionStore";
 import { describeState, isBusy, isTerminal, isWorking, type PendingQuestion } from "./transcript";
+import {
+  AutocompleteDropdown,
+  HighlightBackdrop,
+  useComposerAutocomplete,
+} from "./ComposerAutocomplete";
 
 const STAGE_INTRO: Record<StageKey, string> = {
   general: "Chat with the project agent in this worktree. Pick a stage below to run a spec-driven step.",
@@ -748,6 +755,18 @@ export function SessionChat({
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
   const sid = shell.sessionId;
 
+  // Composer autocomplete: `/skill` commands and `@file` references, plus the
+  // recognized-skill highlight painted behind the textarea text.
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [composerScroll, setComposerScroll] = useState(0);
+  const autocomplete = useComposerAutocomplete({
+    workstreamId,
+    value: draft,
+    onChange: onDraftChange,
+    textareaRef,
+    enabled: !pendingQuestion,
+  });
+
   const handleStart = async () => {
     const input = draft.trim();
     if (!canSubmit || starting) return;
@@ -794,6 +813,24 @@ export function SessionChat({
     }
   };
 
+  // Clear context: detach this tab from its session so the next message opens a
+  // brand-new claude conversation (empty context — the manual escape hatch
+  // before auto-compaction kicks in). A live session is ended first so it can't
+  // keep running headless; the typed draft is kept so it can be resent fresh.
+  const handleClear = async () => {
+    if (!started) return;
+    const live = Boolean(sid && session && session.live && !isTerminal(session.state));
+    if (live) {
+      const ok = await confirm(
+        "Clear this conversation and start fresh? The current session ends and its context is discarded.",
+        { title: "Clear context?", kind: "warning" },
+      );
+      if (!ok) return;
+      if (sid) await killSession(sid).catch(() => {});
+    }
+    onResetSession();
+  };
+
   // Permission mode is a launch-time decision (claude won't switch a running
   // session into bypass), so changing it on a LIVE session restarts the process
   // via --resume with the new mode — the transcript is preserved. We confirm
@@ -815,6 +852,9 @@ export function SessionChat({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // The autocomplete owns arrows / Enter / Tab / Escape while its menu is open
+    // (accepting a pick must not also send the message).
+    if (autocomplete.handleKeyDown(e)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!started) void handleStart();
@@ -906,32 +946,46 @@ export function SessionChat({
                   }}
                 />
               )}
-              <div className="rounded-xl bg-panel-2">
+              <div className="relative rounded-xl bg-panel-2">
+                <AutocompleteDropdown state={autocomplete} />
                 {attachments.length > 0 && (
                   <div className="px-3.5 pt-3">
                     <AttachmentCards attachments={attachments} onRemove={onRemoveAttachment} />
                   </div>
                 )}
-                <textarea
-                  value={draft}
-                  onChange={(e) => onDraftChange(e.target.value)}
-                  onKeyDown={onKeyDown}
-                  onPaste={onPaste}
-                  rows={3}
-                  disabled={Boolean(pendingQuestion)}
-                  placeholder={
-                    pendingQuestion
-                      ? "Answer the question above to continue…"
-                      : !started
-                        ? mode === "general"
-                          ? "Ask the project agent…  (Enter to start, Shift+Enter for a newline)"
-                          : `Brief the ${stageLabel(mode).toLowerCase()} agent…  (Enter to start)`
-                        : busy
-                          ? "Send a follow-up — it'll queue until the turn finishes…"
-                          : "Reply to the agent…  (Enter to send)"
-                  }
-                  className="selectable block w-full resize-none bg-transparent px-3.5 py-3 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
-                />
+                <div className="relative">
+                  <HighlightBackdrop
+                    value={draft}
+                    commandNames={autocomplete.commandNames}
+                    scrollTop={composerScroll}
+                  />
+                  <textarea
+                    ref={textareaRef}
+                    value={draft}
+                    onChange={(e) => {
+                      onDraftChange(e.target.value);
+                      autocomplete.syncCaret();
+                    }}
+                    onKeyDown={onKeyDown}
+                    onPaste={onPaste}
+                    onSelect={autocomplete.syncCaret}
+                    onScroll={(e) => setComposerScroll(e.currentTarget.scrollTop)}
+                    rows={3}
+                    disabled={Boolean(pendingQuestion)}
+                    placeholder={
+                      pendingQuestion
+                        ? "Answer the question above to continue…"
+                        : !started
+                          ? mode === "general"
+                            ? "Ask the project agent…  (Enter to start, Shift+Enter for a newline)"
+                            : `Brief the ${stageLabel(mode).toLowerCase()} agent…  (Enter to start)`
+                          : busy
+                            ? "Send a follow-up — it'll queue until the turn finishes…"
+                            : "Reply to the agent…  (Enter to send)"
+                    }
+                    className="selectable relative block w-full resize-none bg-transparent px-3.5 py-3 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
+                  />
+                </div>
                 <div className="flex items-center gap-0.5 px-2 pb-2">
                   {/* Mode is fixed at spawn → a badge once running; a picker before. */}
                   {started ? (
@@ -1006,6 +1060,20 @@ export function SessionChat({
                       onScreenshots={onAddScreenshots}
                       showLibrary={!started}
                     />
+                    {/* Clear context: end this conversation and start fresh — the
+                        manual way to dodge auto-compaction. Only meaningful once a
+                        session exists. */}
+                    {started && (
+                      <button
+                        type="button"
+                        onClick={() => void handleClear()}
+                        title="Clear context — end this conversation and start fresh"
+                        aria-label="Clear context"
+                        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/50 hover:text-ink"
+                      >
+                        <EraserIcon />
+                      </button>
+                    )}
                     {/* Drop or paste a screenshot anytime — see the pane drop overlay. */}
                     {session?.contextTokens != null && (
                       <ContextMeter tokens={session.contextTokens} windowSize={model.contextWindow} />

@@ -354,6 +354,22 @@ export function DownloadIcon({ size = 14, strokeWidth = 1.9, className }: IconPr
 }
 
 /** Filled square — interrupt / stop the running turn. */
+export function EraserIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="m7 21-4.3-4.3a1.7 1.7 0 0 1 0-2.4l9.6-9.6a1.7 1.7 0 0 1 2.4 0l5.6 5.6a1.7 1.7 0 0 1 0 2.4L13 21"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M22 21H7" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="m5 11 9 9" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function StopIcon({ size = 14 }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="currentColor">

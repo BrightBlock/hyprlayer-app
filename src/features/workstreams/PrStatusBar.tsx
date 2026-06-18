@@ -117,7 +117,7 @@ export function PrStatusBar({
             type="button"
             disabled={!canMerge}
             onClick={() => setMergeOpen((o) => !o)}
-            className={`${pill} border-emerald-400/40 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20`}
+            className={`${pill} border-ship/50 bg-ship/15 text-ship hover:bg-ship/25`}
             title={mergeTitle()}
           >
             {merge.isPending ? <Spinner size={12} /> : null}

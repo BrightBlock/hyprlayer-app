@@ -31,6 +31,13 @@
      themes), so it lives in the shared @theme block rather than per-theme. */
   --color-brand: #60a5fa;
   --color-brand-soft: #7dd3fc;
+  /* Header action-button hues (Ship/Merge = green, Commit = teal). Their own
+     tokens — not the shared status hues — so the light theme can deepen them
+     for contrast without disturbing OK/WARN/BAD. These bright tints read well
+     on the dark themes; `html.light` overrides them to a darker shade so the
+     buttons don't wash out against the cream surface. */
+  --color-ship: #34d399;
+  --color-commit: #2dd4bf;
 }
 
 /* Light — warm neutral creams + ivories, terracotta accent shifted darker so
@@ -43,6 +50,10 @@ html.light {
   --color-ink: #1c1b1a;
   --color-ink-dim: #55534f;
   --color-accent: #c25e3d;
+  /* Deepen the Ship/Commit hues so the tinted header buttons keep contrast on
+     the light surface (the bright dark-theme tints wash out on cream). */
+  --color-ship: #047857;
+  --color-commit: #0f766e;
   color-scheme: light;
 }
 

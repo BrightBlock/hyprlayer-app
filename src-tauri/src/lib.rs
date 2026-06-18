@@ -56,6 +56,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::worktree_file_sides,
             commands::workstreams::worktree_list_dir,
             commands::workstreams::worktree_read_file,
+            commands::workstreams::list_slash_commands,
+            commands::workstreams::worktree_search_files,
             commands::workstreams::workstream_pr_status,
             commands::workstreams::merge_workstream_pr,
             commands::sessions::start_stage_session,

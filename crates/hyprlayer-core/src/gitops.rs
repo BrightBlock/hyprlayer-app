@@ -526,6 +526,90 @@ pub fn list_dir(worktree: &Path, rel: &str) -> Result<Vec<DirEntry>> {
     Ok(entries)
 }
 
+/// Worktree-relative file paths matching `query`, for the composer's `@file`
+/// autocomplete. Matching is a case-insensitive subsequence test against the
+/// path (so `srcsess` finds `src/features/session/...`), ranked so that hits in
+/// the file name and shorter/shallower paths come first. Directories, `.git`,
+/// git-ignored files, and the app's own `thoughts/`+`.hyprlayer/` infra are
+/// skipped. The walk is capped so a giant repo can't stall the keystroke that
+/// triggered it; `limit` bounds the returned set.
+pub fn search_files(worktree: &Path, query: &str, limit: usize) -> Result<Vec<String>> {
+    // Beyond this many filesystem entries we stop walking and rank what we have
+    // — an autocomplete needs to be fast, not exhaustive.
+    const MAX_VISITED: usize = 20_000;
+
+    let repo = open_repo(worktree).ok();
+    let needle = query.to_lowercase();
+
+    let mut scored: Vec<(i32, String)> = Vec::new();
+
+    // `.take` caps how many filesystem entries we visit so a giant repo can't
+    // stall the keystroke; `.filter_entry` prunes `.git` whole rather than
+    // descending into it.
+    let walker = walkdir::WalkDir::new(worktree)
+        .min_depth(1)
+        .into_iter()
+        .filter_entry(|e| e.file_name() != ".git")
+        .flatten()
+        .take(MAX_VISITED);
+
+    for entry in walker {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Ok(rel_path) = entry.path().strip_prefix(worktree) else {
+            continue;
+        };
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        if is_excluded(&rel) {
+            continue;
+        }
+        if let Some(repo) = repo.as_ref() {
+            if repo.is_path_ignored(rel_path).unwrap_or(false) {
+                continue;
+            }
+        }
+        if let Some(score) = subsequence_score(&rel, &needle) {
+            scored.push((score, rel));
+        }
+    }
+
+    // Higher score first; ties broken by shorter path (shallower, closer match).
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.len().cmp(&b.1.len())));
+    scored.truncate(limit);
+    Ok(scored.into_iter().map(|(_, p)| p).collect())
+}
+
+/// Rank a candidate path against a lowercase query. Returns `None` when the
+/// query isn't a subsequence of the path. A contiguous substring scores higher
+/// than a scattered subsequence, and a match within the file name (after the
+/// last `/`) is boosted over one buried in the directory portion.
+fn subsequence_score(path: &str, needle: &str) -> Option<i32> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let lower = path.to_lowercase();
+    // Strong signal: contiguous substring match, boosted when it lands in the
+    // file name (at/after the last slash) rather than the directory portion.
+    if let Some(pos) = lower.find(needle) {
+        let filename_start = lower.rfind('/').map(|s| s + 1).unwrap_or(0);
+        let in_filename = pos >= filename_start;
+        return Some(1000 + if in_filename { 500 } else { 0 } - pos as i32);
+    }
+    // Weaker signal: characters appear in order but not adjacent.
+    let mut chars = needle.chars();
+    let mut current = chars.next();
+    for c in lower.chars() {
+        if Some(c) == current {
+            current = chars.next();
+            if current.is_none() {
+                return Some(100 - path.len() as i32);
+            }
+        }
+    }
+    None
+}
+
 /// Read a worktree file as text (utf8-lossy), refusing oversized files so the
 /// viewer never tries to render megabytes of binary content.
 pub fn read_text_file(worktree: &Path, rel: &str) -> Result<String> {
@@ -544,6 +628,29 @@ pub fn read_text_file(worktree: &Path, rel: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_files_ranks_filename_hits_and_skips_infra() {
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        std::fs::create_dir_all(dir.path().join("src/session")).unwrap();
+        std::fs::write(dir.path().join("src/session/chat.rs"), "x").unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), "x").unwrap();
+        std::fs::create_dir_all(dir.path().join("thoughts/jt")).unwrap();
+        std::fs::write(dir.path().join("thoughts/jt/chat.md"), "x").unwrap();
+
+        let hits = search_files(dir.path(), "chat", 10).unwrap();
+        assert!(hits.contains(&"src/session/chat.rs".to_string()));
+        // The app's thoughts/ infra is never offered.
+        assert!(!hits.iter().any(|p| p.starts_with("thoughts")));
+
+        // Subsequence matching: scattered chars in order still match.
+        let sub = search_files(dir.path(), "ssnchat", 10).unwrap();
+        assert!(sub.contains(&"src/session/chat.rs".to_string()));
+
+        // An empty query lists files (capped), never errors.
+        assert!(!search_files(dir.path(), "", 10).unwrap().is_empty());
+    }
 
     #[test]
     fn worktree_diff_reports_changes_and_skips_thoughts() {

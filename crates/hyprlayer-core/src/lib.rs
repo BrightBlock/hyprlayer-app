@@ -14,6 +14,7 @@ pub mod pipeline;
 pub mod pr;
 pub mod process;
 pub mod repos;
+pub mod skills;
 pub mod store;
 pub mod worktree;
 
