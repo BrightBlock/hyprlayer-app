@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.1.5",
+      "date": "2026-06-18",
+      "summary": "Composer /skill and @file autocomplete, a Commit action, clear-context, and skill-display fixes.",
+      "notes": [
+        "Autocomplete /skills and @files in the composer, with a recognized-skill highlight.",
+        "Commit a worktree without shipping, plus push-based PR status sync and check links.",
+        "Clear a session to start a fresh conversation, and run more agents concurrently.",
+        "Skill activity now shows the skill name and folds its instructions into one row."
+      ]
+    },
+    {
       "version": "0.1.4",
       "date": "2026-06-18",
       "summary": "Configurable git settings, an Open-in-editor menu, and resizable, responsive layout polish.",
