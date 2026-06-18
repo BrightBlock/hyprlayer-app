@@ -1019,10 +1019,12 @@ export function SessionChat({
                 </div>
                 {/* Single row, never wrapping: when the labelled pickers don't
                     fit, the layout effect above flips compactComposer so they
-                    collapse to icons and everything stays on one line. overflow
-                    is hidden only to clip the one pre-collapse layout frame, so
-                    the Send/attach cluster can never bleed past the pane edge. */}
-                <div ref={toolbarRef} className="flex items-center gap-0.5 overflow-hidden px-2 pb-2">
+                    collapse to icons and everything stays on one line. We clip
+                    the horizontal axis only (overflow-x) to hide the one
+                    pre-collapse layout frame so the Send/attach cluster can't
+                    bleed past the pane edge — overflow-y stays visible so the
+                    pickers' upward dropdowns (bottom-full) aren't clipped. */}
+                <div ref={toolbarRef} className="flex items-center gap-0.5 overflow-x-clip px-2 pb-2">
                   {/* Mode is fixed at spawn → a badge once running; a picker before. */}
                   {started ? (
                     <span
