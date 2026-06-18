@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.1.9",
+      "date": "2026-06-18",
+      "summary": "Customizable keyboard shortcuts, per-provider model defaults, and smarter context-doc suggestions.",
+      "notes": [
+        "Set your own keyboard shortcuts for common actions in Settings → Keyboard.",
+        "New sessions can default to a chosen model per provider.",
+        "Each pane suggests the most relevant context doc (research or plan) for its stage.",
+        "The CI Checks panel now flags merge conflicts that block merging."
+      ]
+    },
+    {
       "version": "0.1.8",
       "date": "2026-06-18",
       "summary": "Live markdown while messages stream, and fixed clipped composer picker dropdowns.",
