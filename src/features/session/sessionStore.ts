@@ -33,6 +33,7 @@ import { composeStagePrompt } from "./stages";
 import { openCommitTab, openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
 import {
   addUserMessage,
+  hasPendingPermission,
   initialSessionView,
   isBusy,
   isTerminal,
@@ -695,4 +696,65 @@ export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
       }),
     [keys],
   );
+}
+
+/**
+ * The single live-activity signal for a whole workstream, folded from the states
+ * of every session bound to it. Drives the sidebar/list activity dot so you can
+ * see at a glance which workstreams are running, which are blocked on you, and
+ * which have finished a turn and want review — without opening each one.
+ *
+ * Categories, highest priority first (a workstream takes the most urgent state
+ * any of its sessions is in):
+ *  - `needs-you`  — a session is parked on a permission grant or a question; it
+ *                   can't proceed until you answer. The thing you most want to
+ *                   surface.
+ *  - `working`    — a session is actively computing a turn.
+ *  - `error`      — a session crashed or failed to spawn.
+ *  - `review`     — a session finished its turn (ready) or completed; nothing is
+ *                   running, but there's a result waiting for your eyes.
+ *  - `idle`       — no session activity worth flagging (also the cold-start case
+ *                   before a workstream's sessions are restored into the store).
+ */
+export type WorkstreamActivity = "needs-you" | "working" | "error" | "review" | "idle";
+
+// Higher number = more urgent. A workstream surfaces the max across its sessions.
+const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
+  idle: 0,
+  review: 1,
+  error: 2,
+  working: 3,
+  "needs-you": 4,
+};
+
+function classifyEntry(entry: SessionEntry): WorkstreamActivity {
+  if (
+    entry.state === "awaiting_permission" ||
+    entry.state === "awaiting_question" ||
+    hasPendingPermission(entry) ||
+    entry.pendingQuestion !== null
+  ) {
+    return "needs-you";
+  }
+  if (isWorking(entry)) return "working";
+  if (entry.state === "crashed" || entry.state === "spawn_failed") return "error";
+  // Turn finished but the session is alive and rests at "ready", or the session
+  // ran to completion — either way there's a result to look at.
+  if (entry.state === "completed" || (entry.state === "running" && !entry.streaming)) {
+    return "review";
+  }
+  return "idle";
+}
+
+export function useWorkstreamActivity(workstreamId: string | null): WorkstreamActivity {
+  return useSessionStore((s) => {
+    if (!workstreamId) return "idle";
+    let best: WorkstreamActivity = "idle";
+    for (const entry of Object.values(s.sessions)) {
+      if (entry.workstreamId !== workstreamId) continue;
+      const cur = classifyEntry(entry);
+      if (ACTIVITY_RANK[cur] > ACTIVITY_RANK[best]) best = cur;
+    }
+    return best;
+  });
 }

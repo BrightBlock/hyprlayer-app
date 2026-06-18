@@ -210,3 +210,28 @@ a {
     box-shadow: 0 0 5px 0 currentColor;
   }
 }
+
+/* Gentle breathing for a workstream's "working" activity dot — a soft pulse +
+   halo that reads as live, ongoing work without the radar-ping's urgency. */
+@keyframes work-pulse {
+  0%,
+  100% {
+    transform: scale(0.9);
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow: 0 0 5px 1px currentColor;
+    opacity: 1;
+  }
+}
+.animate-work-pulse {
+  animation: work-pulse 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-work-pulse {
+    animation: none;
+    box-shadow: 0 0 4px 0 currentColor;
+  }
+}

@@ -26,6 +26,7 @@ import {
 } from "../lib/queries";
 import { useElementWidth } from "../lib/useElementWidth";
 import { commitWorkstream, shipWorkstream } from "../features/session/sessionStore";
+import { WorkstreamActivityDot } from "../features/session/WorkstreamActivity";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
 import { useUiStore } from "../lib/uiStore";
@@ -795,6 +796,7 @@ export function Root() {
                         }`}
                         title={`${view.item.title} · ${view.item.branch}`}
                       >
+                        <WorkstreamActivityDot workstreamId={view.item.id} />
                         <GitBranchIcon />
                         <span className="min-w-0 flex-1 truncate">{view.item.title}</span>
                         <WorkstreamRowChip view={view} />
