@@ -37,6 +37,15 @@ export function GitPullRequestIcon({ size = 16, strokeWidth = 1.8, className }: 
   );
 }
 
+export function GitCommitIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <circle cx="12" cy="12" r="3.5" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M3 12h5M16 12h5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function SplitIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -426,6 +435,8 @@ export function ModeIcon({ mode, size = 16, strokeWidth = 1.8 }: IconProps & { m
           <path d="m5 12 4 4 10-10" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );
+    case "commit":
+      return <GitCommitIcon size={size} strokeWidth={strokeWidth} />;
     case "ship":
       return (
         <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">

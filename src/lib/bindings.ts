@@ -185,6 +185,7 @@ export const commands = {
 export const events = {
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
+	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
 };
@@ -495,6 +496,17 @@ export type PrStatus = {
 	 *  requires no review / has no decision yet.
 	 */
 	reviewDecision: string | null,
+};
+
+/**
+ *  A workstream's PR status changed server-side — it merged, its checks
+ *  settled, or a PR appeared/disappeared for the branch. The backend PR watcher
+ *  (`crate::pr_watch`) diffs each poll and emits this only on a real change; the
+ *  frontend refetches that workstream's PR query so the merge/archive bar stays
+ *  in sync without the UI polling `gh` on a timer.
+ */
+export type PrStatusChanged = {
+	workstreamId: string,
 };
 
 export type Project = {

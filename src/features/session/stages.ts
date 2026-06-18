@@ -15,17 +15,20 @@ export const STAGES = [
   { key: "plan", label: "Plan" },
   { key: "implement", label: "Implement" },
   { key: "validate", label: "Validate" },
+  { key: "commit", label: "Commit" },
   { key: "ship", label: "Ship" },
   { key: "revise", label: "Revise" },
 ] as const;
 
 export type StageKey = (typeof STAGES)[number]["key"];
 
-/** Stages a user can pick as an agent mode. Ship and Revise are excluded on
- *  purpose — both are driven by the PR workflow (the header "Ship" action and
- *  the PR bar's feedback actions), not chosen as a chat mode. They stay in
- *  [`STAGES`] so their icon/colour/label still resolve for the ship tab. */
-export const MODE_STAGES = STAGES.filter((s) => s.key !== "ship" && s.key !== "revise");
+/** Stages a user can pick as an agent mode. Commit, Ship and Revise are excluded
+ *  on purpose — all are driven by header/PR actions (the "Commit" and "Ship"
+ *  buttons and the PR bar's feedback actions), not chosen as a chat mode. They
+ *  stay in [`STAGES`] so their icon/colour/label still resolve for their tabs. */
+export const MODE_STAGES = STAGES.filter(
+  (s) => s.key !== "commit" && s.key !== "ship" && s.key !== "revise",
+);
 
 const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
 
@@ -37,6 +40,14 @@ export const SHIP_PROMPT =
   "after the commit and push succeed, open a pull request against the default branch with a " +
   "clear title and run the /describe_pr skill to write the PR description from the " +
   "repository's template and update the PR.";
+
+/** The instruction the Commit action runs — checkpoint the worktree locally,
+ *  without pushing or opening a PR (the split-out counterpart to SHIP_PROMPT).
+ *  Kept byte-identical to the backend `COMMIT_PROMPT`
+ *  (crates/hyprlayer-core/src/pipeline.rs). */
+export const COMMIT_PROMPT =
+  "Commit all changes in this worktree: stage everything, then commit with a clear, " +
+  "descriptive message. Do not push the branch or open a pull request.";
 
 /** The instruction the PR-feedback actions (Fix CI / Address comments) run when
  *  they start a fresh session. Kept byte-identical to the backend `REVISE_PROMPT`
@@ -78,7 +89,7 @@ export function stageCommand(stage: string): string | null {
     case "validate":
       return "/validate_plan";
     default:
-      return null; // general, ship
+      return null; // general, commit, ship, revise
   }
 }
 
@@ -92,6 +103,7 @@ export function composeStagePrompt(stage: string, input: string): string {
   const trimmed = input.trim();
   const key = asStageKey(stage);
   if (key === "general") return trimmed; // plain chat: no skill prefix
+  if (key === "commit") return trimmed ? `${COMMIT_PROMPT}\n\n${trimmed}` : COMMIT_PROMPT;
   if (key === "ship") return trimmed ? `${SHIP_PROMPT}\n\n${trimmed}` : SHIP_PROMPT;
   if (key === "revise") return trimmed ? `${REVISE_PROMPT}\n\n${trimmed}` : REVISE_PROMPT;
   const command = stageCommand(key)!; // research/plan/implement/validate
@@ -101,7 +113,8 @@ export function composeStagePrompt(stage: string, input: string): string {
 /**
  * Tailwind class fragments per stage: the active mode button, the inline
  * badge, and the composer textarea border. Each stage owns one accent hue
- * (research=sky, plan=amber, implement=emerald, validate=violet, ship=rose).
+ * (research=sky, plan=amber, implement=emerald, validate=violet, commit=teal,
+ * ship=emerald to match the header Ship action).
  */
 export const MODE_STYLES: Record<
   StageKey,
@@ -136,10 +149,15 @@ export const MODE_STYLES: Record<
     badge: "bg-violet-400/10 text-violet-300",
     composer: "border-violet-400/40",
   },
+  commit: {
+    activeButton: "border-teal-400/40 bg-teal-400/10 text-teal-300",
+    badge: "bg-teal-400/10 text-teal-300",
+    composer: "border-teal-400/40",
+  },
   ship: {
-    activeButton: "border-rose-400/40 bg-rose-400/10 text-rose-300",
-    badge: "bg-rose-400/10 text-rose-300",
-    composer: "border-rose-400/40",
+    activeButton: "border-emerald-400/40 bg-emerald-400/10 text-emerald-300",
+    badge: "bg-emerald-400/10 text-emerald-300",
+    composer: "border-emerald-400/40",
   },
   revise: {
     activeButton: "border-purple-400/40 bg-purple-400/10 text-purple-300",

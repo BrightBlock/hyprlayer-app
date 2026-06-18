@@ -70,16 +70,19 @@ const themeChrome = EditorView.theme({
   ".cm-cursor": { borderLeftColor: "var(--color-accent)" },
   // Merge view: flat translucent add/del boxes. Green matches the header "Ship"
   // button (Tailwind emerald-400, rgb 52 211 153); red stays on the app's bad
-  // hue. !important because @codemirror/merge's base theme targets these with a
-  // higher-specificity `&light`/`&dark` selector that would otherwise win.
-  ".cm-changedLine": { backgroundColor: "rgba(52, 211, 153, 0.20) !important" },
-  ".cm-deletedChunk": { backgroundColor: "rgba(239, 83, 80, 0.18) !important" },
+  // hue. The whole-line fill is kept light so syntax colors on top stay legible
+  // (a heavier wash drowns strings/comments); the word-level highlight is a touch
+  // stronger so the actual edits within a line still stand out. !important
+  // because @codemirror/merge's base theme targets these with a higher-specificity
+  // `&light`/`&dark` selector that would otherwise win.
+  ".cm-changedLine": { backgroundColor: "rgba(52, 211, 153, 0.11) !important" },
+  ".cm-deletedChunk": { backgroundColor: "rgba(239, 83, 80, 0.11) !important" },
   ".cm-changedText": {
-    background: "rgba(52, 211, 153, 0.45) !important",
+    background: "rgba(52, 211, 153, 0.30) !important",
     backgroundImage: "none !important",
   },
   ".cm-deletedChunk .cm-changedText, .cm-deletedText": {
-    background: "rgba(239, 83, 80, 0.42) !important",
+    background: "rgba(239, 83, 80, 0.30) !important",
     backgroundImage: "none !important",
   },
   // The "N unchanged lines" placeholder. @codemirror/merge's base theme paints

@@ -25,7 +25,7 @@ import {
   useWorkstreamPr,
 } from "../lib/queries";
 import { useElementWidth } from "../lib/useElementWidth";
-import { shipWorkstream } from "../features/session/sessionStore";
+import { commitWorkstream, shipWorkstream } from "../features/session/sessionStore";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
 import { useUiStore } from "../lib/uiStore";
@@ -38,6 +38,7 @@ import {
   ClipboardIcon,
   CodeIcon,
   FolderIcon,
+  GitCommitIcon,
   GitPullRequestIcon,
   PlusIcon,
   TerminalIcon,
@@ -347,6 +348,7 @@ export function Root() {
   // Default to the widest we allow; the user can drag it narrower if desired.
   const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
   const [shipping, setShipping] = useState(false);
+  const [committing, setCommitting] = useState(false);
 
   const projects = bootstrap.data?.projects ?? [];
   const configReady = bootstrap.data?.config.state === "ready";
@@ -433,10 +435,10 @@ export function Root() {
   const archiveOnMerge = bootstrap.data?.settings.git?.archiveOnMerge ?? false;
   const autoArchive = useArchiveWorkstream();
   const autoArchivedRef = useRef<Set<string>>(new Set());
-  const activePr = useWorkstreamPr(
-    activeWorkstreamId ?? "",
-    Boolean(activeWorkstream) && archiveOnMerge,
-  );
+  // Enabled for any active workstream (not just archive-on-merge): the Ship
+  // button gates on this too. Shares the query cache with PrStatusBar's
+  // observer, so it adds no extra `gh` calls.
+  const activePr = useWorkstreamPr(activeWorkstreamId ?? "", Boolean(activeWorkstream));
   useEffect(() => {
     if (!archiveOnMerge || !activeWorkstream) return;
     if (activePr.data?.state !== "merged") return;
@@ -500,9 +502,34 @@ export function Root() {
   // Ship / PR / Archive controls. Rendered in exactly one place per layout
   // (inline left of the pane icons when the sidebar is collapsed, or floating
   // at the window's right edge when it's open), so this is a shared fragment.
+  // Ship opens the PR, so it's pointless once one is live. Hide it while the
+  // branch already has an open or merged PR (the PR bar's Merge/Archive takes
+  // over) — otherwise the agent committing mid-turn leaves the branch `ahead`
+  // and Ship would flicker back even though there's nothing left to ship.
+  const hasLivePr = activePr.data?.state === "open" || activePr.data?.state === "merged";
   const shipControls = currentProject ? (
     <>
-      {activeWorkstream && (activeWorkstream.git.dirty > 0 || activeWorkstream.git.ahead > 0) && (
+      {/* Commit checkpoints the worktree locally, independent of opening a PR —
+          shown whenever there are uncommitted changes, even alongside a live PR. */}
+      {activeWorkstream && activeWorkstream.git.dirty > 0 && (
+        <button
+          type="button"
+          disabled={committing}
+          onClick={() => {
+            setCommitting(true);
+            void commitWorkstream(activeWorkstream.item.id).finally(() => setCommitting(false));
+          }}
+          className="inline-flex h-7 items-center gap-2 rounded-md border border-teal-400/40 bg-teal-400/10 px-3 text-sm font-medium text-teal-300 hover:bg-teal-400/20 disabled:opacity-60"
+          title="Commit this worktree's changes (no push or pull request)"
+          aria-label="Commit"
+        >
+          <GitCommitIcon />
+          {!compactHeader && "Commit"}
+        </button>
+      )}
+      {activeWorkstream &&
+        !hasLivePr &&
+        (activeWorkstream.git.dirty > 0 || activeWorkstream.git.ahead > 0) && (
         <button
           type="button"
           disabled={shipping}

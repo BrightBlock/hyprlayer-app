@@ -40,7 +40,8 @@ function ExternalLinkIcon() {
  * The CI Checks breakdown at the bottom of the diff sidebar. Always shown for an
  * open PR but minimized to just its header until there are actual checks; once
  * checks exist the section is collapsable and lists them line by line — glyph +
- * name — with a row opening the check's run page in the browser. An overall
+ * name — with a row opening that check inside the PR's Checks tab (Actions
+ * runs) or its external CI page (third-party contexts). An overall
  * status dot in the header reflects the combined result. Renders nothing when
  * there's no open PR.
  */

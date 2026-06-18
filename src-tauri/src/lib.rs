@@ -2,6 +2,7 @@ mod commands;
 mod editors;
 mod error;
 mod events;
+mod pr_watch;
 mod session_registry;
 mod settings;
 mod state;
@@ -81,6 +82,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ConfigChanged,
             events::BinariesChanged,
             events::ThoughtsIndexUpdated,
+            events::PrStatusChanged,
             events::SessionLifecycle
         ])
 }
@@ -226,6 +228,12 @@ pub fn run() {
                     }
                 }
             });
+
+            // 3. Watch each active workstream's PR server-side and push a
+            //    PrStatusChanged event on change, so the merge/archive bar stays
+            //    in sync (e.g. a PR merged on GitHub flips Merge → Archive)
+            //    without the frontend polling gh on a timer.
+            pr_watch::spawn(app.handle().clone());
 
             Ok(())
         })

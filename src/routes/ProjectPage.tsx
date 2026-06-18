@@ -616,7 +616,9 @@ export function ProjectPage() {
         setShellMenu({ shellId: shell.id, x: e.clientX, y: e.clientY });
       }}
       className={`inline-flex shrink-0 cursor-pointer select-none items-center rounded-md ${
-        drag?.id === shell.id ? "opacity-40" : ""
+        // While dragging, the live-reordering tab's own slot reads as a clear
+        // accent placeholder so it's obvious where the tab will land on drop.
+        drag?.id === shell.id ? "opacity-60 bg-accent/10 ring-2 ring-inset ring-accent" : ""
       } ${
         opts.active
           ? opts.paneFocused
@@ -627,7 +629,9 @@ export function ProjectPage() {
     >
       <span className="flex min-w-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium">
         {shell.diffView ? (
-          <span className="text-ink-dim" title="Diff view">
+          // Accent-tinted badge so a diff tab is obvious at a glance, distinct
+          // from dim doc/file viewers and the hue-coded agent tabs.
+          <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
             <DiffIcon size={13} />
           </span>
         ) : isViewerShell(shell) ? (
@@ -952,10 +956,12 @@ export function ProjectPage() {
         />
       </Dialog>
 
-      {/* Floating label that trails the cursor while dragging a tab. */}
+      {/* Floating pill that trails the cursor while dragging a tab — styled as a
+          "lifted" tab (accent ring, lift shadow, slight scale) so the drag reads
+          clearly as carrying that tab to a new spot. */}
       {drag && (
         <div
-          className="pointer-events-none fixed z-50 rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs font-medium text-ink shadow-lg"
+          className="pointer-events-none fixed z-50 scale-105 rounded-md border border-accent/70 bg-panel-2 px-2.5 py-1.5 text-xs font-medium text-ink shadow-2xl ring-2 ring-accent/30"
           style={{ left: drag.x + 12, top: drag.y + 12 }}
         >
           {drag.title}

@@ -75,9 +75,29 @@ export function updateWorkstreamTabs(
  * being a chosen chat mode (see `shipWorkstream` in [`sessionStore`]).
  */
 export function openShipTab(workstreamId: string, sessionId: string): void {
+  openDedicatedTab(workstreamId, sessionId, "ship", "Ship");
+}
+
+/**
+ * Open (creating if absent) the dedicated Commit tab for a workstream. Like
+ * shipping, committing reuses one tab per workstream (see `commitWorkstream`).
+ */
+export function openCommitTab(workstreamId: string, sessionId: string): void {
+  openDedicatedTab(workstreamId, sessionId, "commit", "Commit");
+}
+
+/** Shared logic for the action-driven tabs (Ship, Commit): reuse the workstream's
+ *  single `mode` tab if it exists (rebinding it to `sessionId`), else create one
+ *  titled `title`; either way select it. */
+function openDedicatedTab(
+  workstreamId: string,
+  sessionId: string,
+  mode: ShellTab["mode"],
+  title: string,
+): void {
   updateWorkstreamTabs((all) => {
     const current = all[workstreamId] ?? defaultTabState();
-    const existing = current.shells.find((s) => s.mode === "ship");
+    const existing = current.shells.find((s) => s.mode === mode);
     if (existing) {
       const inRightPane = existing.panel === "right";
       return {
@@ -101,8 +121,8 @@ export function openShipTab(workstreamId: string, sessionId: string): void {
           ...current.shells,
           {
             id: nextId,
-            title: "Ship",
-            mode: "ship",
+            title,
+            mode,
             draft: "",
             docs: [],
             attachments: [],

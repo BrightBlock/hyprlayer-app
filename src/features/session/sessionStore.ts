@@ -30,7 +30,7 @@ import { invalidateWorktreeGit } from "../../lib/queries";
 import { docFromTool, docTitle, type DocKind } from "./toolDisplay";
 import { type Attachment } from "./attachments";
 import { composeStagePrompt } from "./stages";
-import { openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
+import { openCommitTab, openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
 import {
   addUserMessage,
   initialSessionView,
@@ -493,6 +493,30 @@ export async function killSession(sessionId: string): Promise<void> {
     return;
   }
   await unwrap(commands.killSession(sessionId));
+}
+
+/**
+ * Commit a workstream's changes from the header action: start a commit-stage
+ * session — stage + commit only, no push or PR — in a dedicated, reusable
+ * "Commit" tab and select it. Lets users checkpoint incrementally and open the
+ * PR later via Ship. Reuses the live commit session's tab if one is running.
+ */
+export async function commitWorkstream(workstreamId: string): Promise<void> {
+  const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
+  const commitTab = tabs?.shells.find((s) => s.mode === "commit");
+  if (commitTab?.sessionId) {
+    const entry = entryOf(commitTab.sessionId);
+    if (entry && !isTerminal(entry.state)) {
+      openCommitTab(workstreamId, commitTab.sessionId); // re-select the live commit tab
+      return;
+    }
+  }
+  const session = await startSession({
+    workstreamId,
+    stage: "commit",
+    input: "",
+  });
+  openCommitTab(workstreamId, session.id);
 }
 
 /**

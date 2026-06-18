@@ -60,7 +60,7 @@ impl MergeMethod {
 }
 
 /// One CI check on the PR's head commit, for the per-check breakdown popover.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PrCheck {
@@ -72,7 +72,7 @@ pub struct PrCheck {
 }
 
 /// A branch's pull request as the PR status bar renders it.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PrStatus {
@@ -139,7 +139,7 @@ struct RollupEntry {
 /// The per-check breakdown: name + outcome + link for each rollup entry, in the
 /// order GitHub returns them. Consumes the rollup so the entry strings move into
 /// the result rather than being cloned.
-fn build_checks(rollup: Vec<RollupEntry>) -> Vec<PrCheck> {
+fn build_checks(rollup: Vec<RollupEntry>, pr_url: &str) -> Vec<PrCheck> {
     rollup
         .into_iter()
         .map(|e| {
@@ -147,10 +147,35 @@ fn build_checks(rollup: Vec<RollupEntry>) -> Vec<PrCheck> {
             PrCheck {
                 name: e.name.or(e.context).unwrap_or_else(|| "check".into()),
                 state,
-                url: e.details_url.or(e.target_url),
+                url: check_url(pr_url, e.details_url.as_deref(), e.target_url.as_deref()),
             }
         })
         .collect()
+}
+
+/// Resolve one check's link. A GitHub Actions CheckRun gets a PR-anchored URL
+/// (`…/pull/N/checks?check_run_id=…`) so the row opens that exact check inside
+/// the PR's Checks tab rather than the bare Actions job page. Anything else
+/// (third-party StatusContexts) keeps its own `targetUrl`, which points at the
+/// external CI — the best link GitHub gives us for those.
+fn check_url(pr_url: &str, details_url: Option<&str>, target_url: Option<&str>) -> Option<String> {
+    if let Some(details) = details_url {
+        return match check_run_id(details) {
+            Some(id) => Some(format!("{pr_url}/checks?check_run_id={id}")),
+            None => Some(details.to_string()),
+        };
+    }
+    target_url.map(str::to_string)
+}
+
+/// The check-run id embedded as the `/job/<id>` segment of an Actions
+/// `detailsUrl` (e.g. `…/actions/runs/27760243809/job/82132429491` → 82132429491,
+/// which equals the run's `databaseId` — the id the PR Checks tab anchors on).
+/// `None` for non-Actions URLs, which carry no such id.
+fn check_run_id(details_url: &str) -> Option<u64> {
+    let (_, rest) = details_url.rsplit_once("/job/")?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
 }
 
 /// Normalize one rollup entry to a per-check [`ChecksState`] across both shapes
@@ -214,7 +239,7 @@ fn parse_pr(stdout: &str) -> Result<PrStatus> {
         program: "gh pr view".into(),
         detail: e.to_string(),
     })?;
-    let checks_list = build_checks(raw.status_check_rollup);
+    let checks_list = build_checks(raw.status_check_rollup, &raw.url);
     let (checks, checks_total, checks_passed, checks_failed) = summarize(&checks_list);
     let review_decision = raw.review_decision.filter(|s| !s.is_empty());
     Ok(PrStatus {
@@ -381,6 +406,42 @@ mod tests {
         assert_eq!(pr.checks_list[1].name, "coverage");
         assert_eq!(pr.checks_list[1].state, ChecksState::Failing);
         assert_eq!(pr.checks_list[1].url.as_deref(), Some("https://x/cov"));
+    }
+
+    #[test]
+    fn actions_check_links_into_pr_checks_tab() {
+        let json = r#"{
+            "number": 8, "url": "https://github.com/o/r/pull/8", "title": "t",
+            "state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "",
+            "statusCheckRollup": [
+                {"status": "COMPLETED", "conclusion": "SUCCESS", "name": "build",
+                 "detailsUrl": "https://github.com/o/r/actions/runs/27760243809/job/82132429491"},
+                {"state": "SUCCESS", "context": "ci/ext", "targetUrl": "https://ext.example/run/9"}
+            ]
+        }"#;
+        let pr = parse_pr(json).unwrap();
+        // The Actions CheckRun resolves to its run *inside the PR's Checks tab*,
+        // not the bare Actions job page.
+        assert_eq!(
+            pr.checks_list[0].url.as_deref(),
+            Some("https://github.com/o/r/pull/8/checks?check_run_id=82132429491")
+        );
+        // A third-party status context keeps its own external target URL.
+        assert_eq!(
+            pr.checks_list[1].url.as_deref(),
+            Some("https://ext.example/run/9")
+        );
+    }
+
+    #[test]
+    fn check_run_id_reads_job_segment_only() {
+        assert_eq!(
+            check_run_id("https://github.com/o/r/actions/runs/1/job/42"),
+            Some(42)
+        );
+        // No `/job/` segment (older/foreign shapes) → no id; caller falls back.
+        assert_eq!(check_run_id("https://github.com/o/r/runs/42"), None);
+        assert_eq!(check_run_id("https://ext.example/build"), None);
     }
 
     #[test]

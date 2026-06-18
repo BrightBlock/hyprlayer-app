@@ -17,6 +17,7 @@ pub enum Stage {
     Plan,
     Implement,
     Validate,
+    Commit,
     Ship,
     Revise,
 }
@@ -32,6 +33,7 @@ impl Stage {
             "plan" => Some(Stage::Plan),
             "implement" => Some(Stage::Implement),
             "validate" => Some(Stage::Validate),
+            "commit" => Some(Stage::Commit),
             "ship" => Some(Stage::Ship),
             "revise" => Some(Stage::Revise),
             _ => None,
@@ -50,6 +52,7 @@ impl Stage {
             Stage::Plan => "plan",
             Stage::Implement => "implement",
             Stage::Validate => "validate",
+            Stage::Commit => "commit",
             Stage::Ship => "ship",
             Stage::Revise => "revise",
         }
@@ -65,7 +68,7 @@ impl Stage {
             Stage::Plan => Some("/create_plan"),
             Stage::Implement => Some("/implement_plan"),
             Stage::Validate => Some("/validate_plan"),
-            Stage::General | Stage::Ship | Stage::Revise => None,
+            Stage::General | Stage::Commit | Stage::Ship | Stage::Revise => None,
         }
     }
 }
@@ -141,6 +144,14 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
             allowed_tools: allow(&[]),
             disallowed_tools: deny(&["Write", "Edit", "Bash(git commit:*)"]),
         },
+        // Commit checkpoints the worktree locally — stage + commit, never push
+        // or touch `gh` (the explicit half of the split-out Ship flow). Push is
+        // hard-denied so an over-eager agent can't turn a commit into a ship.
+        Stage::Commit => StagePolicy {
+            permission_mode: PermissionMode::Default,
+            allowed_tools: allow(&["Bash(git add:*)", "Bash(git commit:*)"]),
+            disallowed_tools: deny(&["Bash(git push:*)", "Bash(gh:*)"]),
+        },
         // Ship and Revise both push to the branch and talk to `gh`; Revise
         // addresses PR feedback (CI failures, review comments) on a branch that
         // already has a PR, so it shares Ship's posture.
@@ -173,6 +184,15 @@ after the commit and push succeed, open a pull request against the default branc
 clear title and run the /describe_pr skill to write the PR description from the \
 repository's template and update the PR.";
 
+/// The Commit directive: checkpoint the worktree locally without shipping. The
+/// split-out counterpart to [`SHIP_PROMPT`] — commit only, so users can land
+/// work incrementally and open the PR later via Ship. Explicitly forbids push
+/// and PR creation (the policy hard-denies push + `gh` to back this up). Kept
+/// byte-identical to the frontend `COMMIT_PROMPT` (src/features/session/stages.ts).
+pub const COMMIT_PROMPT: &str =
+    "Commit all changes in this worktree: stage everything, then commit with a clear, \
+descriptive message. Do not push the branch or open a pull request.";
+
 /// The Revise directive: address PR feedback on a branch that already has a PR.
 /// The specific feedback (failing CI vs. requested changes) rides in the input.
 /// Explicitly tells the agent NOT to open a second PR. Kept byte-identical to the
@@ -200,13 +220,13 @@ pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> St
         // Plain chat: the input verbatim — no skill prefix. Explicitly attached
         // docs/screenshots are still listed below (the user asked for them).
         Stage::General => input.to_string(),
-        // Ship/Revise send a prose directive (not a skill); extra context, if
-        // any, is appended below it.
-        Stage::Ship | Stage::Revise => {
-            let base = if stage == Stage::Ship {
-                SHIP_PROMPT
-            } else {
-                REVISE_PROMPT
+        // Commit/Ship/Revise send a prose directive (not a skill); extra
+        // context, if any, is appended below it.
+        Stage::Commit | Stage::Ship | Stage::Revise => {
+            let base = match stage {
+                Stage::Ship => SHIP_PROMPT,
+                Stage::Revise => REVISE_PROMPT,
+                _ => COMMIT_PROMPT,
             };
             if input.is_empty() {
                 base.to_string()
@@ -320,6 +340,26 @@ mod tests {
         );
         // It does not invoke /commit as a slash-command.
         assert!(!compose_prompt(Stage::Ship, "", &[]).starts_with('/'));
+    }
+
+    #[test]
+    fn commit_checkpoints_locally_without_push_or_pr() {
+        assert_eq!(Stage::parse("commit"), Stage::Commit);
+        assert_eq!(Stage::Commit.as_str(), "commit");
+        assert_eq!(Stage::Commit.command(), None);
+        // Bare directive (button-driven, no input), and extra context appended.
+        assert_eq!(compose_prompt(Stage::Commit, "", &[]), COMMIT_PROMPT);
+        assert_eq!(
+            compose_prompt(Stage::Commit, "split into two commits", &[]),
+            format!("{COMMIT_PROMPT}\n\nsplit into two commits"),
+        );
+        // It commits but is hard-denied from pushing or opening a PR — that's
+        // what keeps it distinct from Ship.
+        let commit = policy_for(Stage::Commit);
+        assert!(commit.allowed_tools.iter().any(|t| t.contains("git commit")));
+        assert!(!commit.allowed_tools.iter().any(|t| t.contains("git push")));
+        assert!(commit.disallowed_tools.iter().any(|t| t.contains("git push")));
+        assert!(commit.disallowed_tools.iter().any(|t| t == "Bash(gh:*)"));
     }
 
     #[test]

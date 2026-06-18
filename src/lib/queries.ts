@@ -305,21 +305,19 @@ export function useReprovisionWorkstream() {
 
 // ── Pull request (derived live from gh) ─────────────────────────────────────
 
-/** The branch's PR (or null), derived live from `gh`. Polls while checks are
- *  still running so the bar advances from "running" → pass/fail on its own; a
- *  settled PR (no PR, merged/closed, or checks done) stops polling. */
+/** The branch's PR (or null), derived live from `gh`. Fetches once on mount;
+ *  liveness is push-based after that — the backend PR watcher diffs each poll
+ *  and emits `prStatusChanged`, which invalidates this query (see
+ *  `src/lib/events.ts`). So the bar advances on its own (checks settling, a
+ *  merge landing elsewhere flipping Merge → Archive) without a UI timer. */
 export function useWorkstreamPr(id: string, enabled = true) {
   return useQuery({
     queryKey: ["workstream", id, "pr"],
     queryFn: () => unwrap(commands.workstreamPrStatus(id)),
     enabled: enabled && id.length > 0,
     // Reuse cached status across rapid workstream switches instead of re-running
-    // the `gh` subprocess each time; matches the poll cadence below.
+    // the `gh` subprocess each time; the backend watcher pushes updates between.
     staleTime: 8000,
-    refetchInterval: (query) => {
-      const pr = query.state.data;
-      return pr && pr.state === "open" && pr.checks === "pending" ? 8000 : false;
-    },
   });
 }
 

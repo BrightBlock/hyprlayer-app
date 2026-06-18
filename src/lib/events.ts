@@ -19,6 +19,14 @@ export function attachEventListeners(): () => void {
       void queryClient.invalidateQueries({ queryKey: ["health"] });
       void queryClient.invalidateQueries({ queryKey: ["project"] });
     }),
+    // A workstream's PR status changed server-side (merged, checks settled, a
+    // PR appeared/disappeared). The backend watcher already diffed it, so just
+    // refetch that workstream's PR query — only the mounted one (active
+    // workstream / archive-on-merge) actually re-runs `gh`.
+    events.prStatusChanged.listen((event) => {
+      const { workstreamId } = event.payload;
+      void queryClient.invalidateQueries({ queryKey: ["workstream", workstreamId, "pr"] });
+    }),
     // The thoughts index changed: docs were (re)indexed, removed, or the tree
     // was rescanned. Refresh every list and the touched documents (all of
     // them on a rescan, where ids is empty).
