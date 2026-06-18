@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use hyprlayer_core::claude::{ClaudeDriver, SessionEvent, SpawnConfig};
+use hyprlayer_core::claude::{ClaudeDriver, PermissionMode, SessionEvent, SpawnConfig};
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent};
@@ -61,6 +61,9 @@ struct LaunchParams {
     project_path: String,
     model: Option<String>,
     effort: Option<String>,
+    /// User-chosen `--permission-mode` override for this spawn, or `None` to use
+    /// the stage's default posture (see [`pipeline::policy_for`]).
+    permission_mode: Option<PermissionMode>,
     resume: bool,
     start_seq: i64,
     channel: Channel<SessionEvent>,
@@ -81,6 +84,7 @@ async fn launch_session(
         project_path,
         model,
         effort,
+        permission_mode,
         resume,
         start_seq,
         channel,
@@ -97,6 +101,10 @@ async fn launch_session(
     let effective = effective_for(state, &project_path).await?;
     let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
     let policy = pipeline::policy_for(Stage::parse(&session.stage));
+    // The stage sets a default permission posture; an explicit user choice in the
+    // composer (e.g. "Bypass permissions") overrides just the mode, keeping the
+    // stage's allow/deny tool lists as guardrails.
+    let permission_mode = permission_mode.unwrap_or(policy.permission_mode);
 
     // The child inherits our env; we only override PATH with the resolver's
     // augmented PATH (login-shell + well-known dirs) so it finds git/gh/etc.
@@ -107,7 +115,7 @@ async fn launch_session(
         claude_bin: claude,
         cwd: PathBuf::from(&session.cwd),
         session_id: session.id.clone(),
-        permission_mode: policy.permission_mode,
+        permission_mode,
         allowed_tools: policy.allowed_tools,
         disallowed_tools: policy.disallowed_tools,
         add_dirs,
@@ -166,6 +174,9 @@ pub async fn start_stage_session(
     attached_docs: Vec<String>,
     model: Option<String>,
     effort: Option<String>,
+    // Optional `--permission-mode` override (`default` | `acceptEdits` | `plan` |
+    // `bypassPermissions`); `None`/unrecognized keeps the stage's default posture.
+    permission_mode: Option<String>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
     let ws = {
@@ -206,6 +217,9 @@ pub async fn start_stage_session(
             project_path: ws.project_path,
             model,
             effort,
+            permission_mode: permission_mode
+                .as_deref()
+                .and_then(PermissionMode::from_flag),
             resume: false,
             start_seq: 0,
             channel: on_event,
@@ -234,6 +248,10 @@ pub async fn resume_session(
     session_id: String,
     model: Option<String>,
     effort: Option<String>,
+    // Optional `--permission-mode` override for the resumed launch. Unlike a live
+    // session (which can't switch into `bypassPermissions`), a resume is a fresh
+    // process, so any mode applies. `None`/unrecognized keeps the stage default.
+    permission_mode: Option<String>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
     let session = {
@@ -290,6 +308,95 @@ pub async fn resume_session(
             project_path: ws.project_path,
             model,
             effort,
+            // A resume CAN carry a permission override (it's a fresh process):
+            // this is how the UI restarts a live session into a new mode (e.g.
+            // bypass, which a running session can't switch into). `None` keeps
+            // the stage default.
+            permission_mode: permission_mode
+                .as_deref()
+                .and_then(PermissionMode::from_flag),
+            resume: true,
+            start_seq,
+            channel: on_event,
+        },
+    )
+    .await?;
+
+    Ok(session)
+}
+
+/// Restart a *live* session into a new permission mode. Claude can't switch a
+/// running session into `bypassPermissions` (it's a launch-time decision), so
+/// the UI applies a mode change by relaunching the process. We do it atomically
+/// on the backend — kill the live driver, wait for it to actually exit (the
+/// forwarder drops it from the registry on its `Exited`), then re-spawn with
+/// `--resume` and the new mode — so the frontend can't race the resume onto the
+/// still-dying old process (which would keep the old mode). Conversation is
+/// preserved; the event log appends after its tail.
+#[tauri::command]
+#[specta::specta]
+pub async fn restart_session(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    permission_mode: Option<String>,
+    on_event: Channel<SessionEvent>,
+) -> CmdResult<Session> {
+    let session = {
+        let id = session_id.clone();
+        db_task(state.db.clone(), move |db| db.get_session(&id)).await?
+    }
+    .ok_or_else(|| session_not_found(&session_id))?;
+
+    // Kill the live process (if any) and wait until the forwarder removes it from
+    // the registry — i.e. it has truly exited and released its permit — before we
+    // re-spawn. Bounded so a wedged process can't hang the restart forever.
+    if let Some(driver) = state.sessions.get(&session_id).await {
+        driver.kill();
+        let mut waited_ms = 0u64;
+        while state.sessions.get(&session_id).await.is_some() && waited_ms < 10_000 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            waited_ms += 50;
+        }
+    }
+
+    let ws = {
+        let id = session.workstream_id.clone();
+        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
+    }
+    .ok_or_else(|| AppError {
+        code: "workstream_not_found".into(),
+        message: format!("No workstream with id {}", session.workstream_id),
+        remedy: None,
+    })?;
+
+    let permit = state.sessions.try_acquire().ok_or_else(too_many_sessions)?;
+    let start_seq = {
+        let id = session.id.clone();
+        db_task(state.db.clone(), move |db| db.session_events(&id))
+            .await?
+            .len() as i64
+    };
+    {
+        let id = session.id.clone();
+        let _ = db_task(state.db.clone(), move |db| {
+            db.set_session_state(&id, "running")
+        })
+        .await;
+    }
+
+    launch_session(
+        &state,
+        permit,
+        LaunchParams {
+            app,
+            session: session.clone(),
+            project_path: ws.project_path,
+            model: None,
+            effort: None,
+            permission_mode: permission_mode
+                .as_deref()
+                .and_then(PermissionMode::from_flag),
             resume: true,
             start_seq,
             channel: on_event,

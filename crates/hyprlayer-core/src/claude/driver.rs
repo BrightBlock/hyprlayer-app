@@ -47,6 +47,20 @@ impl PermissionMode {
             PermissionMode::BypassPermissions => "bypassPermissions",
         }
     }
+
+    /// Parse a `--permission-mode` value (the same strings claude's CLI accepts),
+    /// or `None` for anything unrecognized. Used to apply a user-chosen override
+    /// on top of the stage's default posture; an unknown value falls back to the
+    /// stage default at the call site.
+    pub fn from_flag(s: &str) -> Option<PermissionMode> {
+        match s {
+            "default" => Some(PermissionMode::Default),
+            "acceptEdits" => Some(PermissionMode::AcceptEdits),
+            "plan" => Some(PermissionMode::Plan),
+            "bypassPermissions" => Some(PermissionMode::BypassPermissions),
+            _ => None,
+        }
+    }
 }
 
 /// Everything needed to launch one session.

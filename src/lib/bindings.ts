@@ -117,14 +117,25 @@ export const commands = {
 	 *  spawns the driver under the concurrency cap, and streams events back over
 	 *  `on_event`. Returns the persisted [`Session`] row.
 	 */
-	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], model: string | null, effort: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, model, effort, onEvent })),
+	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], model: string | null, effort: string | null, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, model, effort, permissionMode, onEvent })),
 	/**
 	 *  Resume a previously-started session that's no longer live (e.g. after an app
 	 *  restart) by re-spawning claude with `--resume`, so the conversation continues
 	 *  instead of forcing a new session. The event log appends after its existing
 	 *  tail. Returns the (existing) [`Session`] row.
 	 */
-	resumeSession: (sessionId: string, model: string | null, effort: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, onEvent })),
+	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, onEvent })),
+	/**
+	 *  Restart a *live* session into a new permission mode. Claude can't switch a
+	 *  running session into `bypassPermissions` (it's a launch-time decision), so
+	 *  the UI applies a mode change by relaunching the process. We do it atomically
+	 *  on the backend — kill the live driver, wait for it to actually exit (the
+	 *  forwarder drops it from the registry on its `Exited`), then re-spawn with
+	 *  `--resume` and the new mode — so the frontend can't race the resume onto the
+	 *  still-dying old process (which would keep the old mode). Conversation is
+	 *  preserved; the event log appends after its tail.
+	 */
+	restartSession: (sessionId: string, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, permissionMode, onEvent })),
 	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	/**

@@ -53,6 +53,13 @@ export type SessionEntry = SessionView & {
   /** Whether a live claude process is attached. False for a session restored
    *  from the log after a restart — it resumes on the next message. */
   live: boolean;
+  /** The `--permission-mode` this session launched with (null = stage default).
+   *  Remembered so a resume re-applies it — a running session can't switch into
+   *  `bypassPermissions`, so changing the mode restarts (kill + resume) with it. */
+  permissionMode: string | null;
+  /** True only during a permission-mode restart: the kill→resume swap. Lets the
+   *  kill's `exited` event be swallowed so the transcript doesn't flash "ended". */
+  reloading?: boolean;
   /** Messages the user sent while a turn was still in flight, awaiting delivery.
    *  Delivered one-per-turn as each turn finishes (conversation steering). Each
    *  carries its own staged attachments. */
@@ -137,6 +144,19 @@ function bufferedChannel(): {
 function dispatch(sessionId: string, event: SessionEvent): void {
   const current = entryOf(sessionId);
   if (!current) return;
+
+  // Permission-mode change: swallow the kill's `exited` so the session detaches
+  // (live:false, idle) instead of flashing "session ended". Claude can't switch a
+  // running session into bypass, so we relaunch lazily — the next message resumes
+  // with the new mode (the proven resume-then-send path), rather than eagerly
+  // resuming into an idle process that emits no `init` and hangs on "connecting".
+  if (event.kind === "exited" && current.reloading) {
+    channels.delete(sessionId);
+    setEntry(sessionId, { ...current, live: false, reloading: false, state: "idle" });
+    void queryClient.invalidateQueries({ queryKey: ["workstream", current.workstreamId, "diff"] });
+    return;
+  }
+
   setEntry(sessionId, { ...current, ...reduceEvent(current, event) });
 
   if (event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName)) {
@@ -176,6 +196,8 @@ export async function startSession(args: {
   model?: string | null;
   /** `--effort` level, or null/undefined for claude's default. */
   effort?: string | null;
+  /** `--permission-mode` override, or null/undefined to use the stage default. */
+  permissionMode?: string | null;
 }): Promise<Session> {
   const { channel, activate } = bufferedChannel();
   const attachments = args.attachments ?? [];
@@ -188,6 +210,7 @@ export async function startSession(args: {
       attachments.map((a) => a.path),
       args.model ?? null,
       args.effort ?? null,
+      args.permissionMode ?? null,
       channel,
     ),
   );
@@ -207,6 +230,7 @@ export async function startSession(args: {
     stage: args.stage,
     autoAllow: [],
     live: true,
+    permissionMode: args.permissionMode ?? null,
     workingSince: null,
     queued: [],
   });
@@ -229,8 +253,10 @@ export async function resumeSession(sessionId: string): Promise<void> {
   setEntry(sessionId, { ...current, live: true, state: "starting" });
 
   try {
-    // Resume with claude's original session settings (model/effort null).
-    await unwrap(commands.resumeSession(sessionId, null, null, channel));
+    // Resume with claude's original session settings (model/effort null), but
+    // re-apply the chosen permission mode — claude doesn't restore it, and it's
+    // how a restart carries a mode (e.g. bypass) a live session can't switch to.
+    await unwrap(commands.resumeSession(sessionId, null, null, current.permissionMode, channel));
   } catch (e) {
     channels.delete(sessionId);
     const latest = entryOf(sessionId);
@@ -239,6 +265,72 @@ export async function resumeSession(sessionId: string): Promise<void> {
   }
 
   activate(sessionId); // bind + flush events buffered during the resume call
+}
+
+/**
+ * Restart a live session into a new permission mode via the backend's atomic
+ * `restart_session` (kill the old process, wait for it to die, resume with the
+ * new mode). Doing the kill+wait+respawn server-side removes the frontend race
+ * where a resume could land on the still-dying old process and inherit its mode.
+ *
+ * Channel handling: the old process's kill-`exited` is still routed to the old
+ * channel, so we drop that channel and flag `reloading` first — the dispatch
+ * swallow turns that exit into a clean detach (no "session ended"). Only after
+ * the backend has respawned do we bind the fresh channel, so the swallow can't
+ * race-delete it. The resumed `claude` is alive but silent until the next
+ * message, so we settle to idle/ready rather than hanging on "connecting".
+ */
+async function restartSession(sessionId: string, mode: string | null): Promise<void> {
+  const current = entryOf(sessionId);
+  if (!current) return;
+
+  channels.delete(sessionId); // detach the old channel; its kill-exit is swallowed
+  setEntry(sessionId, { ...current, permissionMode: mode, reloading: true, live: false, state: "starting" });
+
+  const { channel, activate } = bufferedChannel();
+  try {
+    await unwrap(commands.restartSession(sessionId, mode, channel));
+  } catch (e) {
+    const latest = entryOf(sessionId);
+    if (latest) setEntry(sessionId, { ...latest, reloading: false, live: false, state: "idle" });
+    throw e;
+  }
+
+  channels.set(sessionId, channel); // bind the fresh stream now that the old one is gone
+  activate(sessionId);
+  const after = entryOf(sessionId);
+  if (after) {
+    setEntry(sessionId, {
+      ...after,
+      live: true,
+      reloading: false,
+      state: after.state === "starting" ? "idle" : after.state,
+    });
+  }
+}
+
+/**
+ * Change a session's permission mode. Claude can't switch a *running* session
+ * into `bypassPermissions` (it's a launch-time decision), so applying a new mode
+ * to an existing conversation means relaunching the process with the new flag,
+ * continuing via `--resume` so the full transcript is preserved (see
+ * [`restartSession`]). A not-live session just records the choice — it takes
+ * effect on the next start/resume. The caller confirms first if a turn is in
+ * flight (the restart interrupts it). `mode` is the `--permission-mode` flag, or
+ * null for the stage default.
+ */
+export async function applyPermissionMode(
+  sessionId: string,
+  mode: string | null,
+): Promise<void> {
+  const current = entryOf(sessionId);
+  if (!current || current.permissionMode === mode) return;
+
+  if (!channels.has(sessionId)) {
+    setEntry(sessionId, { ...current, permissionMode: mode });
+    return;
+  }
+  await restartSession(sessionId, mode);
 }
 
 /**
@@ -368,29 +460,21 @@ export async function interruptSession(sessionId: string): Promise<void> {
   await unwrap(commands.interruptSession(sessionId));
 }
 
-/** Grace period for a graceful interrupt to land before "stop" escalates to a
- *  hard kill. A turn deep in a subagent may never ack the control-protocol
- *  interrupt, so the stop button must always be able to actually stop. */
-const INTERRUPT_GRACE_MS = 4000;
-
 /**
- * Stop the current turn for the composer's stop button. Tries a graceful
- * interrupt first (keeps the process so the user can send another turn); if the
- * turn is still running after a grace period — e.g. claude is wedged in a
- * subagent and never acked — hard-kills the process tree. Sessions are
- * resumable, so the kill is recoverable.
+ * Stop the current turn for the composer's stop button — and ONLY the turn: the
+ * session stays alive. Claude's control-protocol interrupt is reliable here; it
+ * acks, aborts the turn (emitting a result that un-busies the session), and
+ * stays ready for the next message. We deliberately do NOT escalate to a process
+ * kill: that ends the whole session, which is not what "stop the turn" means. A
+ * detached session has no live turn to stop.
  */
 export async function stopSession(sessionId: string): Promise<void> {
+  if (!channels.has(sessionId)) return;
   try {
     await interruptSession(sessionId);
   } catch {
-    // Interrupt couldn't be delivered (stdin already closed, etc.) — fall
-    // through to the kill below rather than leaving the turn wedged.
-  }
-  await new Promise((resolve) => setTimeout(resolve, INTERRUPT_GRACE_MS));
-  const current = entryOf(sessionId);
-  if (current && channels.has(sessionId) && isBusy(current)) {
-    await killSession(sessionId);
+    // Interrupt couldn't be delivered (stdin already closed, etc.). The session
+    // is left as-is rather than killed — the user can retry or send a message.
   }
 }
 
@@ -491,6 +575,10 @@ export async function restoreSessionIfNeeded(
   sessionId: string,
   workstreamId: string,
   stage: string,
+  /** The tab's persisted `--permission-mode` flag (null = stage default), so a
+   *  resume after an app restart re-applies the user's choice rather than
+   *  silently dropping back to the stage default. */
+  permissionMode: string | null = null,
 ): Promise<void> {
   if (entryOf(sessionId) || channels.has(sessionId) || restoring.has(sessionId)) return;
   restoring.add(sessionId);
@@ -520,6 +608,9 @@ export async function restoreSessionIfNeeded(
       stage,
       autoAllow: [],
       live: false,
+      // The session log doesn't store the mode, but the tab does — re-apply it so
+      // a resume keeps the user's choice (e.g. bypass) across an app restart.
+      permissionMode,
       workingSince: null,
       queued: [],
     });

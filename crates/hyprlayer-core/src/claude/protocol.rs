@@ -130,6 +130,12 @@ pub fn parse_line(line: &str) -> ParsedLine {
             context_tokens: context_tokens(v.get("usage")),
         },
         Some("control_request") => parse_control_request(&v),
+        // Our own control requests (interrupt / set_permission_mode) get acked
+        // with a `control_response`. It's bookkeeping, not transcript content —
+        // ignore it rather than surfacing a scary "unrecognized line" warning.
+        Some("control_response") => ParsedLine::System {
+            subtype: "control_response".into(),
+        },
         // Known-but-ignored informational lines (don't surface as errors).
         Some("rate_limit_event") => ParsedLine::System {
             subtype: "rate_limit".into(),

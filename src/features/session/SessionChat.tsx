@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Badge, Button, ErrorNote, Spinner } from "../../components/ui";
 import {
@@ -19,6 +20,7 @@ import {
   PlusIcon,
   QuestionIcon,
   SendIcon,
+  ShieldIcon,
   SparkleIcon,
   StopIcon,
   XIcon,
@@ -31,11 +33,13 @@ import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attac
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, type StageKey } from "./stages";
 import { EFFORTS, MODELS, effortOption, modelOption } from "./models";
+import { PERMISSION_MODES, permissionModeOption } from "./permissions";
 import { formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers } from "./TranscriptView";
 import {
   allowForSession,
   answerQuestion,
+  applyPermissionMode,
   cancelQueuedMessage,
   respondPermission,
   restoreSessionIfNeeded,
@@ -103,7 +107,14 @@ export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?
   );
 }
 
-type MenuItem = { key: string; label: string; hint?: string; icon?: ReactNode };
+type MenuItem = {
+  key: string;
+  label: string;
+  hint?: string;
+  icon?: ReactNode;
+  /** Render in red (e.g. "Bypass permissions") to flag a risky choice. */
+  danger?: boolean;
+};
 
 /** A compact composer-toolbar dropdown (model / effort / mode). Opens upward —
  *  the composer sits at the bottom of the pane. */
@@ -134,6 +145,8 @@ function ComposerMenu({
   const [text, setText] = useState("");
   // The active selection is "custom" when it matches none of the preset items.
   const customActive = custom != null && !items.some((it) => it.key === activeKey);
+  // A risky active choice (e.g. "Bypass permissions") tints the whole trigger red.
+  const activeDanger = items.some((it) => it.key === activeKey && it.danger);
 
   const close = () => {
     setOpen(false);
@@ -165,11 +178,13 @@ function ComposerMenu({
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
         title={title}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-ink-dim hover:bg-edge/50 hover:text-ink"
+        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-edge/50 ${
+          activeDanger ? "text-bad hover:text-bad" : "text-ink-dim hover:text-ink"
+        }`}
       >
         <span className="shrink-0">{leading}</span>
-        <span className="font-medium text-ink">{label}</span>
-        {hint && <span className="text-ink-dim">{hint}</span>}
+        <span className={`font-medium ${activeDanger ? "text-bad" : "text-ink"}`}>{label}</span>
+        {hint && <span className={activeDanger ? "text-bad/80" : "text-ink-dim"}>{hint}</span>}
         <ChevronDownIcon size={12} />
       </button>
       {open && (
@@ -185,7 +200,7 @@ function ComposerMenu({
                   close();
                 }}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
-                  it.key === activeKey ? "text-ink" : "text-ink-dim"
+                  it.danger ? "text-bad" : it.key === activeKey ? "text-ink" : "text-ink-dim"
                 }`}
               >
                 {it.icon && <span className="shrink-0">{it.icon}</span>}
@@ -568,6 +583,7 @@ type Props = {
   onModeChange: (mode: StageKey) => void;
   onModelChange: (key: string) => void;
   onEffortChange: (key: string) => void;
+  onPermissionModeChange: (key: string) => void;
   onSessionStarted: (sessionId: string) => void;
   onResetSession: () => void;
   onOpenDoc: (id: string) => void;
@@ -593,6 +609,7 @@ export function SessionChat({
   onModeChange,
   onModelChange,
   onEffortChange,
+  onPermissionModeChange,
   onSessionStarted,
   onResetSession,
   onOpenDoc,
@@ -620,14 +637,15 @@ export function SessionChat({
   const mode = asStageKey(shell.mode);
   const model = modelOption(shell.model);
   const effort = effortOption(shell.effort);
+  const permissionMode = permissionModeOption(shell.permissionMode);
 
   // A tab bound to a session but with no transcript in memory means we came
   // back after an app restart — rebuild it from the persisted event log.
   useEffect(() => {
     if (shell.sessionId && !hasEntry) {
-      void restoreSessionIfNeeded(shell.sessionId, view.item.id, shell.mode);
+      void restoreSessionIfNeeded(shell.sessionId, view.item.id, shell.mode, permissionMode.flag);
     }
-  }, [shell.sessionId, hasEntry, view.item.id, shell.mode]);
+  }, [shell.sessionId, hasEntry, view.item.id, shell.mode, permissionMode.flag]);
 
   // Drag-and-drop. Tauri intercepts OS file drops at the window level (HTML5
   // drop events never fire), so we subscribe to the webview's drag-drop stream
@@ -730,6 +748,7 @@ export function SessionChat({
         attachments: atts,
         model: model.flag,
         effort: effort.key,
+        permissionMode: permissionMode.flag,
       });
       onSessionStarted(created.id);
       onDraftChange("");
@@ -754,6 +773,26 @@ export function SessionChat({
     } catch (e) {
       setError(errorMessage(e));
     }
+  };
+
+  // Permission mode is a launch-time decision (claude won't switch a running
+  // session into bypass), so changing it on a LIVE session restarts the process
+  // via --resume with the new mode — the transcript is preserved. We confirm
+  // first only when a turn is in flight, since the restart interrupts it. Before
+  // a session starts (or for a detached one) we just record the choice; it
+  // applies at the next spawn/resume.
+  const handlePermissionModeChange = async (key: string) => {
+    const opt = permissionModeOption(key);
+    const live = Boolean(sid && session && session.live && !isTerminal(session.state));
+    if (live && session && opt.flag !== session.permissionMode && isBusy(session)) {
+      const ok = await confirm(
+        `Restart this session to apply “${opt.label}”? The active turn will be interrupted.`,
+        { title: "Restart session?", kind: "warning" },
+      );
+      if (!ok) return; // declined — leave the running session (and picker) as-is
+    }
+    onPermissionModeChange(key); // persist on the tab (badge + next fresh session)
+    if (live && sid) await applyPermissionMode(sid, opt.flag);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -916,6 +955,24 @@ export function SessionChat({
                     items={EFFORTS.map((e) => ({ key: e.key, label: e.label }))}
                     activeKey={effort.key}
                     onSelect={onEffortChange}
+                  />
+                  {/* Permission posture for the next session this tab starts.
+                      "Bypass permissions" runs claude with no approval prompts —
+                      same as the CLI's --dangerously-skip-permissions. Fixed at
+                      spawn, so a change applies to the next session, not this one. */}
+                  <ComposerMenu
+                    title="Permission mode"
+                    leading={<ShieldIcon size={14} />}
+                    label={permissionMode.label}
+                    hint={permissionMode.hint}
+                    items={PERMISSION_MODES.map((p) => ({
+                      key: p.key,
+                      label: p.label,
+                      hint: p.hint,
+                      danger: p.danger,
+                    }))}
+                    activeKey={permissionMode.key}
+                    onSelect={(k) => void handlePermissionModeChange(k)}
                   />
 
                   <div className="ml-auto flex items-center gap-1">

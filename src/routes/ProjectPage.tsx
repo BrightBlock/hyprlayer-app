@@ -70,6 +70,9 @@ export type ShellTab = {
    *  (see models.ts); fixed at spawn. Undefined → the defaults. */
   model?: string;
   effort?: string;
+  /** Permission-mode key chosen for the NEXT session (see permissions.ts);
+   *  fixed at spawn. Undefined → "auto" (the stage's default posture). */
+  permissionMode?: string;
   sessionId?: string;
   /** When set, this tab is a read-only markdown preview of a doc (its path),
    *  not an agent chat — opened from the diff sidebar, closed when done. */
@@ -237,7 +240,15 @@ export function ProjectPage() {
     patch: Partial<
       Pick<
         ShellTab,
-        "title" | "mode" | "draft" | "docs" | "attachments" | "model" | "effort" | "sessionId"
+        | "title"
+        | "mode"
+        | "draft"
+        | "docs"
+        | "attachments"
+        | "model"
+        | "effort"
+        | "permissionMode"
+        | "sessionId"
       >
     >,
   ) => modifyShell(shellId, (s) => ({ ...s, ...patch }));
@@ -509,6 +520,7 @@ export function ProjectPage() {
     onModeChange: (key: StageKey) => changeShellMode(shell, key),
     onModelChange: (key: string) => patchShell(shell.id, { model: key }),
     onEffortChange: (key: string) => patchShell(shell.id, { effort: key }),
+    onPermissionModeChange: (key: string) => patchShell(shell.id, { permissionMode: key }),
     onSessionStarted: (sessionId: string) => patchShell(shell.id, { sessionId }),
     onResetSession: () => patchShell(shell.id, { sessionId: undefined }),
     onOpenDoc: openDoc,
