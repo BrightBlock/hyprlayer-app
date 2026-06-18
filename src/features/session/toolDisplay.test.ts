@@ -62,6 +62,15 @@ describe("toolSummary", () => {
     ).toBe("A? (+1 more)");
   });
 
+  it("names the skill (not its args) for the Skill tool", () => {
+    // Claude Code emits the keys args-first; the summary must still be the skill.
+    expect(toolSummary("Skill", '{"args":"22","skill":"describe_pr"}')).toBe("describe_pr  22");
+    expect(toolSummary("Skill", '{"skill":"describe_pr"}')).toBe("describe_pr");
+    expect(toolSummary("Skill", '{"skill":"create_plan","args":"add\\nauth"}')).toBe(
+      "create_plan  add …",
+    );
+  });
+
   it("falls back to the first string arg for unknown tools", () => {
     expect(toolSummary("Mystery", '{"n":1,"label":"hello"}')).toBe("hello");
     expect(toolSummary("Mystery", '{"n":1}')).toBe("");

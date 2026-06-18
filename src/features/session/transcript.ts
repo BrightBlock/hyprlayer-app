@@ -84,6 +84,26 @@ export function parseQuestions(json: string): Question[] {
  *  nests them under that Task instead of inlining them in the main thread. */
 type Parented = { parentId?: string | null };
 
+/** Prefix Claude Code prepends to a launched skill's body: the complete
+ *  assistant block reads `Base directory for this skill: <dir>\n\n<SKILL.md>`. */
+const SKILL_BODY_PREFIX = "Base directory for this skill:";
+
+/**
+ * If a completed assistant block is actually a launched skill's injected body
+ * (it starts with [`SKILL_BODY_PREFIX`]), return the skill's name — the last
+ * segment of the base-directory path on the first line — else null. Matched on
+ * the *complete* block only: a streamed `partialText` chunk can start with the
+ * prefix by coincidence, but a whole assistant turn starting with it is the
+ * skill injection, not prose.
+ */
+export function skillBodyName(text: string): string | null {
+  if (!text.startsWith(SKILL_BODY_PREFIX)) return null;
+  const nl = text.indexOf("\n");
+  const dir = (nl === -1 ? text : text.slice(0, nl)).slice(SKILL_BODY_PREFIX.length).trim();
+  const name = dir.split("/").pop() || dir;
+  return name || "skill";
+}
+
 export type TranscriptItem =
   | {
       kind: "user";
@@ -96,6 +116,10 @@ export type TranscriptItem =
     }
   | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
   | ({ kind: "thinking"; id: string; text: string } & Parented)
+  /** A launched skill's injected SKILL.md body — Claude Code delivers it as an
+   *  assistant block; we keep it as its own collapsed chip instead of dumping the
+   *  whole instruction text inline in the thread. */
+  | ({ kind: "skill"; id: string; name: string; body: string } & Parented)
   | ({
       kind: "tool";
       id: string;
@@ -103,6 +127,9 @@ export type TranscriptItem =
       name: string;
       input: string;
       result: { content: string; isError: boolean } | null;
+      /** For a `Skill` call: the launched skill's injected SKILL.md body, folded
+       *  into this row (expand to read it) instead of dumped as its own block. */
+      skillBody?: string;
     } & Parented)
   | {
       kind: "permission";
@@ -312,6 +339,26 @@ function openAssistantIndex(items: TranscriptItem[]): number {
   return -1;
 }
 
+/** The earliest `Skill` tool row in the same thread (`parentId`) still awaiting
+ *  its injected body, so a skill-body block folds into its invocation row rather
+ *  than repeating the header as a separate block. Scans front-to-back so that if
+ *  several skills are queued, bodies attach in invocation (FIFO) order. -1 if
+ *  none. */
+function firstSkillToolAwaitingBody(items: TranscriptItem[], parentId: string | null): number {
+  for (let i = 0; i < items.length; i += 1) {
+    const it = items[i];
+    if (
+      it.kind === "tool" &&
+      it.name === "Skill" &&
+      it.skillBody === undefined &&
+      (it.parentId ?? null) === parentId
+    ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 /** Mark the open streaming assistant block (if any) as finished. */
 function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
   const idx = openAssistantIndex(items);
@@ -402,6 +449,42 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
     }
 
     case "assistantText": {
+      const skill = skillBodyName(event.text);
+      if (skill) {
+        // A launched skill's injected SKILL.md body. In practice it always
+        // follows the skill's own invocation row, so fold the body into that row
+        // (expand to read it) rather than repeat the header as a second block.
+        const toolIdx = firstSkillToolAwaitingBody(view.items, event.parentId ?? null);
+        if (toolIdx !== -1) {
+          const tool = view.items[toolIdx] as Extract<TranscriptItem, { kind: "tool" }>;
+          const items = view.items.slice();
+          items[toolIdx] = { ...tool, skillBody: event.text };
+          return { ...view, items, streaming: true };
+        }
+        // No invocation row to fold into (rare) — keep the body as its own
+        // collapsed chip so it's still inspectable but never dumped inline. If it
+        // streamed into an open assistant block first, convert that in place.
+        const makeSkill = (id: string): TranscriptItem => ({
+          kind: "skill",
+          id,
+          name: skill,
+          body: event.text,
+          parentId: event.parentId,
+        });
+        if (!event.parentId) {
+          const open = openAssistantIndex(view.items);
+          if (open !== -1) {
+            const items = view.items.slice();
+            items[open] = makeSkill(view.items[open].id);
+            return { ...view, items, streaming: true };
+          }
+        }
+        return {
+          ...view,
+          ...appended(view, makeSkill, !event.parentId),
+          streaming: true,
+        };
+      }
       // Subagent text nests under its Task — append, never touch the main block.
       if (event.parentId) {
         if (!event.text.length) return view;
@@ -713,6 +796,10 @@ export function viewToText(view: SessionView): string {
         break;
       case "thinking":
         lines.push("> [thinking]", ...item.text.split("\n").map((l) => `> ${l}`), "");
+        break;
+      case "skill":
+        // Name the loaded skill, not its full injected body (which the chip keeps collapsed).
+        lines.push(`- skill: ${item.name}`, "");
         break;
       case "tool": {
         const header = `- tool: ${item.name}`;

@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 
 import { Button, Spinner } from "../../components/ui";
-import { ChevronRightIcon, ShieldIcon, WrenchIcon } from "../../components/icons";
+import { ChevronRightIcon, ShieldIcon, SparkleIcon, WrenchIcon } from "../../components/icons";
 import { MarkdownPreview } from "../library/MarkdownPreview";
 import { stageLabel } from "./stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
@@ -206,6 +206,34 @@ function ThinkingBlock({ text }: { text: string }) {
   );
 }
 
+/** A launched skill, collapsed to a one-line chip — Claude Code injects the
+ *  skill's full SKILL.md as an assistant block; we keep it out of the thread but
+ *  expandable so the loaded instructions are still inspectable. */
+function SkillBlock({ name, body }: { name: string; body: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`${STEP_ROW} text-ink-dim`}
+      >
+        <SparkleIcon size={12} className="shrink-0 text-ink-dim" />
+        <span className="shrink-0 font-medium text-ink">Skill</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={name}>
+          {name}
+        </span>
+        <StepChevron open={open} reveal="hover" size={11} />
+      </button>
+      {open && (
+        <div className="selectable mt-1 border-l border-edge pl-3">
+          <MarkdownPreview body={body} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolStatusDot({
   result,
   busy,
@@ -275,8 +303,11 @@ function ToolBlock({
   // so their "file … updated successfully" confirmation is redundant noise — and
   // it re-leaks the full path. Suppress that preview on success; keep it on error.
   const isEdit = item.name === "Edit" || item.name === "MultiEdit";
+  // A Skill row already names the skill in its header, so the "Launching skill: X"
+  // result is redundant noise — and its body folds into the expanded view below.
+  const isSkill = item.name === "Skill";
   const preview =
-    result && !(isEdit && !result.isError)
+    result && !((isEdit || isSkill) && !result.isError)
       ? resultPreview(result.content, result.isError)
       : null;
 
@@ -310,7 +341,15 @@ function ToolBlock({
               {prettyToolInput(item.input)}
             </pre>
           )}
-          {result && <ToolResultOutput result={result} />}
+          {item.skillBody && (
+            <div className="selectable">
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim/70">
+                Skill instructions
+              </div>
+              <MarkdownPreview body={item.skillBody} />
+            </div>
+          )}
+          {result && !isSkill && <ToolResultOutput result={result} />}
         </div>
       )}
     </div>
@@ -469,9 +508,9 @@ const unitKind = (u: Unit): ItemKind => (u.type === "group" ? "tool" : u.item.ki
 const isFileUnit = (it: TranscriptItem): boolean =>
   it.kind === "tool" && toolFilePath(it.name, it.input) !== null;
 
-/** The subagent `Task` id an item belongs to (only assistant/thinking/tool carry it). */
+/** The subagent `Task` id an item belongs to (only assistant/thinking/tool/skill carry it). */
 const parentIdOf = (it: TranscriptItem): string | null =>
-  it.kind === "tool" || it.kind === "assistant" || it.kind === "thinking"
+  it.kind === "tool" || it.kind === "assistant" || it.kind === "thinking" || it.kind === "skill"
     ? (it.parentId ?? null)
     : null;
 
@@ -549,6 +588,8 @@ function renderSingle(item: TranscriptItem, busy: boolean, permission: Permissio
       return <AssistantMessage text={item.text} streaming={item.streaming} />;
     case "thinking":
       return <ThinkingBlock text={item.text} />;
+    case "skill":
+      return <SkillBlock name={item.name} body={item.body} />;
     case "tool":
       return <ToolBlock item={item} busy={busy} />;
     case "permission":

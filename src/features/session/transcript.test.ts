@@ -84,6 +84,65 @@ describe("text coalescing", () => {
   });
 });
 
+describe("launched skill bodies", () => {
+  const SKILL_BODY =
+    "Base directory for this skill: /Users/jt/.claude/skills/describe_pr\n\n# Generate PR Description\nYou are ...";
+
+  it("folds the injected body into the Skill invocation row, not a second block", () => {
+    let view = initialSessionView("running");
+    // Real flow: the assistant says it'll run the skill, the Skill tool runs,
+    // then its SKILL.md arrives as an assistant block right after the result.
+    view = reduceEvent(view, { kind: "assistantText", text: "I'll run the doctor skill.", parentId: null });
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "s1",
+      name: "Skill",
+      input: '{"args":"24","skill":"describe_pr"}',
+      parentId: null,
+    });
+    view = reduceEvent(view, {
+      kind: "toolResult",
+      toolUseId: "s1",
+      content: "Launching skill: describe_pr",
+      isError: false,
+      parentId: null,
+    });
+    view = reduceEvent(view, { kind: "assistantText", text: SKILL_BODY, parentId: null });
+
+    // One prose block + one tool row — the body folds into the row, no extra block.
+    expect(kinds(view)).toEqual(["assistant", "tool"]);
+    expect(view.items[1]).toMatchObject({ kind: "tool", name: "Skill", skillBody: SKILL_BODY });
+  });
+
+  it("folds only into the matching skill row when several run in a row", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "toolUse", id: "s1", name: "Skill", input: '{"skill":"a"}', parentId: null });
+    view = reduceEvent(view, { kind: "toolUse", id: "s2", name: "Skill", input: '{"skill":"b"}', parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: `${SKILL_BODY} (one)`, parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: `${SKILL_BODY} (two)`, parentId: null });
+    // Bodies attach to the earliest still-awaiting row first, in order.
+    expect(view.items[0]).toMatchObject({ toolUseId: "s1", skillBody: `${SKILL_BODY} (one)` });
+    expect(view.items[1]).toMatchObject({ toolUseId: "s2", skillBody: `${SKILL_BODY} (two)` });
+    expect(kinds(view)).toEqual(["tool", "tool"]);
+  });
+
+  it("falls back to a collapsed chip when a streamed body has no invocation row", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "partialText", text: "Base directory for this skill: ", parentId: null });
+    expect(kinds(view)).toEqual(["assistant"]);
+    view = reduceEvent(view, { kind: "assistantText", text: SKILL_BODY, parentId: null });
+    expect(kinds(view)).toEqual(["skill"]);
+    expect(view.items[0]).toMatchObject({ kind: "skill", name: "describe_pr" });
+  });
+
+  it("leaves ordinary prose that merely mentions the prefix as an assistant block", () => {
+    let view = initialSessionView("running");
+    const prose = 'A skill body starts with `Base directory for this skill:` — note that.';
+    view = reduceEvent(view, { kind: "assistantText", text: prose, parentId: null });
+    expect(kinds(view)).toEqual(["assistant"]);
+  });
+});
+
 describe("tool blocks", () => {
   it("pairs a tool_result with its tool_use by id", () => {
     let view = initialSessionView("running");

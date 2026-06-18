@@ -62,6 +62,14 @@ export function toolSummary(name: string, input: string): string {
     }
     case "Task":
       return str(obj.description) || str(obj.subagent_type);
+    case "Skill": {
+      // Input is `{skill, args?}`, but Claude Code emits the keys in `args`-first
+      // order — so the generic "first string arg" fallback would surface the args
+      // (often a bare number like a PR id) instead of the skill being invoked.
+      const skill = str(obj.skill);
+      const skillArgs = firstLine(str(obj.args));
+      return skillArgs ? `${skill}  ${skillArgs}` : skill;
+    }
     case "WebFetch":
       return str(obj.url);
     case "WebSearch":
