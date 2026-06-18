@@ -119,7 +119,12 @@ git push origin "$TAG"
 
 # ─── 3. GitHub Release (binaries only, on the PUBLIC releases repo) ──
 say "Creating GitHub Release on ${RELEASES_REPO}…"
-NOTES="$(cat <<EOF
+# Release notes go to a temp file rather than a "$(cat <<EOF …)" capture: the
+# macOS system bash (/bin/bash 3.2, what `env bash` resolves to here) can't
+# parse a heredoc nested inside a double-quoted command substitution, so that
+# form fails with "unexpected EOF". A plain heredoc + --notes-file is portable.
+NOTES_FILE="$(mktemp)"; TMPDIRS+=("$NOTES_FILE")
+cat > "$NOTES_FILE" <<EOF
 ## Install
 
 ### macOS (Apple Silicon)
@@ -137,14 +142,13 @@ xattr -dr com.apple.quarantine /Applications/Hyprlayer.app
 After the first install the app self-updates via the in-app **Update** pill
 (bottom-left of the sidebar).
 EOF
-)"
 if gh release view "$TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
   say "release $TAG already exists — re-uploading assets (--clobber)"
   gh release upload "$TAG" --repo "$RELEASES_REPO" --clobber \
     "$DMG" "$TARBALL" "$TARBALL.sig"
 else
   gh release create "$TAG" --repo "$RELEASES_REPO" --target main \
-    --title "$TAG" --notes "$NOTES" \
+    --title "$TAG" --notes-file "$NOTES_FILE" \
     "$DMG" "$TARBALL" "$TARBALL.sig"
 fi
 ok "Release published"
