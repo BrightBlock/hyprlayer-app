@@ -42,8 +42,11 @@ import { basename } from "../lib/path";
 import { clamp, startEdgeDrag } from "../lib/resize";
 import { useUiStore } from "../lib/uiStore";
 
-const DIFF_SIDEBAR_MIN = 280;
-const DIFF_SIDEBAR_MAX = 560;
+// The diff/changes sidebar is fixed-width: it's either open at this width or
+// hidden entirely (top-bar toggle). No drag-resize. Matched to the left project
+// sidebar's default width (Root's PROJECT_SIDEBAR_MAX) so the two flank the
+// workspace symmetrically.
+const DIFF_SIDEBAR_WIDTH = 360;
 
 /** A doc attached as context to ONE agent tab. */
 export type AttachedDoc = {
@@ -127,10 +130,9 @@ export function ProjectPage() {
   const [docsModalShellId, setDocsModalShellId] = useState<number | null>(null);
   // Hidden state lives in a shared store so the top-bar toggle controls it.
   const diffHidden = useUiStore((state) => state.diffHidden);
-  const [diffWidth, setDiffWidth] = useState(360);
-  // Right-split width as a fraction of the agent area (0..1). Local, like
-  // diffWidth — the split's open/closed state and pane assignments persist in
-  // the tab store, but the exact ratio resets to a sane default per visit.
+  // Right-split width as a fraction of the agent area (0..1). The split's
+  // open/closed state and pane assignments persist in the tab store, but the
+  // exact ratio resets to a sane default per visit.
   const [rightRatio, setRightRatio] = useState(0.5);
   const splitRowRef = useRef<HTMLDivElement>(null);
   // Tab drag (reorder within a pane + move across the split). The hook must run
@@ -563,15 +565,6 @@ export function ProjectPage() {
     ].join("\n");
     void navigator.clipboard.writeText(transcript);
   };
-  const startDiffResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    startEdgeDrag(event, {
-      startWidth: diffWidth,
-      min: DIFF_SIDEBAR_MIN,
-      max: DIFF_SIDEBAR_MAX,
-      direction: -1,
-      onResize: setDiffWidth,
-    });
-  };
   const startSplitResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     const rowW = splitRowRef.current?.clientWidth ?? 800;
     startEdgeDrag(event, {
@@ -906,16 +899,9 @@ export function ProjectPage() {
 
       {!diffHidden && (
         <>
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize diff sidebar"
-            className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
-            onPointerDown={startDiffResize}
-          />
           <aside
             className="flex min-w-0 shrink-0 flex-col border-l border-edge bg-panel"
-            style={{ width: diffWidth }}
+            style={{ width: DIFF_SIDEBAR_WIDTH }}
           >
             <div className="flex min-h-0 flex-1 flex-col">
               <ChangesPanel

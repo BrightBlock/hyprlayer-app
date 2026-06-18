@@ -33,8 +33,10 @@ const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
  *  `compose_prompt` (crates/hyprlayer-core/src/pipeline.rs) so the optimistic
  *  transcript echo matches what claude actually receives. */
 export const SHIP_PROMPT =
-  "Commit all changes in this worktree, push the branch to its remote, then open a " +
-  "pull request against the default branch with a clear title and a summary of what changed.";
+  "First commit all changes in this worktree, then push the branch to its remote. Only " +
+  "after the commit and push succeed, open a pull request against the default branch with a " +
+  "clear title and run the /describe_pr skill to write the PR description from the " +
+  "repository's template and update the PR.";
 
 /** The instruction the PR-feedback actions (Fix CI / Address comments) run when
  *  they start a fresh session. Kept byte-identical to the backend `REVISE_PROMPT`

@@ -2,23 +2,28 @@ import { useState } from "react";
 
 import { useUpdate } from "../../lib/updater";
 import { Badge, Button, Card, CardTitle } from "../../components/ui";
-import { DownloadIcon } from "../../components/icons";
+import { DownloadIcon, XIcon } from "../../components/icons";
 
 /**
- * Compact "Update available" pill for the sidebar footer. Renders only when a
+ * Compact "Update available" card for the sidebar footer. Renders only when a
  * newer signed release is pending and the user hasn't dismissed that version.
- * Clicking installs it (download → swap → relaunch).
+ * Expanded, it shows the version and a one-line summary of what's new; the
+ * primary button installs it (download → swap → relaunch).
  */
 export function UpdatePill({ collapsed }: { collapsed: boolean }) {
   const pendingVersion = useUpdate((s) => s.pendingVersion);
+  const changelog = useUpdate((s) => s.changelog);
   const installing = useUpdate((s) => s.installing);
   const dismissedVersion = useUpdate((s) => s.dismissedVersion);
   const install = useUpdate((s) => s.install);
+  const dismissUpdate = useUpdate((s) => s.dismissUpdate);
 
   if (!pendingVersion || pendingVersion === dismissedVersion) return null;
 
   const busy = installing !== null;
-  const label = installing === "installing" ? "Restarting…" : installing ? "Downloading…" : "Update";
+  const entry = changelog?.find((e) => e.version === pendingVersion) ?? null;
+  const label =
+    installing === "installing" ? "Restarting…" : installing ? "Downloading…" : "Update & restart";
 
   if (collapsed) {
     return (
@@ -36,23 +41,49 @@ export function UpdatePill({ collapsed }: { collapsed: boolean }) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => void install()}
-      disabled={busy}
-      className="flex w-full items-center gap-2 rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1.5 text-xs font-medium text-accent hover:bg-accent/20 disabled:opacity-60"
-      title={`Update to v${pendingVersion} and restart`}
-    >
-      <DownloadIcon />
-      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-      <span className="shrink-0 font-mono opacity-80">v{pendingVersion}</span>
-    </button>
+    <div className="rounded-lg border border-accent/40 bg-accent/10 p-2.5">
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/20 text-accent">
+          <DownloadIcon />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-1.5">
+            <p className="text-xs font-semibold text-ink">Update available</p>
+            <span className="shrink-0 font-mono text-[10px] text-ink-dim">v{pendingVersion}</span>
+          </div>
+          {entry?.summary && (
+            <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-ink-dim">
+              {entry.summary}
+            </p>
+          )}
+        </div>
+        {!busy && (
+          <button
+            type="button"
+            onClick={() => dismissUpdate()}
+            className="-mr-0.5 -mt-0.5 shrink-0 rounded p-1 text-ink-dim hover:bg-accent/15 hover:text-ink"
+            title="Dismiss this update"
+            aria-label="Dismiss this update"
+          >
+            <XIcon size={12} />
+          </button>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => void install()}
+        disabled={busy}
+        className="mt-2 w-full rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-60"
+      >
+        {label}
+      </button>
+    </div>
   );
 }
 
 /**
- * Settings → Updates card: shows the running version, a manual "Check now",
- * and — when an update is pending — its notes plus an install button.
+ * Settings → Updates card: current version, a manual "Check now", and — when an
+ * update is pending — its release notes plus an install button.
  */
 export function UpdatesCard() {
   const currentVersion = useUpdate((s) => s.currentVersion);
@@ -77,18 +108,17 @@ export function UpdatesCard() {
 
   return (
     <Card>
-      <div className="flex items-center justify-between">
-        <CardTitle className="mb-0">Updates</CardTitle>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <CardTitle className="mb-0">Updates</CardTitle>
+          <p className="mt-1 text-sm text-ink-dim">
+            Current version <span className="font-mono text-ink">{currentVersion || "—"}</span>
+          </p>
+        </div>
         <Button onClick={() => void onCheck()} busy={checking}>
           Check now
         </Button>
       </div>
-
-      <p className="mt-1 text-sm text-ink-dim">
-        Current version{" "}
-        <span className="font-mono text-ink">{currentVersion || "—"}</span>. Hyprlayer checks for
-        signed updates on launch and every few hours.
-      </p>
 
       {pendingVersion ? (
         <div className="mt-3 rounded-md border border-accent/40 bg-accent/10 p-3">
@@ -111,7 +141,7 @@ export function UpdatesCard() {
         </div>
       ) : (
         result && (
-          <p className="mt-3 text-sm">
+          <p className="mt-3">
             {result === "uptodate" && <Badge tone="ok">Up to date</Badge>}
             {result === "available" && <Badge tone="accent">Update found</Badge>}
             {result === "error" && <Badge tone="warn">Couldn’t check — try again</Badge>}

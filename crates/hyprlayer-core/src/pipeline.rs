@@ -160,13 +160,18 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
     }
 }
 
-/// The Ship directive: commit, push, and open a PR. Ship has no single skill,
-/// so it sends a plain instruction (the policy pre-approves push + `gh pr`).
+/// The Ship directive, run in order: commit first, then (only once that
+/// succeeds) push, open the PR, and hand the description off to the
+/// `/describe_pr` skill so every shipped PR follows the repo's template instead
+/// of a free-improvised body. `/describe_pr` edits an existing PR, so the PR
+/// must be opened before it runs. The policy pre-approves push + `gh`.
 /// Kept byte-identical to the frontend `SHIP_PROMPT` (src/features/session/stages.ts)
 /// so the optimistic transcript echo matches what claude receives.
 pub const SHIP_PROMPT: &str =
-    "Commit all changes in this worktree, push the branch to its remote, then open a \
-pull request against the default branch with a clear title and a summary of what changed.";
+    "First commit all changes in this worktree, then push the branch to its remote. Only \
+after the commit and push succeed, open a pull request against the default branch with a \
+clear title and run the /describe_pr skill to write the PR description from the \
+repository's template and update the PR.";
 
 /// The Revise directive: address PR feedback on a branch that already has a PR.
 /// The specific feedback (failing CI vs. requested changes) rides in the input.

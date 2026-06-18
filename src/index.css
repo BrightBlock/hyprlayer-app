@@ -110,14 +110,33 @@ body {
     "Segoe UI",
     Roboto,
     sans-serif;
+  /* WebKit (the Tauri runtime) needs the prefix, else this is ignored and
+     everything — chrome included — stays selectable. */
+  -webkit-user-select: none;
   user-select: none;
   cursor: default;
 }
 
 /* Text content areas opt back in to selection. */
 .selectable {
+  -webkit-user-select: text;
   user-select: text;
   cursor: auto;
+}
+
+/* This is a desktop app, not a web page: nothing should be HTML5-draggable.
+   Otherwise links drag out a "localhost" URL ghost and icons/images can be
+   dragged off. Tauri's window drag region (data-tauri-drag-region) and the
+   app's pointer-based tab/panel dragging are unaffected — those don't use the
+   native drag-and-drop the property disables. */
+* {
+  -webkit-user-drag: none;
+}
+img,
+svg,
+a {
+  -webkit-user-drag: none;
+  user-drag: none;
 }
 
 /* Scrollable that still scrolls (trackpad/shift-wheel) but shows no bar. */
