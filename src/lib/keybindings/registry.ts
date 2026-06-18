@@ -6,26 +6,38 @@
  * e.g. *Stop turn* is only registered while a session is running, so the same
  * chord is simply inert elsewhere. A null handler means "not available right
  * now", so the dispatcher lets the keystroke pass through.
+ *
+ * Each id holds a *stack* of handlers, not a single slot: if two components
+ * register the same command at once (split panes, a modal over a page), the
+ * latest mount shadows the earlier one and unmounting it restores the shadowed
+ * handler — instead of one overwriting the other and the unmount deleting the
+ * binding entirely.
  */
 
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 
-type RegistryState = { handlers: Record<string, () => void> };
+type RegistryState = { handlers: Record<string, Array<() => void>> };
 
 const useRegistry = create<RegistryState>(() => ({ handlers: {} }));
 
-function register(id: string, handler: () => void): void {
-  useRegistry.setState((s) => ({ handlers: { ...s.handlers, [id]: handler } }));
-}
-
-function unregister(id: string): void {
-  useRegistry.setState((s) => {
-    if (!(id in s.handlers)) return s;
-    const handlers = { ...s.handlers };
-    delete handlers[id];
-    return { handlers };
-  });
+/**
+ * Push `handler` onto the stack for `id`; returns a disposer that removes
+ * exactly this entry (each call closes over a fresh closure, so identity is
+ * unique even when the same function is registered twice).
+ */
+function register(id: string, handler: () => void): () => void {
+  useRegistry.setState((s) => ({
+    handlers: { ...s.handlers, [id]: [...(s.handlers[id] ?? []), handler] },
+  }));
+  return () =>
+    useRegistry.setState((s) => {
+      const remaining = (s.handlers[id] ?? []).filter((h) => h !== handler);
+      if (remaining.length > 0) return { handlers: { ...s.handlers, [id]: remaining } };
+      const handlers = { ...s.handlers };
+      delete handlers[id];
+      return { handlers };
+    });
 }
 
 /**
@@ -40,14 +52,14 @@ export function useCommand(id: string, handler: (() => void) | null): void {
   const enabled = handler !== null;
   useEffect(() => {
     if (!enabled) return;
-    register(id, () => ref.current?.());
-    return () => unregister(id);
+    return register(id, () => ref.current?.());
   }, [id, enabled]);
 }
 
-/** Run the handler registered for `id`. Returns true iff one was registered. */
+/** Run the topmost handler registered for `id`. Returns true iff one was registered. */
 export function runCommand(id: string): boolean {
-  const handler = useRegistry.getState().handlers[id];
+  const stack = useRegistry.getState().handlers[id];
+  const handler = stack?.[stack.length - 1];
   if (!handler) return false;
   handler();
   return true;
@@ -55,5 +67,5 @@ export function runCommand(id: string): boolean {
 
 /** Test-only: whether a handler is currently registered for `id`. */
 export function isRegistered(id: string): boolean {
-  return id in useRegistry.getState().handlers;
+  return (useRegistry.getState().handlers[id]?.length ?? 0) > 0;
 }

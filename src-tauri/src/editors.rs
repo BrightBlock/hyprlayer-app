@@ -117,7 +117,10 @@ const CANDIDATES: &[Candidate] = &[
         name: "Sublime Text",
         kind: EditorKind::Editor,
         macos_app: "Sublime Text",
-        windows_paths: &["Sublime Text\\sublime_text.exe", "Sublime Text 3\\sublime_text.exe"],
+        windows_paths: &[
+            "Sublime Text\\sublime_text.exe",
+            "Sublime Text 3\\sublime_text.exe",
+        ],
         bins: &["subl"],
     },
     Candidate {
@@ -233,7 +236,10 @@ pub fn detect() -> Vec<EditorTarget> {
                     scope.spawn(move || app_path.as_deref().and_then(icon_data_url))
                 })
                 .collect();
-            handles.into_iter().map(|h| h.join().ok().flatten()).collect()
+            handles
+                .into_iter()
+                .map(|h| h.join().ok().flatten())
+                .collect()
         });
         for (entry, icon) in entries.iter_mut().zip(icons) {
             entry.0.icon_data_url = icon;
@@ -369,7 +375,10 @@ fn icon_data_url(app_path: &Path) -> Option<String> {
     let icns = resolve_icns(app_path)?;
 
     // Distinct temp file per bundle so the parallel conversions don't collide.
-    let stem = app_path.file_name().and_then(|n| n.to_str()).unwrap_or("app");
+    let stem = app_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("app");
     let out = std::env::temp_dir().join(format!("hyprlayer-icon-{stem}.png"));
     let status = std::process::Command::new("sips")
         .args(["-s", "format", "png", "-Z", "64"])
@@ -433,7 +442,8 @@ fn resolve_icns(app_path: &Path) -> Option<PathBuf> {
         if !is_icns {
             continue;
         }
-        if let (Some(stem), Some(app_stem)) = (path.file_stem().and_then(|s| s.to_str()), app_stem) {
+        if let (Some(stem), Some(app_stem)) = (path.file_stem().and_then(|s| s.to_str()), app_stem)
+        {
             if stem.eq_ignore_ascii_case(app_stem) {
                 return Some(path);
             }

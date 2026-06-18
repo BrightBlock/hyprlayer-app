@@ -356,9 +356,15 @@ mod tests {
         // It commits but is hard-denied from pushing or opening a PR — that's
         // what keeps it distinct from Ship.
         let commit = policy_for(Stage::Commit);
-        assert!(commit.allowed_tools.iter().any(|t| t.contains("git commit")));
+        assert!(commit
+            .allowed_tools
+            .iter()
+            .any(|t| t.contains("git commit")));
         assert!(!commit.allowed_tools.iter().any(|t| t.contains("git push")));
-        assert!(commit.disallowed_tools.iter().any(|t| t.contains("git push")));
+        assert!(commit
+            .disallowed_tools
+            .iter()
+            .any(|t| t.contains("git push")));
         assert!(commit.disallowed_tools.iter().any(|t| t == "Bash(gh:*)"));
     }
 

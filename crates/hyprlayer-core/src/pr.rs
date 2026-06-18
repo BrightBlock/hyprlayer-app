@@ -481,7 +481,10 @@ mod tests {
 
     #[test]
     fn mergeable_state_parses_all_arms() {
-        assert_eq!(MergeableState::parse("MERGEABLE"), MergeableState::Mergeable);
+        assert_eq!(
+            MergeableState::parse("MERGEABLE"),
+            MergeableState::Mergeable
+        );
         assert_eq!(
             MergeableState::parse("conflicting"),
             MergeableState::Conflicting

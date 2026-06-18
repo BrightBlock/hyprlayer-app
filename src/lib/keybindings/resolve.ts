@@ -6,7 +6,7 @@
  */
 
 import { normalizeChord, type Chord } from "./chord";
-import { COMMANDS, defaultChord } from "./commands";
+import { COMMANDS, defaultChord, type CommandDef } from "./commands";
 
 /** command id → chord (custom binding), or null (explicitly unbound). An absent
  *  key means "use the catalog default". Mirrors the backend `keybindings.overrides`. */
@@ -18,22 +18,21 @@ export function hasOverride(overrides: Overrides, id: string): boolean {
   return Object.prototype.hasOwnProperty.call(overrides, id);
 }
 
+/** The effective chord for one command: an explicit override (a chord, or
+ *  `null` = unbound) wins; otherwise the catalog default for this OS. */
+function resolveChord(overrides: Overrides, cmd: CommandDef, isMac: boolean): Chord | null {
+  if (!hasOverride(overrides, cmd.id)) return defaultChord(cmd, isMac);
+  const override = overrides[cmd.id];
+  return override == null ? null : normalizeChord(override);
+}
+
 /**
  * Effective chord per command for this OS: an override (including `null` =
  * unbound) wins; otherwise the catalog default. Every command in the catalog is
  * present in the returned map.
  */
 export function effectiveChords(overrides: Overrides, isMac: boolean): Map<string, Chord | null> {
-  const map = new Map<string, Chord | null>();
-  for (const cmd of COMMANDS) {
-    if (hasOverride(overrides, cmd.id)) {
-      const o = overrides[cmd.id];
-      map.set(cmd.id, o == null ? null : normalizeChord(o));
-    } else {
-      map.set(cmd.id, defaultChord(cmd, isMac));
-    }
-  }
-  return map;
+  return new Map(COMMANDS.map((cmd) => [cmd.id, resolveChord(overrides, cmd, isMac)]));
 }
 
 /**
@@ -42,11 +41,11 @@ export function effectiveChords(overrides: Overrides, isMac: boolean): Map<strin
  * the Settings UI should already have flagged via `conflictsFor`.
  */
 export function chordToCommand(overrides: Overrides, isMac: boolean): Map<Chord, string> {
-  const map = new Map<Chord, string>();
-  for (const [id, chord] of effectiveChords(overrides, isMac)) {
-    if (chord) map.set(chord, id);
-  }
-  return map;
+  return new Map(
+    [...effectiveChords(overrides, isMac)].flatMap(([id, chord]) =>
+      chord ? [[chord, id] as const] : [],
+    ),
+  );
 }
 
 /** Command ids (other than `selfId`) whose effective binding equals `chord`. */
@@ -58,9 +57,7 @@ export function conflictsFor(
 ): string[] {
   const norm = normalizeChord(chord);
   if (!norm) return [];
-  const out: string[] = [];
-  for (const [id, c] of effectiveChords(overrides, isMac)) {
-    if (id !== selfId && c && c === norm) out.push(id);
-  }
-  return out;
+  return [...effectiveChords(overrides, isMac)]
+    .filter(([id, c]) => id !== selfId && c === norm)
+    .map(([id]) => id);
 }

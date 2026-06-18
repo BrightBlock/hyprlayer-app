@@ -158,6 +158,17 @@ export const CATEGORY_ORDER: CommandCategory[] = [
   "Library",
 ];
 
+/** Commands grouped by category in display order, with empty groups dropped.
+ *  The catalog owns the grouping so the UI renders from it directly instead of
+ *  re-scanning and re-filtering the flat list on every render. */
+export const COMMANDS_BY_CATEGORY: ReadonlyArray<{
+  category: CommandCategory;
+  commands: CommandDef[];
+}> = CATEGORY_ORDER.map((category) => ({
+  category,
+  commands: COMMANDS.filter((c) => c.category === category),
+})).filter((group) => group.commands.length > 0);
+
 /** The catalog default chord for a command on this OS, normalized; null = none. */
 export function defaultChord(cmd: CommandDef, isMac: boolean): Chord | null {
   const raw = isMac ? cmd.defaults.mac : cmd.defaults.other;

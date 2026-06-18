@@ -75,15 +75,37 @@ export const ALL_MODEL_KEYS = MODELS.map((m) => m.key);
 export const ALL_MODEL_KEY_SET = new Set(ALL_MODEL_KEYS);
 
 /**
- * The models the composer's picker should offer, given the user's "visible
- * models" setting (Settings → Models). `null`/`undefined` means "not
- * customised" → show every preset. Otherwise show exactly the listed keys, in
- * the stored order: a key matching a preset resolves to it; any other key is a
- * custom model id the user added and resolves via [`modelOption`].
+ * Canonical ordering for a "visible models" list: presets in [`MODELS`] order,
+ * then custom ids in first-seen order, de-duplicated and emptied of falsy keys.
+ * The single source of truth for normalization — both the Settings UI (on write)
+ * and the composer (on read) run through it, so a stored list that predates this
+ * rule still renders tidily.
+ */
+export function normalizeVisibleModelKeys(keys: readonly string[]): string[] {
+  // `[...seen]` preserves first-occurrence order, so customs keep insertion order.
+  const seen = new Set(keys.filter(Boolean));
+  return [
+    ...ALL_MODEL_KEYS.filter((key) => seen.has(key)),
+    ...[...seen].filter((key) => !ALL_MODEL_KEY_SET.has(key)),
+  ];
+}
+
+/**
+ * The visible model keys to offer, given the user's "visible models" setting
+ * (Settings → Models). `null`/`undefined` means "not customised" → every preset.
+ * Otherwise the stored keys, always normalized via [`normalizeVisibleModelKeys`].
+ */
+export function visibleModelKeys(keys: readonly string[] | null | undefined): string[] {
+  return keys == null ? ALL_MODEL_KEYS : normalizeVisibleModelKeys(keys);
+}
+
+/**
+ * The models the composer's picker should offer. A key matching a preset
+ * resolves to it; any other key is a custom model id the user added and resolves
+ * via [`modelOption`].
  */
 export function visibleModels(keys: readonly string[] | null | undefined): ModelOption[] {
-  if (!keys) return MODELS;
-  return keys.map(modelOption);
+  return visibleModelKeys(keys).map(modelOption);
 }
 
 /** A reasoning-effort level. The `key` IS the `--effort` value the CLI accepts

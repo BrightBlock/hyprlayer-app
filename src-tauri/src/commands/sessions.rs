@@ -79,10 +79,7 @@ struct LaunchParams {
 
 /// Spawn the claude driver for a session and wire up its forwarder — the launch
 /// pipeline shared by [`start_stage_session`] and [`resume_session`].
-async fn launch_session(
-    state: &AppState,
-    params: LaunchParams,
-) -> CmdResult<Arc<ClaudeDriver>> {
+async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc<ClaudeDriver>> {
     let LaunchParams {
         app,
         session,

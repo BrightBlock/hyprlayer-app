@@ -387,7 +387,9 @@ pub fn stage_files(worktree: &Path, rels: &[String]) -> Result<()> {
         if abs.exists() {
             index.add_path(p).map_err(|e| git_err("git2 add", e))?;
         } else {
-            index.remove_path(p).map_err(|e| git_err("git2 remove", e))?;
+            index
+                .remove_path(p)
+                .map_err(|e| git_err("git2 remove", e))?;
         }
     }
     index.write().map_err(|e| git_err("git2 index write", e))?;
@@ -826,7 +828,10 @@ mod tests {
 
         discard_files(dir.path(), &["a.md".into(), "b.md".into()]).unwrap();
 
-        assert_eq!(std::fs::read_to_string(dir.path().join("a.md")).unwrap(), "one\n");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.md")).unwrap(),
+            "one\n"
+        );
         assert!(!dir.path().join("b.md").exists());
         assert!(worktree_git_status(dir.path()).unwrap().unstaged.is_empty());
     }

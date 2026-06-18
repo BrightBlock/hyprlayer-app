@@ -62,19 +62,18 @@ async fn tick(app: &tauri::AppHandle, last: &mut HashMap<String, Option<PrStatus
 
     // Active workstreams across all projects — the same set the sidebar shows.
     let db = state.db.clone();
-    let items = match tauri::async_runtime::spawn_blocking(move || db.list_active_workstreams())
-        .await
-    {
-        Ok(Ok(items)) => items,
-        Ok(Err(e)) => {
-            log::debug!("pr watch: listing workstreams failed: {e}");
-            return SLOW;
-        }
-        Err(e) => {
-            log::debug!("pr watch: list task join error: {e}");
-            return SLOW;
-        }
-    };
+    let items =
+        match tauri::async_runtime::spawn_blocking(move || db.list_active_workstreams()).await {
+            Ok(Ok(items)) => items,
+            Ok(Err(e)) => {
+                log::debug!("pr watch: listing workstreams failed: {e}");
+                return SLOW;
+            }
+            Err(e) => {
+                log::debug!("pr watch: list task join error: {e}");
+                return SLOW;
+            }
+        };
 
     // Forget workstreams that were archived/removed since the last tick.
     let mut alive: std::collections::HashSet<&str> =

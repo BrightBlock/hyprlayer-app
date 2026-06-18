@@ -11,8 +11,7 @@ import {
   type Chord,
 } from "../../lib/keybindings/chord";
 import {
-  CATEGORY_ORDER,
-  COMMANDS,
+  COMMANDS_BY_CATEGORY,
   commandById,
   type CommandDef,
   type CommandWhen,
@@ -210,31 +209,27 @@ export function KeyboardSettings({ settings }: { settings: AppSettings }) {
 
       {save.isError && <ErrorNote error={save.error} />}
 
-      {CATEGORY_ORDER.map((category) => {
-        const cmds = COMMANDS.filter((c) => c.category === category);
-        if (cmds.length === 0) return null;
-        return (
-          <Card key={category}>
-            <CardTitle>{category}</CardTitle>
-            <div className="divide-y divide-edge/50">
-              {cmds.map((cmd) => (
-                <CommandRow
-                  key={cmd.id}
-                  cmd={cmd}
-                  effective={effective.get(cmd.id) ?? null}
-                  overrides={overrides}
-                  recording={recordingId === cmd.id}
-                  onStartRecord={() => setRecordingId(cmd.id)}
-                  onCommit={(chord) => commit(cmd.id, chord)}
-                  onReset={() => reset(cmd.id)}
-                  onUnbind={() => unbind(cmd.id)}
-                  onCancel={() => setRecordingId(null)}
-                />
-              ))}
-            </div>
-          </Card>
-        );
-      })}
+      {COMMANDS_BY_CATEGORY.map(({ category, commands }) => (
+        <Card key={category}>
+          <CardTitle>{category}</CardTitle>
+          <div className="divide-y divide-edge/50">
+            {commands.map((cmd) => (
+              <CommandRow
+                key={cmd.id}
+                cmd={cmd}
+                effective={effective.get(cmd.id) ?? null}
+                overrides={overrides}
+                recording={recordingId === cmd.id}
+                onStartRecord={() => setRecordingId(cmd.id)}
+                onCommit={(chord) => commit(cmd.id, chord)}
+                onReset={() => reset(cmd.id)}
+                onUnbind={() => unbind(cmd.id)}
+                onCancel={() => setRecordingId(null)}
+              />
+            ))}
+          </div>
+        </Card>
+      ))}
     </div>
   );
 }

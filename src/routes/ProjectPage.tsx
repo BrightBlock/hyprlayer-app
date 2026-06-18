@@ -105,6 +105,22 @@ function isViewerShell(shell: ShellTab): boolean {
 }
 
 /**
+ * Detach the doc at `path` from a shell. A manually-attached doc is just removed;
+ * detaching a *suggested* chip also records the path in `dismissedSuggestions` so
+ * the suggestion never re-adds for this pane. Pure: returns the next shell.
+ */
+function detachDoc(shell: ShellTab, path: string): ShellTab {
+  const wasSuggested = shell.docs.find((d) => d.path === path)?.suggested;
+  const docs = shell.docs.filter((d) => d.path !== path);
+  if (!wasSuggested) return { ...shell, docs };
+  return {
+    ...shell,
+    docs,
+    dismissedSuggestions: [...new Set([...(shell.dismissedSuggestions ?? []), path])],
+  };
+}
+
+/**
  * Registers the project/session keyboard commands whose action closures live in
  * `ProjectPage`. Split into its own component so its hooks (notably `useSession`
  * for the focused pane) run unconditionally — `ProjectPage` itself has early
@@ -564,14 +580,6 @@ export function ProjectPage() {
       return { ...s, docs: [...manual, ...keepSuggested] };
     });
 
-  // Remove a suggested doc and record the path so it never re-adds for this pane.
-  const dismissSuggestion = (shellId: number, path: string) =>
-    modifyShell(shellId, (s) => ({
-      ...s,
-      docs: s.docs.filter((d) => d.path !== path),
-      dismissedSuggestions: [...new Set([...(s.dismissedSuggestions ?? []), path])],
-    }));
-
   // The full set of SessionChat callbacks scoped to ONE shell, so the main and
   // right panes each drive their own agent independently.
   const shellChatProps = (shell: ShellTab) => ({
@@ -586,15 +594,8 @@ export function ProjectPage() {
     onResetSession: () => patchShell(shell.id, { sessionId: undefined }),
     onOpenDoc: openDoc,
     // Detaching a suggested chip records the dismissal so it does not re-add;
-    // detaching a manually-attached doc just removes it.
-    onDetachDoc: (path: string) => {
-      const doc = shell.docs.find((d) => d.path === path);
-      if (doc?.suggested) {
-        dismissSuggestion(shell.id, path);
-      } else {
-        patchShell(shell.id, { docs: shell.docs.filter((d) => d.path !== path) });
-      }
-    },
+    // detaching a manually-attached doc just removes it. See `detachDoc`.
+    onDetachDoc: (path: string) => modifyShell(shell.id, (s) => detachDoc(s, path)),
     onSuggestDoc: (path: string | null, role: string) => suggestDocToShell(shell.id, path, role),
     onBrowseDocs: () => setDocsModalShellId(shell.id),
     onAddFiles: () => void addFilesToShell(shell.id, false),

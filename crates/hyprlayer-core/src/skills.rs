@@ -97,7 +97,10 @@ fn collect_plugins(out: &mut Vec<SlashCommand>) {
 /// intentionally omitted — they don't make sense sent as a programmatic turn.
 fn builtin_commands() -> Vec<SlashCommand> {
     const BUILTINS: &[(&str, &str)] = &[
-        ("init", "Initialize a CLAUDE.md with codebase documentation."),
+        (
+            "init",
+            "Initialize a CLAUDE.md with codebase documentation.",
+        ),
         ("review", "Review a pull request."),
         (
             "security-review",
@@ -239,7 +242,9 @@ mod tests {
         )
         .unwrap();
         let cmds = list_slash_commands(wt);
-        assert!(cmds.iter().any(|c| c.name == "demo" && c.source == "project"));
+        assert!(cmds
+            .iter()
+            .any(|c| c.name == "demo" && c.source == "project"));
     }
 
     #[test]

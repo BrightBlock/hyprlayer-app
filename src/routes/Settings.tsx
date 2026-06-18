@@ -30,6 +30,7 @@ import {
   EFFORTS,
   MODELS,
   modelOption,
+  normalizeVisibleModelKeys,
 } from "../features/session/models";
 import { THEMES, useThemeStore } from "../lib/theme";
 
@@ -320,17 +321,6 @@ function EffortOptions() {
   );
 }
 
-/** Canonical ordering for a visible-models list: presets in MODELS order, then
- *  custom ids in insertion order, de-duplicated. Keeps the stored list (and the
- *  composer picker built from it) tidy regardless of click order. */
-function normalizeVisible(keys: string[]): string[] {
-  // `[...seen]` preserves first-occurrence order, so customs keep insertion order.
-  const seen = new Set(keys);
-  const presets = ALL_MODEL_KEYS.filter((k) => seen.has(k));
-  const customs = [...seen].filter((k) => !ALL_MODEL_KEY_SET.has(k));
-  return [...presets, ...customs];
-}
-
 /** The "Models visible in composer" picker for the Claude provider. Toggling,
  *  adding custom ids, and the bulk actions all write `visibleModels`: `null`
  *  means "not customised → show every preset". */
@@ -358,14 +348,16 @@ function VisibleModelsPanel({
     : rows;
 
   function toggle(key: string, on: boolean) {
-    const next = on ? normalizeVisible([...explicit, key]) : explicit.filter((k) => k !== key);
+    const next = on
+      ? normalizeVisibleModelKeys([...explicit, key])
+      : explicit.filter((k) => k !== key);
     patchClaude({ visibleModels: next });
   }
 
   function addCustom() {
     const id = newId.trim();
     if (!id) return;
-    patchClaude({ visibleModels: normalizeVisible([...explicit, id]) });
+    patchClaude({ visibleModels: normalizeVisibleModelKeys([...explicit, id]) });
     setNewId("");
   }
 
@@ -395,7 +387,9 @@ function VisibleModelsPanel({
             type="button"
             className={actionBtn}
             onClick={() =>
-              patchClaude({ visibleModels: normalizeVisible([...ALL_MODEL_KEYS, ...customKeys]) })
+              patchClaude({
+                visibleModels: normalizeVisibleModelKeys([...ALL_MODEL_KEYS, ...customKeys]),
+              })
             }
           >
             Show all

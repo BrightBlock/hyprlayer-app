@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { WorkstreamView } from "../../lib/bindings";
 import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "../../components/ui";
@@ -29,7 +29,9 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
   // up nothing — so the controlled <select> always matches a real option.
   // Keyed on the dialog being open so reopening re-defaults.
   const defaultBase = bases.data?.defaultBase ?? "";
-  const branches = bases.data?.branches ?? [];
+  // Memoized so its identity is stable across renders — otherwise the `?? []`
+  // literal would re-fire the default-selection effect every render.
+  const branches = useMemo(() => bases.data?.branches ?? [], [bases.data?.branches]);
   useEffect(() => {
     if (!open || base) return;
     const initial = defaultBase || branches[0];

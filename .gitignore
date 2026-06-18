@@ -13,6 +13,9 @@ dist-ssr
 *.local
 target/
 
+# Thoughts tooling (local symlinks to external thoughts repo)
+thoughts/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

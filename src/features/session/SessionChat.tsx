@@ -720,15 +720,18 @@ export function SessionChat({
 
   // Mode-aware suggestion: auto-attach the most recent relevant doc (research
   // for plan-mode, plan for implement/validate) as a "suggested" chip while the
-  // session hasn't started yet. The selector is cheap (single-string key, shallow
-  // equality) and the effect runs only on [started, recent?.path, mode] changes.
+  // session hasn't started yet. A ref absorbs the parent callback's identity
+  // churn so the effect can depend on the real inputs it reads — the resolved
+  // suggestion (path + kind) and whether the session has started — without a
+  // dependency suppression.
   const suggestKind = suggestedDocKind(mode);
   const recent = useMostRecentDoc(workstreamId, suggestKind);
+  const suggestDocRef = useRef(onSuggestDoc);
+  suggestDocRef.current = onSuggestDoc;
   useEffect(() => {
     if (started) return; // suggestions only apply before a session is launched
-    onSuggestDoc(recent?.path ?? null, recent?.kind ?? "other");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, recent?.path, mode]);
+    suggestDocRef.current(recent?.path ?? null, recent?.kind ?? "other");
+  }, [started, recent?.path, recent?.kind]);
 
   // Drag-and-drop. Tauri intercepts OS file drops at the window level (HTML5
   // drop events never fire), so we subscribe to the webview's drag-drop stream

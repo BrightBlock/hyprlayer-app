@@ -160,9 +160,7 @@ pub async fn create_workstream(
         .map_err(AppError::from)?;
     let branch_prefix = state.settings.get().await.git.effective_branch_prefix();
     // An empty/blank selection means "auto-detect" — same as omitting it.
-    let base_override = base
-        .map(|b| b.trim().to_string())
-        .filter(|b| !b.is_empty());
+    let base_override = base.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
     let created = state
         .worktrees
         .create(

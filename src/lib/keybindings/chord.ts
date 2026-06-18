@@ -96,16 +96,18 @@ export function eventToChord(
   const token = keyToken(e.key);
   if (!token) return null;
 
-  const mods: string[] = [];
-  if (isMac ? e.metaKey : e.ctrlKey) mods.push("mod");
-  // The non-primary of the Cmd/Ctrl pair is kept as its literal token, so a
-  // recorded chord that genuinely uses it (rare) still round-trips.
-  if (isMac ? e.ctrlKey : e.metaKey) mods.push(isMac ? "ctrl" : "meta");
-  if (e.altKey) mods.push("alt");
-  if (e.shiftKey) mods.push("shift");
+  // Each entry is [pressed, token] in canonical MOD_ORDER, so filtering the
+  // pressed ones needs no re-sort. The non-primary of the Cmd/Ctrl pair is kept
+  // as its literal token, so a recorded chord that genuinely uses it (rare)
+  // still round-trips.
+  const modifiers: Array<[boolean, string]> = [
+    [isMac ? e.metaKey : e.ctrlKey, "mod"],
+    [isMac ? e.ctrlKey : e.metaKey, isMac ? "ctrl" : "meta"],
+    [e.altKey, "alt"],
+    [e.shiftKey, "shift"],
+  ];
 
-  // `mods` is pushed in canonical MOD_ORDER above, so no re-sort is needed.
-  return [...mods, token].join("+");
+  return [...modifiers.filter(([pressed]) => pressed).map(([, mod]) => mod), token].join("+");
 }
 
 /** Split a chord into its canonically-ordered modifiers and trailing key. */

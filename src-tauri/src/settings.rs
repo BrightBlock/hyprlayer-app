@@ -178,6 +178,26 @@ impl SettingsStore {
     }
 }
 
+async fn persist(path: &std::path::Path, settings: &AppSettings) -> CmdResult<()> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| AppError::internal(format!("create settings dir: {e}")))?;
+    }
+    let json = serde_json::to_string_pretty(settings)
+        .map_err(|e| AppError::internal(format!("serialize settings: {e}")))?;
+
+    // tmp + rename for atomicity, mirroring the CLI's discipline.
+    let tmp = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp, json)
+        .await
+        .map_err(|e| AppError::internal(format!("write settings: {e}")))?;
+    tokio::fs::rename(&tmp, path)
+        .await
+        .map_err(|e| AppError::internal(format!("persist settings: {e}")))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,24 +263,4 @@ mod tests {
         let s: AppSettings = serde_json::from_str(raw).unwrap();
         assert_eq!(s.providers.claude.default_model.as_deref(), Some("sonnet"));
     }
-}
-
-async fn persist(path: &std::path::Path, settings: &AppSettings) -> CmdResult<()> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| AppError::internal(format!("create settings dir: {e}")))?;
-    }
-    let json = serde_json::to_string_pretty(settings)
-        .map_err(|e| AppError::internal(format!("serialize settings: {e}")))?;
-
-    // tmp + rename for atomicity, mirroring the CLI's discipline.
-    let tmp = path.with_extension("json.tmp");
-    tokio::fs::write(&tmp, json)
-        .await
-        .map_err(|e| AppError::internal(format!("write settings: {e}")))?;
-    tokio::fs::rename(&tmp, path)
-        .await
-        .map_err(|e| AppError::internal(format!("persist settings: {e}")))?;
-    Ok(())
 }

@@ -714,16 +714,15 @@ export function useMostRecentDoc(
   const key = useSessionStore(
     useShallow((s) => {
       if (!workstreamId || !kind) return null;
-      let last: string | null = null;
-      for (const entry of Object.values(s.sessions)) {
-        if (entry.workstreamId !== workstreamId) continue;
-        for (const item of entry.items) {
-          if (item.kind !== "tool") continue;
-          const doc = docFromTool(item.name, item.input);
-          if (doc && doc.kind === kind) last = doc.path;
-        }
-      }
-      return last;
+      // Flatten every tool item across the workstream's sessions, project each to
+      // the doc it created, keep those of the requested kind — the last in
+      // traversal order is the most recent.
+      const docs = Object.values(s.sessions)
+        .filter((entry) => entry.workstreamId === workstreamId)
+        .flatMap((entry) => entry.items)
+        .flatMap((item) => (item.kind === "tool" ? [docFromTool(item.name, item.input)] : []))
+        .filter((doc) => doc?.kind === kind);
+      return docs[docs.length - 1]?.path ?? null;
     }),
   );
   return useMemo(
