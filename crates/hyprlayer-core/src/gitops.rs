@@ -52,6 +52,31 @@ pub(crate) fn upstream_oid(repo: &git2::Repository, head: &git2::Reference) -> O
         .and_then(|u| u.get().target())
 }
 
+/// Local + remote branch shorthands for the base-branch picker, deduped and
+/// sorted (e.g. `main`, `origin/main`, `origin/release`). The symbolic
+/// `origin/HEAD` pointer is skipped — it's an alias, not a pickable base.
+/// Cheap (git2, no fork); callers run it on the blocking pool.
+pub fn list_branches(repo_path: &Path) -> Result<Vec<String>> {
+    let repo = open_repo(repo_path)?;
+    let branches = repo.branches(None).map_err(|e| CoreError::OutputParse {
+        program: "git2 branches".into(),
+        detail: e.message().to_string(),
+    })?;
+    let mut names = Vec::new();
+    for branch in branches.flatten() {
+        let (branch, _kind) = branch;
+        if let Ok(Some(name)) = branch.name() {
+            if name.ends_with("/HEAD") {
+                continue;
+            }
+            names.push(name.to_string());
+        }
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
 pub fn thoughts_repo_status(repo_path: &Path) -> Result<ThoughtsRepoStatus> {
     let repo = open_repo(repo_path)?;
 

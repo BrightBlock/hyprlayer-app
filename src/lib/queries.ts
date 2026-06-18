@@ -238,9 +238,21 @@ export function useAllWorkstreams(enabled = true) {
   });
 }
 
+/** Base-branch choices for the new-workstream dialog (local + remote + the
+ * detected default). Fetched lazily — only while the dialog is open. */
+export function useWorkstreamBases(projectPath: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream-bases", projectPath],
+    queryFn: () => unwrap(commands.listWorkstreamBases(projectPath)),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 export function useCreateWorkstream(projectPath: string) {
   return useMutation({
-    mutationFn: (title: string) => unwrap(commands.createWorkstream(projectPath, title)),
+    mutationFn: ({ title, base }: { title: string; base: string | null }) =>
+      unwrap(commands.createWorkstream(projectPath, title, base)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
     },

@@ -24,6 +24,15 @@ pub struct WorkstreamView {
     pub git: WorktreeStatus,
 }
 
+/// Base-branch choices for the "new workstream" dialog: every local + remote
+/// branch, plus the auto-detected default the picker pre-selects.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkstreamBases {
+    pub branches: Vec<String>,
+    pub default_base: String,
+}
+
 fn item_not_found(id: &str) -> AppError {
     AppError {
         code: "workstream_not_found".into(),
@@ -91,12 +100,43 @@ pub async fn list_all_workstreams(state: State<'_, AppState>) -> CmdResult<Vec<W
     .await
 }
 
+/// Branches the user can base a new workstream on, with the auto-detected
+/// default. Best-effort: the default falls back to empty (the dialog then
+/// pre-selects nothing and the backend re-detects on create) so a repo with no
+/// resolvable main/master still lists its branches.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_workstream_bases(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> CmdResult<WorkstreamBases> {
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+    let repo = PathBuf::from(&project_path);
+    let default_base = worktree::detect_base_branch(&git, &repo)
+        .await
+        .unwrap_or_default();
+    let branches = blocking("list_branches", move || {
+        hyprlayer_core::gitops::list_branches(&repo)
+    })
+    .await?
+    .map_err(AppError::from)?;
+    Ok(WorkstreamBases {
+        branches,
+        default_base,
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn create_workstream(
     state: State<'_, AppState>,
     project_path: String,
     title: String,
+    base: Option<String>,
 ) -> CmdResult<WorkstreamView> {
     let title = title.trim().to_string();
     if title.is_empty() {
@@ -119,6 +159,10 @@ pub async fn create_workstream(
         .await
         .map_err(AppError::from)?;
     let branch_prefix = state.settings.get().await.git.effective_branch_prefix();
+    // An empty/blank selection means "auto-detect" — same as omitting it.
+    let base_override = base
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty());
     let created = state
         .worktrees
         .create(
@@ -127,7 +171,7 @@ pub async fn create_workstream(
                 project_repo: PathBuf::from(&project_path),
                 mapped_name: mapped.clone(),
                 title: title.clone(),
-                base_override: None,
+                base_override,
                 branch_prefix,
             },
         )

@@ -46,7 +46,14 @@ export const commands = {
 	listWorkstreams: (projectPath: string, includeArchived: boolean) => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_workstreams", { projectPath, includeArchived })),
 	/**  Active workstreams across every project — feeds the sidebar tree. */
 	listAllWorkstreams: () => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_all_workstreams")),
-	createWorkstream: (projectPath: string, title: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title })),
+	/**
+	 *  Branches the user can base a new workstream on, with the auto-detected
+	 *  default. Best-effort: the default falls back to empty (the dialog then
+	 *  pre-selects nothing and the backend re-detects on create) so a repo with no
+	 *  resolvable main/master still lists its branches.
+	 */
+	listWorkstreamBases: (projectPath: string) => typedError<WorkstreamBases, AppError>(__TAURI_INVOKE("list_workstream_bases", { projectPath })),
+	createWorkstream: (projectPath: string, title: string, base: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
 	setWorkstreamStage: (id: string, stage: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
 	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
@@ -765,6 +772,15 @@ export type Workstream = {
 	createdAt: number | null,
 	updatedAt: number | null,
 	archivedAt: number | null,
+};
+
+/**
+ *  Base-branch choices for the "new workstream" dialog: every local + remote
+ *  branch, plus the auto-detected default the picker pre-selects.
+ */
+export type WorkstreamBases = {
+	branches: string[],
+	defaultBase: string,
 };
 
 export type WorkstreamDoc = {

@@ -41,6 +41,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::library::get_thoughts_git_status,
             commands::workstreams::list_workstreams,
             commands::workstreams::list_all_workstreams,
+            commands::workstreams::list_workstream_bases,
             commands::workstreams::create_workstream,
             commands::workstreams::rename_workstream,
             commands::workstreams::set_workstream_stage,
