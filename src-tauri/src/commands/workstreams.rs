@@ -116,6 +116,7 @@ pub async fn create_workstream(
         .require(BinaryKind::Git)
         .await
         .map_err(AppError::from)?;
+    let branch_prefix = state.settings.get().await.git.effective_branch_prefix();
     let created = state
         .worktrees
         .create(
@@ -125,6 +126,7 @@ pub async fn create_workstream(
                 mapped_name: mapped.clone(),
                 title: title.clone(),
                 base_override: None,
+                branch_prefix,
             },
         )
         .await
@@ -168,6 +170,7 @@ pub async fn create_workstream(
                     &created.branch,
                     &created.base_branch,
                     RemovePolicy::ForceDiscard,
+                    true,
                 )
                 .await;
             return Err(AppError::from(e));
@@ -306,6 +309,7 @@ pub async fn archive_workstream(
         }
     }
 
+    let delete_branch = state.settings.get().await.git.delete_branch_on_archive;
     state
         .worktrees
         .remove(
@@ -315,6 +319,7 @@ pub async fn archive_workstream(
             &item.branch,
             &item.base_branch,
             policy,
+            delete_branch,
         )
         .await
         .map_err(AppError::from)?;
@@ -507,7 +512,14 @@ pub async fn merge_workstream_pr(
         .require(BinaryKind::Gh)
         .await
         .map_err(AppError::from)?;
-    pr::merge_pr(&gh, Path::new(&item.worktree_path), &item.branch, method)
-        .await
-        .map_err(AppError::from)
+    let auto = state.settings.get().await.git.automerge;
+    pr::merge_pr(
+        &gh,
+        Path::new(&item.worktree_path),
+        &item.branch,
+        method,
+        auto,
+    )
+    .await
+    .map_err(AppError::from)
 }

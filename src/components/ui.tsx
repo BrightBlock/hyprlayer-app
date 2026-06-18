@@ -124,6 +124,41 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
+type ToggleProps = {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  /** Accessible label, since the switch renders no visible text itself. */
+  "aria-label"?: string;
+};
+
+/** A binary on/off switch styled to match the settings rows. */
+export function Toggle({ checked, onChange, disabled, ...rest }: ToggleProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={rest["aria-label"]}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cx(
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        checked ? "border-accent bg-accent" : "border-edge bg-panel-2",
+      )}
+    >
+      <span
+        className={cx(
+          "inline-block h-3.5 w-3.5 transform rounded-full bg-surface transition-transform",
+          checked ? "translate-x-4" : "translate-x-0.5",
+        )}
+      />
+    </button>
+  );
+}
+
 type DialogProps = {
   open: boolean;
   onClose: () => void;

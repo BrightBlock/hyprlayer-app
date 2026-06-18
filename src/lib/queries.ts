@@ -2,7 +2,9 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 
 import {
   commands,
+  type AppSettings,
   type BinaryKind,
+  type Bootstrap,
   type CreateDocInput,
   type FmPatchDto,
   type MergeMethod,
@@ -179,6 +181,32 @@ export function useRedetectBinaries() {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["health"] });
     },
+  });
+}
+
+/** Persist app settings (whole-object replace) and refresh the bootstrap cache. */
+export function useSetAppSettings() {
+  return useMutation({
+    mutationFn: (settings: AppSettings) => unwrap(commands.setAppSettings(settings)),
+    onSuccess: (next) => {
+      // Optimistically fold the saved settings into the cached bootstrap so
+      // the toggles don't flicker back while the refetch is in flight.
+      queryClient.setQueryData<Bootstrap>(["bootstrap"], (prev) =>
+        prev ? { ...prev, settings: next } : prev,
+      );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    },
+  });
+}
+
+/** The authenticated GitHub login, for the "username/" branch-prefix option. */
+export function useGithubUsername() {
+  return useQuery({
+    queryKey: ["github-username"],
+    queryFn: () => unwrap(commands.githubUsername()),
+    staleTime: 10 * 60_000,
   });
 }
 

@@ -183,7 +183,7 @@ function ComposerMenu({
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
         title={compact ? `${title}: ${label}` : title}
-        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-edge/50 ${
+        className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs hover:bg-edge/50 ${
           activeDanger ? "text-bad hover:text-bad" : "text-ink-dim hover:text-ink"
         }`}
       >
@@ -644,8 +644,11 @@ export function SessionChat({
   // Collapse the composer toolbar to icon-only when the pane is too narrow to
   // fit the picker labels (e.g. a split pane, or a small window). Measured off
   // the pane root so it tracks the actual available width, not the window.
+  // The threshold sits above the labelled toolbar's natural width so it
+  // switches *before* the row would overflow — otherwise the labels squeeze
+  // and the trailing Send/attach cluster bleeds past the pane's right edge.
   const paneWidth = useElementWidth(dropRef);
-  const compactComposer = paneWidth > 0 && paneWidth < 560;
+  const compactComposer = paneWidth > 0 && paneWidth < 640;
 
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
@@ -933,7 +936,7 @@ export function SessionChat({
                   {started ? (
                     <span
                       title={compactComposer ? stageLabel(mode) : undefined}
-                      className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium ${MODE_STYLES[mode].badge}`}
+                      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${MODE_STYLES[mode].badge}`}
                     >
                       <ModeIcon mode={mode} size={13} />
                       {!compactComposer && stageLabel(mode)}

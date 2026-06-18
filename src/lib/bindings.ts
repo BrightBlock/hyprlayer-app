@@ -174,6 +174,11 @@ export const commands = {
 	 *  every menu open; the frontend caches it anyway.
 	 */
 	detectEditors: () => typedError<EditorTarget[], AppError>(__TAURI_INVOKE("detect_editors")),
+	/**
+	 *  The authenticated GitHub login, for the "username/" branch-prefix option.
+	 *  `None` when gh is missing or not logged in (the UI just hides the option).
+	 */
+	githubUsername: () => typedError<string | null, AppError>(__TAURI_INVOKE("github_username")),
 };
 
 /** Events */
@@ -201,6 +206,8 @@ export type AppSettings = {
 	worktreeRoot?: string | null,
 	/**  Where app-owned project clones live; default ~/hyprlayer/repos. */
 	reposRoot?: string | null,
+	/**  Git behaviour for worktree creation, archive, and merge. */
+	git?: GitSettings,
 };
 
 /**  Where a document lives within its root's layout. */
@@ -404,6 +411,27 @@ export type Frontmatter = {
 export type GitFileEntry = {
 	path: string,
 	change: string,
+};
+
+/**  User-tunable git behaviour. Surfaced in Settings → Git. */
+export type GitSettings = {
+	/**
+	 *  Branch-name prefix for new worktrees. `None` keeps the built-in
+	 *  `hyprlayer/` default; a value (e.g. `"feature/"`) is used verbatim.
+	 */
+	branchPrefix?: string | null,
+	/**
+	 *  Delete the local branch when archiving a workspace. Default `true`,
+	 *  matching the historical behaviour.
+	 */
+	deleteBranchOnArchive?: boolean,
+	/**  Auto-archive a workspace once its PR is observed merged. */
+	archiveOnMerge?: boolean,
+	/**
+	 *  Queue a GitHub auto-merge (`gh pr merge --auto`) so the PR lands once
+	 *  required checks pass. Requires auto-merge enabled on the repo.
+	 */
+	automerge?: boolean,
 };
 
 /**  One of the user's GitHub repos, for the clone dialog's "Recent repos" list. */

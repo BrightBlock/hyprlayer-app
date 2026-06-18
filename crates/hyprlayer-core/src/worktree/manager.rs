@@ -30,6 +30,8 @@ pub struct CreateSpec {
     pub title: String,
     /// Override base (e.g. "origin/release"); detected when None.
     pub base_override: Option<String>,
+    /// Branch-name prefix (e.g. "hyprlayer/"). Used verbatim before the slug.
+    pub branch_prefix: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,12 +88,12 @@ impl WorktreeManager {
         self.root.join(mapped_name).join(slug)
     }
 
-    /// Create branch `hyprlayer/<slug>` + worktree from the detected base.
+    /// Create branch `<prefix><slug>` + worktree from the detected base.
     /// Thoughts provisioning is the caller's next step (it needs config
     /// context this module doesn't own).
     pub async fn create(&self, git: &Path, spec: &CreateSpec) -> Result<CreatedWorktree> {
         let slug = unique_slug(&spec.title);
-        let branch = format!("hyprlayer/{slug}");
+        let branch = format!("{}{slug}", spec.branch_prefix);
         let path = self.worktree_dir(&spec.mapped_name, &slug);
         if path.exists() {
             return Err(CoreError::Io(std::io::Error::new(
@@ -147,7 +149,13 @@ impl WorktreeManager {
     }
 
     /// Remove worktree + branch. `Safe` refuses to destroy work; the caller
-    /// maps the typed errors to confirm-dialog affordances.
+    /// maps the typed errors to confirm-dialog affordances. When
+    /// `delete_branch` is false the local branch is left in place (the
+    /// worktree is still removed).
+    // Each parameter is a distinct, independent input (paths, branch names,
+    // policy, branch-deletion opt-out); bundling them into a struct would only
+    // add indirection.
+    #[allow(clippy::too_many_arguments)]
     pub async fn remove(
         &self,
         git: &Path,
@@ -156,6 +164,7 @@ impl WorktreeManager {
         branch: &str,
         base_branch: &str,
         policy: RemovePolicy,
+        delete_branch: bool,
     ) -> Result<()> {
         if worktree.exists() {
             if policy == RemovePolicy::Safe {
@@ -177,15 +186,18 @@ impl WorktreeManager {
         }
 
         // Branch cleanup: only-if-merged on Safe (tolerate failure and leave
-        // the branch), forced on discard.
-        let delete_flag = if policy == RemovePolicy::ForceDiscard {
-            "-D"
-        } else {
-            "-d"
-        };
-        let _ = git_in(git, project_repo, &["branch", delete_flag, branch])
-            .run()
-            .await;
+        // the branch), forced on discard. Skipped entirely when the caller
+        // opts out of branch deletion.
+        if delete_branch {
+            let delete_flag = if policy == RemovePolicy::ForceDiscard {
+                "-D"
+            } else {
+                "-d"
+            };
+            let _ = git_in(git, project_repo, &["branch", delete_flag, branch])
+                .run()
+                .await;
+        }
 
         Ok(())
     }
@@ -425,6 +437,7 @@ mod tests {
                     mapped_name: "proj".into(),
                     title: "Auth work".into(),
                     base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
                 },
             )
             .await
@@ -449,6 +462,7 @@ mod tests {
                 &created.branch,
                 &created.base_branch,
                 RemovePolicy::Safe,
+                true,
             )
             .await
             .unwrap_err();
@@ -467,6 +481,7 @@ mod tests {
                 &created.branch,
                 &created.base_branch,
                 RemovePolicy::Safe,
+                true,
             )
             .await
             .unwrap_err();
@@ -488,6 +503,7 @@ mod tests {
                 &created.branch,
                 &created.base_branch,
                 RemovePolicy::Safe,
+                true,
             )
             .await
             .unwrap_err();
@@ -502,6 +518,7 @@ mod tests {
                 &created.branch,
                 &created.base_branch,
                 RemovePolicy::ForceDiscard,
+                true,
             )
             .await
             .unwrap();

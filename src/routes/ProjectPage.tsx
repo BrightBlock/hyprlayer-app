@@ -40,7 +40,7 @@ import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel
 import { useBootstrap, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
 import { basename } from "../lib/path";
 import { clamp, startEdgeDrag } from "../lib/resize";
-import { useUiStore } from "../lib/uiStore";
+import { DIFF_SIDEBAR_MAX, DIFF_SIDEBAR_MIN, useUiStore } from "../lib/uiStore";
 
 /** A doc attached as context to ONE agent tab. */
 export type AttachedDoc = {
@@ -125,9 +125,10 @@ export function ProjectPage() {
   // Hidden state lives in a shared store so the top-bar toggle controls it.
   const diffHidden = useUiStore((state) => state.diffHidden);
   // Width lives in the same store so the Root header can inset its right-side
-  // controls to the agent pane's right margin (and track this if it ever
-  // becomes drag-resizable).
+  // controls to the agent pane's right margin — and so dragging the divider
+  // updates both the sidebar and the header in one place.
   const diffWidth = useUiStore((state) => state.diffWidth);
+  const setDiffWidth = useUiStore((state) => state.setDiffWidth);
   // Right-split width as a fraction of the agent area (0..1). The split's
   // open/closed state and pane assignments persist in the tab store, but the
   // exact ratio resets to a sane default per visit.
@@ -574,6 +575,16 @@ export function ProjectPage() {
       onResize: (width) => setRightRatio(clamp(width / rowW, 0.2, 0.8)),
     });
   };
+  // The diff sidebar's handle sits on its left edge, so dragging left grows it.
+  const startDiffResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    startEdgeDrag(event, {
+      startWidth: diffWidth,
+      min: DIFF_SIDEBAR_MIN,
+      max: DIFF_SIDEBAR_MAX,
+      direction: -1,
+      onResize: setDiffWidth,
+    });
+  };
 
   // One tab pill, shared by both pane strips. `paneFocused` is true when this
   // pill's pane holds focus — only then does its active tab read as fully
@@ -899,6 +910,13 @@ export function ProjectPage() {
 
       {!diffHidden && (
         <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize diff sidebar"
+            className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+            onPointerDown={startDiffResize}
+          />
           <aside
             className="flex min-w-0 shrink-0 flex-col border-l border-edge bg-panel"
             style={{ width: diffWidth }}

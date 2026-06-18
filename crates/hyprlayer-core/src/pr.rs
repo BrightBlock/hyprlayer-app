@@ -269,14 +269,45 @@ pub async fn pr_status(gh: &Path, worktree: &Path, branch: &str) -> Result<Optio
 /// gh would try to delete the local branch checked out in this worktree (and
 /// switch branches), which fails. Local branch + worktree teardown is the
 /// archive step's job; GitHub auto-deletes the remote branch if so configured.
-pub async fn merge_pr(gh: &Path, worktree: &Path, branch: &str, method: MergeMethod) -> Result<()> {
+///
+/// When `auto` is set, passes `--auto` so GitHub queues the merge until
+/// required checks pass (the repo must have auto-merge enabled). With `auto`
+/// the call returns as soon as the merge is *queued*, not when it lands.
+pub async fn merge_pr(
+    gh: &Path,
+    worktree: &Path,
+    branch: &str,
+    method: MergeMethod,
+    auto: bool,
+) -> Result<()> {
+    let mut args = vec!["pr", "merge", branch, method.flag()];
+    if auto {
+        args.push("--auto");
+    }
     Exec::new(gh)
         .cwd(worktree)
-        .args(["pr", "merge", branch, method.flag()])
+        .args(args)
         .timeout(Duration::from_secs(60))
         .run()
         .await?;
     Ok(())
+}
+
+/// The authenticated GitHub user's login (`gh api user --jq .login`), or
+/// `None` when gh is unavailable / not logged in. Used to offer a
+/// "username/" branch prefix in settings; failure is non-fatal.
+pub async fn github_login(gh: &Path) -> Option<String> {
+    let out = Exec::new(gh)
+        .args(["api", "user", "--jq", ".login"])
+        .timeout(Duration::from_secs(20))
+        .run_unchecked()
+        .await
+        .ok()?;
+    if out.exit_code != Some(0) {
+        return None;
+    }
+    let login = out.stdout.trim();
+    (!login.is_empty()).then(|| login.to_string())
 }
 
 #[cfg(test)]

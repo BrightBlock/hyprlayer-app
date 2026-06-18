@@ -7,6 +7,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -16,7 +17,13 @@ import {
 } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { useAllWorkstreams, useBootstrap, useEditorTargets } from "../lib/queries";
+import {
+  useAllWorkstreams,
+  useArchiveWorkstream,
+  useBootstrap,
+  useEditorTargets,
+  useWorkstreamPr,
+} from "../lib/queries";
 import { useElementWidth } from "../lib/useElementWidth";
 import { shipWorkstream } from "../features/session/sessionStore";
 import { startEdgeDrag } from "../lib/resize";
@@ -84,25 +91,6 @@ function PanelRightIcon() {
   );
 }
 
-function BookOpenIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 7v14" />
-      <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />
-    </svg>
-  );
-}
-
 function GitBranchIcon() {
   return (
     <svg
@@ -123,14 +111,6 @@ function GitBranchIcon() {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
-    </svg>
-  );
-}
-
-function ArrowLeftIcon() {
-  return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M19 12H5m0 0 6-6m-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -399,15 +379,33 @@ export function Root() {
   // itself, and only when there is actual history to return to.
   const router = useRouter();
   const canGoBack = useCanGoBack();
-  const onSecondaryView =
-    pathname.startsWith("/library") ||
-    pathname.startsWith("/settings") ||
-    (pathname.startsWith("/projects/") && pathname.endsWith("/docs"));
-  const showBack = canGoBack && onSecondaryView;
 
   // Right-click menu + archive flow for the worktree rows. The view itself
   // carries its project path, so the targets are just the view.
   const navigate = useNavigate();
+
+  // Toggling a "global destination" icon (Library / Settings / project docs)
+  // while already there backs out to the previous view — or runs `fallback`
+  // when this view was the entry point — instead of being a no-op the user has
+  // to escape manually. (This replaces the header's dedicated Back button.)
+  const closeOrBack = (fallback: () => void) => {
+    if (canGoBack) router.history.back();
+    else fallback();
+  };
+  const toggleNav = (target: "/library" | "/settings") => {
+    if (pathname.startsWith(target)) closeOrBack(() => void navigate({ to: "/" }));
+    else void navigate({ to: target });
+  };
+  const toggleProjectDocs = (projectPath: string) => {
+    const onDocs = pathname.startsWith("/projects/") && pathname.endsWith("/docs");
+    if (onDocs) {
+      closeOrBack(() =>
+        void navigate({ to: "/projects/$projectPath", params: { projectPath }, search: {} }),
+      );
+    } else {
+      void navigate({ to: "/projects/$projectPath/docs", params: { projectPath } });
+    }
+  };
 
   // Make the dashboard the launch view: once per cold start, if we opened on a
   // restored deeper route, redirect home. In-session navigation is untouched.
@@ -416,6 +414,41 @@ export function Root() {
     launchedToHome = true;
     if (pathname !== "/") void navigate({ to: "/", replace: true });
   }, [navigate, pathname]);
+
+  // When the viewed workstream is archived, fall back to its project view (only
+  // when it was the selected item — leaves background archives alone).
+  const dismissToProject = useCallback(
+    (projectPath: string, id: string) => {
+      if (currentProjectPath === projectPath && activeWorkstreamId === id) {
+        void navigate({ to: "/projects/$projectPath", params: { projectPath }, search: {} });
+      }
+    },
+    [currentProjectPath, activeWorkstreamId, navigate],
+  );
+
+  // Archive-on-merge: when the active workstream's PR is observed merged and the
+  // setting is on, archive it automatically. Force-discard since the work has
+  // landed remotely (the local branch reads as "unpushed" vs the un-pulled
+  // base, so a Safe archive would always refuse). Guarded so it fires once.
+  const archiveOnMerge = bootstrap.data?.settings.git?.archiveOnMerge ?? false;
+  const autoArchive = useArchiveWorkstream();
+  const autoArchivedRef = useRef<Set<string>>(new Set());
+  const activePr = useWorkstreamPr(
+    activeWorkstreamId ?? "",
+    Boolean(activeWorkstream) && archiveOnMerge,
+  );
+  useEffect(() => {
+    if (!archiveOnMerge || !activeWorkstream) return;
+    if (activePr.data?.state !== "merged") return;
+    const id = activeWorkstream.item.id;
+    if (autoArchivedRef.current.has(id)) return;
+    autoArchivedRef.current.add(id);
+    const projectPath = activeWorkstream.item.projectPath;
+    autoArchive.mutate(
+      { id, discard: true },
+      { onSuccess: () => dismissToProject(projectPath, id) },
+    );
+  }, [archiveOnMerge, activeWorkstream, activePr.data?.state, autoArchive, dismissToProject]);
 
   const [itemMenu, setItemMenu] = useState<{
     x: number;
@@ -437,11 +470,16 @@ export function Root() {
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
     IS_MACOS ? TOP_CHROME_MIN_CONTENT_OFFSET : 0,
   );
-  // Inset the right-side controls (file opener + changes toggle, etc.) so they
+  // Inset the agent-pane controls (file opener + changes toggle + docs) so they
   // sit at the agent pane's right margin, mirroring how the breadcrumb tracks
   // the left sidebar. Only the agent view has the diff sidebar, and only while
   // it's shown; everywhere else the controls stay flush to the window edge.
   const rightOffset = currentSection === "Agent" && !diffHidden ? diffWidth : 0;
+  // The Ship/PR/Archive cluster always pins to the window's right edge,
+  // independent of the pane icons. While the diff sidebar is open it floats
+  // above the sidebar (absolutely positioned, to the RIGHT of the inset pane
+  // icons); otherwise it flows inline just to the LEFT of those icons.
+  const shipFloating = rightOffset > 0;
   // Collapse the labelled header controls (the "Ship" button) to icon-only when
   // the toolbar gets crowded — measured off the header's content row so it
   // accounts for the sidebar width, not just the window.
@@ -458,6 +496,31 @@ export function Root() {
       onResize: setSidebarWidth,
     });
   };
+
+  // Ship / PR / Archive controls. Rendered in exactly one place per layout
+  // (inline left of the pane icons when the sidebar is collapsed, or floating
+  // at the window's right edge when it's open), so this is a shared fragment.
+  const shipControls = currentProject ? (
+    <>
+      {activeWorkstream && (activeWorkstream.git.dirty > 0 || activeWorkstream.git.ahead > 0) && (
+        <button
+          type="button"
+          disabled={shipping}
+          onClick={() => {
+            setShipping(true);
+            void shipWorkstream(activeWorkstream.item.id).finally(() => setShipping(false));
+          }}
+          className="inline-flex h-7 items-center gap-2 rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 text-sm font-medium text-emerald-300 hover:bg-emerald-400/20 disabled:opacity-60"
+          title="Commit, push, and open a pull request"
+          aria-label="Ship"
+        >
+          <GitPullRequestIcon />
+          {!compactHeader && "Ship"}
+        </button>
+      )}
+      <PrStatusBar view={activeWorkstream ?? null} onArchive={setArchiveTarget} />
+    </>
+  ) : null;
 
   return (
     <div className="flex h-full flex-col bg-surface">
@@ -494,6 +557,24 @@ export function Root() {
           >
             <HomeIcon />
           </Link>
+          {/* Project docs lives here (a fixed left anchor) rather than in the
+              right cluster, so it doesn't shift when the diff sidebar inset
+              changes. */}
+          {currentProject && (
+            <button
+              type="button"
+              onClick={() => toggleProjectDocs(currentProject.path)}
+              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-edge/60 hover:text-ink ${
+                pathname.startsWith("/projects/") && pathname.endsWith("/docs")
+                  ? "bg-edge text-ink"
+                  : "text-ink-dim"
+              }`}
+              title="Project docs"
+              aria-label="Project docs"
+            >
+              <BookIcon size={18} />
+            </button>
+          )}
         </div>
 
         <div
@@ -526,39 +607,12 @@ export function Root() {
             className="flex shrink-0 items-center gap-2"
             style={{ marginRight: rightOffset }}
           >
-            {showBack && (
-              <button
-                type="button"
-                onClick={() => router.history.back()}
-                className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
-                title="Back"
-                aria-label="Back"
-              >
-                <ArrowLeftIcon />
-              </button>
-            )}
             {currentProject && (
               <>
-                {activeWorkstream &&
-                  (activeWorkstream.git.dirty > 0 || activeWorkstream.git.ahead > 0) && (
-                    <button
-                      type="button"
-                      disabled={shipping}
-                      onClick={() => {
-                        setShipping(true);
-                        void shipWorkstream(activeWorkstream.item.id).finally(() =>
-                          setShipping(false),
-                        );
-                      }}
-                      className="inline-flex h-7 items-center gap-2 rounded-md border border-emerald-400/40 bg-emerald-400/10 px-3 text-sm font-medium text-emerald-300 hover:bg-emerald-400/20 disabled:opacity-60"
-                      title="Commit, push, and open a pull request"
-                      aria-label="Ship"
-                    >
-                      <GitPullRequestIcon />
-                      {!compactHeader && "Ship"}
-                    </button>
-                  )}
-                <PrStatusBar view={activeWorkstream ?? null} onArchive={setArchiveTarget} />
+                {/* Sidebar collapsed → Ship/PR/Archive flow just left of the
+                    pane icons. Sidebar open → they float at the window edge
+                    (rendered below), to the right of the inset icons. */}
+                {!shipFloating && shipControls}
                 <OpenInMenu dir={activeWorkstream?.item.worktreePath ?? currentProject.path} />
                 {currentSection === "Agent" && (
                   <button
@@ -571,19 +625,19 @@ export function Root() {
                     <PanelRightIcon />
                   </button>
                 )}
-                <Link
-                  to="/projects/$projectPath/docs"
-                  params={{ projectPath: currentProject.path }}
-                  className={topIconClass}
-                  title="Project docs"
-                  aria-label="Project docs"
-                >
-                  <BookOpenIcon />
-                </Link>
               </>
             )}
           </div>
         </div>
+
+        {/* Ship/PR/Archive pinned to the window's right edge while the diff
+            sidebar is open, so they float above it independently of the
+            agent-pane icons (which stay inset to the pane's right margin). */}
+        {shipFloating && shipControls && (
+          <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
+            {shipControls}
+          </div>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -733,22 +787,24 @@ export function Root() {
               collapsed ? "flex flex-col items-center gap-1" : "flex items-center justify-between"
             }
           >
-            <Link
-              to="/library"
+            <button
+              type="button"
+              onClick={() => toggleNav("/library")}
               className={footerIconClass(pathname.startsWith("/library"))}
               title="Library"
               aria-label="Library"
             >
               <BookIcon size={18} />
-            </Link>
-            <Link
-              to="/settings"
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleNav("/settings")}
               className={footerIconClass(pathname.startsWith("/settings"))}
               title="Settings"
               aria-label="Settings"
             >
               <SettingsIcon />
-            </Link>
+            </button>
           </div>
         </div>
         </aside>
@@ -865,17 +921,7 @@ export function Root() {
         onClose={() => setArchiveTarget(null)}
         onArchived={(id) => {
           // If the archived item was the one selected, drop back to its project.
-          if (
-            archiveTarget &&
-            currentProjectPath === archiveTarget.item.projectPath &&
-            activeWorkstreamId === id
-          ) {
-            void navigate({
-              to: "/projects/$projectPath",
-              params: { projectPath: archiveTarget.item.projectPath },
-              search: {},
-            });
-          }
+          if (archiveTarget) dismissToProject(archiveTarget.item.projectPath, id);
           setArchiveTarget(null);
         }}
       />

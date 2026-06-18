@@ -6,6 +6,10 @@ import { create } from "zustand";
  */
 export const DIFF_SIDEBAR_WIDTH = 360;
 
+/** Drag-resize bounds (px) for the right-hand diff sidebar. */
+export const DIFF_SIDEBAR_MIN = 280;
+export const DIFF_SIDEBAR_MAX = 640;
+
 type UiStore = {
   /**
    * Whether the right-hand diff sidebar is hidden. Shared state so the top-bar

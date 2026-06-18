@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type { MergeMethod, WorkstreamView } from "../../lib/bindings";
-import { useMergePr, useWorkstreamPr } from "../../lib/queries";
+import { useBootstrap, useMergePr, useWorkstreamPr } from "../../lib/queries";
 import { addressPrFeedback } from "../session/sessionStore";
 import { ContextMenuItem, Spinner } from "../../components/ui";
 import { GitPullRequestIcon } from "../../components/icons";
@@ -54,6 +54,8 @@ export function PrStatusBar({
   const id = view?.item.id ?? "";
   const pr = useWorkstreamPr(id, view !== null);
   const merge = useMergePr(id);
+  const bootstrap = useBootstrap();
+  const automerge = bootstrap.data?.settings.git?.automerge ?? false;
   const [mergeOpen, setMergeOpen] = useState(false);
 
   const data = pr.data;
@@ -62,11 +64,15 @@ export function PrStatusBar({
   const isMerged = data.state === "merged";
   const isOpen = data.state === "open";
   // Gate on green CI + mergeable. A repo with no checks at all (`none`) has
-  // nothing to wait on, so it's allowed; `pending`/`failing` are not.
+  // nothing to wait on, so it's allowed; `failing` never is. `pending` is
+  // allowed only when automerge is on — the merge then queues (`gh pr merge
+  // --auto`) until checks pass.
   const checksOk = data.checks === "passing" || data.checks === "none";
-  const canMerge = isOpen && data.mergeable && checksOk && !merge.isPending;
+  const queuesAuto = automerge && data.checks === "pending";
+  const canMerge = isOpen && data.mergeable && (checksOk || queuesAuto) && !merge.isPending;
 
   const mergeTitle = () => {
+    if (queuesAuto) return "Queue auto-merge — GitHub merges once required checks pass";
     if (canMerge) return "Merge this pull request";
     if (data.checks === "pending") return "Waiting for checks to finish";
     if (data.checks === "failing") return "Fix the failing checks before merging";
@@ -115,7 +121,7 @@ export function PrStatusBar({
             title={mergeTitle()}
           >
             {merge.isPending ? <Spinner size={12} /> : null}
-            Merge
+            {queuesAuto ? "Auto-merge" : "Merge"}
           </button>
           {mergeOpen && (
             <>

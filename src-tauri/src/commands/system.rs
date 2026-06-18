@@ -85,3 +85,14 @@ pub async fn detect_editors() -> CmdResult<Vec<EditorTarget>> {
         .await
         .map_err(|e| AppError::internal(format!("editor detection failed: {e}")))
 }
+
+/// The authenticated GitHub login, for the "username/" branch-prefix option.
+/// `None` when gh is missing or not logged in (the UI just hides the option).
+#[tauri::command]
+#[specta::specta]
+pub async fn github_username(state: State<'_, AppState>) -> CmdResult<Option<String>> {
+    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
+        return Ok(None);
+    };
+    Ok(hyprlayer_core::pr::github_login(&gh).await)
+}

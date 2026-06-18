@@ -75,6 +75,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::get_app_settings,
             commands::system::set_app_settings,
             commands::system::detect_editors,
+            commands::system::github_username,
         ])
         .events(collect_events![
             events::ConfigChanged,
