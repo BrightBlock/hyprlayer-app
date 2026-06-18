@@ -38,6 +38,59 @@ pub struct AppSettings {
     pub git: GitSettings,
     /// Keyboard-shortcut overrides for app operations.
     pub keybindings: KeybindingSettings,
+    /// Per-provider defaults (default model, etc.). Surfaced in Settings → Models.
+    pub providers: ProviderSettings,
+}
+
+/// Defaults for each agent provider. Claude is the only working provider
+/// today; Codex is stubbed so the section can render now and gain real
+/// fields later without a settings migration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProviderSettings {
+    /// Anthropic Claude (the `claude` CLI).
+    pub claude: ClaudeSettings,
+    /// OpenAI Codex — not wired up yet; reserved so the providers section is
+    /// stable as we build it out.
+    pub codex: CodexSettings,
+}
+
+/// Claude provider defaults.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ClaudeSettings {
+    /// Default model key for new sessions — one of the composer's model keys
+    /// (e.g. `"opus"`, `"sonnet"`) or a custom `--model` value. `None` keeps
+    /// the built-in default (Opus).
+    pub default_model: Option<String>,
+    /// Default reasoning-effort key for new sessions (`low`..`max`). `None`
+    /// keeps the built-in default (High).
+    pub default_effort: Option<String>,
+    /// Start new sessions in plan permission mode (`--permission-mode plan`).
+    pub default_plan_mode: bool,
+    /// Which model keys appear in the composer's picker. `None` shows every
+    /// built-in model; `Some(list)` shows exactly those keys (presets plus any
+    /// custom model ids the user added).
+    pub visible_models: Option<Vec<String>>,
+
+    // --- Not wired up yet (UI stubs; nothing consumes these). ---
+    /// Default model for in-app code reviews. Reserved — no review feature yet.
+    pub review_model: Option<String>,
+    /// Default effort for in-app code reviews. Reserved.
+    pub review_effort: Option<String>,
+    /// Start new sessions in fast mode. Reserved — not a `claude` spawn flag yet.
+    pub default_fast_mode: bool,
+}
+
+/// Codex provider defaults. Stub — Codex isn't supported yet; this exists so
+/// the providers section round-trips and can grow fields without a migration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CodexSettings {
+    /// Default model for new Codex sessions. Unused until Codex lands.
+    pub default_model: Option<String>,
+    /// Personality/style for new Codex chats. Reserved — Codex isn't wired up.
+    pub personality: Option<String>,
 }
 
 /// User-tunable git behaviour. Surfaced in Settings → Git.
@@ -173,6 +226,22 @@ mod tests {
         // empty overrides map — no migration needed.
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(s.keybindings.overrides.is_empty());
+    }
+
+    #[test]
+    fn settings_default_when_providers_section_absent() {
+        // Old settings.json (no `providers` key) must deserialize with no
+        // configured default model rather than failing.
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.providers.claude.default_model, None);
+        assert_eq!(s.providers.codex.default_model, None);
+    }
+
+    #[test]
+    fn providers_default_model_round_trips() {
+        let raw = r#"{"providers":{"claude":{"defaultModel":"sonnet"}}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.providers.claude.default_model.as_deref(), Some("sonnet"));
     }
 }
 

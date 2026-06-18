@@ -68,6 +68,24 @@ export function modelOption(key: string | undefined): ModelOption {
   };
 }
 
+/** The full list of preset model keys, in display order. */
+export const ALL_MODEL_KEYS = MODELS.map((m) => m.key);
+
+/** Set form of [`ALL_MODEL_KEYS`] for O(1) "is this a preset?" membership tests. */
+export const ALL_MODEL_KEY_SET = new Set(ALL_MODEL_KEYS);
+
+/**
+ * The models the composer's picker should offer, given the user's "visible
+ * models" setting (Settings → Models). `null`/`undefined` means "not
+ * customised" → show every preset. Otherwise show exactly the listed keys, in
+ * the stored order: a key matching a preset resolves to it; any other key is a
+ * custom model id the user added and resolves via [`modelOption`].
+ */
+export function visibleModels(keys: readonly string[] | null | undefined): ModelOption[] {
+  if (!keys) return MODELS;
+  return keys.map(modelOption);
+}
+
 /** A reasoning-effort level. The `key` IS the `--effort` value the CLI accepts
  *  (low | medium | high | xhigh | max). */
 export type EffortOption = { key: string; label: string };

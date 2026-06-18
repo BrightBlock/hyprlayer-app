@@ -229,6 +229,8 @@ export type AppSettings = {
 	git?: GitSettings,
 	/**  Keyboard-shortcut overrides for app operations. */
 	keybindings?: KeybindingSettings,
+	/**  Per-provider defaults (default model, etc.). Surfaced in Settings → Models. */
+	providers?: ProviderSettings,
 };
 
 /**  Where a document lives within its root's layout. */
@@ -276,6 +278,46 @@ export type ChecksState =
 "passing" | 
 /**  At least one check failed, errored, or timed out. */
 "failing";
+
+/**  Claude provider defaults. */
+export type ClaudeSettings = {
+	/**
+	 *  Default model key for new sessions — one of the composer's model keys
+	 *  (e.g. `"opus"`, `"sonnet"`) or a custom `--model` value. `None` keeps
+	 *  the built-in default (Opus).
+	 */
+	defaultModel?: string | null,
+	/**
+	 *  Default reasoning-effort key for new sessions (`low`..`max`). `None`
+	 *  keeps the built-in default (High).
+	 */
+	defaultEffort?: string | null,
+	/**  Start new sessions in plan permission mode (`--permission-mode plan`). */
+	defaultPlanMode?: boolean,
+	/**
+	 *  Which model keys appear in the composer's picker. `None` shows every
+	 *  built-in model; `Some(list)` shows exactly those keys (presets plus any
+	 *  custom model ids the user added).
+	 */
+	visibleModels?: string[] | null,
+	/**  Default model for in-app code reviews. Reserved — no review feature yet. */
+	reviewModel?: string | null,
+	/**  Default effort for in-app code reviews. Reserved. */
+	reviewEffort?: string | null,
+	/**  Start new sessions in fast mode. Reserved — not a `claude` spawn flag yet. */
+	defaultFastMode?: boolean,
+};
+
+/**
+ *  Codex provider defaults. Stub — Codex isn't supported yet; this exists so
+ *  the providers section round-trips and can grow fields without a migration.
+ */
+export type CodexSettings = {
+	/**  Default model for new Codex sessions. Unused until Codex lands. */
+	defaultModel?: string | null,
+	/**  Personality/style for new Codex chats. Reserved — Codex isn't wired up. */
+	personality?: string | null,
+};
 
 /**
  *  The hyprlayer CLI config file changed on disk (the CLI rewrote it, or the
@@ -559,6 +601,21 @@ export type ProjectDetail = {
 	project: Project,
 	storage: StorageInfo,
 	thoughtsRoot: string | null,
+};
+
+/**
+ *  Defaults for each agent provider. Claude is the only working provider
+ *  today; Codex is stubbed so the section can render now and gain real
+ *  fields later without a settings migration.
+ */
+export type ProviderSettings = {
+	/**  Anthropic Claude (the `claude` CLI). */
+	claude?: ClaudeSettings,
+	/**
+	 *  OpenAI Codex — not wired up yet; reserved so the providers section is
+	 *  stable as we build it out.
+	 */
+	codex?: CodexSettings,
 };
 
 export type QueryResult = {

@@ -28,13 +28,14 @@ import {
   XIcon,
 } from "../../components/icons";
 import { errorMessage } from "../../lib/ipc";
+import { useBootstrap } from "../../lib/queries";
 import type { WorkstreamView } from "../../lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
 import { AttachmentCards } from "./AttachmentCard";
 import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, suggestedDocKind, type StageKey } from "./stages";
-import { EFFORTS, MODELS, effortOption, modelOption } from "./models";
+import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
 import { PERMISSION_MODES, permissionModeOption } from "./permissions";
 import { formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers } from "./TranscriptView";
@@ -694,17 +695,28 @@ export function SessionChat({
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
   const mode = asStageKey(shell.mode);
-  const model = modelOption(shell.model);
-  const effort = effortOption(shell.effort);
-  const permissionMode = permissionModeOption(shell.permissionMode);
+  // A tab with no explicit pick falls back to the provider defaults configured
+  // in Settings → Models → Claude, then to claude's own defaults. `defaultPlanMode`
+  // seeds the permission posture to "plan" for fresh tabs.
+  const claudeDefaults = useBootstrap().data?.settings.providers?.claude;
+  const model = modelOption(shell.model ?? claudeDefaults?.defaultModel ?? undefined);
+  const effort = effortOption(shell.effort ?? claudeDefaults?.defaultEffort ?? undefined);
+  const permissionMode = permissionModeOption(
+    shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
+  );
+  const modelItems = visibleModels(claudeDefaults?.visibleModels);
 
   // A tab bound to a session but with no transcript in memory means we came
-  // back after an app restart — rebuild it from the persisted event log.
+  // back after an app restart — rebuild it from the persisted event log. Use the
+  // tab's OWN stored permission mode (not the plan-mode default), so resuming an
+  // old session re-applies what it actually started with rather than a default
+  // that may have been toggled on since.
+  const restorePermissionFlag = permissionModeOption(shell.permissionMode).flag;
   useEffect(() => {
     if (shell.sessionId && !hasEntry) {
-      void restoreSessionIfNeeded(shell.sessionId, view.item.id, shell.mode, permissionMode.flag);
+      void restoreSessionIfNeeded(shell.sessionId, view.item.id, shell.mode, restorePermissionFlag);
     }
-  }, [shell.sessionId, hasEntry, view.item.id, shell.mode, permissionMode.flag]);
+  }, [shell.sessionId, hasEntry, view.item.id, shell.mode, restorePermissionFlag]);
 
   // Mode-aware suggestion: auto-attach the most recent relevant doc (research
   // for plan-mode, plan for implement/validate) as a "suggested" chip while the
@@ -1073,7 +1085,7 @@ export function SessionChat({
                     leading={<SparkleIcon size={14} />}
                     label={model.label}
                     hint={model.hint}
-                    items={MODELS.map((m) => ({ key: m.key, label: m.label, hint: m.hint }))}
+                    items={modelItems.map((m) => ({ key: m.key, label: m.label, hint: m.hint }))}
                     activeKey={model.key}
                     onSelect={onModelChange}
                     custom={{ label: "Custom…", placeholder: "alias or claude-…" }}

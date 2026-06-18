@@ -6,7 +6,7 @@ import {
   useRedetectBinaries,
   useSetAppSettings,
 } from "../lib/queries";
-import type { AppSettings, GitSettings } from "../lib/bindings";
+import type { AppSettings, ClaudeSettings, GitSettings } from "../lib/bindings";
 import {
   Badge,
   Button,
@@ -15,12 +15,22 @@ import {
   ErrorNote,
   PageError,
   PageSpinner,
+  Select,
   TextInput,
   Toggle,
 } from "../components/ui";
 import { BinaryCard } from "../features/system/BinaryCard";
 import { UpdatesCard } from "../features/system/updates";
 import { KeyboardSettings } from "../features/settings/KeyboardSettings";
+import {
+  ALL_MODEL_KEY_SET,
+  ALL_MODEL_KEYS,
+  DEFAULT_EFFORT_KEY,
+  DEFAULT_MODEL_KEY,
+  EFFORTS,
+  MODELS,
+  modelOption,
+} from "../features/session/models";
 import { THEMES, useThemeStore } from "../lib/theme";
 
 /** [surface, panel-2, accent] preview colors per theme. Kept explicit (rather
@@ -105,14 +115,14 @@ function SettingRow({
   children,
   control,
 }: {
-  title: string;
+  title: React.ReactNode;
   children: React.ReactNode;
   control: React.ReactNode;
 }) {
   return (
     <div className="flex items-start justify-between gap-4 py-3.5">
       <div className="min-w-0">
-        <p className="text-sm text-ink">{title}</p>
+        <div className="flex items-center gap-2 text-sm text-ink">{title}</div>
         <p className="mt-0.5 text-xs text-ink-dim">{children}</p>
       </div>
       <div className="shrink-0 pt-0.5">{control}</div>
@@ -280,6 +290,316 @@ function GitSection({ settings }: { settings: AppSettings }) {
   );
 }
 
+/* -------------------------------- Models --------------------------------- */
+
+/** Model `<option>`s for a default-model picker, built from MODELS so the
+ *  settings page and composer stay in lock-step. */
+function ModelOptions() {
+  return (
+    <>
+      {MODELS.map((m) => (
+        <option key={m.key} value={m.key}>
+          {m.label}
+          {m.hint ? ` (${m.hint})` : ""}
+        </option>
+      ))}
+    </>
+  );
+}
+
+/** Effort `<option>`s for an effort picker. */
+function EffortOptions() {
+  return (
+    <>
+      {EFFORTS.map((e) => (
+        <option key={e.key} value={e.key}>
+          {e.label}
+        </option>
+      ))}
+    </>
+  );
+}
+
+/** Canonical ordering for a visible-models list: presets in MODELS order, then
+ *  custom ids in insertion order, de-duplicated. Keeps the stored list (and the
+ *  composer picker built from it) tidy regardless of click order. */
+function normalizeVisible(keys: string[]): string[] {
+  // `[...seen]` preserves first-occurrence order, so customs keep insertion order.
+  const seen = new Set(keys);
+  const presets = ALL_MODEL_KEYS.filter((k) => seen.has(k));
+  const customs = [...seen].filter((k) => !ALL_MODEL_KEY_SET.has(k));
+  return [...presets, ...customs];
+}
+
+/** The "Models visible in composer" picker for the Claude provider. Toggling,
+ *  adding custom ids, and the bulk actions all write `visibleModels`: `null`
+ *  means "not customised → show every preset". */
+function VisibleModelsPanel({
+  claude,
+  patchClaude,
+}: {
+  claude: ClaudeSettings;
+  patchClaude: (next: Partial<ClaudeSettings>) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [newId, setNewId] = useState("");
+
+  const visible = claude.visibleModels ?? null; // null = default (all presets)
+  // The current selection as an explicit list (materialising the "all" default).
+  const explicit = visible ?? ALL_MODEL_KEYS;
+  const visibleSet = new Set(explicit);
+  const customKeys = (visible ?? []).filter((k) => !ALL_MODEL_KEY_SET.has(k));
+
+  // Rows = every preset plus any custom ids the user added.
+  const rows = [...MODELS, ...customKeys.map(modelOption)];
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? rows.filter((m) => m.label.toLowerCase().includes(q) || m.key.toLowerCase().includes(q))
+    : rows;
+
+  function toggle(key: string, on: boolean) {
+    const next = on ? normalizeVisible([...explicit, key]) : explicit.filter((k) => k !== key);
+    patchClaude({ visibleModels: next });
+  }
+
+  function addCustom() {
+    const id = newId.trim();
+    if (!id) return;
+    patchClaude({ visibleModels: normalizeVisible([...explicit, id]) });
+    setNewId("");
+  }
+
+  const actionBtn =
+    "rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink disabled:opacity-40";
+
+  return (
+    <div className="rounded-md border border-edge bg-panel-2/40 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm text-ink">Claude Code</p>
+          <p className="text-xs text-ink-dim">
+            {visibleSet.size} {visibleSet.size === 1 ? "model" : "models"} visible · Default:{" "}
+            {ALL_MODEL_KEYS.length} models
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className={actionBtn}
+            disabled={visible === null}
+            onClick={() => patchClaude({ visibleModels: null })}
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            className={actionBtn}
+            onClick={() =>
+              patchClaude({ visibleModels: normalizeVisible([...ALL_MODEL_KEYS, ...customKeys]) })
+            }
+          >
+            Show all
+          </button>
+          <button
+            type="button"
+            className={actionBtn}
+            disabled={visibleSet.size === 0}
+            onClick={() => patchClaude({ visibleModels: [] })}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-2.5 flex gap-2">
+        <TextInput
+          value={query}
+          placeholder="Search Claude Code models"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <TextInput
+          value={newId}
+          placeholder="Add model ID"
+          onChange={(e) => setNewId(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addCustom();
+          }}
+          className="max-w-[10rem]"
+        />
+        <Button onClick={addCustom} disabled={!newId.trim()}>
+          Add
+        </Button>
+      </div>
+
+      <ul className="mt-2 max-h-64 overflow-y-auto">
+        {filtered.length === 0 && (
+          <li className="px-1 py-3 text-xs text-ink-dim">No models match “{query}”.</li>
+        )}
+        {filtered.map((m) => {
+          const custom = !ALL_MODEL_KEY_SET.has(m.key);
+          return (
+            <li key={m.key}>
+              <label className="flex cursor-pointer items-center gap-2.5 rounded px-1 py-1.5 hover:bg-edge/40">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 shrink-0 cursor-pointer accent-accent"
+                  checked={visibleSet.has(m.key)}
+                  onChange={(e) => toggle(m.key, e.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="text-sm text-ink">
+                    {m.label}
+                    {m.hint ? ` ${m.hint}` : ""}
+                    {custom && (
+                      <span className="ml-1.5 align-middle">
+                        <Badge tone="dim">custom</Badge>
+                      </span>
+                    )}
+                  </span>
+                  <span className="block font-mono text-xs text-ink-dim">{m.flag ?? m.key}</span>
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function ModelsSection({ settings }: { settings: AppSettings }) {
+  // `providers` and each sub-section are individually optional in the bindings
+  // (every struct is `#[serde(default)]`), so coalesce as we read.
+  const providers = settings.providers ?? {};
+  const claude: ClaudeSettings = providers.claude ?? {};
+  const save = useSetAppSettings();
+
+  function patchClaude(next: Partial<ClaudeSettings>) {
+    save.mutate({
+      ...settings,
+      providers: { ...providers, claude: { ...claude, ...next } },
+    });
+  }
+
+  const defaultModel = claude.defaultModel ?? DEFAULT_MODEL_KEY;
+  const defaultEffort = claude.defaultEffort ?? DEFAULT_EFFORT_KEY;
+
+  const comingSoon = <Badge tone="dim">Coming soon</Badge>;
+
+  return (
+    <>
+      {save.isError && <ErrorNote error={save.error} />}
+
+      <Card>
+        <CardTitle>Defaults</CardTitle>
+        <p className="mt-1 text-xs text-ink-dim">
+          What new Claude chats start with. You can still change any of these per tab in the
+          composer.
+        </p>
+
+        <div className="mt-3 divide-y divide-edge/50">
+          <SettingRow
+            title="Default model"
+            control={
+              <div className="flex gap-2">
+                <Select
+                  aria-label="Default model"
+                  value={defaultModel}
+                  onChange={(e) => patchClaude({ defaultModel: e.target.value })}
+                  className="w-36"
+                >
+                  <ModelOptions />
+                </Select>
+                <Select
+                  aria-label="Default effort"
+                  value={defaultEffort}
+                  onChange={(e) => patchClaude({ defaultEffort: e.target.value })}
+                  className="w-32"
+                >
+                  <EffortOptions />
+                </Select>
+              </div>
+            }
+          >
+            Model and reasoning effort for new chats.
+          </SettingRow>
+
+          {/* Stub — there's no in-app code-review session yet. */}
+          <SettingRow
+            title={<>Review model {comingSoon}</>}
+            control={
+              <div className="flex gap-2">
+                <Select aria-label="Review model" value={defaultModel} disabled className="w-36">
+                  <ModelOptions />
+                </Select>
+                <Select aria-label="Review effort" value={defaultEffort} disabled className="w-32">
+                  <EffortOptions />
+                </Select>
+              </div>
+            }
+          >
+            Model for code reviews.
+          </SettingRow>
+
+          <SettingRow
+            title="Default to plan mode"
+            control={
+              <Toggle
+                aria-label="Default to plan mode"
+                checked={claude.defaultPlanMode ?? false}
+                onChange={(v) => patchClaude({ defaultPlanMode: v })}
+              />
+            }
+          >
+            Start new chats in plan mode — the agent researches and proposes a plan before making
+            any edits.
+          </SettingRow>
+
+          {/* Stub — "fast mode" isn't a claude spawn flag the app passes yet. */}
+          <SettingRow
+            title={<>Default to fast mode {comingSoon}</>}
+            control={<Toggle aria-label="Default to fast mode" checked={false} disabled onChange={() => {}} />}
+          >
+            Start new chats in fast mode.
+          </SettingRow>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between">
+          <CardTitle className="mb-0">Codex</CardTitle>
+          {comingSoon}
+        </div>
+        <p className="mt-1 text-xs text-ink-dim">
+          OpenAI Codex support is on the way. Its defaults will appear here once it lands.
+        </p>
+        <div className="mt-3 divide-y divide-edge/50">
+          <SettingRow
+            title="Personality for new chats"
+            control={
+              <Select aria-label="Codex personality" value="" disabled className="w-44">
+                <option value="">Pragmatic (default)</option>
+              </Select>
+            }
+          >
+            Style to use when a new chat starts with a Codex model.
+          </SettingRow>
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle>Models visible in composer</CardTitle>
+        <p className="mt-1 text-xs text-ink-dim">
+          Choose which provider models are shown when starting or switching chats.
+        </p>
+        <div className="mt-3">
+          <VisibleModelsPanel claude={claude} patchClaude={patchClaude} />
+        </div>
+      </Card>
+    </>
+  );
+}
+
 /* ------------------------------- General --------------------------------- */
 
 function HyprlayerConfigCard({ config }: { config: ReturnType<typeof useBootstrap>["data"] }) {
@@ -353,10 +673,11 @@ function BinariesCard({ data }: { data: NonNullable<ReturnType<typeof useBootstr
 
 /* ------------------------------ Page shell ------------------------------- */
 
-type SectionId = "general" | "git" | "keyboard" | "appearance" | "binaries";
+type SectionId = "general" | "models" | "git" | "keyboard" | "appearance" | "binaries";
 
 const NAV: Array<{ id: SectionId; label: string }> = [
   { id: "general", label: "General" },
+  { id: "models", label: "Models" },
   { id: "git", label: "Git" },
   { id: "keyboard", label: "Keyboard" },
   { id: "appearance", label: "Appearance" },
@@ -407,6 +728,7 @@ export function Settings() {
             <HyprlayerConfigCard config={data} />
           </>
         )}
+        {section === "models" && <ModelsSection settings={data.settings} />}
         {section === "git" && <GitSection settings={data.settings} />}
         {section === "keyboard" && <KeyboardSettings settings={data.settings} />}
         {section === "appearance" && <AppearanceSection />}
