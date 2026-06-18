@@ -6,6 +6,7 @@ import { CreateDocDialog } from "../features/library/CreateDocDialog";
 import { DocCountSummary, DocFilterFields, docQueryFromSearch } from "../features/library/DocFilters";
 import { DocList } from "../features/library/DocList";
 import { useBootstrap, useDocs } from "../lib/queries";
+import { useCommand } from "../lib/keybindings/registry";
 import type { LibrarySearch } from "../router";
 
 export function LibraryPage() {
@@ -13,6 +14,9 @@ export function LibraryPage() {
   const navigate = useNavigate({ from: "/library" });
   const bootstrap = useBootstrap();
   const [createOpen, setCreateOpen] = useState(false);
+
+  // "New Document" — registered only while the Library is open (its context).
+  useCommand("doc.new", () => setCreateOpen(true));
 
   const query = useMemo(() => docQueryFromSearch(search), [search]);
   const docs = useDocs(query);

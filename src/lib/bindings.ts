@@ -227,6 +227,8 @@ export type AppSettings = {
 	reposRoot?: string | null,
 	/**  Git behaviour for worktree creation, archive, and merge. */
 	git?: GitSettings,
+	/**  Keyboard-shortcut overrides for app operations. */
+	keybindings?: KeybindingSettings,
 };
 
 /**  Where a document lives within its root's layout. */
@@ -470,6 +472,19 @@ export type HealthCheck = {
 
 export type HealthReport = {
 	checks: HealthCheck[],
+};
+
+/**
+ *  User overrides for keyboard shortcuts. Surfaced in Settings → Keyboard.
+ * 
+ *  Only *overrides* live here — the per-OS defaults are owned by the frontend
+ *  catalog so they can change without a settings migration. Keys are stable
+ *  command ids (e.g. "nav.dashboard"); a `Some(chord)` is a custom binding,
+ *  `None` means the command is explicitly unbound, and an absent key means
+ *  "use the catalog default".
+ */
+export type KeybindingSettings = {
+	overrides?: { [key in string]: string | null },
 };
 
 export type LinkStatus = 

@@ -20,6 +20,7 @@ import {
 } from "../components/ui";
 import { BinaryCard } from "../features/system/BinaryCard";
 import { UpdatesCard } from "../features/system/updates";
+import { KeyboardSettings } from "../features/settings/KeyboardSettings";
 import { THEMES, useThemeStore } from "../lib/theme";
 
 /** [surface, panel-2, accent] preview colors per theme. Kept explicit (rather
@@ -352,11 +353,12 @@ function BinariesCard({ data }: { data: NonNullable<ReturnType<typeof useBootstr
 
 /* ------------------------------ Page shell ------------------------------- */
 
-type SectionId = "general" | "git" | "appearance" | "binaries";
+type SectionId = "general" | "git" | "keyboard" | "appearance" | "binaries";
 
 const NAV: Array<{ id: SectionId; label: string }> = [
   { id: "general", label: "General" },
   { id: "git", label: "Git" },
+  { id: "keyboard", label: "Keyboard" },
   { id: "appearance", label: "Appearance" },
   { id: "binaries", label: "Binaries" },
 ];
@@ -406,6 +408,7 @@ export function Settings() {
           </>
         )}
         {section === "git" && <GitSection settings={data.settings} />}
+        {section === "keyboard" && <KeyboardSettings settings={data.settings} />}
         {section === "appearance" && <AppearanceSection />}
         {section === "binaries" && <BinariesCard data={data} />}
       </div>

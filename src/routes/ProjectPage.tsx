@@ -22,7 +22,9 @@ import { FileViewerTab } from "../features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
-import { killSession, transcriptToText } from "../features/session/sessionStore";
+import { killSession, stopSession, transcriptToText, useSession } from "../features/session/sessionStore";
+import { isBusy } from "../features/session/transcript";
+import { useCommand } from "../lib/keybindings/registry";
 import {
   importDroppedPaths,
   IMAGE_EXTENSIONS,
@@ -100,6 +102,34 @@ type ShellMenu = {
  *  chat — these carry no session, so the strip shows a doc icon and no dot. */
 function isViewerShell(shell: ShellTab): boolean {
   return !!(shell.docPreviewPath || shell.diffView || shell.filePath);
+}
+
+/**
+ * Registers the project/session keyboard commands whose action closures live in
+ * `ProjectPage`. Split into its own component so its hooks (notably `useSession`
+ * for the focused pane) run unconditionally — `ProjectPage` itself has early
+ * returns above where these closures are defined. Mounted only when a workstream
+ * is open, so the commands are naturally unregistered (inert) otherwise.
+ */
+function ProjectCommands(props: {
+  sessionId: string | undefined;
+  onNewTab: () => void;
+  onCloseTab: (() => void) | null;
+  onToggleSplit: () => void;
+  onNewWorkstream: () => void;
+}) {
+  const session = useSession(props.sessionId);
+  // "Stop turn" only makes sense while the focused pane's session is working /
+  // blocked on the user; otherwise there's no turn to interrupt.
+  const running = Boolean(props.sessionId && session && isBusy(session));
+  const sid = props.sessionId;
+  useCommand("tab.new", props.onNewTab);
+  useCommand("tab.close", props.onCloseTab);
+  useCommand("tab.toggleSplit", props.onToggleSplit);
+  useCommand("ws.new", props.onNewWorkstream);
+  useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
+  useCommand("session.clear", sid ? () => void killSession(sid) : null);
+  return null;
 }
 
 export function ProjectPage() {
@@ -220,6 +250,9 @@ export function ProjectPage() {
     : null;
   const rightActiveShell =
     rightShells.find((s) => s.id === tabs?.rightActiveId) ?? rightShells[0] ?? null;
+  // The shell keyboard commands act on: the active tab of whichever pane holds
+  // focus, so split-pane users stop/close the agent they're looking at.
+  const focusedShell = activePane === "right" ? rightActiveShell : activeShell;
   // The shell whose composer "+" opened the library picker — the modal's
   // attach target, stable while the modal is open.
   const docsModalShell =
@@ -741,6 +774,13 @@ export function ProjectPage() {
 
   return (
     <div className="flex h-full min-h-0 bg-surface">
+      <ProjectCommands
+        sessionId={focusedShell?.sessionId}
+        onNewTab={addShell}
+        onCloseTab={focusedShell ? () => closeShell(focusedShell.id) : null}
+        onToggleSplit={toggleRightSplit}
+        onNewWorkstream={() => setCreateOpen(true)}
+      />
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
           <main className="flex min-w-0 flex-1 flex-col">

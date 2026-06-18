@@ -30,6 +30,9 @@ import { WorkstreamActivityDot } from "../features/session/WorkstreamActivity";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
 import { useUiStore } from "../lib/uiStore";
+import { useCommand } from "../lib/keybindings/registry";
+import { useKeybindings } from "../lib/keybindings/useKeybindings";
+import type { Overrides } from "../lib/keybindings/resolve";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
 import { RepoAvatar } from "../components/RepoAvatar";
 import {
@@ -57,6 +60,10 @@ import type { Project, WorkstreamView } from "../lib/bindings";
 // app load): on launch we land on the dashboard even if the webview restored a
 // deeper route from the previous session.
 let launchedToHome = false;
+
+// Stable identity for "no overrides yet" so the dispatcher's memo/effect doesn't
+// churn on every Root render before settings have loaded a keybindings section.
+const EMPTY_OVERRIDES: Overrides = {};
 
 const PROJECT_SIDEBAR_COLLAPSED = 56;
 const PROJECT_SIDEBAR_MIN = 180;
@@ -508,18 +515,33 @@ export function Root() {
   // over) — otherwise the agent committing mid-turn leaves the branch `ahead`
   // and Ship would flicker back even though there's nothing left to ship.
   const hasLivePr = activePr.data?.state === "open" || activePr.data?.state === "merged";
+  // Commit / Ship actions + their enablement, defined once so the toolbar
+  // buttons and the keyboard commands (below) share a single source of truth.
+  const canCommit = Boolean(activeWorkstream && activeWorkstream.git.dirty > 0);
+  const doCommit = () => {
+    if (!activeWorkstream) return;
+    setCommitting(true);
+    void commitWorkstream(activeWorkstream.item.id).finally(() => setCommitting(false));
+  };
+  const canShip = Boolean(
+    activeWorkstream &&
+      !hasLivePr &&
+      (activeWorkstream.git.dirty > 0 || activeWorkstream.git.ahead > 0),
+  );
+  const doShip = () => {
+    if (!activeWorkstream) return;
+    setShipping(true);
+    void shipWorkstream(activeWorkstream.item.id).finally(() => setShipping(false));
+  };
   const shipControls = currentProject ? (
     <>
       {/* Commit checkpoints the worktree locally, independent of opening a PR —
           shown whenever there are uncommitted changes, even alongside a live PR. */}
-      {activeWorkstream && activeWorkstream.git.dirty > 0 && (
+      {canCommit && (
         <button
           type="button"
           disabled={committing}
-          onClick={() => {
-            setCommitting(true);
-            void commitWorkstream(activeWorkstream.item.id).finally(() => setCommitting(false));
-          }}
+          onClick={doCommit}
           className="inline-flex h-7 items-center gap-2 rounded-md border border-commit/50 bg-commit/15 px-3 text-sm font-medium text-commit hover:bg-commit/25 disabled:opacity-60"
           title="Commit this worktree's changes (no push or pull request)"
           aria-label="Commit"
@@ -528,16 +550,11 @@ export function Root() {
           {!compactHeader && "Commit"}
         </button>
       )}
-      {activeWorkstream &&
-        !hasLivePr &&
-        (activeWorkstream.git.dirty > 0 || activeWorkstream.git.ahead > 0) && (
+      {canShip && (
         <button
           type="button"
           disabled={shipping}
-          onClick={() => {
-            setShipping(true);
-            void shipWorkstream(activeWorkstream.item.id).finally(() => setShipping(false));
-          }}
+          onClick={doShip}
           className="inline-flex h-7 items-center gap-2 rounded-md border border-ship/50 bg-ship/15 px-3 text-sm font-medium text-ship hover:bg-ship/25 disabled:opacity-60"
           title="Commit, push, and open a pull request"
           aria-label="Ship"
@@ -549,6 +566,27 @@ export function Root() {
       <PrStatusBar view={activeWorkstream ?? null} onArchive={setArchiveTarget} />
     </>
   ) : null;
+
+  // Global keyboard shortcuts. The dispatcher reads the user's overrides from
+  // bootstrap; each command below registers its handler only while it's usable
+  // in the current context (a null handler = "not available now"), so the chord
+  // is simply inert elsewhere. Tab/session commands register from ProjectPage.
+  useKeybindings(bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES);
+  useCommand("nav.dashboard", () => void navigate({ to: "/" }));
+  useCommand("nav.library", () => toggleNav("/library"));
+  useCommand("nav.settings", () => toggleNav("/settings"));
+  useCommand(
+    "nav.projectDocs",
+    currentProject ? () => toggleProjectDocs(currentProject.path) : null,
+  );
+  useCommand("nav.back", canGoBack ? () => router.history.back() : null);
+  useCommand("view.toggleProjectSidebar", () => setCollapsed((value) => !value));
+  useCommand(
+    "view.toggleChangesSidebar",
+    currentSection === "Agent" ? () => toggleDiff() : null,
+  );
+  useCommand("ws.commit", canCommit && !committing ? doCommit : null);
+  useCommand("ws.ship", canShip && !shipping ? doShip : null);
 
   return (
     <div className="flex h-full flex-col bg-surface">

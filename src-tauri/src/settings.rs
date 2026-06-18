@@ -13,6 +13,19 @@ use tokio::sync::RwLock;
 
 use crate::error::{AppError, CmdResult};
 
+/// User overrides for keyboard shortcuts. Surfaced in Settings → Keyboard.
+///
+/// Only *overrides* live here — the per-OS defaults are owned by the frontend
+/// catalog so they can change without a settings migration. Keys are stable
+/// command ids (e.g. "nav.dashboard"); a `Some(chord)` is a custom binding,
+/// `None` means the command is explicitly unbound, and an absent key means
+/// "use the catalog default".
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KeybindingSettings {
+    pub overrides: HashMap<String, Option<String>>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
@@ -23,6 +36,8 @@ pub struct AppSettings {
     pub repos_root: Option<String>,
     /// Git behaviour for worktree creation, archive, and merge.
     pub git: GitSettings,
+    /// Keyboard-shortcut overrides for app operations.
+    pub keybindings: KeybindingSettings,
 }
 
 /// User-tunable git behaviour. Surfaced in Settings → Git.
@@ -150,6 +165,14 @@ mod tests {
         // Old settings.json (no `git` key) must deserialize with git defaults.
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(s.git.delete_branch_on_archive);
+    }
+
+    #[test]
+    fn settings_default_when_keybindings_absent() {
+        // Old settings.json (no `keybindings` key) must deserialize with an
+        // empty overrides map — no migration needed.
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(s.keybindings.overrides.is_empty());
     }
 }
 
