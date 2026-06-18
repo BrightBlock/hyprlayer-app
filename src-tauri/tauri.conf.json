@@ -17,7 +17,7 @@
         "title": "Workspace",
         "width": 1280,
         "height": 800,
-        "minWidth": 960,
+        "minWidth": 1180,
         "minHeight": 620,
         "center": true,
         "titleBarStyle": "Overlay",

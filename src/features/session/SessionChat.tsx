@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -27,7 +28,6 @@ import {
   XIcon,
 } from "../../components/icons";
 import { errorMessage } from "../../lib/ipc";
-import { useElementWidth } from "../../lib/useElementWidth";
 import type { WorkstreamView } from "../../lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
 import { AttachmentCards } from "./AttachmentCard";
@@ -649,14 +649,42 @@ export function SessionChat({
   addAttachmentsRef.current = onAddAttachments;
   const workstreamId = view.item.id;
 
-  // Collapse the composer toolbar to icon-only when the pane is too narrow to
-  // fit the picker labels (e.g. a split pane, or a small window). Measured off
-  // the pane root so it tracks the actual available width, not the window.
-  // The threshold sits above the labelled toolbar's natural width so it
-  // switches *before* the row would overflow — otherwise the labels squeeze
-  // and the trailing Send/attach cluster bleeds past the pane's right edge.
-  const paneWidth = useElementWidth(dropRef);
-  const compactComposer = paneWidth > 0 && paneWidth < 640;
+  // Collapse the composer toolbar's pickers to icon-only when their labels would
+  // otherwise overflow the row — a narrow split pane, a long permission label
+  // ("Bypass permissions"), or a running session's extra meter/clear buttons.
+  // We detect *actual* overflow off the toolbar element instead of guessing from
+  // a pane-width threshold: the row's width is content-dependent, so any fixed
+  // number is wrong for some state (and silently regresses when a button is
+  // added). naturalWidthRef remembers the labelled width so we only expand again
+  // once it genuinely fits — the hysteresis that stops collapse/expand flapping.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const naturalWidthRef = useRef(0);
+  const [compactComposer, setCompactComposer] = useState(false);
+  // Re-evaluated on every render (content changes — a session starting, the
+  // permission label, the live token meter) and on every resize (the observer
+  // below — split-divider drags and window resizes, which don't re-render this
+  // component). Kept in a ref so the once-bound observer always runs the latest.
+  const measureRef = useRef<() => void>(() => {});
+  measureRef.current = () => {
+    const el = toolbarRef.current;
+    if (!el) return;
+    if (!compactComposer) {
+      naturalWidthRef.current = el.scrollWidth;
+      if (el.scrollWidth > el.clientWidth + 1) setCompactComposer(true);
+    } else if (naturalWidthRef.current && el.clientWidth >= naturalWidthRef.current) {
+      setCompactComposer(false);
+    }
+  };
+  useLayoutEffect(() => {
+    measureRef.current();
+  });
+  useLayoutEffect(() => {
+    const el = toolbarRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => measureRef.current());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
@@ -675,8 +703,8 @@ export function SessionChat({
 
   // Drag-and-drop. Tauri intercepts OS file drops at the window level (HTML5
   // drop events never fire), so we subscribe to the webview's drag-drop stream
-  // and hit-test the drop position (physical px → CSS px) against THIS pane's
-  // container — each pane handles only drops that land on it.
+  // and hit-test the drop position against THIS pane's container — each pane
+  // handles only drops that land on it.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -684,10 +712,13 @@ export function SessionChat({
       const el = dropRef.current;
       if (!el || !pos) return false;
       const r = el.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const x = pos.x / dpr;
-      const y = pos.y / dpr;
-      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      // The event position already arrives in CSS/logical pixels on macOS
+      // (matching getBoundingClientRect) despite its PhysicalPosition type, so
+      // compare directly. Dividing by devicePixelRatio halves the coordinates
+      // on a Retina display and pulls every drop toward the window's top-left —
+      // harmless in a single full-width pane, but it made a split always route
+      // drops to the left pane instead of the one under the cursor.
+      return pos.x >= r.left && pos.x <= r.right && pos.y >= r.top && pos.y <= r.bottom;
     };
     void getCurrentWebview()
       .onDragDropEvent((event) => {
@@ -986,7 +1017,12 @@ export function SessionChat({
                     className="selectable relative block w-full resize-none bg-transparent px-3.5 py-3 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
                   />
                 </div>
-                <div className="flex items-center gap-0.5 px-2 pb-2">
+                {/* Single row, never wrapping: when the labelled pickers don't
+                    fit, the layout effect above flips compactComposer so they
+                    collapse to icons and everything stays on one line. overflow
+                    is hidden only to clip the one pre-collapse layout frame, so
+                    the Send/attach cluster can never bleed past the pane edge. */}
+                <div ref={toolbarRef} className="flex items-center gap-0.5 overflow-hidden px-2 pb-2">
                   {/* Mode is fixed at spawn → a badge once running; a picker before. */}
                   {started ? (
                     <span
