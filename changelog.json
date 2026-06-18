@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.1.6",
+      "date": "2026-06-18",
+      "summary": "Workstream activity dots, in-place project imports, and split-pane drop and composer toolbar fixes.",
+      "notes": [
+        "Add an existing project from disk in place instead of re-cloning it.",
+        "Workstream cards show activity indicator dots while a session is working.",
+        "Drag-and-drop now targets the pane under the cursor in a split session.",
+        "Composer toolbar collapses to icons on real overflow, never bleeding past the pane edge."
+      ]
+    },
+    {
       "version": "0.1.5",
       "date": "2026-06-18",
       "summary": "Composer /skill and @file autocomplete, a Commit action, clear-context, and skill-display fixes.",
