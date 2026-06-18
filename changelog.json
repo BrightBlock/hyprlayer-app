@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.1.8",
+      "date": "2026-06-18",
+      "summary": "Live markdown while messages stream, and fixed clipped composer picker dropdowns.",
+      "notes": [
+        "Assistant messages now render markdown live as they stream, instead of showing raw text until the message completes.",
+        "The composer mode and model pickers open their dropdowns again — the toolbar overflow fix no longer clips them."
+      ]
+    },
+    {
       "version": "0.1.7",
       "date": "2026-06-18",
       "summary": "Choose the base branch when creating a workstream.",
