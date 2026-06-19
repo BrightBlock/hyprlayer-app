@@ -181,6 +181,7 @@ pub async fn query_docs(state: State<'_, AppState>, query: ThoughtQuery) -> CmdR
 #[tauri::command]
 #[specta::specta]
 pub async fn get_doc(state: State<'_, AppState>, id: String) -> CmdResult<DocContent> {
+    let id = state.index.resolve_id(&id).ok_or_else(|| not_indexed(&id))?;
     let meta = state.index.get(&id).ok_or_else(|| not_indexed(&id))?;
     let path = PathBuf::from(&id);
     let content = tokio::fs::read_to_string(&path)
@@ -202,7 +203,7 @@ pub async fn save_doc(
     content: String,
     base_mtime_ms: f64,
 ) -> CmdResult<DocMeta> {
-    state.index.get(&id).ok_or_else(|| not_indexed(&id))?;
+    let id = state.index.resolve_id(&id).ok_or_else(|| not_indexed(&id))?;
     let abs = PathBuf::from(&id);
     ensure_not_stale(&abs, base_mtime_ms)?;
     let root = root_for_doc(&state, &abs).await?;
@@ -218,7 +219,7 @@ pub async fn patch_doc_frontmatter(
     patch: FmPatchDto,
     base_mtime_ms: f64,
 ) -> CmdResult<DocMeta> {
-    state.index.get(&id).ok_or_else(|| not_indexed(&id))?;
+    let id = state.index.resolve_id(&id).ok_or_else(|| not_indexed(&id))?;
     let abs = PathBuf::from(&id);
     ensure_not_stale(&abs, base_mtime_ms)?;
     let original = tokio::fs::read_to_string(&abs)
@@ -335,7 +336,9 @@ pub async fn create_doc(
 #[specta::specta]
 pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     // Only reveal paths the index knows — the frontend can't point this at
-    // arbitrary filesystem locations.
+    // arbitrary filesystem locations. resolve_id also maps a worktree-symlink
+    // path back to the canonical indexed id before the index check.
+    let id = state.index.resolve_id(&id).ok_or_else(|| not_indexed(&id))?;
     let path = state.index.doc_path(&id).ok_or_else(|| not_indexed(&id))?;
     tauri_plugin_opener::reveal_item_in_dir(path)
         .map_err(|e| AppError::internal(format!("reveal: {e}")))

@@ -327,6 +327,31 @@ impl ThoughtsIndex {
             .map(|r| PathBuf::from(&r.meta.id))
     }
 
+    /// Resolve an externally-supplied path to the id it is indexed under.
+    ///
+    /// Agents write docs through a worktree's `thoughts/` symlinks, so a path
+    /// captured from a `Write` tool call (e.g.
+    /// `<worktree>/thoughts/shared/plans/x.md`) points *through* the link,
+    /// whereas the index keys docs by their real location under the thoughts
+    /// root (`<root>/repos/<mapped>/shared/plans/x.md`). Returns the literal id
+    /// when it is already indexed; otherwise the canonicalized (symlink-
+    /// resolved) id when *that* is indexed; otherwise `None`. The filesystem
+    /// `canonicalize` only runs on a direct miss, so the common case (library
+    /// ids, already canonical) stays a pure in-memory lookup.
+    pub fn resolve_id(&self, id: &str) -> Option<String> {
+        {
+            let map = self.records.read().expect("index lock poisoned");
+            if map.contains_key(id) {
+                return Some(id.to_string());
+            }
+        }
+        // Resolve symlinks outside the lock (a syscall), then re-check.
+        let canonical = std::fs::canonicalize(id).ok()?;
+        let canonical = canonical.to_string_lossy().into_owned();
+        let map = self.records.read().expect("index lock poisoned");
+        map.contains_key(&canonical).then_some(canonical)
+    }
+
     /// Classify a path within its root: `(rel_path, project, area, scope)`.
     /// `None` means the path is not indexable (outside the root, not `.md`,
     /// or inside an ignored directory). For [`Area::Other`] the returned

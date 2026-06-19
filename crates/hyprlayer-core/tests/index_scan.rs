@@ -392,6 +392,45 @@ fn full_scan_preserves_other_roots() {
     assert!(index.get(&id_of(&root_b, DOC_AUTH_PLAN)).is_some());
 }
 
+/// A doc the agent wrote through a worktree's `thoughts/` symlink is opened by
+/// that symlinked path, but the index keys it by its real location under the
+/// thoughts root. `resolve_id` must bridge the two so the doc still loads.
+#[cfg(unix)]
+#[test]
+fn resolve_id_follows_worktree_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let (_tmp, root, index) = scanned();
+
+    // An already-canonical id resolves to itself (the library's fast path).
+    let canonical = id_of(&root, DOC_SHARED_ROADMAP);
+    assert_eq!(index.resolve_id(&canonical), Some(canonical.clone()));
+
+    // Mirror the per-worktree layout: <wt>/thoughts/shared -> the repo's shared
+    // tree, the symlink an agent's `Write` tool path points through.
+    let wt = TempDir::new().unwrap();
+    let thoughts = wt.path().join("thoughts");
+    fs::create_dir_all(&thoughts).unwrap();
+    symlink(root.root.join("repos/myproj/shared"), thoughts.join("shared")).unwrap();
+
+    // The symlinked path the UI captured resolves to the canonical index id.
+    let via_link = thoughts
+        .join("shared/plans/2026-05-20-shared-roadmap.md")
+        .to_string_lossy()
+        .into_owned();
+    assert_ne!(via_link, canonical);
+    assert_eq!(index.resolve_id(&via_link), Some(canonical));
+
+    // A symlinked path to a file that isn't indexed (and a plain missing path)
+    // stay unresolved rather than resolving to some unindexed id.
+    let missing = thoughts
+        .join("shared/plans/2026-01-01-nope.md")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(index.resolve_id(&missing), None);
+    assert_eq!(index.resolve_id("/definitely/missing.md"), None);
+}
+
 #[test]
 fn missing_root_scans_to_empty_stats() {
     let index = ThoughtsIndex::new();
