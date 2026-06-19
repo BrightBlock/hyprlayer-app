@@ -28,7 +28,7 @@ export function WorkstreamActivityDot({ workstreamId }: { workstreamId: string }
   const { color, anim, label } = ACTIVITY_STYLE[activity];
   return (
     <span
-      className="relative flex h-2 w-2 shrink-0 items-center justify-center"
+      className="relative flex h-1.5 w-1.5 shrink-0 items-center justify-center"
       title={label}
       role="status"
       aria-label={label}
@@ -40,7 +40,7 @@ export function WorkstreamActivityDot({ workstreamId }: { workstreamId: string }
         />
       )}
       <span
-        className={`relative inline-flex h-2 w-2 rounded-full ${color} ${
+        className={`relative inline-flex h-1.5 w-1.5 rounded-full ${color} ${
           anim === "work" ? "animate-work-pulse" : ""
         }`}
         aria-hidden="true"
