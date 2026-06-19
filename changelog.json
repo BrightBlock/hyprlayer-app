@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.1.11",
+      "date": "2026-06-19",
+      "summary": "Syntax-highlighted code blocks in chat and library markdown.",
+      "notes": [
+        "Fenced code blocks in assistant messages and library docs now render with Shiki syntax highlighting that tracks the active theme.",
+        "Highlighting waits for streaming to settle, so messages render plain monospace while they stream and recolor once complete."
+      ]
+    },
+    {
       "version": "0.1.10",
       "date": "2026-06-19",
       "summary": "Remove project dialog, compact-boundary markers in the transcript, and a stop button that always stops.",
