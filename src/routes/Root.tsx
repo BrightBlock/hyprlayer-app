@@ -51,6 +51,7 @@ import type { EditorTarget } from "../lib/bindings";
 import { SearchPalette } from "../features/search/SearchPalette";
 import { toggleSearch } from "../features/search/searchStore";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
+import { WorkstreamGitChip } from "../features/workstreams/WorkstreamGitChip";
 import { PrStatusBar } from "../features/workstreams/PrStatusBar";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
@@ -220,28 +221,6 @@ const footerIconClass = (active: boolean): string =>
     active ? "bg-edge text-ink" : "text-ink-dim"
   }`;
 
-/** Conductor-style status chip for a sidebar workstream row: added/deleted
- *  line counts (matching the diff panel), falling back to an ahead-of-base
- *  indicator once the working tree is clean but commits are unpushed. */
-function WorkstreamRowChip({ view }: { view: WorkstreamView }) {
-  const { additions, deletions, dirty, ahead } = view.git;
-  if (additions > 0 || deletions > 0) {
-    return (
-      <span className="flex shrink-0 items-center gap-1 font-mono text-xs font-medium">
-        {additions > 0 && <span className="text-ok">+{additions}</span>}
-        {deletions > 0 && <span className="text-bad">-{deletions}</span>}
-      </span>
-    );
-  }
-  // Changes with no line delta (binary edits, mode/rename only) still count.
-  if (dirty > 0) {
-    return <span className="shrink-0 text-xs font-medium text-ink-dim">●{dirty}</span>;
-  }
-  if (ahead > 0) {
-    return <span className="shrink-0 text-xs font-medium text-accent">↑{ahead}</span>;
-  }
-  return null;
-}
 
 /** A row/trigger icon for a detected app: its real rendered icon when the
  *  backend could rasterize one, otherwise a glyph standing in for its kind.
@@ -413,10 +392,17 @@ export function Root() {
   const activeWorkstream = activeWorkstreamId
     ? (allWorkstreams.data ?? []).find((view) => view.item.id === activeWorkstreamId)
     : undefined;
-  // Breadcrumb: prefer the selected workstream's name over the generic
-  // section label on project routes.
+  // True when we're on a project route with no workstream selected — the board
+  // view. Used to suppress the diff-sidebar chrome that only applies to a chat.
+  const onBoard = currentSection === "Agent" && !locationSearch.item;
+  // Breadcrumb: show "Board" on the project overview, the workstream name when
+  // one is selected, or the generic section label everywhere else.
   const crumb =
-    currentSection === "Agent" ? (activeWorkstream?.item.title ?? "Workstreams") : currentSection;
+    currentSection === "Agent"
+      ? onBoard
+        ? "Board"
+        : (activeWorkstream?.item.title ?? "Workstreams")
+      : currentSection;
 
   // A single contextual Back affordance: only on secondary views (library,
   // settings, docs, setup) so users can return to the agent view without
@@ -518,9 +504,9 @@ export function Root() {
   );
   // Inset the agent-pane controls (file opener + changes toggle + docs) so they
   // sit at the agent pane's right margin, mirroring how the breadcrumb tracks
-  // the left sidebar. Only the agent view has the diff sidebar, and only while
-  // it's shown; everywhere else the controls stay flush to the window edge.
-  const rightOffset = currentSection === "Agent" && !diffHidden ? diffWidth : 0;
+  // the left sidebar. Only the workstream chat view has the diff sidebar; on
+  // the board view or anywhere else the controls stay flush to the window edge.
+  const rightOffset = currentSection === "Agent" && !diffHidden && !onBoard ? diffWidth : 0;
   // The Ship/PR/Archive cluster always pins to the window's right edge,
   // independent of the pane icons. While the diff sidebar is open it floats
   // above the sidebar (absolutely positioned, to the RIGHT of the inset pane
@@ -716,8 +702,27 @@ export function Root() {
                     pane icons. Sidebar open → they float at the window edge
                     (rendered below), to the right of the inset icons. */}
                 {!shipFloating && shipControls}
+                {/* New-workstream affordance for the whole project. Preserves the
+                    selected workstream (if any) so opening it from a chat doesn't
+                    yank you to the board; ProjectPage strips `create` once the
+                    dialog has popped. */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    void navigate({
+                      to: "/projects/$projectPath",
+                      params: { projectPath: currentProject.path },
+                      search: { item: activeWorkstreamId, create: true },
+                    })
+                  }
+                  className={topIconClass}
+                  title="New workstream"
+                  aria-label="New workstream"
+                >
+                  <PlusIcon />
+                </button>
                 <OpenInMenu dir={activeWorkstream?.item.worktreePath ?? currentProject.path} />
-                {currentSection === "Agent" && (
+                {currentSection === "Agent" && !onBoard && (
                   <button
                     type="button"
                     onClick={toggleDiff}
@@ -874,7 +879,7 @@ export function Root() {
                         <WorkstreamActivityDot workstreamId={view.item.id} />
                         <GitBranchIcon />
                         <span className="min-w-0 flex-1 truncate">{view.item.title}</span>
-                        <WorkstreamRowChip view={view} />
+                        <WorkstreamGitChip view={view} />
                       </Link>
                     );
                   })}

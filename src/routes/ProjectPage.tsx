@@ -39,6 +39,7 @@ import {
   type WsTabState,
 } from "../features/session/workstreamTabs";
 import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
+import { ProjectBoard } from "../features/board/ProjectBoard";
 import { useBootstrap, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
 import { basename } from "../lib/path";
 import { clamp, startEdgeDrag } from "../lib/resize";
@@ -166,11 +167,11 @@ export function ProjectPage() {
   const search = useSearch({ from: "/projects/$projectPath" });
   const navigate = useNavigate({ from: "/projects/$projectPath" });
 
-  const storageKey = `hyprlayer:last-workstream:${projectPath}`;
   // Selection is DERIVED from the URL every render — never mirrored into
   // state. (A state mirror + URL canonicalizer once fought each other into
   // an infinite navigate loop when switching between two workstreams.)
-  const activeItemId = search.item ?? localStorage.getItem(storageKey);
+  // When no ?item= is present, the project-root landing shows the board.
+  const selectedId = search.item;
 
   // Shell tabs are PER WORKSTREAM (1 workstream -> N tabs), keyed by workstream
   // id so switching workstreams never mixes tabs. Held in a module store so a
@@ -212,33 +213,26 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.create]);
 
-  // Hooks live above the early returns. Selection resolves to the URL's
-  // ?item= when it names a live workstream, else last-used, else the first.
+  // Hooks live above the early returns. The URL is the sole source of truth
+  // for which workstream is selected. No localStorage fallback — clicking the
+  // project root (no ?item=) shows the board instead of auto-opening a chat.
   const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
-  const activeView = views.find((view) => view.item.id === activeItemId) ?? views[0] ?? null;
+  const activeView = selectedId ? (views.find((v) => v.item.id === selectedId) ?? null) : null;
   const wsId = activeView?.item.id ?? null;
+  // True when no workstream is selected — the project-overview board.
+  const showBoard = selectedId === undefined;
 
-  // Canonicalize the URL to the resolved selection. A valid ?item= always
-  // resolves to itself (no rewrite, no loop); we only write when the param
-  // is missing, or names something the SETTLED list doesn't contain (e.g.
-  // archived elsewhere) — never mid-refetch, where a just-created id can
-  // legitimately be absent for a moment.
+  // Stale-strip: if the URL names a workstream that the SETTLED list doesn't
+  // contain (archived/removed elsewhere), drop back to the board. Never fires
+  // mid-refetch, where a just-created id can legitimately be absent for a moment.
   useEffect(() => {
-    if (!wsId) return;
-    localStorage.setItem(storageKey, wsId);
-    const stale =
-      search.item !== undefined &&
-      search.item !== wsId &&
-      workstreams.isSuccess &&
-      !workstreams.isFetching;
-    if (search.item === undefined || stale) {
-      void navigate({
-        search: (prev) => ({ ...prev, item: wsId }),
-        replace: true,
-      });
+    if (selectedId === undefined) return; // board: nothing to fix
+    if (!workstreams.isSuccess || workstreams.isFetching) return; // wait for list to settle
+    if (!views.some((v) => v.item.id === selectedId)) {
+      void navigate({ search: (prev) => ({ ...prev, item: undefined }), replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsId, search.item, storageKey, workstreams.isSuccess, workstreams.isFetching]);
+  }, [selectedId, workstreams.isSuccess, workstreams.isFetching]);
 
   if (bootstrap.isLoading || workstreams.isLoading) return <PageSpinner />;
   if (bootstrap.isError) return <PageError error={bootstrap.error} />;
@@ -802,6 +796,30 @@ export function ProjectPage() {
     }
     return <SessionChat key={`${activeView.item.id}:${shell.id}`} {...shellChatProps(shell)} />;
   };
+
+  // Board: render when no workstream is selected (project-root click).
+  // All hooks above still run harmlessly with wsId === null.
+  if (showBoard) {
+    return (
+      <>
+        <ProjectBoard
+          views={views}
+          onOpen={(id) => selectItem(id)}
+          onNewWorkstream={() => setCreateOpen(true)}
+        />
+        <CreateWorkstreamDialog
+          projectPath={projectPath}
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(view) => selectItem(view.item.id)}
+        />
+      </>
+    );
+  }
+
+  // Guard: a selectedId that hasn't resolved yet (stale-strip in flight or
+  // post-create refetch) shows a spinner rather than the empty-state card.
+  if (selectedId && !activeView && workstreams.isFetching) return <PageSpinner />;
 
   return (
     <div className="flex h-full min-h-0 bg-surface">
