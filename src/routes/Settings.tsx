@@ -6,7 +6,13 @@ import {
   useRedetectBinaries,
   useSetAppSettings,
 } from "../lib/queries";
-import type { AppSettings, ClaudeSettings, GitSettings } from "../lib/bindings";
+import type {
+  AppSettings,
+  ClaudeSettings,
+  GitSettings,
+  NotificationSettings,
+} from "../lib/bindings";
+import { invalidateNotificationSettingsCache, sendTestNotification } from "../lib/notifications";
 import {
   Badge,
   Button,
@@ -285,6 +291,109 @@ function GitSection({ settings }: { settings: AppSettings }) {
         >
           Queue a GitHub auto-merge so a PR lands once required checks pass. Requires auto-merge
           enabled in your GitHub repository settings.
+        </SettingRow>
+      </div>
+    </Card>
+  );
+}
+
+/* ---------------------------- Notifications ------------------------------ */
+
+const DEFAULT_NOTIFICATIONS: Required<NotificationSettings> = {
+  enabled: true,
+  sound: true,
+};
+
+function NotificationsSection({ settings }: { settings: AppSettings }) {
+  const raw = settings.notifications ?? {};
+  const notif: Required<NotificationSettings> = {
+    enabled: raw.enabled ?? DEFAULT_NOTIFICATIONS.enabled,
+    sound: raw.sound ?? DEFAULT_NOTIFICATIONS.sound,
+  };
+  const save = useSetAppSettings();
+  // Inline result of the most recent "Send test" click — surfaces a clear
+  // message when the OS rejected the toast (e.g. permission not granted
+  // because the app bundle isn't properly registered with macOS).
+  const [testStatus, setTestStatus] = useState<
+    null | { ok: true } | { ok: false; reason: "permission_denied" | "error" }
+  >(null);
+
+  function patch(next: Partial<NotificationSettings>) {
+    save.mutate(
+      { ...settings, notifications: { ...notif, ...next } },
+      // Invalidate the local in-memory snapshot so the next toast picks up the
+      // new value without an app restart.
+      { onSuccess: () => invalidateNotificationSettingsCache() },
+    );
+  }
+
+  async function runTest() {
+    setTestStatus(null);
+    const result = await sendTestNotification();
+    setTestStatus(result.sent ? { ok: true } : { ok: false, reason: result.reason ?? "error" });
+  }
+
+  return (
+    <Card>
+      <CardTitle>Notifications</CardTitle>
+      <p className="mt-1 text-xs text-ink-dim">
+        Native OS toasts when an agent needs your input. Quiet when you’re
+        already looking at the waiting session; fires otherwise — including
+        when you’re on a different tab or workstream inside Hyprlayer.
+      </p>
+
+      {save.isError && (
+        <div className="mt-3">
+          <ErrorNote error={save.error} />
+        </div>
+      )}
+
+      <div className="mt-3 divide-y divide-edge/50">
+        <SettingRow
+          title="Notify when an agent needs you"
+          control={
+            <Toggle
+              aria-label="Notify when an agent needs you"
+              checked={notif.enabled}
+              onChange={(v) => patch({ enabled: v })}
+            />
+          }
+        >
+          Show a toast when a session pauses for permission or a question.
+        </SettingRow>
+
+        <SettingRow
+          title="Play sound"
+          control={
+            <Toggle
+              aria-label="Play sound"
+              checked={notif.sound}
+              onChange={(v) => patch({ sound: v })}
+            />
+          }
+        >
+          Play the default OS notification sound with the toast.
+        </SettingRow>
+
+        <SettingRow
+          title="Test notification"
+          control={
+            <Button onClick={runTest}>Send test</Button>
+          }
+        >
+          Send a sample toast right now to confirm your OS notification
+          permissions are set up. Ignores the toggles above.
+          {testStatus?.ok === true && (
+            <span className="ml-2 text-ok">Sent — check the top-right.</span>
+          )}
+          {testStatus?.ok === false && testStatus.reason === "permission_denied" && (
+            <span className="ml-2 text-warn">
+              macOS denied permission — enable it in System Settings → Notifications.
+            </span>
+          )}
+          {testStatus?.ok === false && testStatus.reason === "error" && (
+            <span className="ml-2 text-bad">Dispatch failed — see the console.</span>
+          )}
         </SettingRow>
       </div>
     </Card>
@@ -667,12 +776,20 @@ function BinariesCard({ data }: { data: NonNullable<ReturnType<typeof useBootstr
 
 /* ------------------------------ Page shell ------------------------------- */
 
-type SectionId = "general" | "models" | "git" | "keyboard" | "appearance" | "binaries";
+type SectionId =
+  | "general"
+  | "models"
+  | "git"
+  | "notifications"
+  | "keyboard"
+  | "appearance"
+  | "binaries";
 
 const NAV: Array<{ id: SectionId; label: string }> = [
   { id: "general", label: "General" },
   { id: "models", label: "Models" },
   { id: "git", label: "Git" },
+  { id: "notifications", label: "Notifications" },
   { id: "keyboard", label: "Keyboard" },
   { id: "appearance", label: "Appearance" },
   { id: "binaries", label: "Binaries" },
@@ -724,6 +841,7 @@ export function Settings() {
         )}
         {section === "models" && <ModelsSection settings={data.settings} />}
         {section === "git" && <GitSection settings={data.settings} />}
+        {section === "notifications" && <NotificationsSection settings={data.settings} />}
         {section === "keyboard" && <KeyboardSettings settings={data.settings} />}
         {section === "appearance" && <AppearanceSection />}
         {section === "binaries" && <BinariesCard data={data} />}

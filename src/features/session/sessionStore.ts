@@ -20,6 +20,7 @@
 
 import { useMemo } from "react";
 import { Channel } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import { useShallow } from "zustand/shallow";
 
@@ -27,6 +28,8 @@ import { commands, type Session, type SessionEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { queryClient } from "../../lib/queryClient";
 import { invalidateWorktreeGit } from "../../lib/queries";
+import { findWorkstreamForNotify, notifyNeedsAttention } from "../../lib/notifications";
+import { router } from "../../router";
 import { docFromTool, docTitle, type DocKind } from "./toolDisplay";
 import { type Attachment } from "./attachments";
 import { composeStagePrompt } from "./stages";
@@ -158,7 +161,20 @@ function dispatch(sessionId: string, event: SessionEvent): void {
     return;
   }
 
-  setEntry(sessionId, { ...current, ...reduceEvent(current, event) });
+  const wasNeedsYou = classifyEntry(current) === "needs-you";
+  const nextEntry: SessionEntry = { ...current, ...reduceEvent(current, event) };
+  setEntry(sessionId, nextEntry);
+
+  // Fire an OS toast when a session *transitions* into needs-you, so the user
+  // notices an attention dot while the window is unfocused. Skip when the user
+  // pre-allowed this tool (the auto-respond below clears it immediately) so we
+  // don't toast for permissions the user never sees.
+  const isNeedsYou = classifyEntry(nextEntry) === "needs-you";
+  const autoApproved =
+    event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName);
+  if (!wasNeedsYou && isNeedsYou && !autoApproved) {
+    void maybeNotifyTransition(sessionId, current.workstreamId, current.stage);
+  }
 
   if (event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName)) {
     // "Allow for this agent" was chosen earlier — answer this one automatically.
@@ -180,6 +196,48 @@ function dispatch(sessionId: string, event: SessionEvent): void {
     // Ahead/behind and link status may have changed (commits, pushes).
     void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
   }
+}
+
+/** Fire the needs-you toast unless the user is already looking right at this
+ *  session — i.e., the window is OS-focused AND the project route shows this
+ *  workstream AND the session is bound to one of the active panes' tabs.
+ *  Errs toward firing: any uncertainty (URL not canonical, tabs missing, the
+ *  Tauri runtime missing in tests) is treated as not-visible. Always
+ *  fire-and-forget — never lets a notification failure escape into dispatch. */
+async function maybeNotifyTransition(
+  sessionId: string,
+  workstreamId: string,
+  stage: string,
+): Promise<void> {
+  try {
+    if (await isSessionVisible(sessionId, workstreamId)) return;
+    const ws = findWorkstreamForNotify(workstreamId);
+    if (!ws) return;
+    await notifyNeedsAttention({
+      workstreamId,
+      projectPath: ws.projectPath,
+      workstreamTitle: ws.title,
+      stage,
+    });
+  } catch {
+    /* Notifications are a side effect; a failure here must not perturb the
+       dispatch path (jsdom has no Tauri runtime, e.g.). */
+  }
+}
+
+async function isSessionVisible(sessionId: string, workstreamId: string): Promise<boolean> {
+  if (!(await getCurrentWindow().isFocused())) return false;
+  const loc = router.state.location;
+  if (!loc.pathname.startsWith("/projects/")) return false;
+  const search = loc.search as { item?: string };
+  if (search.item !== workstreamId) return false;
+  const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
+  if (!tabs) return false;
+  const main = tabs.shells.find((s) => s.id === tabs.activeId);
+  const right = tabs.rightSplit
+    ? tabs.shells.find((s) => s.id === tabs.rightActiveId)
+    : null;
+  return main?.sessionId === sessionId || right?.sessionId === sessionId;
 }
 
 /**

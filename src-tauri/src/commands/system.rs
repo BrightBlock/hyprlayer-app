@@ -42,6 +42,31 @@ pub async fn set_binary_override(
     Ok(statuses)
 }
 
+/// Play the default OS notification sound out-of-band from the toast.
+///
+/// On macOS 13+ the system silently drops the `soundName` on
+/// `NSUserNotification` (which `tauri-plugin-notification`'s backend uses),
+/// so a banner-attached sound is unreliable. We decouple: fire-and-forget
+/// `afplay` on a known system sound file. The visual banner still goes
+/// through the plugin; the sound is independent and reliable across
+/// macOS versions.
+///
+/// On Windows/Linux this is a no-op (the plugin's sound field works there).
+#[tauri::command]
+#[specta::specta]
+pub fn play_sound() -> CmdResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // System default sound; ships with every macOS install. Spawn detached
+        // so we don't block the IPC reply on playback.
+        let _ = std::process::Command::new("/usr/bin/afplay")
+            .arg("/System/Library/Sounds/Funk.aiff")
+            .spawn()
+            .map_err(|e| AppError::internal(format!("afplay: {e}")))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn redetect_binaries(

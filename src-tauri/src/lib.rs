@@ -84,6 +84,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::set_app_settings,
             commands::system::detect_editors,
             commands::system::github_username,
+            commands::system::play_sound,
         ])
         .events(collect_events![
             events::ConfigChanged,
@@ -130,7 +131,8 @@ pub fn run() {
         // @tauri-apps/plugin-updater. `process` provides the relaunch() the
         // frontend calls after an update installs.
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init());
 
     #[cfg(debug_assertions)]
     let tauri_builder = tauri_builder.plugin(tauri_plugin_mcp_bridge::init());

@@ -45,6 +45,12 @@ tauri-plugin-process = "2"
 # behind `cfg(debug_assertions)` in lib.rs, so the bridge is never reachable
 # from a release build.
 tauri-plugin-mcp-bridge = "0.11"
+# Native OS toast notifications. The frontend uses these to flag when a session
+# transitions to needs-you (awaiting permission/question) while the window is
+# unfocused. On macOS the plugin's sound field rides legacy NSUserNotification
+# and goes silent on 13+, so we play sounds out-of-band via `afplay` in
+# play_sound() — see commands/system.rs.
+tauri-plugin-notification = "2"
 specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 specta-typescript = "0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }

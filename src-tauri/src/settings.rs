@@ -40,6 +40,31 @@ pub struct AppSettings {
     pub keybindings: KeybindingSettings,
     /// Per-provider defaults (default model, etc.). Surfaced in Settings → Models.
     pub providers: ProviderSettings,
+    /// OS-toast behaviour when a session transitions to "needs you".
+    pub notifications: NotificationSettings,
+}
+
+/// Controls native OS notifications fired when a session moves into the
+/// needs-you state (awaiting permission/question) while the window is
+/// unfocused. The frontend reads this on every transition; toggling the
+/// setting takes effect on the next event without a restart.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NotificationSettings {
+    /// Master switch. `true` (default) fires a toast when an agent needs you;
+    /// `false` suppresses all notifications regardless of `sound`.
+    pub enabled: bool,
+    /// Whether the toast plays the OS default notification sound.
+    pub sound: bool,
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sound: true,
+        }
+    }
 }
 
 /// Defaults for each agent provider. Claude is the only working provider
@@ -262,5 +287,22 @@ mod tests {
         let raw = r#"{"providers":{"claude":{"defaultModel":"sonnet"}}}"#;
         let s: AppSettings = serde_json::from_str(raw).unwrap();
         assert_eq!(s.providers.claude.default_model.as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn notifications_default_on_with_sound() {
+        // Old settings.json without the `notifications` key must default to
+        // enabled — the feature is opt-out, not opt-in.
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(s.notifications.enabled);
+        assert!(s.notifications.sound);
+    }
+
+    #[test]
+    fn notifications_round_trip() {
+        let raw = r#"{"notifications":{"enabled":false,"sound":false}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert!(!s.notifications.enabled);
+        assert!(!s.notifications.sound);
     }
 }
