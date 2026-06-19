@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.1.12",
+      "date": "2026-06-19",
+      "summary": "Rewind a conversation to an earlier user message and re-send an edited prompt.",
+      "notes": [
+        "Hover any of your messages in the transcript to reveal a Rewind action that truncates the conversation back to that turn, repopulates the composer with the original prompt for editing, and resumes from the truncated state.",
+        "User turns now show a relative timestamp and a copy-prompt button on the same hover toolbar."
+      ]
+    },
+    {
       "version": "0.1.11",
       "date": "2026-06-19",
       "summary": "Syntax-highlighted code blocks in chat and library markdown.",
