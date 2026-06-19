@@ -21,14 +21,15 @@
   --color-ink-dim: #a8a6a2;
   --color-accent: #d97757;
   --color-accent-ink: #0c0c0c;
-  /* Status hues are shared across every theme (defined once, not per-theme,
-     so OK/WARN/BAD read consistently no matter the surface). */
+  /* Status + brand hues. Tuned for the Dark+ charcoal surface here, but each
+     html.<name> block below retunes them so chat code blocks AND the file/diff
+     viewer (both bind syntax tokens — strings to --color-ok, numbers to
+     --color-warn, functions to --color-brand, types to --color-brand-soft,
+     invalid to --color-bad) read native to that theme's palette instead of
+     bright-on-dark defaults bleeding onto cream/navy/phosphor surfaces. */
   --color-ok: #4caf50;
   --color-warn: #f0b13a;
   --color-bad: #ef5350;
-  /* Brand accent — the blue/violet of the Hyprlayer logo + dashboard
-     highlights. Theme-independent (the brand mark stays constant across
-     themes), so it lives in the shared @theme block rather than per-theme. */
   --color-brand: #60a5fa;
   --color-brand-soft: #7dd3fc;
   /* Header action-button hues (Ship/Merge = green, Commit = teal). Their own
@@ -54,6 +55,13 @@ html.light {
      the light surface (the bright dark-theme tints wash out on cream). */
   --color-ship: #047857;
   --color-commit: #0f766e;
+  /* Syntax tokens — deepened so strings/numbers/types/functions keep contrast
+     on the cream surface. Default sky/yellow/pale-cyan wash out on light. */
+  --color-ok: #15803d;
+  --color-warn: #b45309;
+  --color-brand: #1d4ed8;
+  --color-brand-soft: #7c3aed;
+  --color-bad: #b91c1c;
   color-scheme: light;
 }
 
@@ -67,6 +75,13 @@ html.claude {
   --color-ink: #f5f4ee;
   --color-ink-dim: #b0a89a;
   --color-accent: #d97757;
+  /* Syntax tokens — warm-tuned (sage strings, warm-amber numbers, muted teal
+     functions, peach-tan types) so syntax sits with the terracotta accent
+     rather than fighting it with bright sky/lime defaults. */
+  --color-ok: #8fb579;
+  --color-warn: #d4a056;
+  --color-brand: #5ba3a0;
+  --color-brand-soft: #c89a78;
 }
 
 /* Cobalt — Wes Bos's Cobalt 2. Deep navy surfaces, bright sky-blue accent. */
@@ -78,6 +93,13 @@ html.cobalt {
   --color-ink: #e1efff;
   --color-ink-dim: #aacdee;
   --color-accent: #66c4ff;
+  /* Syntax tokens — pull from Wes Bos's Cobalt2 palette so syntax sits
+     native to the deep navy (lime strings, pink numbers, yellow functions,
+     cyan types). */
+  --color-ok: #a5ff90;
+  --color-warn: #ff628c;
+  --color-brand: #ffc600;
+  --color-brand-soft: #9effff;
 }
 
 /* Matrix — CRT phosphor vibe. Near-black green-tinted surfaces, calm green
@@ -90,6 +112,13 @@ html.matrix {
   --color-ink: #c8cdc4;
   --color-ink-dim: #8b918a;
   --color-accent: #3fb950;
+  /* Syntax tokens — mono-green phosphor palette so code stays in the CRT
+     vibe instead of mixing bright sky-blue and yellow into the green wash.
+     --color-bad stays red so invalid tokens still alarm. */
+  --color-ok: #7ee787;
+  --color-warn: #d4ec78;
+  --color-brand: #56d364;
+  --color-brand-soft: #aff5b4;
 }
 
 /* Solarized Dark — Ethan Schoonover's palette (base03/02 + base0/1), with the
@@ -104,6 +133,14 @@ html.solarized {
   --color-ink-dim: #839496;
   --color-accent: #cb4b16;
   --color-accent-ink: #ffffff;
+  /* Syntax tokens — Ethan Schoonover's canonical solarized accents (cyan
+     strings, magenta numbers, blue functions, violet types, red invalid)
+     so code reads as solarized instead of default-dark on the teal base. */
+  --color-ok: #2aa198;
+  --color-warn: #d33682;
+  --color-brand: #268bd2;
+  --color-brand-soft: #6c71c4;
+  --color-bad: #dc322f;
 }
 
 html,
