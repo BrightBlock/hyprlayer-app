@@ -67,7 +67,7 @@ const STAGE_INTRO: Record<StageKey, string> = {
   plan: "Runs /create_plan to turn research into a concrete, reviewable implementation plan.",
   implement: "Runs /implement_plan to make the changes in this worktree, committing as it goes.",
   validate: "Runs /validate_plan to check the work against the plan and the project's tests.",
-  commit: "Commits this worktree's changes locally — no push or pull request. Use Ship when you're ready to open a PR.",
+  commit: "Runs /commit to commit this worktree's changes locally — no push or pull request. Use Ship when you're ready to open a PR.",
   ship: "Commits any remaining changes, then pushes the branch and opens a pull request.",
   revise: "Addresses PR feedback — failing CI or requested changes — then pushes fixes to the branch.",
 };

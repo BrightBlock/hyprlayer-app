@@ -59,16 +59,18 @@ impl Stage {
     }
 
     /// The skill slash-command this stage invokes, or `None` for stages that send
-    /// a plain prompt (General chat; Ship sends [`SHIP_PROMPT`], not a skill).
-    /// Single source of truth for the command, mirrored by the frontend
-    /// `stageCommand` (src/features/session/stages.ts) for its optimistic echo.
+    /// a plain prompt (General chat; Ship and Revise send [`SHIP_PROMPT`] /
+    /// [`REVISE_PROMPT`] prose, not a skill). Single source of truth for the
+    /// command, mirrored by the frontend `stageCommand`
+    /// (src/features/session/stages.ts) for its optimistic echo.
     pub fn command(self) -> Option<&'static str> {
         match self {
             Stage::Research => Some("/research_codebase"),
             Stage::Plan => Some("/create_plan"),
             Stage::Implement => Some("/implement_plan"),
             Stage::Validate => Some("/validate_plan"),
-            Stage::General | Stage::Commit | Stage::Ship | Stage::Revise => None,
+            Stage::Commit => Some("/commit"),
+            Stage::General | Stage::Ship | Stage::Revise => None,
         }
     }
 }
@@ -184,15 +186,6 @@ after the commit and push succeed, open a pull request against the default branc
 clear title and run the /describe_pr skill to write the PR description from the \
 repository's template and update the PR.";
 
-/// The Commit directive: checkpoint the worktree locally without shipping. The
-/// split-out counterpart to [`SHIP_PROMPT`] — commit only, so users can land
-/// work incrementally and open the PR later via Ship. Explicitly forbids push
-/// and PR creation (the policy hard-denies push + `gh` to back this up). Kept
-/// byte-identical to the frontend `COMMIT_PROMPT` (src/features/session/stages.ts).
-pub const COMMIT_PROMPT: &str =
-    "Commit all changes in this worktree: stage everything, then commit with a clear, \
-descriptive message. Do not push the branch or open a pull request.";
-
 /// The Revise directive: address PR feedback on a branch that already has a PR.
 /// The specific feedback (failing CI vs. requested changes) rides in the input.
 /// Explicitly tells the agent NOT to open a second PR. Kept byte-identical to the
@@ -212,21 +205,21 @@ fn skill_prompt(skill: &str, input: &str) -> String {
 /// Compose the first prompt for a stage: the matching skill invocation plus the
 /// user's input, with any attached context docs listed for the skill to pick up
 /// (e.g. `/create_plan` consuming the research doc produced by `/research_codebase`).
-/// General is pure passthrough (plain chat); Ship sends the [`SHIP_PROMPT`]
-/// directive rather than a skill.
+/// General is pure passthrough (plain chat); Ship and Revise send the
+/// [`SHIP_PROMPT`] / [`REVISE_PROMPT`] directives rather than a skill.
 pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> String {
     let input = input.trim();
     let prompt = match stage {
         // Plain chat: the input verbatim — no skill prefix. Explicitly attached
         // docs/screenshots are still listed below (the user asked for them).
         Stage::General => input.to_string(),
-        // Commit/Ship/Revise send a prose directive (not a skill); extra
-        // context, if any, is appended below it.
-        Stage::Commit | Stage::Ship | Stage::Revise => {
-            let base = match stage {
-                Stage::Ship => SHIP_PROMPT,
-                Stage::Revise => REVISE_PROMPT,
-                _ => COMMIT_PROMPT,
+        // Ship/Revise send a prose directive (not a skill); extra context, if
+        // any, is appended below it.
+        Stage::Ship | Stage::Revise => {
+            let base = if matches!(stage, Stage::Ship) {
+                SHIP_PROMPT
+            } else {
+                REVISE_PROMPT
             };
             if input.is_empty() {
                 base.to_string()
@@ -234,11 +227,11 @@ pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> St
                 format!("{base}\n\n{input}")
             }
         }
-        // research/plan/implement/validate each invoke their skill.
+        // research/plan/implement/validate/commit each invoke their skill.
         _ => skill_prompt(
             stage
                 .command()
-                .expect("non-ship/general stage has a command"),
+                .expect("skill-driven stage has a command"),
             input,
         ),
     };
@@ -338,7 +331,8 @@ mod tests {
             compose_prompt(Stage::Ship, "skip the changelog", &[]),
             format!("{SHIP_PROMPT}\n\nskip the changelog"),
         );
-        // It does not invoke /commit as a slash-command.
+        // It does not delegate to the /commit skill — Ship owns its own ordered
+        // commit-then-push-then-PR directive.
         assert!(!compose_prompt(Stage::Ship, "", &[]).starts_with('/'));
     }
 
@@ -346,12 +340,12 @@ mod tests {
     fn commit_checkpoints_locally_without_push_or_pr() {
         assert_eq!(Stage::parse("commit"), Stage::Commit);
         assert_eq!(Stage::Commit.as_str(), "commit");
-        assert_eq!(Stage::Commit.command(), None);
-        // Bare directive (button-driven, no input), and extra context appended.
-        assert_eq!(compose_prompt(Stage::Commit, "", &[]), COMMIT_PROMPT);
+        assert_eq!(Stage::Commit.command(), Some("/commit"));
+        // Button-driven: bare skill invocation. Extra input rides as its argument.
+        assert_eq!(compose_prompt(Stage::Commit, "", &[]), "/commit");
         assert_eq!(
             compose_prompt(Stage::Commit, "split into two commits", &[]),
-            format!("{COMMIT_PROMPT}\n\nsplit into two commits"),
+            "/commit split into two commits",
         );
         // It commits but is hard-denied from pushing or opening a PR — that's
         // what keeps it distinct from Ship.

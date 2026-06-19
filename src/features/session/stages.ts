@@ -42,14 +42,6 @@ export const SHIP_PROMPT =
   "clear title and run the /describe_pr skill to write the PR description from the " +
   "repository's template and update the PR.";
 
-/** The instruction the Commit action runs — checkpoint the worktree locally,
- *  without pushing or opening a PR (the split-out counterpart to SHIP_PROMPT).
- *  Kept byte-identical to the backend `COMMIT_PROMPT`
- *  (crates/hyprlayer-core/src/pipeline.rs). */
-export const COMMIT_PROMPT =
-  "Commit all changes in this worktree: stage everything, then commit with a clear, " +
-  "descriptive message. Do not push the branch or open a pull request.";
-
 /** The instruction the PR-feedback actions (Fix CI / Address comments) run when
  *  they start a fresh session. Kept byte-identical to the backend `REVISE_PROMPT`
  *  (crates/hyprlayer-core/src/pipeline.rs); the specific feedback rides in the
@@ -88,10 +80,11 @@ export function suggestedDocKind(stage: string): DocKind | null {
 
 /**
  * The skill slash-command a stage invokes, or `null` for stages that send a
- * plain prompt (general chat; ship sends a prose directive — see [`SHIP_PROMPT`]).
- * Mirror of the backend `compose_prompt` (crates/hyprlayer-core/src/pipeline.rs);
- * the backend is the source of truth for what's sent — this drives the composer
- * hint and the optimistic transcript echo.
+ * plain prompt (general chat; ship and revise send prose directives — see
+ * [`SHIP_PROMPT`], [`REVISE_PROMPT`]). Mirror of the backend `compose_prompt`
+ * (crates/hyprlayer-core/src/pipeline.rs); the backend is the source of truth
+ * for what's sent — this drives the composer hint and the optimistic transcript
+ * echo.
  */
 export function stageCommand(stage: string): string | null {
   switch (asStageKey(stage)) {
@@ -103,8 +96,10 @@ export function stageCommand(stage: string): string | null {
       return "/implement_plan";
     case "validate":
       return "/validate_plan";
+    case "commit":
+      return "/commit";
     default:
-      return null; // general, commit, ship, revise
+      return null; // general, ship, revise
   }
 }
 
@@ -118,10 +113,9 @@ export function composeStagePrompt(stage: string, input: string): string {
   const trimmed = input.trim();
   const key = asStageKey(stage);
   if (key === "general") return trimmed; // plain chat: no skill prefix
-  if (key === "commit") return trimmed ? `${COMMIT_PROMPT}\n\n${trimmed}` : COMMIT_PROMPT;
   if (key === "ship") return trimmed ? `${SHIP_PROMPT}\n\n${trimmed}` : SHIP_PROMPT;
   if (key === "revise") return trimmed ? `${REVISE_PROMPT}\n\n${trimmed}` : REVISE_PROMPT;
-  const command = stageCommand(key)!; // research/plan/implement/validate
+  const command = stageCommand(key)!; // research/plan/implement/validate/commit
   return trimmed ? `${command} ${trimmed}` : command;
 }
 

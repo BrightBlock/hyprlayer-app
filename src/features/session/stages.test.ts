@@ -50,11 +50,13 @@ describe("stageCommand", () => {
     expect(stageCommand("plan")).toBe("/create_plan");
     expect(stageCommand("implement")).toBe("/implement_plan");
     expect(stageCommand("validate")).toBe("/validate_plan");
+    expect(stageCommand("commit")).toBe("/commit");
   });
 
   it("has no command for plain-prompt stages", () => {
     expect(stageCommand("general")).toBeNull();
     expect(stageCommand("ship")).toBeNull();
+    expect(stageCommand("revise")).toBeNull();
     expect(stageCommand("nonsense")).toBeNull();
   });
 });
@@ -83,5 +85,12 @@ describe("composeStagePrompt", () => {
   it("appends extra ship context below the directive", () => {
     const prompt = composeStagePrompt("ship", "skip the changelog");
     expect(prompt).toBe(`${SHIP_PROMPT}\n\nskip the changelog`);
+  });
+
+  it("commit invokes the /commit skill with any input as its argument", () => {
+    expect(composeStagePrompt("commit", "")).toBe("/commit");
+    expect(composeStagePrompt("commit", "split into two commits")).toBe(
+      "/commit split into two commits",
+    );
   });
 });
