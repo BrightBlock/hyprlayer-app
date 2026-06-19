@@ -8,8 +8,17 @@ describe("detectTrigger", () => {
     expect(t).toEqual({ type: "command", start: 0, query: "rese" });
   });
 
-  it("ignores a slash that isn't the first token", () => {
+  it("detects a slash mid-prompt as a command token", () => {
     const text = "look at /research";
+    expect(detectTrigger(text, text.length)).toEqual({
+      type: "command",
+      start: 8,
+      query: "research",
+    });
+  });
+
+  it("does not treat a slash inside a token as a command", () => {
+    const text = "src/main";
     expect(detectTrigger(text, text.length)).toBeNull();
   });
 

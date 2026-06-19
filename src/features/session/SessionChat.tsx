@@ -29,6 +29,7 @@ import {
   XIcon,
 } from "../../components/icons";
 import { errorMessage } from "../../lib/ipc";
+import { basename } from "../../lib/path";
 import { useBootstrap } from "../../lib/queries";
 import type { WorkstreamView } from "../../lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
@@ -992,6 +993,14 @@ export function SessionChat({
     onChange: onDraftChange,
     textareaRef,
     enabled: !pendingQuestion,
+    // Picking from the @file dropdown stages the file as an attachment card
+    // (same lane as drop/paste/dialog) instead of leaving a raw path in the
+    // prompt. The search returns worktree-relative paths; the agent needs an
+    // absolute one.
+    onPickFile: (rel) => {
+      const root = view.item.worktreePath.replace(/\/+$/, "");
+      onAddAttachments([{ path: `${root}/${rel}`, name: basename(rel), kind: "file" }]);
+    },
   });
 
   const handleStart = async () => {

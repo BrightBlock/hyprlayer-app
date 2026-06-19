@@ -110,7 +110,7 @@ pub fn run() {
         eprintln!("skipping typescript bindings export: {e}");
     }
 
-    tauri::Builder::default()
+    let tauri_builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -130,7 +130,12 @@ pub fn run() {
         // @tauri-apps/plugin-updater. `process` provides the relaunch() the
         // frontend calls after an update installs.
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_process::init());
+
+    #[cfg(debug_assertions)]
+    let tauri_builder = tauri_builder.plugin(tauri_plugin_mcp_bridge::init());
+
+    tauri_builder
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

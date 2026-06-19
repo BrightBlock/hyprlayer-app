@@ -40,6 +40,11 @@ tauri-plugin-single-instance = "2"
 # `relaunch()`, which the frontend calls after downloadAndInstall().
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Dev-only: lets `@hypothesi/tauri-mcp-server` drive the webview over a
+# WebSocket on :9223 for end-to-end verification. The init call is gated
+# behind `cfg(debug_assertions)` in lib.rs, so the bridge is never reachable
+# from a release build.
+tauri-plugin-mcp-bridge = "0.11"
 specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 specta-typescript = "0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }

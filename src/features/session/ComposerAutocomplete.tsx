@@ -12,9 +12,10 @@ import { commands as ipc, type SlashCommand } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { basename } from "../../lib/path";
 
-/** A live autocomplete trigger detected at the caret: a `/command` at the start
- *  of the message, or an `@file` token anywhere in it. `start` is the index of
- *  the `/`/`@` itself, so applying a pick can splice from there. */
+/** A live autocomplete trigger detected at the caret: a `/command` or `@file`
+ *  token, either of which can open any whitespace-delimited token in the draft.
+ *  `start` is the index of the `/`/`@` itself, so applying a pick can splice
+ *  from there. */
 type Trigger = { type: "command" | "file"; start: number; query: string };
 
 /** What the dropdown renders for one row, normalized across command/file modes. */
@@ -30,9 +31,9 @@ export type Suggestion = {
 const FILE_LIMIT = 20;
 const FILE_DEBOUNCE_MS = 100;
 
-/** Detect whether the caret sits inside an autocomplete trigger. A command only
- *  triggers when the `/` opens the message (claude resolves slash commands only
- *  at the start); a file triggers whenever an `@` opens the current token. */
+/** Detect whether the caret sits inside an autocomplete trigger. Either a `/`
+ *  or `@` that opens the current whitespace-delimited token fires — anywhere
+ *  in the draft, matching the in-prompt skill highlight. */
 export function detectTrigger(text: string, caret: number): Trigger | null {
   // Walk back to the start of the whitespace-delimited token under the caret.
   let i = caret;
@@ -40,11 +41,7 @@ export function detectTrigger(text: string, caret: number): Trigger | null {
   const token = text.slice(i, caret);
 
   if (token.startsWith("/")) {
-    // Only the very first token of the message is a command — everything before
-    // the slash must be blank.
-    if (text.slice(0, i).trim() === "") {
-      return { type: "command", start: i, query: token.slice(1) };
-    }
+    return { type: "command", start: i, query: token.slice(1) };
   }
   if (token.startsWith("@")) {
     return { type: "file", start: i, query: token.slice(1) };
@@ -96,15 +93,21 @@ export type ComposerAutocomplete = {
 /** Drives `/command` and `@file` autocomplete plus the recognized-skill
  *  highlight for the composer textarea. The caller owns the `value`/`onChange`
  *  of the (controlled) textarea and the ref; this hook only reads the caret and
- *  splices accepted picks back through `onChange`. */
+ *  splices accepted picks back through `onChange`.
+ *
+ *  When `onPickFile` is provided, an accepted `@file` pick is promoted to an
+ *  attachment card instead of being spliced back into the textarea: the
+ *  `@query` token is removed from the draft and the worktree-relative path is
+ *  handed to the host. Falls back to the inline `@path ` splice when omitted. */
 export function useComposerAutocomplete(opts: {
   workstreamId: string;
   value: string;
   onChange: (next: string) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   enabled: boolean;
+  onPickFile?: (path: string) => void;
 }): ComposerAutocomplete {
-  const { workstreamId, value, onChange, textareaRef, enabled } = opts;
+  const { workstreamId, value, onChange, textareaRef, enabled, onPickFile } = opts;
 
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [caret, setCaret] = useState(0);
@@ -203,6 +206,31 @@ export function useComposerAutocomplete(opts: {
     (index: number) => {
       const item = suggestions[index];
       if (!item || !trigger) return;
+
+      if (trigger.type === "file" && onPickFile) {
+        // Promote the @file pick to an attachment card: delete the `@query`
+        // from the draft and hand the path off to the host. If the deletion
+        // would leave a doubled space, eat one to keep the draft tidy.
+        let removeTo = caret;
+        if (value[trigger.start - 1] === " " && value[removeTo] === " ") {
+          removeTo += 1;
+        }
+        const next = value.slice(0, trigger.start) + value.slice(removeTo);
+        onChange(next);
+        onPickFile(item.value);
+        const newCaret = trigger.start;
+        dismissed.current = null;
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (el) {
+            el.focus();
+            el.setSelectionRange(newCaret, newCaret);
+          }
+          setCaret(newCaret);
+        });
+        return;
+      }
+
       const insert =
         trigger.type === "command" ? `/${item.value} ` : `@${item.value} `;
       const next = value.slice(0, trigger.start) + insert + value.slice(caret);
@@ -220,7 +248,7 @@ export function useComposerAutocomplete(opts: {
         setCaret(newCaret);
       });
     },
-    [suggestions, trigger, value, caret, onChange, textareaRef],
+    [suggestions, trigger, value, caret, onChange, textareaRef, onPickFile],
   );
 
   const handleKeyDown = useCallback(
