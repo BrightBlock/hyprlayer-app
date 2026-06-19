@@ -447,8 +447,9 @@ pub async fn clone_project(
 }
 
 /// Remove a project from the registry. With `delete_files`, also delete the
-/// clone from disk — but only when it sits inside the repos root and has no
-/// active workstreams, so we never destroy a repo whose worktrees are live.
+/// directory from disk — for both app-owned clones and in-place imports (the
+/// user opts in per removal). Refused while the project has active workstreams:
+/// they own live worktrees cut from this repo, so removal would orphan them.
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_project(
@@ -459,6 +460,26 @@ pub async fn remove_project(
 ) -> CmdResult<()> {
     let repo = PathBuf::from(&path);
 
+    // A project's active workstreams own live worktrees cut from this repo.
+    // Removing the project would orphan them (and deleting the repo would
+    // strand them outright), so refuse until they're archived.
+    let path_for_count = path.clone();
+    let active = db_task(state.db.clone(), move |db| {
+        db.list_workstreams(&path_for_count, false)
+    })
+    .await?
+    .len();
+    if active > 0 {
+        return Err(AppError {
+            code: "active_workstreams".into(),
+            message: format!(
+                "This project still has {active} active workstream{}.",
+                if active == 1 { "" } else { "s" }
+            ),
+            remedy: Some("Archive its workstreams first, then remove the project.".into()),
+        });
+    }
+
     // Drop the thoughts repoMapping (best-effort; the directory may be gone).
     if repo.is_dir() {
         let _ = HyprCli::new(&state.binaries).thoughts_uninit(&repo).await;
@@ -467,18 +488,10 @@ pub async fn remove_project(
     let path_for_db = path.clone();
     db_task(state.db.clone(), move |db| db.delete_project(&path_for_db)).await?;
 
+    // No active workstreams (guarded above), so deleting the clone or the
+    // in-place import is safe when the user opted in.
     if delete_files && repo.is_dir() {
-        let root = repos_root(&state, None).await;
-        let path_for_count = path.clone();
-        let active = db_task(state.db.clone(), move |db| {
-            db.list_workstreams(&path_for_count, false)
-        })
-        .await
-        .map(|w| w.len())
-        .unwrap_or(usize::MAX); // unknown → don't delete
-        if repo.starts_with(&root) && active == 0 {
-            let _ = std::fs::remove_dir_all(&repo);
-        }
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     state.config.invalidate().await;

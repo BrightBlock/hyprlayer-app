@@ -53,6 +53,7 @@ import { PrStatusBar } from "../features/workstreams/PrStatusBar";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
+import { RemoveProjectDialog } from "../features/projects/RemoveProjectDialog";
 import { UpdatePill } from "../features/system/updates";
 import type { Project, WorkstreamView } from "../lib/bindings";
 
@@ -484,6 +485,7 @@ export function Root() {
     null,
   );
   const [settingsProject, setSettingsProject] = useState<Project | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
   const diffWidth = useUiStore((state) => state.diffWidth);
@@ -971,6 +973,15 @@ export function Root() {
           >
             Project settings…
           </ContextMenuItem>
+          <ContextMenuItem
+            danger
+            onClick={() => {
+              setRemoveTarget(projectMenu.project);
+              setProjectMenu(null);
+            }}
+          >
+            Remove project…
+          </ContextMenuItem>
         </ContextMenu>
       )}
 
@@ -1002,6 +1013,16 @@ export function Root() {
           // If the archived item was the one selected, drop back to its project.
           if (archiveTarget) dismissToProject(archiveTarget.item.projectPath, id);
           setArchiveTarget(null);
+        }}
+      />
+
+      <RemoveProjectDialog
+        target={removeTarget}
+        onClose={() => setRemoveTarget(null)}
+        onRemoved={(path) => {
+          // If the removed project was the one being viewed, drop back home.
+          if (currentProjectPath === path) void navigate({ to: "/" });
+          setRemoveTarget(null);
         }}
       />
     </div>

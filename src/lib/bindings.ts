@@ -24,8 +24,9 @@ export const commands = {
 	cloneProject: (url: string, location: string | null, name: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, location, name, bootstrapUser })),
 	/**
 	 *  Remove a project from the registry. With `delete_files`, also delete the
-	 *  clone from disk — but only when it sits inside the repos root and has no
-	 *  active workstreams, so we never destroy a repo whose worktrees are live.
+	 *  directory from disk — for both app-owned clones and in-place imports (the
+	 *  user opts in per removal). Refused while the project has active workstreams:
+	 *  they own live worktrees cut from this repo, so removal would orphan them.
 	 */
 	removeProject: (path: string, deleteFiles: boolean) => typedError<null, AppError>(__TAURI_INVOKE("remove_project", { path, deleteFiles })),
 	/**
