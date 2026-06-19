@@ -72,6 +72,55 @@ export function updateWorkstreamTabs(
 }
 
 /**
+ * Open (or re-focus) a read-only doc-preview tab for `path` in a workstream's
+ * main pane, and select it. The module-level twin of ProjectPage's
+ * `openDocPreview`, callable from outside the project page (e.g. the global
+ * search palette) so opening a library doc keeps you in your current workstream
+ * instead of navigating away. Reuses an already-open tab for the same doc.
+ */
+export function openDocPreviewTab(workstreamId: string, path: string, title: string): void {
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId] ?? defaultTabState();
+    const existing = current.shells.find((s) => s.docPreviewPath === path);
+    if (existing) {
+      const inRightPane = existing.panel === "right";
+      return {
+        ...all,
+        [workstreamId]: {
+          ...current,
+          ...(inRightPane
+            ? { rightActiveId: existing.id, rightSplit: true }
+            : { activeId: existing.id }),
+          activePane: inRightPane ? "right" : "main",
+        },
+      };
+    }
+    const nextId = nextShellId(current.shells);
+    return {
+      ...all,
+      [workstreamId]: {
+        ...current,
+        shells: [
+          ...current.shells,
+          {
+            id: nextId,
+            title,
+            mode: "general",
+            draft: "",
+            docs: [],
+            attachments: [],
+            docPreviewPath: path,
+            panel: "main",
+          },
+        ],
+        activeId: nextId,
+        activePane: "main",
+      },
+    };
+  });
+}
+
+/**
  * Open (creating if absent) the dedicated Ship tab for a workstream, bind it to
  * `sessionId`, and select it. Shipping reuses one tab per workstream rather than
  * being a chosen chat mode (see `shipWorkstream` in [`sessionStore`]).

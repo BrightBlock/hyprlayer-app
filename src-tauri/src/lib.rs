@@ -76,6 +76,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::list_sessions,
             commands::sessions::get_session_log,
             commands::sessions::attach_session,
+            commands::sessions::list_active_sessions,
             commands::attachments::import_attachment,
             commands::attachments::save_attachment,
             commands::system::set_binary_override,

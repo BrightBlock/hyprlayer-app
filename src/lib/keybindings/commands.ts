@@ -32,6 +32,13 @@ export type CommandDef = {
 export const COMMANDS: CommandDef[] = [
   // Navigation
   {
+    id: "search.open",
+    label: "Search Everything",
+    category: "Navigation",
+    when: "always",
+    defaults: { mac: "mod+p", other: "mod+p" },
+  },
+  {
     id: "nav.dashboard",
     label: "Go to Dashboard",
     category: "Navigation",

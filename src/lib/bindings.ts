@@ -213,6 +213,13 @@ export const commands = {
 	 */
 	attachSession: (sessionId: string, onEvent: Channel<SessionEvent>) => typedError<null, AppError>(__TAURI_INVOKE("attach_session", { sessionId, onEvent })),
 	/**
+	 *  All agents currently live in the registry (across every project), each
+	 *  joined to its workstream's title + project path, newest first. Drives the
+	 *  global search palette's "Agents" section, so even agents whose tab was
+	 *  never opened are findable.
+	 */
+	listActiveSessions: () => typedError<ActiveSessionView[], AppError>(__TAURI_INVOKE("list_active_sessions")),
+	/**
 	 *  Copy a dropped file (often a volatile screenshot temp file) into the
 	 *  workstream's attachments dir. Returns the new stable absolute path.
 	 */
@@ -262,6 +269,16 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  View returned by [`list_active_sessions`]: one live session joined to its
+ *  workstream's display name and project path.
+ */
+export type ActiveSessionView = {
+	session: Session,
+	workstreamTitle: string,
+	projectPath: string,
+};
+
 /**
  *  Error shape every IPC command returns. The frontend renders `message`,
  *  shows `remedy` as the call-to-action, and may branch on `code`.

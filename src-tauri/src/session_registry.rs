@@ -33,4 +33,9 @@ impl SessionRegistry {
     pub async fn remove(&self, id: &str) {
         self.live.lock().await.remove(id);
     }
+
+    /// Snapshot the ids of all currently-live sessions.
+    pub async fn live_ids(&self) -> Vec<String> {
+        self.live.lock().await.keys().cloned().collect()
+    }
 }

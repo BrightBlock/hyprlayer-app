@@ -2,6 +2,7 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 
 import {
   commands,
+  type ActiveSessionView,
   type AppSettings,
   type BinaryKind,
   type Bootstrap,
@@ -234,6 +235,16 @@ export function useAllWorkstreams(enabled = true) {
   return useQuery({
     queryKey: ["workstreams", "@all"],
     queryFn: () => unwrap(commands.listAllWorkstreams()),
+    enabled,
+  });
+}
+
+/** All agents currently live in the registry across every project. Used by the
+ *  search palette's Agents section. Invalidated by SessionLifecycle events. */
+export function useActiveSessions(enabled = true) {
+  return useQuery<ActiveSessionView[]>({
+    queryKey: ["active-sessions"],
+    queryFn: () => unwrap(commands.listActiveSessions()),
     enabled,
   });
 }

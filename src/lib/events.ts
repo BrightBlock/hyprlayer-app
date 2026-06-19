@@ -27,6 +27,11 @@ export function attachEventListeners(): () => void {
       const { workstreamId } = event.payload;
       void queryClient.invalidateQueries({ queryKey: ["workstream", workstreamId, "pr"] });
     }),
+    // A session started, changed state, or ended. Invalidate the active-sessions
+    // list so the search palette's Agents section tracks running agents in real time.
+    events.sessionLifecycle.listen(() => {
+      void queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
+    }),
     // The thoughts index changed: docs were (re)indexed, removed, or the tree
     // was rescanned. Refresh every list and the touched documents (all of
     // them on a rescan, where ids is empty).

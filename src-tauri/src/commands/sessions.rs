@@ -13,6 +13,7 @@ use hyprlayer_core::claude::{ClaudeDriver, PermissionMode, SessionEvent, SpawnCo
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent, Workstream};
+use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::State;
 use tauri_specta::Event;
@@ -750,4 +751,52 @@ fn emit_lifecycle(app: &tauri::AppHandle, session_id: &str, workstream_id: &str,
         state: state.to_string(),
     }
     .emit(app);
+}
+
+/// View returned by [`list_active_sessions`]: one live session joined to its
+/// workstream's display name and project path.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveSessionView {
+    pub session: Session,
+    pub workstream_title: String,
+    pub project_path: String,
+}
+
+/// All agents currently live in the registry (across every project), each
+/// joined to its workstream's title + project path, newest first. Drives the
+/// global search palette's "Agents" section, so even agents whose tab was
+/// never opened are findable.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_active_sessions(state: State<'_, AppState>) -> CmdResult<Vec<ActiveSessionView>> {
+    let ids = state.sessions.live_ids().await;
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let db = state.db.clone();
+    db_task(db, move |db| {
+        let mut out = Vec::new();
+        for id in ids {
+            let Some(session) = db.get_session(&id)? else {
+                continue;
+            };
+            let Some(ws) = db.get_workstream(&session.workstream_id)? else {
+                continue;
+            };
+            out.push(ActiveSessionView {
+                workstream_title: ws.title,
+                project_path: ws.project_path,
+                session,
+            });
+        }
+        out.sort_by(|a, b| {
+            b.session
+                .started_at
+                .partial_cmp(&a.session.started_at)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        Ok(out)
+    })
+    .await
 }

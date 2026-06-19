@@ -48,6 +48,8 @@ import {
   TerminalIcon,
 } from "../components/icons";
 import type { EditorTarget } from "../lib/bindings";
+import { SearchPalette } from "../features/search/SearchPalette";
+import { toggleSearch } from "../features/search/searchStore";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { PrStatusBar } from "../features/workstreams/PrStatusBar";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
@@ -621,6 +623,7 @@ export function Root() {
   );
   useCommand("ws.commit", canCommit && !committing ? doCommit : null);
   useCommand("ws.ship", canShip && !shipping ? doShip : null);
+  useCommand("search.open", () => toggleSearch());
 
   return (
     <div className="flex h-full flex-col bg-surface">
@@ -1056,6 +1059,8 @@ export function Root() {
           setRemoveTarget(null);
         }}
       />
+
+      <SearchPalette />
     </div>
   );
 }

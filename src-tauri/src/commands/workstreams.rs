@@ -460,9 +460,7 @@ pub async fn restore_workstream(
                 "Another workstream took the original path ({}).",
                 worktree_path.display()
             ),
-            remedy: Some(
-                "Move or archive the workstream at that path, then try again.".into(),
-            ),
+            remedy: Some("Move or archive the workstream at that path, then try again.".into()),
         });
     }
 
@@ -517,10 +515,7 @@ pub async fn restore_workstream(
 /// and DELETE the workstream row.
 #[tauri::command]
 #[specta::specta]
-pub async fn delete_archived_workstream(
-    state: State<'_, AppState>,
-    id: String,
-) -> CmdResult<()> {
+pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let item = load_item(&state, &id).await?;
     if item.status != "archived" {
         return Err(AppError {
@@ -540,7 +535,13 @@ pub async fn delete_archived_workstream(
 
     state
         .worktrees
-        .purge_archive(&git, project_path, &archive_path, &item.branch, delete_branch)
+        .purge_archive(
+            &git,
+            project_path,
+            &archive_path,
+            &item.branch,
+            delete_branch,
+        )
         .await
         .map_err(AppError::from)?;
 
