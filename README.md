@@ -34,7 +34,7 @@ your config and your thoughts storage; the app gives you a workspace on top of i
 
 **Git & Review:**
 - Fork-style Git panel for staging, unstaging, and discarding changes
-- Side-by-side and unified diffs with an in-app file viewer
+- Side-by-side and unified diffs with syntax highlighting and an in-app file viewer
 - Per-worktree status so you always see exactly what an agent changed
 
 **Storage Backends:**
