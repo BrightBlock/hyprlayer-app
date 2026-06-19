@@ -348,10 +348,16 @@ pub async fn archive_workstream(
         RemovePolicy::Safe
     };
     let worktree_path = Path::new(&item.worktree_path);
+    // A path that exists without a `.git` entry is a husk left behind by a
+    // partial teardown (see worktree::is_live_worktree). Treat it as missing
+    // for the gate and the uninit pass — ensure_removable can't read it, and
+    // thoughts_uninit has nothing to unmap. `WorktreeManager::remove` will
+    // prune the registration and rm -rf the dir.
+    let live = worktree::is_live_worktree(worktree_path);
 
     // Safe gate FIRST — `thoughts uninit` tears down the worktree's links,
     // so it must not run before we know the removal will be allowed.
-    if policy == RemovePolicy::Safe && worktree_path.exists() {
+    if policy == RemovePolicy::Safe && live {
         worktree::ensure_removable(worktree_path, &item.base_branch, &item.branch)
             .map_err(AppError::from)?;
     }
@@ -359,7 +365,7 @@ pub async fn archive_workstream(
     // CLI-first teardown: uninit removes the thoughts/ links and the
     // worktree's repoMappings entry. Direct mapping edit is the fallback.
     let mut unmapped = false;
-    if worktree_path.exists() {
+    if live {
         match HyprCli::new(&state.binaries)
             .thoughts_uninit(worktree_path)
             .await

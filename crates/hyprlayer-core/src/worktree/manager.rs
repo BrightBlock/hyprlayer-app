@@ -166,7 +166,7 @@ impl WorktreeManager {
         policy: RemovePolicy,
         delete_branch: bool,
     ) -> Result<()> {
-        if worktree.exists() {
+        if is_live_worktree(worktree) {
             if policy == RemovePolicy::Safe {
                 ensure_removable(worktree, base_branch, branch)?;
             }
@@ -179,10 +179,18 @@ impl WorktreeManager {
                 .run()
                 .await?;
         } else {
-            // Directory gone out-of-band: clear the stale registration.
+            // Husk or fully gone: git's `worktree remove` would fail (the path
+            // isn't in its registry anymore, or has no `.git` to read), and
+            // ensure_removable can't even read status. Prune the registration
+            // and best-effort delete the leftover directory — anything still
+            // in it is post-teardown runtime crud (.vite/, logs/) recreated by
+            // a process whose cwd outlived the archive.
             let _ = git_in(git, project_repo, &["worktree", "prune"])
                 .run()
                 .await;
+            if worktree.exists() {
+                let _ = std::fs::remove_dir_all(worktree);
+            }
         }
 
         // Branch cleanup: only-if-merged on Safe (tolerate failure and leave
@@ -209,6 +217,15 @@ impl WorktreeManager {
             .await?;
         Ok(())
     }
+}
+
+/// True iff `path` is a live git worktree (has a `.git` entry — directory for
+/// the main checkout, regular file with `gitdir:` for a linked worktree). A
+/// path that exists without `.git` is a husk left over from a partial teardown
+/// (e.g. `git worktree remove` succeeded but a process whose cwd was inside
+/// recreated runtime dirs after); callers treat it the same as "missing".
+pub fn is_live_worktree(path: &Path) -> bool {
+    path.join(".git").exists()
 }
 
 /// The Safe-removal gate: errors when removing the worktree would destroy
@@ -537,5 +554,61 @@ mod tests {
         let (_guard, repo) = fixture_repo();
         let git = which::which("git").unwrap();
         assert_eq!(detect_base_branch(&git, &repo).await.unwrap(), "main");
+    }
+
+    /// Husk state: the worktree directory exists but its `.git` linkfile is
+    /// gone and only post-teardown runtime crud remains. This reproduces
+    /// project-removal-21c6 — a Safe archive there hung because ensure_removable
+    /// couldn't open the repo and `git worktree remove --force` rejected a path
+    /// no longer in git's registry. `remove` must succeed under Safe and clear
+    /// the directory.
+    #[tokio::test]
+    async fn safe_remove_clears_husk_left_by_partial_teardown() {
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Husk".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let wt = PathBuf::from(&created.path);
+
+        // Simulate the partial teardown: drop git's record of the worktree
+        // (which also removes the `.git` linkfile), then have a still-running
+        // process recreate runtime dirs at the cwd.
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["worktree", "remove", "--force", wt.to_str().unwrap()])
+            .output()
+            .unwrap();
+        std::fs::create_dir_all(wt.join(".vite")).unwrap();
+        std::fs::create_dir_all(wt.join("logs")).unwrap();
+        assert!(wt.exists() && !is_live_worktree(&wt), "set up husk");
+
+        manager
+            .remove(
+                &git,
+                &repo,
+                &wt,
+                &created.branch,
+                &created.base_branch,
+                RemovePolicy::Safe,
+                true,
+            )
+            .await
+            .unwrap();
+        assert!(!wt.exists(), "husk directory must be cleaned up");
     }
 }
