@@ -24,6 +24,39 @@ pub fn default_worktree_root() -> PathBuf {
         .join("worktrees")
 }
 
+/// `<project>/archived-contexts` — Conductor-style: archived worktrees live
+/// alongside their source repo so the relationship is visible in Finder.
+/// `.git/info/exclude` keeps them out of the user's `git status`.
+pub const ARCHIVE_SUBDIR: &str = "archived-contexts";
+
+/// Where a workstream's worktree lands after archive: one directory per slug
+/// under [`ARCHIVE_SUBDIR`].
+pub fn archive_dir_for(project_repo: &Path, slug: &str) -> PathBuf {
+    project_repo.join(ARCHIVE_SUBDIR).join(slug)
+}
+
+/// Append `archived-contexts/` to the project's per-clone exclude so its
+/// archived worktrees don't show as untracked in the user's `git status`.
+/// Idempotent: re-running is a no-op once the entry is present.
+pub fn ensure_archive_excluded(project_repo: &Path) -> std::io::Result<()> {
+    let exclude = project_repo.join(".git").join("info").join("exclude");
+    let Some(parent) = exclude.parent() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(parent)?;
+    let needle = format!("/{}/", ARCHIVE_SUBDIR);
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if existing.lines().any(|l| l.trim() == needle) {
+        return Ok(());
+    }
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str(&format!("# hyprlayer: hide archived worktrees from git status\n{needle}\n"));
+    std::fs::write(&exclude, next)
+}
+
 pub struct CreateSpec {
     pub project_repo: PathBuf,
     pub mapped_name: String,
@@ -215,6 +248,112 @@ impl WorktreeManager {
         git_in(git, project_repo, &["worktree", "prune"])
             .run()
             .await?;
+        Ok(())
+    }
+
+    /// Move a worktree to its archive location, preserving the branch + every
+    /// uncommitted file. Restore is the inverse [`Self::restore`]. Husks
+    /// (worktree dir without `.git`) can't be moved by git, so we fall back to
+    /// pruning + best-effort `rm -rf`: there's nothing recoverable left.
+    /// Returns `true` when a real archive was produced; `false` for a husk
+    /// (caller should not promise the user a restore path).
+    pub async fn archive(
+        &self,
+        git: &Path,
+        project_repo: &Path,
+        worktree: &Path,
+        dest: &Path,
+    ) -> Result<bool> {
+        if !is_live_worktree(worktree) {
+            // Same husk handling as Self::remove — nothing recoverable here.
+            let _ = git_in(git, project_repo, &["worktree", "prune"])
+                .run()
+                .await;
+            if worktree.exists() {
+                let _ = std::fs::remove_dir_all(worktree);
+            }
+            return Ok(false);
+        }
+
+        if dest.exists() {
+            return Err(CoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("archive destination already exists: {}", dest.display()),
+            )));
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let from = worktree.display().to_string();
+        let to = dest.display().to_string();
+        // `git worktree move` refuses if the worktree is locked or contains
+        // submodules, which surfaces as a CoreError::Git for the caller to map.
+        git_in(git, project_repo, &["worktree", "move", &from, &to])
+            .timeout(Duration::from_secs(120))
+            .run()
+            .await?;
+        Ok(true)
+    }
+
+    /// Move a previously-archived worktree back to its original path. The
+    /// caller must guarantee `target` is free — collision is the one failure
+    /// mode the UI prompts for.
+    pub async fn restore(
+        &self,
+        git: &Path,
+        project_repo: &Path,
+        archive: &Path,
+        target: &Path,
+    ) -> Result<()> {
+        if target.exists() {
+            return Err(CoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("restore target already exists: {}", target.display()),
+            )));
+        }
+        if !is_live_worktree(archive) {
+            return Err(CoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("archived worktree missing: {}", archive.display()),
+            )));
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let from = archive.display().to_string();
+        let to = target.display().to_string();
+        git_in(git, project_repo, &["worktree", "move", &from, &to])
+            .timeout(Duration::from_secs(120))
+            .run()
+            .await?;
+        Ok(())
+    }
+
+    /// Permanent purge: prune the archive directory + delete the branch.
+    /// Used by the "Delete permanently" action on the archive history view.
+    pub async fn purge_archive(
+        &self,
+        git: &Path,
+        project_repo: &Path,
+        archive: &Path,
+        branch: &str,
+        delete_branch: bool,
+    ) -> Result<()> {
+        if archive.exists() {
+            let _ = std::fs::remove_dir_all(archive);
+        }
+        // The archive was a registered worktree until this moment; prune to
+        // drop the registry entry now that its directory is gone.
+        let _ = git_in(git, project_repo, &["worktree", "prune"])
+            .run()
+            .await;
+        if delete_branch {
+            let _ = git_in(git, project_repo, &["branch", "-D", branch])
+                .run()
+                .await;
+        }
         Ok(())
     }
 }
@@ -554,6 +693,108 @@ mod tests {
         let (_guard, repo) = fixture_repo();
         let git = which::which("git").unwrap();
         assert_eq!(detect_base_branch(&git, &repo).await.unwrap(), "main");
+    }
+
+    /// Archive → restore round-trip preserves the branch and the uncommitted
+    /// edits that block a Safe remove. This is the non-destructive
+    /// alternative to remove(): work survives, restore returns the worktree
+    /// to its original path with `git worktree move`.
+    #[tokio::test]
+    async fn archive_restore_round_trip_preserves_uncommitted_work() {
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Restore me".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let wt = PathBuf::from(&created.path);
+
+        // Dirty edit + untracked file: archive must preserve both.
+        std::fs::write(wt.join("README.md"), "edited\n").unwrap();
+        std::fs::write(wt.join("scratch.txt"), "wip\n").unwrap();
+
+        let archive_dir = repo.join("archived-contexts").join(&created.slug);
+        let moved = manager
+            .archive(&git, &repo, &wt, &archive_dir)
+            .await
+            .unwrap();
+        assert!(moved);
+        assert!(!wt.exists(), "source path freed after archive");
+        assert!(archive_dir.join("README.md").exists());
+        assert!(archive_dir.join("scratch.txt").exists());
+        assert!(is_live_worktree(&archive_dir), "still a live worktree");
+
+        // The branch survived archive and git still tracks the worktree at
+        // its new location.
+        let branches = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["branch", "--list", &created.branch])
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+
+        manager
+            .restore(&git, &repo, &archive_dir, &wt)
+            .await
+            .unwrap();
+        assert!(!archive_dir.exists());
+        assert_eq!(std::fs::read_to_string(wt.join("README.md")).unwrap(), "edited\n");
+        assert_eq!(std::fs::read_to_string(wt.join("scratch.txt")).unwrap(), "wip\n");
+        let st = status(&wt, &created.base_branch, None);
+        assert_eq!((st.dirty, st.untracked), (1, 1));
+    }
+
+    /// Restore refuses (rather than clobbers) when the original path was
+    /// re-used by another workstream while this one was archived.
+    #[tokio::test]
+    async fn restore_refuses_when_target_path_is_occupied() {
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Conflict".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let wt = PathBuf::from(&created.path);
+        let archive_dir = repo.join("archived-contexts").join(&created.slug);
+        manager
+            .archive(&git, &repo, &wt, &archive_dir)
+            .await
+            .unwrap();
+
+        // Something else took the path before the user clicked Unarchive.
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join("squatter"), "occupied").unwrap();
+
+        let err = manager
+            .restore(&git, &repo, &archive_dir, &wt)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Io(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists));
     }
 
     /// Husk state: the worktree directory exists but its `.git` linkfile is

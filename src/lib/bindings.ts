@@ -61,11 +61,31 @@ export const commands = {
 	detachWorkstreamDoc: (id: string, docPath: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("detach_workstream_doc", { id, docPath })),
 	listWorkstreamDocs: (id: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("list_workstream_docs", { id })),
 	/**
-	 *  Archive an item. `discard: false` is the safe path — it fails with
-	 *  `worktree_dirty` / `worktree_unpushed` when work would be lost, and the
-	 *  UI re-asks with `discard: true`.
+	 *  Archive a workstream non-destructively: move the worktree to
+	 *  `<project>/archived-contexts/<slug>/` (Conductor-style) and flip the
+	 *  DB row to `archived`. Branch and every uncommitted file are preserved
+	 *  for [`restore_workstream`]. Husks (worktree dir without `.git`) can't be
+	 *  moved; they're pruned + cleaned, the row still flips to archived, and
+	 *  restore for that row will fail with `archive_missing`.
 	 */
-	archiveWorkstream: (id: string, discard: boolean) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id, discard })),
+	archiveWorkstream: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id })),
+	/**  All archived workstreams across every project, newest-first. */
+	listArchivedWorkstreams: () => typedError<ArchivedWorkstreamView[], AppError>(__TAURI_INVOKE("list_archived_workstreams")),
+	/**
+	 *  Move an archived workstream back to its original path and flip the row
+	 *  to `active`. Fails with `restore_target_occupied` when something has
+	 *  taken the original `worktree_path` since archive (e.g. a new workstream
+	 *  reused the slug), and `archive_missing` if the backup directory was
+	 *  deleted out-of-band.
+	 */
+	restoreWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("restore_workstream", { id })),
+	/**
+	 *  Permanent delete: remove the archive directory, prune git's worktree
+	 *  registry, optionally drop the branch (per `git.delete_branch_on_archive`,
+	 *  which now governs the *permanent delete* side of the archive lifecycle),
+	 *  and DELETE the workstream row.
+	 */
+	deleteArchivedWorkstream: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_archived_workstream", { id })),
 	/**
 	 *  Re-create broken thoughts links (status shows `broken` after e.g. a moved
 	 *  thoughts repo).
@@ -251,6 +271,18 @@ export type AppSettings = {
 	keybindings?: KeybindingSettings,
 	/**  Per-provider defaults (default model, etc.). Surfaced in Settings → Models. */
 	providers?: ProviderSettings,
+};
+
+/**
+ *  View shape for the archive history view. `archive_exists` flags rows
+ *  whose backup directory was deleted out-of-band (restore would fail; UI
+ *  surfaces "delete permanently" as the only action).
+ */
+export type ArchivedWorkstreamView = {
+	item: Workstream,
+	/**  `<project>/archived-contexts/<slug>` — the on-disk backup path. */
+	archivePath: string,
+	archiveExists: boolean,
 };
 
 /**  Where a document lives within its root's layout. */

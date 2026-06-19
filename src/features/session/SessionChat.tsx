@@ -47,6 +47,7 @@ import {
   killSession,
   respondPermission,
   restoreSessionIfNeeded,
+  resumeSession,
   rewindToMessage,
   sendMessage,
   startSession,
@@ -647,6 +648,7 @@ export function SessionChat({
 }: Props) {
   const session = useSession(shell.sessionId);
   const [starting, setStarting] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -718,6 +720,31 @@ export function SessionChat({
       void restoreSessionIfNeeded(shell.sessionId, view.item.id, shell.mode, restorePermissionFlag);
     }
   }, [shell.sessionId, hasEntry, view.item.id, shell.mode, restorePermissionFlag]);
+
+  // Auto-resume terminal sessions on first sight — covers the archive→restore
+  // case (where the kill was app-initiated, not user-chosen) and any other
+  // session that came back terminal. The ref guards against re-firing: if the
+  // resume itself fails and bounces back to terminal, we surface the banner
+  // for an explicit retry instead of looping. Cleared when the user opts
+  // out via "New session" (sessionId becomes undefined).
+  const autoResumedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!shell.sessionId) {
+      autoResumedRef.current = null;
+      return;
+    }
+    if (autoResumedRef.current === shell.sessionId) return;
+    if (!session || !isTerminal(session.state)) return;
+    // Only attempt when there's actually something to resume — empty sessions
+    // (spawn_failed before any events) don't have a transcript worth chasing.
+    if (session.items.length === 0) return;
+    autoResumedRef.current = shell.sessionId;
+    setError(null);
+    setResuming(true);
+    void resumeSession(shell.sessionId)
+      .catch((e) => setError(errorMessage(e)))
+      .finally(() => setResuming(false));
+  }, [shell.sessionId, session]);
 
   // Mode-aware suggestion: auto-attach the most recent relevant doc (research
   // for plan-mode, plan for implement/validate) as a "suggested" chip while the
@@ -990,11 +1017,34 @@ export function SessionChat({
           {terminal ? (
             <div className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2.5">
               <span className="text-sm text-ink-dim">
-                This session has ended. Start a new one to keep working in this tab.
+                {resuming
+                  ? "Resuming the previous session…"
+                  : "This session has ended. Resume to continue, or start fresh."}
               </span>
-              <Button variant="primary" onClick={onResetSession}>
-                New session
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button onClick={onResetSession} disabled={resuming}>
+                  New session
+                </Button>
+                <Button
+                  variant="primary"
+                  busy={resuming}
+                  disabled={!sid || resuming}
+                  onClick={async () => {
+                    if (!sid) return;
+                    setError(null);
+                    setResuming(true);
+                    try {
+                      await resumeSession(sid);
+                    } catch (e) {
+                      setError(errorMessage(e));
+                    } finally {
+                      setResuming(false);
+                    }
+                  }}
+                >
+                  Resume
+                </Button>
+              </div>
             </div>
           ) : (
             <>

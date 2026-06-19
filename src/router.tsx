@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 
 import { Root } from "./routes/Root";
+import { Archive } from "./routes/Archive";
 import { Dashboard } from "./routes/Dashboard";
 import { Settings } from "./routes/Settings";
 import { ProjectPage } from "./routes/ProjectPage";
@@ -49,6 +50,12 @@ const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
   component: Settings,
+});
+
+const archiveRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/archive",
+  component: Archive,
 });
 
 const libraryRoute = createRoute({
@@ -110,6 +117,7 @@ const projectDocsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   settingsRoute,
+  archiveRoute,
   libraryRoute,
   docRoute,
   projectDocsRoute,

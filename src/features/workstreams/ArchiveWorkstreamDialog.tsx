@@ -1,6 +1,5 @@
 import type { WorkstreamView } from "../../lib/bindings";
 import { Button, Dialog, ErrorNote } from "../../components/ui";
-import { isAppError } from "../../lib/ipc";
 import { useArchiveWorkstream } from "../../lib/queries";
 
 type Props = {
@@ -11,17 +10,14 @@ type Props = {
   onArchived: (id: string) => void;
 };
 
-const BLOCKING_CODES = new Set(["worktree_dirty", "worktree_unpushed"]);
-
 /**
- * Two-step archive: the safe call (discard=false) first; if the backend
- * refuses because work would be lost, surface its message + remedy and offer
- * the destructive retry (discard=true).
+ * Non-destructive archive: the worktree is moved (not deleted) to
+ * `<project>/archived-contexts/<slug>/` and the branch is preserved. The
+ * Archive view restores from there. No discard branch — uncommitted work
+ * survives by construction.
  */
 export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) {
   const archive = useArchiveWorkstream();
-
-  const blocked = archive.isError && isAppError(archive.error) && BLOCKING_CODES.has(archive.error.code);
 
   const close = () => {
     if (archive.isPending) return;
@@ -29,11 +25,11 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
     onClose();
   };
 
-  const run = (discard: boolean) => {
+  const run = () => {
     if (!target || archive.isPending) return;
     const id = target.item.id;
     archive.mutate(
-      { id, discard },
+      { id },
       {
         onSuccess: () => {
           archive.reset();
@@ -54,32 +50,22 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
               <span className="font-mono text-xs">({target.item.branch})</span> —{" "}
             </>
           )}
-          the worktree and branch will be removed.
+          the worktree moves to <span className="font-mono text-xs">archived-contexts/</span> and
+          the branch is preserved. You can unarchive it later from the Archive view.
         </p>
         {archive.isError && <ErrorNote error={archive.error} />}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={close} disabled={archive.isPending}>
             Cancel
           </Button>
-          {blocked ? (
-            <Button
-              type="button"
-              variant="danger"
-              busy={archive.isPending}
-              onClick={() => run(true)}
-            >
-              Discard changes & archive
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="primary"
-              busy={archive.isPending}
-              onClick={() => run(false)}
-            >
-              Archive
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="primary"
+            busy={archive.isPending}
+            onClick={run}
+          >
+            Archive
+          </Button>
         </div>
       </div>
     </Dialog>

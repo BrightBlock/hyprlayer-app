@@ -302,9 +302,33 @@ export function useSetWorkstreamStage(projectPath: string) {
 
 export function useArchiveWorkstream() {
   return useMutation({
-    mutationFn: ({ id, discard }: { id: string; discard: boolean }) =>
-      unwrap(commands.archiveWorkstream(id, discard)),
+    mutationFn: ({ id }: { id: string }) => unwrap(commands.archiveWorkstream(id)),
     onSuccess: (_data, { id }) => invalidateWorkstream(id),
+  });
+}
+
+/** Archived workstreams across all projects, newest-first — feeds the
+ *  Archive history view. Separate query key from the active lists so
+ *  archive/restore mutations invalidate both halves cleanly. */
+export function useArchivedWorkstreams(enabled = true) {
+  return useQuery({
+    queryKey: ["workstreams", "@archived"],
+    queryFn: () => unwrap(commands.listArchivedWorkstreams()),
+    enabled,
+  });
+}
+
+export function useRestoreWorkstream() {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.restoreWorkstream(id)),
+    onSuccess: (_data, id) => invalidateWorkstream(id),
+  });
+}
+
+export function useDeleteArchivedWorkstream() {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.deleteArchivedWorkstream(id)),
+    onSuccess: (_data, id) => invalidateWorkstream(id),
   });
 }
 

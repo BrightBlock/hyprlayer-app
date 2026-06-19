@@ -168,6 +168,19 @@ impl Db {
         })
     }
 
+    /// All archived items across projects, newest-first — feeds the archive
+    /// history view.
+    pub fn list_archived_workstreams(&self) -> Result<Vec<Workstream>> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {COLS} FROM workstreams WHERE status = 'archived'
+                 ORDER BY archived_at DESC, created_at DESC"
+            ))?;
+            let rows = stmt.query_map([], row_to_item)?;
+            rows.collect()
+        })
+    }
+
     pub fn update_workstream_stage(&self, id: &str, stage: &str) -> Result<()> {
         self.touch(id, "stage", stage)
     }
@@ -193,6 +206,28 @@ impl Db {
                  WHERE id = ?1",
                 params![id, now_ms()],
             )?;
+            Ok(())
+        })
+    }
+
+    /// Flip an archived row back to active and clear `archived_at`. The
+    /// matching worktree restore is the caller's job.
+    pub fn unarchive_workstream(&self, id: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE workstreams SET status = 'active', archived_at = NULL, updated_at = ?2
+                 WHERE id = ?1",
+                params![id, now_ms()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Permanent delete. ON DELETE CASCADE on workstream_docs sweeps the
+    /// attached doc rows. The matching filesystem purge is the caller's job.
+    pub fn delete_workstream(&self, id: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute("DELETE FROM workstreams WHERE id = ?1", params![id])?;
             Ok(())
         })
     }
@@ -297,6 +332,41 @@ mod tests {
             .is_some());
 
         assert!(db.get_workstream("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn archive_unarchive_round_trip_clears_archived_at() {
+        let db = Db::open_in_memory().unwrap();
+        let a = item(&db, "auth");
+        let b = item(&db, "billing");
+
+        db.archive_workstream(&a.id).unwrap();
+        let archived = db.list_archived_workstreams().unwrap();
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].id, a.id);
+        assert_eq!(archived[0].status, "archived");
+        assert!(archived[0].archived_at.is_some());
+
+        db.unarchive_workstream(&a.id).unwrap();
+        let got = db.get_workstream(&a.id).unwrap().unwrap();
+        assert_eq!(got.status, "active");
+        assert!(got.archived_at.is_none());
+        assert!(db.list_archived_workstreams().unwrap().is_empty());
+        // Untouched siblings stay untouched.
+        assert_eq!(db.get_workstream(&b.id).unwrap().unwrap().status, "active");
+    }
+
+    #[test]
+    fn delete_workstream_cascades_docs() {
+        let db = Db::open_in_memory().unwrap();
+        let a = item(&db, "auth");
+        db.attach_workstream_doc(&a.id, "/t/r.md", "research")
+            .unwrap();
+        assert_eq!(db.workstream_docs(&a.id).unwrap().len(), 1);
+
+        db.delete_workstream(&a.id).unwrap();
+        assert!(db.get_workstream(&a.id).unwrap().is_none());
+        assert!(db.workstream_docs(&a.id).unwrap().is_empty());
     }
 
     #[test]

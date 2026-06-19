@@ -7,7 +7,7 @@ use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::skills::SlashCommand;
 use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
-use hyprlayer_core::worktree::{self, CreateSpec, RemovePolicy, WorktreeStatus};
+use hyprlayer_core::worktree::{self, archive_dir_for, CreateSpec, RemovePolicy, WorktreeStatus};
 use hyprlayer_core::CoreError;
 use serde::Serialize;
 use tauri::State;
@@ -310,23 +310,23 @@ pub async fn list_workstream_docs(
     db_task(state.db.clone(), move |db| db.workstream_docs(&id)).await
 }
 
-/// Archive an item. `discard: false` is the safe path — it fails with
-/// `worktree_dirty` / `worktree_unpushed` when work would be lost, and the
-/// UI re-asks with `discard: true`.
+/// Archive a workstream non-destructively: move the worktree to
+/// `<project>/archived-contexts/<slug>/` (Conductor-style) and flip the
+/// DB row to `archived`. Branch and every uncommitted file are preserved
+/// for [`restore_workstream`]. Husks (worktree dir without `.git`) can't be
+/// moved; they're pruned + cleaned, the row still flips to archived, and
+/// restore for that row will fail with `archive_missing`.
 #[tauri::command]
 #[specta::specta]
-pub async fn archive_workstream(
-    state: State<'_, AppState>,
-    id: String,
-    discard: bool,
-) -> CmdResult<()> {
+pub async fn archive_workstream(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let item = load_item(&state, &id).await?;
 
-    // Tear down any live agent sessions for this workstream BEFORE removing the
-    // worktree. Otherwise the claude process keeps running against a deleted cwd
-    // and its driver + forwarder task leak (they only exit on the process's own
-    // `Exited` event, which archive never triggers). Kill each and wait — bounded
-    // — for the forwarder to drop it from the live registry.
+    // Tear down any live agent sessions for this workstream BEFORE moving the
+    // worktree. Otherwise the claude process keeps running against a stale
+    // cwd and its driver + forwarder task leak (they only exit on the
+    // process's own `Exited` event, which archive never triggers). Kill each
+    // and wait — bounded — for the forwarder to drop it from the live
+    // registry.
     let sessions = {
         let id = id.clone();
         db_task(state.db.clone(), move |db| db.list_sessions(&id))
@@ -342,28 +342,14 @@ pub async fn archive_workstream(
         .require(BinaryKind::Git)
         .await
         .map_err(AppError::from)?;
-    let policy = if discard {
-        RemovePolicy::ForceDiscard
-    } else {
-        RemovePolicy::Safe
-    };
+    let project_path = Path::new(&item.project_path);
     let worktree_path = Path::new(&item.worktree_path);
-    // A path that exists without a `.git` entry is a husk left behind by a
-    // partial teardown (see worktree::is_live_worktree). Treat it as missing
-    // for the gate and the uninit pass — ensure_removable can't read it, and
-    // thoughts_uninit has nothing to unmap. `WorktreeManager::remove` will
-    // prune the registration and rm -rf the dir.
+    let archive_path = archive_dir_for(project_path, &item.slug);
     let live = worktree::is_live_worktree(worktree_path);
 
-    // Safe gate FIRST — `thoughts uninit` tears down the worktree's links,
-    // so it must not run before we know the removal will be allowed.
-    if policy == RemovePolicy::Safe && live {
-        worktree::ensure_removable(worktree_path, &item.base_branch, &item.branch)
-            .map_err(AppError::from)?;
-    }
-
-    // CLI-first teardown: uninit removes the thoughts/ links and the
-    // worktree's repoMappings entry. Direct mapping edit is the fallback.
+    // Uninit so the worktree's absolute-path symlinks + repoMappings don't
+    // accumulate stale entries pointing at the archive location. Restore
+    // re-provisions from scratch. Direct mapping removal is the fallback.
     let mut unmapped = false;
     if live {
         match HyprCli::new(&state.binaries)
@@ -375,20 +361,17 @@ pub async fn archive_workstream(
         }
     }
 
-    let delete_branch = state.settings.get().await.git.delete_branch_on_archive;
-    state
+    let moved = state
         .worktrees
-        .remove(
-            &git,
-            Path::new(&item.project_path),
-            worktree_path,
-            &item.branch,
-            &item.base_branch,
-            policy,
-            delete_branch,
-        )
+        .archive(&git, project_path, worktree_path, &archive_path)
         .await
         .map_err(AppError::from)?;
+    if moved {
+        // Per-clone exclude — written once per project, idempotent.
+        if let Err(e) = worktree::ensure_archive_excluded(project_path) {
+            log::warn!("could not write .git/info/exclude for archive: {e}");
+        }
+    }
 
     if !unmapped {
         if let Err(e) = thoughts_links::remove_worktree_mapping(state.config.path(), worktree_path)
@@ -399,6 +382,169 @@ pub async fn archive_workstream(
     state.config.invalidate().await;
 
     db_task(state.db.clone(), move |db| db.archive_workstream(&id)).await
+}
+
+/// View shape for the archive history view. `archive_exists` flags rows
+/// whose backup directory was deleted out-of-band (restore would fail; UI
+/// surfaces "delete permanently" as the only action).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivedWorkstreamView {
+    pub item: Workstream,
+    /// `<project>/archived-contexts/<slug>` — the on-disk backup path.
+    pub archive_path: String,
+    pub archive_exists: bool,
+}
+
+/// All archived workstreams across every project, newest-first.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_archived_workstreams(
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<ArchivedWorkstreamView>> {
+    let items = db_task(state.db.clone(), |db| db.list_archived_workstreams()).await?;
+    blocking("list_archived", move || {
+        items
+            .into_iter()
+            .map(|item| {
+                let archive_path = archive_dir_for(Path::new(&item.project_path), &item.slug);
+                let archive_exists = archive_path.exists();
+                ArchivedWorkstreamView {
+                    archive_path: archive_path.display().to_string(),
+                    archive_exists,
+                    item,
+                }
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+}
+
+/// Move an archived workstream back to its original path and flip the row
+/// to `active`. Fails with `restore_target_occupied` when something has
+/// taken the original `worktree_path` since archive (e.g. a new workstream
+/// reused the slug), and `archive_missing` if the backup directory was
+/// deleted out-of-band.
+#[tauri::command]
+#[specta::specta]
+pub async fn restore_workstream(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<WorkstreamView> {
+    let item = load_item(&state, &id).await?;
+    if item.status != "archived" {
+        return Err(AppError {
+            code: "not_archived".into(),
+            message: format!("{} is not archived.", item.title),
+            remedy: None,
+        });
+    }
+    let project_path = Path::new(&item.project_path);
+    let worktree_path = Path::new(&item.worktree_path);
+    let archive_path = archive_dir_for(project_path, &item.slug);
+
+    if !archive_path.exists() {
+        return Err(AppError {
+            code: "archive_missing".into(),
+            message: format!(
+                "The backup directory for this workstream is gone ({}).",
+                archive_path.display()
+            ),
+            remedy: Some("Delete the archived row to remove it from the list.".into()),
+        });
+    }
+    if worktree_path.exists() {
+        return Err(AppError {
+            code: "restore_target_occupied".into(),
+            message: format!(
+                "Another workstream took the original path ({}).",
+                worktree_path.display()
+            ),
+            remedy: Some(
+                "Move or archive the workstream at that path, then try again.".into(),
+            ),
+        });
+    }
+
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+    state
+        .worktrees
+        .restore(&git, project_path, &archive_path, worktree_path)
+        .await
+        .map_err(AppError::from)?;
+
+    // Re-provision thoughts: links + repoMappings. Best-effort — restore is
+    // still useful with broken links (the user sees the broken-link badge
+    // and can hit Reprovision), but the common path should produce a fully
+    // working worktree.
+    let effective = effective_for(&state, &item.project_path).await?;
+    let link = match thoughts_links::provision_thoughts(worktree_path, &effective) {
+        Ok(link) => Some(link),
+        Err(e) => {
+            log::warn!("thoughts re-provision after restore failed: {e}");
+            None
+        }
+    };
+    if let Some(mapped) = effective.mapped_name.as_deref() {
+        if let Err(e) = thoughts_links::add_worktree_mapping(
+            state.config.path(),
+            worktree_path,
+            mapped,
+            effective.profile_name.as_deref(),
+        ) {
+            log::warn!("could not re-add worktree mapping after restore: {e}");
+        }
+    }
+    state.config.invalidate().await;
+
+    let id_for_db = id.clone();
+    db_task(state.db.clone(), move |db| {
+        db.unarchive_workstream(&id_for_db)
+    })
+    .await?;
+
+    let item = load_item(&state, &id).await?;
+    Ok(item_view(item, link))
+}
+
+/// Permanent delete: remove the archive directory, prune git's worktree
+/// registry, optionally drop the branch (per `git.delete_branch_on_archive`,
+/// which now governs the *permanent delete* side of the archive lifecycle),
+/// and DELETE the workstream row.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_archived_workstream(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<()> {
+    let item = load_item(&state, &id).await?;
+    if item.status != "archived" {
+        return Err(AppError {
+            code: "not_archived".into(),
+            message: format!("{} is not archived.", item.title),
+            remedy: Some("Archive it first.".into()),
+        });
+    }
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+    let project_path = Path::new(&item.project_path);
+    let archive_path = archive_dir_for(project_path, &item.slug);
+    let delete_branch = state.settings.get().await.git.delete_branch_on_archive;
+
+    state
+        .worktrees
+        .purge_archive(&git, project_path, &archive_path, &item.branch, delete_branch)
+        .await
+        .map_err(AppError::from)?;
+
+    db_task(state.db.clone(), move |db| db.delete_workstream(&id)).await
 }
 
 /// Re-create broken thoughts links (status shows `broken` after e.g. a moved

@@ -125,6 +125,26 @@ function GitBranchIcon() {
   );
 }
 
+function ArchiveIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="4" rx="1" />
+      <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+      <path d="M10 12h4" />
+    </svg>
+  );
+}
+
 function SettingsIcon({ size = 18 }: { size?: number }) {
   return (
     <svg
@@ -415,7 +435,7 @@ export function Root() {
     if (canGoBack) router.history.back();
     else fallback();
   };
-  const toggleNav = (target: "/library" | "/settings") => {
+  const toggleNav = (target: "/library" | "/settings" | "/archive") => {
     if (pathname.startsWith(target)) closeOrBack(() => void navigate({ to: "/" }));
     else void navigate({ to: target });
   };
@@ -449,10 +469,10 @@ export function Root() {
     [currentProjectPath, activeWorkstreamId, navigate],
   );
 
-  // Archive-on-merge: when the active workstream's PR is observed merged and the
-  // setting is on, archive it automatically. Force-discard since the work has
-  // landed remotely (the local branch reads as "unpushed" vs the un-pulled
-  // base, so a Safe archive would always refuse). Guarded so it fires once.
+  // Archive-on-merge: when the active workstream's PR is observed merged and
+  // the setting is on, archive it automatically. Archive is non-destructive
+  // (the worktree moves to archived-contexts/, branch is preserved), so no
+  // discard concern. Guarded so it fires once.
   const archiveOnMerge = bootstrap.data?.settings.git?.archiveOnMerge ?? false;
   const autoArchive = useArchiveWorkstream();
   const autoArchivedRef = useRef<Set<string>>(new Set());
@@ -468,7 +488,7 @@ export function Root() {
     autoArchivedRef.current.add(id);
     const projectPath = activeWorkstream.item.projectPath;
     autoArchive.mutate(
-      { id, discard: true },
+      { id },
       { onSuccess: () => dismissToProject(projectPath, id) },
     );
   }, [archiveOnMerge, activeWorkstream, activePr.data?.state, autoArchive, dismissToProject]);
@@ -877,15 +897,26 @@ export function Root() {
             >
               <BookIcon size={18} />
             </button>
-            <button
-              type="button"
-              onClick={() => toggleNav("/settings")}
-              className={footerIconClass(pathname.startsWith("/settings"))}
-              title="Settings"
-              aria-label="Settings"
-            >
-              <SettingsIcon />
-            </button>
+            <div className={collapsed ? "contents" : "flex items-center gap-1"}>
+              <button
+                type="button"
+                onClick={() => toggleNav("/archive")}
+                className={footerIconClass(pathname.startsWith("/archive"))}
+                title="Archive"
+                aria-label="Archive"
+              >
+                <ArchiveIcon />
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleNav("/settings")}
+                className={footerIconClass(pathname.startsWith("/settings"))}
+                title="Settings"
+                aria-label="Settings"
+              >
+                <SettingsIcon />
+              </button>
+            </div>
           </div>
         </div>
         </aside>
