@@ -59,6 +59,17 @@ pub enum ParsedLine {
         /// "context window fill" the UI's context meter shows.
         context_tokens: Option<u32>,
     },
+    /// `{"type":"system","subtype":"compact_boundary",...}` — claude auto- or
+    /// manually compacted the conversation; the next assistant turn runs on the
+    /// post-compact summary. Surfaced so a silent compaction stretch is visible
+    /// in the transcript instead of looking like a stuck turn.
+    CompactBoundary {
+        /// "auto" (claude triggered it) or "manual" (a `/compact` slash command).
+        /// Unrecognized values pass through verbatim.
+        trigger: String,
+        /// Token count just before the compact ran, when reported.
+        pre_tokens: Option<u32>,
+    },
     /// A line we don't model — kept verbatim so the driver can log it.
     Unknown { raw: String },
 }
@@ -100,16 +111,28 @@ pub fn parse_line(line: &str) -> ParsedLine {
     match v.get("type").and_then(Value::as_str) {
         Some("system") => {
             let subtype = v.get("subtype").and_then(Value::as_str).unwrap_or("");
-            if subtype == "init" {
-                ParsedLine::Init {
+            match subtype {
+                "init" => ParsedLine::Init {
                     claude_session_id: str_field(&v, "session_id"),
                     model: str_field(&v, "model"),
                     tools: string_list(v.get("tools")),
+                },
+                "compact_boundary" => {
+                    let meta = v.get("compact_metadata");
+                    let trigger = meta
+                        .and_then(|m| m.get("trigger"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("auto")
+                        .to_string();
+                    let pre_tokens = meta
+                        .and_then(|m| m.get("pre_tokens"))
+                        .and_then(Value::as_u64)
+                        .map(|n| n.min(u32::MAX as u64) as u32);
+                    ParsedLine::CompactBoundary { trigger, pre_tokens }
                 }
-            } else {
-                ParsedLine::System {
-                    subtype: subtype.to_string(),
-                }
+                other => ParsedLine::System {
+                    subtype: other.to_string(),
+                },
             }
         }
         Some("assistant") => ParsedLine::Assistant {

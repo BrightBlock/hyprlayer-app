@@ -140,6 +140,11 @@ export type TranscriptItem =
       decision: PermissionDecision | null;
     }
   | { kind: "error"; id: string; detail: string; raw: string }
+  /** A compact-boundary marker — claude auto- or manually compacted the
+   *  conversation. Rendered as a thin divider so a silent stretch during compact
+   *  is legible. `trigger` is "auto" or "manual"; `preTokens` is the context
+   *  fill just before the compact, when reported. */
+  | { kind: "compact"; id: string; trigger: string; preTokens: number | null }
   | {
       kind: "exit";
       id: string;
@@ -672,6 +677,25 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       return {
         ...view,
         ...appended(view, (id) => ({ kind: "error", id, detail: event.detail, raw: event.raw })),
+      };
+
+    case "compactBoundary":
+      // claude paused to summarize the conversation. The next assistant turn
+      // resumes on the post-compact summary; close any open prose block so the
+      // divider doesn't land mid-stream. Busy state is unchanged: a turn that
+      // was in flight stays in flight until its own `result`/`turnDone` lands.
+      return {
+        ...view,
+        ...appended(
+          view,
+          (id) => ({
+            kind: "compact",
+            id,
+            trigger: event.trigger,
+            preTokens: event.preTokens,
+          }),
+          true,
+        ),
       };
 
     default:

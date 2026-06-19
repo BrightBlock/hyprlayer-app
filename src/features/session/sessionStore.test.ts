@@ -19,7 +19,17 @@ const h = vi.hoisted(() => {
   });
   const sendUserMessage = vi.fn(async () => ({ status: "ok", data: null }));
   const resumeSession = vi.fn(async () => ({ status: "ok", data: {} }));
-  return { FakeChannel, state, startStageSession, sendUserMessage, resumeSession };
+  const interruptSession = vi.fn(async () => ({ status: "ok", data: null }));
+  const killSession = vi.fn(async () => ({ status: "ok", data: null }));
+  return {
+    FakeChannel,
+    state,
+    startStageSession,
+    sendUserMessage,
+    resumeSession,
+    interruptSession,
+    killSession,
+  };
 });
 
 vi.mock("@tauri-apps/api/core", () => ({ Channel: h.FakeChannel }));
@@ -28,13 +38,14 @@ vi.mock("../../lib/bindings", () => ({
     startStageSession: h.startStageSession,
     sendUserMessage: h.sendUserMessage,
     resumeSession: h.resumeSession,
+    interruptSession: h.interruptSession,
+    killSession: h.killSession,
   },
 }));
 
 // Imported after the mocks so the store binds to them.
-const { startSession, sendMessage, cancelQueuedMessage, useSessionStore } = await import(
-  "./sessionStore"
-);
+const { startSession, sendMessage, cancelQueuedMessage, stopSession, useSessionStore } =
+  await import("./sessionStore");
 
 const INIT: SessionEvent = { kind: "init", claudeSessionId: "c1", model: "m" };
 const TURN_DONE: SessionEvent = {
@@ -67,6 +78,8 @@ beforeEach(() => {
   h.startStageSession.mockClear();
   h.sendUserMessage.mockClear();
   h.resumeSession.mockClear();
+  h.interruptSession.mockClear();
+  h.killSession.mockClear();
   h.state.lastChannel = null;
 });
 
@@ -116,5 +129,66 @@ describe("conversation steering (mid-turn message queue)", () => {
 
     cancelQueuedMessage(id, 1);
     expect(queued(id)).toEqual(["keep"]);
+  });
+});
+
+describe("stopSession (interrupt → kill escalation)", () => {
+  it("interrupts only when claude responds before the watchdog fires", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await startBusySession();
+      emit(INIT); // streaming → isWorking true → watchdog will arm
+
+      const done = stopSession(id);
+      // The graceful interrupt is sent immediately…
+      expect(h.interruptSession).toHaveBeenCalledWith(id);
+      // …then claude acks by emitting a turnDone, un-busying the session.
+      emit(TURN_DONE);
+      await vi.runAllTimersAsync();
+      await done;
+
+      // No escalation: the watchdog observed isWorking flip false in time.
+      expect(h.killSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("escalates to killSession when claude doesn't ack within the grace window", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await startBusySession();
+      emit(INIT); // streaming → isWorking true
+
+      const done = stopSession(id);
+      expect(h.interruptSession).toHaveBeenCalledWith(id);
+      // Claude never emits a result: drive past the grace window so the watchdog
+      // gives up and the hard kill fires.
+      await vi.runAllTimersAsync();
+      await done;
+
+      expect(h.killSession).toHaveBeenCalledWith(id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still kills when the interrupt itself fails to deliver", async () => {
+    vi.useFakeTimers();
+    try {
+      // A wedged session whose stdin is gone — interrupt rejects, but we still
+      // want the kill to land so the user isn't stuck.
+      h.interruptSession.mockRejectedValueOnce(new Error("stdin closed"));
+      const id = await startBusySession();
+      emit(INIT);
+
+      const done = stopSession(id);
+      await vi.runAllTimersAsync();
+      await done;
+
+      expect(h.killSession).toHaveBeenCalledWith(id);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

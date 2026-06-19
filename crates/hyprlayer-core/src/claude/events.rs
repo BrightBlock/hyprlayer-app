@@ -119,6 +119,14 @@ pub enum SessionEvent {
         num_turns: Option<u32>,
         context_tokens: Option<u32>,
     },
+    /// claude auto- or manually compacted the conversation. The transcript
+    /// renders a divider so a silent compaction stretch is legible instead of
+    /// looking like a stuck turn. `trigger` is "auto" or "manual"; `pre_tokens`
+    /// is the context fill just before the compact, when reported.
+    CompactBoundary {
+        trigger: String,
+        pre_tokens: Option<u32>,
+    },
     /// An unparseable / unknown stdout line — surfaced, never fatal.
     ProtocolError { detail: String, raw: String },
     /// The process ended. Terminal: no further events for this session.
@@ -145,6 +153,7 @@ impl SessionEvent {
             SessionEvent::QuestionAsk { .. } => "questionAsk",
             SessionEvent::Usage { .. } => "usage",
             SessionEvent::TurnDone { .. } => "turnDone",
+            SessionEvent::CompactBoundary { .. } => "compactBoundary",
             SessionEvent::ProtocolError { .. } => "protocolError",
             SessionEvent::Exited { .. } => "exited",
         }

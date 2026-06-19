@@ -151,6 +151,40 @@ fn malformed_permission_request_is_unknown_not_an_empty_card() {
 }
 
 #[test]
+fn parses_compact_boundary_with_metadata() {
+    // Auto-compaction with token count surfaces both fields.
+    let auto = r#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"auto","pre_tokens":182431},"session_id":"s1"}"#;
+    match parse_line(auto) {
+        ParsedLine::CompactBoundary { trigger, pre_tokens } => {
+            assert_eq!(trigger, "auto");
+            assert_eq!(pre_tokens, Some(182_431));
+        }
+        other => panic!("expected CompactBoundary, got {other:?}"),
+    }
+
+    // Manual `/compact` with no token count is still a valid boundary.
+    let manual = r#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual"}}"#;
+    match parse_line(manual) {
+        ParsedLine::CompactBoundary { trigger, pre_tokens } => {
+            assert_eq!(trigger, "manual");
+            assert_eq!(pre_tokens, None);
+        }
+        other => panic!("expected CompactBoundary, got {other:?}"),
+    }
+
+    // Missing metadata entirely falls back to "auto" with no token count, rather
+    // than dropping the event — the divider still draws, even if unlabelled.
+    let bare = r#"{"type":"system","subtype":"compact_boundary"}"#;
+    match parse_line(bare) {
+        ParsedLine::CompactBoundary { trigger, pre_tokens } => {
+            assert_eq!(trigger, "auto");
+            assert_eq!(pre_tokens, None);
+        }
+        other => panic!("expected CompactBoundary, got {other:?}"),
+    }
+}
+
+#[test]
 fn outbound_shapes_are_well_formed() {
     use hyprlayer_core::claude::protocol::{
         control_request_json, permission_response_json, user_turn_json,

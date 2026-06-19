@@ -746,6 +746,13 @@ export type SessionEvent =
  *  fill (input tokens in context for the turn) for the UI's context meter.
  */
 { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null } | 
+/**
+ *  claude auto- or manually compacted the conversation. The transcript
+ *  renders a divider so a silent compaction stretch is legible instead of
+ *  looking like a stuck turn. `trigger` is "auto" or "manual"; `pre_tokens`
+ *  is the context fill just before the compact, when reported.
+ */
+{ kind: "compactBoundary"; trigger: string; preTokens: number | null } | 
 /**  An unparseable / unknown stdout line — surfaced, never fatal. */
 { kind: "protocolError"; detail: string; raw: string } | 
 /**  The process ended. Terminal: no further events for this session. */

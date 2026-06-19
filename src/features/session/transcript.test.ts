@@ -468,6 +468,20 @@ describe("turn + exit lifecycle", () => {
     expect(view.items[0]).toMatchObject({ kind: "error", detail: "bad line" });
     expect(view.state).toBe("running");
   });
+
+  it("compactBoundary appends a divider, closes the open assistant, and keeps the turn streaming", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "partialText", text: "thinking…", parentId: null });
+    expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: true });
+    view = reduceEvent(view, { kind: "compactBoundary", trigger: "auto", preTokens: 182_431 });
+    // The open assistant block is closed so the divider doesn't land mid-stream,
+    // but a turn that was in flight (`streaming: true`) stays in flight — the
+    // post-compact turn keeps the spinner alive until its own `turnDone`.
+    expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: false });
+    expect(view.items[1]).toMatchObject({ kind: "compact", trigger: "auto", preTokens: 182_431 });
+    expect(view.streaming).toBe(true);
+    expect(view.state).toBe("running");
+  });
 });
 
 describe("connecting state (leaves 'starting' on first sign of life)", () => {

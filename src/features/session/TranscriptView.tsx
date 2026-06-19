@@ -12,6 +12,7 @@ import {
   baseName,
   editDiffFromTool,
   formatElapsed,
+  formatTokens,
   prettyToolInput,
   resultPreview,
   toolFilePath,
@@ -435,6 +436,27 @@ function exitRemedy(stderrTail: string): string | null {
   return null;
 }
 
+/** A thin horizontal divider marking where claude paused to compact the
+ *  conversation — auto- or manually. Without this row a long compact looks like
+ *  the session went silent (no events fire while the summary is generated). */
+function CompactDivider({ item }: { item: Extract<TranscriptItem, { kind: "compact" }> }) {
+  const label = item.trigger === "manual" ? "Conversation compacted" : "Conversation auto-compacted";
+  const tokens = item.preTokens != null ? ` · ${formatTokens(item.preTokens)} before` : "";
+  return (
+    <div
+      className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-ink-dim/70"
+      title="claude summarized the prior turns; the next turn continues on the summary."
+    >
+      <span className="h-px flex-1 bg-edge" aria-hidden />
+      <span className="shrink-0">
+        {label}
+        {tokens}
+      </span>
+      <span className="h-px flex-1 bg-edge" aria-hidden />
+    </div>
+  );
+}
+
 function ExitNotice({ item }: { item: Extract<TranscriptItem, { kind: "exit" }> }) {
   const bad = item.outcome === "crashed" || item.outcome === "spawn_failed";
   const remedy = bad ? exitRemedy(item.stderrTail) : null;
@@ -597,6 +619,8 @@ function renderSingle(item: TranscriptItem, busy: boolean, permission: Permissio
       return <PermissionCard item={item} handlers={permission} />;
     case "error":
       return <ProtocolErrorBlock detail={item.detail} raw={item.raw} />;
+    case "compact":
+      return <CompactDivider item={item} />;
     case "exit":
       return <ExitNotice item={item} />;
     default:

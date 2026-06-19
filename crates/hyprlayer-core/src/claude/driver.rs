@@ -516,6 +516,9 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             num_turns,
             context_tokens,
         }],
+        ParsedLine::CompactBoundary { trigger, pre_tokens } => {
+            vec![SessionEvent::CompactBoundary { trigger, pre_tokens }]
+        }
         ParsedLine::Unknown { raw } => vec![SessionEvent::ProtocolError {
             detail: "unrecognized stream-json line".into(),
             raw,

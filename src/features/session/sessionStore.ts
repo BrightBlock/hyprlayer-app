@@ -462,21 +462,55 @@ export async function interruptSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Stop the current turn for the composer's stop button — and ONLY the turn: the
- * session stays alive. Claude's control-protocol interrupt is reliable here; it
- * acks, aborts the turn (emitting a result that un-busies the session), and
- * stays ready for the next message. We deliberately do NOT escalate to a process
- * kill: that ends the whole session, which is not what "stop the turn" means. A
- * detached session has no live turn to stop.
+ * Stop the current turn for the composer's stop button. Sends claude's graceful
+ * control-protocol interrupt first; if claude can't respond (model call wedged,
+ * a tool hung mid-execution, etc.) and the session is still actively computing
+ * after a short grace window, escalates to a hard kill so the user is never
+ * stuck with a frozen turn and no way out. A detached session has no live turn
+ * to stop. Sessions parked on a permission/question are already un-working, so
+ * the watchdog resolves immediately and we don't kill — the interrupt still
+ * delivers when they're answered.
  */
+const STOP_ESCALATION_MS = 3000;
 export async function stopSession(sessionId: string): Promise<void> {
   if (!channels.has(sessionId)) return;
   try {
     await interruptSession(sessionId);
   } catch {
-    // Interrupt couldn't be delivered (stdin already closed, etc.). The session
-    // is left as-is rather than killed — the user can retry or send a message.
+    // Interrupt couldn't be delivered (stdin already closed, etc.). Fall through
+    // to the watchdog: if the session is still working, the kill below ends it.
   }
+  const settled = await waitForView(sessionId, (v) => !isWorking(v), STOP_ESCALATION_MS);
+  if (settled) return;
+  try {
+    await killSession(sessionId);
+  } catch {
+    // Best-effort hard stop; the user can't do anything more from the composer.
+  }
+}
+
+/** Resolve as soon as the session's view matches `predicate`, or `false` if the
+ *  timeout fires first. Used by [`stopSession`] to watch for the turn settling
+ *  before escalating to a kill. */
+function waitForView(
+  sessionId: string,
+  predicate: (view: SessionEntry) => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
+  const initial = entryOf(sessionId);
+  if (!initial || predicate(initial)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (result: boolean) => {
+      clearTimeout(timer);
+      unsub();
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    const unsub = useSessionStore.subscribe((state) => {
+      const entry = state.sessions[sessionId];
+      if (!entry || predicate(entry)) finish(true);
+    });
+  });
 }
 
 /** Hard-stop the session (kills the process tree). A detached (restored, not
