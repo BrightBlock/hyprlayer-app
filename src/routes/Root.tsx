@@ -222,10 +222,11 @@ function WorkstreamRowChip({ view }: { view: WorkstreamView }) {
 
 /** A row/trigger icon for a detected app: its real rendered icon when the
  *  backend could rasterize one, otherwise a glyph standing in for its kind.
- *  App icons are full-bleed squircles, so they read heavier than the thin
- *  stroke glyphs beside them — render them at the exact target size (no
- *  upscaling) so they sit at the same optical weight. */
-function appIcon(app: EditorTarget, size = 16): ReactNode {
+ *  Rasterized macOS app icons sit inside a full-bleed squircle with built-in
+ *  padding, so at the bar's nominal 18px the visible glyph reads ~14px — too
+ *  light next to the stroke icons. Render the squircle at 22px so the glyph
+ *  inside lands at the same optical weight as HomeIcon/PanelRightIcon. */
+function appIcon(app: EditorTarget, size = 22): ReactNode {
   if (app.iconDataUrl) {
     return (
       <img
@@ -254,30 +255,39 @@ function OpenInMenu({ dir }: { dir: string }) {
   const [open, setOpen] = useState(false);
   const targets = useEditorTargets();
 
+  // The default editor (what the trigger wears) is also pulled to the top of
+  // the dropdown so row 1 — and the "1" accelerator — open the user's primary
+  // editor, instead of whichever app the backend happened to list first.
+  const defaultApp = useMemo(() => {
+    const apps = targets.data ?? [];
+    return apps.find((a) => a.kind === "editor") ?? apps.find((a) => a.id !== "files");
+  }, [targets.data]);
+
   const items = useMemo(() => {
-    const apps = (targets.data ?? []).map((app) => ({
-      key: app.id,
-      label: app.name,
-      icon: appIcon(app),
-      run: (): void => {
-        // Best-effort: a wrong/uninstalled handler shouldn't surface a scary
-        // error for a convenience action, but log so failures are debuggable.
-        const p = app.openWith ? openPath(dir, app.openWith) : openPath(dir);
-        void p.catch((e) => console.error(`Open in ${app.name} failed`, e));
-      },
-    }));
+    const apps = targets.data ?? [];
+    const ordered = defaultApp ? [defaultApp, ...apps.filter((a) => a.id !== defaultApp.id)] : apps;
     return [
-      ...apps,
+      ...ordered.map((app) => ({
+        key: app.id,
+        label: app.name,
+        icon: appIcon(app),
+        run: (): void => {
+          // Best-effort: a wrong/uninstalled handler shouldn't surface a scary
+          // error for a convenience action, but log so failures are debuggable.
+          const p = app.openWith ? openPath(dir, app.openWith) : openPath(dir);
+          void p.catch((e) => console.error(`Open in ${app.name} failed`, e));
+        },
+      })),
       {
         key: "copy-path",
         label: "Copy path",
-        icon: <ClipboardIcon size={16} />,
+        icon: <ClipboardIcon size={20} />,
         run: (): void => {
           void navigator.clipboard.writeText(dir);
         },
       },
     ];
-  }, [targets.data, dir]);
+  }, [targets.data, defaultApp, dir]);
 
   // While open, number keys (1–9) trigger the matching row, mirroring the
   // accelerators shown at the right of each item; Escape closes.
@@ -299,24 +309,26 @@ function OpenInMenu({ dir }: { dir: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, items]);
 
-  // The trigger wears the default editor's icon (first detected editor, else
-  // the first openable app), Conductor-style, so it reads as "open in editor".
-  const apps = targets.data ?? [];
-  const defaultApp = apps.find((a) => a.kind === "editor") ?? apps.find((a) => a.id !== "files");
-
+  // The trigger wears the default editor's icon (computed above), Conductor-
+  // style, so it reads as "open in editor".
   return (
     <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-7 items-center gap-0.5 rounded-md pl-1.5 pr-1 text-ink-dim hover:bg-edge/60 hover:text-ink"
+        className="inline-flex h-7 items-center rounded-md pr-1 text-ink-dim hover:bg-edge/60 hover:text-ink"
         title="Open in editor or terminal"
         aria-label="Open working directory in editor or terminal"
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        {defaultApp ? appIcon(defaultApp, 16) : <CodeIcon size={16} />}
-        <ChevronDownIcon size={12} className="text-ink-dim/80" />
+        {/* Icon sits in the same h-7 w-7 square as the right-sidebar button so
+            the two bar controls share a footprint; the chevron is a tight
+            sidecar that just labels the box as a menu trigger. */}
+        <span className="inline-flex h-7 w-7 items-center justify-center">
+          {defaultApp ? appIcon(defaultApp, 18) : <CodeIcon size={18} />}
+        </span>
+        <ChevronDownIcon size={12} className="-ml-1 text-ink-dim/80" />
       </button>
       {open && (
         <>
