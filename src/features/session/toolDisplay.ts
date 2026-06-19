@@ -242,3 +242,29 @@ export function formatElapsed(ms: number): string {
   }
   return `${Math.floor(totalMin / 60)}h ${String(totalMin % 60).padStart(2, "0")}m`;
 }
+
+/**
+ * A short relative-time label for a past instant, Claude-Code-style:
+ * `just now`, `15s ago`, `4m ago`, `2h ago`, `3d ago`, `2w ago`, `5mo ago`,
+ * `1y ago`. `from` defaults to a fresh `Date.now()` reading; pass it explicitly
+ * in tests for determinism. Falls back to `just now` for the future or for
+ * invalid values (a backfilled-from-null timestamp).
+ */
+export function formatRelativeTime(epochMs: number | null, from: number = Date.now()): string {
+  if (epochMs === null || !Number.isFinite(epochMs)) return "just now";
+  const seconds = Math.max(0, Math.floor((from - epochMs) / 1000));
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  const years = Math.floor(days / 365);
+  return `${years}y ago`;
+}

@@ -113,6 +113,11 @@ export type TranscriptItem =
       /** Files/screenshots attached to this turn — rendered as pin cards, while
        *  the path the agent actually received stays out of the bubble. */
       attachments: Attachment[];
+      /** Epoch ms the user sent this turn — stamped optimistically by
+       *  `addUserMessage`, or backfilled from the persisted event's `createdAt`
+       *  on replay. `null` only for legacy rows logged before this field
+       *  existed; the UI falls back to the session's start time in that case. */
+      createdAt: number | null;
     }
   | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
   | ({ kind: "thinking"; id: string; text: string } & Parented)
@@ -424,12 +429,21 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
     case "userMessage":
       // Persisted user turn, seen only when replaying the log on restart (the
       // backend doesn't forward it live — the optimistic `addUserMessage` already
-      // showed it). Rebuilds the user's side of the conversation.
+      // showed it). Rebuilds the user's side of the conversation. `createdAt` is
+      // null here and backfilled by the replay loop from the stored event's
+      // `createdAt` column (the reducer is pure and clock-free).
       return {
         ...view,
         ...appended(
           view,
-          (id) => ({ kind: "user", id, text: event.text, stage: event.stage, attachments: [] }),
+          (id) => ({
+            kind: "user",
+            id,
+            text: event.text,
+            stage: event.stage,
+            attachments: [],
+            createdAt: null,
+          }),
           true,
         ),
         streaming: true,
@@ -705,16 +719,23 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
 
 /* ---------------------------- frontend actions --------------------------- */
 
-/** Append the user's turn optimistically and flag a turn as in flight. */
+/** Append the user's turn optimistically and flag a turn as in flight. The
+ *  caller passes `createdAt` (epoch ms) so the reducer stays clock-free and
+ *  tests stay deterministic — the live path passes `Date.now()`. */
 export function addUserMessage(
   view: SessionView,
   text: string,
   stage: string | null,
   attachments: Attachment[] = [],
+  createdAt: number | null = null,
 ): SessionView {
   return {
     ...view,
-    ...appended(view, (id) => ({ kind: "user", id, text, stage, attachments }), true),
+    ...appended(
+      view,
+      (id) => ({ kind: "user", id, text, stage, attachments, createdAt }),
+      true,
+    ),
     streaming: true,
   };
 }

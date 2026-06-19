@@ -12,7 +12,7 @@ use std::sync::Arc;
 use hyprlayer_core::claude::{ClaudeDriver, PermissionMode, SessionEvent, SpawnConfig};
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
-use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent};
+use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent, Workstream};
 use tauri::ipc::Channel;
 use tauri::State;
 use tauri_specta::Event;
@@ -57,6 +57,27 @@ async fn live_driver(state: &AppState, session_id: &str) -> CmdResult<Arc<Claude
         .get(session_id)
         .await
         .ok_or_else(|| session_not_found(session_id))
+}
+
+/// Fetch a persisted session by id, or fail with the standard not-found error —
+/// the DB twin of [`live_driver`], shared by the commands that mutate a session.
+async fn load_session(state: &AppState, id: &str) -> CmdResult<Session> {
+    let owned = id.to_string();
+    db_task(state.db.clone(), move |db| db.get_session(&owned))
+        .await?
+        .ok_or_else(|| session_not_found(id))
+}
+
+/// Fetch a workstream by id, or fail.
+async fn load_workstream(state: &AppState, id: &str) -> CmdResult<Workstream> {
+    let owned = id.to_string();
+    db_task(state.db.clone(), move |db| db.get_workstream(&owned))
+        .await?
+        .ok_or_else(|| AppError {
+            code: "workstream_not_found".into(),
+            message: format!("No workstream with id {id}"),
+            remedy: None,
+        })
 }
 
 /// Everything `launch_session` needs that isn't shared. `resume` toggles
@@ -387,6 +408,97 @@ pub async fn restart_session(
         },
     )
     .await?;
+
+    Ok(session)
+}
+
+/// Rewind a session to the N-th (1-based) user turn, discarding everything
+/// after it: kill the live driver, delete persisted events at the cutoff seq
+/// onward, then re-spawn with `--resume` so the same conversation can continue
+/// — claude's underlying history is unchanged (the SDK has no "rewind"
+/// control), but our UI and the persisted log match the truncated state, and
+/// the user can re-prompt from that point. `user_turn` is the 1-based ordinal
+/// of the clicked user bubble (i.e. the N-th `userMessage` event). Returns
+/// the existing [`Session`].
+#[tauri::command]
+#[specta::specta]
+pub async fn rewind_session(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    user_turn: u32,
+    on_event: Channel<SessionEvent>,
+) -> CmdResult<Session> {
+    let session = load_session(&state, &session_id).await?;
+
+    // Resolve the cutoff (the seq of the N-th userMessage). Everything at or
+    // after this seq is dropped — the target user turn is removed, so the
+    // composer can re-send a (possibly edited) version of it.
+    let cutoff = {
+        let id = session.id.clone();
+        let n = user_turn as usize;
+        db_task(state.db.clone(), move |db| db.nth_user_message_seq(&id, n)).await?
+    }
+    .ok_or_else(|| AppError {
+        code: "user_turn_not_found".into(),
+        message: format!("session {session_id} has no user turn #{user_turn}"),
+        remedy: None,
+    })?;
+
+    // Resolve the workstream before any destructive step, so a missing-row error
+    // can't strand us with the log already cut.
+    let ws = load_workstream(&state, &session.workstream_id).await?;
+
+    // Take the live process down before mutating the log so its forwarder can't
+    // race-append events past the truncation point and re-emerge a turn we
+    // dropped.
+    kill_and_await_exit(&state, &session_id).await;
+
+    // Cut the tail, but keep the removed rows in hand: if the re-spawn below
+    // fails, a launch error must not cost the conversation. We restore them and
+    // surface the error rather than leaving a truncated, process-less session.
+    let removed = {
+        let id = session.id.clone();
+        db_task(state.db.clone(), move |db| {
+            db.cut_session_events_from(&id, cutoff)
+        })
+        .await?
+    };
+
+    {
+        let id = session.id.clone();
+        let _ = db_task(state.db.clone(), move |db| {
+            db.set_session_state(&id, "running")
+        })
+        .await;
+    }
+
+    let launched = launch_session(
+        &state,
+        LaunchParams {
+            app,
+            session: session.clone(),
+            project_path: ws.project_path,
+            model: None,
+            effort: None,
+            permission_mode: None,
+            resume: true,
+            start_seq: cutoff,
+            channel: on_event,
+        },
+    )
+    .await;
+
+    if let Err(e) = launched {
+        // Roll the cut back so the session is recoverable via a normal resume.
+        let id = session.id.clone();
+        let _ = db_task(state.db.clone(), move |db| {
+            db.restore_session_events(&id, &removed)?;
+            db.set_session_state(&id, "idle")
+        })
+        .await;
+        return Err(e);
+    }
 
     Ok(session)
 }

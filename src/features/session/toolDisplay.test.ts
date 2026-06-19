@@ -7,6 +7,7 @@ import {
   editDiffFromTool,
   formatCost,
   formatElapsed,
+  formatRelativeTime,
   formatTokens,
   parseToolInput,
   prettyToolInput,
@@ -250,5 +251,30 @@ describe("formatElapsed", () => {
 
   it("clamps negative inputs to zero", () => {
     expect(formatElapsed(-500)).toBe("0.0s");
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const NOW = 1_700_000_000_000;
+  const ago = (ms: number) => NOW - ms;
+
+  it("collapses anything under 10 seconds to 'just now'", () => {
+    expect(formatRelativeTime(ago(0), NOW)).toBe("just now");
+    expect(formatRelativeTime(ago(9_000), NOW)).toBe("just now");
+  });
+
+  it("scales through second, minute, hour, day, week, month, year buckets", () => {
+    expect(formatRelativeTime(ago(45_000), NOW)).toBe("45s ago");
+    expect(formatRelativeTime(ago(4 * 60_000), NOW)).toBe("4m ago");
+    expect(formatRelativeTime(ago(2 * 3_600_000), NOW)).toBe("2h ago");
+    expect(formatRelativeTime(ago(3 * 86_400_000), NOW)).toBe("3d ago");
+    expect(formatRelativeTime(ago(14 * 86_400_000), NOW)).toBe("2w ago");
+    expect(formatRelativeTime(ago(45 * 86_400_000), NOW)).toBe("1mo ago");
+    expect(formatRelativeTime(ago(400 * 86_400_000), NOW)).toBe("1y ago");
+  });
+
+  it("falls back to 'just now' for null and future timestamps", () => {
+    expect(formatRelativeTime(null, NOW)).toBe("just now");
+    expect(formatRelativeTime(NOW + 5_000, NOW)).toBe("just now");
   });
 });

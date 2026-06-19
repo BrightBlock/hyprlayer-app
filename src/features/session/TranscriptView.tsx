@@ -1,7 +1,14 @@
 import { memo, useEffect, useRef, useState } from "react";
 
 import { Button, Spinner } from "../../components/ui";
-import { ChevronRightIcon, ShieldIcon, SparkleIcon, WrenchIcon } from "../../components/icons";
+import {
+  ChevronRightIcon,
+  ClipboardIcon,
+  RewindIcon,
+  ShieldIcon,
+  SparkleIcon,
+  WrenchIcon,
+} from "../../components/icons";
 import { MarkdownPreview } from "../library/MarkdownPreview";
 import { stageLabel } from "./stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
@@ -12,6 +19,7 @@ import {
   baseName,
   editDiffFromTool,
   formatElapsed,
+  formatRelativeTime,
   formatTokens,
   prettyToolInput,
   resultPreview,
@@ -25,19 +33,119 @@ export type PermissionHandlers = {
   onDeny: (requestId: string) => void;
 };
 
+/** Actions reachable from the per-user-message toolbar (copy/rewind).
+ *  Plumbed alongside `PermissionHandlers` so the rendering stays prop-driven
+ *  (no zustand access from the view) and tests can drive the buttons. Rewind
+ *  carries the bubble's text so the host can repopulate the composer with it
+ *  (Claude-Desktop-style: rewinding lands you back on that prompt to edit and
+ *  re-send). */
+export type PromptHandlers = {
+  onRewind: (itemId: string, text: string) => void;
+};
+
 /* -------------------------------- pieces --------------------------------- */
 
+/** A short-lived "Copied!" confirmation under the copy button (Claude-Code
+ *  style). Re-renders the toolbar on tick to fade the label after 1.2s. */
+function useCopyFeedback() {
+  const [copied, setCopied] = useState(false);
+  const trigger = (text: string) => {
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    });
+  };
+  return { copied, trigger };
+}
+
+/**
+ * Re-render a relative-time label on a schedule that matches its precision:
+ * every 10s under a minute, every 30s under an hour, every 5m thereafter.
+ * Avoids waking the React tree on a 1s tick when the label says "2w ago".
+ */
+function useTickingNow(epochMs: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (epochMs === null) return;
+    // A self-rescheduling timeout: each run picks the next delay from the
+    // message's current age, so the cadence widens as it ages past each
+    // boundary (a fresh "5s ago" runs at 10s, a "2w ago" at 5m).
+    let id: number;
+    const schedule = () => {
+      const ageMs = Date.now() - epochMs;
+      const delay = ageMs < 60_000 ? 10_000 : ageMs < 3_600_000 ? 30_000 : 300_000;
+      id = window.setTimeout(() => {
+        setNow(Date.now());
+        schedule();
+      }, delay);
+    };
+    schedule();
+    return () => window.clearTimeout(id);
+  }, [epochMs]);
+  return now;
+}
+
+/** Hover-revealed actions for a user turn — copy text, rewind to here, fork,
+ *  and a relative timestamp — mirroring Claude Desktop's prompt toolbar. */
+function UserMessageToolbar({
+  itemId,
+  text,
+  createdAt,
+  onRewind,
+}: {
+  itemId: string;
+  text: string;
+  createdAt: number | null;
+  onRewind: (id: string, text: string) => void;
+}) {
+  const { copied, trigger } = useCopyFeedback();
+  const now = useTickingNow(createdAt);
+  const rel = createdAt === null ? "" : formatRelativeTime(createdAt, now);
+  const btn =
+    "flex h-6 w-6 cursor-pointer items-center justify-center rounded text-ink-dim opacity-0 transition hover:bg-edge hover:text-ink group-hover:opacity-100";
+  return (
+    <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-ink-dim">
+      <button
+        type="button"
+        onClick={() => trigger(text)}
+        className={btn}
+        title={copied ? "Copied" : "Copy prompt"}
+        aria-label="Copy prompt"
+      >
+        <ClipboardIcon size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={() => onRewind(itemId, text)}
+        className={btn}
+        title="Rewind to here"
+        aria-label="Rewind to here"
+      >
+        <RewindIcon size={12} />
+      </button>
+      {rel && <span className="ml-1 tabular-nums">{rel}</span>}
+    </div>
+  );
+}
+
 function UserMessage({
+  id,
   text,
   stage,
   attachments,
+  createdAt,
+  prompt,
 }: {
+  id: string;
   text: string;
   stage: string | null;
   attachments: Attachment[];
+  createdAt: number | null;
+  prompt: PromptHandlers;
 }) {
   return (
-    <div className="flex justify-end">
+    <div className="group flex flex-col items-end">
       <div className="max-w-[85%] rounded-lg border border-edge bg-panel-2 px-3.5 py-2.5">
         {stage && stage !== "general" && (
           <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-ink-dim">
@@ -49,6 +157,12 @@ function UserMessage({
         )}
         <AttachmentCards attachments={attachments} className={text ? "mt-2" : ""} />
       </div>
+      <UserMessageToolbar
+        itemId={id}
+        text={text}
+        createdAt={createdAt}
+        onRewind={prompt.onRewind}
+      />
     </div>
   );
 }
@@ -603,10 +717,24 @@ function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) 
 }
 
 /** Render one standalone item (no grouping / nesting). */
-function renderSingle(item: TranscriptItem, busy: boolean, permission: PermissionHandlers) {
+function renderSingle(
+  item: TranscriptItem,
+  busy: boolean,
+  permission: PermissionHandlers,
+  prompt: PromptHandlers,
+) {
   switch (item.kind) {
     case "user":
-      return <UserMessage text={item.text} stage={item.stage} attachments={item.attachments} />;
+      return (
+        <UserMessage
+          id={item.id}
+          text={item.text}
+          stage={item.stage}
+          attachments={item.attachments}
+          createdAt={item.createdAt}
+          prompt={prompt}
+        />
+      );
     case "assistant":
       return <AssistantMessage text={item.text} streaming={item.streaming} />;
     case "thinking":
@@ -640,12 +768,14 @@ function SubagentBlock({
   childrenByParent,
   busy,
   permission,
+  prompt,
 }: {
   item: Extract<TranscriptItem, { kind: "tool" }>;
   childItems: TranscriptItem[];
   childrenByParent: ChildMap;
   busy: boolean;
   permission: PermissionHandlers;
+  prompt: PromptHandlers;
 }) {
   const [open, setOpen] = useState(false);
   const summary = toolSummary(item.name, item.input);
@@ -678,6 +808,7 @@ function SubagentBlock({
             childrenByParent={childrenByParent}
             busy={busy}
             permission={permission}
+            prompt={prompt}
           />
           {result && (
             <div>
@@ -699,11 +830,13 @@ function ItemList({
   childrenByParent,
   busy,
   permission,
+  prompt,
 }: {
   items: TranscriptItem[];
   childrenByParent: ChildMap;
   busy: boolean;
   permission: PermissionHandlers;
+  prompt: PromptHandlers;
 }) {
   const hasChildren = (it: TranscriptItem) =>
     it.kind === "tool" && childrenByParent.has(it.toolUseId);
@@ -732,13 +865,14 @@ function ItemList({
                 childrenByParent={childrenByParent}
                 busy={busy}
                 permission={permission}
+                prompt={prompt}
               />
             </div>
           );
         }
         return (
           <div key={item.id} className={gap}>
-            {renderSingle(item, busy, permission)}
+            {renderSingle(item, busy, permission, prompt)}
           </div>
         );
       })}
@@ -757,6 +891,7 @@ type Props = {
    *  drives the bottom-left elapsed counter. */
   workingSince: number | null;
   permission: PermissionHandlers;
+  prompt: PromptHandlers;
 };
 
 export const TranscriptView = memo(function TranscriptView({
@@ -765,6 +900,7 @@ export const TranscriptView = memo(function TranscriptView({
   connecting,
   workingSince,
   permission,
+  prompt,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -814,6 +950,7 @@ export const TranscriptView = memo(function TranscriptView({
           childrenByParent={childrenByParent}
           busy={busy}
           permission={permission}
+          prompt={prompt}
         />
         {connecting && (
           <div className="mt-3 flex items-center gap-2 text-sm text-ink-dim">

@@ -214,6 +214,93 @@ impl Db {
         })
     }
 
+    /// The seq of the `n`-th (1-based) `userMessage` event in this session,
+    /// or `None` if there are fewer than `n` user turns. Shared by rewind/fork:
+    /// the UI knows which user bubble was clicked (ordinal among user items),
+    /// and that maps to the seq of the corresponding persisted event.
+    pub fn nth_user_message_seq(&self, session_id: &str, n: usize) -> Result<Option<i64>> {
+        if n == 0 {
+            return Ok(None);
+        }
+        self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT seq FROM session_events
+                 WHERE session_id = ?1 AND kind = 'userMessage'
+                 ORDER BY seq
+                 LIMIT 1 OFFSET ?2",
+            )?;
+            let mut rows = stmt.query(params![session_id, (n - 1) as i64])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some(row.get(0)?))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    /// Delete every event at `seq >= cutoff` for this session — the rewind
+    /// truncation — and return the removed rows (seq/created_at preserved) so the
+    /// caller can [`restore_session_events`] them if a follow-up step (the
+    /// re-spawn) fails. Read + delete run in one transaction so they can't
+    /// interleave. The caller is expected to have stopped the live driver first;
+    /// appending events for a killed session after this leaves a consistent log.
+    pub fn cut_session_events_from(
+        &self,
+        session_id: &str,
+        cutoff: i64,
+    ) -> Result<Vec<StoredEvent>> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let removed = {
+                let mut stmt = tx.prepare(
+                    "SELECT seq, kind, payload, created_at FROM session_events
+                     WHERE session_id = ?1 AND seq >= ?2 ORDER BY seq",
+                )?;
+                let rows = stmt.query_map(params![session_id, cutoff], |row| {
+                    Ok(StoredEvent {
+                        seq: row.get::<_, i64>("seq")? as f64,
+                        kind: row.get("kind")?,
+                        payload: row.get("payload")?,
+                        created_at: row.get("created_at")?,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            tx.execute(
+                "DELETE FROM session_events WHERE session_id = ?1 AND seq >= ?2",
+                params![session_id, cutoff],
+            )?;
+            tx.commit()?;
+            Ok(removed)
+        })
+    }
+
+    /// Re-insert events removed by [`cut_session_events_from`], verbatim (seq and
+    /// created_at preserved) — the rollback for a rewind whose re-spawn failed,
+    /// so a launch error never costs the conversation tail.
+    pub fn restore_session_events(&self, session_id: &str, events: &[StoredEvent]) -> Result<()> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            {
+                let mut insert = tx.prepare(
+                    "INSERT INTO session_events (session_id, seq, kind, payload, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                )?;
+                for e in events {
+                    insert.execute(params![
+                        session_id,
+                        e.seq as i64,
+                        e.kind,
+                        e.payload,
+                        e.created_at
+                    ])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     /* ----------------------------- Orphan PIDs ---------------------------- */
 
     pub fn record_orphan(&self, pid: i64, session_id: &str) -> Result<()> {
@@ -309,6 +396,89 @@ mod tests {
         assert_eq!(events[1].kind, "assistantText");
 
         assert_eq!(db.list_sessions(&ws.id).unwrap().len(), 1);
+    }
+
+    /// Build a small session whose log alternates user/assistant turns. Used
+    /// by the rewind and fork helper tests below — keeps them parallel.
+    fn seed_dialog(db: &Db, session_id: &str) {
+        db.insert_workstream(crate::store::NewWorkstream {
+            project_path: "/p".into(),
+            title: "t".into(),
+            slug: format!("t-{session_id}"),
+            branch: format!("hyprlayer/t-{session_id}"),
+            worktree_path: "/wt".into(),
+            base_branch: "main".into(),
+        })
+        .unwrap();
+        let ws = db.list_active_workstreams().unwrap().pop().unwrap();
+        db.insert_session(NewSession {
+            id: session_id.into(),
+            workstream_id: ws.id,
+            stage: "general".into(),
+            cwd: "/wt".into(),
+        })
+        .unwrap();
+        for (seq, kind) in [
+            (0, "init"),
+            (1, "userMessage"),
+            (2, "assistantText"),
+            (3, "userMessage"),
+            (4, "assistantText"),
+            (5, "userMessage"),
+            (6, "assistantText"),
+        ] {
+            db.append_session_event(session_id, seq, kind, &format!(r#"{{"kind":"{kind}"}}"#))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn nth_user_message_seq_finds_each_user_turn() {
+        let db = Db::open_in_memory().unwrap();
+        seed_dialog(&db, "s1");
+        assert_eq!(db.nth_user_message_seq("s1", 1).unwrap(), Some(1));
+        assert_eq!(db.nth_user_message_seq("s1", 2).unwrap(), Some(3));
+        assert_eq!(db.nth_user_message_seq("s1", 3).unwrap(), Some(5));
+        assert_eq!(db.nth_user_message_seq("s1", 4).unwrap(), None);
+    }
+
+    #[test]
+    fn cut_drops_everything_from_cutoff_then_restores_verbatim() {
+        let db = Db::open_in_memory().unwrap();
+        seed_dialog(&db, "s1");
+        let kinds = |db: &Db| -> Vec<(i64, String)> {
+            db.session_events("s1")
+                .unwrap()
+                .into_iter()
+                .map(|e| (e.seq as i64, e.kind))
+                .collect()
+        };
+        // Rewind to user turn #2 → cutoff seq 3, remove seqs 3..=6.
+        let removed = db.cut_session_events_from("s1", 3).unwrap();
+        assert_eq!(removed.len(), 4);
+        assert_eq!(removed[0].seq as i64, 3);
+        assert_eq!(
+            kinds(&db),
+            vec![
+                (0, "init".into()),
+                (1, "userMessage".into()),
+                (2, "assistantText".into()),
+            ],
+        );
+        // Rollback (a failed re-spawn) puts the cut tail back exactly as it was.
+        db.restore_session_events("s1", &removed).unwrap();
+        assert_eq!(
+            kinds(&db),
+            vec![
+                (0, "init".into()),
+                (1, "userMessage".into()),
+                (2, "assistantText".into()),
+                (3, "userMessage".into()),
+                (4, "assistantText".into()),
+                (5, "userMessage".into()),
+                (6, "assistantText".into()),
+            ],
+        );
     }
 
     #[test]

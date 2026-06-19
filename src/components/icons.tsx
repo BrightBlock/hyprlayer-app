@@ -236,6 +236,35 @@ export function ClipboardIcon({ size = 13, strokeWidth = 1.8, className }: IconP
   );
 }
 
+/** Curved back-arrow — the "rewind to here" prompt toolbar action. */
+export function RewindIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+    >
+      <path
+        d="M9 14 4 9l5-5"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4 9h9a6 6 0 0 1 6 6v0a6 6 0 0 1-6 6h-3"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** `{ }` — data/config files (json, yaml, toml…). */
 export function BracesIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (

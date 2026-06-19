@@ -38,7 +38,7 @@ import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, suggestedDocKind, typ
 import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
 import { PERMISSION_MODES, permissionModeOption } from "./permissions";
 import { formatTokens } from "./toolDisplay";
-import { TranscriptView, type PermissionHandlers } from "./TranscriptView";
+import { TranscriptView, type PermissionHandlers, type PromptHandlers } from "./TranscriptView";
 import {
   allowForSession,
   answerQuestion,
@@ -47,6 +47,7 @@ import {
   killSession,
   respondPermission,
   restoreSessionIfNeeded,
+  rewindToMessage,
   sendMessage,
   startSession,
   stopSession,
@@ -931,6 +932,18 @@ export function SessionChat({
     onDeny: (rid) => sid && void respondPermission(sid, rid, false, null),
   };
 
+  const prompt: PromptHandlers = {
+    onRewind: (itemId, text) => {
+      if (!sid) return;
+      // Land the user back on the prompt they're rewinding to (Claude-Desktop
+      // behaviour): the composer is repopulated with the original text so they
+      // can edit and re-send, while the backend truncates the conversation in
+      // parallel.
+      onDraftChange(text);
+      void rewindToMessage(sid, itemId);
+    },
+  };
+
   return (
     <div ref={dropRef} className="relative flex min-h-0 flex-1 flex-col">
       {dragOver && (
@@ -948,6 +961,7 @@ export function SessionChat({
           connecting={!session || session.state === "starting"}
           workingSince={session?.workingSince ?? null}
           permission={permission}
+          prompt={prompt}
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-5">

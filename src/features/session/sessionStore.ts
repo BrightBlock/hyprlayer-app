@@ -224,7 +224,13 @@ export async function startSession(args: {
   // Echo the composed prompt (skill command + input) — but NOT the doc/path
   // list the backend appends; those render as pin cards instead, so the agent's
   // raw paths never appear in the user bubble.
-  view = addUserMessage(view, composeStagePrompt(args.stage, args.input), args.stage, attachments);
+  view = addUserMessage(
+    view,
+    composeStagePrompt(args.stage, args.input),
+    args.stage,
+    attachments,
+    Date.now(),
+  );
   setEntry(session.id, {
     ...view,
     workstreamId: args.workstreamId,
@@ -310,6 +316,94 @@ async function restartSession(sessionId: string, mode: string | null): Promise<v
   }
 }
 
+/** The 1-based ordinal of the user-kind item at `itemId` among all user-kind
+ *  items in the session. The backend's rewind/fork commands consume this
+ *  ordinal (mapping it to the N-th `userMessage` event in the persisted log),
+ *  so the frontend doesn't need to know about seqs. Returns 0 if not found —
+ *  callers treat that as "no-op". */
+function userTurnOrdinal(items: SessionEntry["items"], itemId: string): number {
+  let n = 0;
+  for (const item of items) {
+    if (item.kind !== "user") continue;
+    n += 1;
+    if (item.id === itemId) return n;
+  }
+  return 0;
+}
+
+/**
+ * Rewind a session to the user turn identified by `itemId`, dropping that turn
+ * and everything after it — Claude-Desktop-style "rewind to here". Drives the
+ * backend's `rewind_session`: the live driver is killed, persisted events at
+ * the cutoff onward are deleted, and the session re-spawns with `--resume` so
+ * the conversation can continue from the truncated state. The user can then
+ * re-prompt from that point (the original prompt is gone from the transcript).
+ */
+export async function rewindToMessage(sessionId: string, itemId: string): Promise<void> {
+  const current = entryOf(sessionId);
+  if (!current) return;
+  const ordinal = userTurnOrdinal(current.items, itemId);
+  if (ordinal === 0) return;
+
+  // Drop the old channel BEFORE the backend kills the live driver — the kill's
+  // `exited` event is routed to the old channel, and we want it absorbed (the
+  // session isn't ending; it's re-spawning), so flag it like `restartSession`.
+  channels.delete(sessionId);
+  setEntry(sessionId, { ...current, reloading: true, live: false, state: "starting" });
+
+  const { channel, activate } = bufferedChannel();
+  try {
+    await unwrap(commands.rewindSession(sessionId, ordinal, channel));
+  } catch (e) {
+    const latest = entryOf(sessionId);
+    if (latest) setEntry(sessionId, { ...latest, reloading: false, live: false, state: "idle" });
+    throw e;
+  }
+
+  // Drop the truncated tail from the visible transcript immediately — the
+  // backend has removed them from SQLite, and we don't want a stale post-cut
+  // tail to linger until the next attach/restore cycle.
+  //
+  // Leave context-window / cost / turn-count fields untouched: claude's
+  // actual session memory is unchanged by our rewind (the CLI has no rewind),
+  // so the pre-rewind values ARE the current reality. The next assistant
+  // message's `usage` event repopulates them naturally, so any drift here
+  // self-corrects on the very next turn — no need to fake a reset.
+  const latest = entryOf(sessionId);
+  if (latest) {
+    const truncated = truncateAtUserOrdinal(latest, ordinal);
+    setEntry(sessionId, {
+      ...latest,
+      ...truncated,
+      reloading: false,
+      live: true,
+      streaming: false,
+      state: "running",
+      pendingPermission: null,
+      pendingQuestion: null,
+      queued: [],
+    });
+  }
+
+  channels.set(sessionId, channel);
+  activate(sessionId);
+}
+
+/**
+ * Drop every item from `view.items` at or after the N-th user turn, restoring
+ * the view to the state right before that prompt was sent. The reducer
+ * `counter` is left untouched (item ids are still unique).
+ */
+function truncateAtUserOrdinal(view: SessionView, ordinal: number): SessionView {
+  let seen = 0;
+  for (let i = 0; i < view.items.length; i += 1) {
+    if (view.items[i].kind !== "user") continue;
+    seen += 1;
+    if (seen === ordinal) return { ...view, items: view.items.slice(0, i) };
+  }
+  return view;
+}
+
 /**
  * Change a session's permission mode. Claude can't switch a *running* session
  * into `bypassPermissions` (it's a launch-time decision), so applying a new mode
@@ -367,9 +461,23 @@ async function deliverMessage(
 ): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
-  setEntry(sessionId, { ...current, ...addUserMessage(current, text, null, attachments) });
+  const withUser = addUserMessage(current, text, null, attachments, Date.now());
+  const optimisticId = withUser.items[withUser.items.length - 1].id;
+  setEntry(sessionId, { ...current, ...withUser });
   if (!channels.has(sessionId)) await resumeSession(sessionId);
-  await unwrap(commands.sendUserMessage(sessionId, text, attachments.map((a) => a.path)));
+  try {
+    await unwrap(commands.sendUserMessage(sessionId, text, attachments.map((a) => a.path)));
+  } catch (e) {
+    // The turn never reached the driver, so no `userMessage` event will be
+    // persisted. Drop the optimistic bubble so the visible transcript stays in
+    // lockstep with the log — an orphaned bubble would shift every later user
+    // turn's ordinal and misaim a subsequent rewind.
+    const latest = entryOf(sessionId);
+    if (latest) {
+      setEntry(sessionId, { ...latest, items: latest.items.filter((it) => it.id !== optimisticId) });
+    }
+    throw e;
+  }
 }
 
 /**
@@ -650,6 +758,13 @@ export async function restoreSessionIfNeeded(
     for (const stored of log) {
       try {
         view = reduceEvent(view, JSON.parse(stored.payload) as SessionEvent);
+        // The reducer is clock-free, so a replayed user turn lands with
+        // `createdAt: null`. Backfill from the stored event's `createdAt`
+        // (epoch ms) so the toolbar timestamp survives the restart.
+        const last = view.items[view.items.length - 1];
+        if (stored.kind === "userMessage" && last?.kind === "user" && last.createdAt === null) {
+          view = { ...view, items: [...view.items.slice(0, -1), { ...last, createdAt: stored.createdAt }] };
+        }
       } catch {
         // A single corrupt row shouldn't sink the whole transcript.
       }

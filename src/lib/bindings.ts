@@ -163,6 +163,17 @@ export const commands = {
 	 *  preserved; the event log appends after its tail.
 	 */
 	restartSession: (sessionId: string, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, permissionMode, onEvent })),
+	/**
+	 *  Rewind a session to the N-th (1-based) user turn, discarding everything
+	 *  after it: kill the live driver, delete persisted events at the cutoff seq
+	 *  onward, then re-spawn with `--resume` so the same conversation can continue
+	 *  — claude's underlying history is unchanged (the SDK has no "rewind"
+	 *  control), but our UI and the persisted log match the truncated state, and
+	 *  the user can re-prompt from that point. `user_turn` is the 1-based ordinal
+	 *  of the clicked user bubble (i.e. the N-th `userMessage` event). Returns
+	 *  the existing [`Session`].
+	 */
+	rewindSession: (sessionId: string, userTurn: number, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, onEvent })),
 	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	/**
