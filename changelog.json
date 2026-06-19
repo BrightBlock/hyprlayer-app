@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.1.13",
+      "date": "2026-06-19",
+      "summary": "Archive workspaces non-destructively, OS toasts when agents need attention, and attachment cards for @file.",
+      "notes": [
+        "Archive a workstream from the sidebar to put it on ice without losing the worktree or branch — unarchive or permanently delete it later from the new Archive view.",
+        "When an agent transitions to needs-you while the window is unfocused or you're on another tab, a native OS toast fires; clicking it within 15 seconds jumps to that workstream.",
+        "Picking a file from the @file dropdown now stages it as an attachment card instead of leaving a raw path in the prompt, and /commands fire on any whitespace-delimited token rather than only at the start of the message.",
+        "At 60% context usage a banner suggests running /create_handoff; once the doc is written it attaches as a tab chip and the Eraser button glows amber so Clear & resume picks up where you left off.",
+        "Syntax token colors in fenced code blocks now draw from each theme's own palette rather than bleeding Dark+ defaults onto light, claude, cobalt, matrix, and solarized surfaces."
+      ]
+    },
+    {
       "version": "0.1.12",
       "date": "2026-06-19",
       "summary": "Rewind a conversation to an earlier user message and re-send an edited prompt.",
