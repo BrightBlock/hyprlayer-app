@@ -13,7 +13,8 @@ import {
 } from "../components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { DiffIcon, DocIcon, PlusIcon, SplitIcon, XIcon } from "../components/icons";
+import { DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "../components/icons";
+import { commands } from "../lib/bindings";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { ChangesPanel } from "../features/workstreams/ChangesPanel";
 import { PrChecksPanel } from "../features/workstreams/PrChecksPanel";
@@ -21,6 +22,7 @@ import { DiffTab } from "../features/workstreams/DiffTab";
 import { FileViewerTab } from "../features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
+import { TerminalTab } from "../features/session/TerminalTab";
 import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
 import { killSession, stopSession, transcriptToText, useSession } from "../features/session/sessionStore";
 import { isBusy } from "../features/session/transcript";
@@ -94,6 +96,9 @@ export type ShellTab = {
   /** When set, this tab is a read-only view of a worktree file (its path).
    *  Opened from the Files tree. */
   filePath?: string;
+  /** When set, this tab is an interactive terminal (PTY) for the worktree.
+   *  `terminalId` binds it to a live backend PTY once opened; absent until then. */
+  terminalView?: { terminalId?: string };
   /** Which pane this shell lives in. Absent/"main" → the main pane; "right" →
    *  the side-by-side right split. */
   panel?: "main" | "right";
@@ -109,6 +114,11 @@ type ShellMenu = {
  *  chat — these carry no session, so the strip shows a doc icon and no dot. */
 function isViewerShell(shell: ShellTab): boolean {
   return !!(shell.docPreviewPath || shell.diffView || shell.filePath);
+}
+
+/** An interactive terminal tab — has its own PTY, no session dot. */
+function isTerminalShell(shell: ShellTab): boolean {
+  return !!shell.terminalView;
 }
 
 /**
@@ -143,6 +153,8 @@ function ProjectCommands(props: {
   onCloseTab: (() => void) | null;
   onToggleSplit: () => void;
   onNewWorkstream: () => void;
+  onToggleTerminal: () => void;
+  onToggleTerminalFull: () => void;
 }) {
   const session = useSession(props.sessionId);
   // "Stop turn" only makes sense while the focused pane's session is working /
@@ -153,6 +165,8 @@ function ProjectCommands(props: {
   useCommand("tab.close", props.onCloseTab);
   useCommand("tab.toggleSplit", props.onToggleSplit);
   useCommand("ws.new", props.onNewWorkstream);
+  useCommand("terminal.open", props.onToggleTerminal);
+  useCommand("terminal.toggleFullscreen", props.onToggleTerminalFull);
   useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
   useCommand("session.clear", sid ? () => void killSession(sid) : null);
   return null;
@@ -194,6 +208,12 @@ export function ProjectPage() {
   // open/closed state and pane assignments persist in the tab store, but the
   // exact ratio resets to a sane default per visit.
   const [rightRatio, setRightRatio] = useState(0.5);
+  // Which pane (if any) is maximized to fill the whole agent view, scoped to
+  // the workstream it was triggered in so switching workstreams un-maximizes.
+  // Ephemeral view state (a temporary "focus this terminal"), not persisted.
+  const [maximized, setMaximized] = useState<{ wsId: string; pane: "main" | "right" } | null>(
+    null,
+  );
   const splitRowRef = useRef<HTMLDivElement>(null);
   // Tab drag (reorder within a pane + move across the split). The hook must run
   // before this component's early returns, so it reaches the action closures
@@ -264,6 +284,12 @@ export function ProjectPage() {
   const rightShells = shells.filter(isRightShell);
   const rightSplit = (tabs?.rightSplit ?? false) && rightShells.length > 0;
   const activePane: "main" | "right" = tabs?.activePane ?? "main";
+  // A maximized pane hides its sibling (and the sibling's tab strip) so the
+  // active pane fills the agent view. Only meaningful while the split is open.
+  const maxPane = maximized && maximized.wsId === wsId ? maximized.pane : null;
+  const maxMain = maxPane === "main" && rightSplit;
+  const maxRight = maxPane === "right" && rightSplit;
+  const maximizedView = maxMain || maxRight;
   const activeShell = tabs
     ? (mainShells.find((s) => s.id === tabs.activeId) ?? mainShells[0] ?? null)
     : null;
@@ -308,9 +334,12 @@ export function ProjectPage() {
         | "permissionMode"
         | "sessionId"
         | "handoffNudgeDismissed"
+        | "terminalView"
       >
     >,
   ) => modifyShell(shellId, (s) => ({ ...s, ...patch }));
+  const setTerminalId = (shellId: number, terminalId: string) =>
+    patchShell(shellId, { terminalView: { terminalId } });
   const selectShell = (shellId: number) => {
     updateTabs((current) => ({ ...current, activeId: shellId, activePane: "main" }));
   };
@@ -355,6 +384,7 @@ export function ProjectPage() {
   // The split toggle in the tab strip: open the right pane (seeding a fresh
   // agent the first time) or hide it. Hiding keeps the right shells around.
   const toggleRightSplit = () => {
+    setMaximized(null);
     updateTabs((current) => {
       if (current.rightSplit) return { ...current, rightSplit: false, activePane: "main" };
       if (current.shells.some(isRightShell)) {
@@ -363,10 +393,67 @@ export function ProjectPage() {
       return spawnRightShell(current);
     });
   };
+  // Open a terminal in the right dock, reusing an existing terminal tab if any.
+  const addTerminal = () =>
+    updateTabs((current) => {
+      const existing = current.shells.find(isTerminalShell);
+      if (existing) {
+        const right = existing.panel === "right";
+        return {
+          ...current,
+          rightSplit: right ? true : current.rightSplit,
+          rightActiveId: right ? existing.id : current.rightActiveId,
+          activeId: right ? current.activeId : existing.id,
+          activePane: right ? ("right" as const) : ("main" as const),
+        };
+      }
+      const id = nextShellId(current.shells);
+      return {
+        ...current,
+        shells: [
+          ...current.shells,
+          {
+            id,
+            title: "Terminal",
+            mode: "general" as const,
+            draft: "",
+            docs: [],
+            attachments: [],
+            panel: "right" as const,
+            terminalView: {},
+          },
+        ],
+        rightActiveId: id,
+        rightSplit: true,
+        activePane: "right" as const,
+      };
+    });
+  // Keyboard "fullscreen" for the terminal: maximize its pane to fill the agent
+  // view, or restore the split if it's already maximized (a toggle). Prefers the
+  // focused tab when it's a terminal, else the first terminal in the workstream.
+  const toggleTerminalFullscreen = () => {
+    if (maxPane) {
+      setMaximized(null);
+      return;
+    }
+    const term =
+      focusedShell && isTerminalShell(focusedShell)
+        ? focusedShell
+        : shells.find(isTerminalShell);
+    if (!term || !wsId) return;
+    const pane = term.panel ?? "main";
+    if (pane === "right") selectRightShell(term.id);
+    else selectShell(term.id);
+    if (rightSplit) setMaximized({ wsId, pane });
+  };
   // The X on the right strip tears the split down: end its agents and drop the
   // right shells entirely (vs. the toggle, which just hides the pane).
   const closeRightSplit = () => {
-    for (const s of rightShells) if (s.sessionId) void killSession(s.sessionId);
+    setMaximized(null);
+    for (const s of rightShells) {
+      if (s.sessionId) void killSession(s.sessionId);
+      if (s.terminalView?.terminalId) void commands.terminalClose(s.terminalView.terminalId);
+    }
     updateTabs((current) => ({
       ...current,
       shells: current.shells.filter(isMainShell),
@@ -484,6 +571,8 @@ export function ProjectPage() {
     // Closing the tab ends its session — there's no End button; the window IS
     // the handle. (No-op if the session already ended or was never started.)
     if (shell.sessionId) void killSession(shell.sessionId);
+    if (shell.terminalView?.terminalId)
+      void commands.terminalClose(shell.terminalView.terminalId);
     updateTabs((current) => {
       const remaining = current.shells.filter((s) => s.id !== shellId);
       if (onRight) {
@@ -506,6 +595,37 @@ export function ProjectPage() {
           : current.activeId;
       return { ...current, shells: remaining, activeId };
     });
+  };
+  // The "Toggle Terminal" command (⌘`): open a terminal if none exists, reveal it
+  // if it's hidden, or hide it when it's already on screen. Hiding preserves the
+  // PTY (collapses the dock for a right-pane terminal, defocuses the tab for a
+  // main-pane one) — only an explicit tab close or the split's X kills the shell,
+  // so a reveal re-attaches the same running session. The toolbar terminal button
+  // stays open/focus-only.
+  const toggleTerminal = () => {
+    const term = shells.find(isTerminalShell);
+    if (!term) {
+      addTerminal();
+      return;
+    }
+    const onRight = isRightShell(term);
+    const visible = onRight
+      ? rightSplit && rightActiveShell?.id === term.id
+      : activeShell?.id === term.id;
+    if (!visible) {
+      addTerminal(); // reveal: re-show the dock (right) or focus the tab (main)
+      return;
+    }
+    // Hide without teardown — the PTY keeps running for the next reveal.
+    if (onRight) {
+      setMaximized(null);
+      updateTabs((current) => ({ ...current, rightSplit: false, activePane: "main" }));
+      return;
+    }
+    // Main-pane terminal: defocus to another main tab (no-op if it's the only one).
+    const others = mainShells.filter((s) => s.id !== term.id);
+    const other = others[others.length - 1];
+    if (other) selectShell(other.id);
   };
   const openDoc = (id: string) => {
     void navigate({ to: "/library/doc", search: { id, mode: "preview" } });
@@ -728,6 +848,10 @@ export function ProjectPage() {
           <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
             <DiffIcon size={13} />
           </span>
+        ) : isTerminalShell(shell) ? (
+          <span className="text-ink-dim">
+            <TerminalIcon size={13} />
+          </span>
         ) : isViewerShell(shell) ? (
           <span className="text-ink-dim">
             <DocIcon size={13} />
@@ -738,7 +862,9 @@ export function ProjectPage() {
         <span className="max-w-[160px] truncate" title={shell.title}>
           {shell.title}
         </span>
-        {!isViewerShell(shell) && <SessionTabDot sessionId={shell.sessionId} />}
+        {!isViewerShell(shell) && !isTerminalShell(shell) && (
+          <SessionTabDot sessionId={shell.sessionId} />
+        )}
       </span>
       {opts.closable && (
         <button
@@ -794,6 +920,18 @@ export function ProjectPage() {
         />
       );
     }
+    if (shell.terminalView) {
+      return (
+        <TerminalTab
+          key={`${activeView.item.id}:${shell.id}`}
+          workstreamId={activeView.item.id}
+          shellId={shell.id}
+          terminalId={shell.terminalView.terminalId}
+          autoFocus={shell.id === focusedShell?.id}
+          onTerminalId={(tid) => setTerminalId(shell.id, tid)}
+        />
+      );
+    }
     return <SessionChat key={`${activeView.item.id}:${shell.id}`} {...shellChatProps(shell)} />;
   };
 
@@ -829,6 +967,8 @@ export function ProjectPage() {
         onCloseTab={focusedShell ? () => closeShell(focusedShell.id) : null}
         onToggleSplit={toggleRightSplit}
         onNewWorkstream={() => setCreateOpen(true)}
+        onToggleTerminal={toggleTerminal}
+        onToggleTerminalFull={toggleTerminalFullscreen}
       />
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
@@ -837,9 +977,13 @@ export function ProjectPage() {
               {/* Main-pane tab strip + the split / docs controls. */}
               <div
                 data-pane="main"
-                className={`flex min-w-0 flex-1 items-center justify-between gap-3 px-5 ${
-                  dropPane === "main" ? "bg-accent/10" : ""
-                }`}
+                // pr-2.5 (not px-5) lines the rightmost control — the split
+                // toggle, an h-8 button — up vertically with the title bar's
+                // "changes sidebar" toggle above it (an h-7 button at pr-3); the
+                // 2px-narrower title button needs 2px more inset to share a center.
+                className={`flex min-w-0 flex-1 items-center justify-between gap-3 pl-5 pr-2.5 ${
+                  maxRight ? "hidden" : ""
+                } ${dropPane === "main" ? "bg-accent/10" : ""}`}
               >
                 <div className="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto">
                   {activeView &&
@@ -859,15 +1003,23 @@ export function ProjectPage() {
                   )}
                 </div>
                 {activeView && (
-                  <IconButton
-                    onClick={toggleRightSplit}
-                    active={rightSplit}
-                    title={rightSplit ? "Close split" : "Split agent right"}
-                    aria-label={rightSplit ? "Close split" : "Split agent right"}
-                    className="shrink-0"
-                  >
-                    <SplitIcon className={rightSplit ? "text-accent" : undefined} />
-                  </IconButton>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <IconButton
+                      onClick={addTerminal}
+                      title="Open terminal"
+                      aria-label="Open terminal"
+                    >
+                      <TerminalIcon />
+                    </IconButton>
+                    <IconButton
+                      onClick={toggleRightSplit}
+                      active={rightSplit}
+                      title={rightSplit ? "Close split" : "Split agent right"}
+                      aria-label={rightSplit ? "Close split" : "Split agent right"}
+                    >
+                      <SplitIcon className={rightSplit ? "text-accent" : undefined} />
+                    </IconButton>
+                  </div>
                 )}
               </div>
               {/* Right-pane tab strip, sized + bordered to sit over the right
@@ -876,9 +1028,9 @@ export function ProjectPage() {
                 <div
                   data-pane="right"
                   className={`flex shrink-0 items-center gap-1 border-l border-edge px-3 ${
-                    dropPane === "right" ? "bg-accent/10" : ""
-                  }`}
-                  style={{ width: `${rightRatio * 100}%` }}
+                    maxMain ? "hidden" : ""
+                  } ${dropPane === "right" ? "bg-accent/10" : ""}`}
+                  style={{ width: maxRight ? "100%" : `${rightRatio * 100}%` }}
                 >
                   <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
                     {rightShells.map((shell) =>
@@ -938,6 +1090,29 @@ export function ProjectPage() {
                     Move to right split
                   </ContextMenuItem>
                 )}
+                {rightSplit &&
+                  (maxPane === (contextShell.panel ?? "main") ? (
+                    <ContextMenuItem
+                      onClick={() => {
+                        setMaximized(null);
+                        setShellMenu(null);
+                      }}
+                    >
+                      Restore split view
+                    </ContextMenuItem>
+                  ) : isTerminalShell(contextShell) ? (
+                    <ContextMenuItem
+                      onClick={() => {
+                        const pane = contextShell.panel ?? "main";
+                        if (pane === "right") selectRightShell(contextShell.id);
+                        else selectShell(contextShell.id);
+                        if (wsId) setMaximized({ wsId, pane });
+                        setShellMenu(null);
+                      }}
+                    >
+                      Expand to full view
+                    </ContextMenuItem>
+                  ) : null)}
                 <ContextMenuItem
                   disabled={(contextShell.panel ?? "main") !== "right" && mainShells.length === 1}
                   onClick={() => {
@@ -983,9 +1158,9 @@ export function ProjectPage() {
               <div ref={splitRowRef} className="flex min-h-0 flex-1">
                 <div
                   data-pane="main"
-                  className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${
-                    dropPane === "main" ? "ring-2 ring-inset ring-accent/60" : ""
-                  }`}
+                  className={`relative flex min-h-0 min-w-0 flex-col ${
+                    maxRight ? "hidden" : "flex-1"
+                  } ${dropPane === "main" ? "ring-2 ring-inset ring-accent/60" : ""}`}
                   onPointerDownCapture={() => {
                     if (rightSplit && activePane !== "main") setActivePane("main");
                   }}
@@ -998,15 +1173,19 @@ export function ProjectPage() {
                       role="separator"
                       aria-orientation="vertical"
                       aria-label="Resize agent split"
-                      className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+                      className={`relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60 ${
+                        maximizedView ? "hidden" : ""
+                      }`}
                       onPointerDown={startSplitResize}
                     />
                     <div
                       data-pane="right"
                       className={`relative flex min-h-0 flex-col border-l border-edge ${
+                        maxMain ? "hidden" : ""
+                      } ${maxRight ? "flex-1" : ""} ${
                         dropPane === "right" ? "ring-2 ring-inset ring-accent/60" : ""
                       }`}
-                      style={{ width: `${rightRatio * 100}%` }}
+                      style={maxRight ? undefined : { width: `${rightRatio * 100}%` }}
                       onPointerDownCapture={() => {
                         if (activePane !== "right") setActivePane("right");
                       }}

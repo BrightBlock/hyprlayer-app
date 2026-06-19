@@ -196,18 +196,21 @@ a {
 }
 
 /* ────────────────────────────────────────────────────────────────────────
-   Scrollbars. Themed to match the prompt box (panel-2) so every bar reads as
-   part of the surface instead of the OS default. The thumb uses the same
-   token as the prompt input; hover lifts it to the edge tone for affordance.
-   Vars resolve per-theme, so bars recolor automatically with the active
-   theme. `.no-scrollbar` opts out (higher specificity wins above). */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-panel-2) transparent;
-}
+   Scrollbars. A slim themed pill (panel-2 thumb on a transparent track) so
+   every bar reads as part of the surface; hover lifts the thumb to the edge
+   tone for affordance. Vars resolve per-theme, so bars recolor automatically.
+   `.no-scrollbar` opts out.
+
+   NB: we deliberately do NOT set the standard `scrollbar-width` /
+   `scrollbar-color` properties. In WebKit/Blink, setting either one disables
+   the `::-webkit-scrollbar` pseudo-elements and falls back to the native bar:
+   `scrollbar-width: thin` in particular renders the light macOS overlay bar,
+   which ignores our color and reads as a bright stripe — most visibly on
+   xterm's always-on terminal viewport. Leaving them at their `auto` default
+   lets these webkit pills render everywhere, the terminal included. */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -215,8 +218,8 @@ a {
 ::-webkit-scrollbar-thumb {
   background-color: var(--color-panel-2);
   border-radius: 9999px;
-  /* Transparent border + padding-box clip insets the thumb so it floats in
-     the track rather than filling its full width. */
+  /* Transparent border + padding-box clip insets the thumb so it floats as a
+     slim pill in the track rather than filling its full width. */
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -225,6 +228,18 @@ a {
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* The terminal viewport refuses the slim webkit pills above (xterm always
+   falls back to a native bar), and that native bar reads wrong in every state:
+   fat next to the app's 8px pills, and a bright stripe when the buffer is empty
+   (e.g. right after `clear`). Scrolling a terminal is discoverable on its own,
+   so we hide the bar entirely — the viewport still scrolls via wheel/trackpad. */
+.xterm-viewport {
+  scrollbar-width: none;
+}
+.xterm-viewport::-webkit-scrollbar {
+  display: none;
 }
 
 /* Soft breathing halo for an agent tab icon while its session is working.

@@ -6,6 +6,7 @@ mod pr_watch;
 mod session_registry;
 mod settings;
 mod state;
+mod terminal_registry;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -86,6 +87,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::detect_editors,
             commands::system::github_username,
             commands::system::play_sound,
+            commands::terminal::terminal_open,
+            commands::terminal::terminal_attach,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_close,
         ])
         .events(collect_events![
             events::ConfigChanged,
@@ -201,6 +207,7 @@ pub fn run() {
                 index: Arc::new(hyprlayer_core::index::ThoughtsIndex::new()),
                 index_watch: tokio::sync::Mutex::new(None),
                 sessions: Arc::new(session_registry::SessionRegistry::new()),
+                terminals: Arc::new(terminal_registry::TerminalRegistry::new()),
             });
 
             // 1. Fold the login-shell PATH in (GUI apps start with launchd's
@@ -252,8 +259,17 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Best-effort: kill any live terminal shells when the app quits, so
+            // they don't outlive the window. The PTY master's SIGHUP-on-drop at
+            // process exit is the backstop if this path is ever missed.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                use tauri::Manager;
+                app.state::<AppState>().terminals.kill_all_blocking();
+            }
+        });
 }
 
 /// (Re)build the thoughts index and its filesystem watcher from the current

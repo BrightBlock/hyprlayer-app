@@ -53,7 +53,9 @@ pub fn ensure_archive_excluded(project_repo: &Path) -> std::io::Result<()> {
     if !next.is_empty() && !next.ends_with('\n') {
         next.push('\n');
     }
-    next.push_str(&format!("# hyprlayer: hide archived worktrees from git status\n{needle}\n"));
+    next.push_str(&format!(
+        "# hyprlayer: hide archived worktrees from git status\n{needle}\n"
+    ));
     std::fs::write(&exclude, next)
 }
 
@@ -751,8 +753,14 @@ mod tests {
             .await
             .unwrap();
         assert!(!archive_dir.exists());
-        assert_eq!(std::fs::read_to_string(wt.join("README.md")).unwrap(), "edited\n");
-        assert_eq!(std::fs::read_to_string(wt.join("scratch.txt")).unwrap(), "wip\n");
+        assert_eq!(
+            std::fs::read_to_string(wt.join("README.md")).unwrap(),
+            "edited\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(wt.join("scratch.txt")).unwrap(),
+            "wip\n"
+        );
         let st = status(&wt, &created.base_branch, None);
         assert_eq!((st.dirty, st.untracked), (1, 1));
     }
@@ -794,7 +802,9 @@ mod tests {
             .restore(&git, &repo, &archive_dir, &wt)
             .await
             .unwrap_err();
-        assert!(matches!(err, CoreError::Io(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists));
+        assert!(
+            matches!(err, CoreError::Io(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists)
+        );
     }
 
     /// Husk state: the worktree directory exists but its `.git` linkfile is

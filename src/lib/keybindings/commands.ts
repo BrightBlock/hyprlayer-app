@@ -11,7 +11,13 @@
 
 import { normalizeChord, type Chord } from "./chord";
 
-export type CommandCategory = "Navigation" | "View" | "Workspace" | "Session" | "Library";
+export type CommandCategory =
+  | "Navigation"
+  | "View"
+  | "Workspace"
+  | "Terminal"
+  | "Session"
+  | "Library";
 
 /** Where a command is available — informational, and drives UI grouping. It is
  *  NOT the runtime gate: whether a handler is registered (see `registry.ts`) is
@@ -131,6 +137,44 @@ export const COMMANDS: CommandDef[] = [
     when: "workstream",
     defaults: { mac: "mod+shift+p", other: "mod+shift+p" },
   },
+  // Terminal
+  {
+    id: "terminal.open",
+    label: "Toggle Terminal",
+    category: "Terminal",
+    when: "project",
+    defaults: { mac: "mod+backquote", other: "mod+backquote" },
+  },
+  {
+    id: "terminal.toggleFullscreen",
+    label: "Toggle Terminal Full View",
+    category: "Terminal",
+    when: "project",
+    // Shift+punctuation can't be a binding here (the dispatcher matches on
+    // e.key, so Shift+` is "~"); a shift+letter chord round-trips cleanly.
+    defaults: { mac: "mod+shift+f", other: "mod+shift+f" },
+  },
+  {
+    id: "terminal.zoomIn",
+    label: "Terminal Zoom In",
+    category: "Terminal",
+    when: "project",
+    defaults: { mac: "mod+equal", other: "mod+equal" },
+  },
+  {
+    id: "terminal.zoomOut",
+    label: "Terminal Zoom Out",
+    category: "Terminal",
+    when: "project",
+    defaults: { mac: "mod+minus", other: "mod+minus" },
+  },
+  {
+    id: "terminal.zoomReset",
+    label: "Terminal Zoom Reset",
+    category: "Terminal",
+    when: "project",
+    defaults: { mac: "mod+0", other: "mod+0" },
+  },
   // Session
   {
     id: "session.stop",
@@ -161,6 +205,7 @@ export const CATEGORY_ORDER: CommandCategory[] = [
   "Navigation",
   "View",
   "Workspace",
+  "Terminal",
   "Session",
   "Library",
 ];

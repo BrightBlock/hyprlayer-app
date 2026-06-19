@@ -3,6 +3,7 @@ pub mod library;
 pub mod projects;
 pub mod sessions;
 pub mod system;
+pub mod terminal;
 pub mod workstreams;
 
 use std::sync::Arc;

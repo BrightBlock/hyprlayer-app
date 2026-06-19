@@ -16,6 +16,7 @@ pub mod process;
 pub mod repos;
 pub mod skills;
 pub mod store;
+pub mod terminal;
 pub mod worktree;
 
 pub use error::CoreError;

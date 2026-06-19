@@ -337,6 +337,10 @@ pub async fn archive_workstream(state: State<'_, AppState>, id: String) -> CmdRe
         kill_and_await_exit(&state, &session.id).await;
     }
 
+    // Same for any live terminals in this workstream: kill their shells so we
+    // don't leak orphaned PTY processes against the about-to-move worktree.
+    state.terminals.remove_for_workstream(&id).await;
+
     let git = state
         .binaries
         .require(BinaryKind::Git)

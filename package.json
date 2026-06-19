@@ -29,6 +29,8 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@uiw/react-codemirror": "^4.25.10",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

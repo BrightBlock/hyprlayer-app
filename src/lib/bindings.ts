@@ -257,6 +257,26 @@ export const commands = {
 	 *  On Windows/Linux this is a no-op (the plugin's sound field works there).
 	 */
 	playSound: () => typedError<null, AppError>(__TAURI_INVOKE("play_sound")),
+	/**
+	 *  Open a new PTY for the given workstream, spawn the user's shell in the
+	 *  worktree directory, and start forwarding output to `on_event`.
+	 * 
+	 *  Returns the `terminal_id` used for subsequent write/resize/close calls.
+	 */
+	terminalOpen: (workstreamId: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("terminal_open", { workstreamId, cols, rows, onEvent })),
+	/**
+	 *  Attach to an existing PTY: replay its scrollback then tail live output.
+	 * 
+	 *  Returns `false` if the PTY is gone (e.g. after an app restart), in which
+	 *  case the frontend should call `terminal_open` to start a fresh one.
+	 */
+	terminalAttach: (terminalId: string, onEvent: Channel<TerminalEvent>) => typedError<boolean, AppError>(__TAURI_INVOKE("terminal_attach", { terminalId, onEvent })),
+	/**  Forward base64-encoded keyboard input to the PTY. */
+	terminalWrite: (terminalId: string, data: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_write", { terminalId, data })),
+	/**  Notify the PTY of a terminal-size change so it can reflow output. */
+	terminalResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("terminal_resize", { terminalId, cols, rows })),
+	/**  Kill the shell process and remove the terminal from the registry. */
+	terminalClose: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_close", { terminalId })),
 };
 
 /** Events */
@@ -919,6 +939,9 @@ export type SyncReport = {
 
 /**  How multiple `tags` filters combine. */
 export type TagMode = "and" | "or";
+
+/**  One streamed terminal event. Output is base64 because PTY output is binary. */
+export type TerminalEvent = { kind: "output"; data: string } | { kind: "exited"; code: number | null };
 
 /**  A library query: filters AND across fields, OR within a field. */
 export type ThoughtQuery = {

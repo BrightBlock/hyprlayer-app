@@ -128,7 +128,10 @@ pub fn parse_line(line: &str) -> ParsedLine {
                         .and_then(|m| m.get("pre_tokens"))
                         .and_then(Value::as_u64)
                         .map(|n| n.min(u32::MAX as u64) as u32);
-                    ParsedLine::CompactBoundary { trigger, pre_tokens }
+                    ParsedLine::CompactBoundary {
+                        trigger,
+                        pre_tokens,
+                    }
                 }
                 other => ParsedLine::System {
                     subtype: other.to_string(),

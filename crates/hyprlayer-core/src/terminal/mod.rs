@@ -1,0 +1,245 @@
+//! PTY session abstraction for the Ghostty-style terminal panel.
+//!
+//! [`PtySession`] spawns the user's shell on a real PTY in the worktree
+//! directory, streams output over a [`tokio::sync::broadcast`] channel with a
+//! bounded scrollback ring, and accepts input / resize / kill.
+//!
+//! The reader loop runs on a dedicated [`std::thread`] because
+//! `portable-pty`'s reader is a blocking `std::io::Read` handle — it must not
+//! block a tokio task. Everything else (broadcast, scrollback) is shared-safe.
+
+use std::collections::VecDeque;
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex as StdMutex};
+
+use base64::Engine as _;
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
+
+/// Max scrollback bytes retained for re-attach replay (drops oldest first).
+const SCROLLBACK_CAP: usize = 256 * 1024;
+const B64: base64::engine::general_purpose::GeneralPurpose =
+    base64::engine::general_purpose::STANDARD;
+
+/// One streamed terminal event. Output is base64 because PTY output is binary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TerminalEvent {
+    Output { data: String },
+    Exited { code: Option<i32> },
+}
+
+/// Configuration for spawning a new [`PtySession`].
+pub struct SpawnTerminal {
+    pub shell: PathBuf,
+    pub cwd: PathBuf,
+    pub cols: u16,
+    pub rows: u16,
+    pub env: Vec<(String, String)>,
+    pub workstream_id: String,
+}
+
+/// A live PTY session: shell process + broadcast output + bounded scrollback.
+///
+/// The `Child` itself lives in the reader thread, which `wait()`s on it after
+/// EOF to reap it and report the real exit code; we keep only a cloned
+/// [`ChildKiller`] here so `kill()` never contends with that wait on a shared
+/// child handle.
+pub struct PtySession {
+    master: StdMutex<Box<dyn MasterPty + Send>>,
+    killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
+    writer: StdMutex<Box<dyn Write + Send>>,
+    tx: broadcast::Sender<TerminalEvent>,
+    scrollback: Arc<StdMutex<VecDeque<u8>>>,
+    pub workstream_id: String,
+}
+
+impl PtySession {
+    /// Spawn a shell in the given worktree directory and start the reader thread.
+    pub fn spawn(cfg: SpawnTerminal) -> std::io::Result<Arc<Self>> {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: cfg.rows,
+                cols: cfg.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(to_io)?;
+
+        let mut cmd = CommandBuilder::new(&cfg.shell);
+        cmd.cwd(&cfg.cwd);
+        cmd.env("TERM", "xterm-256color");
+        for (k, v) in &cfg.env {
+            cmd.env(k, v);
+        }
+        let mut child = pair.slave.spawn_command(cmd).map_err(to_io)?;
+        drop(pair.slave); // so the master sees EOF when the shell exits
+        let killer = child.clone_killer();
+
+        let reader = pair.master.try_clone_reader().map_err(to_io)?;
+        let writer = pair.master.take_writer().map_err(to_io)?;
+        let (tx, _rx) = broadcast::channel(2048);
+        let scrollback = Arc::new(StdMutex::new(VecDeque::with_capacity(SCROLLBACK_CAP)));
+
+        let session = Arc::new(Self {
+            master: StdMutex::new(pair.master),
+            killer: StdMutex::new(killer),
+            writer: StdMutex::new(writer),
+            tx: tx.clone(),
+            scrollback: scrollback.clone(),
+            workstream_id: cfg.workstream_id,
+        });
+
+        // portable-pty's reader is a blocking io::Read; give it its own thread.
+        // The thread also owns the `child` so it can `wait()` on EOF — reaping
+        // the shell (no zombie) and surfacing its real exit code.
+        let mut reader = reader;
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let chunk = &buf[..n];
+                        {
+                            let mut sb = scrollback.lock().unwrap();
+                            for &b in chunk {
+                                if sb.len() == SCROLLBACK_CAP {
+                                    sb.pop_front();
+                                }
+                                sb.push_back(b);
+                            }
+                        }
+                        // send() errs only if there are no receivers — fine.
+                        let _ = tx.send(TerminalEvent::Output {
+                            data: B64.encode(chunk),
+                        });
+                    }
+                }
+            }
+            let code = child.wait().ok().map(|s| s.exit_code() as i32);
+            let _ = tx.send(TerminalEvent::Exited { code });
+        });
+
+        Ok(session)
+    }
+
+    /// Subscribe to the live output broadcast.
+    pub fn subscribe(&self) -> broadcast::Receiver<TerminalEvent> {
+        self.tx.subscribe()
+    }
+
+    /// Atomically snapshot the retained scrollback and subscribe to live output,
+    /// returning both. Taken together under the scrollback lock — which the
+    /// reader thread also holds while appending before each `send` — this closes
+    /// the gap where a chunk emitted between a separate snapshot and subscribe
+    /// would be in neither (lost) or both (duplicated). The snapshot is the
+    /// base64 scrollback for replay; live output follows on the receiver.
+    pub fn subscribe_with_scrollback(&self) -> (broadcast::Receiver<TerminalEvent>, String) {
+        let sb = self.scrollback.lock().unwrap();
+        let rx = self.tx.subscribe();
+        let snapshot = B64.encode(sb.iter().copied().collect::<Vec<u8>>());
+        (rx, snapshot)
+    }
+
+    /// Write raw bytes (keyboard input) to the PTY master.
+    pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
+        let mut w = self.writer.lock().unwrap();
+        w.write_all(bytes)?;
+        w.flush()
+    }
+
+    /// Notify the PTY of a terminal-size change.
+    pub fn resize(&self, cols: u16, rows: u16) -> std::io::Result<()> {
+        self.master
+            .lock()
+            .unwrap()
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(to_io)
+    }
+
+    /// Send SIGKILL to the shell process. The reader thread then hits EOF,
+    /// `wait()`s on the child to reap it, and emits the final `Exited` event.
+    pub fn kill(&self) {
+        let _ = self.killer.lock().unwrap().kill();
+    }
+}
+
+fn to_io(e: impl std::fmt::Display) -> std::io::Error {
+    std::io::Error::other(e.to_string())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn pty_echo_roundtrip() {
+        let s = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "test".into(),
+        })
+        .expect("spawn pty");
+
+        let mut rx = s.subscribe();
+        s.write_input(b"printf MARKER_OK\n").unwrap();
+
+        let mut seen = String::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Ok(TerminalEvent::Output { data })) =
+                tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
+            {
+                seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
+                if seen.contains("MARKER_OK") {
+                    break;
+                }
+            }
+        }
+        assert!(seen.contains("MARKER_OK"), "got: {seen:?}");
+        s.resize(100, 30).expect("resize ok");
+        s.kill();
+    }
+
+    /// Mirrors the `terminal_open` path: subscribe via `subscribe_with_scrollback`
+    /// (as `attach_stream` does) and confirm live output is delivered on that rx.
+    #[tokio::test]
+    async fn open_path_delivers_live_output() {
+        let s = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "test".into(),
+        })
+        .expect("spawn pty");
+
+        let (mut rx, snapshot) = s.subscribe_with_scrollback();
+        let mut seen = String::from_utf8_lossy(&B64.decode(snapshot).unwrap()).into_owned();
+        s.write_input(b"printf MARKER_OK\n").unwrap();
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !seen.contains("MARKER_OK") && tokio::time::Instant::now() < deadline {
+            if let Ok(Ok(TerminalEvent::Output { data })) =
+                tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
+            {
+                seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
+            }
+        }
+        assert!(seen.contains("MARKER_OK"), "got: {seen:?}");
+        s.kill();
+    }
+}

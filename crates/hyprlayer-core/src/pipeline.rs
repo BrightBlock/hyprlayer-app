@@ -229,9 +229,7 @@ pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> St
         }
         // research/plan/implement/validate/commit each invoke their skill.
         _ => skill_prompt(
-            stage
-                .command()
-                .expect("skill-driven stage has a command"),
+            stage.command().expect("skill-driven stage has a command"),
             input,
         ),
     };

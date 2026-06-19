@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -30,5 +30,10 @@ export default defineConfig(async () => ({
       //    cargo-locked .dll there throws EBUSY and crashes the dev server.
       ignored: ["**/src-tauri/**", "**/target/**"],
     },
+  },
+
+  // Vitest — run with `pnpm test`
+  test: {
+    setupFiles: ["./src/test-setup.ts"],
   },
 }));
