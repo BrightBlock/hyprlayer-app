@@ -64,8 +64,14 @@ export type ShellTab = {
   draft: string;
   docs: AttachedDoc[];
   /** Paths of suggested docs the user explicitly dismissed in this pane; never
-   *  re-suggested for the lifetime of the tab even if the mode switches back. */
+   *  re-suggested for the lifetime of the tab even if the mode switches back.
+   *  Also covers auto-captured handoff docs: once detached, that path stays
+   *  detached so the in-session re-write doesn't keep re-attaching it. */
   dismissedSuggestions?: string[];
+  /** The user dismissed the "context is filling up — create a handoff?" banner
+   *  for this tab. Only suppresses the suggestion banner; an actual handoff doc
+   *  (auto-captured into [`docs`]) still surfaces the ready-to-resume banner. */
+  handoffNudgeDismissed?: boolean;
   /** Files/screenshots staged in this tab's composer (dropped, pasted, or picked
    *  from the file dialog). Volatile sources are copied into the worktree's
    *  `.hyprlayer/attachments/` first; sent with the next turn, then cleared. */
@@ -110,9 +116,12 @@ function isViewerShell(shell: ShellTab): boolean {
  * the suggestion never re-adds for this pane. Pure: returns the next shell.
  */
 function detachDoc(shell: ShellTab, path: string): ShellTab {
-  const wasSuggested = shell.docs.find((d) => d.path === path)?.suggested;
+  const removed = shell.docs.find((d) => d.path === path);
   const docs = shell.docs.filter((d) => d.path !== path);
-  if (!wasSuggested) return { ...shell, docs };
+  // Suggested chips and auto-captured handoff docs both need to be remembered
+  // as dismissed — they're re-added by their respective effects otherwise.
+  const persistDismissal = Boolean(removed?.suggested) || removed?.role === "handoff";
+  if (!persistDismissal) return { ...shell, docs };
   return {
     ...shell,
     docs,
@@ -304,6 +313,7 @@ export function ProjectPage() {
         | "effort"
         | "permissionMode"
         | "sessionId"
+        | "handoffNudgeDismissed"
       >
     >,
   ) => modifyShell(shellId, (s) => ({ ...s, ...patch }));
@@ -590,13 +600,33 @@ export function ProjectPage() {
     onModelChange: (key: string) => patchShell(shell.id, { model: key }),
     onEffortChange: (key: string) => patchShell(shell.id, { effort: key }),
     onPermissionModeChange: (key: string) => patchShell(shell.id, { permissionMode: key }),
-    onSessionStarted: (sessionId: string) => patchShell(shell.id, { sessionId }),
+    // Strip the auto-captured handoff chip(s) once the new session has started:
+    // by then they've already ridden through `handleStart` as attachments, so the
+    // bridge has served its purpose — keeping the chip would leave the ready
+    // banner re-showing in the resumed session and block a future suggest fire.
+    onSessionStarted: (sessionId: string) =>
+      modifyShell(shell.id, (s) => ({
+        ...s,
+        sessionId,
+        handoffNudgeDismissed: false,
+        docs: s.docs.filter((d) => d.role !== "handoff"),
+      })),
     onResetSession: () => patchShell(shell.id, { sessionId: undefined }),
     onOpenDoc: openDoc,
     // Detaching a suggested chip records the dismissal so it does not re-add;
     // detaching a manually-attached doc just removes it. See `detachDoc`.
     onDetachDoc: (path: string) => modifyShell(shell.id, (s) => detachDoc(s, path)),
     onSuggestDoc: (path: string | null, role: string) => suggestDocToShell(shell.id, path, role),
+    onDismissHandoffNudge: () => patchShell(shell.id, { handoffNudgeDismissed: true }),
+    // Append the handoff doc as a regular (non-suggested) chip so it sticks
+    // through `handleClear` and rides as an attachment into the fresh session.
+    // Deduped by path; the auto-attach effect in SessionChat is the only caller.
+    onAttachHandoffDoc: (path: string) =>
+      modifyShell(shell.id, (s) =>
+        s.docs.some((d) => d.path === path)
+          ? s
+          : { ...s, docs: [...s.docs, { path, role: "handoff" }] },
+      ),
     onBrowseDocs: () => setDocsModalShellId(shell.id),
     onAddFiles: () => void addFilesToShell(shell.id, false),
     onAddScreenshots: () => void addFilesToShell(shell.id, true),

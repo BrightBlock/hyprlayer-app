@@ -309,6 +309,7 @@ function ChangeSection({
 const DOC_TONE: Record<DocKind, string> = {
   research: "bg-sky-400/10 text-sky-300",
   plan: "bg-amber-400/10 text-amber-300",
+  handoff: "bg-orange-400/10 text-orange-300",
 };
 
 function DocsSection({

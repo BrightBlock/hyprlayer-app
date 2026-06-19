@@ -183,13 +183,13 @@ export function prettyToolInput(input: string): string {
   }
 }
 
-export type DocKind = "research" | "plan";
+export type DocKind = "research" | "plan" | "handoff";
 
 /**
- * If a tool call wrote/edited a research or plan doc (a `.md` under a
- * `…/research/…` or `…/plans/…` path), return its path + kind — used to surface
- * agent-created docs in the diff sidebar. Other writes (code in the worktree)
- * return null.
+ * If a tool call wrote/edited a research, plan, or handoff doc (a `.md` under a
+ * `…/research/…`, `…/plans/…`, or `…/handoffs/…` path), return its path + kind —
+ * used to surface agent-created docs in the diff sidebar. Other writes (code in
+ * the worktree) return null.
  */
 export function docFromTool(name: string, input: string): { path: string; kind: DocKind } | null {
   if (name !== "Write" && name !== "Edit" && name !== "MultiEdit") return null;
@@ -198,6 +198,7 @@ export function docFromTool(name: string, input: string): { path: string; kind: 
   if (!path.endsWith(".md")) return null;
   if (path.includes("/research/")) return { path, kind: "research" };
   if (path.includes("/plans/") || path.includes("/plan/")) return { path, kind: "plan" };
+  if (path.includes("/handoffs/") || path.includes("/handoff/")) return { path, kind: "handoff" };
   return null;
 }
 

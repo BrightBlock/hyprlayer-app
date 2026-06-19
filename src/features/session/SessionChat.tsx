@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -37,7 +38,7 @@ import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, suggestedDocKind, type StageKey } from "./stages";
 import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
 import { PERMISSION_MODES, permissionModeOption } from "./permissions";
-import { formatTokens } from "./toolDisplay";
+import { docFromTool, formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers, type PromptHandlers } from "./TranscriptView";
 import {
   allowForSession,
@@ -399,6 +400,76 @@ function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: numb
 }
 
 /**
+ * Context-handoff nudge above the composer. Two flavours driven by `mode`:
+ *  - `suggest` — context is filling up; offer to run /create_handoff now.
+ *  - `ready` — a handoff doc was captured; one click clears the session and
+ *    prefills /resume_handoff so a single Enter resumes against the doc.
+ * Either flavour can be dismissed; `ready` re-arms only if the handoff is
+ * detached or a fresh one is written.
+ */
+function HandoffBanner({
+  mode,
+  contextPct,
+  suggestRequested,
+  onCreateHandoff,
+  onClearAndResume,
+  onDismiss,
+}: {
+  mode: "suggest" | "ready";
+  contextPct: number;
+  /** /create_handoff has already been sent or queued — disable the button so
+   *  a double-click can't queue a duplicate run. */
+  suggestRequested: boolean;
+  onCreateHandoff: () => void;
+  onClearAndResume: () => void;
+  onDismiss: () => void;
+}) {
+  const isReady = mode === "ready";
+  const disabled = !isReady && suggestRequested;
+  const actionLabel = isReady
+    ? "Clear & resume"
+    : suggestRequested
+      ? "Creating…"
+      : "Create handoff";
+  return (
+    <div className="mb-2 flex items-center gap-2 rounded-md border border-amber-400/40 bg-amber-400/5 px-3 py-2">
+      <span className="shrink-0 text-amber-300">
+        <SparkleIcon size={14} />
+      </span>
+      <span className="min-w-0 flex-1 text-xs text-ink-dim">
+        {isReady ? (
+          <>Handoff ready — clear context to start a fresh session with the handoff attached.</>
+        ) : suggestRequested ? (
+          <>Handoff queued — the agent will write it on the next turn.</>
+        ) : (
+          <>
+            Context is filling up ({Math.round(contextPct * 100)}%). Create a handoff doc and
+            continue in a fresh session?
+          </>
+        )}
+      </span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={isReady ? onClearAndResume : onCreateHandoff}
+        className="shrink-0 rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-xs font-medium text-amber-300 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-amber-400/10"
+      >
+        {actionLabel}
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        title={isReady ? "Dismiss — keep working in this session" : "Dismiss"}
+        aria-label="Dismiss"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
+      >
+        <XIcon size={10} strokeWidth={2.4} />
+      </button>
+    </div>
+  );
+}
+
+/**
  * The interactive answer panel for an `AskUserQuestion`, pinned just above the
  * composer. Questions are asked one at a time (a stepper): each question shows
  * its options (single- or multi-select), "Next" advances, and the last question's
@@ -612,6 +683,11 @@ type Props = {
   onDetachDoc: (path: string) => void;
   /** Reconcile the pane's auto-suggested doc (called by the mode-suggestion effect). */
   onSuggestDoc: (path: string | null, role: string) => void;
+  /** Hide the "context filling up" banner for this tab. */
+  onDismissHandoffNudge: () => void;
+  /** Capture a freshly written handoff doc as a chip on this tab — survives Clear
+   *  Context so it auto-attaches to the next session this tab starts. */
+  onAttachHandoffDoc: (path: string) => void;
   /** Open the library picker (centered modal) to attach context docs. */
   onBrowseDocs: () => void;
   /** Native OS file dialog → attach the chosen files as context. */
@@ -639,6 +715,8 @@ export function SessionChat({
   onOpenDoc,
   onDetachDoc,
   onSuggestDoc,
+  onDismissHandoffNudge,
+  onAttachHandoffDoc,
   onBrowseDocs,
   onAddFiles,
   onAddScreenshots,
@@ -846,6 +924,64 @@ export function SessionChat({
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
   const sid = shell.sessionId;
 
+  // Handoff flow: at ≥60% context fill, nudge the user to create a handoff doc
+  // and start fresh. The flow is two banners and a button glow:
+  //   1. suggest — show while pct ≥ NUDGE_THRESHOLD and the user hasn't acted;
+  //      "Create handoff" sends `/create_handoff`.
+  //   2. ready — once the agent's Write produces a doc under `…/handoffs/…md`,
+  //      it auto-attaches to this tab as a regular doc chip (so it survives
+  //      `handleClear` and rides into the next session as an attachment). The
+  //      Eraser button lights up; "Clear & resume" runs handleClear and
+  //      prefills `/resume_handoff`.
+  const HANDOFF_NUDGE_THRESHOLD = 0.6;
+  const contextPct =
+    session?.contextTokens != null ? session.contextTokens / model.contextWindow : 0;
+  const handoffDoc = shell.docs.find((d) => d.role === "handoff") ?? null;
+  // Last handoff doc written in the CURRENT session's items, ignoring ones the
+  // user already dismissed. We scan the live transcript rather than the
+  // workstream-wide selector so an old handoff from a previous session of this
+  // workstream doesn't pop in as soon as the new session opens.
+  const sessionItems = session?.items;
+  const dismissedSet = useMemo(
+    () => new Set(shell.dismissedSuggestions ?? []),
+    [shell.dismissedSuggestions],
+  );
+  const detectedHandoffPath = useMemo(() => {
+    if (!sessionItems) return null;
+    for (let i = sessionItems.length - 1; i >= 0; i--) {
+      const item = sessionItems[i];
+      if (item.kind !== "tool") continue;
+      const doc = docFromTool(item.name, item.input);
+      if (doc?.kind === "handoff" && !dismissedSet.has(doc.path)) return doc.path;
+    }
+    return null;
+  }, [sessionItems, dismissedSet]);
+  // The parent callback's identity churns; a ref keeps the effect deps tight to
+  // the input that actually matters (the detected path), so we don't re-fire on
+  // every parent render.
+  const attachHandoffRef = useRef(onAttachHandoffDoc);
+  attachHandoffRef.current = onAttachHandoffDoc;
+  useEffect(() => {
+    if (!detectedHandoffPath) return;
+    if (shell.docs.some((d) => d.path === detectedHandoffPath)) return;
+    attachHandoffRef.current(detectedHandoffPath);
+  }, [detectedHandoffPath, shell.docs]);
+  const showHandoffSuggest =
+    started &&
+    !terminal &&
+    !handoffDoc &&
+    !shell.handoffNudgeDismissed &&
+    contextPct >= HANDOFF_NUDGE_THRESHOLD;
+  const showHandoffReady = Boolean(handoffDoc) && started && !terminal;
+  // True once /create_handoff has been sent (queued mid-turn or already in the
+  // transcript) but before the handoff doc shows up — disables the suggest
+  // button so a double-click can't queue a second /create_handoff.
+  const HANDOFF_COMMAND = "/create_handoff";
+  const handoffRequested =
+    session != null &&
+    (session.queued.some((m) => m.text.trim() === HANDOFF_COMMAND) ||
+      session.items.some((it) => it.kind === "user" && it.text.trim() === HANDOFF_COMMAND));
+
   // Composer autocomplete: `/skill` commands and `@file` references, plus the
   // recognized-skill highlight painted behind the textarea text.
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -908,18 +1044,28 @@ export function SessionChat({
   // brand-new claude conversation (empty context — the manual escape hatch
   // before auto-compaction kicks in). A live session is ended first so it can't
   // keep running headless; the typed draft is kept so it can be resent fresh.
-  const handleClear = async () => {
+  // `skipConfirm` is set when the user is already on the explicit "Clear &
+  // resume" path (handoff banner) — the create-handoff step is implicit consent.
+  const handleClear = async (opts: { skipConfirm?: boolean } = {}) => {
     if (!started) return;
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
-    if (live) {
-      const ok = await confirm(
-        "Clear this conversation and start fresh? The current session ends and its context is discarded.",
-        { title: "Clear context?", kind: "warning" },
-      );
+    if (live && !opts.skipConfirm) {
+      const message = handoffDoc
+        ? "Clear this conversation and start fresh? The captured handoff doc will attach to the next session in this tab."
+        : "Clear this conversation and start fresh? The current session ends and its context is discarded.";
+      const ok = await confirm(message, { title: "Clear context?", kind: "warning" });
       if (!ok) return;
-      if (sid) await killSession(sid).catch(() => {});
     }
+    if (live && sid) await killSession(sid).catch(() => {});
     onResetSession();
+  };
+
+  // "Clear & resume" path triggered from the handoff-ready banner. The handoff
+  // doc is already pinned to `shell.docs` (so it'll ride as an attachment to the
+  // fresh session); also prefill `/resume_handoff` so a single Enter resumes.
+  const handleClearAndResume = async () => {
+    await handleClear({ skipConfirm: true });
+    if (draft.trim() === "") onDraftChange("/resume_handoff");
   };
 
   // Permission mode is a launch-time decision (claude won't switch a running
@@ -1048,6 +1194,22 @@ export function SessionChat({
             </div>
           ) : (
             <>
+              {(showHandoffSuggest || showHandoffReady) && (
+                <HandoffBanner
+                  mode={showHandoffReady ? "ready" : "suggest"}
+                  contextPct={contextPct}
+                  suggestRequested={handoffRequested}
+                  onCreateHandoff={() => {
+                    if (sid && !handoffRequested) void sendMessage(sid, HANDOFF_COMMAND, []);
+                  }}
+                  onClearAndResume={() => void handleClearAndResume()}
+                  onDismiss={
+                    showHandoffReady && handoffDoc
+                      ? () => onDetachDoc(handoffDoc.path)
+                      : onDismissHandoffNudge
+                  }
+                />
+              )}
               {!started && (
                 <WorkstreamDocChips
                   docs={shell.docs}
@@ -1196,14 +1358,24 @@ export function SessionChat({
                     />
                     {/* Clear context: end this conversation and start fresh — the
                         manual way to dodge auto-compaction. Only meaningful once a
-                        session exists. */}
+                        session exists. The handoff-ready state lights the button
+                        amber + adds a slow pulse so the user knows the next step
+                        is to clear and resume from the captured handoff doc. */}
                     {started && (
                       <button
                         type="button"
                         onClick={() => void handleClear()}
-                        title="Clear context — end this conversation and start fresh"
+                        title={
+                          showHandoffReady
+                            ? "Clear context and resume from the handoff doc"
+                            : "Clear context — end this conversation and start fresh"
+                        }
                         aria-label="Clear context"
-                        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/50 hover:text-ink"
+                        className={
+                          showHandoffReady
+                            ? "flex h-8 w-8 animate-pulse items-center justify-center rounded-md text-amber-300 ring-1 ring-amber-400/50 hover:bg-amber-400/10"
+                            : "flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/50 hover:text-ink"
+                        }
                       >
                         <EraserIcon />
                       </button>

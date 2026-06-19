@@ -181,13 +181,17 @@ describe("resultPreview", () => {
 });
 
 describe("docFromTool", () => {
-  it("recognises research and plan docs written by the agent", () => {
+  it("recognises research, plan, and handoff docs written by the agent", () => {
     expect(
       docFromTool("Write", '{"file_path":"/Users/jt/thoughts/repos/x/shared/research/2026-06-15-auth.md"}'),
     ).toEqual({ path: "/Users/jt/thoughts/repos/x/shared/research/2026-06-15-auth.md", kind: "research" });
     expect(docFromTool("Edit", '{"file_path":"/t/shared/plans/big-refactor.md"}')).toEqual({
       path: "/t/shared/plans/big-refactor.md",
       kind: "plan",
+    });
+    expect(docFromTool("Write", '{"file_path":"/t/shared/handoffs/2026-06-19-context.md"}')).toEqual({
+      path: "/t/shared/handoffs/2026-06-19-context.md",
+      kind: "handoff",
     });
   });
 
