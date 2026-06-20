@@ -229,6 +229,7 @@ fn forward(
     });
 }
 
+#[cfg(not(windows))]
 fn default_shell() -> PathBuf {
     // `$SHELL` is the user's login shell (folded in from the login environment
     // for GUI launches); `/bin/sh` is the POSIX-guaranteed fallback when it's
@@ -236,4 +237,18 @@ fn default_shell() -> PathBuf {
     std::env::var_os("SHELL")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/bin/sh"))
+}
+
+#[cfg(windows)]
+fn default_shell() -> PathBuf {
+    // Windows has no `$SHELL`, and the Unix `/bin/sh` fallback doesn't exist —
+    // it would fail to spawn and leave the terminal blank. Prefer PowerShell 7
+    // (`pwsh`), fall back to the built-in Windows PowerShell, then `%ComSpec%`
+    // (cmd.exe). Resolved to a full path so the PTY's CreateProcess doesn't
+    // depend on its own PATH search.
+    which::which("pwsh")
+        .or_else(|_| which::which("powershell"))
+        .ok()
+        .or_else(|| std::env::var_os("ComSpec").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("powershell.exe"))
 }

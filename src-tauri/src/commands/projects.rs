@@ -421,8 +421,11 @@ pub async fn add_project(
         .map_err(AppError::from)?;
 
     // Canonicalize so the registered path is stable (no trailing slash, symlinks
-    // resolved), which keeps later lookups and removals matching exactly.
-    let repo = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+    // resolved), which keeps later lookups and removals matching exactly. `dunce`
+    // strips the Windows `\\?\` verbatim prefix that `std::fs::canonicalize` adds
+    // — that prefix leaks into project URLs and trips git/tools that can't parse
+    // verbatim paths.
+    let repo = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let name = project_name(directory_name, &repo.to_string_lossy(), &repo);
     register_repo(&app, &state, &git, &repo, &name, "disk", false).await
 }
@@ -714,4 +717,20 @@ async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck
     });
 
     checks
+}
+
+#[cfg(test)]
+mod tests {
+    /// `add_project` canonicalizes the repo path for stable identity. On Windows
+    /// `std::fs::canonicalize` returns a `\\?\` verbatim path, which leaks into
+    /// project URLs and trips git/tools; `dunce::canonicalize` must strip it.
+    #[test]
+    fn canonicalized_project_path_has_no_verbatim_prefix() {
+        let here = dunce::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
+        assert!(
+            !here.to_string_lossy().starts_with(r"\\?\"),
+            "registered project path must not carry the \\\\?\\ prefix: {}",
+            here.display(),
+        );
+    }
 }

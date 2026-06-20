@@ -48,12 +48,16 @@ pub struct SpawnTerminal {
 
 /// A live PTY session: shell process + broadcast output + bounded scrollback.
 ///
-/// The `Child` itself lives in the reader thread, which `wait()`s on it after
-/// EOF to reap it and report the real exit code; we keep only a cloned
-/// [`ChildKiller`] here so `kill()` never contends with that wait on a shared
-/// child handle.
+/// A waiter thread owns the `Child`, `wait()`s on it for the real exit code,
+/// hands that to the reader thread, and then drops the master. The reader
+/// thread streams output and emits the final `Exited`. We keep only a cloned
+/// [`ChildKiller`] here so `kill()` never contends with that wait.
 pub struct PtySession {
-    master: StdMutex<Box<dyn MasterPty + Send>>,
+    /// `Option` so the waiter can drop the master once the child exits — on
+    /// Windows that tears down the lingering ConPTY conhost, which is the only
+    /// thing that unblocks the reader's blocking read (it never sees EOF on its
+    /// own there). Shared with the waiter thread.
+    master: Arc<StdMutex<Option<Box<dyn MasterPty + Send>>>>,
     killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
     writer: StdMutex<Box<dyn Write + Send>>,
     tx: broadcast::Sender<TerminalEvent>,
@@ -90,9 +94,10 @@ impl PtySession {
         let writer = pair.master.take_writer().map_err(to_io)?;
         let (tx, _rx) = broadcast::channel(2048);
         let scrollback = Arc::new(StdMutex::new(VecDeque::with_capacity(SCROLLBACK_CAP)));
+        let master = Arc::new(StdMutex::new(Some(pair.master)));
 
         let session = Arc::new(Self {
-            master: StdMutex::new(pair.master),
+            master: master.clone(),
             killer: StdMutex::new(killer),
             writer: StdMutex::new(writer),
             tx: tx.clone(),
@@ -100,10 +105,18 @@ impl PtySession {
             workstream_id: cfg.workstream_id,
         });
 
+        // The reader and the child are reaped on separate threads. The reader
+        // can't double as the reaper: on Windows the ConPTY conhost keeps the
+        // read pipe open after the child exits, so a read-until-EOF loop would
+        // block forever and never surface the exit. Instead the waiter reaps the
+        // child for its code and the reader emits `Exited` once it has both
+        // drained to EOF and received that code — keeping the final output ahead
+        // of the exit event (the property the Unix tests rely on).
+        let (code_tx, code_rx) = std::sync::mpsc::channel::<Option<i32>>();
+
         // portable-pty's reader is a blocking io::Read; give it its own thread.
-        // The thread also owns the `child` so it can `wait()` on EOF — reaping
-        // the shell (no zombie) and surfacing its real exit code.
         let mut reader = reader;
+        let reader_tx = tx.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
@@ -121,14 +134,27 @@ impl PtySession {
                             }
                         }
                         // send() errs only if there are no receivers — fine.
-                        let _ = tx.send(TerminalEvent::Output {
+                        let _ = reader_tx.send(TerminalEvent::Output {
                             data: B64.encode(chunk),
                         });
                     }
                 }
             }
+            let code = code_rx.recv().unwrap_or(None);
+            let _ = reader_tx.send(TerminalEvent::Exited { code });
+        });
+
+        // Waiter: reap the child (no zombie) for its real exit code, hand it to
+        // the reader, then drop the master. Dropping the master closes a
+        // lingering ConPTY so the reader's blocked read returns EOF on Windows;
+        // on Unix the reader already EOF'd when the child closed the slave, so
+        // the drop is a harmless no-op.
+        std::thread::spawn(move || {
             let code = child.wait().ok().map(|s| s.exit_code() as i32);
-            let _ = tx.send(TerminalEvent::Exited { code });
+            let _ = code_tx.send(code);
+            if let Ok(mut guard) = master.lock() {
+                let _ = guard.take();
+            }
         });
 
         Ok(session)
@@ -159,22 +185,24 @@ impl PtySession {
         w.flush()
     }
 
-    /// Notify the PTY of a terminal-size change.
+    /// Notify the PTY of a terminal-size change. A no-op once the child has
+    /// exited and the waiter has dropped the master.
     pub fn resize(&self, cols: u16, rows: u16) -> std::io::Result<()> {
-        self.master
-            .lock()
-            .unwrap()
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(to_io)
+        match self.master.lock().unwrap().as_ref() {
+            Some(master) => master
+                .resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(to_io),
+            None => Ok(()),
+        }
     }
 
-    /// Send SIGKILL to the shell process. The reader thread then hits EOF,
-    /// `wait()`s on the child to reap it, and emits the final `Exited` event.
+    /// Send SIGKILL to the shell process. The waiter thread then reaps it, the
+    /// reader emits the final `Exited` event, and the master is dropped.
     pub fn kill(&self) {
         let _ = self.killer.lock().unwrap().kill();
     }

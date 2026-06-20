@@ -28,6 +28,10 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 dirs.workspace = true
+# Strips the Windows `\\?\` verbatim prefix from canonicalized project paths.
+dunce = "1"
+# Resolve the default terminal shell (pwsh/powershell) by name on Windows.
+which = "7"
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"

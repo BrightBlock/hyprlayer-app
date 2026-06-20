@@ -271,16 +271,43 @@ fn join_deduped(mut segments: Vec<PathBuf>) -> OsString {
 fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> {
     let cwd = env::current_dir().ok()?;
 
+    // On Windows dev builds `cargo run` puts `target\debug` on PATH, where the
+    // GUI exe `Hyprlayer.exe` matches a search for `hyprlayer` — so the resolver
+    // must not hand back its own build artifacts and spawn a second app instance.
+    let forbidden: Vec<PathBuf> = env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .map(|dir| {
+            // Both `target\debug\` and the `target\debug\deps\` copy cargo keeps.
+            let mut dirs = vec![dir.clone(), dir.join("deps")];
+            if dir.file_name().is_some_and(|n| n == "deps") {
+                dirs.extend(dir.parent().map(PathBuf::from));
+            }
+            dirs.into_iter().filter_map(|d| d.canonicalize().ok()).collect()
+        })
+        .unwrap_or_default();
+    let is_build_artifact = |p: &PathBuf| {
+        p.canonicalize()
+            .ok()
+            .and_then(|c| c.parent().map(PathBuf::from))
+            .is_some_and(|parent| forbidden.contains(&parent))
+    };
+
     // On Windows, prefer a real .exe over npm's .cmd shims — CreateProcess
     // cannot spawn .cmd directly and the session driver needs a true child.
     #[cfg(windows)]
     {
-        if let Ok(exe) = which::which_in(format!("{name}.exe"), Some(augmented_path), &cwd) {
-            return Some(exe);
+        if let Ok(mut hits) = which::which_in_all(format!("{name}.exe"), Some(augmented_path), &cwd) {
+            if let Some(exe) = hits.find(|p| !is_build_artifact(p)) {
+                return Some(exe);
+            }
         }
     }
 
-    which::which_in(name, Some(augmented_path), cwd).ok()
+    let found = which::which_in_all(name, Some(augmented_path), &cwd)
+        .ok()?
+        .find(|p| !is_build_artifact(p));
+    found
 }
 
 fn well_known_dirs() -> Vec<PathBuf> {

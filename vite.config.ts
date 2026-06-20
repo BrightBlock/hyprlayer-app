@@ -28,7 +28,11 @@ export default defineConfig(async () => ({
       // 3. don't watch Rust sources or build output. `target/` is at the
       //    workspace root (not under src-tauri/), and on Windows watching a
       //    cargo-locked .dll there throws EBUSY and crashes the dev server.
-      ignored: ["**/src-tauri/**", "**/target/**"],
+      //    `archived-contexts/` only exists when you dogfood Hyprlayer on its
+      //    own repo: archiving a workstream moves its worktree (a full repo
+      //    checkout, `src/*.tsx` and all) into it, which would otherwise trip
+      //    a full-reload — the dev-only "screen flash" on archive.
+      ignored: ["**/src-tauri/**", "**/target/**", "**/archived-contexts/**"],
     },
   },
 

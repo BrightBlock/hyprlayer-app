@@ -1883,6 +1883,7 @@ version = "0.1.16"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
+ "dunce",
  "hyprlayer-core",
  "log",
  "serde",
@@ -1904,6 +1905,7 @@ dependencies = [
  "time",
  "tokio",
  "uuid",
+ "which",
 ]
 
 [[package]]

@@ -226,6 +226,8 @@ function routeSection(pathname: string): string {
   if (pathname.startsWith("/library/doc")) return "Document";
   if (pathname.startsWith("/library")) return "Library";
   if (pathname.startsWith("/settings")) return "Settings";
+  if (pathname.startsWith("/archive")) return "Archive";
+  if (pathname.startsWith("/onboarding")) return "Setup";
   if (pathname === "/") return "Home";
   return "Workspace";
 }
