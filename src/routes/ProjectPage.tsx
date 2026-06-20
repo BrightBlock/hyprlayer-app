@@ -1269,10 +1269,10 @@ export function ProjectPage() {
         open={docsModalShellId !== null}
         onClose={() => setDocsModalShellId(null)}
         title="Attach context from library"
-        className="max-w-2xl"
+        className="!max-w-2xl"
       >
         <WorkstreamDocsPanel
-          mappedName={project.mappedName}
+          thoughtsProject={project.thoughtsProject}
           targetTitle={docsModalShell?.title ?? null}
           attachedPaths={(docsModalShell?.docs ?? []).map((d) => d.path)}
           onAttach={attachDocToShell}

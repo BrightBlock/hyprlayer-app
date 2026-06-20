@@ -20,7 +20,13 @@ use crate::state::AppState;
 pub struct Project {
     /// Absolute path of the app-owned clone (`~/hyprlayer/repos/<name>`).
     pub path: String,
+    /// Human-facing project name (the app registry name, e.g. `brightblock.ai`).
     pub mapped_name: String,
+    /// The thoughts `repoMappings` key this repo resolves to — the identifier
+    /// docs are indexed (and worktrees created) under. The CLI sanitizes it, so
+    /// it can differ from `mapped_name` (e.g. `brightblock.ai` → `brightblock_ai`).
+    /// Filter docs by project using THIS, not the display name.
+    pub thoughts_project: String,
     pub profile: Option<String>,
     pub backend_kind: String,
     pub exists_on_disk: bool,
@@ -133,10 +139,21 @@ async fn registry_projects(state: &AppState) -> Vec<Project> {
                 .as_ref()
                 .map(|e| e.backend.kind().as_str().to_string())
                 .unwrap_or_else(|| "git".to_string());
+            // Docs are indexed — and worktrees created — under the thoughts
+            // `repoMappings` key, which the CLI sanitizes (e.g. a repo named
+            // `brightblock.ai` maps to `brightblock_ai`). Expose it separately so
+            // doc queries can filter on it while the UI keeps showing the
+            // friendlier registry name. Fall back to the registry name when the
+            // project isn't mapped into thoughts yet.
+            let thoughts_project = eff
+                .as_ref()
+                .and_then(|e| e.mapped_name.clone())
+                .unwrap_or_else(|| r.name.clone());
             Project {
                 exists_on_disk: Path::new(&r.path).is_dir(),
                 path: r.path,
                 mapped_name: r.name,
+                thoughts_project,
                 profile,
                 backend_kind,
                 origin_url: r.origin_url,

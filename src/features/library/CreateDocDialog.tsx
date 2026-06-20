@@ -9,7 +9,7 @@ import { parseTagsInput } from "./text";
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** Preselect this project (mapped name), e.g. the library's active filter. */
+  /** Preselect this project (its thoughts key), e.g. the library's active filter. */
   initialProjectName?: string;
 };
 
@@ -31,7 +31,7 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
   const [scope, setScope] = useState<string>("user");
   const [projectPath, setProjectPath] = useState(
     () =>
-      projects.find((p) => p.mappedName === initialProjectName)?.path ?? projects[0]?.path ?? "",
+      projects.find((p) => p.thoughtsProject === initialProjectName)?.path ?? projects[0]?.path ?? "",
   );
   const [ticket, setTicket] = useState("");
   const [tags, setTags] = useState("");

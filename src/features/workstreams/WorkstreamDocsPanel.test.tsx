@@ -57,7 +57,7 @@ function renderPanel(attachedPaths: string[] = [RESEARCH_DOC.id]) {
   render(
     <QueryClientProvider client={client}>
       <WorkstreamDocsPanel
-        mappedName="myproj"
+        thoughtsProject="myproj"
         targetTitle="Agent 2"
         attachedPaths={attachedPaths}
         onAttach={onAttach}

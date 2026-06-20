@@ -729,7 +729,15 @@ export type PrStatusChanged = {
 export type Project = {
 	/**  Absolute path of the app-owned clone (`~/hyprlayer/repos/<name>`). */
 	path: string,
+	/**  Human-facing project name (the app registry name, e.g. `brightblock.ai`). */
 	mappedName: string,
+	/**
+	 *  The thoughts `repoMappings` key this repo resolves to — the identifier
+	 *  docs are indexed (and worktrees created) under. The CLI sanitizes it, so
+	 *  it can differ from `mapped_name` (e.g. `brightblock.ai` → `brightblock_ai`).
+	 *  Filter docs by project using THIS, not the display name.
+	 */
+	thoughtsProject: string,
 	profile: string | null,
 	backendKind: string,
 	existsOnDisk: boolean,

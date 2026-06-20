@@ -12,8 +12,8 @@ export function roleForDoc(doc: DocMeta): string {
 }
 
 type Props = {
-  /** Project mapped name; docs are scoped to it. */
-  mappedName: string | null;
+  /** The project's thoughts key (the doc-index project id); docs are scoped to it. */
+  thoughtsProject: string | null;
   /** Title of the agent tab attachments will target (the last-active one). */
   targetTitle: string | null;
   /** Doc ids already attached to that tab. */
@@ -29,7 +29,7 @@ type Props = {
  * the workstream.
  */
 export function WorkstreamDocsPanel({
-  mappedName,
+  thoughtsProject,
   targetTitle,
   attachedPaths,
   onAttach,
@@ -44,7 +44,7 @@ export function WorkstreamDocsPanel({
       text: text.trim() ? text.trim() : null,
       types: type ? [type] : [],
       statuses: [],
-      projects: mappedName ? [mappedName] : [],
+      projects: thoughtsProject ? [thoughtsProject] : [],
       scopes: [],
       authors: [],
       tags: [],
@@ -55,13 +55,13 @@ export function WorkstreamDocsPanel({
       limit: 50,
       offset: 0,
     }),
-    [mappedName, text, type],
+    [thoughtsProject, text, type],
   );
-  const docs = useDocs(query, Boolean(mappedName));
+  const docs = useDocs(query, Boolean(thoughtsProject));
   const attached = new Set(attachedPaths);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-3 p-5">
+    <div className="space-y-3">
       <div className="flex items-center gap-2">
         <TextInput
           value={text}
@@ -101,7 +101,7 @@ export function WorkstreamDocsPanel({
         </p>
       )}
       {docs.data && docs.data.items.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-edge bg-panel">
+        <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-edge bg-panel">
           {docs.data.items.map((doc) => {
             const isAttached = attached.has(doc.id);
             return (

@@ -18,9 +18,10 @@ export function ProjectDocsPage() {
   // The bootstrap cache already names every project — no per-page
   // `storage info` subprocess needed just for the mapped name.
   const project = bootstrap.data?.projects.find((p) => p.path === projectPath);
-  const mappedName = project?.mappedName;
-  const query = useMemo(() => docQueryFromSearch(search, mappedName), [mappedName, search]);
-  const docs = useDocs(query, Boolean(mappedName));
+  // Scope docs by the thoughts key (the doc-index project id), not the display name.
+  const projectKey = project?.thoughtsProject;
+  const query = useMemo(() => docQueryFromSearch(search, projectKey), [projectKey, search]);
+  const docs = useDocs(query, Boolean(projectKey));
 
   const update = (patch: Partial<ProjectDocsSearch>) =>
     void navigate({
@@ -71,7 +72,7 @@ export function ProjectDocsPage() {
             </div>
             <Link
               to="/library"
-              search={{ project: project.mappedName }}
+              search={{ project: project.thoughtsProject }}
               className="rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-sm font-medium text-ink hover:bg-edge/60"
             >
               Open in Library
@@ -93,7 +94,7 @@ export function ProjectDocsPage() {
       <CreateDocDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        initialProjectName={project.mappedName}
+        initialProjectName={project.thoughtsProject}
       />
     </div>
   );

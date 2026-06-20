@@ -41,7 +41,7 @@ type DocFilterFieldsProps = {
   search: LibrarySearch;
   onUpdate: (patch: Partial<LibrarySearch>) => void;
   /** Options for the Project select; omitted on project-scoped pages. */
-  projectOptions?: { path: string; mappedName: string }[];
+  projectOptions?: { path: string; mappedName: string; thoughtsProject: string }[];
 };
 
 /** The filter rail both the Library and project-docs pages share. */
@@ -96,7 +96,7 @@ export function DocFilterFields({ search, onUpdate, projectOptions }: DocFilterF
           >
             <option value="">All projects</option>
             {projectOptions.map((project) => (
-              <option key={project.path} value={project.mappedName}>
+              <option key={project.path} value={project.thoughtsProject}>
                 {project.mappedName}
               </option>
             ))}
