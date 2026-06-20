@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 
 import {
+  useAiStatus,
   useBootstrap,
   useGithubUsername,
   useRedetectBinaries,
@@ -18,6 +20,7 @@ import {
   Button,
   Card,
   CardTitle,
+  Dialog,
   ErrorNote,
   PageError,
   PageSpinner,
@@ -25,6 +28,7 @@ import {
   TextInput,
   Toggle,
 } from "../components/ui";
+import { SetupTerminal } from "../features/onboarding/SetupTerminal";
 import { BinaryCard } from "../features/system/BinaryCard";
 import { UpdatesCard } from "../features/system/updates";
 import { KeyboardSettings } from "../features/settings/KeyboardSettings";
@@ -705,6 +709,74 @@ function ModelsSection({ settings }: { settings: AppSettings }) {
 
 /* ------------------------------- General --------------------------------- */
 
+/** AI tool card — shows current agent-tool status and lets users reconfigure
+ *  via the embedded terminal without leaving Settings. */
+function AiToolCard() {
+  const aiStatus = useAiStatus();
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const handleExit = (code: number | null) => {
+    if (code === 0) {
+      void aiStatus.refetch();
+      setDialogOpen(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <CardTitle className="mb-0">AI tool</CardTitle>
+        <Button onClick={() => setDialogOpen(true)}>
+          {aiStatus.data?.installed ? "Reconfigure" : "Configure"}
+        </Button>
+      </div>
+      <div className="mt-2 text-sm">
+        {aiStatus.isLoading && (
+          <p className="text-ink-dim">Checking status…</p>
+        )}
+        {!aiStatus.isLoading && aiStatus.data?.installed && (
+          <p>
+            <Badge tone="ok">Installed</Badge>
+            <span className="ml-2 text-ink-dim">
+              {aiStatus.data.agentTool ?? "AI tool"}{" "}
+              {aiStatus.data.location ? (
+                <span className="font-mono text-xs">{aiStatus.data.location}</span>
+              ) : null}
+            </span>
+          </p>
+        )}
+        {!aiStatus.isLoading && !aiStatus.data?.installed && (
+          <p>
+            <Badge tone="warn">Not configured</Badge>
+            <span className="ml-2 text-ink-dim">
+              Click Configure to install your AI coding assistant.
+            </span>
+          </p>
+        )}
+      </div>
+
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        title="Configure AI tool"
+        className="max-w-2xl"
+      >
+        <p className="mb-3 text-sm text-ink-dim">
+          Use the terminal below to select and install your AI coding assistant.
+          The dialog closes automatically on success.
+        </p>
+        <div className="relative h-80 rounded-lg border border-edge bg-surface overflow-hidden">
+          <SetupTerminal
+            args={["ai", "configure", "--force"]}
+            onExit={handleExit}
+            className="h-full"
+          />
+        </div>
+      </Dialog>
+    </Card>
+  );
+}
+
 function HyprlayerConfigCard({ config }: { config: ReturnType<typeof useBootstrap>["data"] }) {
   const data = config!;
   return (
@@ -836,7 +908,18 @@ export function Settings() {
         {section === "general" && (
           <>
             <UpdatesCard />
+            <AiToolCard />
             <HyprlayerConfigCard config={data} />
+            <Card>
+              <CardTitle>Setup wizard</CardTitle>
+              <p className="mb-3 text-sm text-ink-dim">
+                Re-run the guided setup to reconfigure your AI tool or change your thoughts
+                repository.
+              </p>
+              <Link to="/onboarding">
+                <Button>Re-run setup</Button>
+              </Link>
+            </Card>
           </>
         )}
         {section === "models" && <ModelsSection settings={data.settings} />}

@@ -66,6 +66,14 @@ import type { Project, WorkstreamView } from "../lib/bindings";
 // deeper route from the previous session.
 let launchedToHome = false;
 
+// Module-scoped dismissed flag for the onboarding wizard. When the user closes
+// the wizard without completing it, this prevents the auto-launch from re-popping
+// during the same session. Resets on a cold app reload (desired).
+export let onboardingDismissed = false;
+export function dismissOnboarding() {
+  onboardingDismissed = true;
+}
+
 // Stable identity for "no overrides yet" so the dispatcher's memo/effect doesn't
 // churn on every Root render before settings have loaded a keybindings section.
 const EMPTY_OVERRIDES: Overrides = {};
@@ -415,6 +423,21 @@ export function Root() {
   // Right-click menu + archive flow for the worktree rows. The view itself
   // carries its project path, so the targets are just the view.
   const navigate = useNavigate();
+
+  // Non-blocking first-run gate: when config is missing and the user hasn't
+  // dismissed the wizard this session, navigate to /onboarding. Not a
+  // beforeLoad guard — the shell renders immediately and the wizard slides in
+  // only once the bootstrap query resolves.
+  useEffect(() => {
+    if (
+      bootstrap.data?.config.state === "missing" &&
+      !onboardingDismissed &&
+      !pathname.startsWith("/onboarding")
+    ) {
+      void navigate({ to: "/onboarding" });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootstrap.data?.config.state, pathname]);
 
   // Toggling a "global destination" icon (Library / Settings / project docs)
   // while already there backs out to the previous view — or runs `fallback`
@@ -795,7 +818,13 @@ export function Root() {
             )}
             {!bootstrap.isLoading && projects.length === 0 && !collapsed && (
               <p className="px-2 py-1 text-sm text-ink-dim">
-                {configReady ? "No projects mapped yet." : "Setup required."}
+                {configReady ? (
+                  "No projects mapped yet."
+                ) : (
+                  <Link to="/onboarding" className="underline hover:text-ink">
+                    Setup required.
+                  </Link>
+                )}
               </p>
             )}
             {projects.map((p) => {

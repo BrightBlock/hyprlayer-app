@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod library;
+pub mod onboarding;
 pub mod projects;
 pub mod sessions;
 pub mod system;

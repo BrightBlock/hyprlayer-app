@@ -120,7 +120,7 @@ pub struct SyncReport {
 /// `repoMappings`, which also carry every worktree's `thoughts init` entry.
 /// Each row is enriched with its backend/profile from the effective config,
 /// best-effort (a missing/locked config just yields the git default).
-async fn registry_projects(state: &AppState) -> Vec<Project> {
+pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
     let records = match db_task(state.db.clone(), |db| db.list_projects()).await {
         Ok(records) => records,
         Err(e) => {
@@ -165,7 +165,7 @@ async fn registry_projects(state: &AppState) -> Vec<Project> {
 
 /// The config health summary shown during onboarding. The project list is
 /// derived separately now — see [`registry_projects`].
-async fn config_summary(state: &AppState) -> ConfigSummary {
+pub(crate) async fn config_summary(state: &AppState) -> ConfigSummary {
     let path = state.config.path().display().to_string();
     match state.config.load().await {
         Ok(loaded) => {

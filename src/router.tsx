@@ -3,6 +3,7 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 import { Root } from "./routes/Root";
 import { Archive } from "./routes/Archive";
 import { Dashboard } from "./routes/Dashboard";
+import { Onboarding } from "./routes/Onboarding";
 import { Settings } from "./routes/Settings";
 import { ProjectPage } from "./routes/ProjectPage";
 import { ProjectDocsPage } from "./routes/ProjectDocsPage";
@@ -44,6 +45,12 @@ const indexRoute = createRoute({
   // beforeLoad on a bootstrap IPC — that delayed first paint. The shell renders
   // instantly. Setup/config lives under Settings now.
   component: Dashboard,
+});
+
+const onboardingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/onboarding",
+  component: Onboarding,
 });
 
 const settingsRoute = createRoute({
@@ -116,6 +123,7 @@ const projectDocsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  onboardingRoute,
   settingsRoute,
   archiveRoute,
   libraryRoute,

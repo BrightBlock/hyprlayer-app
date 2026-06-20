@@ -35,6 +35,10 @@ pub enum TerminalEvent {
 /// Configuration for spawning a new [`PtySession`].
 pub struct SpawnTerminal {
     pub shell: PathBuf,
+    /// Additional arguments passed to the program (empty for an interactive
+    /// shell, non-empty when running a specific command such as `["ai",
+    /// "configure"]` via `spawn_cli_terminal`).
+    pub args: Vec<String>,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
@@ -70,6 +74,9 @@ impl PtySession {
             .map_err(to_io)?;
 
         let mut cmd = CommandBuilder::new(&cfg.shell);
+        for arg in &cfg.args {
+            cmd.arg(arg);
+        }
         cmd.cwd(&cfg.cwd);
         cmd.env("TERM", "xterm-256color");
         for (k, v) in &cfg.env {
@@ -185,6 +192,7 @@ mod tests {
     async fn pty_echo_roundtrip() {
         let s = PtySession::spawn(SpawnTerminal {
             shell: PathBuf::from("/bin/sh"),
+            args: vec![],
             cwd: std::env::temp_dir(),
             cols: 80,
             rows: 24,
@@ -215,10 +223,47 @@ mod tests {
 
     /// Mirrors the `terminal_open` path: subscribe via `subscribe_with_scrollback`
     /// (as `attach_stream` does) and confirm live output is delivered on that rx.
+    /// Confirm that `SpawnTerminal::args` are forwarded: `/bin/echo hi` exits 0
+    /// and its output appears on the channel.
+    #[tokio::test]
+    async fn spawn_with_args_runs_and_exits() {
+        let s = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/echo"),
+            args: vec!["ARGS_OK".into()],
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "test-args".into(),
+        })
+        .expect("spawn pty");
+
+        let mut rx = s.subscribe();
+        let mut seen = String::new();
+        let mut exited = false;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await {
+                Ok(Ok(TerminalEvent::Output { data })) => {
+                    seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
+                }
+                Ok(Ok(TerminalEvent::Exited { code })) => {
+                    assert_eq!(code, Some(0), "echo should exit 0");
+                    exited = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(seen.contains("ARGS_OK"), "got: {seen:?}");
+        assert!(exited, "expected Exited event");
+    }
+
     #[tokio::test]
     async fn open_path_delivers_live_output() {
         let s = PtySession::spawn(SpawnTerminal {
             shell: PathBuf::from("/bin/sh"),
+            args: vec![],
             cwd: std::env::temp_dir(),
             cols: 80,
             rows: 24,

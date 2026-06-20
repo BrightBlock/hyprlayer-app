@@ -245,6 +245,13 @@ export const commands = {
 	 */
 	githubUsername: () => typedError<string | null, AppError>(__TAURI_INVOKE("github_username")),
 	/**
+	 *  The shell username used to prefill the onboarding "Your name" field. Mirrors
+	 *  the CLI's `prompt_for_username` default (`$USER` → `$USERNAME` → `"user"`)
+	 *  exactly: the embedded `thoughts init`/`ai configure` PTY inherits this same
+	 *  process environment, so this is precisely the default the CLI would show.
+	 */
+	defaultUsername: () => __TAURI_INVOKE<string>("default_username"),
+	/**
 	 *  Play the default OS notification sound out-of-band from the toast.
 	 * 
 	 *  On macOS 13+ the system silently drops the `soundName` on
@@ -277,6 +284,40 @@ export const commands = {
 	terminalResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("terminal_resize", { terminalId, cols, rows })),
 	/**  Kill the shell process and remove the terminal from the registry. */
 	terminalClose: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_close", { terminalId })),
+	/**
+	 *  Open a new PTY running `hyprlayer <args>` (no workstream context needed).
+	 * 
+	 *  Used by the onboarding wizard to embed `hyprlayer ai configure` or similar
+	 *  interactive CLI commands inside the app without leaving to a terminal.
+	 *  Reuses the same id-based write/resize/close/attach commands as a workstream
+	 *  PTY — the only difference is how it is opened (binary + args vs. shell in cwd).
+	 */
+	spawnCliTerminal: (args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_cli_terminal", { args, cols, rows, onEvent })),
+	/**
+	 *  Read the AI tool install state without running `ai configure`.
+	 *  Gates the AI step: if already installed, the step shows "configured" with
+	 *  a "Reconfigure" option; if not, it prompts the user to run `ai configure`
+	 *  in the embedded terminal.
+	 */
+	getAiStatus: () => typedError<AiStatus, AppError>(__TAURI_INVOKE("get_ai_status")),
+	/**
+	 *  Inspect `~/thoughts` so the thoughts step can auto-select disk-vs-create.
+	 *  Infallible: a missing home dir falls back to a relative `thoughts`.
+	 */
+	probeDefaultThoughts: () => __TAURI_INVOKE<ThoughtsProbe>("probe_default_thoughts"),
+	/**
+	 *  Check out or initialise the user's thoughts repository and write the
+	 *  `thoughts` section into `config.json`, then return the updated bootstrap.
+	 * 
+	 *  This is the "Confirm" action in the thoughts-repo step of the wizard. The
+	 *  write is merge-tolerant: if `ai configure` has already created an ai-only
+	 *  config, the `ai` section is preserved and `thoughts` is injected.
+	 * 
+	 *  On success the config watcher will eventually emit `ConfigChanged`, but we
+	 *  also invalidate and emit immediately so the wizard's "Step 3 complete" state
+	 *  doesn't wait for the 2-second poll cycle.
+	 */
+	initThoughtsRepo: (user: string, source: ThoughtsSource) => typedError<Bootstrap, AppError>(__TAURI_INVOKE("init_thoughts_repo", { user, source })),
 };
 
 /** Events */
@@ -297,6 +338,21 @@ export type ActiveSessionView = {
 	session: Session,
 	workstreamTitle: string,
 	projectPath: string,
+};
+
+/**
+ *  Typed response for `hyprlayer ai status --json`.
+ * 
+ *  The CLI emits additional fields (location, version, …) that we don't need
+ *  yet; they are captured by `#[serde(default)]` and ignored.
+ */
+export type AiStatus = {
+	/**  The agent tool name as reported by the CLI, e.g. `"Claude Code"`. */
+	agentTool?: string | null,
+	/**  Whether the agent tool is installed and ready to use. */
+	installed?: boolean,
+	/**  Filesystem path to the agent binary, when installed. */
+	location?: string | null,
 };
 
 /**
@@ -979,6 +1035,20 @@ export type ThoughtsIndexUpdated = {
 	ids: string[],
 };
 
+/**
+ *  Probe of the default `~/thoughts` location, so the wizard can pick a sensible
+ *  initial mode: if it's already a git repo, default to "open from disk" and
+ *  prefill the path; otherwise default to "create" at the same path.
+ */
+export type ThoughtsProbe = {
+	/**  Absolute `~/thoughts` path (tilde expanded), for prefilling the field. */
+	defaultPath: string,
+	/**  Whether that path exists on disk. */
+	exists: boolean,
+	/**  Whether it's already a git repository. */
+	isGitRepo: boolean,
+};
+
 export type ThoughtsRepoStatus = {
 	branch: string | null,
 	/**  Working-tree entries that differ from HEAD (staged + unstaged + untracked). */
@@ -987,6 +1057,28 @@ export type ThoughtsRepoStatus = {
 	behind: number,
 	hasRemote: boolean,
 };
+
+/**  How the user wants to set up their thoughts repository. */
+export type ThoughtsSource = 
+/**
+ *  Clone a remote git repository (e.g. a private GitHub thoughts repo).
+ *  `location` is where the clone is placed.
+ *  When None, defaults to `~/thoughts`.
+ */
+{ mode: "clone"; url: string; 
+/**
+ *  Absolute path where the cloned repo will be placed.
+ *  When None, defaults to `~/thoughts`.
+ */
+location: string | null } | 
+/**  Use an existing local git repository. */
+{ mode: "disk"; 
+/**  Absolute path to the existing git repository. */
+path: string } | 
+/**  Initialise a fresh git repository at the given path. */
+{ mode: "create"; 
+/**  Absolute path where the new repo will be created. */
+path: string };
 
 export type Workstream = {
 	id: string,

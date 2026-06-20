@@ -68,6 +68,22 @@ pub struct StorageInfo {
     pub schema: Vec<SchemaFieldInfo>,
 }
 
+/// Typed response for `hyprlayer ai status --json`.
+///
+/// The CLI emits additional fields (location, version, …) that we don't need
+/// yet; they are captured by `#[serde(default)]` and ignored.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiStatus {
+    /// The agent tool name as reported by the CLI, e.g. `"Claude Code"`.
+    pub agent_tool: Option<String>,
+    /// Whether the agent tool is installed and ready to use.
+    pub installed: bool,
+    /// Filesystem path to the agent binary, when installed.
+    pub location: Option<String>,
+}
+
 pub struct HyprCli<'a> {
     resolver: &'a BinaryResolver,
 }
@@ -142,9 +158,9 @@ impl<'a> HyprCli<'a> {
             .await
     }
 
-    /// `hyprlayer ai status --json` (loose shape; refined when the app
-    /// grows AI-tool management UI).
-    pub async fn ai_status(&self, cwd: &Path) -> Result<serde_json::Value> {
+    /// `hyprlayer ai status --json` — typed; only the three fields the
+    /// onboarding step needs; extra CLI fields are silently ignored.
+    pub async fn ai_status(&self, cwd: &Path) -> Result<AiStatus> {
         let stdout = self
             .exec(cwd, &["ai", "status", "--json"], Duration::from_secs(30))
             .await?;

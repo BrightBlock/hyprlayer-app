@@ -86,12 +86,17 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::set_app_settings,
             commands::system::detect_editors,
             commands::system::github_username,
+            commands::system::default_username,
             commands::system::play_sound,
             commands::terminal::terminal_open,
             commands::terminal::terminal_attach,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_close,
+            commands::terminal::spawn_cli_terminal,
+            commands::onboarding::get_ai_status,
+            commands::onboarding::probe_default_thoughts,
+            commands::onboarding::init_thoughts_repo,
         ])
         .events(collect_events![
             events::ConfigChanged,

@@ -52,6 +52,7 @@ pub async fn terminal_open(
 
     let session = PtySession::spawn(SpawnTerminal {
         shell: default_shell(),
+        args: vec![],
         cwd: PathBuf::from(&ws.worktree_path),
         cols,
         rows,
@@ -133,6 +134,54 @@ pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> 
         s.kill();
     }
     Ok(())
+}
+
+/// Open a new PTY running `hyprlayer <args>` (no workstream context needed).
+///
+/// Used by the onboarding wizard to embed `hyprlayer ai configure` or similar
+/// interactive CLI commands inside the app without leaving to a terminal.
+/// Reuses the same id-based write/resize/close/attach commands as a workstream
+/// PTY — the only difference is how it is opened (binary + args vs. shell in cwd).
+#[tauri::command]
+#[specta::specta]
+pub async fn spawn_cli_terminal(
+    state: State<'_, AppState>,
+    args: Vec<String>,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<TerminalEvent>,
+) -> CmdResult<String> {
+    let bin = state
+        .binaries
+        .require(hyprlayer_core::process::binaries::BinaryKind::Hyprlayer)
+        .await
+        .map_err(AppError::from)?;
+    let path = state.binaries.augmented_path().await;
+    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+
+    let session = PtySession::spawn(SpawnTerminal {
+        shell: bin,
+        args,
+        cwd,
+        cols,
+        rows,
+        env: vec![("PATH".into(), path.to_string_lossy().into_owned())],
+        workstream_id: "onboarding".into(),
+    })
+    .map_err(|e| AppError::internal(format!("open pty: {e}")))?;
+
+    let terminal_id = uuid::Uuid::new_v4().to_string();
+    state
+        .terminals
+        .insert(terminal_id.clone(), session.clone())
+        .await;
+    attach_stream(
+        &session,
+        on_event,
+        state.terminals.clone(),
+        terminal_id.clone(),
+    );
+    Ok(terminal_id)
 }
 
 /// Replay scrollback then forward live output — the shared open/attach path.

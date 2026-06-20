@@ -10,6 +10,7 @@ import {
   type FmPatchDto,
   type MergeMethod,
   type ThoughtQuery,
+  type ThoughtsSource,
   type WorkstreamView,
 } from "./bindings";
 import { unwrap } from "./ipc";
@@ -208,6 +209,17 @@ export function useGithubUsername() {
     queryKey: ["github-username"],
     queryFn: () => unwrap(commands.githubUsername()),
     staleTime: 10 * 60_000,
+  });
+}
+
+/** The shell username ($USER), to prefill the onboarding name field. Matches
+ *  the CLI's default. Never changes during a session, so cache indefinitely.
+ *  Returns a plain string (the command is infallible). */
+export function useDefaultUsername() {
+  return useQuery({
+    queryKey: ["default-username"],
+    queryFn: () => commands.defaultUsername(),
+    staleTime: Infinity,
   });
 }
 
@@ -447,5 +459,45 @@ export function useDiscardFiles(id: string) {
   return useMutation({
     mutationFn: (paths: string[]) => unwrap(commands.worktreeDiscard(id, paths)),
     onSettled: () => invalidateWorktreeGit(id),
+  });
+}
+
+// ── Onboarding ───────────────────────────────────────────────────────────────
+
+/** AI tool install state — gates the AI step in the onboarding wizard.
+ *  Cached per session (staleTime: Infinity) since the install state rarely
+ *  changes mid-session; `.refetch()` is called explicitly after `ai configure`
+ *  exits 0 in the embedded terminal. */
+export function useAiStatus() {
+  return useQuery({
+    queryKey: ["aiStatus"],
+    queryFn: () => unwrap(commands.getAiStatus()),
+    staleTime: Infinity,
+  });
+}
+
+/** Probe `~/thoughts` so the wizard can default to "open from disk" (and prefill
+ *  the path) when an existing repo is already there. Re-checked on each mount —
+ *  the user may have just created the dir in another step. */
+export function useProbeDefaultThoughts() {
+  return useQuery({
+    queryKey: ["probe-default-thoughts"],
+    queryFn: () => commands.probeDefaultThoughts(),
+  });
+}
+
+/** Set up the user's thoughts repo (clone/disk/create) and write config.json.
+ *  Invalidates the full bootstrap/projects/docs/workstreams set on success so
+ *  the rest of the app reflects the new ready state immediately. */
+export function useInitThoughtsRepo() {
+  return useMutation({
+    mutationFn: (args: { user: string; source: ThoughtsSource }) =>
+      unwrap(commands.initThoughtsRepo(args.user, args.source)),
+    onSuccess: (data) => {
+      // Optimistically hydrate the bootstrap cache so the wizard's success
+      // state is instant, then trigger a full invalidation for correctness.
+      queryClient.setQueryData<Bootstrap>(["bootstrap"], data);
+      invalidateProjects();
+    },
   });
 }

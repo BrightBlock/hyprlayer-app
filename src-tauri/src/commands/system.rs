@@ -121,3 +121,15 @@ pub async fn github_username(state: State<'_, AppState>) -> CmdResult<Option<Str
     };
     Ok(hyprlayer_core::pr::github_login(&gh).await)
 }
+
+/// The shell username used to prefill the onboarding "Your name" field. Mirrors
+/// the CLI's `prompt_for_username` default (`$USER` → `$USERNAME` → `"user"`)
+/// exactly: the embedded `thoughts init`/`ai configure` PTY inherits this same
+/// process environment, so this is precisely the default the CLI would show.
+#[tauri::command]
+#[specta::specta]
+pub fn default_username() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".to_string())
+}

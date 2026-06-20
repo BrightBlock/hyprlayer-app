@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 
 import { HyprlayerLogo } from "../components/Logo";
 import { Card, PageError, Spinner } from "../components/ui";
@@ -40,6 +40,7 @@ export function Dashboard() {
 
   if (bootstrap.error) return <PageError error={bootstrap.error} />;
 
+  const configMissing = bootstrap.data?.config.state === "missing";
   const projectCount = bootstrap.data?.projects.length ?? 0;
   const docTotal = docsQuery.data?.total ?? 0;
   const typeCount = new Set(graph.nodes.map((n) => n.type)).size;
@@ -56,29 +57,45 @@ export function Dashboard() {
         </p>
       </header>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <ActionTile
-          title="Add"
-          subtitle="Clone a repo or open one from disk"
-          tone="brand"
-          icon={<PlusIcon size={20} />}
-          onClick={() => setAddOpen(true)}
-        />
-        <ActionTile
-          title="Discover"
-          subtitle="Browse your GitHub repos to clone"
-          tone="violet"
-          icon={<CompassIcon />}
-          onClick={() => setDiscoverOpen(true)}
-        />
-        <ActionTile
-          title="Settings"
-          subtitle="Binaries, roots, and preferences"
-          tone="neutral"
-          icon={<GearIcon />}
-          onClick={() => void navigate({ to: "/settings" })}
-        />
-      </section>
+      {configMissing ? (
+        /* First-run CTA: replace the three tiles with a single prominent prompt */
+        <section className="flex flex-col items-center gap-4 rounded-xl border border-brand/30 bg-brand/5 p-8 text-center">
+          <p className="text-lg font-semibold text-ink">Finish setting up Hyprlayer</p>
+          <p className="text-sm text-ink-dim">
+            Configure your AI assistant and connect your thoughts repository to get started.
+          </p>
+          <Link
+            to="/onboarding"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            Finish setup →
+          </Link>
+        </section>
+      ) : (
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <ActionTile
+            title="Add"
+            subtitle="Clone a repo or open one from disk"
+            tone="brand"
+            icon={<PlusIcon size={20} />}
+            onClick={() => setAddOpen(true)}
+          />
+          <ActionTile
+            title="Discover"
+            subtitle="Browse your GitHub repos to clone"
+            tone="violet"
+            icon={<CompassIcon />}
+            onClick={() => setDiscoverOpen(true)}
+          />
+          <ActionTile
+            title="Settings"
+            subtitle="Binaries, roots, and preferences"
+            tone="neutral"
+            icon={<GearIcon />}
+            onClick={() => void navigate({ to: "/settings" })}
+          />
+        </section>
+      )}
 
       <Card className="flex flex-col p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">

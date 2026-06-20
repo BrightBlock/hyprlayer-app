@@ -68,48 +68,78 @@ pub struct LoadedConfig {
 
 /// TEMPORARY exception to the single-writer rule (ADR 0002): a true first run
 /// has no config at all, and `hyprlayer thoughts init --yes` refuses to run
-/// without one. Write the minimal v4 config (git backend defaults) and hand
-/// ownership straight back to the CLI. Refuses to touch an existing file.
+/// without one. Write the minimal v4 config (git backend, `~/thoughts`) and hand
+/// ownership straight back to the CLI. Thin wrapper around
+/// [`ensure_thoughts_config`] for the existing `AddProjectDialog` first-run path.
 /// Delete once upstream `thoughts init` gains a `--user` flag.
 pub fn write_bootstrap_config(path: &Path, user: &str) -> Result<()> {
-    if path.exists() {
-        return Err(CoreError::Io(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            format!(
-                "refusing to overwrite existing config at {}",
-                path.display()
-            ),
-        )));
-    }
+    ensure_thoughts_config(path, user, "~/thoughts")
+}
+
+/// Merge-tolerant thoughts-config writer used by the onboarding wizard.
+///
+/// Three cases:
+/// - **Missing** → create a fresh v4 config with the `thoughts` section.
+/// - **Exists without `thoughts`** → parse as `serde_json::Value`, inject the
+///   `thoughts` object preserving every other key (`ai`, `telemetry`, …), then
+///   atomic tmp+rename.
+/// - **Exists with `thoughts` already** → error `thoughts_already_configured`
+///   (the user should use Settings / the CLI to change it).
+pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> Result<()> {
     let user = user.trim();
     if user.is_empty() {
         return Err(CoreError::Io(std::io::Error::other(
-            "a username is required to bootstrap the hyprlayer config",
+            "a username is required to write the hyprlayer config",
         )));
     }
 
-    let config = serde_json::json!({
-        "version": 4,
-        "thoughts": {
-            "user": user,
-            "backend": {
-                "kind": "git",
-                "thoughtsRepo": "~/thoughts",
-                "reposDir": "repos",
-                "globalDir": "global"
-            },
-            "repoMappings": {},
-            "profiles": {}
-        }
+    let thoughts_section = serde_json::json!({
+        "user": user,
+        "backend": {
+            "kind": "git",
+            "thoughtsRepo": thoughts_repo,
+            "reposDir": "repos",
+            "globalDir": "global"
+        },
+        "repoMappings": {},
+        "profiles": {}
     });
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+
+    let value = if path.exists() {
+        let raw = std::fs::read_to_string(path)?;
+        let mut v: serde_json::Value =
+            serde_json::from_str(&raw).map_err(|e| CoreError::ConfigParse {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+        if v.get("thoughts").is_some() {
+            return Err(CoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "thoughts is already configured; use Settings or the CLI to change it",
+            )));
+        }
+        v["thoughts"] = thoughts_section;
+        // Ensure version is set to 4 if missing (e.g. an ai-only config written
+        // by `ai configure` before version was established).
+        if v.get("version").is_none() || v["version"].is_null() {
+            v["version"] = serde_json::json!(4);
+        }
+        v
+    } else {
+        serde_json::json!({
+            "version": 4,
+            "thoughts": thoughts_section
+        })
+    };
+
     let tmp = path.with_extension("json.tmp");
     std::fs::write(
         &tmp,
-        serde_json::to_string_pretty(&config).expect("static json"),
+        serde_json::to_string_pretty(&value).expect("static json"),
     )?;
     std::fs::rename(&tmp, path)?;
     Ok(())
@@ -284,6 +314,48 @@ mod tests {
         let err = parse_config(v2, Path::new("test.json")).unwrap_err();
         assert_eq!(err.code(), "config_needs_migration");
         assert!(err.remedy().is_some());
+    }
+
+    #[test]
+    fn ensure_thoughts_config_creates_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        ensure_thoughts_config(&path, "alice", "~/thoughts").unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["version"], 4);
+        assert_eq!(v["thoughts"]["user"], "alice");
+        assert_eq!(v["thoughts"]["backend"]["thoughtsRepo"], "~/thoughts");
+    }
+
+    #[test]
+    fn ensure_thoughts_config_merges_into_ai_only_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        // Write an ai-only config first (as `ai configure` might create)
+        std::fs::write(
+            &path,
+            r#"{"version":4,"ai":{"agentTool":"claude"}}"#,
+        )
+        .unwrap();
+        ensure_thoughts_config(&path, "bob", "~/my-thoughts").unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        // `ai` section preserved
+        assert_eq!(v["ai"]["agentTool"], "claude");
+        // `thoughts` section injected
+        assert_eq!(v["thoughts"]["user"], "bob");
+        assert_eq!(v["thoughts"]["backend"]["thoughtsRepo"], "~/my-thoughts");
+    }
+
+    #[test]
+    fn ensure_thoughts_config_errors_when_thoughts_already_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        ensure_thoughts_config(&path, "alice", "~/thoughts").unwrap();
+        let err = ensure_thoughts_config(&path, "alice", "~/thoughts").unwrap_err();
+        assert_eq!(err.code(), "io");
+        assert!(err.to_string().contains("already configured"));
     }
 
     #[test]

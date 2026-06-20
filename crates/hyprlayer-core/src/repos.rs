@@ -85,6 +85,33 @@ pub async fn clone_repo(git: &Path, source: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `git init -b main <path>` — creates the directory if needed, then initialises
+/// a new empty git repository. Used by onboarding's "create new thoughts repo"
+/// path so users don't have to leave the app.
+pub async fn init_repo(git: &Path, dest: &Path) -> Result<()> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::create_dir_all(dest)?;
+    let dest_str = dest.to_str().ok_or_else(|| CoreError::OutputParse {
+        program: "git init".into(),
+        detail: "destination path is not valid UTF-8".into(),
+    })?;
+    Exec::new(git)
+        .args(["init", "-b", "main", dest_str])
+        .timeout(Duration::from_secs(30))
+        .run()
+        .await?;
+    Ok(())
+}
+
+/// Returns `true` when `path` is a git repository root (i.e. `<path>/.git`
+/// exists as a directory or a file). Does not verify that it's a valid repo —
+/// just the cheapest possible "this looks like git" check.
+pub fn is_git_repo(path: &Path) -> bool {
+    path.join(".git").exists()
+}
+
 /// One of the user's GitHub repos, for the clone dialog's "Recent repos" list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
