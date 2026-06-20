@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.2.0",
+      "date": "2026-06-20",
+      "summary": "Hyprlayer now runs on Windows (x64), with terminal and project fixes for the platform.",
+      "notes": [
+        "Windows (x64) is now a supported platform: Hyprlayer ships a native Windows installer alongside the macOS (Apple Silicon) build, with the same in-app auto-updates — install it once and future versions arrive through the Update pill.",
+        "A set of Windows-specific fixes make agent sessions work end to end: the terminal now closes cleanly when its shell exits, project paths and the default shell (PowerShell) are detected correctly, and the app reliably locates its bundled CLI binary so agents launch as expected."
+      ]
+    },
+    {
       "version": "0.1.16",
       "date": "2026-06-20",
       "summary": "A guided first-run setup wizard, plus a header breadcrumb alignment fix.",
