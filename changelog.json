@@ -1,6 +1,19 @@
 {
   "versions": [
     {
+      "version": "0.1.15",
+      "date": "2026-06-20",
+      "summary": "Keyboard tab cycling, a Content Security Policy, plus terminal, docs, and commit-button fixes.",
+      "notes": [
+        "Cycle through a pane's agent tabs from the keyboard — Ctrl+Tab and Ctrl+Shift+Tab move forward and back (Ctrl+PageUp / Ctrl+PageDown on Windows and Linux), wrapping at the ends and focusing the agent's composer.",
+        "Fixed a freshly opened integrated terminal that could stall at 80×24 — showing the full grid but acting hung — until you reattached; it now fits its pane on open.",
+        "Added a Content Security Policy to the desktop app, tightening what the in-app webview is allowed to load.",
+        "Commit and Ship buttons now read the live worktree git status, so they stay in lockstep with the Changes panel instead of lingering after you commit from the integrated terminal.",
+        "Fixed the attachment picker modal so it sizes correctly instead of overflowing, and long document lists now scroll inside it.",
+        "Library and workstream document lookups now match on the sanitized thoughts project key, so docs resolve even when a project's display name differs from its thoughts key."
+      ]
+    },
+    {
       "version": "0.1.14",
       "date": "2026-06-20",
       "summary": "Integrated terminal, a project board view, and a global Cmd+P search palette.",
