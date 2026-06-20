@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.1.16",
+      "date": "2026-06-20",
+      "summary": "A guided first-run setup wizard, plus a header breadcrumb alignment fix.",
+      "notes": [
+        "On first launch — or whenever your config is missing — Hyprlayer now opens a three-step setup wizard: enter your name, configure your AI CLI tool inline in an embedded terminal, and connect a thoughts repo by cloning one, picking a folder on disk, or creating a fresh one. You can re-run it anytime from Settings, which also gains an AI tool card showing your CLI's status with one-click reconfigure.",
+        "Fixed the header breadcrumb sliding under the window controls when the sidebar collapses — its inset is now derived from the actual left-cluster layout (and the number of visible controls) instead of a hard-coded macOS value, so it aligns correctly on both macOS and Linux."
+      ]
+    },
+    {
       "version": "0.1.15",
       "date": "2026-06-20",
       "summary": "Keyboard tab cycling, a Content Security Policy, plus terminal, docs, and commit-button fixes.",
