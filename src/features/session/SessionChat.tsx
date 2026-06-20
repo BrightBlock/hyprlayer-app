@@ -35,6 +35,7 @@ import type { WorkstreamView } from "../../lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
 import { AttachmentCards } from "./AttachmentCard";
 import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
+import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, suggestedDocKind, type StageKey } from "./stages";
 import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
@@ -987,6 +988,20 @@ export function SessionChat({
   // recognized-skill highlight painted behind the textarea text.
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [composerScroll, setComposerScroll] = useState(0);
+
+  // Grab focus when something swaps this agent back on screen (e.g. the terminal
+  // is toggled away) so the user can type straight away. We consume the signal
+  // inside the frame, not in the effect body, so React 19 StrictMode's
+  // double-invoke (setup→cleanup→setup) can't consume-then-cancel and drop the
+  // focus — only the surviving frame claims it, exactly once.
+  const pendingFocusShellId = useComposerFocusStore((s) => s.pendingShellId);
+  useEffect(() => {
+    if (pendingFocusShellId !== shell.id) return;
+    const raf = requestAnimationFrame(() => {
+      if (consumeComposerFocus(shell.id)) textareaRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [pendingFocusShellId, shell.id]);
   const autocomplete = useComposerAutocomplete({
     workstreamId,
     value: draft,

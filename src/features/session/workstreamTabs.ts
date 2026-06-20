@@ -39,6 +39,30 @@ export const defaultTabState = (): WsTabState => ({
 export const nextShellId = (shells: ShellTab[]): number =>
   Math.max(0, ...shells.map((s) => s.id)) + 1;
 
+/**
+ * Cycle the active tab within the *focused* pane by `dir` (+1 next, -1 previous),
+ * wrapping around the ends. The split's two panes each have their own strip, so
+ * cycling only moves through the pane you're looking at (per `activePane`) and
+ * leaves the other pane's selection untouched. Pure: returns the next state, or
+ * the input unchanged when the focused pane holds fewer than two tabs (nothing to
+ * cycle). Tabs cycle in their on-screen order, so drag-reordering is respected.
+ */
+export function cycleActiveTab(state: WsTabState, dir: 1 | -1): WsTabState {
+  const pane = state.activePane ?? "main";
+  const inPane = (s: ShellTab) =>
+    pane === "right" ? s.panel === "right" : (s.panel ?? "main") !== "right";
+  const members = state.shells.filter(inPane);
+  if (members.length < 2) return state;
+  const activeId = pane === "right" ? state.rightActiveId : state.activeId;
+  // An unresolved active id reads as the pane's first tab (the same fallback the
+  // project page renders), so step relative to index 0.
+  const from = Math.max(0, members.findIndex((s) => s.id === activeId));
+  const nextId = members[(from + dir + members.length) % members.length].id;
+  return pane === "right"
+    ? { ...state, rightActiveId: nextId, activePane: "right" }
+    : { ...state, activeId: nextId, activePane: "main" };
+}
+
 type TabsStore = { byWs: Record<string, WsTabState> };
 
 export const useWorkstreamTabsStore = create<TabsStore>()(
@@ -69,6 +93,31 @@ export function updateWorkstreamTabs(
   next: (prev: Record<string, WsTabState>) => Record<string, WsTabState>,
 ): void {
   useWorkstreamTabsStore.setState((s) => ({ byWs: next(s.byWs) }));
+}
+
+/**
+ * A transient, one-shot "focus this shell's composer" signal. An action that
+ * swaps which agent is on screen — e.g. toggling the terminal away — sets the
+ * target shell id; that shell's composer consumes it once mounted and focuses
+ * its textarea, so the user lands ready to type. Deliberately NOT persisted and
+ * NOT part of the tab strip: it's a fire-and-forget signal, cleared the instant
+ * it's honored so it never re-steals focus on a later render.
+ */
+export const useComposerFocusStore = create<{ pendingShellId: number | null }>(() => ({
+  pendingShellId: null,
+}));
+
+/** Ask `shellId`'s composer to grab focus as soon as it's on screen. */
+export function requestComposerFocus(shellId: number): void {
+  useComposerFocusStore.setState({ pendingShellId: shellId });
+}
+
+/** Claim a pending focus for `shellId`: clears the signal and returns true iff it
+ *  was the requested shell, so the composer focuses exactly once. */
+export function consumeComposerFocus(shellId: number): boolean {
+  if (useComposerFocusStore.getState().pendingShellId !== shellId) return false;
+  useComposerFocusStore.setState({ pendingShellId: null });
+  return true;
 }
 
 /**

@@ -117,6 +117,25 @@ export const COMMANDS: CommandDef[] = [
     defaults: { mac: "mod+backslash", other: "mod+backslash" },
   },
   {
+    id: "tab.next",
+    label: "Next Agent Tab",
+    category: "Workspace",
+    when: "project",
+    // Cycle agent tabs the way every browser/editor does: the *literal* Control
+    // key, not the `mod` abstraction. On macOS that's `ctrl+tab` (⌘Tab is the OS
+    // app switcher — reserved). Elsewhere physical Ctrl maps to `mod`, so Ctrl+Tab
+    // would be `mod+tab` — also reserved — so the non-mac default uses the other
+    // standard tab-cycle chord, Ctrl+PageDown.
+    defaults: { mac: "ctrl+tab", other: "mod+pagedown" },
+  },
+  {
+    id: "tab.prev",
+    label: "Previous Agent Tab",
+    category: "Workspace",
+    when: "project",
+    defaults: { mac: "ctrl+shift+tab", other: "mod+pageup" },
+  },
+  {
     id: "ws.new",
     label: "New Workstream",
     category: "Workspace",

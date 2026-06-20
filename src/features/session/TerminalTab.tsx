@@ -105,6 +105,18 @@ export function TerminalTab({
         idRef.current = id;
         onTerminalId(id);
       }
+      // Reconcile the PTY size now that `id` is live. The mount-time fit() no-ops
+      // while xterm's renderer warms up, so the PTY opens at xterm's default
+      // 80×24; the ResizeObserver below corrects it — but on a fresh open its
+      // first fit can fire *before* this async open sets `id`, and its `id`-gated
+      // resize is then dropped, stranding the PTY at 80×24 while the renderer
+      // shows the real grid. That mismatch reads as a hung terminal until a
+      // close/re-attach. Pushing one resize here closes the race for the open
+      // path too (a no-op on the backend when the size already matches).
+      if (id && !disposed) {
+        lastGrid = engine.fit();
+        void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
+      }
     })();
 
     const unsubInput = engine.onInput((data) => {

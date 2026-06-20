@@ -34,8 +34,10 @@ import {
 } from "../features/session/attachments";
 import { stageLabel, type StageKey } from "../features/session/stages";
 import {
+  cycleActiveTab,
   defaultTabState,
   nextShellId,
+  requestComposerFocus,
   updateWorkstreamTabs,
   useWorkstreamTabsStore,
   type WsTabState,
@@ -121,6 +123,11 @@ function isTerminalShell(shell: ShellTab): boolean {
   return !!shell.terminalView;
 }
 
+/** An agent chat tab (the only kind with a composer) — not a viewer or terminal. */
+function isAgentShell(shell: ShellTab): boolean {
+  return !isViewerShell(shell) && !isTerminalShell(shell);
+}
+
 /**
  * Detach the doc at `path` from a shell. A manually-attached doc is just removed;
  * detaching a *suggested* chip also records the path in `dismissedSuggestions` so
@@ -152,6 +159,8 @@ function ProjectCommands(props: {
   onNewTab: () => void;
   onCloseTab: (() => void) | null;
   onToggleSplit: () => void;
+  onNextTab: () => void;
+  onPrevTab: () => void;
   onNewWorkstream: () => void;
   onToggleTerminal: () => void;
   onToggleTerminalFull: () => void;
@@ -164,6 +173,8 @@ function ProjectCommands(props: {
   useCommand("tab.new", props.onNewTab);
   useCommand("tab.close", props.onCloseTab);
   useCommand("tab.toggleSplit", props.onToggleSplit);
+  useCommand("tab.next", props.onNextTab);
+  useCommand("tab.prev", props.onPrevTab);
   useCommand("ws.new", props.onNewWorkstream);
   useCommand("terminal.open", props.onToggleTerminal);
   useCommand("terminal.toggleFullscreen", props.onToggleTerminalFull);
@@ -349,6 +360,9 @@ export function ProjectPage() {
   const setActivePane = (pane: "main" | "right") => {
     updateTabs((current) => (current.activePane === pane ? current : { ...current, activePane: pane }));
   };
+  // Ctrl+Tab / Ctrl+Shift+Tab: move to the next/previous agent tab within the
+  // focused pane, wrapping at the ends (a no-op when that pane has one tab).
+  const cycleTab = (dir: 1 | -1) => updateTabs((current) => cycleActiveTab(current, dir));
   const makeShell = (id: number, panel: "main" | "right"): ShellTab => ({
     id,
     title: `Agent ${id}`,
@@ -620,12 +634,17 @@ export function ProjectPage() {
     if (onRight) {
       setMaximized(null);
       updateTabs((current) => ({ ...current, rightSplit: false, activePane: "main" }));
+      // Hand focus to the main agent now back in full view so the user can type.
+      if (activeShell && isAgentShell(activeShell)) requestComposerFocus(activeShell.id);
       return;
     }
     // Main-pane terminal: defocus to another main tab (no-op if it's the only one).
     const others = mainShells.filter((s) => s.id !== term.id);
     const other = others[others.length - 1];
-    if (other) selectShell(other.id);
+    if (other) {
+      selectShell(other.id);
+      if (isAgentShell(other)) requestComposerFocus(other.id);
+    }
   };
   const openDoc = (id: string) => {
     void navigate({ to: "/library/doc", search: { id, mode: "preview" } });
@@ -966,6 +985,8 @@ export function ProjectPage() {
         onNewTab={addShell}
         onCloseTab={focusedShell ? () => closeShell(focusedShell.id) : null}
         onToggleSplit={toggleRightSplit}
+        onNextTab={() => cycleTab(1)}
+        onPrevTab={() => cycleTab(-1)}
         onNewWorkstream={() => setCreateOpen(true)}
         onToggleTerminal={toggleTerminal}
         onToggleTerminalFull={toggleTerminalFullscreen}

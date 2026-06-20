@@ -59,6 +59,8 @@ const NAMED_TOKENS: Record<string, string> = {
   ArrowDown: "down",
   ArrowLeft: "left",
   ArrowRight: "right",
+  PageUp: "pageup",
+  PageDown: "pagedown",
 };
 
 /** Map a raw `e.key` to its canonical token, or null if it's unusable. */
@@ -164,6 +166,8 @@ const MAC_KEY_GLYPH: Record<string, string> = {
   down: "↓",
   left: "←",
   right: "→",
+  pageup: "⇞",
+  pagedown: "⇟",
 };
 
 /** Key token → Windows/Linux display label (special keys), else uppercased. */
@@ -178,6 +182,8 @@ const OTHER_KEY_LABEL: Record<string, string> = {
   down: "Down",
   left: "Left",
   right: "Right",
+  pageup: "PgUp",
+  pagedown: "PgDn",
 };
 
 /** Symbols shared across platforms for punctuation tokens. */
