@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Cut a release tag locally. CI (.github/workflows/release.yml) takes over once
-# the tag is pushed: it builds the macOS universal + Windows bundles,
-# ed25519-signs the updater packages, uploads a GitHub Release, and writes the
-# updater manifest + changelog to brightblock.ai. Running apps see the new
-# version via the in-app Update pill within a few minutes.
+# Cut a release tag locally. Then run ./scripts/release-local.sh to build +
+# ed25519-sign the macOS arm64 and Windows x64 bundles, upload a GitHub Release,
+# and write the updater manifest + changelog to brightblock.ai. Running apps see
+# the new version via the in-app Update pill within a few minutes.
+# (There is no CI release — GitHub Actions was removed; releases are local-only.)
 #
 # Before bumping versions this script gates on changelog.json: the entry for
 # the new version must exist with a non-empty summary (it's what the in-app
-# Update card renders and what CI copies to brightblock.ai). A stub is
+# Update card renders and what release-local.sh copies to brightblock.ai). A stub is
 # scaffolded if missing — fill it in and re-run.
 #
 # Usage:
@@ -107,5 +107,5 @@ git tag "v$NEW"
 
 echo ""
 echo "✓ Tagged v$NEW."
-echo "  CI release (all platforms):  git push && git push --tags"
-echo "  Local release (macOS arm64): ./scripts/release-local.sh"
+echo "  Publish (mac + win):  ./scripts/release-local.sh"
+echo "  Publish (mac only):   ./scripts/release-local.sh --mac-only"
