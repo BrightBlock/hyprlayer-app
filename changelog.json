@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.1.14",
+      "date": "2026-06-20",
+      "summary": "Integrated terminal, a project board view, and a global Cmd+P search palette.",
+      "notes": [
+        "Open an integrated terminal in the right dock — ⌘` toggles it open, revealed, or hidden. It runs your shell in the workstream's worktree, matches the active theme, remembers its font size (zoom in/out/reset), and keeps the session alive while hidden; shells are torn down only on tab close, workstream archive, or app exit.",
+        "Opening a project with no workstream selected now shows a dashboard board — every workstream as a card with its git status and stage — instead of auto-opening the last-used chat.",
+        "Press Cmd+P to open a global search palette that fuzzy-matches across all workstreams, live agents, library docs, and worktree files, and jumps straight to whatever you pick.",
+        "Docs that an agent writes through a worktree's thoughts/ symlink now resolve to the real file, so opening, saving, revealing, or editing their frontmatter from the library works instead of missing the index."
+      ]
+    },
+    {
       "version": "0.1.13",
       "date": "2026-06-19",
       "summary": "Archive workspaces non-destructively, OS toasts when agents need attention, and attachment cards for @file.",
