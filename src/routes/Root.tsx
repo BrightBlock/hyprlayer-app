@@ -23,6 +23,7 @@ import {
   useBootstrap,
   useEditorTargets,
   useWorkstreamPr,
+  useWorktreeGitStatus,
 } from "../lib/queries";
 import { useElementWidth } from "../lib/useElementWidth";
 import { commitWorkstream, shipWorkstream } from "../features/session/sessionStore";
@@ -468,6 +469,16 @@ export function Root() {
   // button gates on this too. Shares the query cache with PrStatusBar's
   // observer, so it adds no extra `gh` calls.
   const activePr = useWorkstreamPr(activeWorkstreamId ?? "", Boolean(activeWorkstream));
+  // Live uncommitted-change count for the active worktree — the SAME query the
+  // Changes panel renders, so the Commit/Ship buttons can never disagree with
+  // what the panel shows. The sidebar list's `git.dirty` is a cross-workstream
+  // snapshot refreshed only on explicit invalidation; it goes stale when the
+  // worktree changes outside the app's invalidation paths (e.g. a commit in the
+  // integrated terminal), which is what left a Commit button hovering over an
+  // empty panel. Keyed identically to the panel's query, so it adds no extra IPC.
+  const activeStatus = useWorktreeGitStatus(activeWorkstreamId ?? "", Boolean(activeWorkstream));
+  const activeChangedCount =
+    (activeStatus.data?.staged.length ?? 0) + (activeStatus.data?.unstaged.length ?? 0);
   useEffect(() => {
     if (!archiveOnMerge || !activeWorkstream) return;
     if (activePr.data?.state !== "merged") return;
@@ -539,7 +550,9 @@ export function Root() {
   const hasLivePr = activePr.data?.state === "open" || activePr.data?.state === "merged";
   // Commit / Ship actions + their enablement, defined once so the toolbar
   // buttons and the keyboard commands (below) share a single source of truth.
-  const canCommit = Boolean(activeWorkstream && activeWorkstream.git.dirty > 0);
+  // Gate on the live `activeChangedCount` (the Changes panel's query), NOT the
+  // list's `git.dirty` snapshot, so the buttons stay in lockstep with the panel.
+  const canCommit = Boolean(activeWorkstream) && activeChangedCount > 0;
   const doCommit = () => {
     if (!activeWorkstream) return;
     setCommitting(true);
@@ -548,7 +561,7 @@ export function Root() {
   const canShip = Boolean(
     activeWorkstream &&
       !hasLivePr &&
-      (activeWorkstream.git.dirty > 0 || activeWorkstream.git.ahead > 0),
+      (activeChangedCount > 0 || activeWorkstream.git.ahead > 0),
   );
   const doShip = () => {
     if (!activeWorkstream) return;
