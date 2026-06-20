@@ -81,9 +81,18 @@ const EMPTY_OVERRIDES: Overrides = {};
 const PROJECT_SIDEBAR_COLLAPSED = 56;
 const PROJECT_SIDEBAR_MIN = 180;
 const PROJECT_SIDEBAR_MAX = 360;
-// macOS only: keep the header's left content clear of the overlaid traffic
-// lights + the collapse button. Other platforms don't float controls here.
-const TOP_CHROME_MIN_CONTENT_OFFSET = 148;
+// The header's left controls (sidebar toggle, dashboard, and — on a project —
+// docs) live in an absolutely-positioned cluster, so they're out of flow: the
+// header content must be inset past the cluster's right edge or the breadcrumb
+// slides under it once the sidebar collapses below the cluster's width. These
+// mirror the cluster's Tailwind layout so the inset is derived, not hard-coded
+// (and stays correct as controls are added — the old fixed 148 only covered the
+// 2-icon macOS cluster and ignored the later-added docs button + all of Linux).
+const LEFT_CLUSTER_LEFT = IS_MACOS ? 92 : 12; // left-[92px] (clears traffic lights) / left-3
+const LEFT_CLUSTER_ICON = 28; // each control is h-7 w-7
+const LEFT_CLUSTER_GAP = 4; // gap-1 between controls
+const HEADER_CONTENT_PAD = 16; // pl-4 on the content row, before the breadcrumb
+const LEFT_CLUSTER_CLEARANCE = 12; // breathing room between the cluster and the breadcrumb
 
 // Cross-platform vector icons (Lucide family / native-style), currentColor so
 // they theme with the bar and stay pixel-crisp at every DPI on macOS + Windows.
@@ -532,9 +541,18 @@ export function Root() {
   const toggleDiff = useUiStore((state) => state.toggleDiff);
   const diffWidth = useUiStore((state) => state.diffWidth);
 
+  // Floor for the header inset: clear the absolutely-positioned left cluster so
+  // the breadcrumb never collides with it when the sidebar is collapsed. The
+  // cluster carries the docs button only on a project route (3 icons vs 2).
+  const leftClusterIcons = currentProject ? 3 : 2;
+  const leftClusterRight =
+    LEFT_CLUSTER_LEFT +
+    leftClusterIcons * LEFT_CLUSTER_ICON +
+    (leftClusterIcons - 1) * LEFT_CLUSTER_GAP;
+  const minContentOffset = leftClusterRight + LEFT_CLUSTER_CLEARANCE - HEADER_CONTENT_PAD;
   const contentOffset = Math.max(
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
-    IS_MACOS ? TOP_CHROME_MIN_CONTENT_OFFSET : 0,
+    minContentOffset,
   );
   // Inset the agent-pane controls (file opener + changes toggle + docs) so they
   // sit at the agent pane's right margin, mirroring how the breadcrumb tracks
