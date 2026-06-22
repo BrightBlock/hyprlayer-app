@@ -1169,7 +1169,7 @@ export function SessionChat({
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          <div className="mx-auto w-4/5">
+          <div className="mx-auto w-[90%]">
             <div className="rounded-lg border border-edge bg-panel p-4">
               <div className="mb-2 flex items-center gap-2">
                 <span className={`rounded p-0.5 ${MODE_STYLES[mode].badge}`}>
@@ -1184,7 +1184,7 @@ export function SessionChat({
       )}
 
       <div className="p-4">
-        <div className="mx-auto w-4/5">
+        <div className="mx-auto w-[90%]">
           {error && (
             <div className="mb-2">
               <ErrorNote error={{ code: "session", message: error, remedy: null }} />

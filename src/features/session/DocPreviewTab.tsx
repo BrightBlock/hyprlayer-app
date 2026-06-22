@@ -25,7 +25,7 @@ export function DocPreviewTab({ path, title }: { path: string; title: string }) 
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-5">
-      <div className="mx-auto w-4/5">
+      <div className="mx-auto w-[90%]">
         <div className="mb-4 flex items-center gap-2 border-b border-edge pb-3">
           <DocIcon size={15} />
           <span className="truncate text-sm font-medium text-ink" title={path}>
