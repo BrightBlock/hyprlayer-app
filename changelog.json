@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.2.2",
+      "date": "2026-06-22",
+      "summary": "Compaction summaries fold into a collapsible divider, and finished background tasks now clear themselves.",
+      "notes": [
+        "When a session compacts, the summary the agent writes afterward is now folded into the compaction divider as a collapsible panel — collapsed by default, with a chevron to expand it. Previously that block either flooded the transcript or was hidden entirely; now it sits inline on the divider, the same way a launched skill's body does.",
+        "Background shell tasks an agent starts and never checks again — fire-and-forget background commands — now disappear from the composer's background-task indicator as soon as they finish, instead of lingering as a phantom running task. The app acts on the agent's task-completion notification and clears the entry on any terminal status."
+      ]
+    },
+    {
       "version": "0.2.1",
       "date": "2026-06-22",
       "summary": "Live background shell tasks now surface in the composer toolbar with a status popover.",
