@@ -258,6 +258,22 @@ describe("taskStartedAt — per-task elapsed timestamps", () => {
     expect(afterTurnDone).toBe(firstStamp);
   });
 
+  it("removes the timestamp when the task completes via notification (no poll)", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+    emit(TURN_DONE);
+    expect(useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"]).toBeTruthy();
+
+    // claude's async completion notification — the agent never polled the task.
+    emit({ kind: "backgroundTaskUpdate", taskId: "task-a", toolUseId: "tu-1", status: "completed" });
+
+    const taskStartedAt = useSessionStore.getState().sessions[id]?.taskStartedAt;
+    expect(taskStartedAt?.["tu-1"]).toBeUndefined();
+    expect(Object.keys(taskStartedAt ?? {})).toHaveLength(0);
+  });
+
   it("removes the timestamp when the task ends via TaskStop", async () => {
     const id = await startBusySession();
     emit(INIT);
@@ -297,6 +313,24 @@ describe("classifyEntry — background activity state", () => {
     expect(entry.state).toBe("running");
     expect(entry.streaming).toBe(false);
     expect(classifyEntry(entry)).toBe("background");
+  });
+
+  it("flips from 'background' to 'review' once the task completes via notification", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+    emit(TURN_DONE);
+    expect(classifyEntry(entryOf(id))).toBe("background");
+
+    // The screenshot bug: the task finished but stayed "background" forever
+    // because the agent never polled it. The async notification now clears it.
+    emit({ kind: "backgroundTaskUpdate", taskId: "task-a", toolUseId: "tu-1", status: "completed" });
+
+    const entry = entryOf(id);
+    expect(entry.state).toBe("running");
+    expect(entry.streaming).toBe(false);
+    expect(classifyEntry(entry)).toBe("review");
   });
 
   it("returns 'working' (which outranks background) while the turn is streaming", async () => {

@@ -525,6 +525,15 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
                 pre_tokens,
             }]
         }
+        ParsedLine::TaskNotification {
+            task_id,
+            tool_use_id,
+            status,
+        } => vec![SessionEvent::BackgroundTaskUpdate {
+            task_id,
+            tool_use_id,
+            status,
+        }],
         ParsedLine::Unknown { raw } => vec![SessionEvent::ProtocolError {
             detail: "unrecognized stream-json line".into(),
             raw,
@@ -636,6 +645,30 @@ mod tests {
             events.as_slice(),
             [SessionEvent::PermissionAsk { tool_name, .. }] if tool_name == "Bash"
         ));
+    }
+
+    /// A background-task completion notification becomes a `BackgroundTaskUpdate`
+    /// session event (the UI drops the finished shell from its live indicator),
+    /// carrying the shell id, the spawning Bash tool-use id, and the status.
+    #[test]
+    fn task_notification_becomes_a_background_task_update() {
+        let events = parsed_to_events(ParsedLine::TaskNotification {
+            task_id: "bxmc1fof8".into(),
+            tool_use_id: Some("toolu_01HgG".into()),
+            status: "completed".into(),
+        });
+        match events.as_slice() {
+            [SessionEvent::BackgroundTaskUpdate {
+                task_id,
+                tool_use_id,
+                status,
+            }] => {
+                assert_eq!(task_id, "bxmc1fof8");
+                assert_eq!(tool_use_id.as_deref(), Some("toolu_01HgG"));
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected one BackgroundTaskUpdate, got {other:?}"),
+        }
     }
 
     /// Defensive: an AskUserQuestion whose `questions` is missing OR present but

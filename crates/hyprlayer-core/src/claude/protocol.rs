@@ -70,6 +70,20 @@ pub enum ParsedLine {
         /// Token count just before the compact ran, when reported.
         pre_tokens: Option<u32>,
     },
+    /// `{"type":"system","subtype":"task_notification",...}` — a background shell
+    /// task (spawned by `Bash{run_in_background:true}`) reached a terminal state.
+    /// claude emits this ASYNCHRONOUSLY as the task finishes, even when the agent
+    /// never polled it (the common fire-and-forget case) — realizing the spawn
+    /// result's promise that "you will be notified when it completes". It's the
+    /// authoritative "this background shell is done" signal the UI needs to drop a
+    /// finished task from its live indicator. `status` is "completed" or "failed"
+    /// at terminal; `tool_use_id` is the spawning `Bash` call (the UI's direct
+    /// transcript key), `task_id` the background shell id.
+    TaskNotification {
+        task_id: String,
+        tool_use_id: Option<String>,
+        status: String,
+    },
     /// A line we don't model — kept verbatim so the driver can log it.
     Unknown { raw: String },
 }
@@ -133,6 +147,20 @@ pub fn parse_line(line: &str) -> ParsedLine {
                         pre_tokens,
                     }
                 }
+                // The background-task lifecycle notification: claude fires it on
+                // its own when a `Bash{run_in_background}` shell finishes (see the
+                // variant doc). We key on `task_id`; without one there's nothing
+                // actionable, so it stays an informational `System` line.
+                "task_notification" => match str_field(&v, "task_id") {
+                    Some(task_id) => ParsedLine::TaskNotification {
+                        task_id,
+                        tool_use_id: str_field(&v, "tool_use_id"),
+                        status: str_field(&v, "status").unwrap_or_default(),
+                    },
+                    None => ParsedLine::System {
+                        subtype: "task_notification".into(),
+                    },
+                },
                 other => ParsedLine::System {
                     subtype: other.to_string(),
                 },
@@ -370,4 +398,69 @@ pub fn control_request_json(request_id: &str, subtype: &str, extra: Value) -> St
         "request": request,
     })
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A background-task completion notification (verified against claude 2.1.x:
+    /// fire `sleep N && …` with `run_in_background`, don't poll, and this lands
+    /// asynchronously the moment the shell exits) parses to `TaskNotification`
+    /// carrying the shell id, the spawning Bash tool-use id, and the status.
+    #[test]
+    fn task_notification_completed_parses() {
+        let line = r#"{"type":"system","subtype":"task_notification","task_id":"bxmc1fof8","tool_use_id":"toolu_01HgG","status":"completed","output_file":"/tmp/x.output","summary":"Background command \"Sleep\" completed (exit code 0)","session_id":"s"}"#;
+        match parse_line(line) {
+            ParsedLine::TaskNotification {
+                task_id,
+                tool_use_id,
+                status,
+            } => {
+                assert_eq!(task_id, "bxmc1fof8");
+                assert_eq!(tool_use_id.as_deref(), Some("toolu_01HgG"));
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected TaskNotification, got {other:?}"),
+        }
+    }
+
+    /// A failed background command reports `status:"failed"` (same shape) — the
+    /// UI drops it from the live set just the same (it's no longer running).
+    #[test]
+    fn task_notification_failed_parses() {
+        let line = r#"{"type":"system","subtype":"task_notification","task_id":"bzxqr580k","tool_use_id":"toolu_01W","status":"failed","summary":"… failed with exit code 7","session_id":"s"}"#;
+        assert!(matches!(
+            parse_line(line),
+            ParsedLine::TaskNotification { status, .. } if status == "failed"
+        ));
+    }
+
+    /// Defensive: a malformed notification missing `task_id` has nothing to key
+    /// on, so it degrades to an informational `System` line rather than emitting
+    /// an unactionable task event.
+    #[test]
+    fn task_notification_without_task_id_falls_back_to_system() {
+        let line = r#"{"type":"system","subtype":"task_notification","status":"completed"}"#;
+        assert!(matches!(
+            parse_line(line),
+            ParsedLine::System { subtype } if subtype == "task_notification"
+        ));
+    }
+
+    /// The sibling lifecycle lines (`task_started` / `task_updated`) are not
+    /// modelled — the terminal `task_notification` is the single signal we act
+    /// on — so they stay generic `System` lines and drive nothing.
+    #[test]
+    fn other_task_lifecycle_lines_stay_system() {
+        for subtype in ["task_started", "task_updated"] {
+            let line = format!(
+                r#"{{"type":"system","subtype":"{subtype}","task_id":"x"}}"#
+            );
+            assert!(matches!(
+                parse_line(&line),
+                ParsedLine::System { subtype: s } if s == subtype
+            ));
+        }
+    }
 }

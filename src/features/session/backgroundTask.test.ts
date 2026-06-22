@@ -87,6 +87,17 @@ function taskStop(
   return makeTool("TaskStop", JSON.stringify({ task_id: taskId }), toolUseId, result);
 }
 
+/** A background-task notification marker (the reduced `backgroundTaskUpdate`
+ *  event). `spawnToolUseId` mirrors the notification carrying the spawning
+ *  Bash tool-use id directly; pass null to exercise the task_id fallback. */
+function taskUpdate(
+  taskId: string,
+  spawnToolUseId: string | null,
+  status: string,
+): Extract<TranscriptItem, { kind: "taskUpdate" }> {
+  return { kind: "taskUpdate", id: `up-${taskId}-${status}`, taskId, toolUseId: spawnToolUseId, status };
+}
+
 function replayFixture(events: unknown[]): TranscriptItem[] {
   let view = initialSessionView();
   for (const ev of events) {
@@ -212,6 +223,65 @@ describe("backgroundTasksFromItems", () => {
     expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
+  // ── completion notification (the fire-and-forget path) ─────────────────────
+
+  it("removes a task on a terminal completion notification — agent never polled", () => {
+    // The screenshot bug: a `sleep`-style task the agent fires and forgets. No
+    // TaskOutput poll, no TaskStop — only claude's async notification clears it.
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskUpdate("task-a", "t1", "completed"),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("removes a task on a FAILED completion notification (no longer running)", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskUpdate("task-a", "t1", "failed"),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("matches the notification by task_id when it carries no toolUseId", () => {
+    // Defensive fallback: an update keyed only on task_id still resolves to the
+    // spawning tool via the spawn-result mapping.
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskUpdate("task-a", null, "completed"),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("keeps the task on a non-terminal 'running' notification", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskUpdate("task-a", "t1", "running"),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("task-a");
+  });
+
+  it("removes only the notified task when two are running", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { description: "Task A", result: SPAWN_RESULT("task-a") }),
+      bgBash("t2", { description: "Task B", result: SPAWN_RESULT("task-b") }),
+      taskUpdate("task-a", "t1", "completed"),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("task-b");
+  });
+
+  it("ignores a completion notification for an unknown task", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskUpdate("completely-unknown", null, "completed"),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(1);
+  });
+
   it("does NOT remove a task when TaskStop has no result yet (not confirmed)", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
@@ -324,5 +394,23 @@ describe("backgroundTasksFromItems — fixture replay", () => {
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
     expect(tasks[0].status).toBe("running");
+  });
+
+  it("a reduced backgroundTaskUpdate event drops a fire-and-forget task", () => {
+    // End-to-end: spawn a background task, end the turn (no poll), then deliver
+    // claude's async completion notification as a real event through the reducer.
+    const events: SessionEvent[] = [
+      { kind: "toolUse", id: "bg-1", name: "Bash", input: JSON.stringify({ command: "sleep 150", description: "Sleep 2.5 minutes", run_in_background: true }), parentId: null },
+      { kind: "toolResult", toolUseId: "bg-1", content: SPAWN_RESULT("task-z").content, isError: false, parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null },
+    ];
+    const before = replayFixture(events);
+    expect(backgroundTasksFromItems(before)).toHaveLength(1);
+
+    const after = replayFixture([
+      ...events,
+      { kind: "backgroundTaskUpdate", taskId: "task-z", toolUseId: "bg-1", status: "completed" },
+    ]);
+    expect(backgroundTasksFromItems(after)).toHaveLength(0);
   });
 });

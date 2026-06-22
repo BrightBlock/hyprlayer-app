@@ -127,6 +127,19 @@ pub enum SessionEvent {
         trigger: String,
         pre_tokens: Option<u32>,
     },
+    /// A background shell task (spawned by `Bash{run_in_background:true}`) reached
+    /// a terminal state. claude emits the underlying `task_notification`
+    /// asynchronously the moment the shell finishes — even if the agent never
+    /// polled it — so this is how the UI learns a fire-and-forget background task
+    /// is done and drops it from the live "background tasks" indicator (the
+    /// poll/stop paths miss the common case where the agent just moves on).
+    /// `status` is "completed" or "failed"; `tool_use_id` is the spawning `Bash`
+    /// call (the UI's direct transcript key), `task_id` the background shell id.
+    BackgroundTaskUpdate {
+        task_id: String,
+        tool_use_id: Option<String>,
+        status: String,
+    },
     /// An unparseable / unknown stdout line — surfaced, never fatal.
     ProtocolError { detail: String, raw: String },
     /// The process ended. Terminal: no further events for this session.
@@ -154,6 +167,7 @@ impl SessionEvent {
             SessionEvent::Usage { .. } => "usage",
             SessionEvent::TurnDone { .. } => "turnDone",
             SessionEvent::CompactBoundary { .. } => "compactBoundary",
+            SessionEvent::BackgroundTaskUpdate { .. } => "backgroundTaskUpdate",
             SessionEvent::ProtocolError { .. } => "protocolError",
             SessionEvent::Exited { .. } => "exited",
         }

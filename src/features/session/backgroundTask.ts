@@ -4,12 +4,17 @@
  * exactly like transcript.ts / toolDisplay.ts.
  *
  * Background tasks are spawned by Bash{run_in_background:true} calls. Their
- * lifecycle: spawn → (optional TaskOutput polls) → natural completion
- * (TaskOutput returns <status>completed</status>) or TaskStop/KillBash.
+ * lifecycle: spawn → (optional TaskOutput polls) → it ends one of three ways:
+ *   - a `taskUpdate` marker with a terminal status — claude's ASYNCHRONOUS
+ *     "you will be notified when it completes" notification, which fires even
+ *     when the agent never polls (the common fire-and-forget case, and the only
+ *     way `sleep 999 &`-style tasks ever clear without a manual stop);
+ *   - a TaskOutput/BashOutput poll that returns <status>completed</status>;
+ *   - TaskStop/KillBash.
  * Session exit is handled a layer up, not here: this pure walk still reports an
- * un-stopped spawn as live, so callers are responsible for dropping tasks once
- * the session is terminal (`useSessionBackgroundTasks` guards on `isTerminal`;
- * SessionChat hides the bar behind its terminal gate).
+ * un-stopped, un-notified spawn as live, so callers are responsible for dropping
+ * tasks once the session is terminal (`useSessionBackgroundTasks` guards on
+ * `isTerminal`; SessionChat hides the bar behind its terminal gate).
  *
  * Wire shapes (confirmed from real Claude Code 2.1.x sessions):
  *   Spawn result:
@@ -70,8 +75,10 @@ export function isBackgroundSpawn(item: TranscriptItem): boolean {
 }
 
 /**
- * Live background tasks for a transcript, in spawn order. Walks `tool` items:
+ * Live background tasks for a transcript, in spawn order. Walks items:
  *  - Bash{run_in_background:true} opens a task (taskId filled from its result);
+ *  - a `taskUpdate` marker with a terminal status (anything but "running") ends
+ *    it — claude's async completion notification, the fire-and-forget path;
  *  - TaskStop / KillBash for a known id ends it;
  *  - a TaskOutput/BashOutput result with <status>completed</status> ends it;
  *  - an in-flight TaskOutput/BashOutput (result === null) flips its target to
@@ -86,6 +93,22 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
   const taskIdToToolUseId = new Map<string, string>(); // task_id → toolUseId
 
   for (const item of items) {
+    // ── 0. Background-task completion notification (a non-tool control marker) ─
+    // claude's async "you will be notified when it completes" signal, surfaced
+    // by the backend as a `backgroundTaskUpdate` event. A terminal status ends
+    // the task even though the agent never polled it — the fire-and-forget case
+    // the TaskOutput/TaskStop paths below miss. Match by `toolUseId` (carried by
+    // the notification) first, falling back to the spawn-result `task_id` map.
+    if (item.kind === "taskUpdate") {
+      if (item.status === "running") continue; // still live — nothing to drop
+      const toolUseId = item.toolUseId ?? taskIdToToolUseId.get(item.taskId);
+      if (toolUseId) {
+        tasks.delete(toolUseId);
+        taskIdToToolUseId.delete(item.taskId);
+      }
+      continue;
+    }
+
     if (item.kind !== "tool") continue;
 
     // ── 1. Background Bash spawn ─────────────────────────────────────────────

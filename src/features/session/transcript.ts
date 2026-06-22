@@ -150,6 +150,21 @@ export type TranscriptItem =
    *  is legible. `trigger` is "auto" or "manual"; `preTokens` is the context
    *  fill just before the compact, when reported. */
   | { kind: "compact"; id: string; trigger: string; preTokens: number | null }
+  /** A background shell task (`Bash{run_in_background}`) changed state — claude's
+   *  asynchronous "you will be notified when it completes" signal, surfaced so the
+   *  live background-tasks indicator drops a finished task even when the agent
+   *  never polled it. A non-rendering control marker (it produces no UI in the
+   *  transcript, like a `compact` divider with no body); consumed only by
+   *  `backgroundTasksFromItems`. `status` is "completed"/"failed" at terminal —
+   *  anything but "running" ends the task. `toolUseId` is the spawning `Bash`
+   *  call when known (the direct key), else null and matched via `taskId`. */
+  | {
+      kind: "taskUpdate";
+      id: string;
+      taskId: string;
+      toolUseId: string | null;
+      status: string;
+    }
   | {
       kind: "exit";
       id: string;
@@ -710,6 +725,24 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           }),
           true,
         ),
+      };
+
+    case "backgroundTaskUpdate":
+      // An out-of-band async signal: claude fires it the moment a background
+      // shell finishes, which can land between turns (it even wakes an
+      // autonomous turn to react). Append a non-rendering marker that
+      // `backgroundTasksFromItems` consumes to drop the finished task; leave
+      // streaming/state untouched so it can't perturb an in-flight or resting
+      // turn, and don't close the open assistant block (it isn't turn content).
+      return {
+        ...view,
+        ...appended(view, (id) => ({
+          kind: "taskUpdate",
+          id,
+          taskId: event.taskId,
+          toolUseId: event.toolUseId,
+          status: event.status,
+        })),
       };
 
     default:

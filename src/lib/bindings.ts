@@ -928,6 +928,17 @@ export type SessionEvent =
  *  is the context fill just before the compact, when reported.
  */
 { kind: "compactBoundary"; trigger: string; preTokens: number | null } | 
+/**
+ *  A background shell task (spawned by `Bash{run_in_background:true}`) reached
+ *  a terminal state. claude emits the underlying `task_notification`
+ *  asynchronously the moment the shell finishes — even if the agent never
+ *  polled it — so this is how the UI learns a fire-and-forget background task
+ *  is done and drops it from the live "background tasks" indicator (the
+ *  poll/stop paths miss the common case where the agent just moves on).
+ *  `status` is "completed" or "failed"; `tool_use_id` is the spawning `Bash`
+ *  call (the UI's direct transcript key), `task_id` the background shell id.
+ */
+{ kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | 
 /**  An unparseable / unknown stdout line — surfaced, never fatal. */
 { kind: "protocolError"; detail: string; raw: string } | 
 /**  The process ended. Terminal: no further events for this session. */
