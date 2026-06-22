@@ -22,6 +22,9 @@ use crate::state::AppState;
 pub struct WorkstreamView {
     pub item: Workstream,
     pub git: WorktreeStatus,
+    /// Populated only by `create_workstream`: result of copying configured
+    /// untracked files into the new worktree. `null` on every other path.
+    pub seed: Option<hyprlayer_core::worktree::seed::SeedReport>,
 }
 
 /// Base-branch choices for the "new workstream" dialog: every local + remote
@@ -51,7 +54,11 @@ async fn load_item(state: &AppState, id: &str) -> CmdResult<Workstream> {
 /// Live git + thoughts-link status for one item (blocking work).
 fn item_view(item: Workstream, link: Option<LinkStatus>) -> WorkstreamView {
     let git = worktree::status(Path::new(&item.worktree_path), &item.base_branch, link);
-    WorkstreamView { item, git }
+    WorkstreamView {
+        item,
+        git,
+        seed: None,
+    }
 }
 
 #[tauri::command]
@@ -222,6 +229,34 @@ pub async fn create_workstream(
     };
     state.config.invalidate().await;
 
+    // Best-effort: copy configured untracked files (e.g. .env) into the new
+    // worktree. NEVER fatal — a missing file must not undo a provisioned worktree.
+    let seed = {
+        let repo = PathBuf::from(&project_path);
+        let wt = worktree_path.clone();
+        blocking("seed_worktree", move || {
+            let patterns = hyprlayer_core::repo_settings::read(&repo)
+                .map(|s| s.worktree.copy)
+                .unwrap_or_else(|e| {
+                    log::warn!("read .hyprlayer/settings.toml: {e}");
+                    Vec::new()
+                });
+            hyprlayer_core::worktree::seed::seed_worktree(&repo, &wt, &patterns)
+        })
+        .await
+        .unwrap_or_default()
+    };
+    if !seed.errors.is_empty() || !seed.missing.is_empty() {
+        log::warn!(
+            "worktree seed: copied {}, missing {:?}, errors {:?}",
+            seed.copied.len(),
+            seed.missing,
+            seed.errors
+        );
+    } else if !seed.copied.is_empty() {
+        log::info!("worktree seed: copied {} file(s)", seed.copied.len());
+    }
+
     let new_item = NewWorkstream {
         project_path,
         title,
@@ -232,7 +267,9 @@ pub async fn create_workstream(
     };
     let item = db_task(state.db.clone(), move |db| db.insert_workstream(new_item)).await?;
 
-    Ok(item_view(item, Some(link)))
+    let mut view = item_view(item, Some(link));
+    view.seed = Some(seed);
+    Ok(view)
 }
 
 #[tauri::command]

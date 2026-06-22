@@ -37,6 +37,8 @@ export const commands = {
 	listRecentRepos: () => typedError<GithubRepo[], AppError>(__TAURI_INVOKE("list_recent_repos")),
 	syncThoughts: (path: string, message: string | null) => typedError<SyncReport, AppError>(__TAURI_INVOKE("sync_thoughts", { path, message })),
 	runBackendHealth: (path: string) => typedError<HealthReport, AppError>(__TAURI_INVOKE("run_backend_health", { path })),
+	getWorktreeFiles: (path: string) => typedError<string[], AppError>(__TAURI_INVOKE("get_worktree_files", { path })),
+	setWorktreeFiles: (path: string, patterns: string[]) => typedError<string[], AppError>(__TAURI_INVOKE("set_worktree_files", { path, patterns })),
 	queryDocs: (query: ThoughtQuery) => typedError<QueryResult, AppError>(__TAURI_INVOKE("query_docs", { query })),
 	getDoc: (id: string) => typedError<DocContent, AppError>(__TAURI_INVOKE("get_doc", { id })),
 	saveDoc: (id: string, content: string, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("save_doc", { id, content, baseMtimeMs })),
@@ -841,6 +843,20 @@ export type SchemaFieldInfo = {
 	required: boolean,
 };
 
+export type SeedError = {
+	entry: string,
+	message: string,
+};
+
+export type SeedReport = {
+	/**  Repo-relative file paths actually written into the new worktree. */
+	copied: string[],
+	/**  Entries (literal or glob) that matched nothing in the repo. */
+	missing: string[],
+	/**  Per-entry copy/compile errors that did not prevent other entries from being copied. */
+	errors: SeedError[],
+};
+
 export type Session = {
 	id: string,
 	workstreamId: string,
@@ -1128,6 +1144,11 @@ export type WorkstreamDoc = {
 export type WorkstreamView = {
 	item: Workstream,
 	git: WorktreeStatus,
+	/**
+	 *  Populated only by `create_workstream`: result of copying configured
+	 *  untracked files into the new worktree. `null` on every other path.
+	 */
+	seed: SeedReport | null,
 };
 
 /**

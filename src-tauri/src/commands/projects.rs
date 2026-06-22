@@ -10,7 +10,7 @@ use serde::Serialize;
 use tauri::State;
 use tauri_specta::Event;
 
-use super::db_task;
+use super::{blocking, db_task};
 use crate::error::{AppError, CmdResult};
 use crate::settings::AppSettings;
 use crate::state::AppState;
@@ -717,6 +717,43 @@ async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck
     });
 
     checks
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_worktree_files(
+    state: State<'_, AppState>,
+    path: String,
+) -> CmdResult<Vec<String>> {
+    let _ = &state; // project path comes from the arg; state kept for signature symmetry
+    blocking("read_repo_settings", move || {
+        hyprlayer_core::repo_settings::read(std::path::Path::new(&path)).map(|s| s.worktree.copy)
+    })
+    .await?
+    .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_worktree_files(
+    state: State<'_, AppState>,
+    path: String,
+    patterns: Vec<String>,
+) -> CmdResult<Vec<String>> {
+    let _ = &state;
+    let cleaned: Vec<String> = patterns
+        .into_iter()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let p = path.clone();
+    let saved = cleaned.clone();
+    blocking("write_repo_settings", move || {
+        hyprlayer_core::repo_settings::set_worktree_copy(std::path::Path::new(&p), &cleaned)
+    })
+    .await?
+    .map_err(AppError::from)?;
+    Ok(saved)
 }
 
 #[cfg(test)]

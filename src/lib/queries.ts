@@ -489,6 +489,24 @@ export function useProbeDefaultThoughts() {
 /** Set up the user's thoughts repo (clone/disk/create) and write config.json.
  *  Invalidates the full bootstrap/projects/docs/workstreams set on success so
  *  the rest of the app reflects the new ready state immediately. */
+// ── Repo worktree file list ───────────────────────────────────────────────────
+
+/** Files/globs configured to be copied from a repo into each new worktree. */
+export function useWorktreeFiles(path: string) {
+  return useQuery({
+    queryKey: ["worktreeFiles", path],
+    queryFn: () => unwrap(commands.getWorktreeFiles(path)),
+  });
+}
+
+/** Persist the full worktree-files list for a project (whole-list replace). */
+export function useSetWorktreeFiles(path: string) {
+  return useMutation({
+    mutationFn: (patterns: string[]) => unwrap(commands.setWorktreeFiles(path, patterns)),
+    onSuccess: (next) => queryClient.setQueryData(["worktreeFiles", path], next),
+  });
+}
+
 export function useInitThoughtsRepo() {
   return useMutation({
     mutationFn: (args: { user: string; source: ThoughtsSource }) =>

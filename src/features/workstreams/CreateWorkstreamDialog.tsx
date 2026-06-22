@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { WorkstreamView } from "../../lib/bindings";
+import type { SeedReport, WorkstreamView } from "../../lib/bindings";
 import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "../../components/ui";
 import { useCreateWorkstream, useWorkstreamBases } from "../../lib/queries";
 
@@ -18,9 +18,22 @@ type Props = {
  * The base branch defaults to the repo's detected default; pick another to
  * branch from a release line or feature branch instead.
  */
+/** Brief non-blocking note shown when the seed step had missing/errored files. */
+function SeedNote({ seed }: { seed: SeedReport }) {
+  const problems = [...seed.missing, ...seed.errors.map((e) => e.entry)];
+  if (problems.length === 0) return null;
+  return (
+    <p className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+      Copied {seed.copied.length} file{seed.copied.length !== 1 ? "s" : ""};
+      couldn&apos;t find: {problems.join(", ")}
+    </p>
+  );
+}
+
 export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }: Props) {
   const [title, setTitle] = useState("");
   const [base, setBase] = useState("");
+  const [seedNote, setSeedNote] = useState<SeedReport | null>(null);
   const create = useCreateWorkstream(projectPath);
   const bases = useWorkstreamBases(projectPath, open);
 
@@ -42,6 +55,7 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
     if (create.isPending) return;
     setTitle("");
     setBase("");
+    setSeedNote(null);
     create.reset();
     onClose();
   };
@@ -56,7 +70,12 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
           setTitle("");
           setBase("");
           create.reset();
-          onClose();
+          // Surface seed problems as a non-blocking note before closing.
+          if (view.seed && (view.seed.missing.length > 0 || view.seed.errors.length > 0)) {
+            setSeedNote(view.seed);
+          } else {
+            onClose();
+          }
           onCreated(view);
         },
       },
@@ -103,9 +122,10 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
         </p>
         {bases.isError && <ErrorNote error={bases.error} />}
         {create.isError && <ErrorNote error={create.error} />}
+        {seedNote && <SeedNote seed={seedNote} />}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={close} disabled={create.isPending}>
-            Cancel
+            {seedNote ? "Close" : "Cancel"}
           </Button>
           <Button type="submit" variant="primary" busy={create.isPending} disabled={!title.trim()}>
             {create.isPending ? "Provisioning worktree…" : "Create"}

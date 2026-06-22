@@ -411,7 +411,11 @@ fn resolve_id_follows_worktree_symlinks() {
     let wt = TempDir::new().unwrap();
     let thoughts = wt.path().join("thoughts");
     fs::create_dir_all(&thoughts).unwrap();
-    symlink(root.root.join("repos/myproj/shared"), thoughts.join("shared")).unwrap();
+    symlink(
+        root.root.join("repos/myproj/shared"),
+        thoughts.join("shared"),
+    )
+    .unwrap();
 
     // The symlinked path the UI captured resolves to the canonical index id.
     let via_link = thoughts

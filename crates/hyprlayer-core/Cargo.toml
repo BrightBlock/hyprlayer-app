@@ -27,6 +27,9 @@ git2 = { version = "0.19", default-features = false }
 memchr = "2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 walkdir = "2"
+globset = "0.4"
+toml = "0.8"
+toml_edit = "0.22"
 notify = "8"
 notify-debouncer-full = "0.5"
 specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"], optional = true }

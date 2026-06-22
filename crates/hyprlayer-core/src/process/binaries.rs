@@ -283,7 +283,9 @@ fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> 
             if dir.file_name().is_some_and(|n| n == "deps") {
                 dirs.extend(dir.parent().map(PathBuf::from));
             }
-            dirs.into_iter().filter_map(|d| d.canonicalize().ok()).collect()
+            dirs.into_iter()
+                .filter_map(|d| d.canonicalize().ok())
+                .collect()
         })
         .unwrap_or_default();
     let is_build_artifact = |p: &PathBuf| {
@@ -297,7 +299,8 @@ fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> 
     // cannot spawn .cmd directly and the session driver needs a true child.
     #[cfg(windows)]
     {
-        if let Ok(mut hits) = which::which_in_all(format!("{name}.exe"), Some(augmented_path), &cwd) {
+        if let Ok(mut hits) = which::which_in_all(format!("{name}.exe"), Some(augmented_path), &cwd)
+        {
             if let Some(exe) = hits.find(|p| !is_build_artifact(p)) {
                 return Some(exe);
             }

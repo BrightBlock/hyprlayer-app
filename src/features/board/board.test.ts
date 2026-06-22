@@ -38,6 +38,7 @@ function makeView(
       behind: 0,
       thoughts: "ok" as const,
     },
+    seed: null,
   };
 }
 

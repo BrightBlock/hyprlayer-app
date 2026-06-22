@@ -3,6 +3,7 @@
 //! mapping so agent skills resolve the project correctly from inside it.
 
 mod manager;
+pub mod seed;
 pub mod thoughts_links;
 
 pub use manager::*;

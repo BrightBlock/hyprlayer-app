@@ -56,6 +56,9 @@ pub enum CoreError {
     #[error("unsafe or out-of-worktree path: {path}")]
     InvalidPath { path: String },
 
+    #[error("failed to parse {path}: {message}")]
+    RepoSettingsParse { path: PathBuf, message: String },
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -100,6 +103,9 @@ impl CoreError {
             CoreError::WorktreeUnpushed { .. } => Some(
                 "Push the branch (or merge it) first, or archive with 'discard changes' to drop the commits.".into(),
             ),
+            CoreError::RepoSettingsParse { .. } => {
+                Some("Fix the TOML syntax in .hyprlayer/settings.toml.".into())
+            }
             _ => None,
         }
     }
@@ -120,6 +126,7 @@ impl CoreError {
             CoreError::WorktreeDirty(_) => "worktree_dirty",
             CoreError::WorktreeUnpushed { .. } => "worktree_unpushed",
             CoreError::InvalidPath { .. } => "invalid_path",
+            CoreError::RepoSettingsParse { .. } => "repo_settings_parse",
             CoreError::Io(_) => "io",
         }
     }

@@ -333,11 +333,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         // Write an ai-only config first (as `ai configure` might create)
-        std::fs::write(
-            &path,
-            r#"{"version":4,"ai":{"agentTool":"claude"}}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"version":4,"ai":{"agentTool":"claude"}}"#).unwrap();
         ensure_thoughts_config(&path, "bob", "~/my-thoughts").unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();

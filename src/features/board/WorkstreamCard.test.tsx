@@ -37,6 +37,7 @@ function makeView(over: Partial<{ prNumber: number | null }> = {}): WorkstreamVi
       behind: 0,
       thoughts: "ok" as const,
     },
+    seed: null,
   };
 }
 

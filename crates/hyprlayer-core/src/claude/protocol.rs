@@ -454,9 +454,7 @@ mod tests {
     #[test]
     fn other_task_lifecycle_lines_stay_system() {
         for subtype in ["task_started", "task_updated"] {
-            let line = format!(
-                r#"{{"type":"system","subtype":"{subtype}","task_id":"x"}}"#
-            );
+            let line = format!(r#"{{"type":"system","subtype":"{subtype}","task_id":"x"}}"#);
             assert!(matches!(
                 parse_line(&line),
                 ParsedLine::System { subtype: s } if s == subtype
