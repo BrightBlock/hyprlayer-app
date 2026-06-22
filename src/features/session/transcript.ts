@@ -104,6 +104,21 @@ export function skillBodyName(text: string): string | null {
   return name || "skill";
 }
 
+/** The system-injected preamble that opens claude's post-compact summary —
+ *  delivered as one (often 10–20KB) assistant block right after the compact
+ *  boundary. Matched to fold that block into the divider instead of dumping it. */
+const COMPACT_SUMMARY_PREFIX = "This session is being continued from a previous conversation";
+
+/**
+ * True when a completed assistant block is claude's post-compact summary (it
+ * opens with [`COMPACT_SUMMARY_PREFIX`]). Matched on the *complete* block, like
+ * [`skillBodyName`]: a streamed `partialText` chunk could start this way by
+ * coincidence, but a whole assistant turn opening with it is the injected summary.
+ */
+export function isCompactSummary(text: string): boolean {
+  return text.startsWith(COMPACT_SUMMARY_PREFIX);
+}
+
 export type TranscriptItem =
   | {
       kind: "user";
@@ -148,8 +163,16 @@ export type TranscriptItem =
   /** A compact-boundary marker — claude auto- or manually compacted the
    *  conversation. Rendered as a thin divider so a silent stretch during compact
    *  is legible. `trigger` is "auto" or "manual"; `preTokens` is the context
-   *  fill just before the compact, when reported. */
-  | { kind: "compact"; id: string; trigger: string; preTokens: number | null }
+   *  fill just before the compact, when reported. `summary` is claude's
+   *  post-compact summary — the large block injected right after the boundary,
+   *  folded in here so it expands from the divider instead of dumping inline. */
+  | {
+      kind: "compact";
+      id: string;
+      trigger: string;
+      preTokens: number | null;
+      summary?: string;
+    }
   /** A background shell task (`Bash{run_in_background}`) changed state — claude's
    *  asynchronous "you will be notified when it completes" signal, surfaced so the
    *  live background-tasks indicator drops a finished task even when the agent
@@ -384,6 +407,18 @@ function firstSkillToolAwaitingBody(items: TranscriptItem[], parentId: string | 
   return -1;
 }
 
+/** The earliest `compact` divider still awaiting its post-compact summary, so the
+ *  summary block folds into it rather than dumping inline. A boundary is followed
+ *  immediately by its summary, so in practice only one is ever awaiting; -1 if
+ *  none (then the block is treated as ordinary prose). */
+function firstCompactAwaitingSummary(items: TranscriptItem[]): number {
+  for (let i = 0; i < items.length; i += 1) {
+    const it = items[i];
+    if (it.kind === "compact" && it.summary === undefined) return i;
+  }
+  return -1;
+}
+
 /** Mark the open streaming assistant block (if any) as finished. */
 function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
   const idx = openAssistantIndex(items);
@@ -518,6 +553,25 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           ...appended(view, makeSkill, !event.parentId),
           streaming: true,
         };
+      }
+      // claude's post-compact summary — a single, often 10–20KB assistant block
+      // injected right after the compact boundary. Fold it into that divider
+      // (expand to read it) instead of dumping the whole summary inline. Main
+      // thread only, like the boundary; and only when a boundary is actually
+      // awaiting its summary, so a coincidental prefix match with no recent
+      // compaction stays ordinary prose.
+      if (!event.parentId && isCompactSummary(event.text)) {
+        // The summary normally lands whole, but if it streamed into an open
+        // assistant block first, drop that partial so it isn't shown twice.
+        const open = openAssistantIndex(view.items);
+        const base = open === -1 ? view.items : view.items.filter((_, i) => i !== open);
+        const compactIdx = firstCompactAwaitingSummary(base);
+        if (compactIdx !== -1) {
+          const compact = base[compactIdx] as Extract<TranscriptItem, { kind: "compact" }>;
+          const items = base.slice();
+          items[compactIdx] = { ...compact, summary: event.text };
+          return { ...view, items, streaming: true };
+        }
       }
       // Subagent text nests under its Task — append, never touch the main block.
       if (event.parentId) {
@@ -896,6 +950,11 @@ export function viewToText(view: SessionView): string {
         break;
       case "error":
         lines.push(`- protocol error: ${item.detail}`, "");
+        break;
+      case "compact":
+        // Mark the boundary; the summary itself stays out of the copy (it's the
+        // bulky injected block the divider keeps collapsed), like skill bodies.
+        lines.push("--- Conversation compacted ---", "");
         break;
       case "exit":
         lines.push(`--- ${exitLabel(item.outcome)} ---`, "");

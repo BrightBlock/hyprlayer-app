@@ -552,21 +552,51 @@ function exitRemedy(stderrTail: string): string | null {
 
 /** A thin horizontal divider marking where claude paused to compact the
  *  conversation — auto- or manually. Without this row a long compact looks like
- *  the session went silent (no events fire while the summary is generated). */
+ *  the session went silent (no events fire while the summary is generated). When
+ *  claude's post-compact summary is folded in, the label becomes a toggle that
+ *  expands it — kept collapsed by default so the 10–20KB summary never floods the
+ *  thread (the same treatment a launched skill's injected body gets). */
 function CompactDivider({ item }: { item: Extract<TranscriptItem, { kind: "compact" }> }) {
+  const [open, setOpen] = useState(false);
   const label = item.trigger === "manual" ? "Conversation compacted" : "Conversation auto-compacted";
   const tokens = item.preTokens != null ? ` · ${formatTokens(item.preTokens)} before` : "";
+  const { summary } = item;
   return (
-    <div
-      className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-ink-dim/70"
-      title="claude summarized the prior turns; the next turn continues on the summary."
-    >
-      <span className="h-px flex-1 bg-edge" aria-hidden />
-      <span className="shrink-0">
-        {label}
-        {tokens}
-      </span>
-      <span className="h-px flex-1 bg-edge" aria-hidden />
+    <div className="text-[11px] text-ink-dim/70">
+      <div className="flex items-center gap-2 uppercase tracking-wide">
+        <span className="h-px flex-1 bg-edge" aria-hidden />
+        {summary ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 uppercase tracking-wide transition hover:bg-panel-2 hover:text-ink"
+            title="claude summarized the prior turns; expand to read the summary."
+          >
+            <span>
+              {label}
+              {tokens}
+            </span>
+            <ChevronRightIcon
+              size={11}
+              className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+            />
+          </button>
+        ) : (
+          <span
+            className="shrink-0"
+            title="claude summarized the prior turns; the next turn continues on the summary."
+          >
+            {label}
+            {tokens}
+          </span>
+        )}
+        <span className="h-px flex-1 bg-edge" aria-hidden />
+      </div>
+      {open && summary && (
+        <div className="selectable mt-2 max-h-96 overflow-auto rounded-md border border-edge bg-panel-2 p-3 normal-case tracking-normal text-ink-dim">
+          <MarkdownPreview body={summary} />
+        </div>
+      )}
     </div>
   );
 }

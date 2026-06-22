@@ -7,6 +7,7 @@ import {
   hasPendingPermission,
   initialSessionView,
   isBusy,
+  isCompactSummary,
   isTerminal,
   isWorking,
   parseQuestions,
@@ -481,6 +482,63 @@ describe("turn + exit lifecycle", () => {
     expect(view.items[1]).toMatchObject({ kind: "compact", trigger: "auto", preTokens: 182_431 });
     expect(view.streaming).toBe(true);
     expect(view.state).toBe("running");
+  });
+});
+
+describe("post-compact summary", () => {
+  // claude delivers the summary as one big assistant block right after the
+  // boundary; it always opens with this system-injected preamble.
+  const SUMMARY =
+    "This session is being continued from a previous conversation that ran out of context. " +
+    "The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request…";
+
+  it("isCompactSummary matches the preamble, not ordinary prose", () => {
+    expect(isCompactSummary(SUMMARY)).toBe(true);
+    expect(isCompactSummary("This session is being continued from a previous conversation")).toBe(true);
+    expect(isCompactSummary("Here is a summary of the previous conversation.")).toBe(false);
+    expect(isCompactSummary("")).toBe(false);
+  });
+
+  it("folds the summary into the preceding compact divider, not a new block", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "compactBoundary", trigger: "auto", preTokens: 167_335 });
+    view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
+    // Just the divider — the 12–18KB summary folds into it, never dumped inline.
+    expect(kinds(view)).toEqual(["compact"]);
+    expect(view.items[0]).toMatchObject({ kind: "compact", trigger: "auto", summary: SUMMARY });
+    // The turn is still in flight; its real continuation renders as normal prose.
+    view = reduceEvent(view, { kind: "assistantText", text: "Now I'll read the file.", parentId: null });
+    expect(kinds(view)).toEqual(["compact", "assistant"]);
+    expect(view.items[1]).toMatchObject({ kind: "assistant", text: "Now I'll read the file." });
+  });
+
+  it("drops a streamed partial summary so it isn't shown twice", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "compactBoundary", trigger: "manual", preTokens: null });
+    // If the summary streamed as partials first, an open assistant block holds
+    // them — folding the completed summary in must remove that partial block.
+    view = reduceEvent(view, { kind: "partialText", text: SUMMARY.slice(0, 40), parentId: null });
+    expect(kinds(view)).toEqual(["compact", "assistant"]);
+    view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
+    expect(kinds(view)).toEqual(["compact"]);
+    expect(view.items[0]).toMatchObject({ kind: "compact", summary: SUMMARY });
+  });
+
+  it("leaves a summary-prefixed block as prose when no boundary is awaiting one", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
+    // No compact divider to fold into → render it rather than silently drop it.
+    expect(kinds(view)).toEqual(["assistant"]);
+    expect(view.items[0]).toMatchObject({ kind: "assistant", text: SUMMARY });
+  });
+
+  it("copies a compaction marker but not the bulky summary text", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "compactBoundary", trigger: "auto", preTokens: 167_335 });
+    view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
+    const text = viewToText(view);
+    expect(text).toContain("Conversation compacted");
+    expect(text).not.toContain("Primary Request");
   });
 });
 
