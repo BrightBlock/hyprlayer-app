@@ -147,6 +147,13 @@ html,
 body,
 #root {
   height: 100%;
+  /* Desktop app: lock the document itself. The window never scrolls or
+     rubber-band-bounces when the wheel/trackpad lands on a non-scrolling area
+     (the header, composer, sidebars, gaps) — every real scroll region inside
+     opts into its own `overflow-*`. `overscroll-behavior: none` also stops the
+     WebKit elastic bounce on the page even when nothing actually overflows. */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {

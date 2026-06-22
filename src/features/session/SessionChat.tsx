@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -67,6 +68,17 @@ import {
   HighlightBackdrop,
   useComposerAutocomplete,
 } from "./ComposerAutocomplete";
+import { useCommand } from "../../lib/keybindings/registry";
+import { PromptHistoryStack } from "./PromptHistoryStack";
+import {
+  IDLE_NAV,
+  recallAt,
+  recallNext,
+  recallPrev,
+  userPrompts,
+  type HistoryNav,
+  type NavResult,
+} from "./promptHistory";
 
 const STAGE_INTRO: Record<StageKey, string> = {
   general: "Chat with the project agent in this worktree. Pick a stage below to run a spec-driven step.",
@@ -930,6 +942,54 @@ export function SessionChat({
 
   // Background tasks bar.
   const backgroundTasks = useSessionBackgroundTasks(sid);
+
+  // Prompt history navigation: derive prompts from the live transcript,
+  // hold ephemeral nav state, and register focus-gated recall commands.
+  const prompts = useMemo(
+    () => (session ? userPrompts(session.items) : []),
+    [session],
+  );
+  const [historyNav, setHistoryNav] = useState<HistoryNav>(IDLE_NAV);
+  const [composerFocused, setComposerFocused] = useState(false);
+  // The value we last wrote via recall, so the textarea onChange can tell a
+  // programmatic recall apart from a real user edit.
+  const recalledValueRef = useRef<string | null>(null);
+
+  const applyRecall = useCallback(
+    (res: NavResult) => {
+      if (!res) return;
+      setHistoryNav(res.nav);
+      recalledValueRef.current = res.draft;
+      onDraftChange(res.draft);
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        const n = ta.value.length;
+        ta.setSelectionRange(n, n); // cursor to end for natural editing
+      });
+    },
+    [onDraftChange],
+  );
+
+  // Reset navigation when the bound session changes (Clear Context / restart).
+  useEffect(() => {
+    setHistoryNav(IDLE_NAV);
+    recalledValueRef.current = null;
+  }, [sid]);
+
+  const canRecall = composerFocused && prompts.length > 0 && !pendingQuestion;
+  useCommand(
+    "session.historyPrev",
+    canRecall ? () => applyRecall(recallPrev(prompts, historyNav, draft)) : null,
+  );
+  useCommand(
+    "session.historyNext",
+    historyNav.index !== null
+      ? () => applyRecall(recallNext(prompts, historyNav, draft))
+      : null,
+  );
+
   const transcriptRef = useRef<TranscriptHandle | null>(null);
 
   // Handoff flow: at ≥60% context fill, nudge the user to create a handoff doc
@@ -1047,6 +1107,8 @@ export function SessionChat({
       });
       onSessionStarted(created.id);
       onDraftChange("");
+      setHistoryNav(IDLE_NAV);
+      recalledValueRef.current = null;
       onClearAttachments();
     } catch (e) {
       setError(errorMessage(e));
@@ -1064,6 +1126,8 @@ export function SessionChat({
     try {
       await sendMessage(sid, text, attachments);
       onDraftChange("");
+      setHistoryNav(IDLE_NAV);
+      recalledValueRef.current = null;
       onClearAttachments();
     } catch (e) {
       setError(errorMessage(e));
@@ -1156,6 +1220,17 @@ export function SessionChat({
             Drop to attach
           </div>
         </div>
+      )}
+      {/* Prompt-history stack: floats in the pane's top-right corner over the
+          transcript gutter. Gated to states where the composer is actually
+          editable (not terminal / not blocked on a question), since recall
+          targets the composer draft. */}
+      {!terminal && !pendingQuestion && prompts.length > 0 && (
+        <PromptHistoryStack
+          prompts={prompts}
+          activeIndex={historyNav.index}
+          onRecall={(i) => applyRecall(recallAt(prompts, historyNav, draft, i))}
+        />
       )}
       {started ? (
         <TranscriptView
@@ -1283,9 +1358,19 @@ export function SessionChat({
                     ref={textareaRef}
                     value={draft}
                     onChange={(e) => {
-                      onDraftChange(e.target.value);
+                      const val = e.target.value;
+                      // A change we didn't originate via recall = a user edit: leave
+                      // navigation so further typing builds on this text and the stash
+                      // is dropped.
+                      if (historyNav.index !== null && val !== recalledValueRef.current) {
+                        setHistoryNav(IDLE_NAV);
+                      }
+                      recalledValueRef.current = null;
+                      onDraftChange(val);
                       autocomplete.syncCaret();
                     }}
+                    onFocus={() => setComposerFocused(true)}
+                    onBlur={() => setComposerFocused(false)}
                     onKeyDown={onKeyDown}
                     onPaste={onPaste}
                     onSelect={autocomplete.syncCaret}

@@ -265,6 +265,27 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, workstreams.isSuccess, workstreams.isFetching]);
 
+  // Landing on a workstream — switching focus to it, or opening it fresh — drops
+  // the cursor straight into its composer so the user can type immediately, no
+  // click needed. We target the active tab of the focused pane when it's an
+  // agent (terminals/viewers have no composer); the shell's SessionChat consumes
+  // the one-shot focus signal once it's on screen. Keyed on `wsId` ONLY: this
+  // must fire on a workstream switch, never on in-workstream tab edits — a
+  // `tabsByWs` dependency would re-run on every keystroke (draft writes mutate
+  // the strip) and yank the caret to the end mid-type.
+  useEffect(() => {
+    if (!wsId) return;
+    const tabs = tabsByWs[wsId] ?? defaultTabState();
+    const pane = tabs.activePane ?? "main";
+    const inPane = (s: ShellTab) =>
+      pane === "right" ? s.panel === "right" : (s.panel ?? "main") !== "right";
+    const members = tabs.shells.filter(inPane);
+    const activeId = pane === "right" ? tabs.rightActiveId : tabs.activeId;
+    const focused = members.find((s) => s.id === activeId) ?? members[0] ?? null;
+    if (focused && isAgentShell(focused)) requestComposerFocus(focused.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsId]);
+
   if (bootstrap.isLoading || workstreams.isLoading) return <PageSpinner />;
   if (bootstrap.isError) return <PageError error={bootstrap.error} />;
   if (workstreams.isError) return <PageError error={workstreams.error} />;

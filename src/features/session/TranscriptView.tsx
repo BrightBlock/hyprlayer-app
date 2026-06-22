@@ -1,4 +1,13 @@
-import { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState } from "react";
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react";
 
 import { Button, Spinner } from "../../components/ui";
 import {
@@ -930,6 +939,17 @@ export type TranscriptHandle = {
   scrollToTool: (toolUseId: string) => void;
 };
 
+/** How close to the bottom (px) counts as "stuck to the bottom" — the gate for
+ *  *resuming* auto-follow. Forgiving on purpose: while streaming, the bottom
+ *  keeps growing, so a too-tight gate means scrolling "to the bottom" lands a few
+ *  px short and never re-locks. The matching re-lock is eased (see RELOCK_MS), so
+ *  a generous gate doesn't reintroduce the snap a wide threshold used to cause. */
+const RESTICK_PX = 24;
+
+/** When the view re-sticks from a gap, ease the catch-up to the exact bottom
+ *  shut over roughly this long instead of jumping — keeps the re-lock smooth. */
+const RELOCK_MS = 200;
+
 export const TranscriptView = memo(
   forwardRef<TranscriptHandle, Props>(function TranscriptView(
     { items, busy, connecting, workingSince, permission, prompt },
@@ -937,6 +957,14 @@ export const TranscriptView = memo(
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const atBottom = useRef(true);
+    // Previous scrollTop + scrollHeight, to read scroll *direction* and to tell a
+    // real user scroll-up apart from a content-shrink clamp (both lower scrollTop,
+    // but only the former should release the stick).
+    const lastTop = useRef(0);
+    const lastHeight = useRef(0);
+    // performance.now() until which a freshly re-stuck view eases the remaining
+    // gap to the bottom instead of snapping (a smooth "catch up" on re-lock).
+    const relockUntil = useRef(0);
 
     useImperativeHandle(ref, () => ({
       scrollToTool(toolUseId) {
@@ -947,30 +975,69 @@ export const TranscriptView = memo(
       },
     }));
 
+    // Keep the view at the bottom while stuck. A fresh re-lock (see `relockUntil`)
+    // eases the gap shut over a few frames so it glides rather than jumps; steady
+    // streaming pins hard so it tracks the live output tightly. No-ops the instant
+    // the user scrolls up (atBottom cleared), so it never fights them.
+    const pin = useCallback(() => {
+      const el = scrollRef.current;
+      if (!el || !atBottom.current) return;
+      const target = el.scrollHeight - el.clientHeight;
+      const gap = target - el.scrollTop;
+      if (gap <= 0) return;
+      if (gap > 2 && performance.now() < relockUntil.current) {
+        el.scrollTop += Math.max(1, gap * 0.3);
+      } else {
+        el.scrollTop = target;
+      }
+    }, []);
+
     const onScroll = () => {
       const el = scrollRef.current;
       if (!el) return;
-      atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      const top = el.scrollTop;
+      const height = el.scrollHeight;
+      const wasBottom = atBottom.current;
+      // A drop in scrollTop while the content height held is the user scrolling
+      // up — release at once so streaming stops yanking them back. (A drop the
+      // content *shrinking* forces — scrollTop clamps down on its own — is not a
+      // gesture, so it must not release.) Otherwise, re-stick once they're back
+      // within reach of the bottom.
+      if (top < lastTop.current - 1 && height >= lastHeight.current - 1) {
+        atBottom.current = false;
+      } else if (height - top - el.clientHeight < RESTICK_PX) {
+        atBottom.current = true;
+      }
+      // On the transition back to stuck, glide the catch-up to the exact bottom.
+      if (!wasBottom && atBottom.current) relockUntil.current = performance.now() + RELOCK_MS;
+      lastTop.current = top;
+      lastHeight.current = height;
     };
 
-    // Stick to the bottom on discrete updates (new items, tool results).
+    // A wheel/trackpad scroll-up releases synchronously, before the next frame's
+    // pin can fire — the scroll event alone can land after that frame's rAF.
+    const onWheel = (e: WheelEvent<HTMLDivElement>) => {
+      if (e.deltaY < 0) atBottom.current = false;
+    };
+
+    // Discrete updates while idle (a queued message renders, a tool result lands):
+    // snap to the bottom if stuck. While a turn streams the rAF below owns pinning.
     useEffect(() => {
+      if (busy) return;
       const el = scrollRef.current;
       if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-    }, [items]);
+    }, [items, busy]);
 
-    // While a turn is in flight the visible text grows smoothly between store
-    // updates (the typewriter reveal), so pin to the bottom every frame too —
-    // unless the user has scrolled up.
+    // While a turn is in flight the visible text grows between store updates, so
+    // keep the view pinned (and glide a re-lock) every frame.
     useEffect(() => {
       if (!busy) return;
       let frame = requestAnimationFrame(function tick() {
-        const el = scrollRef.current;
-        if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+        pin();
         frame = requestAnimationFrame(tick);
       });
       return () => cancelAnimationFrame(frame);
-    }, [busy]);
+    }, [busy, pin]);
 
     // Subagent items nest under their `Task`; the main thread shows the rest.
     const childrenByParent: ChildMap = new Map();
@@ -985,7 +1052,16 @@ export const TranscriptView = memo(
     const topLevel = items.filter((item) => parentIdOf(item) === null);
 
     return (
-      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto p-5">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        onWheel={onWheel}
+        // `overscroll-contain`: keep the wheel inside the transcript. Without it,
+        // scrolling past the top/bottom edge chains to the app-level <main>
+        // scroller and drags the whole window — the agent pane must own its
+        // scroll. (Newly reachable now that scroll-up isn't pinned mid-stream.)
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5"
+      >
         <div className="mx-auto w-[90%]">
           <ItemList
             items={topLevel}

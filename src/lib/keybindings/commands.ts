@@ -209,6 +209,23 @@ export const COMMANDS: CommandDef[] = [
     when: "session",
     defaults: { mac: "mod+shift+k", other: "mod+shift+k" },
   },
+  {
+    id: "session.historyPrev",
+    label: "Recall Previous Prompt",
+    category: "Session",
+    when: "session",
+    // Arrow combos need a primary modifier to fire while the composer textarea
+    // is focused (see useKeybindings' editable-target guard); Alt+↑/↓ are free,
+    // non-reserved, and read as the classic "step through history" gesture.
+    defaults: { mac: "alt+up", other: "alt+up" },
+  },
+  {
+    id: "session.historyNext",
+    label: "Recall Next Prompt",
+    category: "Session",
+    when: "session",
+    defaults: { mac: "alt+down", other: "alt+down" },
+  },
   // Library
   {
     id: "doc.new",
