@@ -35,6 +35,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::projects::run_backend_health,
             commands::projects::get_worktree_files,
             commands::projects::set_worktree_files,
+            commands::projects::check_worktree_files,
             commands::library::query_docs,
             commands::library::get_doc,
             commands::library::save_doc,

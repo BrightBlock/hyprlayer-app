@@ -756,6 +756,28 @@ pub async fn set_worktree_files(
     Ok(saved)
 }
 
+/// Dry-run the project's configured worktree-copy patterns against its checkout
+/// so the UI can flag a project whose copy files are missing (e.g. a `.env` that
+/// doesn't exist on disk) BEFORE a workstream is created. Mirrors
+/// `create_workstream`'s seed step exactly, minus the copy. Never errors — an
+/// unreadable settings file yields an empty (clean) report.
+#[tauri::command]
+#[specta::specta]
+pub async fn check_worktree_files(
+    state: State<'_, AppState>,
+    path: String,
+) -> CmdResult<hyprlayer_core::worktree::seed::SeedReport> {
+    let _ = &state;
+    blocking("check_worktree_files", move || {
+        let repo = std::path::Path::new(&path);
+        let patterns = hyprlayer_core::repo_settings::read(repo)
+            .map(|s| s.worktree.copy)
+            .unwrap_or_default();
+        hyprlayer_core::worktree::seed::check_worktree_patterns(repo, &patterns)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     /// `add_project` canonicalizes the repo path for stable identity. On Windows

@@ -39,6 +39,14 @@ export const commands = {
 	runBackendHealth: (path: string) => typedError<HealthReport, AppError>(__TAURI_INVOKE("run_backend_health", { path })),
 	getWorktreeFiles: (path: string) => typedError<string[], AppError>(__TAURI_INVOKE("get_worktree_files", { path })),
 	setWorktreeFiles: (path: string, patterns: string[]) => typedError<string[], AppError>(__TAURI_INVOKE("set_worktree_files", { path, patterns })),
+	/**
+	 *  Dry-run the project's configured worktree-copy patterns against its checkout
+	 *  so the UI can flag a project whose copy files are missing (e.g. a `.env` that
+	 *  doesn't exist on disk) BEFORE a workstream is created. Mirrors
+	 *  `create_workstream`'s seed step exactly, minus the copy. Never errors — an
+	 *  unreadable settings file yields an empty (clean) report.
+	 */
+	checkWorktreeFiles: (path: string) => typedError<SeedReport, AppError>(__TAURI_INVOKE("check_worktree_files", { path })),
 	queryDocs: (query: ThoughtQuery) => typedError<QueryResult, AppError>(__TAURI_INVOKE("query_docs", { query })),
 	getDoc: (id: string) => typedError<DocContent, AppError>(__TAURI_INVOKE("get_doc", { id })),
 	saveDoc: (id: string, content: string, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("save_doc", { id, content, baseMtimeMs })),

@@ -282,6 +282,72 @@ describe("backgroundTasksFromItems", () => {
     expect(backgroundTasksFromItems(items)).toHaveLength(1);
   });
 
+  // ── output-file read (the dominant real-world terminus) ────────────────────
+
+  it("ends a task when the agent reads its .output file via Read", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      makeTool("Read", JSON.stringify({ file_path: "/tmp/tasks/task-a.output" }), "rd1", {
+        content: "…build log…",
+        isError: false,
+      }),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("ends a task when the agent greps its .output file via foreground Bash (the screenshot bug)", () => {
+    // Real repro: the agent backgrounds `cargo test` to regenerate TS bindings,
+    // then greps the output file directly. claude suppresses the completion
+    // notification once the output is read, so this read is the only signal that
+    // ever clears the task.
+    const items: TranscriptItem[] = [
+      bgBash("t1", {
+        command: "cargo test typescript_bindings_export",
+        description: "Regenerate TS bindings",
+        result: SPAWN_RESULT("task-a"),
+      }),
+      makeTool(
+        "Bash",
+        JSON.stringify({ command: 'grep -iE "warning|error" /tmp/tasks/task-a.output' }),
+        "g1",
+        { content: "(clean)", isError: false },
+      ),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("drops the read task as soon as the read tool-use appears, before its result", () => {
+    // The toolUse already carries the path in its input, so we clear promptly
+    // rather than waiting for the read's result to arrive.
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      makeTool("Read", JSON.stringify({ file_path: "/tmp/tasks/task-a.output" }), "rd1", null),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("ends only the read task when several are running", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { description: "Task A", result: SPAWN_RESULT("task-a") }),
+      bgBash("t2", { description: "Task B", result: SPAWN_RESULT("task-b") }),
+      makeTool("Read", JSON.stringify({ file_path: "/tmp/tasks/task-b.output" }), "rd1", null),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("task-a");
+  });
+
+  it("leaves tasks intact for a tool that references no .output path", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      fgBash("fg1", "ls -la"),
+      makeTool("Read", JSON.stringify({ file_path: "/some/other/file.txt" }), "rd1", null),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("task-a");
+  });
+
   it("does NOT remove a task when TaskStop has no result yet (not confirmed)", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
@@ -412,5 +478,23 @@ describe("backgroundTasksFromItems — fixture replay", () => {
       { kind: "backgroundTaskUpdate", taskId: "task-z", toolUseId: "bg-1", status: "completed" },
     ]);
     expect(backgroundTasksFromItems(after)).toHaveLength(0);
+  });
+
+  it("a direct output-file read clears a fire-and-forget task end-to-end", () => {
+    // The real-world path: background a build, end the turn, then in a later
+    // turn read the output file directly (claude sends no completion
+    // notification once the output is consumed, so the read must clear it).
+    const events: SessionEvent[] = [
+      { kind: "toolUse", id: "bg-1", name: "Bash", input: JSON.stringify({ command: "cargo test", description: "Regenerate TS bindings", run_in_background: true }), parentId: null },
+      { kind: "toolResult", toolUseId: "bg-1", content: SPAWN_RESULT("task-z").content, isError: false, parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null },
+    ];
+    expect(backgroundTasksFromItems(replayFixture(events))).toHaveLength(1);
+
+    const afterRead = replayFixture([
+      ...events,
+      { kind: "toolUse", id: "rd-1", name: "Bash", input: JSON.stringify({ command: "tail -25 /private/tmp/tasks/task-z.output" }), parentId: null },
+    ]);
+    expect(backgroundTasksFromItems(afterRead)).toHaveLength(0);
   });
 });

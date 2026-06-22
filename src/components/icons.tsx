@@ -25,6 +25,28 @@ export function XIcon({ size = 14, strokeWidth = 2 }: IconProps) {
   );
 }
 
+export function WarningTriangleIcon({ size = 14, strokeWidth = 2, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+    >
+      <path
+        d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <path d="M12 9v4" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M12 17h.01" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function GitPullRequestIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>

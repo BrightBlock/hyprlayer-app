@@ -4,17 +4,24 @@
  * exactly like transcript.ts / toolDisplay.ts.
  *
  * Background tasks are spawned by Bash{run_in_background:true} calls. Their
- * lifecycle: spawn → (optional TaskOutput polls) → it ends one of three ways:
+ * lifecycle: spawn → (optional polls/reads) → it ends one of four ways:
+ *   - the agent READS the task's output file (`<taskId>.output`) — the spawn
+ *     result itself directs it there ("To check interim output, use Read on
+ *     that file path"), and the moment claude sees that output consumed it
+ *     STOPS emitting the async completion notification below, so the read is the
+ *     only signal we'll ever get. This is by far the most common terminus in
+ *     practice: agents background a build/test and grep the log rather than poll
+ *     (in the observed corpus this path outnumbered the notification ~34:1);
  *   - a `taskUpdate` marker with a terminal status — claude's ASYNCHRONOUS
- *     "you will be notified when it completes" notification, which fires even
- *     when the agent never polls (the common fire-and-forget case, and the only
- *     way `sleep 999 &`-style tasks ever clear without a manual stop);
+ *     "you will be notified when it completes" notification. It fires ONLY for a
+ *     true fire-and-forget task the agent never reads or polls (e.g.
+ *     `sleep 999 &`); reading the output (above) suppresses it;
  *   - a TaskOutput/BashOutput poll that returns <status>completed</status>;
  *   - TaskStop/KillBash.
  * Session exit is handled a layer up, not here: this pure walk still reports an
- * un-stopped, un-notified spawn as live, so callers are responsible for dropping
- * tasks once the session is terminal (`useSessionBackgroundTasks` guards on
- * `isTerminal`; SessionChat hides the bar behind its terminal gate).
+ * un-read, un-stopped, un-notified spawn as live, so callers are responsible for
+ * dropping tasks once the session is terminal (`useSessionBackgroundTasks`
+ * guards on `isTerminal`; SessionChat hides the bar behind its terminal gate).
  *
  * Wire shapes (confirmed from real Claude Code 2.1.x sessions):
  *   Spawn result:
@@ -77,8 +84,12 @@ export function isBackgroundSpawn(item: TranscriptItem): boolean {
 /**
  * Live background tasks for a transcript, in spawn order. Walks items:
  *  - Bash{run_in_background:true} opens a task (taskId filled from its result);
+ *  - any later tool whose INPUT reads the task's `<taskId>.output` file ends it
+ *    — the agent consumed the output directly, so it's no longer the unattended
+ *    fire-and-forget the indicator surfaces, and claude won't notify us once the
+ *    output is read (the dominant real-world terminus);
  *  - a `taskUpdate` marker with a terminal status (anything but "running") ends
- *    it — claude's async completion notification, the fire-and-forget path;
+ *    it — claude's async completion notification, the never-read path;
  *  - TaskStop / KillBash for a known id ends it;
  *  - a TaskOutput/BashOutput result with <status>completed</status> ends it;
  *  - an in-flight TaskOutput/BashOutput (result === null) flips its target to
@@ -177,6 +188,27 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
         task.status = "running";
       }
       continue;
+    }
+
+    // ── 4. Direct read of a task's output file → end its live tracking ───────
+    // Any other tool whose INPUT references a tracked task's `<taskId>.output`
+    // file: the agent is consuming the task's output directly — a `Read` on the
+    // path, or a `cat`/`grep`/`tail` over it — instead of polling via TaskOutput.
+    // The spawn result steers it here ("To check interim output, use Read on
+    // that file path"), and, crucially, once claude sees the output consumed it
+    // SUPPRESSES the async completion notification, so this read is the only
+    // signal we'll ever get; without acting on it the task lingers as a phantom
+    // "running" forever. Drop it: a checked task is no longer the unattended
+    // fire-and-forget the indicator exists to surface. Match on the
+    // `<taskId>.output` basename (task ids are unique random tokens, so it can't
+    // collide); the spawn and lifecycle tools above all `continue`, so only
+    // these consuming reads reach here. Snapshot the map — we delete while
+    // iterating.
+    for (const [taskId, toolUseId] of [...taskIdToToolUseId]) {
+      if (item.input.includes(`${taskId}.output`)) {
+        tasks.delete(toolUseId);
+        taskIdToToolUseId.delete(taskId);
+      }
     }
   }
 

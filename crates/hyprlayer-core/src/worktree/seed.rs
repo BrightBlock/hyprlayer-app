@@ -116,6 +116,20 @@ fn copy_tree(repo: &Path, worktree: &Path, dir_rel: &Path, report: &mut SeedRepo
 /// - Best-effort: never panics, never returns an error. Failures accumulate in
 ///   `SeedReport::errors`; missing entries accumulate in `SeedReport::missing`.
 pub fn seed_worktree(repo: &Path, worktree: &Path, patterns: &[String]) -> SeedReport {
+    run(repo, Some(worktree), patterns)
+}
+
+/// Dry-run [`seed_worktree`]: resolve `patterns` against `repo` and report what
+/// WOULD be copied (`copied`), what matched nothing (`missing`), and what
+/// errored — without writing anything. Drives the project-level "copy files not
+/// found" warning so a bad copy config surfaces before any worktree is created.
+pub fn check_worktree_patterns(repo: &Path, patterns: &[String]) -> SeedReport {
+    run(repo, None, patterns)
+}
+
+/// Shared engine. `dst = Some(worktree)` copies; `dst = None` is a dry run that
+/// only resolves matches (used by [`check_worktree_patterns`]).
+fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
     let mut report = SeedReport::default();
     if patterns.is_empty() {
         return report;
@@ -143,20 +157,25 @@ pub fn seed_worktree(repo: &Path, worktree: &Path, patterns: &[String]) -> SeedR
                         entry: lit.to_string(),
                         message: e.to_string(),
                     }),
-                    Ok(meta) if meta.is_dir() => {
-                        copy_tree(repo, worktree, rel, &mut report);
-                    }
-                    Ok(_) => {
+                    Ok(meta) if meta.is_dir() => match dst {
+                        Some(worktree) => copy_tree(repo, worktree, rel, &mut report),
+                        // Dry run: an existing directory resolves; no need to walk it.
+                        None => report.copied.push(lit.to_string()),
+                    },
+                    Ok(_) => match dst {
                         // File or symlink — copy target content.
-                        let dst = worktree.join(rel);
-                        match copy_file(&src, &dst) {
-                            Ok(_) => report.copied.push(lit.to_string()),
-                            Err(e) => report.errors.push(SeedError {
-                                entry: lit.to_string(),
-                                message: e.to_string(),
-                            }),
+                        Some(worktree) => {
+                            let out = worktree.join(rel);
+                            match copy_file(&src, &out) {
+                                Ok(_) => report.copied.push(lit.to_string()),
+                                Err(e) => report.errors.push(SeedError {
+                                    entry: lit.to_string(),
+                                    message: e.to_string(),
+                                }),
+                            }
                         }
-                    }
+                        None => report.copied.push(lit.to_string()),
+                    },
                 }
             }
         }
@@ -209,6 +228,11 @@ pub fn seed_worktree(repo: &Path, worktree: &Path, patterns: &[String]) -> SeedR
             tracing::warn!("worktree seed: glob walk truncated at {MAX_VISITED} entries");
             break;
         }
+        // Dry run only needs to know each pattern matches *something*; once every
+        // matcher has hit, the rest of the walk can't change the report.
+        if dst.is_none() && matchers.iter().all(|ge| ge.hit) {
+            break;
+        }
 
         let entry = match entry {
             Ok(e) => e,
@@ -228,20 +252,22 @@ pub fn seed_worktree(repo: &Path, worktree: &Path, patterns: &[String]) -> SeedR
         for ge in matchers.iter_mut() {
             if ge.matcher.is_match(&file_rel) {
                 ge.hit = true;
-                if !already_copied {
-                    let rel_str = file_rel.display().to_string();
-                    let dst = worktree.join(&file_rel);
-                    match copy_file(entry.path(), &dst) {
-                        Ok(_) => {
-                            report.copied.push(rel_str);
-                            already_copied = true;
-                        }
-                        Err(e) => {
-                            report.errors.push(SeedError {
-                                entry: rel_str,
-                                message: e.to_string(),
-                            });
-                            already_copied = true; // don't attempt again for this file
+                if let Some(worktree) = dst {
+                    if !already_copied {
+                        let rel_str = file_rel.display().to_string();
+                        let out = worktree.join(&file_rel);
+                        match copy_file(entry.path(), &out) {
+                            Ok(_) => {
+                                report.copied.push(rel_str);
+                                already_copied = true;
+                            }
+                            Err(e) => {
+                                report.errors.push(SeedError {
+                                    entry: rel_str,
+                                    message: e.to_string(),
+                                });
+                                already_copied = true; // don't attempt again for this file
+                            }
                         }
                     }
                 }
@@ -422,5 +448,58 @@ mod tests {
         let mut copied = r.copied.clone();
         copied.sort();
         assert_eq!(copied, vec!["config/a.local.json", "config/b.local.json"]);
+    }
+
+    // ── Dry-run check (check_worktree_patterns) ───────────────────────────────
+
+    #[test]
+    fn check_present_nested_literal_is_clean_and_writes_nothing() {
+        let (repo, wt) = dirs();
+        write(repo.path(), "tools/operating-review/.env", b"SECRET=1");
+        let r = check_worktree_patterns(repo.path(), &["tools/operating-review/.env".into()]);
+        assert!(r.missing.is_empty(), "should resolve: {r:?}");
+        assert!(r.errors.is_empty());
+        // A check must never touch the filesystem.
+        assert!(!wt.path().join("tools/operating-review/.env").exists());
+    }
+
+    #[test]
+    fn check_absent_literal_is_missing() {
+        let (repo, _wt) = dirs();
+        let r = check_worktree_patterns(repo.path(), &["tools/operating-review/.env".into()]);
+        assert_eq!(r.missing, vec!["tools/operating-review/.env"]);
+        assert!(r.copied.is_empty());
+        assert!(r.errors.is_empty());
+    }
+
+    #[test]
+    fn check_existing_directory_resolves() {
+        let (repo, _wt) = dirs();
+        write(repo.path(), "certs/ca.crt", b"CERT");
+        let r = check_worktree_patterns(repo.path(), &["certs".into()]);
+        assert!(r.missing.is_empty(), "existing dir resolves: {r:?}");
+    }
+
+    #[test]
+    fn check_glob_hit_and_miss() {
+        let (repo, _wt) = dirs();
+        write(repo.path(), "pkg/web/.env", b"A");
+        assert!(
+            check_worktree_patterns(repo.path(), &["**/.env".into()])
+                .missing
+                .is_empty()
+        );
+        assert_eq!(
+            check_worktree_patterns(repo.path(), &["**/*.secret".into()]).missing,
+            vec!["**/*.secret"]
+        );
+    }
+
+    #[test]
+    fn check_unsafe_path_is_error_not_missing() {
+        let (repo, _wt) = dirs();
+        let r = check_worktree_patterns(repo.path(), &["../escape".into()]);
+        assert!(r.errors.iter().any(|e| e.entry == "../escape"), "{r:?}");
+        assert!(r.missing.is_empty());
     }
 }

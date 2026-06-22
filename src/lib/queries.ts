@@ -503,7 +503,28 @@ export function useWorktreeFiles(path: string) {
 export function useSetWorktreeFiles(path: string) {
   return useMutation({
     mutationFn: (patterns: string[]) => unwrap(commands.setWorktreeFiles(path, patterns)),
-    onSuccess: (next) => queryClient.setQueryData(["worktreeFiles", path], next),
+    onSuccess: (next) => {
+      queryClient.setQueryData(["worktreeFiles", path], next);
+      // The copy list changed — re-validate so the project's warning badge
+      // reflects the new patterns immediately.
+      void queryClient.invalidateQueries({ queryKey: ["worktree-files-check", path] });
+    },
+  });
+}
+
+/** Dry-run check of a project's worktree-copy patterns against its checkout:
+ *  which configured files/globs resolve and which are missing/errored. Drives
+ *  the sidebar's per-project "copy files not found" warning. Inherits the global
+ *  staleTime (5s) + refetchOnWindowFocus, so it re-checks on app start, when the
+ *  copy list changes (invalidated by [`useSetWorktreeFiles`]), AND when the
+ *  window regains focus — so fixing a file on disk and returning to the app
+ *  clears the warning without a restart. Focus is driven by Tauri's window
+ *  signal (see [`setupQueryFocus`]), since the WKWebview doesn't emit the
+ *  browser focus event on app switches. */
+export function useWorktreeFilesCheck(path: string) {
+  return useQuery({
+    queryKey: ["worktree-files-check", path],
+    queryFn: () => unwrap(commands.checkWorktreeFiles(path)),
   });
 }
 

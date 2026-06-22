@@ -23,6 +23,7 @@ import {
   useBootstrap,
   useEditorTargets,
   useWorkstreamPr,
+  useWorktreeFilesCheck,
   useWorktreeGitStatus,
 } from "../lib/queries";
 import { useElementWidth } from "../lib/useElementWidth";
@@ -48,6 +49,7 @@ import {
   GitPullRequestIcon,
   PlusIcon,
   TerminalIcon,
+  WarningTriangleIcon,
 } from "../components/icons";
 import type { EditorTarget } from "../lib/bindings";
 import { SearchPalette } from "../features/search/SearchPalette";
@@ -370,6 +372,27 @@ function OpenInMenu({ dir }: { dir: string }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Yellow triangle on a project row when its configured worktree-copy files
+ *  don't resolve against the checkout (e.g. a `.env` that doesn't exist on
+ *  disk). Hovering lists the offending patterns. Renders nothing when the copy
+ *  config is clean or the project has none. The check runs on app start and
+ *  refreshes when the copy list changes (see `useWorktreeFilesCheck`). */
+function ProjectCopyWarning({ projectPath }: { projectPath: string }) {
+  const check = useWorktreeFilesCheck(projectPath);
+  const report = check.data;
+  const problems = report ? [...report.missing, ...report.errors.map((e) => e.entry)] : [];
+  if (problems.length === 0) return null;
+  return (
+    <span
+      className="flex h-6 w-6 shrink-0 items-center justify-center text-warn"
+      title={`Won't be copied to new worktrees:\n${problems.join("\n")}\n\nAdd the file to the repo, or fix the path in Project settings.`}
+      aria-label={`Copy file issues: ${problems.join(", ")}`}
+    >
+      <WarningTriangleIcon size={14} />
+    </span>
   );
 }
 
@@ -901,6 +924,7 @@ export function Root() {
                         />
                       )}
                     </Link>
+                    <ProjectCopyWarning projectPath={p.path} />
                     <Link
                       to="/projects/$projectPath"
                       params={{ projectPath: p.path }}
