@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.2.3",
+      "date": "2026-06-22",
+      "summary": "Shell-style prompt history, configurable per-repo worktree file seeding, and a wider chat area.",
+      "notes": [
+        "Step through the prompts you've already submitted this session with Alt+Up / Alt+Down (remappable in Settings → Keyboard), recalling each one into the composer to edit and resend. A stacked-lines graphic in the agent pane's top-right corner visualizes the history — hover a line to preview a prompt, click to recall — and it's capped at the 15 most recent, current session only.",
+        "Configure files that every new worktree should start with: a Worktree Files card in Project Settings writes a copy list to a committable .hyprlayer/settings.toml, and creating a workstream seeds those files (literal paths or globs) from the main checkout into the fresh worktree. Seeding is best-effort — a listed file that's missing is noted, never fatal.",
+        "Scrolling up while a reply streams now releases the auto-scroll instead of yanking you back to the bottom, and the view re-locks with a smooth glide once you return to the end.",
+        "The chat content area is now wider — 90% of the pane, up from 80% — and switching to a workstream drops the cursor straight into its composer so you can start typing without clicking first."
+      ]
+    },
+    {
       "version": "0.2.2",
       "date": "2026-06-22",
       "summary": "Compaction summaries fold into a collapsible divider, and finished background tasks now clear themselves.",
