@@ -31,6 +31,11 @@ import { invalidateWorktreeGit } from "../../lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "../../lib/notifications";
 import { router } from "../../router";
 import { docFromTool, docTitle, type DocKind } from "./toolDisplay";
+import {
+  backgroundTasksFromItems,
+  type BackgroundTask,
+  type BackgroundTaskStatus,
+} from "./backgroundTask";
 import { type Attachment } from "./attachments";
 import { composeStagePrompt } from "./stages";
 import { openCommitTab, openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
@@ -72,6 +77,16 @@ export type SessionEntry = SessionView & {
    *  drives the live "time working" counter. Maintained outside the pure
    *  reducer (it needs a clock) by `setEntry`, so every mutation keeps it right. */
   workingSince: number | null;
+  /** Epoch ms when each background task (keyed by `toolUseId`) was first
+   *  observed — drives the bar's per-task elapsed timer. Rebuilt from the live
+   *  task set on every `setEntry`, so a task's stamp drops as soon as it ends
+   *  (TaskStop or a completed poll). It is NOT cleared by session exit on its
+   *  own — an un-stopped spawn stays in `items` — so the bar is kept from
+   *  showing phantom tasks one layer up: a terminal session renders the "ended"
+   *  banner instead of the composer, and `useSessionBackgroundTasks` guards on
+   *  `isTerminal`. In-memory only; never persisted. Maintained outside the pure
+   *  reducer like `workingSince`. */
+  taskStartedAt: Record<string, number>;
 };
 
 /** A follow-up turn the user sent mid-turn, held until the current turn ends. */
@@ -95,8 +110,28 @@ function setEntry(sessionId: string, next: SessionEntry): void {
   useSessionStore.setState((s) => {
     const prev = s.sessions[sessionId];
     const workingSince = nextWorkingSince(prev, next);
-    return { sessions: { ...s.sessions, [sessionId]: { ...next, workingSince } } };
+    const taskStartedAt = nextTaskStartedAt(prev, next);
+    return { sessions: { ...s.sessions, [sessionId]: { ...next, workingSince, taskStartedAt } } };
   });
+}
+
+/**
+ * Epoch-ms start timestamp for each live background task (by `toolUseId`).
+ * Stamped on first appearance, preserved across subsequent `setEntry` calls,
+ * and naturally dropped when a task ends (it won't be in the live set anymore).
+ * Mirrors the `workingSince` mechanism: maintained here (outside the pure
+ * reducer) because it needs a clock.
+ */
+function nextTaskStartedAt(
+  prev: SessionEntry | undefined,
+  next: SessionEntry,
+): Record<string, number> {
+  const live = backgroundTasksFromItems(next.items);
+  const out: Record<string, number> = {};
+  for (const t of live) {
+    out[t.toolUseId] = prev?.taskStartedAt?.[t.toolUseId] ?? Date.now();
+  }
+  return out;
 }
 
 /**
@@ -297,6 +332,7 @@ export async function startSession(args: {
     live: true,
     permissionMode: args.permissionMode ?? null,
     workingSince: null,
+    taskStartedAt: {},
     queued: [],
   });
 
@@ -844,6 +880,7 @@ export async function restoreSessionIfNeeded(
       // a resume keeps the user's choice (e.g. bypass) across an app restart.
       permissionMode,
       workingSince: null,
+      taskStartedAt: {},
       queued: [],
     });
   } catch (error) {
@@ -938,6 +975,55 @@ export function useMostRecentDoc(
   );
 }
 
+export type LiveBackgroundTask = BackgroundTask & { startedAt: number | null };
+
+/**
+ * Live background tasks for one session, with per-task elapsed timestamps.
+ * Follows the `useWorkstreamDocs` pattern: a `useShallow` selector builds a
+ * flat list of stable string keys so streaming deltas don't churn the bar
+ * unless the task set or their statuses actually change; `useMemo` converts
+ * the keys to typed objects only on real changes.
+ *
+ * `startedAt` is taken from `taskStartedAt` (maintained in the store layer
+ * outside the pure reducer, like `workingSince`).
+ */
+export function useSessionBackgroundTasks(sessionId: string | undefined): LiveBackgroundTask[] {
+  // Key: "toolUseId\0taskId\0status\0startedAt\0label\0command"
+  // \0 is safe because none of these fields contain NUL bytes.
+  const keys = useSessionStore(
+    useShallow((s) => {
+      if (!sessionId) return [] as string[];
+      const entry = s.sessions[sessionId];
+      if (!entry) return [] as string[];
+      // A terminal session's process group is dead, so its background shells
+      // are too — even though an un-stopped spawn still sits in `items`. Don't
+      // surface phantom "running" tasks. (SessionChat also hides the bar behind
+      // its `terminal` gate; this keeps the selector correct on its own.)
+      if (isTerminal(entry.state)) return [] as string[];
+      const tasks = backgroundTasksFromItems(entry.items);
+      return tasks.map((t) => {
+        const startedAt = entry.taskStartedAt[t.toolUseId] ?? 0;
+        return [t.toolUseId, t.taskId ?? "", t.status, startedAt, t.label, t.command].join("\0");
+      });
+    }),
+  );
+  return useMemo(
+    () =>
+      keys.map((k) => {
+        const [toolUseId, taskIdRaw, status, startedAtStr, label, ...cmdParts] = k.split("\0");
+        return {
+          toolUseId,
+          taskId: taskIdRaw || null,
+          status: status as BackgroundTaskStatus,
+          startedAt: Number(startedAtStr) || null,
+          label,
+          command: cmdParts.join("\0"),
+        } satisfies LiveBackgroundTask;
+      }),
+    [keys],
+  );
+}
+
 /**
  * The single live-activity signal for a whole workstream, folded from the states
  * of every session bound to it. Drives the sidebar/list activity dot so you can
@@ -955,19 +1041,23 @@ export function useMostRecentDoc(
  *                   running, but there's a result waiting for your eyes.
  *  - `idle`       — no session activity worth flagging (also the cold-start case
  *                   before a workstream's sessions are restored into the store).
+ *  - `background` — a turn is done but one or more background shells are still
+ *                   running; a distinct pulse distinct from the blue "working"
+ *                   and the static green "review" dot.
  */
-export type WorkstreamActivity = "needs-you" | "working" | "error" | "review" | "idle";
+export type WorkstreamActivity = "needs-you" | "working" | "error" | "background" | "review" | "idle";
 
 // Higher number = more urgent. A workstream surfaces the max across its sessions.
 const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
   idle: 0,
   review: 1,
-  error: 2,
-  working: 3,
-  "needs-you": 4,
+  background: 2,
+  error: 3,
+  working: 4,
+  "needs-you": 5,
 };
 
-function classifyEntry(entry: SessionEntry): WorkstreamActivity {
+export function classifyEntry(entry: SessionEntry): WorkstreamActivity {
   if (
     entry.state === "awaiting_permission" ||
     entry.state === "awaiting_question" ||
@@ -981,6 +1071,13 @@ function classifyEntry(entry: SessionEntry): WorkstreamActivity {
   // Turn finished but the session is alive and rests at "ready", or the session
   // ran to completion — either way there's a result to look at.
   if (entry.state === "completed" || (entry.state === "running" && !entry.streaming)) {
+    // A live (non-terminal) session resting between turns with background
+    // shells still running gets the distinct pulse instead of the static
+    // "review" green. A "completed" session is terminal — its process group and
+    // its shells are already dead — so it reads as "review", not "background".
+    if (!isTerminal(entry.state) && backgroundTasksFromItems(entry.items).length > 0) {
+      return "background";
+    }
     return "review";
   }
   return "idle";

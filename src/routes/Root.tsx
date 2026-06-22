@@ -31,6 +31,7 @@ import { WorkstreamActivityDot } from "../features/session/WorkstreamActivity";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
 import { useUiStore } from "../lib/uiStore";
+import { onboardingDismissed } from "./onboardingState";
 import { useCommand } from "../lib/keybindings/registry";
 import { useKeybindings } from "../lib/keybindings/useKeybindings";
 import type { Overrides } from "../lib/keybindings/resolve";
@@ -65,14 +66,6 @@ import type { Project, WorkstreamView } from "../lib/bindings";
 // app load): on launch we land on the dashboard even if the webview restored a
 // deeper route from the previous session.
 let launchedToHome = false;
-
-// Module-scoped dismissed flag for the onboarding wizard. When the user closes
-// the wizard without completing it, this prevents the auto-launch from re-popping
-// during the same session. Resets on a cold app reload (desired).
-export let onboardingDismissed = false;
-export function dismissOnboarding() {
-  onboardingDismissed = true;
-}
 
 // Stable identity for "no overrides yet" so the dispatcher's memo/effect doesn't
 // churn on every Root render before settings have loaded a keybindings section.

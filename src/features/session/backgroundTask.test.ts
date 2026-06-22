@@ -1,0 +1,328 @@
+import { describe, expect, it } from "vitest";
+
+import type { SessionEvent } from "../../lib/bindings";
+import {
+  backgroundTasksFromItems,
+  isBackgroundSpawn,
+  type BackgroundTask,
+} from "./backgroundTask";
+import { initialSessionView, reduceEvent, type TranscriptItem } from "./transcript";
+import fixture from "./__fixtures__/background-tasks.events.json";
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+const SPAWN_RESULT = (taskId: string) => ({
+  content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/tasks/${taskId}.output. You will be notified when it completes. To check interim output, use Read on that file path.`,
+  isError: false,
+});
+
+const TASKOUT_TIMEOUT = (taskId: string) => ({
+  content: `<retrieval_status>timeout</retrieval_status>\n\n<task_id>${taskId}</task_id>\n\n<task_type>local_bash</task_type>\n\n<status>running</status>`,
+  isError: false,
+});
+
+const TASKOUT_COMPLETED = (taskId: string) => ({
+  content: `<retrieval_status>success</retrieval_status>\n\n<task_id>${taskId}</task_id>\n\n<task_type>local_bash</task_type>\n\n<status>completed</status>\n\n<exit_code>0</exit_code>\n\n<output>\nDone.\n</output>`,
+  isError: false,
+});
+
+const TASKSTOP_RESULT = (taskId: string, command = "some-cmd") => ({
+  content: JSON.stringify({
+    message: `Successfully stopped task: ${taskId} (${command})`,
+    task_id: taskId,
+    task_type: "local_bash",
+    command,
+  }),
+  isError: false,
+});
+
+function makeTool(
+  name: string,
+  input: string,
+  toolUseId: string,
+  result: { content: string; isError: boolean } | null = null,
+): Extract<TranscriptItem, { kind: "tool" }> {
+  return { kind: "tool", id: `id-${toolUseId}`, toolUseId, name, input, result };
+}
+
+function bgBash(
+  toolUseId: string,
+  opts: {
+    command?: string;
+    description?: string;
+    result?: { content: string; isError: boolean } | null;
+  } = {},
+): Extract<TranscriptItem, { kind: "tool" }> {
+  const input: Record<string, unknown> = {
+    command: opts.command ?? "sleep 999",
+    run_in_background: true,
+  };
+  if (opts.description !== undefined) input.description = opts.description;
+  return makeTool("Bash", JSON.stringify(input), toolUseId, opts.result ?? null);
+}
+
+function fgBash(toolUseId: string, command = "ls"): Extract<TranscriptItem, { kind: "tool" }> {
+  return makeTool("Bash", JSON.stringify({ command }), toolUseId, { content: "done", isError: false });
+}
+
+function taskOutput(
+  toolUseId: string,
+  taskId: string,
+  result: { content: string; isError: boolean } | null,
+  block = true,
+): Extract<TranscriptItem, { kind: "tool" }> {
+  return makeTool(
+    "TaskOutput",
+    JSON.stringify({ task_id: taskId, block, timeout: 60000 }),
+    toolUseId,
+    result,
+  );
+}
+
+function taskStop(
+  toolUseId: string,
+  taskId: string,
+  result: { content: string; isError: boolean } | null = null,
+): Extract<TranscriptItem, { kind: "tool" }> {
+  return makeTool("TaskStop", JSON.stringify({ task_id: taskId }), toolUseId, result);
+}
+
+function replayFixture(events: unknown[]): TranscriptItem[] {
+  let view = initialSessionView();
+  for (const ev of events) {
+    view = reduceEvent(view, ev as SessionEvent);
+  }
+  return view.items;
+}
+
+// ─── isBackgroundSpawn ───────────────────────────────────────────────────────
+
+describe("isBackgroundSpawn", () => {
+  it("returns true for a Bash item with run_in_background:true", () => {
+    expect(isBackgroundSpawn(bgBash("t1"))).toBe(true);
+  });
+
+  it("returns false for a regular foreground Bash item", () => {
+    expect(isBackgroundSpawn(fgBash("t1"))).toBe(false);
+  });
+
+  it("returns false for non-Bash tool items", () => {
+    expect(
+      isBackgroundSpawn(makeTool("TaskOutput", JSON.stringify({ task_id: "x" }), "t1")),
+    ).toBe(false);
+  });
+
+  it("returns false for non-tool transcript items", () => {
+    const userItem: TranscriptItem = {
+      kind: "user",
+      id: "u1",
+      text: "hello",
+      stage: null,
+      attachments: [],
+      createdAt: null,
+    };
+    expect(isBackgroundSpawn(userItem)).toBe(false);
+  });
+});
+
+// ─── backgroundTasksFromItems ────────────────────────────────────────────────
+
+describe("backgroundTasksFromItems", () => {
+  it("returns empty array for an empty transcript", () => {
+    expect(backgroundTasksFromItems([])).toEqual([]);
+  });
+
+  it("ignores foreground Bash calls", () => {
+    const items: TranscriptItem[] = [fgBash("t1"), fgBash("t2")];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("ignores non-tool transcript items", () => {
+    const items: TranscriptItem[] = [
+      { kind: "user", id: "u1", text: "hi", stage: null, attachments: [], createdAt: null },
+      { kind: "assistant", id: "a1", text: "hello", streaming: false },
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("adds a running task when spawn + result arrive", () => {
+    const items: TranscriptItem[] = [bgBash("t1", { description: "My task", result: SPAWN_RESULT("task-a") })];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject<Partial<BackgroundTask>>({
+      taskId: "task-a",
+      toolUseId: "t1",
+      label: "My task",
+      status: "running",
+    });
+  });
+
+  it("uses command first-line as label when description is absent", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { command: "pnpm build\nsome-other-line", result: SPAWN_RESULT("task-a") }),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks[0].label).toBe("pnpm build …");
+  });
+
+  it("sets taskId to null before the spawn result arrives", () => {
+    // result === null means the toolResult event hasn't arrived yet
+    const items: TranscriptItem[] = [bgBash("t1", { result: null })];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBeNull();
+    expect(tasks[0].status).toBe("running");
+  });
+
+  it("flips status to awaiting when TaskOutput result is pending", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskOutput("to1", "task-a", null), // result=null → agent is blocked
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe("awaiting");
+    expect(tasks[0].taskId).toBe("task-a");
+  });
+
+  it("resets status to running after a TaskOutput timeout result", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskOutput("to1", "task-a", null), // awaiting
+      taskOutput("to2", "task-a", TASKOUT_TIMEOUT("task-a")), // timeout → still running
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe("running");
+  });
+
+  it("removes a task when TaskOutput result indicates completion", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskOutput("to1", "task-a", TASKOUT_COMPLETED("task-a")),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("removes a task when TaskStop result arrives", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskStop("ts1", "task-a", TASKSTOP_RESULT("task-a", "sleep 999")),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("does NOT remove a task when TaskStop has no result yet (not confirmed)", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskStop("ts1", "task-a", null), // result=null → stop not confirmed
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+  });
+
+  it("supports legacy KillBash (shell_id) for stopping tasks", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      makeTool(
+        "KillBash",
+        JSON.stringify({ shell_id: "task-a" }),
+        "kb1",
+        { content: "killed", isError: false },
+      ),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("supports legacy BashOutput (shell_id) for awaiting", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      makeTool("BashOutput", JSON.stringify({ shell_id: "task-a" }), "bo1", null),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe("awaiting");
+  });
+
+  it("tracks two concurrent background tasks independently", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { description: "Task A", result: SPAWN_RESULT("task-a") }),
+      bgBash("t2", { description: "Task B", result: SPAWN_RESULT("task-b") }),
+      taskOutput("to1", "task-a", null), // A is awaiting
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(2);
+    const a = tasks.find((t) => t.taskId === "task-a")!;
+    const b = tasks.find((t) => t.taskId === "task-b")!;
+    expect(a.status).toBe("awaiting");
+    expect(b.status).toBe("running");
+  });
+
+  it("removes only the stopped task when two are running", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { description: "Task A", result: SPAWN_RESULT("task-a") }),
+      bgBash("t2", { description: "Task B", result: SPAWN_RESULT("task-b") }),
+      taskStop("ts1", "task-a", TASKSTOP_RESULT("task-a")),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("task-b");
+  });
+
+  it("preserves spawn order", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { description: "First", result: SPAWN_RESULT("id-1") }),
+      bgBash("t2", { description: "Second", result: SPAWN_RESULT("id-2") }),
+      bgBash("t3", { description: "Third", result: SPAWN_RESULT("id-3") }),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks.map((t) => t.label)).toEqual(["First", "Second", "Third"]);
+  });
+
+  it("ignores TaskOutput for an unknown task_id", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      taskOutput("to1", "completely-unknown", null), // unknown id → no effect
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe("running");
+  });
+});
+
+// ─── fixture replay ──────────────────────────────────────────────────────────
+
+describe("backgroundTasksFromItems — fixture replay", () => {
+  it("ends up with zero live tasks after the full fixture sequence", () => {
+    const items = replayFixture(fixture);
+    // The fixture goes: spawn → poll-timeout → poll-completed → turnDone
+    // After all events are replayed, the task is completed and removed.
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("pins the Bash-birth wire format: extracts task_id from spawn result", () => {
+    // Replay only the first two events (toolUse + toolResult for spawn)
+    const items = replayFixture(fixture.slice(0, 2));
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("fixture-task-1");
+    expect(tasks[0].label).toBe("Launch dev instance");
+    expect(tasks[0].status).toBe("running");
+  });
+
+  it("shows awaiting while TaskOutput result is pending (awaiting state)", () => {
+    // Replay spawn + result + turnDone + TaskOutput (NO toolResult yet)
+    const items = replayFixture(fixture.slice(0, 4));
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe("awaiting");
+  });
+
+  it("resets to running after a timeout result", () => {
+    // Replay through the timeout result (events 0-4)
+    const items = replayFixture(fixture.slice(0, 5));
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe("running");
+  });
+});

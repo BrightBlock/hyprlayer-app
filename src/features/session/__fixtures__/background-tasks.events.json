@@ -1,0 +1,56 @@
+[
+  {
+    "kind": "toolUse",
+    "id": "fixture-bash-bg-1",
+    "name": "Bash",
+    "input": "{\"command\":\"pnpm tauri dev > /tmp/dev.log 2>&1\",\"description\":\"Launch dev instance\",\"timeout\":600000,\"run_in_background\":true}",
+    "parentId": null
+  },
+  {
+    "kind": "toolResult",
+    "toolUseId": "fixture-bash-bg-1",
+    "content": "Command running in background with ID: fixture-task-1. Output is being written to: /private/tmp/claude-501/tasks/fixture-task-1.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+    "isError": false,
+    "parentId": null
+  },
+  {
+    "kind": "turnDone",
+    "costUsd": null,
+    "numTurns": 1,
+    "contextTokens": null
+  },
+  {
+    "kind": "toolUse",
+    "id": "fixture-taskout-1",
+    "name": "TaskOutput",
+    "input": "{\"task_id\":\"fixture-task-1\",\"block\":true,\"timeout\":240000}",
+    "parentId": null
+  },
+  {
+    "kind": "toolResult",
+    "toolUseId": "fixture-taskout-1",
+    "content": "<retrieval_status>timeout</retrieval_status>\n\n<task_id>fixture-task-1</task_id>\n\n<task_type>local_bash</task_type>\n\n<status>running</status>",
+    "isError": false,
+    "parentId": null
+  },
+  {
+    "kind": "toolUse",
+    "id": "fixture-taskout-2",
+    "name": "TaskOutput",
+    "input": "{\"task_id\":\"fixture-task-1\",\"block\":true,\"timeout\":300000}",
+    "parentId": null
+  },
+  {
+    "kind": "toolResult",
+    "toolUseId": "fixture-taskout-2",
+    "content": "<retrieval_status>success</retrieval_status>\n\n<task_id>fixture-task-1</task_id>\n\n<task_type>local_bash</task_type>\n\n<status>completed</status>\n\n<exit_code>0</exit_code>\n\n<output>\nDone.\n</output>",
+    "isError": false,
+    "parentId": null
+  },
+  {
+    "kind": "turnDone",
+    "costUsd": null,
+    "numTurns": 2,
+    "contextTokens": null
+  }
+]

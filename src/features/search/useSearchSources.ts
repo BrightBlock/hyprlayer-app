@@ -21,9 +21,10 @@ function sessionStateToActivity(state: string): WorkstreamActivity {
 const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
   idle: 0,
   review: 1,
-  error: 2,
-  working: 3,
-  "needs-you": 4,
+  background: 2,
+  error: 3,
+  working: 4,
+  "needs-you": 5,
 };
 
 export function useSearchSources(query: string, activeWorkstreamId?: string): SearchResult[] {

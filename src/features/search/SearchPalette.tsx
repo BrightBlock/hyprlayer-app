@@ -19,6 +19,7 @@ const ACTIVITY_STYLE: Record<
   working: { color: "bg-sky-400", anim: "work", label: "Working" },
   error: { color: "bg-bad", anim: "none", label: "Errored" },
   review: { color: "bg-ok", anim: "none", label: "Turn done" },
+  background: { color: "bg-violet-400", anim: "work", label: "Background tasks running" },
 };
 
 function ActivityBadge({ activity }: { activity: WorkstreamActivity }) {

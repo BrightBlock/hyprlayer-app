@@ -41,7 +41,7 @@ import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, suggestedDocKind, typ
 import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
 import { PERMISSION_MODES, permissionModeOption } from "./permissions";
 import { docFromTool, formatTokens } from "./toolDisplay";
-import { TranscriptView, type PermissionHandlers, type PromptHandlers } from "./TranscriptView";
+import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
 import {
   allowForSession,
   answerQuestion,
@@ -57,8 +57,10 @@ import {
   stopSession,
   useSession,
   useMostRecentDoc,
+  useSessionBackgroundTasks,
   type QueuedMessage,
 } from "./sessionStore";
+import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
 import { describeState, isBusy, isTerminal, isWorking, type PendingQuestion } from "./transcript";
 import {
   AutocompleteDropdown,
@@ -926,6 +928,10 @@ export function SessionChat({
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
   const sid = shell.sessionId;
 
+  // Background tasks bar.
+  const backgroundTasks = useSessionBackgroundTasks(sid);
+  const transcriptRef = useRef<TranscriptHandle | null>(null);
+
   // Handoff flow: at ≥60% context fill, nudge the user to create a handoff doc
   // and start fresh. The flow is two banners and a button glow:
   //   1. suggest — show while pct ≥ NUDGE_THRESHOLD and the user hasn't acted;
@@ -1153,6 +1159,7 @@ export function SessionChat({
       )}
       {started ? (
         <TranscriptView
+          ref={transcriptRef}
           items={session?.items ?? []}
           busy={working}
           connecting={!session || session.state === "starting"}
@@ -1404,6 +1411,13 @@ export function SessionChat({
                         <EraserIcon />
                       </button>
                     )}
+                    {/* Live background shells (Bash run_in_background): a pulsing
+                        terminal icon + count that opens a per-task popover. Sits
+                        by the context meter; renders nothing when none run. */}
+                    <BackgroundTasksIndicator
+                      tasks={backgroundTasks}
+                      onJumpTo={(toolUseId) => transcriptRef.current?.scrollToTool(toolUseId)}
+                    />
                     {/* Drop or paste a screenshot anytime — see the pane drop overlay. */}
                     {session?.contextTokens != null && (
                       <ContextMeter tokens={session.contextTokens} windowSize={model.contextWindow} />

@@ -44,8 +44,14 @@ vi.mock("../../lib/bindings", () => ({
 }));
 
 // Imported after the mocks so the store binds to them.
-const { startSession, sendMessage, cancelQueuedMessage, stopSession, useSessionStore } =
-  await import("./sessionStore");
+const {
+  startSession,
+  sendMessage,
+  cancelQueuedMessage,
+  stopSession,
+  classifyEntry,
+  useSessionStore,
+} = await import("./sessionStore");
 
 const INIT: SessionEvent = { kind: "init", claudeSessionId: "c1", model: "m" };
 const TURN_DONE: SessionEvent = {
@@ -190,5 +196,144 @@ describe("stopSession (interrupt → kill escalation)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ─── background task timestamps (taskStartedAt) ──────────────────────────────
+
+const SPAWN_RESULT = (taskId: string) =>
+  `Command running in background with ID: ${taskId}. Output is being written to: /tmp/tasks/${taskId}.output. You will be notified when it completes. To check interim output, use Read on that file path.`;
+
+const BASH_BG_SPAWN = (toolUseId: string, _taskId: string): SessionEvent => ({
+  kind: "toolUse",
+  id: toolUseId,
+  name: "Bash",
+  input: JSON.stringify({ command: "sleep 999", run_in_background: true }),
+  parentId: null,
+});
+
+const BASH_BG_RESULT = (toolUseId: string, taskId: string): SessionEvent => ({
+  kind: "toolResult",
+  toolUseId,
+  content: SPAWN_RESULT(taskId),
+  isError: false,
+  parentId: null,
+});
+
+describe("taskStartedAt — per-task elapsed timestamps", () => {
+  it("starts at {} when a session is created", async () => {
+    const id = await startBusySession();
+    expect(useSessionStore.getState().sessions[id]?.taskStartedAt).toEqual({});
+  });
+
+  it("stamps taskStartedAt when a background spawn result arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await startBusySession();
+      const before = Date.now();
+      emit(INIT);
+      emit(BASH_BG_SPAWN("tu-1", "task-a"));
+      emit(BASH_BG_RESULT("tu-1", "task-a"));
+
+      const startedAt = useSessionStore.getState().sessions[id]?.taskStartedAt;
+      expect(startedAt).toBeDefined();
+      expect(startedAt?.["tu-1"]).toBeGreaterThanOrEqual(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves the timestamp across subsequent events (monotonic)", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+
+    const firstStamp = useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"];
+    expect(firstStamp).toBeTruthy();
+
+    // A new event arrives — stamp should remain unchanged.
+    emit(TURN_DONE);
+    const afterTurnDone = useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"];
+    expect(afterTurnDone).toBe(firstStamp);
+  });
+
+  it("removes the timestamp when the task ends via TaskStop", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+    emit(TURN_DONE);
+
+    // Agent stops the task.
+    const stopResult = JSON.stringify({
+      message: "Successfully stopped task: task-a (sleep 999)",
+      task_id: "task-a",
+      task_type: "local_bash",
+      command: "sleep 999",
+    });
+    emit({ kind: "toolUse", id: "ts-1", name: "TaskStop", input: JSON.stringify({ task_id: "task-a" }), parentId: null });
+    emit({ kind: "toolResult", toolUseId: "ts-1", content: stopResult, isError: false, parentId: null });
+
+    const taskStartedAt = useSessionStore.getState().sessions[id]?.taskStartedAt;
+    expect(taskStartedAt?.["tu-1"]).toBeUndefined();
+    expect(Object.keys(taskStartedAt ?? {})).toHaveLength(0);
+  });
+});
+
+// ─── classifyEntry — background activity ────────────────────────────────────
+
+const entryOf = (id: string) => useSessionStore.getState().sessions[id]!;
+
+describe("classifyEntry — background activity state", () => {
+  it("returns 'background' for a live resting session with a running background task", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+    emit(TURN_DONE); // running && !streaming, task still un-stopped
+
+    const entry = entryOf(id);
+    expect(entry.state).toBe("running");
+    expect(entry.streaming).toBe(false);
+    expect(classifyEntry(entry)).toBe("background");
+  });
+
+  it("returns 'working' (which outranks background) while the turn is streaming", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+    // No turnDone → still streaming → working takes precedence over background.
+    const entry = entryOf(id);
+    expect(entry.streaming).toBe(true);
+    expect(classifyEntry(entry)).toBe("working");
+  });
+
+  it("returns 'review' (not 'background') for a COMPLETED session even with an un-stopped task", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+    // The process exits cleanly while the shell is still un-stopped: it died
+    // with the process group, so the dead session reads as review — not a
+    // phantom "background" pulse.
+    emit({ kind: "exited", outcome: "completed", code: 0, stderrTail: "" });
+
+    const entry = entryOf(id);
+    expect(entry.state).toBe("completed");
+    expect(classifyEntry(entry)).toBe("review");
+  });
+
+  it("returns 'idle' for a KILLED session with an un-stopped task", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+    emit({ kind: "exited", outcome: "killed", code: null, stderrTail: "" });
+
+    const entry = entryOf(id);
+    expect(entry.state).toBe("killed");
+    expect(classifyEntry(entry)).toBe("idle");
   });
 });

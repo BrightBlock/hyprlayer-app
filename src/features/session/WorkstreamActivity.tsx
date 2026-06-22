@@ -19,6 +19,9 @@ const ACTIVITY_STYLE: Record<
   working: { color: "bg-sky-400 text-sky-400", anim: "work", label: "Working" },
   error: { color: "bg-bad", anim: "none", label: "Errored" },
   review: { color: "bg-ok", anim: "none", label: "Turn done — ready for review" },
+  // Violet breathing = "passive background work" (turn done, but shells running).
+  // Distinct hue from blue "working" so the two are visually separable.
+  background: { color: "bg-violet-400 text-violet-400", anim: "work", label: "Background tasks running" },
 };
 
 /** Leading/trailing status dot for a workstream row. Renders null while idle. */

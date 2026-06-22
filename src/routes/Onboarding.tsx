@@ -32,7 +32,7 @@ import {
 import { SetupTerminal } from "../features/onboarding/SetupTerminal";
 import { RepoSourcePicker, type RepoSource } from "../features/projects/RepoSourcePicker";
 import type { ThoughtsSource } from "../lib/bindings";
-import { dismissOnboarding } from "./Root";
+import { dismissOnboarding } from "./onboardingState";
 
 // ── Step shell ────────────────────────────────────────────────────────────────
 

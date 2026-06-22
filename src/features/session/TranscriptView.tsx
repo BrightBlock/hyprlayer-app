@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { Button, Spinner } from "../../components/ui";
 import {
@@ -428,7 +428,7 @@ function ToolBlock({
       : null;
 
   return (
-    <div className="text-xs">
+    <div className="text-xs" data-tooluse-id={item.toolUseId}>
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
@@ -894,72 +894,85 @@ type Props = {
   prompt: PromptHandlers;
 };
 
-export const TranscriptView = memo(function TranscriptView({
-  items,
-  busy,
-  connecting,
-  workingSince,
-  permission,
-  prompt,
-}: Props) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const atBottom = useRef(true);
+/** Imperative handle exposed via ref so the parent can scroll to a tool row. */
+export type TranscriptHandle = {
+  /** Scroll the transcript to the tool row with the given `toolUseId`. */
+  scrollToTool: (toolUseId: string) => void;
+};
 
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  };
+export const TranscriptView = memo(
+  forwardRef<TranscriptHandle, Props>(function TranscriptView(
+    { items, busy, connecting, workingSince, permission, prompt },
+    ref,
+  ) {
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const atBottom = useRef(true);
 
-  // Stick to the bottom on discrete updates (new items, tool results).
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [items]);
+    useImperativeHandle(ref, () => ({
+      scrollToTool(toolUseId) {
+        const container = scrollRef.current;
+        if (!container) return;
+        const el = container.querySelector(`[data-tooluse-id="${toolUseId}"]`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      },
+    }));
 
-  // While a turn is in flight the visible text grows smoothly between store
-  // updates (the typewriter reveal), so pin to the bottom every frame too —
-  // unless the user has scrolled up.
-  useEffect(() => {
-    if (!busy) return;
-    let frame = requestAnimationFrame(function tick() {
+    const onScroll = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
+
+    // Stick to the bottom on discrete updates (new items, tool results).
+    useEffect(() => {
       const el = scrollRef.current;
       if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-      frame = requestAnimationFrame(tick);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [busy]);
+    }, [items]);
 
-  // Subagent items nest under their `Task`; the main thread shows the rest.
-  const childrenByParent: ChildMap = new Map();
-  for (const item of items) {
-    const parent = parentIdOf(item);
-    if (parent) {
-      const arr = childrenByParent.get(parent);
-      if (arr) arr.push(item);
-      else childrenByParent.set(parent, [item]);
+    // While a turn is in flight the visible text grows smoothly between store
+    // updates (the typewriter reveal), so pin to the bottom every frame too —
+    // unless the user has scrolled up.
+    useEffect(() => {
+      if (!busy) return;
+      let frame = requestAnimationFrame(function tick() {
+        const el = scrollRef.current;
+        if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+        frame = requestAnimationFrame(tick);
+      });
+      return () => cancelAnimationFrame(frame);
+    }, [busy]);
+
+    // Subagent items nest under their `Task`; the main thread shows the rest.
+    const childrenByParent: ChildMap = new Map();
+    for (const item of items) {
+      const parent = parentIdOf(item);
+      if (parent) {
+        const arr = childrenByParent.get(parent);
+        if (arr) arr.push(item);
+        else childrenByParent.set(parent, [item]);
+      }
     }
-  }
-  const topLevel = items.filter((item) => parentIdOf(item) === null);
+    const topLevel = items.filter((item) => parentIdOf(item) === null);
 
-  return (
-    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto p-5">
-      <div className="mx-auto w-4/5">
-        <ItemList
-          items={topLevel}
-          childrenByParent={childrenByParent}
-          busy={busy}
-          permission={permission}
-          prompt={prompt}
-        />
-        {connecting && (
-          <div className="mt-3 flex items-center gap-2 text-sm text-ink-dim">
-            <Spinner size={14} />
-            Connecting to claude…
-          </div>
-        )}
-        {workingSince !== null && <ElapsedCounter since={workingSince} />}
+    return (
+      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="mx-auto w-4/5">
+          <ItemList
+            items={topLevel}
+            childrenByParent={childrenByParent}
+            busy={busy}
+            permission={permission}
+            prompt={prompt}
+          />
+          {connecting && (
+            <div className="mt-3 flex items-center gap-2 text-sm text-ink-dim">
+              <Spinner size={14} />
+              Connecting to claude…
+            </div>
+          )}
+          {workingSince !== null && <ElapsedCounter since={workingSince} />}
+        </div>
       </div>
-    </div>
-  );
-});
+    );
+  }),
+);
