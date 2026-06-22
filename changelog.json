@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.2.1",
+      "date": "2026-06-22",
+      "summary": "Live background shell tasks now surface in the composer toolbar with a status popover.",
+      "notes": [
+        "When an agent leaves background shell tasks running — anything it started with a background Bash command — a pulsing terminal indicator now appears next to the context meter in the composer toolbar. Click it for a popover that lists each task with its label and a live elapsed timer, and click a row to jump the transcript to the call that spawned it.",
+        "Workstreams whose turn has finished but still have background shells running now show a distinct violet \"background\" activity state — on the workstream dot and in the Cmd+P search palette — so you can tell at a glance which sessions still have live processes."
+      ]
+    },
+    {
       "version": "0.2.0",
       "date": "2026-06-20",
       "summary": "Hyprlayer now runs on Windows (x64), with terminal and project fixes for the platform.",

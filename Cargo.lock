@@ -1879,7 +1879,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-app"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
@@ -1910,7 +1910,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
