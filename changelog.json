@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.2.4",
+      "date": "2026-06-22",
+      "summary": "Worktree-copy warning badges, cleaner workstream creation, and self-clearing background tasks.",
+      "notes": [
+        "Projects whose configured worktree-copy files don't resolve against the checkout now show a yellow warning badge on their sidebar row; hover it to see the offending patterns and the suggested fix. The check re-runs on startup, when you change the copy list, and when the window regains focus — so correcting a file on disk and tabbing back clears the warning without a restart.",
+        "Creating a workstream now always dismisses the dialog and jumps straight to the new workstream. Seed-copy problems surface on the project's warning badge instead of reopening an empty New workstream prompt.",
+        "Background shell tasks no longer linger as a phantom \"running\" task: reading a task's output file directly — the common case where the agent consumes the output and the completion notification is suppressed — now ends its live tracking."
+      ]
+    },
+    {
       "version": "0.2.3",
       "date": "2026-06-22",
       "summary": "Shell-style prompt history, configurable per-repo worktree file seeding, and a wider chat area.",
