@@ -112,6 +112,7 @@ const DEFAULT_GIT: Required<GitSettings> = {
   deleteBranchOnArchive: true,
   archiveOnMerge: false,
   automerge: false,
+  pruneIgnoredOnArchive: true,
 };
 
 const DEFAULT_PREFIX = "hyprlayer/";
@@ -150,6 +151,8 @@ function GitSection({ settings }: { settings: AppSettings }) {
     deleteBranchOnArchive: raw.deleteBranchOnArchive ?? DEFAULT_GIT.deleteBranchOnArchive,
     archiveOnMerge: raw.archiveOnMerge ?? DEFAULT_GIT.archiveOnMerge,
     automerge: raw.automerge ?? DEFAULT_GIT.automerge,
+    pruneIgnoredOnArchive:
+      raw.pruneIgnoredOnArchive ?? DEFAULT_GIT.pruneIgnoredOnArchive,
   };
   const save = useSetAppSettings();
   const username = useGithubUsername();
@@ -295,6 +298,21 @@ function GitSection({ settings }: { settings: AppSettings }) {
         >
           Queue a GitHub auto-merge so a PR lands once required checks pass. Requires auto-merge
           enabled in your GitHub repository settings.
+        </SettingRow>
+
+        <SettingRow
+          title="Prune ignored files on archive"
+          control={
+            <Toggle
+              aria-label="Prune ignored files on archive"
+              checked={git.pruneIgnoredOnArchive}
+              onChange={(v) => patch({ pruneIgnoredOnArchive: v })}
+            />
+          }
+        >
+          Remove git-ignored files (build output, dependencies) when archiving so archives stay
+          small. Files in your repo's <code className="font-mono text-xs">worktree.copy</code> list
+          (e.g. <code className="font-mono text-xs">.env</code>) are kept.
         </SettingRow>
       </div>
     </Card>

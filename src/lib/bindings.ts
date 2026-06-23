@@ -97,6 +97,13 @@ export const commands = {
 	 */
 	deleteArchivedWorkstream: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_archived_workstream", { id })),
 	/**
+	 *  Bulk permanent-delete of archived workstreams. `before_ms = None` purges
+	 *  ALL archived rows; `Some(cutoff)` purges those with `archived_at < cutoff`.
+	 *  Per-row reuse of purge_archive + delete_workstream; best-effort (failures
+	 *  counted, not fatal), mirroring delete_archived_workstream.
+	 */
+	cleanupArchivedWorkstreams: (beforeMs: number | null) => typedError<ArchiveCleanupReport, AppError>(__TAURI_INVOKE("cleanup_archived_workstreams", { beforeMs })),
+	/**
 	 *  Re-create broken thoughts links (status shows `broken` after e.g. a moved
 	 *  thoughts repo).
 	 */
@@ -392,6 +399,15 @@ export type AppSettings = {
 };
 
 /**
+ *  Report returned by [`cleanup_archived_workstreams`]: rows successfully
+ *  deleted vs. rows that failed (logged individually as warnings).
+ */
+export type ArchiveCleanupReport = {
+	deleted: number,
+	failed: number,
+};
+
+/**
  *  View shape for the archive history view. `archive_exists` flags rows
  *  whose backup directory was deleted out-of-band (restore would fail; UI
  *  surfaces "delete permanently" as the only action).
@@ -665,6 +681,12 @@ export type GitSettings = {
 	 *  required checks pass. Requires auto-merge enabled on the repo.
 	 */
 	automerge?: boolean,
+	/**
+	 *  Strip git-ignored files (build output, deps) from a worktree before
+	 *  archiving so archives don't balloon. Files matched by the repo's
+	 *  `worktree.copy` patterns are preserved. Default `true`.
+	 */
+	pruneIgnoredOnArchive?: boolean,
 };
 
 /**  One of the user's GitHub repos, for the clone dialog's "Recent repos" list. */

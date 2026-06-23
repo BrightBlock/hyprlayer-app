@@ -17,6 +17,7 @@ import { RepoAvatar } from "../components/RepoAvatar";
 import {
   useArchivedWorkstreams,
   useBootstrap,
+  useCleanupArchivedWorkstreams,
   useDeleteArchivedWorkstream,
   useRestoreWorkstream,
 } from "../lib/queries";
@@ -68,6 +69,7 @@ export function Archive() {
   const bootstrap = useBootstrap();
   const restore = useRestoreWorkstream();
   const purge = useDeleteArchivedWorkstream();
+  const cleanup = useCleanupArchivedWorkstreams();
   const navigate = useNavigate();
 
   const [filter, setFilter] = useState("");
@@ -75,6 +77,7 @@ export function Archive() {
     null,
   );
   const [confirmDelete, setConfirmDelete] = useState<ArchivedWorkstreamView | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [restoreError, setRestoreError] = useState<unknown>(null);
 
   // Memoise so the bucket-grouping useMemo doesn't re-run on every render
@@ -140,7 +143,19 @@ export function Archive() {
       <div className="sticky top-0 z-10 border-b border-edge bg-surface/95 px-6 py-4 backdrop-blur">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-base font-semibold">Archived workstreams</h1>
-          {(restore.isPending || purge.isPending || archived.isFetching) && <Spinner />}
+          <div className="flex items-center gap-2">
+            {(restore.isPending || purge.isPending || cleanup.isPending || archived.isFetching) && (
+              <Spinner />
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={total === 0}
+              onClick={() => setCleanupOpen(true)}
+            >
+              Clean up…
+            </Button>
+          </div>
         </div>
         <div className="mt-3">
           <TextInput
@@ -225,6 +240,19 @@ export function Archive() {
         }}
         error={purge.isError ? purge.error : null}
       />
+
+      <CleanupDialog
+        open={cleanupOpen}
+        archived={archived.data ?? []}
+        busy={cleanup.isPending}
+        onClose={() => {
+          if (!cleanup.isPending) setCleanupOpen(false);
+        }}
+        onConfirm={(beforeMs) => {
+          cleanup.mutate(beforeMs, { onSettled: () => setCleanupOpen(false) });
+        }}
+        error={cleanup.isError ? cleanup.error : null}
+      />
     </div>
   );
 }
@@ -291,6 +319,90 @@ type ConfirmProps = {
   onConfirm: () => void;
   error: unknown;
 };
+
+type CleanupScope = "all" | 30 | 60 | 90;
+
+type CleanupProps = {
+  open: boolean;
+  archived: ArchivedWorkstreamView[];
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (beforeMs: number | null) => void;
+  error: unknown;
+};
+
+function CleanupDialog({ open, archived, busy, onClose, onConfirm, error }: CleanupProps) {
+  const [scope, setScope] = useState<CleanupScope>("all");
+
+  const now = Date.now();
+  const beforeMs: number | null =
+    scope === "all" ? null : now - scope * MS_PER_DAY;
+
+  const count =
+    scope === "all"
+      ? archived.length
+      : archived.filter((v) => {
+          const at: number = v.item.archivedAt ?? v.item.updatedAt ?? 0;
+          return at < (beforeMs as number);
+        }).length;
+
+  const scopeOptions: Array<{ value: CleanupScope; label: string }> = [
+    { value: "all", label: "All archives" },
+    { value: 30, label: "Older than 30 days" },
+    { value: 60, label: "Older than 60 days" },
+    { value: 90, label: "Older than 90 days" },
+  ];
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Clean up archives">
+      <div className="space-y-4">
+        <p className="text-sm text-ink-dim">
+          Choose which archived workstreams to delete. This removes them from disk along with their
+          local branches (per your Git settings) and cannot be undone.
+        </p>
+
+        <div className="space-y-1.5" role="radiogroup" aria-label="Cleanup scope">
+          {scopeOptions.map((opt) => (
+            <button
+              key={String(opt.value)}
+              type="button"
+              role="radio"
+              aria-checked={scope === opt.value}
+              onClick={() => setScope(opt.value)}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-edge/40"
+            >
+              <span
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                  scope === opt.value ? "border-accent" : "border-edge"
+                }`}
+              >
+                {scope === opt.value && <span className="h-2 w-2 rounded-full bg-accent" />}
+              </span>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {error && isAppError(error) ? <ErrorNote error={error} /> : null}
+
+        <div className="flex items-center justify-end gap-2">
+          <Button type="button" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            busy={busy}
+            disabled={count === 0}
+            onClick={() => onConfirm(beforeMs)}
+          >
+            Delete {count} permanently
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
 
 function PurgeConfirmDialog({ target, busy, onClose, onConfirm, error }: ConfirmProps) {
   return (

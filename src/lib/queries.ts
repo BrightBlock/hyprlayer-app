@@ -362,6 +362,14 @@ export function useReprovisionWorkstream() {
   });
 }
 
+export function useCleanupArchivedWorkstreams() {
+  return useMutation({
+    mutationFn: (beforeMs: number | null) =>
+      unwrap(commands.cleanupArchivedWorkstreams(beforeMs)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workstreams"] }),
+  });
+}
+
 // ── Pull request (derived live from gh) ─────────────────────────────────────
 
 /** The branch's PR (or null), derived live from `gh`. Fetches once on mount;

@@ -333,6 +333,27 @@ impl WorktreeManager {
         Ok(())
     }
 
+    /// Best-effort removal of git-ignored files from a live worktree before
+    /// archive, so build artifacts (target/, node_modules/) don't bloat the
+    /// archive. `keep` patterns (the repo's `worktree.copy` globs) are passed as
+    /// `git clean -e !<pat>` negations so seeded files like `.env` survive even
+    /// when they appear in the repo's gitignore. Single `-f` (not `-ff`) leaves
+    /// nested git repos untouched.
+    pub async fn clean_ignored(&self, git: &Path, worktree: &Path, keep: &[String]) -> Result<()> {
+        let mut args: Vec<String> = vec!["clean".into(), "-d".into(), "-f".into(), "-X".into()];
+        for pat in keep {
+            // Negation `!<pat>` un-ignores the pattern, keeping matching files.
+            args.push("-e".into());
+            args.push(format!("!{pat}"));
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        git_in(git, worktree, &arg_refs) // git -C <worktree> clean -d -f -X -e !<pat>...
+            .timeout(Duration::from_secs(120))
+            .run()
+            .await?;
+        Ok(())
+    }
+
     /// Permanent purge: prune the archive directory + delete the branch.
     /// Used by the "Delete permanently" action on the archive history view.
     pub async fn purge_archive(
@@ -805,6 +826,70 @@ mod tests {
         assert!(
             matches!(err, CoreError::Io(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists)
         );
+    }
+
+    /// `clean_ignored` removes git-ignored files but preserves `keep` patterns
+    /// (worktree.copy), tracked edits, and untracked-not-ignored files.
+    /// `.env` is included in the gitignore to verify that the negation exclude
+    /// (`!.env`) overrides the gitignore rule and keeps the seeded file.
+    #[tokio::test]
+    async fn clean_ignored_removes_ignored_keeps_seeded_and_tracked() {
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Clean me".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let wt = PathBuf::from(&created.path);
+
+        // Gitignore: target/, *.log, and .env (seeded files are typically ignored).
+        std::fs::write(wt.join(".gitignore"), "target/\n*.log\n.env\n").unwrap();
+        sh(&wt, &["add", ".gitignore"]);
+        sh(&wt, &["commit", "-m", "add gitignore"]);
+
+        // Create ignored files/dirs.
+        std::fs::create_dir_all(wt.join("target")).unwrap();
+        std::fs::write(wt.join("target").join("junk"), "build output").unwrap();
+        std::fs::write(wt.join("debug.log"), "log").unwrap();
+
+        // Create untracked-but-NOT-ignored file (should survive).
+        std::fs::write(wt.join("scratch.txt"), "wip").unwrap();
+
+        // Create a "seeded" ignored file; its pattern is in keep so the `!.env`
+        // negation un-ignores it and `git clean -X` leaves it alone.
+        std::fs::write(wt.join(".env"), "SECRET=1").unwrap();
+
+        // Tracked edit (should survive).
+        std::fs::write(wt.join("README.md"), "changed").unwrap();
+
+        manager
+            .clean_ignored(&git, &wt, &[".env".to_string()])
+            .await
+            .unwrap();
+
+        // Ignored files removed.
+        assert!(!wt.join("target").exists(), "target/ must be cleaned");
+        assert!(!wt.join("debug.log").exists(), "debug.log must be cleaned");
+
+        // Kept: not-ignored, tracked, and seeded.
+        assert!(
+            wt.join("scratch.txt").exists(),
+            "untracked non-ignored must survive"
+        );
+        assert!(wt.join(".env").exists(), ".env (keep pattern) must survive");
+        assert!(wt.join("README.md").exists(), "tracked edit must survive");
     }
 
     /// Husk state: the worktree directory exists but its `.git` linkfile is

@@ -133,6 +133,10 @@ pub struct GitSettings {
     /// Queue a GitHub auto-merge (`gh pr merge --auto`) so the PR lands once
     /// required checks pass. Requires auto-merge enabled on the repo.
     pub automerge: bool,
+    /// Strip git-ignored files (build output, deps) from a worktree before
+    /// archiving so archives don't balloon. Files matched by the repo's
+    /// `worktree.copy` patterns are preserved. Default `true`.
+    pub prune_ignored_on_archive: bool,
 }
 
 /// The default branch prefix when none is configured.
@@ -145,6 +149,7 @@ impl Default for GitSettings {
             delete_branch_on_archive: true,
             archive_on_merge: false,
             automerge: false,
+            prune_ignored_on_archive: true,
         }
     }
 }
@@ -237,6 +242,7 @@ mod tests {
         assert!(!git.archive_on_merge);
         assert!(!git.automerge);
         assert_eq!(git.branch_prefix, None);
+        assert!(git.prune_ignored_on_archive, "prune must default to true");
     }
 
     #[test]

@@ -402,6 +402,16 @@ pub async fn archive_workstream(state: State<'_, AppState>, id: String) -> CmdRe
         }
     }
 
+    if live && state.settings.get().await.git.prune_ignored_on_archive {
+        // worktree.copy patterns are preserved; read mirrors create_workstream.
+        let keep = hyprlayer_core::repo_settings::read(project_path)
+            .map(|s| s.worktree.copy)
+            .unwrap_or_default();
+        if let Err(e) = state.worktrees.clean_ignored(&git, worktree_path, &keep).await {
+            log::warn!("prune ignored files before archive failed: {e}");
+        }
+    }
+
     let moved = state
         .worktrees
         .archive(&git, project_path, worktree_path, &archive_path)
@@ -587,6 +597,72 @@ pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) 
         .map_err(AppError::from)?;
 
     db_task(state.db.clone(), move |db| db.delete_workstream(&id)).await
+}
+
+/// Report returned by [`cleanup_archived_workstreams`]: rows successfully
+/// deleted vs. rows that failed (logged individually as warnings).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveCleanupReport {
+    pub deleted: u32,
+    pub failed: u32,
+}
+
+/// Bulk permanent-delete of archived workstreams. `before_ms = None` purges
+/// ALL archived rows; `Some(cutoff)` purges those with `archived_at < cutoff`.
+/// Per-row reuse of purge_archive + delete_workstream; best-effort (failures
+/// counted, not fatal), mirroring delete_archived_workstream.
+#[tauri::command]
+#[specta::specta]
+pub async fn cleanup_archived_workstreams(
+    state: State<'_, AppState>,
+    before_ms: Option<f64>,
+) -> CmdResult<ArchiveCleanupReport> {
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+    let delete_branch = state.settings.get().await.git.delete_branch_on_archive;
+
+    let items = db_task(state.db.clone(), |db| db.list_archived_workstreams()).await?;
+
+    let mut deleted = 0u32;
+    let mut failed = 0u32;
+
+    for w in items {
+        // Filter: None → all; Some(cut) → only rows archived before the cutoff.
+        if let Some(cut) = before_ms {
+            if !w.archived_at.map_or(false, |a| a < cut) {
+                continue;
+            }
+        }
+
+        let project_path = PathBuf::from(&w.project_path);
+        let archive_path = archive_dir_for(&project_path, &w.slug);
+        let id = w.id.clone();
+        let branch = w.branch.clone();
+
+        if let Err(e) = state
+            .worktrees
+            .purge_archive(&git, &project_path, &archive_path, &branch, delete_branch)
+            .await
+        {
+            log::warn!("cleanup_archived_workstreams: purge {id} failed: {e}");
+            failed += 1;
+            continue;
+        }
+
+        match db_task(state.db.clone(), move |db| db.delete_workstream(&id)).await {
+            Ok(_) => deleted += 1,
+            Err(e) => {
+                log::warn!("cleanup_archived_workstreams: db delete failed: {e:?}");
+                failed += 1;
+            }
+        }
+    }
+
+    Ok(ArchiveCleanupReport { deleted, failed })
 }
 
 /// Re-create broken thoughts links (status shows `broken` after e.g. a moved
