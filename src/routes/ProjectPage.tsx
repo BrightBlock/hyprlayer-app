@@ -32,7 +32,7 @@ import {
   IMAGE_EXTENSIONS,
   type Attachment,
 } from "../features/session/attachments";
-import { stageLabel, type StageKey } from "../features/session/stages";
+import { nextModeStage, stageLabel, type StageKey } from "../features/session/stages";
 import {
   cycleActiveTab,
   defaultTabState,
@@ -164,6 +164,9 @@ function ProjectCommands(props: {
   onNewWorkstream: () => void;
   onToggleTerminal: () => void;
   onToggleTerminalFull: () => void;
+  /** Cycle the focused agent's stage, or null when there's no un-started agent
+   *  tab in focus (a running agent's stage is fixed; terminals have none). */
+  onCycleStage: (() => void) | null;
 }) {
   const session = useSession(props.sessionId);
   // "Stop turn" only makes sense while the focused pane's session is working /
@@ -178,6 +181,7 @@ function ProjectCommands(props: {
   useCommand("ws.new", props.onNewWorkstream);
   useCommand("terminal.open", props.onToggleTerminal);
   useCommand("terminal.toggleFullscreen", props.onToggleTerminalFull);
+  useCommand("ws.cycleStage", props.onCycleStage);
   useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
   useCommand("session.clear", sid ? () => void killSession(sid) : null);
   return null;
@@ -1011,6 +1015,15 @@ export function ProjectPage() {
         onNewWorkstream={() => setCreateOpen(true)}
         onToggleTerminal={toggleTerminal}
         onToggleTerminalFull={toggleTerminalFullscreen}
+        onCycleStage={
+          // Only when an un-started agent tab holds focus: a live session's stage
+          // is fixed at spawn, and terminal tabs have no stage. The composer
+          // handles Shift+Tab itself while focused (see SessionChat); this is the
+          // global path for when focus sits outside the composer.
+          focusedShell && isAgentShell(focusedShell) && !focusedShell.sessionId
+            ? () => changeShellMode(focusedShell, nextModeStage(focusedShell.mode))
+            : null
+        }
       />
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">

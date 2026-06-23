@@ -5,6 +5,7 @@ import {
   SHIP_PROMPT,
   STAGES,
   composeStagePrompt,
+  nextModeStage,
   stageCommand,
   suggestedDocKind,
 } from "./stages";
@@ -92,5 +93,38 @@ describe("composeStagePrompt", () => {
     expect(composeStagePrompt("commit", "split into two commits")).toBe(
       "/commit split into two commits",
     );
+  });
+});
+
+// Drives the "Cycle Agent Stage" keybinding (default Shift+Tab).
+describe("nextModeStage", () => {
+  it("advances through the selectable stages in order", () => {
+    expect(nextModeStage("general")).toBe("research");
+    expect(nextModeStage("research")).toBe("plan");
+    expect(nextModeStage("plan")).toBe("implement");
+    expect(nextModeStage("implement")).toBe("validate");
+  });
+
+  it("wraps the last selectable stage back to the first", () => {
+    expect(nextModeStage("validate")).toBe("general");
+  });
+
+  it("starts at the first mode for stages outside the cycle", () => {
+    // commit/ship/revise are real stages but excluded from the mode picker; an
+    // unknown string is treated the same — both start the cycle at general.
+    for (const stage of ["commit", "ship", "revise", "bogus"]) {
+      expect(nextModeStage(stage)).toBe("general");
+    }
+  });
+
+  it("visits every selectable stage exactly once before wrapping", () => {
+    const seen = new Set<string>();
+    let cur: string = MODE_STAGES[0].key;
+    for (let n = 0; n < MODE_STAGES.length; n++) {
+      seen.add(cur);
+      cur = nextModeStage(cur);
+    }
+    expect(seen.size).toBe(MODE_STAGES.length);
+    expect(cur).toBe(MODE_STAGES[0].key); // full loop returns to the start
   });
 });

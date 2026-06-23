@@ -6,7 +6,7 @@
  */
 
 import { normalizeChord, type Chord } from "./chord";
-import { COMMANDS, defaultChord, type CommandDef } from "./commands";
+import { COMMANDS, commandById, defaultChord, type CommandDef } from "./commands";
 
 /** command id → chord (custom binding), or null (explicitly unbound). An absent
  *  key means "use the catalog default". Mirrors the backend `keybindings.overrides`. */
@@ -33,6 +33,15 @@ function resolveChord(overrides: Overrides, cmd: CommandDef, isMac: boolean): Ch
  */
 export function effectiveChords(overrides: Overrides, isMac: boolean): Map<string, Chord | null> {
   return new Map(COMMANDS.map((cmd) => [cmd.id, resolveChord(overrides, cmd, isMac)]));
+}
+
+/** The effective chord for a single command id (an override wins, else the
+ *  catalog default), or null if it's unbound or the id is unknown. For callers
+ *  that match one specific chord without building the whole index — e.g. a chord
+ *  the global dispatcher can't see because its editable-target guard swallows it. */
+export function effectiveChord(overrides: Overrides, id: string, isMac: boolean): Chord | null {
+  const cmd = commandById(id);
+  return cmd ? resolveChord(overrides, cmd, isMac) : null;
 }
 
 /**

@@ -156,6 +156,19 @@ export const COMMANDS: CommandDef[] = [
     when: "workstream",
     defaults: { mac: "mod+shift+p", other: "mod+shift+p" },
   },
+  {
+    id: "ws.cycleStage",
+    label: "Cycle Agent Stage",
+    category: "Workspace",
+    when: "workstream",
+    // Steps the focused agent through its pipeline stages (General → Research →
+    // Plan → Implement → Validate, wrapping) before it starts; once the session
+    // is running the stage is fixed at spawn, so it's inert. Bare Shift+Tab has
+    // no primary modifier, so the composer textarea handles it directly (the
+    // global dispatcher's editable-target guard ignores it there) — see
+    // SessionChat's onKeyDown.
+    defaults: { mac: "shift+tab", other: "shift+tab" },
+  },
   // Terminal
   {
     id: "terminal.open",

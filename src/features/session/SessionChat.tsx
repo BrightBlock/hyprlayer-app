@@ -30,7 +30,10 @@ import {
   XIcon,
 } from "../../components/icons";
 import { errorMessage } from "../../lib/ipc";
+import { eventToChord, hasPrimaryModifier } from "../../lib/keybindings/chord";
+import { effectiveChord } from "../../lib/keybindings/resolve";
 import { basename } from "../../lib/path";
+import { IS_MACOS } from "../../lib/platform";
 import { useBootstrap } from "../../lib/queries";
 import type { WorkstreamView } from "../../lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
@@ -38,7 +41,7 @@ import { AttachmentCards } from "./AttachmentCard";
 import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
 import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
 import type { ShellTab } from "../../routes/ProjectPage";
-import { MODE_STAGES, MODE_STYLES, asStageKey, stageLabel, suggestedDocKind, type StageKey } from "./stages";
+import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "./stages";
 import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
 import { PERMISSION_MODES, permissionModeOption } from "./permissions";
 import { docFromTool, formatTokens } from "./toolDisplay";
@@ -792,6 +795,15 @@ export function SessionChat({
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
   const mode = asStageKey(shell.mode);
+  // The configurable "cycle agent stage" chord (default Shift+Tab). Matched in
+  // the composer because a chord with no primary modifier is inert in the global
+  // dispatcher's editable-target guard, so it never fires while the textarea is
+  // focused — onKeyDown picks it up here instead.
+  const cycleStageChord = effectiveChord(
+    useBootstrap().data?.settings.keybindings?.overrides ?? {},
+    "ws.cycleStage",
+    IS_MACOS,
+  );
   // A tab with no explicit pick falls back to the provider defaults configured
   // in Settings → Models → Claude, then to claude's own defaults. `defaultPlanMode`
   // seeds the permission posture to "plan" for fresh tabs.
@@ -1186,6 +1198,21 @@ export function SessionChat({
     // The autocomplete owns arrows / Enter / Tab / Escape while its menu is open
     // (accepting a pick must not also send the message).
     if (autocomplete.handleKeyDown(e)) return;
+    // Cycle the agent stage (default Shift+Tab) while the mode picker is live —
+    // once the session starts the stage is fixed at spawn, so it's a no-op. We
+    // only take a chord WITHOUT a primary modifier: that's exactly the case the
+    // global dispatcher skips in an editable target, so matching it here covers
+    // the composer without double-firing on a remapped ⌘/Ctrl/Alt chord.
+    if (
+      !started &&
+      cycleStageChord &&
+      !hasPrimaryModifier(cycleStageChord) &&
+      eventToChord(e.nativeEvent, IS_MACOS) === cycleStageChord
+    ) {
+      e.preventDefault();
+      onModeChange(nextModeStage(mode));
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!started) void handleStart();

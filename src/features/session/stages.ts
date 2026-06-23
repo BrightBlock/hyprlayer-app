@@ -64,6 +64,18 @@ export function stageLabel(stage: string): string {
   return STAGES.find((s) => s.key === asStageKey(stage))!.label;
 }
 
+/** The next selectable agent stage after `stage`, wrapping around — the order
+ *  follows [`MODE_STAGES`] (general → research → plan → implement → validate →
+ *  general). Drives the "cycle agent stage" keybinding. A stage outside
+ *  [`MODE_STAGES`] (commit/ship/revise, or anything unknown) starts the cycle at
+ *  the first mode. */
+export function nextModeStage(stage: string): StageKey {
+  // Exact match (callers pass a normalized StageKey): a stage outside the cycle
+  // lands at index -1, so (-1 + 1) % n = 0 — the first mode.
+  const i = MODE_STAGES.findIndex((s) => s.key === stage);
+  return MODE_STAGES[(i + 1) % MODE_STAGES.length].key;
+}
+
 /** Which doc kind a pane in this stage should suggest, or null for none. */
 export function suggestedDocKind(stage: string): DocKind | null {
   switch (asStageKey(stage)) {
