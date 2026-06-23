@@ -27,7 +27,11 @@ import {
   useWorktreeGitStatus,
 } from "../lib/queries";
 import { useElementWidth } from "../lib/useElementWidth";
-import { commitWorkstream, shipWorkstream } from "../features/session/sessionStore";
+import {
+  commitWorkstream,
+  shipWorkstream,
+  useWorkstreamShipBusy,
+} from "../features/session/sessionStore";
 import { WorkstreamActivityDot } from "../features/session/WorkstreamActivity";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
@@ -611,7 +615,15 @@ export function Root() {
   // buttons and the keyboard commands (below) share a single source of truth.
   // Gate on the live `activeChangedCount` (the Changes panel's query), NOT the
   // list's `git.dirty` snapshot, so the buttons stay in lockstep with the panel.
-  const canCommit = Boolean(activeWorkstream) && activeChangedCount > 0;
+  //
+  // Hide Commit while Ship is mid-turn (`shipBusy`) or just being kicked off
+  // (`shipping`): Ship commits these same changes itself, so a manual Commit
+  // would be redundant and could race it. Once the ship turn parks, the
+  // turn-done invalidation has dropped the live count to 0, so Commit stays
+  // hidden until *new* uncommitted changes land on the branch.
+  const shipBusy = useWorkstreamShipBusy(activeWorkstreamId ?? null);
+  const canCommit =
+    Boolean(activeWorkstream) && activeChangedCount > 0 && !shipBusy && !shipping;
   const doCommit = () => {
     if (!activeWorkstream) return;
     setCommitting(true);

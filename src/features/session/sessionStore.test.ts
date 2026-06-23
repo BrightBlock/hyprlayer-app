@@ -50,6 +50,7 @@ const {
   cancelQueuedMessage,
   stopSession,
   classifyEntry,
+  workstreamShipBusy,
   useSessionStore,
 } = await import("./sessionStore");
 
@@ -369,5 +370,40 @@ describe("classifyEntry — background activity state", () => {
     const entry = entryOf(id);
     expect(entry.state).toBe("killed");
     expect(classifyEntry(entry)).toBe("idle");
+  });
+});
+
+// ─── workstreamShipBusy — hide Commit while Ship commits ────────────────────
+
+describe("workstreamShipBusy", () => {
+  const shipBusy = (ws: string) => workstreamShipBusy(useSessionStore.getState().sessions, ws);
+
+  it("is true while the ship session is mid-turn, false once that turn parks", async () => {
+    await startSession({ workstreamId: "ws1", stage: "ship", input: "" });
+    expect(shipBusy("ws1")).toBe(true); // "starting" → working
+
+    emit(INIT); // streaming
+    expect(shipBusy("ws1")).toBe(true);
+
+    emit(TURN_DONE); // commit/push/PR done, parks at "review"
+    expect(shipBusy("ws1")).toBe(false);
+  });
+
+  it("stays true while the ship turn is paused on a permission (needs-you)", async () => {
+    await startSession({ workstreamId: "ws1", stage: "ship", input: "" });
+    emit(INIT);
+    emit({ kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    expect(shipBusy("ws1")).toBe(true);
+  });
+
+  it("ignores non-ship sessions and other workstreams' ship sessions", async () => {
+    // A working *general*-stage session must not suppress Commit…
+    await startSession({ workstreamId: "ws1", stage: "general", input: "" });
+    expect(shipBusy("ws1")).toBe(false);
+
+    // …nor a ship session belonging to a different workstream.
+    await startSession({ workstreamId: "ws2", stage: "ship", input: "" });
+    expect(shipBusy("ws1")).toBe(false);
+    expect(shipBusy("ws2")).toBe(true);
   });
 });

@@ -1095,3 +1095,35 @@ export function useWorkstreamActivity(workstreamId: string | null): WorkstreamAc
     return best;
   });
 }
+
+/**
+ * Pure core of {@link useWorkstreamShipBusy} — true when one of this
+ * workstream's Ship sessions is mid-turn ("working", or "needs-you" while paused
+ * on a permission/question during that turn). Exported for testing.
+ */
+export function workstreamShipBusy(
+  sessions: Record<string, SessionEntry>,
+  workstreamId: string | null,
+): boolean {
+  if (!workstreamId) return false;
+  for (const entry of Object.values(sessions)) {
+    if (entry.workstreamId !== workstreamId || entry.stage !== "ship") continue;
+    const activity = classifyEntry(entry);
+    if (activity === "working" || activity === "needs-you") return true;
+  }
+  return false;
+}
+
+/**
+ * True while this workstream's Ship session is mid-turn — actively
+ * committing / pushing / opening the PR. Ship commits the worktree's current
+ * changes itself, so the manual Commit button is redundant (and racy) while this
+ * holds; Root hides it until the ship turn parks. By then the turn-done
+ * invalidation has refreshed the live git-status count to 0, so Commit reappears
+ * only for changes made *after* the ship, never for the ones Ship just
+ * committed. Goes false once the ship turn finishes (parks at "review"/idle) or
+ * the session ends, so a failed ship still leaves Commit available as a fallback.
+ */
+export function useWorkstreamShipBusy(workstreamId: string | null): boolean {
+  return useSessionStore((s) => workstreamShipBusy(s.sessions, workstreamId));
+}
