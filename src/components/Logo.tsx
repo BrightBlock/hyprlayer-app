@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 /**
  * The Hyprlayer brand lockup: a stacked-"layers" glyph next to the wordmark.
  * Pure inline SVG (currentColor-aware where it helps) so it stays crisp at any
@@ -23,8 +25,18 @@ export function HyprlayerLogo({ height = 28 }: { height?: number }) {
   );
 }
 
-/** Just the glyph — three offset layers fanning up, the "hyper layers" idea. */
-export function HyprlayerMark({ size = 28 }: { size?: number }) {
+/**
+ * Just the glyph — three offset layers fanning up, the "hyper layers" idea.
+ *
+ * Pass `animated` while a session is working: each layer dims to half its
+ * resting weight and lights back up in a bottom→top wave, reading as live work
+ * without the urgency of a spinner. Each layer's resting opacity is fed to the
+ * shared `hl-layer-pulse` keyframes via the `--hl-base` custom property, and the
+ * stagger lives in `.hl-layer:nth-child()` delays — both in index.css, which
+ * also pins the layers static under `prefers-reduced-motion`.
+ */
+export function HyprlayerMark({ size = 28, animated = false }: { size?: number; animated?: boolean }) {
+  const cls = animated ? "hl-layer" : undefined;
   return (
     <svg
       aria-hidden="true"
@@ -42,10 +54,28 @@ export function HyprlayerMark({ size = 28 }: { size?: number }) {
       </defs>
       {/* Bottom layer (dimmest), middle, then top — an isometric stack.
           Centered vertically in the 32×32 box (content spans y 6–26) so the
-          glyph's optical center lines up with the wordmark's. */}
-      <path d="M16 26 4 20l12-6 12 6-12 6Z" fill="url(#hl-mark)" opacity="0.35" />
-      <path d="M16 22 4 16l12-6 12 6-12 6Z" fill="url(#hl-mark)" opacity="0.6" />
-      <path d="M16 18 4 12l12-6 12 6-12 6Z" fill="url(#hl-mark)" />
+          glyph's optical center lines up with the wordmark's. When animated, the
+          resting opacity moves to `--hl-base` so the keyframes can drive it. */}
+      <path
+        d="M16 26 4 20l12-6 12 6-12 6Z"
+        fill="url(#hl-mark)"
+        className={cls}
+        opacity={animated ? undefined : 0.35}
+        style={animated ? ({ "--hl-base": 0.35 } as CSSProperties) : undefined}
+      />
+      <path
+        d="M16 22 4 16l12-6 12 6-12 6Z"
+        fill="url(#hl-mark)"
+        className={cls}
+        opacity={animated ? undefined : 0.6}
+        style={animated ? ({ "--hl-base": 0.6 } as CSSProperties) : undefined}
+      />
+      <path
+        d="M16 18 4 12l12-6 12 6-12 6Z"
+        fill="url(#hl-mark)"
+        className={cls}
+        style={animated ? ({ "--hl-base": 1 } as CSSProperties) : undefined}
+      />
     </svg>
   );
 }

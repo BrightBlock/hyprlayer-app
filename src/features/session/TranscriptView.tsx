@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { Button, Spinner } from "../../components/ui";
+import { HyprlayerMark } from "../../components/Logo";
 import {
   ChevronRightIcon,
   ClipboardIcon,
@@ -675,7 +676,10 @@ function ElapsedCounter({ since }: { since: number }) {
     return () => clearInterval(id);
   }, [since]);
   return (
-    <div className="mt-3 font-mono text-xs tabular-nums text-ink-dim">{formatElapsed(now - since)}</div>
+    <div className="mt-3 flex items-center gap-1.5 font-mono text-xs tabular-nums text-ink-dim">
+      <HyprlayerMark size={14} animated />
+      {formatElapsed(now - since)}
+    </div>
   );
 }
 

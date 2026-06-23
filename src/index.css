@@ -294,3 +294,38 @@ a {
     box-shadow: 0 0 1px 0 currentColor;
   }
 }
+
+/* Animated Hyprlayer mark, shown beside the elapsed-time counter while a session
+   is working. Each layer dims to half its resting weight and lights back up; the
+   per-layer stagger (bottom→top) makes the glow travel up the stack — live work
+   without a spinner's spin. Resting opacity comes in via --hl-base (set per path
+   in HyprlayerMark) so one keyframe serves all three layers. */
+@keyframes hl-layer-pulse {
+  0%,
+  100% {
+    opacity: calc(var(--hl-base) * 0.5);
+  }
+  50% {
+    opacity: var(--hl-base);
+  }
+}
+.hl-layer {
+  animation: hl-layer-pulse 1.5s ease-in-out infinite;
+}
+.hl-layer:nth-child(2) {
+  /* bottom layer (first <path>, after <defs>) — leads the wave */
+  animation-delay: 0s;
+}
+.hl-layer:nth-child(3) {
+  animation-delay: 0.16s;
+}
+.hl-layer:nth-child(4) {
+  /* top layer — trails, so the brightest layer lights last */
+  animation-delay: 0.32s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hl-layer {
+    animation: none;
+    opacity: var(--hl-base);
+  }
+}
