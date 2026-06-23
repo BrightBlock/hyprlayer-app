@@ -340,6 +340,14 @@ export function ProjectPage() {
     : null;
   const rightActiveShell =
     rightShells.find((s) => s.id === tabs?.rightActiveId) ?? rightShells[0] ?? null;
+  // The terminal tab (if any) and whether it's currently on screen — shared by
+  // the toggle handler and the button's label so the two can't disagree.
+  const terminalShell = shells.find(isTerminalShell) ?? null;
+  const terminalVisible = terminalShell
+    ? isRightShell(terminalShell)
+      ? rightSplit && rightActiveShell?.id === terminalShell.id
+      : activeShell?.id === terminalShell.id
+    : false;
   // The shell keyboard commands act on: the active tab of whichever pane holds
   // focus, so split-pane users stop/close the agent they're looking at.
   const focusedShell = activePane === "right" ? rightActiveShell : activeShell;
@@ -649,23 +657,14 @@ export function ProjectPage() {
   // PTY (collapses the dock for a right-pane terminal, defocuses the tab for a
   // main-pane one) — only an explicit tab close or the split's X kills the shell,
   // so a reveal re-attaches the same running session. The toolbar terminal button
-  // stays open/focus-only.
+  // shares this handler, so clicking it toggles the same way ⌘` does.
   const toggleTerminal = () => {
-    const term = shells.find(isTerminalShell);
-    if (!term) {
-      addTerminal();
-      return;
-    }
-    const onRight = isRightShell(term);
-    const visible = onRight
-      ? rightSplit && rightActiveShell?.id === term.id
-      : activeShell?.id === term.id;
-    if (!visible) {
-      addTerminal(); // reveal: re-show the dock (right) or focus the tab (main)
+    if (!terminalShell || !terminalVisible) {
+      addTerminal(); // create, or reveal a hidden terminal (re-show dock / focus tab)
       return;
     }
     // Hide without teardown — the PTY keeps running for the next reveal.
-    if (onRight) {
+    if (isRightShell(terminalShell)) {
       setMaximized(null);
       updateTabs((current) => ({ ...current, rightSplit: false, activePane: "main" }));
       // Hand focus to the main agent now back in full view so the user can type.
@@ -673,7 +672,7 @@ export function ProjectPage() {
       return;
     }
     // Main-pane terminal: defocus to another main tab (no-op if it's the only one).
-    const others = mainShells.filter((s) => s.id !== term.id);
+    const others = mainShells.filter((s) => s.id !== terminalShell.id);
     const other = others[others.length - 1];
     if (other) {
       selectShell(other.id);
@@ -1069,9 +1068,10 @@ export function ProjectPage() {
                 {activeView && (
                   <div className="flex shrink-0 items-center gap-1">
                     <IconButton
-                      onClick={addTerminal}
-                      title="Open terminal"
-                      aria-label="Open terminal"
+                      onClick={toggleTerminal}
+                      active={terminalVisible}
+                      title={terminalVisible ? "Close terminal" : "Open terminal"}
+                      aria-label={terminalVisible ? "Close terminal" : "Open terminal"}
                     >
                       <TerminalIcon />
                     </IconButton>
