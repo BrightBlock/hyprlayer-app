@@ -1,6 +1,19 @@
 {
   "versions": [
     {
+      "version": "0.2.5",
+      "date": "2026-06-23",
+      "summary": "Archive cleanup and worktree pruning, Shift+Tab stage cycling, plus terminal, docs, and Commit fixes.",
+      "notes": [
+        "Workstreams now strip git-ignored build output and dependencies when archived (seeded files like .env are kept), and a new Clean up… button on the Archive page bulk permanent-deletes archives — all of them, or only those older than 30/60/90 days.",
+        "Cycle an un-started agent tab through its pipeline stages (General → Research → Plan → Implement → Validate) with a configurable keybinding (default Shift+Tab); the stage locks once the session starts.",
+        "Fixed a blank terminal (blinking cursor, no output) when resuming a session after an app restart, caused by reusing a single-use Tauri channel across the attach-then-open path.",
+        "Agent-created plans, research, and handoffs written outside the thoughts roots (e.g. under ~/.claude/plans/) now open in the read-only preview instead of failing with “not indexed.”",
+        "The manual Commit button now hides while a workstream’s Ship turn is in flight so it can’t race the commit Ship makes itself, and reappears if the ship fails or new uncommitted changes land.",
+        "The in-app update check now runs every 3 hours instead of every 6, so new releases surface sooner."
+      ]
+    },
+    {
       "version": "0.2.4",
       "date": "2026-06-22",
       "summary": "Worktree-copy warning badges, cleaner workstream creation, and self-clearing background tasks.",
