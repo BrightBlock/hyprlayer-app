@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.3.0",
+      "date": "2026-06-23",
+      "summary": "A broad performance pass: smoother live sessions, GPU terminal, snappier sidebar, faster startup.",
+      "notes": [
+        "Live sessions are noticeably smoother — the transcript and markdown only re-render the one message that is actively streaming (settled messages are memoized), and the text reveal is throttled, so a busy turn no longer bogs down the whole conversation.",
+        "The terminal now renders on the GPU via WebGL for fast, crisp output, with the prompt opened at the true grid size so a wrapping line no longer corrupts the redraw; it falls back to the standard renderer automatically if the GPU context is lost. Terminals also open as a login shell, so they pick up your shell profile.",
+        "The sidebar stays responsive with many workstreams: git-status checks now run in parallel rather than one after another, and the active worktree refreshes the moment its files change on disk — no window focus required.",
+        "Lower background overhead — the PR watcher pauses while the window is unfocused (waking on refocus), and database and filesystem work moved off the UI’s async path, so the app stays responsive during heavy turns.",
+        "Faster startup: heavy screens such as the document editor and the terminal/project view now load on demand instead of all up front."
+      ]
+    },
+    {
       "version": "0.2.5",
       "date": "2026-06-23",
       "summary": "Archive cleanup and worktree pruning, Shift+Tab stage cycling, plus terminal, docs, and Commit fixes.",
