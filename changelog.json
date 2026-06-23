@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.3.1",
+      "date": "2026-06-23",
+      "summary": "An animated brand mark beside the working timer, plus terminal-toggle and repo-path placeholder fixes.",
+      "notes": [
+        "A small Hyprlayer mark now animates beside the elapsed-time counter while a session is working — a calm, branded progress cue whose three stacked layers glow in a bottom→top wave. It renders static under reduced-motion.",
+        "The toolbar terminal button now toggles the terminal: clicking it opens or reveals a hidden terminal and hides a visible one, matching the ⌘` shortcut. The button shows active state and its label switches between “Open terminal” and “Close terminal”; hiding keeps the PTY running for a later reveal.",
+        "Fixed misleading placeholder text in the repo path input — it now reads /path/to/your/repo instead of /path/to/your/thoughts."
+      ]
+    },
+    {
       "version": "0.3.0",
       "date": "2026-06-23",
       "summary": "A broad performance pass: smoother live sessions, GPU terminal, snappier sidebar, faster startup.",
