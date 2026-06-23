@@ -21,7 +21,7 @@ import { getVersion } from "@tauri-apps/api/app";
 
 const MANIFEST_BASE = "https://brightblock.ai/hyprlayer/updates";
 const CHANGELOG_URL = `${MANIFEST_BASE}/changelog.json`;
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+const CHECK_INTERVAL_MS = 3 * 60 * 60 * 1000; // 3h
 
 /** One per-version entry in changelog.json, newest first. Authored at release
  *  time by scripts/release.sh and copied to brightblock.ai by CI. */
