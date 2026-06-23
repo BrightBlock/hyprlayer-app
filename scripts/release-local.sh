@@ -160,7 +160,7 @@ ok "Built $DMG_NAME (sha256 $DMG_SHA)"
 # (the key never leaves this Mac). A Windows failure aborts before any push.
 SETUP_NAME=""; WIN_SIG=""
 if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
-  say "Waiting for the Windows build on $WIN_SSH_HOST…"
+  say "Waiting for the Windows build on ${WIN_SSH_HOST}…"
   if ! wait "$WIN_PID"; then
     echo "── Windows build log ─────────────────────────────────────"
     cat "$WIN_LOG"
