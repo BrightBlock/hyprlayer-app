@@ -30,6 +30,18 @@ pub struct PrStatusChanged {
     pub workstream_id: String,
 }
 
+/// A workstream's worktree changed on disk — a file was edited, created, or
+/// deleted outside the app (an external editor, a build, a `git checkout`). The
+/// backend watches the active worktree (`commands::workstreams::watch_worktree`)
+/// and emits this so the Changes panel and git status refresh live, without the
+/// UI waiting for window focus. The frontend refetches that workstream's
+/// worktree-git queries (see `invalidateWorktreeGit`).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeChanged {
+    pub workstream_id: String,
+}
+
 /// Coarse session state change, for board/sidebar badges (the fine-grained
 /// transcript flows over the per-session Channel, not this global event).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]

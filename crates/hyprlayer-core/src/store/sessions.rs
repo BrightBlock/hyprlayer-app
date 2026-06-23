@@ -187,11 +187,13 @@ impl Db {
         payload: &str,
     ) -> Result<()> {
         self.with(|conn| {
-            conn.execute(
+            // Cached statement: the forwarder appends one row per block during a
+            // live turn, so reuse the prepared INSERT instead of re-compiling it.
+            let mut stmt = conn.prepare_cached(
                 "INSERT INTO session_events (session_id, seq, kind, payload, created_at)
                  VALUES (?1,?2,?3,?4,?5)",
-                params![session_id, seq, kind, payload, now_ms()],
             )?;
+            stmt.execute(params![session_id, seq, kind, payload, now_ms()])?;
             Ok(())
         })
     }

@@ -8,17 +8,35 @@
 
 import { diffStrings, type PatchLine } from "../workstreams/diff";
 
+// A tool's `input` is re-parsed many times per render — transcript grouping
+// inspects every tool's input on each pass, and several display helpers parse
+// the same string. Cache by input string (bounded so a long session can't grow
+// it without limit); the same string always parses to the same value.
+const parsedInputCache = new Map<string, Record<string, unknown> | null>();
+const PARSED_CACHE_MAX = 1000;
+
 /** Parse a tool's `input` (compact JSON string) into an object, or null. */
 export function parseToolInput(input: string): Record<string, unknown> | null {
   if (!input) return null;
+  const cached = parsedInputCache.get(input);
+  if (cached !== undefined) return cached;
+  let result: Record<string, unknown> | null;
   try {
     const value: unknown = JSON.parse(input);
-    return value !== null && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
+    result =
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
   } catch {
-    return null;
+    result = null;
   }
+  if (parsedInputCache.size >= PARSED_CACHE_MAX) {
+    // Evict the oldest entry (Map preserves insertion order) to stay bounded.
+    const oldest = parsedInputCache.keys().next().value;
+    if (oldest !== undefined) parsedInputCache.delete(oldest);
+  }
+  parsedInputCache.set(input, result);
+  return result;
 }
 
 function str(value: unknown): string {

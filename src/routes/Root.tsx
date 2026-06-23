@@ -7,6 +7,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -1031,7 +1032,18 @@ export function Root() {
         )}
 
         <main className="min-w-0 flex-1 overflow-y-auto">
-          <Outlet />
+          {/* Boundary for the code-split route chunks (see router.tsx): shows a
+              spinner during the one-time fetch of a heavy route (DocPage's
+              CodeMirror, ProjectPage's xterm), then it's cached. */}
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center">
+                <Spinner size={20} />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 

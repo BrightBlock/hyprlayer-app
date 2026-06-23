@@ -142,6 +142,15 @@ export const commands = {
 	 */
 	worktreeSearchFiles: (id: string, query: string, limit: number) => typedError<string[], AppError>(__TAURI_INVOKE("worktree_search_files", { id, query, limit })),
 	/**
+	 *  Point the live worktree watcher at this workstream's worktree, so external
+	 *  edits push a `WorktreeChanged` event and the Changes panel + git status
+	 *  refresh without waiting for window focus (the way the agent and terminal
+	 *  panes already stream live). Single-slot: switching workstreams replaces the
+	 *  previous watcher; calling it again for the same id is a no-op. The frontend
+	 *  calls this whenever the viewed workstream changes.
+	 */
+	watchWorktree: (workstreamId: string) => typedError<null, AppError>(__TAURI_INVOKE("watch_worktree", { workstreamId })),
+	/**
 	 *  The pull request for a workstream's branch, or `None` when there's no PR yet.
 	 *  Derived live from `gh`. Degrades to `None` (never an error) when gh is
 	 *  missing/unauthenticated or the call fails — the PR bar simply stays hidden,
@@ -344,6 +353,7 @@ export const events = {
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
+	worktreeChanged: makeEvent<WorktreeChanged>("worktree-changed"),
 };
 
 /* Types */
@@ -1179,6 +1189,18 @@ export type WorkstreamView = {
 	 *  untracked files into the new worktree. `null` on every other path.
 	 */
 	seed: SeedReport | null,
+};
+
+/**
+ *  A workstream's worktree changed on disk — a file was edited, created, or
+ *  deleted outside the app (an external editor, a build, a `git checkout`). The
+ *  backend watches the active worktree (`commands::workstreams::watch_worktree`)
+ *  and emits this so the Changes panel and git status refresh live, without the
+ *  UI waiting for window focus. The frontend refetches that workstream's
+ *  worktree-git queries (see `invalidateWorktreeGit`).
+ */
+export type WorktreeChanged = {
+	workstreamId: string,
 };
 
 /**

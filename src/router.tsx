@@ -1,14 +1,28 @@
+import { lazy } from "react";
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 
 import { Root } from "./routes/Root";
-import { Archive } from "./routes/Archive";
 import { Dashboard } from "./routes/Dashboard";
-import { Onboarding } from "./routes/Onboarding";
-import { Settings } from "./routes/Settings";
-import { ProjectPage } from "./routes/ProjectPage";
-import { ProjectDocsPage } from "./routes/ProjectDocsPage";
-import { LibraryPage } from "./routes/LibraryPage";
-import { DocPage } from "./routes/DocPage";
+
+// The shell (Root) and the landing dashboard load eagerly; everything else is
+// code-split so the initial bundle doesn't carry CodeMirror + its language
+// grammars (DocPage / file viewer) or xterm (ProjectPage's terminal). Each
+// chunk loads on first navigation, behind the Suspense boundary in Root.
+const Archive = lazy(() => import("./routes/Archive").then((m) => ({ default: m.Archive })));
+const Onboarding = lazy(() =>
+  import("./routes/Onboarding").then((m) => ({ default: m.Onboarding })),
+);
+const Settings = lazy(() => import("./routes/Settings").then((m) => ({ default: m.Settings })));
+const ProjectPage = lazy(() =>
+  import("./routes/ProjectPage").then((m) => ({ default: m.ProjectPage })),
+);
+const ProjectDocsPage = lazy(() =>
+  import("./routes/ProjectDocsPage").then((m) => ({ default: m.ProjectDocsPage })),
+);
+const LibraryPage = lazy(() =>
+  import("./routes/LibraryPage").then((m) => ({ default: m.LibraryPage })),
+);
+const DocPage = lazy(() => import("./routes/DocPage").then((m) => ({ default: m.DocPage })));
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands, type TerminalEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
@@ -104,8 +105,24 @@ export function TerminalTab({
         }
       }
       if (!id && !disposed) {
-        const g = engine.grid();
-        const opened = await unwrap(commands.terminalOpen(workstreamId, g.cols, g.rows, newChannel()));
+        // Spawn the PTY at the TRUE grid, not xterm's 80×24 default. xterm only
+        // computes its render dimensions a frame after open(), so the mount-time
+        // fit() no-ops and `engine.grid()` is still 80×24 here. Opening the PTY at
+        // that wrong size makes the shell's line editor (zle) initialise its width
+        // at 80; the later resize to the real width doesn't cleanly reflow it, so
+        // a command long enough to wrap corrupts the prompt redraw and the line
+        // blanks mid-screen — only fixed by re-execing the shell (`exec zsh -l`).
+        // Wait two frames for the renderer, then fit, so the shell starts at the
+        // real width. (termic defers its spawn for exactly this "garbage dims"
+        // reason.)
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        if (disposed) return;
+        lastGrid = engine.fit();
+        const opened = await unwrap(
+          commands.terminalOpen(workstreamId, lastGrid.cols, lastGrid.rows, newChannel()),
+        );
         // The tab may have unmounted while `terminalOpen` was in flight. The
         // cleanup can't kill a PTY it never saw an id for, so close it here and
         // skip publishing the id upstream.
@@ -117,14 +134,9 @@ export function TerminalTab({
         idRef.current = id;
         onTerminalId(id);
       }
-      // Reconcile the PTY size now that `id` is live. The mount-time fit() no-ops
-      // while xterm's renderer warms up, so the PTY opens at xterm's default
-      // 80×24; the ResizeObserver below corrects it — but on a fresh open its
-      // first fit can fire *before* this async open sets `id`, and its `id`-gated
-      // resize is then dropped, stranding the PTY at 80×24 while the renderer
-      // shows the real grid. That mismatch reads as a hung terminal until a
-      // close/re-attach. Pushing one resize here closes the race for the open
-      // path too (a no-op on the backend when the size already matches).
+      // Reconcile once more now that `id` is live, covering the attach path and
+      // any layout that settled during the await above. A no-op on the backend
+      // when the size already matches.
       if (id && !disposed) {
         lastGrid = engine.fit();
         void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
@@ -155,8 +167,30 @@ export function TerminalTab({
     const ro = new ResizeObserver(scheduleFit);
     ro.observe(host);
 
+    // xterm paints on requestAnimationFrame, which a WKWebView throttles (and
+    // can drop) while the window is unfocused — so output or a scroll that lands
+    // while you're away can leave the terminal stale, and it doesn't self-heal on
+    // refocus (the user's workaround was to resize the pane, which forces a
+    // repaint via the grid change). On focus-regain, refit (in case the layout
+    // drifted) and force a repaint so the terminal is correct the instant you
+    // look back, with no resize needed.
+    let unlistenFocus: (() => void) | undefined;
+    let focusCancelled = false;
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (!focused || disposed) return;
+        scheduleFit();
+        engine.refresh();
+      })
+      .then((fn) => {
+        if (focusCancelled) fn();
+        else unlistenFocus = fn;
+      });
+
     return () => {
       disposed = true;
+      focusCancelled = true;
+      unlistenFocus?.();
       if (raf) cancelAnimationFrame(raf);
       unsubInput();
       ro.disconnect();

@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use hyprlayer_core::error::Result;
@@ -44,8 +45,35 @@ pub fn spawn(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut last: HashMap<String, Option<PrStatus>> = HashMap::new();
         loop {
+            // Read focus + the wake handle without holding the State guard across
+            // an await.
+            let (focused, wake) = {
+                let state = app.state::<AppState>();
+                (
+                    state.focused.load(Ordering::Relaxed),
+                    state.focus_changed.clone(),
+                )
+            };
+
+            // Unfocused: skip the poll entirely (no background `gh` storm). Wake
+            // immediately on refocus for a catch-up, or fall back to a SLOW tick.
+            // The frontend's focus-refetch already refreshes the visible PR, so a
+            // small resume delay on the push side is invisible.
+            if !focused {
+                tokio::select! {
+                    _ = wake.notified() => {}
+                    _ = tokio::time::sleep(SLOW) => {}
+                }
+                continue;
+            }
+
             let delay = tick(&app, &mut last).await;
-            tokio::time::sleep(delay).await;
+            // Wake early if focus flips (e.g. a blur mid-FAST-sleep) so we
+            // re-evaluate instead of finishing the sleep in the background.
+            tokio::select! {
+                _ = tokio::time::sleep(delay) => {}
+                _ = wake.notified() => {}
+            }
         }
     });
 }

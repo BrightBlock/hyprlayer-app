@@ -1220,23 +1220,32 @@ export function SessionChat({
     }
   };
 
-  const permission: PermissionHandlers = {
-    onAllow: (rid) => sid && void respondPermission(sid, rid, true, null),
-    onAllowForSession: (rid, tool) => sid && void allowForSession(sid, rid, tool),
-    onDeny: (rid) => sid && void respondPermission(sid, rid, false, null),
-  };
+  // Stable across renders (deps are the session id + the draft setter) so the
+  // memoized transcript rows that receive these — UserMessage, PermissionCard —
+  // aren't forced to re-render on every streamed token.
+  const permission: PermissionHandlers = useMemo(
+    () => ({
+      onAllow: (rid) => sid && void respondPermission(sid, rid, true, null),
+      onAllowForSession: (rid, tool) => sid && void allowForSession(sid, rid, tool),
+      onDeny: (rid) => sid && void respondPermission(sid, rid, false, null),
+    }),
+    [sid],
+  );
 
-  const prompt: PromptHandlers = {
-    onRewind: (itemId, text) => {
-      if (!sid) return;
-      // Land the user back on the prompt they're rewinding to (Claude-Desktop
-      // behaviour): the composer is repopulated with the original text so they
-      // can edit and re-send, while the backend truncates the conversation in
-      // parallel.
-      onDraftChange(text);
-      void rewindToMessage(sid, itemId);
-    },
-  };
+  const prompt: PromptHandlers = useMemo(
+    () => ({
+      onRewind: (itemId, text) => {
+        if (!sid) return;
+        // Land the user back on the prompt they're rewinding to (Claude-Desktop
+        // behaviour): the composer is repopulated with the original text so they
+        // can edit and re-send, while the backend truncates the conversation in
+        // parallel.
+        onDraftChange(text);
+        void rewindToMessage(sid, itemId);
+      },
+    }),
+    [sid, onDraftChange],
+  );
 
   return (
     <div ref={dropRef} className="relative flex min-h-0 flex-1 flex-col">

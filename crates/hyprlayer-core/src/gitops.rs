@@ -150,23 +150,33 @@ pub fn worktree_diff_line_counts(repo: &git2::Repository) -> (u32, u32) {
         return (0, 0);
     };
     let (mut additions, mut deletions) = (0u32, 0u32);
-    for (idx, delta) in diff.deltas().enumerate() {
-        let path = delta
-            .new_file()
-            .path()
-            .or_else(|| delta.old_file().path())
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if crate::worktree::is_thoughts_path(&path) || is_hyprlayer_internal(&path) {
-            continue;
-        }
-        if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, idx) {
-            if let Ok((_context, adds, dels)) = patch.line_stats() {
-                additions += adds as u32;
-                deletions += dels as u32;
+    // Stream the diff line-by-line instead of materializing a `Patch` (and its
+    // patch-text buffer) per file: we only need the +/- totals. The `thoughts/`
+    // + `.hyprlayer/` filter is applied in the line callback with the exact same
+    // predicates `worktree_diff` uses, so the sidebar counter can't drift from
+    // the panel.
+    let _ = diff.foreach(
+        &mut |_delta, _progress| true,
+        None,
+        None,
+        Some(&mut |delta, _hunk, line| {
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if crate::worktree::is_thoughts_path(&path) || is_hyprlayer_internal(&path) {
+                return true;
             }
-        }
-    }
+            match line.origin() {
+                '+' => additions += 1,
+                '-' => deletions += 1,
+                _ => {}
+            }
+            true
+        }),
+    );
     (additions, deletions)
 }
 

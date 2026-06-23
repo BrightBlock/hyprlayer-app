@@ -1,5 +1,6 @@
 import { events } from "./bindings";
 import { queryClient } from "./queryClient";
+import { invalidateWorktreeGit } from "./queries";
 
 /**
  * Bridge backend push events into query invalidation. Call once at startup;
@@ -26,6 +27,12 @@ export function attachEventListeners(): () => void {
     events.prStatusChanged.listen((event) => {
       const { workstreamId } = event.payload;
       void queryClient.invalidateQueries({ queryKey: ["workstream", workstreamId, "pr"] });
+    }),
+    // The active workstream's worktree changed on disk (an external edit, a
+    // build, a git checkout). The backend watches it and pushed this, so refresh
+    // that workstream's git status + Changes panel live — no window focus needed.
+    events.worktreeChanged.listen((event) => {
+      invalidateWorktreeGit(event.payload.workstreamId);
     }),
     // A session started, changed state, or ended. Invalidate the active-sessions
     // list so the search palette's Agents section tracks running agents in real time.

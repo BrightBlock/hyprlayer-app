@@ -52,7 +52,10 @@ pub async fn terminal_open(
 
     let session = PtySession::spawn(SpawnTerminal {
         shell: default_shell(),
-        args: vec![],
+        // Spawn as a login shell, the way Terminal.app / iTerm do — it sources the
+        // user's full profile chain (`~/.zprofile`/`~/.zlogin` as well as
+        // `~/.zshrc`), so the terminal matches the shell the user gets elsewhere.
+        args: vec!["-l".to_string()],
         cwd: PathBuf::from(&ws.worktree_path),
         cols,
         rows,

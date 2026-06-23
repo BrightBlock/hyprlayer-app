@@ -100,6 +100,55 @@ pub fn watch_roots(
     })
 }
 
+/// Watch a directory tree and invoke `on_change` (on the watcher thread) once
+/// per debounced batch that touches a non-noise path. Churn under VCS/build
+/// dirs (`.git`, `node_modules`, `target`, …) is ignored, so editing source —
+/// not a dev server rewriting caches — is what fires it. Used to push live
+/// git-status refreshes for a workstream's worktree, so the Changes panel
+/// updates without waiting for window focus. Dropping the handle stops watching.
+pub fn watch_path(path: &Path, on_change: Box<dyn Fn() + Send + Sync>) -> Result<WatchHandle> {
+    let mut debouncer = new_debouncer(
+        Duration::from_millis(300),
+        None,
+        move |result: DebounceEventResult| {
+            if let Ok(events) = result {
+                let relevant = events
+                    .iter()
+                    .flat_map(|e| e.paths.iter())
+                    .any(|p| !is_noise_path(p));
+                if relevant {
+                    on_change();
+                }
+            }
+        },
+    )
+    .map_err(notify_to_core)?;
+    debouncer
+        .watch(path, RecursiveMode::Recursive)
+        .map_err(notify_to_core)?;
+    Ok(WatchHandle {
+        _debouncer: debouncer,
+    })
+}
+
+/// Paths whose churn shouldn't trigger a git-status refresh: VCS internals and
+/// build/dependency output that change constantly without affecting the diff.
+fn is_noise_path(path: &Path) -> bool {
+    const NOISE: &[&str] = &[
+        ".git",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        ".next",
+        ".turbo",
+        ".cache",
+    ];
+    path.components().any(|c| {
+        matches!(c, std::path::Component::Normal(os) if NOISE.iter().any(|n| os == *n))
+    })
+}
+
 fn handle_batch(
     index: &ThoughtsIndex,
     watched: &[WatchedRoot],

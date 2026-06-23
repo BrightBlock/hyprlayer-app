@@ -20,6 +20,10 @@ use tokio::sync::broadcast;
 
 /// Max scrollback bytes retained for re-attach replay (drops oldest first).
 const SCROLLBACK_CAP: usize = 256 * 1024;
+/// Upper bound on a single coalesced IPC event. Only a genuine flood (a build,
+/// `cat` of a big file) — where reads queue up faster than we drain them — gets
+/// batched this far; interactive output flushes immediately (see the coalescer).
+const FLUSH_BYTES: usize = 64 * 1024;
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
@@ -114,32 +118,96 @@ impl PtySession {
         // of the exit event (the property the Unix tests rely on).
         let (code_tx, code_rx) = std::sync::mpsc::channel::<Option<i32>>();
 
-        // portable-pty's reader is a blocking io::Read; give it its own thread.
+        // Raw reads flow reader-thread → coalescer-thread over this channel. The
+        // reader can only do blocking `read`s (it can't also wait on a timer), so
+        // a second thread does the time-based batching.
+        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+
+        // Reader: portable-pty's reader is a blocking io::Read, so it gets its own
+        // thread. It just hands each read to the coalescer and exits (dropping
+        // `chunk_tx`, which the coalescer observes as EOF) once the PTY closes.
         let mut reader = reader;
-        let reader_tx = tx.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        let chunk = &buf[..n];
-                        {
-                            let mut sb = scrollback.lock().unwrap();
-                            for &b in chunk {
-                                if sb.len() == SCROLLBACK_CAP {
-                                    sb.pop_front();
-                                }
-                                sb.push_back(b);
-                            }
-                        }
-                        // send() errs only if there are no receivers — fine.
-                        let _ = reader_tx.send(TerminalEvent::Output {
-                            data: B64.encode(chunk),
-                        });
-                    }
+                    // If the coalescer is gone there's no one to stream to; stop.
+                    Ok(n) if chunk_tx.send(buf[..n].to_vec()).is_err() => break,
+                    Ok(_) => {}
                 }
             }
+        });
+
+        // Coalescer: flush each read straight through, but fold in any reads that
+        // are ALREADY queued (a flood) up to `FLUSH_BYTES`, so a chatty program
+        // still collapses into a handful of IPC events without ever delaying the
+        // interactive path. It appends each batch to the scrollback ring and
+        // broadcasts it under the same lock, so a concurrent
+        // `subscribe_with_scrollback` sees every batch in exactly one of
+        // {snapshot, live stream} — never both (duplicated) nor neither (lost).
+        // It blocks on `recv()` when idle, so an open-but-quiet terminal costs no
+        // wakeups.
+        let reader_tx = tx.clone();
+        std::thread::spawn(move || {
+            let mut pending: Vec<u8> = Vec::with_capacity(FLUSH_BYTES);
+            let flush = |pending: &mut Vec<u8>| {
+                if pending.is_empty() {
+                    return;
+                }
+                let encoded = B64.encode(&pending);
+                let mut sb = scrollback.lock().unwrap();
+                sb.extend(pending.iter().copied());
+                let overflow = sb.len().saturating_sub(SCROLLBACK_CAP);
+                if overflow > 0 {
+                    sb.drain(0..overflow);
+                }
+                // send() errs only if there are no receivers — fine. Held under
+                // the scrollback lock so it can't interleave with a snapshot.
+                let _ = reader_tx.send(TerminalEvent::Output { data: encoded });
+                drop(sb);
+                pending.clear();
+            };
+            loop {
+                // Block for the next read; a closed channel means the reader is
+                // done, so drop out and emit the exit below.
+                let first = match chunk_rx.recv() {
+                    Ok(c) => c,
+                    Err(_) => break,
+                };
+                pending.extend_from_slice(&first);
+                // Drain whatever ELSE is already queued (a genuine flood, where
+                // reads pile up faster than we encode+broadcast) up to the byte
+                // cap — but DON'T wait for more. Interactive output (a keystroke
+                // echo, a prompt redraw on wrap) has nothing else queued, so it
+                // flushes on the same tick it arrives.
+                //
+                // This eager flush matters for rendering, not just latency: a
+                // WKWebView only re-composites the xterm canvas when it paints,
+                // and xterm paints once per write. Coalescing a wrap's redraw into
+                // a single delayed write produced a single paint that WKWebView
+                // would leave un-presented until the next "real" event (Enter,
+                // resize) — the terminal went black mid-line. Writing each read
+                // through keeps the paint cadence high enough that every update is
+                // presented, matching a no-coalescing reference renderer.
+                let mut disconnected = false;
+                while pending.len() < FLUSH_BYTES {
+                    match chunk_rx.try_recv() {
+                        Ok(c) => pending.extend_from_slice(&c),
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            disconnected = true;
+                            break;
+                        }
+                    }
+                }
+                flush(&mut pending);
+                if disconnected {
+                    break;
+                }
+            }
+            // EOF: the tail is already flushed above; emit the exit once the
+            // waiter has the code, keeping final output ahead of the exit event.
             let code = code_rx.recv().unwrap_or(None);
             let _ = reader_tx.send(TerminalEvent::Exited { code });
         });
@@ -167,10 +235,11 @@ impl PtySession {
 
     /// Atomically snapshot the retained scrollback and subscribe to live output,
     /// returning both. Taken together under the scrollback lock — which the
-    /// reader thread also holds while appending before each `send` — this closes
-    /// the gap where a chunk emitted between a separate snapshot and subscribe
-    /// would be in neither (lost) or both (duplicated). The snapshot is the
-    /// base64 scrollback for replay; live output follows on the receiver.
+    /// coalescer thread also holds while appending each output batch to the ring
+    /// and broadcasting it — this closes the gap where a batch emitted between a
+    /// separate snapshot and subscribe would be in neither (lost) or both
+    /// (duplicated). The snapshot is the base64 scrollback for replay; live
+    /// output follows on the receiver.
     pub fn subscribe_with_scrollback(&self) -> (broadcast::Receiver<TerminalEvent>, String) {
         let sb = self.scrollback.lock().unwrap();
         let rx = self.tx.subscribe();

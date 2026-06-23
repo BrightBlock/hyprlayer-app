@@ -116,6 +116,26 @@ function setEntry(sessionId: string, next: SessionEntry): void {
 }
 
 /**
+ * Drop the in-memory transcripts for a workstream's sessions — called when the
+ * workstream is archived. The store otherwise only ever grows: every session's
+ * full transcript (messages, thinking, tool I/O) stays resident for the app's
+ * lifetime. The backend has already killed the live drivers, and the SQLite
+ * event log remains the source of truth if the workstream is restored, so
+ * nothing is lost by releasing them here.
+ */
+export function removeSessionsForWorkstream(workstreamId: string): void {
+  const { sessions } = useSessionStore.getState();
+  const ids = Object.keys(sessions).filter((id) => sessions[id]?.workstreamId === workstreamId);
+  if (ids.length === 0) return;
+  for (const id of ids) channels.delete(id);
+  useSessionStore.setState((s) => {
+    const next = { ...s.sessions };
+    for (const id of ids) delete next[id];
+    return { sessions: next };
+  });
+}
+
+/**
  * Epoch-ms start timestamp for each live background task (by `toolUseId`).
  * Stamped on first appearance, preserved across subsequent `setEntry` calls,
  * and naturally dropped when a task ends (it won't be in the live set anymore).

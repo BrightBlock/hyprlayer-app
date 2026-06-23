@@ -299,6 +299,15 @@ fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> St
         })
 }
 
+/// Recursively delete a directory tree on the blocking pool. A repo clone can
+/// hold `node_modules`/`.git`/`target`, so a synchronous `remove_dir_all` would
+/// stall a tokio worker for seconds; this keeps it off the async runtime.
+/// Best-effort — the caller decides what (if anything) a failure means.
+async fn remove_dir_all_bg(path: &Path) {
+    let path = path.to_path_buf();
+    let _ = blocking("remove_dir", move || std::fs::remove_dir_all(path)).await;
+}
+
 /// Provision thoughts inside `repo`, register it as a project, and surface it.
 ///
 /// `owned` says whether the app created `repo` (a fresh clone) or merely
@@ -320,7 +329,7 @@ async fn register_repo(
         .await
     {
         if owned {
-            let _ = std::fs::remove_dir_all(repo);
+            remove_dir_all_bg(repo).await;
         }
         return Err(AppError::from(e));
     }
@@ -335,7 +344,7 @@ async fn register_repo(
     };
     if let Err(e) = db_task(state.db.clone(), move |db| db.insert_project(row)).await {
         if owned {
-            let _ = std::fs::remove_dir_all(repo);
+            remove_dir_all_bg(repo).await;
         } else {
             let _ = HyprCli::new(&state.binaries).thoughts_uninit(repo).await;
         }
@@ -511,7 +520,7 @@ pub async fn remove_project(
     // No active workstreams (guarded above), so deleting the clone or the
     // in-place import is safe when the user opted in.
     if delete_files && repo.is_dir() {
-        let _ = std::fs::remove_dir_all(&repo);
+        remove_dir_all_bg(&repo).await;
     }
 
     state.config.invalidate().await;

@@ -41,6 +41,13 @@ impl Db {
 
     fn init(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // Under WAL, NORMAL is the standard crash-safe setting: it drops the
+        // per-commit fsync (only a power-loss window remains, not a process-crash
+        // one), which matters because the session forwarder appends an event row
+        // per block during a live turn. A short busy_timeout lets a reader wait
+        // out a writer instead of erroring under the single shared connection.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "busy_timeout", 5_000)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         migrations::migrate(&conn)?;
         Ok(Self {

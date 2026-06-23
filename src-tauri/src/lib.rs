@@ -67,6 +67,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::worktree_read_file,
             commands::workstreams::list_slash_commands,
             commands::workstreams::worktree_search_files,
+            commands::workstreams::watch_worktree,
             commands::workstreams::workstream_pr_status,
             commands::workstreams::merge_workstream_pr,
             commands::sessions::start_stage_session,
@@ -107,6 +108,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::BinariesChanged,
             events::ThoughtsIndexUpdated,
             events::PrStatusChanged,
+            events::WorktreeChanged,
             events::SessionLifecycle
         ])
 }
@@ -205,6 +207,22 @@ pub fn run() {
                 log::warn!("could not register worktree root with the asset scope: {e}");
             }
 
+            // Track OS window focus so background pollers can stand down while the
+            // app is in the background. Seeded `true` (the window comes up focused);
+            // the window event below keeps it current.
+            let focused = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let focus_changed = Arc::new(tokio::sync::Notify::new());
+            if let Some(window) = app.get_webview_window("main") {
+                let focused = focused.clone();
+                let focus_changed = focus_changed.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(is_focused) = event {
+                        focused.store(*is_focused, std::sync::atomic::Ordering::Relaxed);
+                        focus_changed.notify_waiters();
+                    }
+                });
+            }
+
             app.manage(AppState {
                 config: config.clone(),
                 binaries: binaries.clone(),
@@ -215,8 +233,11 @@ pub fn run() {
                 )),
                 index: Arc::new(hyprlayer_core::index::ThoughtsIndex::new()),
                 index_watch: tokio::sync::Mutex::new(None),
+                worktree_watch: tokio::sync::Mutex::new(None),
                 sessions: Arc::new(session_registry::SessionRegistry::new()),
                 terminals: Arc::new(terminal_registry::TerminalRegistry::new()),
+                focused,
+                focus_changed,
             });
 
             // 1. Fold the login-shell PATH in (GUI apps start with launchd's

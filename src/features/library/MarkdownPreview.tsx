@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Element } from "hast";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -89,12 +90,18 @@ const components: Components = {
   td: ({ children }) => <td className="border border-edge px-2 py-1 align-top">{children}</td>,
 };
 
-export function MarkdownPreview({ body }: { body: string }) {
+// Hoisted so ReactMarkdown sees a stable plugins array across renders.
+const remarkPlugins = [remarkGfm];
+
+// Memoized: react-markdown re-parses the whole body (mdast → hast) on every
+// render, so a transcript full of settled messages must not re-parse them when
+// an unrelated streamed token arrives. With stable `body` this is a no-op.
+export const MarkdownPreview = memo(function MarkdownPreview({ body }: { body: string }) {
   return (
     <div className="selectable text-sm text-ink">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
         {body}
       </ReactMarkdown>
     </div>
   );
-}
+});

@@ -632,7 +632,17 @@ fn tail_live(driver: Arc<ClaudeDriver>, on_event: Channel<SessionEvent>) {
             match rx.recv().await {
                 Ok(event) => {
                     let terminal = matches!(event, SessionEvent::Exited { .. });
-                    if on_event.send(event).is_err() || terminal {
+                    // `UserMessage` is persist-only — the live UI already showed it
+                    // optimistically when the user sent it, and the replayed log
+                    // carries the earlier ones. Forwarding it here (on re-attach to
+                    // a still-live session) would double-stamp the next turn, so we
+                    // skip it exactly as the owning forwarder does.
+                    if !matches!(event, SessionEvent::UserMessage { .. })
+                        && on_event.send(event).is_err()
+                    {
+                        break;
+                    }
+                    if terminal {
                         break;
                     }
                 }
@@ -656,6 +666,25 @@ struct ForwarderCtx {
     /// First persisted-event sequence number — 0 for a fresh session, or the
     /// existing event count when resuming (so the log appends, not collides).
     start_seq: i64,
+}
+
+/// What one session event writes to the `sessions` row, captured as owned data
+/// so the write can run on the blocking pool instead of inline on the async
+/// runtime. Mirrors the per-variant updates the forwarder used to do directly.
+enum RowWrite {
+    None,
+    Init {
+        claude_session_id: String,
+        model: Option<String>,
+    },
+    State(&'static str),
+    TurnDone {
+        cost: Option<f64>,
+    },
+    Exited {
+        state: &'static str,
+        summary: Option<String>,
+    },
 }
 
 fn spawn_forwarder(ctx: ForwarderCtx) {
@@ -683,37 +712,47 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
                 Err(broadcast::error::RecvError::Closed) => break,
             };
 
-            // Persist for replay — usage pings included (tiny), so the context
-            // meter survives a restart even if the turn was interrupted before
-            // its result event ever landed.
-            if let Ok(payload) = serde_json::to_string(&event) {
-                let _ = db.append_session_event(&session_id, seq, event.kind(), &payload);
-                seq += 1;
-            }
+            // `UserMessage` is persist-only: the UI already showed it optimistically
+            // when the user sent it, so forwarding it would double-stamp the turn.
+            let is_user_message = matches!(event, SessionEvent::UserMessage { .. });
 
-            // Advance the session row + emit coarse lifecycle.
-            let mut terminal = false;
-            match &event {
+            // `PartialText` is the streaming live-typing delta; it is ephemeral —
+            // the coalesced `AssistantText` block is the durable record — so it is
+            // never persisted, only forwarded. Skipping it removes a per-token
+            // write storm. Usage pings stay persisted (tiny) so the context meter
+            // survives a restart even when a turn was interrupted before its
+            // result event landed.
+            let payload = (!matches!(event, SessionEvent::PartialText { .. }))
+                .then(|| serde_json::to_string(&event).ok())
+                .flatten();
+            let kind = event.kind();
+
+            // Extract the session-row update (owned) and the coarse lifecycle to
+            // emit, so the actual writes can run on the blocking pool.
+            let (row_write, lifecycle, terminal) = match &event {
                 SessionEvent::Init {
                     claude_session_id,
                     model,
-                } => {
-                    let _ = db.mark_session_init(&session_id, claude_session_id, model.as_deref());
-                    emit_lifecycle(&app, &session_id, &workstream_id, "running");
-                }
-                SessionEvent::PermissionAsk { .. } => {
-                    let _ = db.set_session_state(&session_id, "awaiting_permission");
-                    emit_lifecycle(&app, &session_id, &workstream_id, "awaiting_permission");
-                }
-                SessionEvent::QuestionAsk { .. } => {
-                    let _ = db.set_session_state(&session_id, "awaiting_question");
-                    emit_lifecycle(&app, &session_id, &workstream_id, "awaiting_question");
-                }
+                } => (
+                    RowWrite::Init {
+                        claude_session_id: claude_session_id.clone(),
+                        model: model.clone(),
+                    },
+                    Some("running"),
+                    false,
+                ),
+                SessionEvent::PermissionAsk { .. } => (
+                    RowWrite::State("awaiting_permission"),
+                    Some("awaiting_permission"),
+                    false,
+                ),
+                SessionEvent::QuestionAsk { .. } => (
+                    RowWrite::State("awaiting_question"),
+                    Some("awaiting_question"),
+                    false,
+                ),
                 SessionEvent::TurnDone { cost_usd, .. } => {
-                    if let Some(cost) = cost_usd {
-                        let _ = db.set_session_cost(&session_id, *cost);
-                    }
-                    let _ = db.set_session_state(&session_id, "running");
+                    (RowWrite::TurnDone { cost: *cost_usd }, None, false)
                 }
                 SessionEvent::Exited {
                     outcome,
@@ -721,21 +760,73 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
                     ..
                 } => {
                     let state = outcome.state();
-                    let summary = (!stderr_tail.is_empty()).then_some(stderr_tail.as_str());
-                    let _ = db.finish_session(&session_id, state, summary);
-                    let _ = db.clear_orphans_for(&session_id);
-                    registry.remove(&session_id).await;
-                    emit_lifecycle(&app, &session_id, &workstream_id, state);
-                    terminal = true;
+                    let summary = (!stderr_tail.is_empty()).then(|| stderr_tail.clone());
+                    (RowWrite::Exited { state, summary }, Some(state), true)
                 }
-                _ => {}
+                _ => (RowWrite::None, None, false),
+            };
+
+            // Forward to the live UI first, so streaming latency never waits on a
+            // DB write. (PartialText takes this path and then skips the DB hop.)
+            if !is_user_message {
+                let _ = channel.send(event);
             }
 
-            // `UserMessage` is persist-only: the UI already showed it optimistically
-            // when the user sent it, so forwarding it would double-stamp the turn.
-            // Every other event drives the live transcript.
-            if !matches!(event, SessionEvent::UserMessage { .. }) {
-                let _ = channel.send(event);
+            // Persist + advance the session row off the async runtime — the core
+            // store is blocking and the rest of the app already wraps it in
+            // spawn_blocking; the forwarder was the one hot path still writing
+            // inline. Awaited (not fire-and-forget) so appends keep their seq
+            // order. Skipped entirely when the event neither persists nor mutates
+            // the row (e.g. PartialText), to avoid a pool round-trip per token.
+            let has_db_work = payload.is_some() || !matches!(row_write, RowWrite::None);
+            if has_db_work {
+                let cur_seq = seq;
+                let db = db.clone();
+                let sid = session_id.clone();
+                let persisted = tauri::async_runtime::spawn_blocking(move || {
+                    let persisted = payload.is_some();
+                    if let Some(payload) = payload {
+                        let _ = db.append_session_event(&sid, cur_seq, kind, &payload);
+                    }
+                    match row_write {
+                        RowWrite::Init {
+                            claude_session_id,
+                            model,
+                        } => {
+                            let _ =
+                                db.mark_session_init(&sid, &claude_session_id, model.as_deref());
+                        }
+                        RowWrite::State(state) => {
+                            let _ = db.set_session_state(&sid, state);
+                        }
+                        RowWrite::TurnDone { cost } => {
+                            if let Some(cost) = cost {
+                                let _ = db.set_session_cost(&sid, cost);
+                            }
+                            let _ = db.set_session_state(&sid, "running");
+                        }
+                        RowWrite::Exited { state, summary } => {
+                            let _ = db.finish_session(&sid, state, summary.as_deref());
+                            let _ = db.clear_orphans_for(&sid);
+                        }
+                        RowWrite::None => {}
+                    }
+                    persisted
+                })
+                .await
+                .unwrap_or(false);
+                if persisted {
+                    seq += 1;
+                }
+            }
+
+            // Drop the live driver from the registry on exit, then emit the coarse
+            // lifecycle transition for the sidebar/toasts.
+            if terminal {
+                registry.remove(&session_id).await;
+            }
+            if let Some(state) = lifecycle {
+                emit_lifecycle(&app, &session_id, &workstream_id, state);
             }
             if terminal {
                 break;

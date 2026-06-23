@@ -15,6 +15,7 @@ import {
 } from "./bindings";
 import { unwrap } from "./ipc";
 import { queryClient } from "./queryClient";
+import { removeSessionsForWorkstream } from "../features/session/sessionStore";
 
 export function useBootstrap() {
   return useQuery({
@@ -248,6 +249,11 @@ export function useAllWorkstreams(enabled = true) {
     queryKey: ["workstreams", "@all"],
     queryFn: () => unwrap(commands.listAllWorkstreams()),
     enabled,
+    // Each fetch fans a git2 status sweep across every active workstream, so
+    // don't re-run it on every app-switch: mutations and session events already
+    // invalidate it (see invalidateWorkstream / invalidateWorktreeGit), and a
+    // 30s window still picks up out-of-band changes on the next focus.
+    staleTime: 30_000,
   });
 }
 
@@ -326,7 +332,12 @@ export function useSetWorkstreamStage(projectPath: string) {
 export function useArchiveWorkstream() {
   return useMutation({
     mutationFn: ({ id }: { id: string }) => unwrap(commands.archiveWorkstream(id)),
-    onSuccess: (_data, { id }) => invalidateWorkstream(id),
+    onSuccess: (_data, { id }) => {
+      // Archiving kills the workstream's live sessions on the backend; release
+      // their in-memory transcripts here so they don't linger for the session.
+      removeSessionsForWorkstream(id);
+      invalidateWorkstream(id);
+    },
   });
 }
 

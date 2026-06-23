@@ -269,6 +269,15 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, workstreams.isSuccess, workstreams.isFetching]);
 
+  // Point the backend's live worktree watcher at the viewed workstream, so
+  // external edits (an editor, a build, a git checkout) push a refresh of the
+  // Changes panel + git status without waiting for window focus — the way the
+  // agent and terminal panes already stream live.
+  useEffect(() => {
+    if (!wsId) return;
+    void commands.watchWorktree(wsId);
+  }, [wsId]);
+
   // Landing on a workstream — switching focus to it, or opening it fresh — drops
   // the cursor straight into its composer so the user can type immediately, no
   // click needed. We target the active tab of the focused pane when it's an

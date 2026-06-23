@@ -138,7 +138,7 @@ function UserMessageToolbar({
   );
 }
 
-function UserMessage({
+const UserMessage = memo(function UserMessage({
   id,
   text,
   stage,
@@ -174,7 +174,7 @@ function UserMessage({
       />
     </div>
   );
-}
+});
 
 /**
  * Smoothly reveal text as it streams in. claude sends `partialText` in bursts;
@@ -192,12 +192,20 @@ function useSmoothText(text: string, streaming: boolean): string {
       setRevealed(targetLen.current);
       return;
     }
-    let frame = requestAnimationFrame(function tick() {
-      setRevealed((cur) => {
-        const target = targetLen.current;
-        if (cur >= target) return cur; // caught up; idle until more arrives
-        return Math.min(target, cur + Math.max(2, Math.ceil((target - cur) / 6)));
-      });
+    // Throttle the reveal (and thus the markdown re-parse it drives) to ~30fps:
+    // the rAF still ticks each frame, but we only advance the revealed length
+    // every ~33ms. The CSS-animated cursor keeps motion fluid between steps, so
+    // the cost of re-parsing the growing block during a live turn roughly halves.
+    let last = 0;
+    let frame = requestAnimationFrame(function tick(ts) {
+      if (ts - last >= 33) {
+        last = ts;
+        setRevealed((cur) => {
+          const target = targetLen.current;
+          if (cur >= target) return cur; // caught up; idle until more arrives
+          return Math.min(target, cur + Math.max(2, Math.ceil((target - cur) / 6)));
+        });
+      }
       frame = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(frame);
@@ -210,7 +218,13 @@ const StreamCursor = () => (
   <span className="ml-0.5 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-ink-dim align-baseline" />
 );
 
-function AssistantMessage({ text, streaming }: { text: string; streaming: boolean }) {
+const AssistantMessage = memo(function AssistantMessage({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming: boolean;
+}) {
   const shown = useSmoothText(text, streaming);
 
   // Render markdown live as the text streams in (react-markdown handles
@@ -234,7 +248,7 @@ function AssistantMessage({ text, streaming }: { text: string; streaming: boolea
       <MarkdownPreview body={text} />
     </div>
   );
-}
+});
 
 /** The shared button shell for a transcript working-step row (thinking, tool,
  *  tool group, subagent) — a tight, full-bleed hover target. */
@@ -306,7 +320,7 @@ function Collapsible({
   );
 }
 
-function ThinkingBlock({ text }: { text: string }) {
+const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   // A one-line preview of the thought (Claude-Code / Conductor style), so a
   // collapsed thinking block still hints at what the agent reasoned about.
@@ -329,12 +343,12 @@ function ThinkingBlock({ text }: { text: string }) {
       )}
     </div>
   );
-}
+});
 
 /** A launched skill, collapsed to a one-line chip — Claude Code injects the
  *  skill's full SKILL.md as an assistant block; we keep it out of the thread but
  *  expandable so the loaded instructions are still inspectable. */
-function SkillBlock({ name, body }: { name: string; body: string }) {
+const SkillBlock = memo(function SkillBlock({ name, body }: { name: string; body: string }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="text-xs">
@@ -357,7 +371,7 @@ function SkillBlock({ name, body }: { name: string; body: string }) {
       )}
     </div>
   );
-}
+});
 
 function ToolStatusDot({
   result,
@@ -415,7 +429,7 @@ function ToolArg({ name, input }: { name: string; input: string }) {
  * `● Name  summary` line with a dimmed `⎿ result` line beneath it. Click to
  * expand the full input/output.
  */
-function ToolBlock({
+const ToolBlock = memo(function ToolBlock({
   item,
   busy,
 }: {
@@ -479,9 +493,9 @@ function ToolBlock({
       )}
     </div>
   );
-}
+});
 
-function PermissionCard({
+const PermissionCard = memo(function PermissionCard({
   item,
   handlers,
 }: {
@@ -534,9 +548,15 @@ function PermissionCard({
       </div>
     </div>
   );
-}
+});
 
-function ProtocolErrorBlock({ detail, raw }: { detail: string; raw: string }) {
+const ProtocolErrorBlock = memo(function ProtocolErrorBlock({
+  detail,
+  raw,
+}: {
+  detail: string;
+  raw: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible
@@ -549,7 +569,7 @@ function ProtocolErrorBlock({ detail, raw }: { detail: string; raw: string }) {
       </pre>
     </Collapsible>
   );
-}
+});
 
 /** A crash/spawn-failure stderr that mentions login → an actionable remedy. */
 function exitRemedy(stderrTail: string): string | null {
@@ -565,7 +585,11 @@ function exitRemedy(stderrTail: string): string | null {
  *  claude's post-compact summary is folded in, the label becomes a toggle that
  *  expands it — kept collapsed by default so the 10–20KB summary never floods the
  *  thread (the same treatment a launched skill's injected body gets). */
-function CompactDivider({ item }: { item: Extract<TranscriptItem, { kind: "compact" }> }) {
+const CompactDivider = memo(function CompactDivider({
+  item,
+}: {
+  item: Extract<TranscriptItem, { kind: "compact" }>;
+}) {
   const [open, setOpen] = useState(false);
   const label = item.trigger === "manual" ? "Conversation compacted" : "Conversation auto-compacted";
   const tokens = item.preTokens != null ? ` · ${formatTokens(item.preTokens)} before` : "";
@@ -608,9 +632,13 @@ function CompactDivider({ item }: { item: Extract<TranscriptItem, { kind: "compa
       )}
     </div>
   );
-}
+});
 
-function ExitNotice({ item }: { item: Extract<TranscriptItem, { kind: "exit" }> }) {
+const ExitNotice = memo(function ExitNotice({
+  item,
+}: {
+  item: Extract<TranscriptItem, { kind: "exit" }>;
+}) {
   const bad = item.outcome === "crashed" || item.outcome === "spawn_failed";
   const remedy = bad ? exitRemedy(item.stderrTail) : null;
   return (
@@ -631,7 +659,7 @@ function ExitNotice({ item }: { item: Extract<TranscriptItem, { kind: "exit" }> 
       )}
     </div>
   );
-}
+});
 
 /**
  * The live "time working" readout pinned to the bottom-left of the transcript

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use hyprlayer_core::gitops::{DirEntry, FileSides, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
@@ -11,6 +12,7 @@ use hyprlayer_core::worktree::{self, archive_dir_for, CreateSpec, RemovePolicy, 
 use hyprlayer_core::CoreError;
 use serde::Serialize;
 use tauri::State;
+use tauri_specta::Event;
 
 use super::sessions::kill_and_await_exit;
 use super::{blocking, db_task, effective_for};
@@ -61,6 +63,38 @@ fn item_view(item: Workstream, link: Option<LinkStatus>) -> WorkstreamView {
     }
 }
 
+/// Compute each workstream's git+link status concurrently on the blocking pool
+/// (one task per item), preserving input order. Status is filesystem-bound
+/// (two git2 tree walks per repo), so a serial sweep made sidebar latency scale
+/// with the *number* of active workstreams; fanning out makes it the slowest
+/// single repo instead. `link_for` runs inside each task (it's also blocking fs
+/// work), so a shared piece of context (the effective config) is passed by Arc.
+async fn status_batch<F>(items: Vec<Workstream>, link_for: F) -> CmdResult<Vec<WorkstreamView>>
+where
+    F: Fn(&Workstream) -> Option<LinkStatus> + Send + Sync + 'static,
+{
+    let link_for = Arc::new(link_for);
+    let handles: Vec<_> = items
+        .into_iter()
+        .map(|item| {
+            let link_for = link_for.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let link = link_for(&item);
+                item_view(item, link)
+            })
+        })
+        .collect();
+    let mut views = Vec::with_capacity(handles.len());
+    for handle in handles {
+        views.push(
+            handle
+                .await
+                .map_err(|e| AppError::internal(format!("status task: {e}")))?,
+        );
+    }
+    Ok(views)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workstreams(
@@ -73,22 +107,17 @@ pub async fn list_workstreams(
     })
     .await?;
 
-    // Status polling is filesystem-bound; do the whole batch off-thread.
+    // All items in one project share a thoughts config; resolve it once, then
+    // each task checks its own worktree's links against it.
     let effective = if let Some(first) = items.first() {
         Some(effective_for(&state, &first.project_path).await?)
     } else {
         None
     };
-    blocking("status", move || {
-        items
-            .into_iter()
-            .map(|item| {
-                let link = effective
-                    .as_ref()
-                    .map(|eff| thoughts_links::check_thoughts(Path::new(&item.worktree_path), eff));
-                item_view(item, link)
-            })
-            .collect::<Vec<_>>()
+    status_batch(items, move |item| {
+        effective
+            .as_ref()
+            .map(|eff| thoughts_links::check_thoughts(Path::new(&item.worktree_path), eff))
     })
     .await
 }
@@ -98,13 +127,54 @@ pub async fn list_workstreams(
 #[specta::specta]
 pub async fn list_all_workstreams(state: State<'_, AppState>) -> CmdResult<Vec<WorkstreamView>> {
     let items = db_task(state.db.clone(), |db| db.list_active_workstreams()).await?;
-    blocking("status", move || {
-        items
-            .into_iter()
-            .map(|item| item_view(item, None))
-            .collect::<Vec<_>>()
+    status_batch(items, |_| None).await
+}
+
+/// Point the live worktree watcher at this workstream's worktree, so external
+/// edits push a `WorktreeChanged` event and the Changes panel + git status
+/// refresh without waiting for window focus (the way the agent and terminal
+/// panes already stream live). Single-slot: switching workstreams replaces the
+/// previous watcher; calling it again for the same id is a no-op. The frontend
+/// calls this whenever the viewed workstream changes.
+#[tauri::command]
+#[specta::specta]
+pub async fn watch_worktree(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    workstream_id: String,
+) -> CmdResult<()> {
+    let mut guard = state.worktree_watch.lock().await;
+    if guard.as_ref().is_some_and(|(id, _)| id == &workstream_id) {
+        return Ok(()); // already watching this worktree
+    }
+    // Drop the previous watcher before resolving the new one (so a missing
+    // worktree, e.g. just-archived, simply leaves nothing watched).
+    *guard = None;
+
+    let ws = load_item(&state, &workstream_id).await?;
+    let path = PathBuf::from(&ws.worktree_path);
+    if !path.is_dir() {
+        return Ok(());
+    }
+
+    let app = app.clone();
+    let wsid = workstream_id.clone();
+    let handle = blocking("watch_worktree", move || {
+        hyprlayer_core::index::watcher::watch_path(
+            &path,
+            Box::new(move || {
+                let _ = crate::events::WorktreeChanged {
+                    workstream_id: wsid.clone(),
+                }
+                .emit(&app);
+            }),
+        )
     })
-    .await
+    .await?
+    .map_err(AppError::from)?;
+
+    *guard = Some((workstream_id, handle));
+    Ok(())
 }
 
 /// Branches the user can base a new workstream on, with the auto-detected
