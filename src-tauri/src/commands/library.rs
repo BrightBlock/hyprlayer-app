@@ -181,19 +181,41 @@ pub async fn query_docs(state: State<'_, AppState>, query: ThoughtQuery) -> CmdR
 #[tauri::command]
 #[specta::specta]
 pub async fn get_doc(state: State<'_, AppState>, id: String) -> CmdResult<DocContent> {
-    let id = state
-        .index
-        .resolve_id(&id)
-        .ok_or_else(|| not_indexed(&id))?;
-    let meta = state.index.get(&id).ok_or_else(|| not_indexed(&id))?;
-    let path = PathBuf::from(&id);
-    let content = tokio::fs::read_to_string(&path)
+    // Indexed library docs: rich metadata straight from the in-memory index.
+    if let Some(resolved) = state.index.resolve_id(&id) {
+        if let Some(meta) = state.index.get(&resolved) {
+            let path = PathBuf::from(&resolved);
+            let content = tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|e| AppError::internal(format!("read doc: {e}")))?;
+            return Ok(DocContent {
+                meta,
+                content,
+                mtime_ms: file_mtime_ms(&path),
+            });
+        }
+    }
+
+    // Fallback: an agent-created doc that lives outside every configured
+    // thoughts root — e.g. a plan Claude wrote under `~/.claude/plans/`. These
+    // surface in a workstream's Changes panel but are never indexed, so render
+    // them read-only straight from disk with a best-effort meta instead of
+    // failing. Gated to `.md` so this can't be turned into an arbitrary-file
+    // reader; a missing file falls through to the "deleted or moved" message.
+    let abs = PathBuf::from(&id);
+    if !abs
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    {
+        return Err(not_indexed(&id));
+    }
+    let content = tokio::fs::read_to_string(&abs)
         .await
-        .map_err(|e| AppError::internal(format!("read doc: {e}")))?;
+        .map_err(|_| not_indexed(&id))?;
     Ok(DocContent {
-        meta,
+        meta: hyprlayer_core::index::unindexed_meta(&abs, &content),
         content,
-        mtime_ms: file_mtime_ms(&path),
+        mtime_ms: file_mtime_ms(&abs),
     })
 }
 

@@ -477,6 +477,56 @@ fn build_record_from_bytes(
     })
 }
 
+/// Build a best-effort [`DocMeta`] for a markdown document that is **not** part
+/// of any thoughts root — e.g. a plan Claude wrote under `~/.claude/plans/`.
+///
+/// Such docs are surfaced in a workstream's Changes panel (any `.md` an agent
+/// `Write`s under a `plans`/`research`/`handoffs` dir) but live outside the
+/// indexed library, so read-only preview consumers fall back to this to render
+/// them anyway. With no root there is no repo/profile/area context: `project`
+/// and `profile` are `None`, `area` is [`Area::Other`], `backend` is empty, and
+/// `scope` comes from frontmatter (else `"shared"`, matching how the indexer
+/// scopes [`Area::Other`] docs). Title/type/date are filled from the filename +
+/// parent-dir fallbacks, exactly as for an indexed doc. `content` is the doc's
+/// already-read text, so this does no body I/O (only a cheap mtime stat).
+pub fn unindexed_meta(abs: &Path, content: &str) -> DocMeta {
+    let parsed = frontmatter::parse(content);
+    let mut fm = parsed.fm;
+    frontmatter::apply_path_fallbacks(&mut fm, abs);
+
+    let scope = fm
+        .scope
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "shared".to_string());
+
+    let rel_path = abs
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_string();
+
+    let mtime_ms = std::fs::metadata(abs)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0.0, |d| d.as_millis() as f64);
+
+    DocMeta {
+        id: abs.to_string_lossy().into_owned(),
+        rel_path,
+        project: None,
+        area: Area::Other,
+        scope,
+        profile: None,
+        backend: String::new(),
+        fm,
+        fm_warnings: parsed.warnings,
+        mtime_ms,
+        size_bytes: content.len() as f64,
+    }
+}
+
 fn truncate_at_char_boundary(s: &str, max: usize) -> &str {
     if s.len() <= max {
         return s;
@@ -614,6 +664,51 @@ mod tests {
         for key in ["relPath", "fmWarnings", "mtimeMs", "sizeBytes"] {
             assert!(v.get(key).is_some(), "missing key {key}");
         }
+    }
+
+    #[test]
+    fn unindexed_meta_for_claude_plan() {
+        // A plan Claude wrote under ~/.claude/plans/: no frontmatter at all, so
+        // title/type fall back to the filename + parent dir, and with no root it
+        // classifies as a rootless Area::Other doc. Rooted at a guaranteed-absent
+        // dir so the mtime stat below deterministically degrades to 0.
+        let path =
+            Path::new("/hyprlayer-nonexistent-xyzzy/.claude/plans/ethereal-swinging-kurzweil.md");
+        let content = "# Ethereal Swinging Kurzweil\n\nStep 1. Do the thing.\n";
+        let meta = unindexed_meta(path, content);
+
+        assert_eq!(
+            meta.id,
+            "/hyprlayer-nonexistent-xyzzy/.claude/plans/ethereal-swinging-kurzweil.md"
+        );
+        assert_eq!(meta.rel_path, "ethereal-swinging-kurzweil.md");
+        assert_eq!(meta.area, Area::Other);
+        assert_eq!(meta.scope, "shared");
+        assert_eq!(meta.project, None);
+        assert_eq!(meta.profile, None);
+        assert!(meta.backend.is_empty());
+        // Filename/parent-dir fallbacks fill the title and type.
+        assert_eq!(meta.fm.title.as_deref(), Some("ethereal swinging kurzweil"));
+        assert_eq!(meta.fm.doc_type.as_deref(), Some("plan"));
+        assert_eq!(meta.size_bytes, content.len() as f64);
+        // No real file at this path, so the mtime stat degrades to 0 not an error.
+        assert_eq!(meta.mtime_ms, 0.0);
+    }
+
+    #[test]
+    fn unindexed_meta_honors_frontmatter() {
+        // Explicit frontmatter wins over the path fallbacks, and a declared
+        // scope is preserved instead of the "shared" default.
+        let path = Path::new("/tmp/whatever/handoffs/x.md");
+        let content =
+            "---\ntitle: Real Title\ntype: research\nscope: global\ntags: [a, b]\n---\n\nBody.\n";
+        let meta = unindexed_meta(path, content);
+
+        assert_eq!(meta.fm.title.as_deref(), Some("Real Title"));
+        assert_eq!(meta.fm.doc_type.as_deref(), Some("research"));
+        assert_eq!(meta.scope, "global");
+        assert_eq!(meta.fm.tags, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(meta.area, Area::Other);
     }
 
     #[test]
