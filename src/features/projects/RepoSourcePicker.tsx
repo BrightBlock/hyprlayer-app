@@ -141,7 +141,7 @@ export function RepoSourcePicker({
             <TextInput
               value={value.path}
               onChange={(e) => onChange({ ...value, path: e.target.value })}
-              placeholder="/path/to/your/thoughts"
+              placeholder="/path/to/your/repo"
               autoFocus
               disabled={disabled}
               className="font-mono text-xs"
