@@ -73,11 +73,23 @@ export function TerminalTab({
     // so showing a dock whose sibling pane is active doesn't steal focus.
     if (autoFocus) engine.focus();
 
-    const channel = new Channel<TerminalEvent>();
-    channel.onmessage = (ev) => {
-      if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
-      else if (ev.kind === "exited")
-        engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
+    // A Tauri Channel can back exactly ONE invoke: when that command's backend
+    // `Channel` drops, it emits an `end` marker, and the frontend `Channel`
+    // responds by unregistering its own callback (see `cleanupCallback` in
+    // @tauri-apps/api `core`). A failed `terminal_attach` drops its channel the
+    // instant it returns `false` — so reusing that same channel for the
+    // follow-up `terminal_open` sends the fresh shell's prompt into an already
+    // torn-down callback: it's dropped, and the terminal sits blank with only a
+    // blinking cursor (the resume-after-restart path, where the persisted id is
+    // dead). Mint a fresh channel per invoke; all route to the same engine.
+    const newChannel = (): Channel<TerminalEvent> => {
+      const channel = new Channel<TerminalEvent>();
+      channel.onmessage = (ev) => {
+        if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
+        else if (ev.kind === "exited")
+          engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
+      };
+      return channel;
     };
 
     let disposed = false;
@@ -85,7 +97,7 @@ export function TerminalTab({
     idRef.current = id;
     void (async () => {
       if (id) {
-        const ok = await unwrap(commands.terminalAttach(id, channel));
+        const ok = await unwrap(commands.terminalAttach(id, newChannel()));
         if (!ok) {
           id = undefined; // PTY gone (e.g. restart) → open fresh
           idRef.current = undefined;
@@ -93,7 +105,7 @@ export function TerminalTab({
       }
       if (!id && !disposed) {
         const g = engine.grid();
-        const opened = await unwrap(commands.terminalOpen(workstreamId, g.cols, g.rows, channel));
+        const opened = await unwrap(commands.terminalOpen(workstreamId, g.cols, g.rows, newChannel()));
         // The tab may have unmounted while `terminalOpen` was in flight. The
         // cleanup can't kill a PTY it never saw an id for, so close it here and
         // skip publishing the id upstream.
