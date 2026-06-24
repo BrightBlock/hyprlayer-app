@@ -159,6 +159,14 @@ pub fn run() {
     #[cfg(debug_assertions)]
     let tauri_builder = tauri_builder.plugin(tauri_plugin_mcp_bridge::init());
 
+    // macOS only: replace the system default menu with one that omits "Close
+    // Window". The default binds ⌘W to it — one key from ⌘⇧W (Close Agent Tab) —
+    // so a slipped tab-close shuts the lone window out from under every running
+    // session. ⌘Q (Quit) and the red traffic-light button remain the deliberate
+    // ways out. See `macos_menu`. (Other OSes get no default menu, so no ⌘W.)
+    #[cfg(target_os = "macos")]
+    let tauri_builder = tauri_builder.menu(macos_menu);
+
     tauri_builder
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
@@ -304,6 +312,64 @@ pub fn run() {
                 app.state::<AppState>().terminals.kill_all_blocking();
             }
         });
+}
+
+/// The macOS application menu: tauri's standard default, faithfully — clipboard
+/// (Edit), Quit (⌘Q), Hide, fullscreen, minimize all unchanged — but with the
+/// "Close Window" item dropped so ⌘W is inert (see the call site for why). The
+/// default binds Close Window in both a File submenu and the Window submenu, so
+/// both go: the File submenu held nothing else and is omitted, and the Window
+/// submenu keeps only Minimize/Zoom.
+#[cfg(target_os = "macos")]
+fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
+
+    // Mirror tauri's default About metadata so the About panel is unchanged.
+    let pkg = handle.package_info();
+    let config = handle.config();
+    let about = AboutMetadata {
+        name: Some(pkg.name.clone()),
+        version: Some(pkg.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        authors: config.bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
+    };
+
+    let app_menu = SubmenuBuilder::new(handle, &pkg.name)
+        .about(Some(about))
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .separator()
+        .quit()
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(handle, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view_menu = SubmenuBuilder::new(handle, "View").fullscreen().build()?;
+
+    // Standard Window menu, but WITHOUT .close_window(): that's the ⌘W we drop.
+    let window_menu = SubmenuBuilder::new(handle, "Window")
+        .minimize()
+        .maximize()
+        .build()?;
+
+    // Empty on macOS by default — the OS injects its own Help search field.
+    let help_menu = SubmenuBuilder::new(handle, "Help").build()?;
+
+    MenuBuilder::new(handle)
+        .items(&[&app_menu, &edit_menu, &view_menu, &window_menu, &help_menu])
+        .build()
 }
 
 /// (Re)build the thoughts index and its filesystem watcher from the current
