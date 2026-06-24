@@ -56,6 +56,15 @@ export function useCommand(id: string, handler: (() => void) | null): void {
   }, [id, enabled]);
 }
 
+/** Virtual command id for Escape — not user-rebindable, but it rides the same
+ *  handler stack so a dialog/menu over a page shadows the page's own Escape. */
+export const ESCAPE_COMMAND_ID = "ui.escape";
+
+/** Register an Escape handler while mounted (`null` = inert here). */
+export function useEscape(handler: (() => void) | null): void {
+  useCommand(ESCAPE_COMMAND_ID, handler);
+}
+
 /** Run the topmost handler registered for `id`. Returns true iff one was registered. */
 export function runCommand(id: string): boolean {
   const stack = useRegistry.getState().handlers[id];

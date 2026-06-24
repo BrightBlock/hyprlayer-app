@@ -40,7 +40,7 @@ import { IS_MACOS } from "../lib/platform";
 import { useUiStore } from "../lib/uiStore";
 import { selectPinnedViews, usePinStore } from "../lib/pinStore";
 import { onboardingDismissed } from "./onboardingState";
-import { useCommand } from "../lib/keybindings/registry";
+import { useCommand, useEscape } from "../lib/keybindings/registry";
 import { useKeybindings } from "../lib/keybindings/useKeybindings";
 import type { Overrides } from "../lib/keybindings/resolve";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
@@ -712,6 +712,13 @@ export function Root() {
   useCommand("ws.commit", canCommit && !committing ? doCommit : null);
   useCommand("ws.ship", canShip && !shipping ? doShip : null);
   useCommand("search.open", () => toggleSearch());
+  // Escape closes Settings, mirroring how ⌘, toggles it shut. A dialog/menu open
+  // over it shadows this on the shared Escape stack, so it closes first.
+  useEscape(
+    pathname.startsWith("/settings")
+      ? () => closeOrBack(() => void navigate({ to: "/" }))
+      : null,
+  );
 
   return (
     <div className="flex h-full flex-col bg-surface">

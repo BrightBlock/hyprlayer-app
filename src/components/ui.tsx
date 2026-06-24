@@ -8,6 +8,7 @@ import type {
 } from "react";
 
 import { errorMessage, errorRemedy } from "../lib/ipc";
+import { useEscape } from "../lib/keybindings/registry";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -169,14 +170,7 @@ type DialogProps = {
 
 /** Dependency-free modal: fixed overlay + panel; Escape or a backdrop click closes. */
 export function Dialog({ open, onClose, title, children, className }: DialogProps) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  useEscape(open ? onClose : null);
 
   if (!open) return null;
   return (
@@ -263,20 +257,16 @@ let closeActiveContextMenu: (() => void) | null = null;
 /** Fixed-position right-click menu; any window click or Escape closes it, and
  *  opening another menu closes this one. */
 export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
+  useEscape(onClose);
   useEffect(() => {
     // Mounting (or repositioning) closes whatever other menu was open.
     if (closeActiveContextMenu && closeActiveContextMenu !== onClose) closeActiveContextMenu();
     closeActiveContextMenu = onClose;
 
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
     window.addEventListener("click", onClose);
-    window.addEventListener("keydown", onKey);
     return () => {
       if (closeActiveContextMenu === onClose) closeActiveContextMenu = null;
       window.removeEventListener("click", onClose);
-      window.removeEventListener("keydown", onKey);
     };
   }, [onClose]);
 

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useKeybindings } from "./useKeybindings";
-import { useCommand } from "./registry";
+import { useCommand, useEscape } from "./registry";
 
 // IS_MACOS derives from the jsdom user agent (not "Macintosh"), so these tests
 // run in the non-mac branch where Ctrl maps to `mod`.
@@ -16,6 +16,11 @@ function Dispatcher({ overrides = {} }: { overrides?: Record<string, string | nu
 
 function CommandHost({ id, handler }: { id: string; handler: (() => void) | null }) {
   useCommand(id, handler);
+  return null;
+}
+
+function EscapeHost({ handler }: { handler: (() => void) | null }) {
+  useEscape(handler);
   return null;
 }
 
@@ -73,5 +78,87 @@ describe("useKeybindings dispatcher", () => {
     );
     fireEvent.keyDown(window, { key: "n" });
     expect(bare).toHaveBeenCalledOnce();
+  });
+});
+
+describe("useKeybindings Escape routing", () => {
+  it("routes bare Escape to the registered Escape handler and consumes the key", () => {
+    const onEscape = vi.fn();
+    render(
+      <>
+        <Dispatcher />
+        <EscapeHost handler={onEscape} />
+      </>,
+    );
+    const evt = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    window.dispatchEvent(evt);
+    expect(onEscape).toHaveBeenCalledOnce();
+    expect(evt.defaultPrevented).toBe(true);
+  });
+
+  it("leaves Escape untouched when nothing is registered (terminal/editor keeps it)", () => {
+    render(<Dispatcher />);
+    const evt = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    window.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+  });
+
+  it("closes the topmost surface first: a modal over a page shadows the page", () => {
+    const page = vi.fn();
+    const modal = vi.fn();
+    const { rerender } = render(
+      <>
+        <Dispatcher />
+        <EscapeHost handler={page} />
+      </>,
+    );
+    // Modal opens on top of the page — it's the latest registrant, so it wins.
+    rerender(
+      <>
+        <Dispatcher />
+        <EscapeHost handler={page} />
+        <EscapeHost handler={modal} />
+      </>,
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(modal).toHaveBeenCalledOnce();
+    expect(page).not.toHaveBeenCalled();
+
+    // Modal closes; the next Escape falls through to the page beneath it.
+    rerender(
+      <>
+        <Dispatcher />
+        <EscapeHost handler={page} />
+      </>,
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(page).toHaveBeenCalledOnce();
+  });
+
+  it("fires Escape even while focus is in an input (close a dialog you're typing in)", () => {
+    const onEscape = vi.fn();
+    const { container } = render(
+      <>
+        <Dispatcher />
+        <EscapeHost handler={onEscape} />
+        <input data-testid="field" />
+      </>,
+    );
+    const input = container.querySelector("input")!;
+    input.focus();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onEscape).toHaveBeenCalledOnce();
+  });
+
+  it("does not route a modified Escape (e.g. the reserved ⌘⇧Esc) to the Escape stack", () => {
+    const onEscape = vi.fn();
+    render(
+      <>
+        <Dispatcher />
+        <EscapeHost handler={onEscape} />
+      </>,
+    );
+    fireEvent.keyDown(window, { key: "Escape", ctrlKey: true, shiftKey: true });
+    expect(onEscape).not.toHaveBeenCalled();
   });
 });

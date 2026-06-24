@@ -16,7 +16,7 @@ import { useEffect, useMemo } from "react";
 import { IS_MACOS } from "../platform";
 import { eventToChord, hasPrimaryModifier } from "./chord";
 import { chordToCommand, type Overrides } from "./resolve";
-import { runCommand } from "./registry";
+import { ESCAPE_COMMAND_ID, runCommand } from "./registry";
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -33,6 +33,13 @@ export function useKeybindings(overrides: Overrides): void {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Bare Escape closes the topmost dismissible surface (no editable guard —
+      // you must escape a dialog you're typing in); only consumed when handled,
+      // so it still reaches the terminal/editor when nothing is open.
+      if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        if (runCommand(ESCAPE_COMMAND_ID)) e.preventDefault();
+        return;
+      }
       const chord = eventToChord(e, IS_MACOS);
       if (!chord) return;
       const id = index.get(chord);
