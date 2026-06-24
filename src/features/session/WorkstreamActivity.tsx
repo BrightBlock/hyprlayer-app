@@ -24,10 +24,32 @@ const ACTIVITY_STYLE: Record<
   background: { color: "bg-violet-400 text-violet-400", anim: "work", label: "Background tasks running" },
 };
 
-/** Leading/trailing status dot for a workstream row. Renders null while idle. */
-export function WorkstreamActivityDot({ workstreamId }: { workstreamId: string }) {
+/**
+ * Leading/trailing status dot for a workstream row. Idle is invisible by default
+ * (`idle="hide"`); pass `idle="dot"` to render a muted placeholder dot instead,
+ * so a list reads as an even column of status dots — the sidebar tree's look.
+ */
+export function WorkstreamActivityDot({
+  workstreamId,
+  idle = "hide",
+}: {
+  workstreamId: string;
+  idle?: "hide" | "dot";
+}) {
   const activity = useWorkstreamActivity(workstreamId);
-  if (activity === "idle") return null;
+  if (activity === "idle") {
+    if (idle === "dot") {
+      return (
+        <span
+          className="flex h-1.5 w-1.5 shrink-0 items-center justify-center"
+          aria-hidden="true"
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-ink-dim/40" />
+        </span>
+      );
+    }
+    return null;
+  }
   const { color, anim, label } = ACTIVITY_STYLE[activity];
   return (
     <span

@@ -11,6 +11,10 @@ type EdgeDragOptions = {
   /** +1 when dragging right grows the panel, -1 when it shrinks it. */
   direction: 1 | -1;
   onResize: (width: number) => void;
+  /** Fired on pointer-down / release — e.g. to suppress a width transition
+   *  while dragging so the panel tracks the cursor instead of trailing it. */
+  onStart?: () => void;
+  onEnd?: () => void;
 };
 
 /**
@@ -19,7 +23,7 @@ type EdgeDragOptions = {
  */
 export function startEdgeDrag(
   event: ReactPointerEvent<HTMLElement>,
-  { startWidth, min, max, direction, onResize }: EdgeDragOptions,
+  { startWidth, min, max, direction, onResize, onStart, onEnd }: EdgeDragOptions,
 ): void {
   event.preventDefault();
   const startX = event.clientX;
@@ -28,6 +32,7 @@ export function startEdgeDrag(
 
   document.body.style.cursor = "col-resize";
   document.body.style.userSelect = "none";
+  onStart?.();
 
   const onPointerMove = (moveEvent: PointerEvent) => {
     onResize(clamp(startWidth + direction * (moveEvent.clientX - startX), min, max));
@@ -37,6 +42,7 @@ export function startEdgeDrag(
     document.body.style.userSelect = previousSelect;
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
+    onEnd?.();
   };
 
   window.addEventListener("pointermove", onPointerMove);

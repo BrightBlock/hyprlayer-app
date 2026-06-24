@@ -226,6 +226,9 @@ export function ProjectPage() {
   // updates both the sidebar and the header in one place.
   const diffWidth = useUiStore((state) => state.diffWidth);
   const setDiffWidth = useUiStore((state) => state.setDiffWidth);
+  // True only while the diff-sidebar resize handle is dragged — suppresses the
+  // width transition so the panel tracks the cursor instead of trailing it.
+  const [resizingDiff, setResizingDiff] = useState(false);
   // Right-split width as a fraction of the agent area (0..1). The split's
   // open/closed state and pane assignments persist in the tab store, but the
   // exact ratio resets to a sane default per visit.
@@ -856,6 +859,8 @@ export function ProjectPage() {
       max: DIFF_SIDEBAR_MAX,
       direction: -1,
       onResize: setDiffWidth,
+      onStart: () => setResizingDiff(true),
+      onEnd: () => setResizingDiff(false),
     });
   };
 
@@ -1312,30 +1317,39 @@ export function ProjectPage() {
       </section>
 
       {!diffHidden && (
-        <>
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize diff sidebar"
-            className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
-            onPointerDown={startDiffResize}
-          />
-          <aside
-            className="flex min-w-0 shrink-0 flex-col border-l border-edge bg-panel"
-            style={{ width: diffWidth }}
-          >
-            <div className="flex min-h-0 flex-1 flex-col">
-              <ChangesPanel
-                workstreamId={activeView?.item.id ?? null}
-                onOpenDoc={openDocPreview}
-                onOpenDiff={openDiff}
-                onOpenFile={openFile}
-              />
-            </div>
-            <PrChecksPanel view={activeView ?? null} />
-          </aside>
-        </>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize diff sidebar"
+          className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+          onPointerDown={startDiffResize}
+        />
       )}
+      {/* Changes sidebar — width-animates between 0 and diffWidth so toggling it
+          glides instead of snapping. overflow-hidden clips the fixed-width inner
+          shell (pinned to the window edge) so its content never reflows; the
+          transition is dropped while the resize handle is dragged. */}
+      <aside
+        className={`relative shrink-0 overflow-hidden border-l border-edge bg-panel ${
+          resizingDiff
+            ? ""
+            : "transition-[width] duration-200 ease-out motion-reduce:transition-none"
+        }`}
+        style={{ width: diffHidden ? 0 : diffWidth }}
+        inert={diffHidden}
+      >
+        <div className="absolute inset-y-0 right-0 flex flex-col" style={{ width: diffWidth }}>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <ChangesPanel
+              workstreamId={activeView?.item.id ?? null}
+              onOpenDoc={openDocPreview}
+              onOpenDiff={openDiff}
+              onOpenFile={openFile}
+            />
+          </div>
+          <PrChecksPanel view={activeView ?? null} />
+        </div>
+      </aside>
 
       {/* Library picker — opened from a composer's "+" menu. Centered modal so
           attaching context docs never replaces the agent view. */}

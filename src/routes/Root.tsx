@@ -82,9 +82,10 @@ let launchedToHome = false;
 // churn on every Root render before settings have loaded a keybindings section.
 const EMPTY_OVERRIDES: Overrides = {};
 
-const PROJECT_SIDEBAR_COLLAPSED = 56;
 const PROJECT_SIDEBAR_MIN = 180;
 const PROJECT_SIDEBAR_MAX = 360;
+// The activity-bar nav rail that sits left of the project panel (fixed width).
+const NAV_RAIL_WIDTH = 56;
 // The header's left controls (sidebar toggle, dashboard, and — on a project —
 // docs) live in an absolutely-positioned cluster, so they're out of flow: the
 // header content must be inset past the cluster's right edge or the breadcrumb
@@ -100,19 +101,6 @@ const LEFT_CLUSTER_CLEARANCE = 12; // breathing room between the cluster and the
 
 // Cross-platform vector icons (Lucide family / native-style), currentColor so
 // they theme with the bar and stay pixel-crisp at every DPI on macOS + Windows.
-function PanelLeftIcon() {
-  return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M5.5 4.5H9v15H5.5A2.5 2.5 0 0 1 3 17V7a2.5 2.5 0 0 1 2.5-2.5Z"
-        fill="currentColor"
-        opacity="0.9"
-      />
-    </svg>
-  );
-}
-
 function PanelRightIcon() {
   return (
     <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -126,6 +114,9 @@ function PanelRightIcon() {
   );
 }
 
+/** Branch-fork glyph for a worktree-backed workstream — it lives on its own
+ *  branch in a dedicated worktree. Paired with `MainCheckoutIcon` so a row's
+ *  worktree mode reads at a glance. */
 function GitBranchIcon() {
   return (
     <svg
@@ -213,22 +204,59 @@ function SettingsIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-function HomeIcon() {
+/** Rounded-square glyph for the nav rail's Home entry. A simple framed square
+ *  reads as "home base / dashboard" and, paired with the accent-filled active
+ *  state, becomes the white-on-accent square button from the mock. Tuned to the
+ *  mock: a bold, generously rounded outline that fills ~40% of the button. */
+function SquareIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="currentColor" strokeWidth="2.5" />
+    </svg>
+  );
+}
+
+/** Isometric cube for the nav rail's Projects entry — a 3D box reads as "a
+ *  project / a unit of work," distinct from the flat square (Home) and the book
+ *  (Library). Geometry from Lucide's `box`; sized to the mock (~47% of button). */
+function CubeIcon({ size = 22 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
-      width="18"
-      height="18"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="1.7"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M3 10.5 12 3l9 7.5" />
-      <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
-      <path d="M9.5 21v-6h5v6" />
+      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+      <path d="m3.3 7 8.7 5 8.7-5" />
+      <path d="M12 22V12" />
+    </svg>
+  );
+}
+
+/** Book glyph for the nav rail's Library entry — the mock's book: a spine curve
+ *  on the left plus the inside-cover line near the foot. Geometry from Lucide's
+ *  `book`; distinct from the lined `BookIcon` used for project docs / chat. */
+function RailBookIcon({ size = 21 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
     </svg>
   );
 }
@@ -263,10 +291,23 @@ function routeSection(pathname: string): string {
 const topIconClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink";
 
-/** Bottom-bar icon button (Library / Settings). */
-const footerIconClass = (active: boolean): string =>
-  `inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-edge/60 hover:text-ink ${
-    active ? "bg-edge text-ink" : "text-ink-dim"
+/** Primary nav-rail icon button — Home / Projects / Library up top and the
+ *  Archive / Settings utilities at the foot. Active wears the redesign's
+ *  accent-filled rounded square (white glyph); idle sits dim with a soft
+ *  accent-tinted hover. */
+// The nav rail's Home button is the persistent accent-filled square from the
+// mockup — it always wears the solid fill. Every other entry stays plain until
+// its route is active, when it takes the mockup's outlined treatment (accent
+// tint + ring + accent glyph). So the active section reads as an outlined box
+// while Home stays solid — exactly the two states the mockup shows side by side.
+const RAIL_ICON_BASE =
+  "flex h-9 w-9 items-center justify-center rounded-[11px] transition-colors";
+const railHomeClass = `${RAIL_ICON_BASE} bg-accent text-white shadow-sm`;
+const railNavClass = (active: boolean): string =>
+  `${RAIL_ICON_BASE} ${
+    active
+      ? "bg-accent/20 text-accent ring-[1.5px] ring-inset ring-accent/55"
+      : "text-ink-dim hover:bg-accent/10 hover:text-ink"
   }`;
 
 
@@ -275,7 +316,8 @@ const footerIconClass = (active: boolean): string =>
  *  Rasterized macOS app icons sit inside a full-bleed squircle with built-in
  *  padding, so at the bar's nominal 18px the visible glyph reads ~14px — too
  *  light next to the stroke icons. Render the squircle at 22px so the glyph
- *  inside lands at the same optical weight as HomeIcon/PanelRightIcon. */
+ *  inside lands at the same optical weight as the bar's stroke icons (e.g.
+ *  PanelRightIcon). */
 function appIcon(app: EditorTarget, size = 22): ReactNode {
   if (app.iconDataUrl) {
     return (
@@ -438,6 +480,10 @@ export function Root() {
   const [collapsed, setCollapsed] = useState(false);
   // Default to the widest we allow; the user can drag it narrower if desired.
   const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
+  // True only while the resize handle is being dragged. The panel's width
+  // transition (which smooths the collapse/expand) is suppressed during a drag
+  // so the panel tracks the cursor instead of trailing it by the animation.
+  const [resizingSidebar, setResizingSidebar] = useState(false);
   const [shipping, setShipping] = useState(false);
   const [committing, setCommitting] = useState(false);
 
@@ -606,15 +652,18 @@ export function Root() {
 
   // Floor for the header inset: clear the absolutely-positioned left cluster so
   // the breadcrumb never collides with it when the sidebar is collapsed. The
-  // cluster carries the docs button only on a project route (3 icons vs 2).
-  const leftClusterIcons = currentProject ? 3 : 2;
+  // cluster carries only the docs button, and only on a project route.
+  const leftClusterIcons = currentProject ? 1 : 0;
   const leftClusterRight =
     LEFT_CLUSTER_LEFT +
     leftClusterIcons * LEFT_CLUSTER_ICON +
     (leftClusterIcons - 1) * LEFT_CLUSTER_GAP;
   const minContentOffset = leftClusterRight + LEFT_CLUSTER_CLEARANCE - HEADER_CONTENT_PAD;
+  // The breadcrumb clears the whole left region — the nav rail plus the project
+  // panel (fully hidden when collapsed) — so it sits above the main content,
+  // not floating over the panel.
   const contentOffset = Math.max(
-    collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
+    NAV_RAIL_WIDTH + (collapsed ? 0 : sidebarWidth),
     minContentOffset,
   );
   // Collapse the labelled header controls (the "Ship" button) to icon-only when
@@ -631,6 +680,8 @@ export function Root() {
       max: PROJECT_SIDEBAR_MAX,
       direction: 1,
       onResize: setSidebarWidth,
+      onStart: () => setResizingSidebar(true),
+      onEnd: () => setResizingSidebar(false),
     });
   };
 
@@ -748,25 +799,6 @@ export function Root() {
             IS_MACOS ? "left-[92px]" : "left-3"
           }`}
         >
-          <button
-            type="button"
-            onClick={() => setCollapsed((value) => !value)}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
-            title={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
-            aria-label={collapsed ? "Expand project sidebar" : "Collapse project sidebar"}
-          >
-            <PanelLeftIcon />
-          </button>
-          <Link
-            to="/"
-            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-edge/60 hover:text-ink ${
-              pathname === "/" ? "bg-edge text-ink" : "text-ink-dim"
-            }`}
-            title="Dashboard"
-            aria-label="Dashboard"
-          >
-            <HomeIcon />
-          </Link>
           {/* Project docs lives here (a fixed left anchor) rather than in the
               right cluster, so it doesn't shift when the diff sidebar inset
               changes. */}
@@ -789,7 +821,9 @@ export function Root() {
 
         <div
           ref={headerRef}
-          className="flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3"
+          className={`flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3 ${
+            resizingSidebar ? "" : "transition-[margin] duration-200 ease-out motion-reduce:transition-none"
+          }`}
           style={{ marginLeft: contentOffset }}
           data-tauri-drag-region
         >
@@ -858,21 +892,108 @@ export function Root() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside
-          className="flex shrink-0 flex-col border-r border-edge bg-surface"
-          style={{ width: collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth }}
+        {/* Primary nav rail — the activity-bar column from the redesign. Home,
+            Projects, and Library ride up top as accent-filled rounded squares
+            when active; Archive + Settings (and the update pill) sit at the
+            foot. Always visible, independent of the project panel's collapse. */}
+        <nav
+          className="flex shrink-0 flex-col items-center border-r border-edge bg-surface py-4"
+          style={{ width: NAV_RAIL_WIDTH }}
+          aria-label="Primary"
         >
+          <div className="flex flex-col items-center gap-3">
+            <Link
+              to="/"
+              className={railHomeClass}
+              title="Home"
+              aria-label="Home"
+            >
+              <SquareIcon />
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                // VS Code-style: clicking the active Projects entry collapses or
+                // re-opens the project panel (the nav rail stays). From elsewhere
+                // it opens a project with the panel shown. Inert with no projects.
+                if (pathname.startsWith("/projects")) {
+                  setCollapsed((value) => !value);
+                  return;
+                }
+                const target = currentProjectPath ?? projects[0]?.path;
+                if (target) {
+                  setCollapsed(false);
+                  void navigate({
+                    to: "/projects/$projectPath",
+                    params: { projectPath: target },
+                    search: {},
+                  });
+                }
+              }}
+              className={railNavClass(pathname.startsWith("/projects"))}
+              title={
+                pathname.startsWith("/projects")
+                  ? collapsed
+                    ? "Show projects panel"
+                    : "Hide projects panel"
+                  : "Projects"
+              }
+              aria-label="Projects"
+            >
+              <CubeIcon />
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleNav("/library")}
+              className={railNavClass(pathname.startsWith("/library"))}
+              title="Library"
+              aria-label="Library"
+            >
+              <RailBookIcon />
+            </button>
+          </div>
+          <div className="mt-auto flex flex-col items-center gap-3">
+            <UpdatePill collapsed />
+            <button
+              type="button"
+              onClick={() => toggleNav("/archive")}
+              className={railNavClass(pathname.startsWith("/archive"))}
+              title="Archive"
+              aria-label="Archive"
+            >
+              <ArchiveIcon size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleNav("/settings")}
+              className={railNavClass(pathname.startsWith("/settings"))}
+              title="Settings"
+              aria-label="Settings"
+            >
+              <SettingsIcon size={18} />
+            </button>
+          </div>
+        </nav>
+        {/* Project panel — width-animates between 0 and sidebarWidth so a
+            collapse/expand glides instead of snapping. overflow-hidden clips
+            the fixed-width inner shell (pinned to the rail edge) so its content
+            never reflows mid-animation; the transition is dropped while the
+            resize handle is dragged so the panel tracks the cursor. */}
+        <aside
+          className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
+            resizingSidebar
+              ? ""
+              : "transition-[width] duration-200 ease-out motion-reduce:transition-none"
+          }`}
+          style={{ width: collapsed ? 0 : sidebarWidth }}
+          inert={collapsed}
+        >
+          <div className="absolute inset-y-0 left-0 flex flex-col" style={{ width: sidebarWidth }}>
           {/* Header band, height-matched to the agent bar (h-9) so the
               "Projects" label + add button sit vertically centered alongside
               it — and the bottom border lines up across the sidebar/pane seam. */}
-          <div
-            className={`flex h-9 shrink-0 items-center border-b border-edge ${
-              collapsed ? "justify-center px-1" : "justify-between pl-4 pr-3"
-            }`}
-          >
-            {!collapsed && (
-              <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Projects</p>
-            )}
+          <div className="flex h-9 shrink-0 items-center justify-between border-b border-edge pl-4 pr-3">
+            <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Projects</p>
             <button
               type="button"
               onClick={() => setAddProjectOpen(true)}
@@ -889,7 +1010,7 @@ export function Root() {
                 <Spinner />
               </div>
             )}
-            {!bootstrap.isLoading && projects.length === 0 && !collapsed && (
+            {!bootstrap.isLoading && projects.length === 0 && (
               <p className="px-2 py-1 text-sm text-ink-dim">
                 {configReady ? (
                   "No projects mapped yet."
@@ -902,10 +1023,10 @@ export function Root() {
             )}
 
             {/* Pinned worktrees: a quick-access list above the project tree.
-                Hidden on the icon rail (collapsed) and when nothing is pinned,
-                so the header never takes space until the user pins something.
-                Pin/unpin lives on the worktree row's right-click menu. */}
-            {!collapsed && pinnedViews.length > 0 && (
+                Hidden when nothing is pinned, so the header never takes space
+                until the user pins something. Pin/unpin lives on the worktree
+                row's right-click menu. */}
+            {pinnedViews.length > 0 && (
               <div className="mb-1 border-b border-edge/60 pb-1.5">
                 <button
                   type="button"
@@ -941,8 +1062,8 @@ export function Root() {
                           setProjectMenu(null);
                           setItemMenu({ x: e.clientX, y: e.clientY, view });
                         }}
-                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-edge/60 hover:text-ink ${
-                          isActiveItem ? "bg-edge text-ink" : "text-ink-dim"
+                        className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-edge/50 hover:text-ink ${
+                          isActiveItem ? "bg-accent/15 text-ink" : "text-ink-dim"
                         }`}
                         title={`${projectName} · ${view.item.title} · ${view.item.branch}`}
                       >
@@ -965,33 +1086,6 @@ export function Root() {
               const isCurrent = currentProjectPath === p.path;
               const projectHighlight = isCurrent && !activeWorkstreamId;
 
-              if (collapsed) {
-                return (
-                  <Link
-                    key={p.path}
-                    to="/projects/$projectPath"
-                    params={{ projectPath: p.path }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setItemMenu(null);
-                      setProjectMenu({ x: e.clientX, y: e.clientY, project: p });
-                    }}
-                    className={`mb-1 flex h-9 w-9 items-center justify-center rounded-md hover:bg-edge/60 ${
-                      isCurrent ? "bg-edge" : ""
-                    }`}
-                    title={p.mappedName}
-                    aria-label={p.mappedName}
-                  >
-                    <RepoAvatar
-                      source={p.originUrl}
-                      name={p.mappedName}
-                      size={22}
-                      className="rounded-md"
-                    />
-                  </Link>
-                );
-              }
-
               return (
                 <div key={p.path} className="mb-0.5">
                   <div
@@ -1000,19 +1094,31 @@ export function Root() {
                       setItemMenu(null);
                       setProjectMenu({ x: e.clientX, y: e.clientY, project: p });
                     }}
-                    className={`group flex items-center rounded-md pr-1 hover:bg-edge/60 ${
-                      projectHighlight ? "bg-edge" : ""
+                    className={`group relative flex items-center overflow-hidden rounded-lg pr-1 ${
+                      projectHighlight ? "bg-accent/15" : "hover:bg-edge/50"
                     }`}
                   >
+                    {/* The selected project wears the redesign's accent spine. */}
+                    {projectHighlight && (
+                      <span
+                        className="absolute inset-y-0 left-0 w-[3px] bg-accent"
+                        aria-hidden="true"
+                      />
+                    )}
                     <Link
                       to="/projects/$projectPath"
                       params={{ projectPath: p.path }}
-                      className={`flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-sm hover:text-ink ${
-                        projectHighlight ? "text-ink" : "text-ink-dim"
+                      className={`flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-sm text-ink ${
+                        projectHighlight ? "font-semibold" : "font-medium"
                       }`}
                       title={`${p.mappedName} · ${p.backendKind}${p.profile ? ` · ${p.profile}` : ""}`}
                     >
-                      <RepoAvatar source={p.originUrl} name={p.mappedName} size={18} />
+                      <RepoAvatar
+                        source={p.originUrl}
+                        name={p.mappedName}
+                        size={22}
+                        className="rounded-md"
+                      />
                       <span className="truncate">{p.mappedName}</span>
                       {!p.existsOnDisk && (
                         <span
@@ -1022,11 +1128,18 @@ export function Root() {
                       )}
                     </Link>
                     <ProjectCopyWarning projectPath={p.path} />
+                    {/* Workstream count at rest; the add affordance takes its
+                        place on hover (the mockup shows the count). */}
+                    {children.length > 0 && (
+                      <span className="shrink-0 px-1.5 text-xs tabular-nums text-ink-dim/60 group-hover:hidden">
+                        {children.length}
+                      </span>
+                    )}
                     <Link
                       to="/projects/$projectPath"
                       params={{ projectPath: p.path }}
                       search={{ create: true }}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+                      className="hidden h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim group-hover:flex hover:bg-edge/60 hover:text-ink"
                       title={`New workstream in ${p.mappedName}`}
                       aria-label={`New workstream in ${p.mappedName}`}
                     >
@@ -1036,8 +1149,10 @@ export function Root() {
 
                   {children.map((view) => {
                     const isActiveItem = isCurrent && activeWorkstreamId === view.item.id;
-                    // In-place workstreams run in the project's own checkout — no
-                    // dedicated worktree — so they get the house glyph and a hint.
+                    // In-place workstreams run in the project's own checkout (no
+                    // dedicated worktree). The row reads as a clean status-dot +
+                    // title to match the design, so the distinction lives in the
+                    // tooltip rather than a leading glyph.
                     const inplace = view.item.worktreeMode === "inplace";
                     return (
                       <Link
@@ -1050,16 +1165,37 @@ export function Root() {
                           setProjectMenu(null);
                           setItemMenu({ x: e.clientX, y: e.clientY, view });
                         }}
-                        className={`flex items-center gap-2 rounded-md py-1.5 pl-6 pr-2 text-sm hover:bg-edge/60 hover:text-ink ${
-                          isActiveItem ? "bg-edge text-ink" : "text-ink-dim"
+                        className={`relative flex items-center gap-2.5 overflow-hidden rounded-lg py-2 pl-6 pr-2 text-sm ${
+                          isActiveItem
+                            ? "bg-accent/15 text-ink"
+                            : "text-ink-dim hover:bg-edge/50 hover:text-ink"
                         }`}
                         title={`${view.item.title} · ${view.item.branch}${
                           inplace ? " · main checkout (no worktree)" : ""
                         }`}
                       >
-                        <WorkstreamActivityDot workstreamId={view.item.id} />
-                        {inplace ? <MainCheckoutIcon /> : <GitBranchIcon />}
+                        {isActiveItem && (
+                          <span
+                            className="absolute inset-y-0 left-0 w-[3px] bg-accent"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <WorkstreamActivityDot workstreamId={view.item.id} idle="dot" />
                         <span className="min-w-0 flex-1 truncate">{view.item.title}</span>
+                        {/* Worktree-mode indicator: branch-fork for a dedicated
+                            worktree, house for an in-place (main-checkout) run.
+                            Kept on the trailing edge with the git chip so the
+                            leading status dot stays clean (the mock's look). */}
+                        <span
+                          className="flex shrink-0 items-center text-ink-dim/70"
+                          title={
+                            inplace
+                              ? "Runs in the main checkout (no worktree)"
+                              : "Runs in a dedicated worktree"
+                          }
+                        >
+                          {inplace ? <MainCheckoutIcon /> : <GitBranchIcon />}
+                        </span>
                         <WorkstreamGitChip view={view} />
                       </Link>
                     );
@@ -1069,45 +1205,7 @@ export function Root() {
             })}
 
           </nav>
-
-        <div className="flex flex-col gap-2 border-t border-edge p-2">
-          <UpdatePill collapsed={collapsed} />
-          <div
-            className={
-              collapsed ? "flex flex-col items-center gap-1" : "flex items-center justify-between"
-            }
-          >
-            <button
-              type="button"
-              onClick={() => toggleNav("/library")}
-              className={footerIconClass(pathname.startsWith("/library"))}
-              title="Library"
-              aria-label="Library"
-            >
-              <BookIcon size={18} />
-            </button>
-            <div className={collapsed ? "contents" : "flex items-center gap-1"}>
-              <button
-                type="button"
-                onClick={() => toggleNav("/archive")}
-                className={footerIconClass(pathname.startsWith("/archive"))}
-                title="Archive"
-                aria-label="Archive"
-              >
-                <ArchiveIcon />
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleNav("/settings")}
-                className={footerIconClass(pathname.startsWith("/settings"))}
-                title="Settings"
-                aria-label="Settings"
-              >
-                <SettingsIcon />
-              </button>
-            </div>
           </div>
-        </div>
         </aside>
 
         {!collapsed && (
