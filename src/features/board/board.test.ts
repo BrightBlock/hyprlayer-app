@@ -20,6 +20,7 @@ function makeView(
       branch: "feature/test",
       worktreePath: "/worktrees/test",
       baseBranch: "main",
+      worktreeMode: "isolated",
       stage: over.stage ?? "general",
       status: "active",
       prNumber: over.prNumber !== undefined ? over.prNumber : null,

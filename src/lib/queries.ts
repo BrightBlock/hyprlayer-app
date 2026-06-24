@@ -278,10 +278,24 @@ export function useWorkstreamBases(projectPath: string, enabled = true) {
   });
 }
 
+/** How a new workstream is backed. `isolated` creates a fresh branch + worktree;
+ * `existing` checks a chosen local branch out into a worktree; `inplace` runs in
+ * the project's own checkout with no worktree. */
+export type WorkstreamMode = "isolated" | "existing" | "inplace";
+
 export function useCreateWorkstream(projectPath: string) {
   return useMutation({
-    mutationFn: ({ title, base }: { title: string; base: string | null }) =>
-      unwrap(commands.createWorkstream(projectPath, title, base)),
+    mutationFn: ({
+      title,
+      base,
+      mode,
+      branch,
+    }: {
+      title: string;
+      base: string | null;
+      mode: WorkstreamMode;
+      branch: string | null;
+    }) => unwrap(commands.createWorkstream(projectPath, title, base, mode, branch)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
     },

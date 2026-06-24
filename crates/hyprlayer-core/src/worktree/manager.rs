@@ -64,9 +64,28 @@ pub struct CreateSpec {
     pub mapped_name: String,
     pub title: String,
     /// Override base (e.g. "origin/release"); detected when None.
+    /// Only consulted in [`CreateMode::Isolated`].
     pub base_override: Option<String>,
     /// Branch-name prefix (e.g. "hyprlayer/"). Used verbatim before the slug.
+    /// Only consulted in [`CreateMode::Isolated`].
     pub branch_prefix: String,
+    /// How to back the workstream.
+    pub mode: CreateMode,
+}
+
+/// The three ways to back a new workstream. The default — [`CreateMode::Isolated`]
+/// — is the original behavior; the other two adopt a branch the user already has.
+#[derive(Debug, Clone)]
+pub enum CreateMode {
+    /// Create branch `<prefix><slug>` and a dedicated worktree from the base.
+    Isolated,
+    /// Check an existing *local* branch out into a dedicated worktree (no new
+    /// branch). A remote-tracking ref would detach HEAD, so the caller must pass
+    /// a local branch name.
+    Existing { branch: String },
+    /// No worktree: switch the project's own checkout onto an existing local
+    /// `branch`. `worktree_path` becomes the project repo itself.
+    InPlace { branch: String },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -123,13 +142,98 @@ impl WorktreeManager {
         self.root.join(mapped_name).join(slug)
     }
 
-    /// Create branch `<prefix><slug>` + worktree from the detected base.
-    /// Thoughts provisioning is the caller's next step (it needs config
-    /// context this module doesn't own).
+    /// Provision the worktree for a workstream per its [`CreateMode`]. Thoughts
+    /// provisioning is the caller's next step (it needs config context this
+    /// module doesn't own) — except in [`CreateMode::InPlace`], where the target
+    /// is the already-provisioned project checkout.
     pub async fn create(&self, git: &Path, spec: &CreateSpec) -> Result<CreatedWorktree> {
         let slug = unique_slug(&spec.title);
-        let branch = format!("{}{slug}", spec.branch_prefix);
-        let path = self.worktree_dir(&spec.mapped_name, &slug);
+
+        // Freshen remote refs so the base/branch is current; offline is fine.
+        // Shared by every mode.
+        let _ = git_in(git, &spec.project_repo, &["fetch", "--prune", "origin"])
+            .timeout(Duration::from_secs(30))
+            .run()
+            .await;
+
+        match &spec.mode {
+            CreateMode::Isolated => {
+                let branch = format!("{}{slug}", spec.branch_prefix);
+                let path = self.prepare_worktree_dir(&spec.mapped_name, &slug)?;
+                let base = match &spec.base_override {
+                    Some(b) => b.clone(),
+                    None => detect_base_branch(git, &spec.project_repo).await?,
+                };
+                // `-b <branch>`: create the branch as part of the checkout.
+                self.worktree_add(git, &spec.project_repo, &path, &["-b", &branch], &base)
+                    .await?;
+                self.windows_longpaths(git, &path).await;
+                Ok(CreatedWorktree {
+                    path: path.display().to_string(),
+                    branch,
+                    slug,
+                    base_branch: base,
+                })
+            }
+            CreateMode::Existing { branch } => {
+                let path = self.prepare_worktree_dir(&spec.mapped_name, &slug)?;
+                // Base is informational here (ahead/behind fallback); detection
+                // failing must not block adopting a branch the user already has.
+                let base = detect_base_branch(git, &spec.project_repo)
+                    .await
+                    .unwrap_or_else(|_| branch.clone());
+                // No `-b`: check the existing local branch out into the worktree.
+                self.worktree_add(git, &spec.project_repo, &path, &[], branch)
+                    .await?;
+                self.windows_longpaths(git, &path).await;
+                Ok(CreatedWorktree {
+                    path: path.display().to_string(),
+                    branch: branch.clone(),
+                    slug,
+                    base_branch: base,
+                })
+            }
+            CreateMode::InPlace { branch } => {
+                // No worktree: switch the project's own checkout onto `branch`.
+                // On checkout git refuses only *conflicting* dirty changes —
+                // non-conflicting modified files silently follow the switch onto
+                // the new branch. To avoid carrying a user's in-progress work
+                // across branches, refuse a dirty tree up front. Exception: when
+                // we're already on `branch` the switch is a no-op, and the dirty
+                // tree is that branch's own work — leave it untouched.
+                let already_here = crate::gitops::current_branch(&spec.project_repo).as_deref()
+                    == Some(branch.as_str());
+                if !already_here {
+                    // Untracked files ride along harmlessly and aren't "carried
+                    // onto" the branch in a surprising way; only modified tracked
+                    // files are. Guard on those.
+                    let dirty = status(&spec.project_repo, branch, None).dirty;
+                    if dirty > 0 {
+                        return Err(CoreError::WorktreeDirty(dirty));
+                    }
+                    git_in(git, &spec.project_repo, &["checkout", branch])
+                        .timeout(Duration::from_secs(60))
+                        .run()
+                        .await?;
+                }
+                let base = detect_base_branch(git, &spec.project_repo)
+                    .await
+                    .unwrap_or_else(|_| branch.clone());
+                Ok(CreatedWorktree {
+                    path: spec.project_repo.display().to_string(),
+                    branch: branch.clone(),
+                    slug,
+                    base_branch: base,
+                })
+            }
+        }
+    }
+
+    /// Resolve + reserve the worktree directory for `slug`, erroring if it's
+    /// already taken and creating its parent. Shared by the worktree-backed
+    /// modes (isolated, existing).
+    fn prepare_worktree_dir(&self, mapped_name: &str, slug: &str) -> Result<PathBuf> {
+        let path = self.worktree_dir(mapped_name, slug);
         if path.exists() {
             return Err(CoreError::Io(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
@@ -137,50 +241,42 @@ impl WorktreeManager {
             )));
         }
         std::fs::create_dir_all(path.parent().expect("worktree dir has parent"))?;
+        Ok(path)
+    }
 
-        // Freshen remote refs so the base is current; offline is fine.
-        let _ = git_in(git, &spec.project_repo, &["fetch", "--prune", "origin"])
-            .timeout(Duration::from_secs(30))
+    /// `git -C <repo> worktree add <extra...> <path> <committish>`. `extra` is
+    /// `["-b", branch]` to create a branch, or empty to check an existing one out.
+    async fn worktree_add(
+        &self,
+        git: &Path,
+        project_repo: &Path,
+        path: &Path,
+        extra: &[&str],
+        committish: &str,
+    ) -> Result<()> {
+        let path_str = path.to_str().ok_or_else(|| CoreError::OutputParse {
+            program: "worktree add".into(),
+            detail: "worktree path is not valid UTF-8".into(),
+        })?;
+        let mut args = vec!["worktree", "add"];
+        args.extend_from_slice(extra);
+        args.push(path_str);
+        args.push(committish);
+        git_in(git, project_repo, &args)
+            .timeout(Duration::from_secs(120))
             .run()
-            .await;
+            .await?;
+        Ok(())
+    }
 
-        let base = match &spec.base_override {
-            Some(b) => b.clone(),
-            None => detect_base_branch(git, &spec.project_repo).await?,
-        };
-
-        git_in(
-            git,
-            &spec.project_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                &branch,
-                path.to_str().ok_or_else(|| CoreError::OutputParse {
-                    program: "worktree add".into(),
-                    detail: "worktree path is not valid UTF-8".into(),
-                })?,
-                &base,
-            ],
-        )
-        .timeout(Duration::from_secs(120))
-        .run()
-        .await?;
-
+    /// Windows path-length escape valve, applied per worktree. No-op elsewhere.
+    async fn windows_longpaths(&self, _git: &Path, _worktree: &Path) {
         #[cfg(windows)]
         {
-            let _ = git_in(git, &path, &["config", "core.longpaths", "true"])
+            let _ = git_in(_git, _worktree, &["config", "core.longpaths", "true"])
                 .run()
                 .await;
         }
-
-        Ok(CreatedWorktree {
-            path: path.display().to_string(),
-            branch,
-            slug,
-            base_branch: base,
-        })
     }
 
     /// Remove worktree + branch. `Safe` refuses to destroy work; the caller
@@ -617,6 +713,7 @@ mod tests {
                     title: "Auth work".into(),
                     base_override: None,
                     branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Isolated,
                 },
             )
             .await
@@ -711,6 +808,163 @@ mod tests {
         assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
     }
 
+    /// Existing-branch mode checks a branch the user already has out into a
+    /// dedicated worktree — no new branch is created, and the worktree's HEAD is
+    /// that branch (not detached).
+    #[tokio::test]
+    async fn create_existing_checks_out_user_branch_without_creating_one() {
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+
+        // A branch the user already created.
+        sh(&repo, &["branch", "feature-x"]);
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Adopt feature".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Existing {
+                        branch: "feature-x".into(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(created.branch, "feature-x");
+        let wt = PathBuf::from(&created.path);
+        assert!(wt.join("README.md").exists());
+        // The worktree is on the branch, not detached.
+        let st = status(&wt, &created.base_branch, None);
+        assert_eq!(st.branch.as_deref(), Some("feature-x"));
+    }
+
+    /// In-place mode creates no worktree: it switches the project's own checkout
+    /// onto the chosen branch and reports the repo itself as the path.
+    #[tokio::test]
+    async fn create_inplace_switches_main_checkout_and_makes_no_worktree() {
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+
+        // Move the main checkout off main so the create has to switch it back.
+        sh(&repo, &["checkout", "-b", "side"]);
+        assert_eq!(crate::gitops::current_branch(&repo).as_deref(), Some("side"));
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Work on main".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::InPlace {
+                        branch: "main".into(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(created.branch, "main");
+        // The path is the project repo itself — no dedicated worktree dir.
+        assert_eq!(PathBuf::from(&created.path), repo);
+        assert!(
+            std::fs::read_dir(wt_root.path()).unwrap().next().is_none(),
+            "in-place must not create a worktree under the root"
+        );
+        // The main checkout was switched onto the chosen branch.
+        assert_eq!(crate::gitops::current_branch(&repo).as_deref(), Some("main"));
+    }
+
+    /// In-place onto a *different* branch refuses a dirty tree: a plain checkout
+    /// would silently carry the user's modified tracked files across, so the
+    /// branch + checkout are left exactly as they were.
+    #[tokio::test]
+    async fn create_inplace_refuses_dirty_tree_when_switching_branches() {
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+
+        // A branch to switch to, while a tracked file is left modified on main.
+        sh(&repo, &["branch", "other"]);
+        std::fs::write(repo.join("README.md"), "dirty edit\n").unwrap();
+
+        let err = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Switch away".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::InPlace {
+                        branch: "other".into(),
+                    },
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, CoreError::WorktreeDirty(_)), "got {err:?}");
+        // Nothing moved: still on main, edit intact.
+        assert_eq!(crate::gitops::current_branch(&repo).as_deref(), Some("main"));
+        assert_eq!(
+            std::fs::read_to_string(repo.join("README.md")).unwrap(),
+            "dirty edit\n"
+        );
+    }
+
+    /// In-place onto the branch already checked out is a no-op switch, so a dirty
+    /// tree is fine — that work belongs to the branch being adopted and must be
+    /// left untouched.
+    #[tokio::test]
+    async fn create_inplace_allows_dirty_tree_on_current_branch() {
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+
+        std::fs::write(repo.join("README.md"), "wip\n").unwrap();
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Adopt current".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::InPlace {
+                        branch: "main".into(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(created.branch, "main");
+        assert_eq!(PathBuf::from(&created.path), repo);
+        // The in-progress edit is preserved exactly.
+        assert_eq!(
+            std::fs::read_to_string(repo.join("README.md")).unwrap(),
+            "wip\n"
+        );
+    }
+
     #[tokio::test]
     async fn base_detection_falls_back_to_local_main() {
         let (_guard, repo) = fixture_repo();
@@ -738,6 +992,7 @@ mod tests {
                     title: "Restore me".into(),
                     base_override: None,
                     branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Isolated,
                 },
             )
             .await
@@ -804,6 +1059,7 @@ mod tests {
                     title: "Conflict".into(),
                     base_override: None,
                     branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Isolated,
                 },
             )
             .await
@@ -848,6 +1104,7 @@ mod tests {
                     title: "Clean me".into(),
                     base_override: None,
                     branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Isolated,
                 },
             )
             .await
@@ -914,6 +1171,7 @@ mod tests {
                     title: "Husk".into(),
                     base_override: None,
                     branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Isolated,
                 },
             )
             .await

@@ -83,6 +83,16 @@ const MIGRATIONS: &[&str] = &[
         created_at  REAL NOT NULL
     );
     ",
+    // v4: workstreams can now be created three ways. `worktree_mode` records
+    // which, so the archive/delete lifecycle knows whether the branch + dir are
+    // app-owned (safe to drop) or the user's. Existing rows are the original
+    // behavior: a new branch in a dedicated worktree → 'isolated'.
+    //   isolated — new branch <prefix><slug> in a new worktree (the default)
+    //   existing — a user-chosen local branch checked out into a new worktree
+    //   inplace  — no worktree; the project's own checkout on a chosen branch
+    "
+    ALTER TABLE workstreams ADD COLUMN worktree_mode TEXT NOT NULL DEFAULT 'isolated';
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

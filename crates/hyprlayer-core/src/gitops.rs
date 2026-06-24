@@ -77,6 +77,43 @@ pub fn list_branches(repo_path: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// Local branch names only (e.g. `main`, `feature/foo`), sorted + deduped.
+/// Used by the "existing branch" / "in-place" workstream modes, which check a
+/// branch out into a worktree (or the main checkout) — picking a remote-tracking
+/// ref like `origin/main` there would detach HEAD, so those modes must offer
+/// local branches exclusively. Cheap (git2, no fork); run on the blocking pool.
+pub fn list_local_branches(repo_path: &Path) -> Result<Vec<String>> {
+    let repo = open_repo(repo_path)?;
+    let branches = repo
+        .branches(Some(git2::BranchType::Local))
+        .map_err(|e| CoreError::OutputParse {
+            program: "git2 local branches".into(),
+            detail: e.message().to_string(),
+        })?;
+    let mut names = Vec::new();
+    for (branch, _kind) in branches.flatten() {
+        if let Ok(Some(name)) = branch.name() {
+            names.push(name.to_string());
+        }
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// Shorthand of the repo's current branch (HEAD), or `None` when detached or on
+/// an unborn branch. The "in-place" workstream mode pre-selects this so the
+/// common case (attach a workstream to whatever the main checkout is already on)
+/// needs no branch switch.
+pub fn current_branch(repo_path: &Path) -> Option<String> {
+    let repo = open_repo(repo_path).ok()?;
+    let head = repo.head().ok()?;
+    if !head.is_branch() {
+        return None;
+    }
+    head.shorthand().map(|s| s.to_string())
+}
+
 pub fn thoughts_repo_status(repo_path: &Path) -> Result<ThoughtsRepoStatus> {
     let repo = open_repo(repo_path)?;
 

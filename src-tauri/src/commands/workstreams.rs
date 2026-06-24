@@ -8,7 +8,9 @@ use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::skills::SlashCommand;
 use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
-use hyprlayer_core::worktree::{self, archive_dir_for, CreateSpec, RemovePolicy, WorktreeStatus};
+use hyprlayer_core::worktree::{
+    self, archive_dir_for, CreateMode, CreateSpec, RemovePolicy, WorktreeStatus,
+};
 use hyprlayer_core::CoreError;
 use serde::Serialize;
 use tauri::State;
@@ -29,13 +31,18 @@ pub struct WorkstreamView {
     pub seed: Option<hyprlayer_core::worktree::seed::SeedReport>,
 }
 
-/// Base-branch choices for the "new workstream" dialog: every local + remote
-/// branch, plus the auto-detected default the picker pre-selects.
+/// Branch choices for the "new workstream" dialog, covering all three modes.
+/// `branches` (local + remote) feeds the *isolated* base picker; `local_branches`
+/// feeds the *existing*/*in-place* pickers (a remote ref would detach HEAD);
+/// `current_branch` pre-selects the in-place default (whatever the checkout is
+/// already on).
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkstreamBases {
     pub branches: Vec<String>,
+    pub local_branches: Vec<String>,
     pub default_base: String,
+    pub current_branch: Option<String>,
 }
 
 fn item_not_found(id: &str) -> AppError {
@@ -209,14 +216,19 @@ pub async fn list_workstream_bases(
     let default_base = worktree::detect_base_branch(&git, &repo)
         .await
         .unwrap_or_default();
-    let branches = blocking("list_branches", move || {
-        hyprlayer_core::gitops::list_branches(&repo)
+    let (branches, local_branches, current_branch) = blocking("list_branches", move || {
+        let branches = hyprlayer_core::gitops::list_branches(&repo)?;
+        let local_branches = hyprlayer_core::gitops::list_local_branches(&repo)?;
+        let current_branch = hyprlayer_core::gitops::current_branch(&repo);
+        Ok::<_, CoreError>((branches, local_branches, current_branch))
     })
     .await?
     .map_err(AppError::from)?;
     Ok(WorkstreamBases {
         branches,
+        local_branches,
         default_base,
+        current_branch,
     })
 }
 
@@ -227,6 +239,10 @@ pub async fn create_workstream(
     project_path: String,
     title: String,
     base: Option<String>,
+    // `mode`: "isolated" (default) | "existing" | "inplace" — see `WorkstreamBases`.
+    // `branch`: the local branch to adopt for existing/inplace; unused for isolated.
+    mode: String,
+    branch: Option<String>,
 ) -> CmdResult<WorkstreamView> {
     let title = title.trim().to_string();
     if title.is_empty() {
@@ -235,6 +251,78 @@ pub async fn create_workstream(
             message: "Workstreams need a title.".into(),
             remedy: None,
         });
+    }
+
+    // Resolve the requested backing mode up front so an unknown mode or a
+    // missing branch fails before any git work.
+    let branch_choice = branch.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+    let needs_branch = |m: &str| {
+        branch_choice.clone().ok_or_else(|| AppError {
+            code: "invalid_branch".into(),
+            message: format!("Pick a branch to start the {m} workstream from."),
+            remedy: None,
+        })
+    };
+    let (create_mode, mode_str): (CreateMode, &str) = match mode.as_str() {
+        "isolated" => (CreateMode::Isolated, "isolated"),
+        "existing" => (
+            CreateMode::Existing {
+                branch: needs_branch("existing-branch")?,
+            },
+            "existing",
+        ),
+        "inplace" => (
+            CreateMode::InPlace {
+                branch: needs_branch("in-place")?,
+            },
+            "inplace",
+        ),
+        other => {
+            return Err(AppError {
+                code: "invalid_mode".into(),
+                message: format!("Unknown workstream mode: {other}"),
+                remedy: None,
+            })
+        }
+    };
+    let inplace = mode_str == "inplace";
+
+    // Existing/in-place adopt a branch the user already has, and both check it
+    // out somewhere (a worktree, or the main checkout) — a remote-tracking ref or
+    // tag would detach HEAD. The UI only offers local branches, but a direct
+    // Tauri invoke could pass anything, so validate server-side before any git
+    // work. (`WorktreeManager` documents this as a caller invariant; enforce it.)
+    if let Some(branch) = branch_choice.clone() {
+        let repo = PathBuf::from(&project_path);
+        let locals = blocking("list_local_branches", move || {
+            hyprlayer_core::gitops::list_local_branches(&repo)
+        })
+        .await?
+        .map_err(AppError::from)?;
+        if !locals.contains(&branch) {
+            return Err(AppError {
+                code: "invalid_branch".into(),
+                message: format!("`{branch}` is not a local branch."),
+                remedy: Some("Pick an existing local branch to start from.".into()),
+            });
+        }
+    }
+
+    // At most one in-place workstream per project: every in-place row shares the
+    // single project checkout, so a second one would claim a different branch on
+    // the same HEAD and the two would fight over it (silent wrong-branch work).
+    if inplace {
+        let pp = project_path.clone();
+        let active = db_task(state.db.clone(), move |db| db.list_workstreams(&pp, false)).await?;
+        if active.iter().any(|w| w.is_inplace()) {
+            return Err(AppError {
+                code: "inplace_exists".into(),
+                message: "This project already has an in-place workstream.".into(),
+                remedy: Some(
+                    "Archive it first, or create the workstream in a dedicated worktree.".into(),
+                ),
+            });
+        }
     }
 
     let effective = effective_for(&state, &project_path).await?;
@@ -261,84 +349,99 @@ pub async fn create_workstream(
                 title: title.clone(),
                 base_override,
                 branch_prefix,
+                mode: create_mode,
             },
         )
         .await
         .map_err(AppError::from)?;
 
-    // Provision hyprlayer context inside the worktree, CLI-first: `thoughts
-    // init --yes --directory <mapped>` creates the symlinks and maps the
-    // worktree to the SAME repo name, with the CLI owning its config write.
-    // Manual provisioning (which has the Windows junction fallback) is the
-    // fallback. Failures roll the worktree back so we never leave
-    // half-provisioned state behind.
     let worktree_path = PathBuf::from(&created.path);
-    let cli_init = HyprCli::new(&state.binaries)
-        .thoughts_init(&worktree_path, &mapped, effective.profile_name.as_deref())
-        .await;
-    let provision = match cli_init {
-        Ok(_) => Ok(thoughts_links::check_thoughts(&worktree_path, &effective)),
-        Err(init_err) => {
-            log::warn!("thoughts init in worktree failed ({init_err}); provisioning manually");
-            (|| -> Result<LinkStatus, CoreError> {
-                let link = thoughts_links::provision_thoughts(&worktree_path, &effective)?;
-                thoughts_links::add_worktree_mapping(
-                    state.config.path(),
-                    &worktree_path,
-                    &mapped,
-                    effective.profile_name.as_deref(),
-                )?;
-                Ok(link)
-            })()
-        }
-    };
-    let link = match provision {
-        Ok(link) => link,
-        Err(e) => {
-            let _ = state
-                .worktrees
-                .remove(
-                    &git,
-                    Path::new(&project_path),
-                    &worktree_path,
-                    &created.branch,
-                    &created.base_branch,
-                    RemovePolicy::ForceDiscard,
-                    true,
-                )
-                .await;
-            return Err(AppError::from(e));
-        }
-    };
-    state.config.invalidate().await;
 
-    // Best-effort: copy configured untracked files (e.g. .env) into the new
-    // worktree. NEVER fatal — a missing file must not undo a provisioned worktree.
-    let seed = {
-        let repo = PathBuf::from(&project_path);
-        let wt = worktree_path.clone();
-        blocking("seed_worktree", move || {
-            let patterns = hyprlayer_core::repo_settings::read(&repo)
-                .map(|s| s.worktree.copy)
-                .unwrap_or_else(|e| {
-                    log::warn!("read .hyprlayer/settings.toml: {e}");
-                    Vec::new()
-                });
-            hyprlayer_core::worktree::seed::seed_worktree(&repo, &wt, &patterns)
-        })
-        .await
-        .unwrap_or_default()
+    // In-place workstreams target the project's own checkout, which is already
+    // provisioned — re-running `thoughts init` (and rolling it back on failure)
+    // would touch the user's repo. Just read the existing link status; never
+    // provision or seed.
+    let (link, seed) = if inplace {
+        let link = thoughts_links::check_thoughts(&worktree_path, &effective);
+        (link, None)
+    } else {
+        // Provision hyprlayer context inside the new worktree, CLI-first:
+        // `thoughts init --yes --directory <mapped>` creates the symlinks and
+        // maps the worktree to the SAME repo name, with the CLI owning its
+        // config write. Manual provisioning (which has the Windows junction
+        // fallback) is the fallback. Failures roll the worktree back so we
+        // never leave half-provisioned state behind.
+        let cli_init = HyprCli::new(&state.binaries)
+            .thoughts_init(&worktree_path, &mapped, effective.profile_name.as_deref())
+            .await;
+        let provision = match cli_init {
+            Ok(_) => Ok(thoughts_links::check_thoughts(&worktree_path, &effective)),
+            Err(init_err) => {
+                log::warn!("thoughts init in worktree failed ({init_err}); provisioning manually");
+                (|| -> Result<LinkStatus, CoreError> {
+                    let link = thoughts_links::provision_thoughts(&worktree_path, &effective)?;
+                    thoughts_links::add_worktree_mapping(
+                        state.config.path(),
+                        &worktree_path,
+                        &mapped,
+                        effective.profile_name.as_deref(),
+                    )?;
+                    Ok(link)
+                })()
+            }
+        };
+        let link = match provision {
+            Ok(link) => link,
+            Err(e) => {
+                // Roll the worktree back. Delete the branch only when WE created
+                // it (isolated); an adopted existing branch is the user's.
+                let _ = state
+                    .worktrees
+                    .remove(
+                        &git,
+                        Path::new(&project_path),
+                        &worktree_path,
+                        &created.branch,
+                        &created.base_branch,
+                        RemovePolicy::ForceDiscard,
+                        mode_str == "isolated",
+                    )
+                    .await;
+                return Err(AppError::from(e));
+            }
+        };
+        state.config.invalidate().await;
+
+        // Best-effort: copy configured untracked files (e.g. .env) into the new
+        // worktree. NEVER fatal — a missing file must not undo a provisioned
+        // worktree.
+        let seed = {
+            let repo = PathBuf::from(&project_path);
+            let wt = worktree_path.clone();
+            blocking("seed_worktree", move || {
+                let patterns = hyprlayer_core::repo_settings::read(&repo)
+                    .map(|s| s.worktree.copy)
+                    .unwrap_or_else(|e| {
+                        log::warn!("read .hyprlayer/settings.toml: {e}");
+                        Vec::new()
+                    });
+                hyprlayer_core::worktree::seed::seed_worktree(&repo, &wt, &patterns)
+            })
+            .await
+            .unwrap_or_default()
+        };
+        if !seed.errors.is_empty() || !seed.missing.is_empty() {
+            log::warn!(
+                "worktree seed: copied {}, missing {:?}, errors {:?}",
+                seed.copied.len(),
+                seed.missing,
+                seed.errors
+            );
+        } else if !seed.copied.is_empty() {
+            log::info!("worktree seed: copied {} file(s)", seed.copied.len());
+        }
+        (link, Some(seed))
     };
-    if !seed.errors.is_empty() || !seed.missing.is_empty() {
-        log::warn!(
-            "worktree seed: copied {}, missing {:?}, errors {:?}",
-            seed.copied.len(),
-            seed.missing,
-            seed.errors
-        );
-    } else if !seed.copied.is_empty() {
-        log::info!("worktree seed: copied {} file(s)", seed.copied.len());
-    }
 
     let new_item = NewWorkstream {
         project_path,
@@ -347,11 +450,12 @@ pub async fn create_workstream(
         branch: created.branch.clone(),
         worktree_path: created.path.clone(),
         base_branch: created.base_branch.clone(),
+        worktree_mode: mode_str.to_string(),
     };
     let item = db_task(state.db.clone(), move |db| db.insert_workstream(new_item)).await?;
 
     let mut view = item_view(item, Some(link));
-    view.seed = Some(seed);
+    view.seed = seed;
     Ok(view)
 }
 
@@ -436,6 +540,10 @@ pub async fn list_workstream_docs(
 /// for [`restore_workstream`]. Husks (worktree dir without `.git`) can't be
 /// moved; they're pruned + cleaned, the row still flips to archived, and
 /// restore for that row will fail with `archive_missing`.
+///
+/// In-place workstreams have no dedicated worktree (their path IS the project
+/// checkout), so archive is purely a status flip: the directory, branch, and
+/// thoughts links are left exactly as they are.
 #[tauri::command]
 #[specta::specta]
 pub async fn archive_workstream(state: State<'_, AppState>, id: String) -> CmdResult<()> {
@@ -460,6 +568,12 @@ pub async fn archive_workstream(state: State<'_, AppState>, id: String) -> CmdRe
     // Same for any live terminals in this workstream: kill their shells so we
     // don't leak orphaned PTY processes against the about-to-move worktree.
     state.terminals.remove_for_workstream(&id).await;
+
+    // In-place: nothing to move or unlink — just flip the row. (The shared
+    // project checkout, its branch, and its thoughts links stay put.)
+    if item.is_inplace() {
+        return db_task(state.db.clone(), move |db| db.archive_workstream(&id)).await;
+    }
 
     let git = state
         .binaries
@@ -542,7 +656,10 @@ pub async fn list_archived_workstreams(
             .into_iter()
             .map(|item| {
                 let archive_path = archive_dir_for(Path::new(&item.project_path), &item.slug);
-                let archive_exists = archive_path.exists();
+                // In-place rows were never moved to an archive dir — archive is a
+                // pure status flip, and restore is too — so they're always
+                // restorable regardless of whether the (unused) path exists.
+                let archive_exists = item.is_inplace() || archive_path.exists();
                 ArchivedWorkstreamView {
                     archive_path: archive_path.display().to_string(),
                     archive_exists,
@@ -573,6 +690,21 @@ pub async fn restore_workstream(
             remedy: None,
         });
     }
+
+    // In-place: archive never moved anything, so restore is just the status
+    // flip plus a fresh link read against the project checkout.
+    if item.is_inplace() {
+        let effective = effective_for(&state, &item.project_path).await?;
+        let link = thoughts_links::check_thoughts(Path::new(&item.worktree_path), &effective);
+        let id_for_db = id.clone();
+        db_task(state.db.clone(), move |db| {
+            db.unarchive_workstream(&id_for_db)
+        })
+        .await?;
+        let item = load_item(&state, &id).await?;
+        return Ok(item_view(item, Some(link)));
+    }
+
     let project_path = Path::new(&item.project_path);
     let worktree_path = Path::new(&item.worktree_path);
     let archive_path = archive_dir_for(project_path, &item.slug);
@@ -665,7 +797,10 @@ pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) 
         .map_err(AppError::from)?;
     let project_path = Path::new(&item.project_path);
     let archive_path = archive_dir_for(project_path, &item.slug);
-    let delete_branch = state.settings.get().await.git.delete_branch_on_archive;
+    // Only ever delete a branch the app created (isolated). For an in-place row
+    // the archive dir doesn't exist either, so purge is just a registry prune.
+    let delete_branch =
+        state.settings.get().await.git.delete_branch_on_archive && item.app_owns_branch();
 
     state
         .worktrees
@@ -706,7 +841,7 @@ pub async fn cleanup_archived_workstreams(
         .require(BinaryKind::Git)
         .await
         .map_err(AppError::from)?;
-    let delete_branch = state.settings.get().await.git.delete_branch_on_archive;
+    let delete_branch_setting = state.settings.get().await.git.delete_branch_on_archive;
 
     let items = db_task(state.db.clone(), |db| db.list_archived_workstreams()).await?;
 
@@ -725,6 +860,8 @@ pub async fn cleanup_archived_workstreams(
         let archive_path = archive_dir_for(&project_path, &w.slug);
         let id = w.id.clone();
         let branch = w.branch.clone();
+        // Never delete a branch the app didn't create (existing/inplace).
+        let delete_branch = delete_branch_setting && w.app_owns_branch();
 
         if let Err(e) = state
             .worktrees

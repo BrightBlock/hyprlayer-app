@@ -150,6 +150,30 @@ function GitBranchIcon() {
   );
 }
 
+/** Glyph for an in-place workstream: it has no dedicated worktree, so it runs in
+ * the project's own checkout. A house reads as "home base / the main checkout"
+ * — distinct at a glance from the branch-fork used for worktree-backed rows.
+ * Geometry from Lucide's `house` for crisp, properly-weighted rendering. */
+function MainCheckoutIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+      <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  );
+}
+
 function ArchiveIcon({ size = 18 }: { size?: number }) {
   return (
     <svg
@@ -1012,6 +1036,9 @@ export function Root() {
 
                   {children.map((view) => {
                     const isActiveItem = isCurrent && activeWorkstreamId === view.item.id;
+                    // In-place workstreams run in the project's own checkout — no
+                    // dedicated worktree — so they get the house glyph and a hint.
+                    const inplace = view.item.worktreeMode === "inplace";
                     return (
                       <Link
                         key={view.item.id}
@@ -1026,10 +1053,12 @@ export function Root() {
                         className={`flex items-center gap-2 rounded-md py-1.5 pl-6 pr-2 text-sm hover:bg-edge/60 hover:text-ink ${
                           isActiveItem ? "bg-edge text-ink" : "text-ink-dim"
                         }`}
-                        title={`${view.item.title} · ${view.item.branch}`}
+                        title={`${view.item.title} · ${view.item.branch}${
+                          inplace ? " · main checkout (no worktree)" : ""
+                        }`}
                       >
                         <WorkstreamActivityDot workstreamId={view.item.id} />
-                        <GitBranchIcon />
+                        {inplace ? <MainCheckoutIcon /> : <GitBranchIcon />}
                         <span className="min-w-0 flex-1 truncate">{view.item.title}</span>
                         <WorkstreamGitChip view={view} />
                       </Link>

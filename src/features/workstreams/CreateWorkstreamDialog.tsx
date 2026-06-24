@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { WorkstreamView } from "../../lib/bindings";
 import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "../../components/ui";
-import { useCreateWorkstream, useWorkstreamBases } from "../../lib/queries";
+import { PlusIcon, SplitIcon } from "../../components/icons";
+import { useCreateWorkstream, useWorkstreamBases, type WorkstreamMode } from "../../lib/queries";
 
 type Props = {
   projectPath: string;
@@ -12,53 +13,111 @@ type Props = {
   onCreated: (view: WorkstreamView) => void;
 };
 
+/** Where work on an existing branch lives: a dedicated worktree, or the
+ * project's own checkout (no worktree). */
+type Place = "worktree" | "here";
+
+/** Prefix matches first, then any substring; non-matches dropped. Mirrors the
+ * composer's command filter so branch search feels the same. */
+function filterBranches(all: string[], query: string): string[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return all;
+  const prefix: string[] = [];
+  const substr: string[] = [];
+  for (const b of all) {
+    const name = b.toLowerCase();
+    if (name.startsWith(q)) prefix.push(b);
+    else if (name.includes(q)) substr.push(b);
+  }
+  return [...prefix, ...substr];
+}
+
 /**
- * Title prompt for a new workstream. Creation provisions a branch + worktree
- * on disk (~1-3s), so the dialog stays open with a busy state until done.
- * The base branch defaults to the repo's detected default; pick another to
- * branch from a release line or feature branch instead.
+ * New-workstream dialog. A single branch combobox is the heart of it: the
+ * pinned "New branch" row (the default) creates a fresh branch + worktree from a
+ * base; picking an existing local branch instead reveals a Worktree/Here choice
+ * — Worktree checks it out into a dedicated worktree, Here switches the
+ * project's own checkout to it with no worktree. There is no mode dropdown; the
+ * branch you choose determines the shape. The list is local branches only — a
+ * remote-tracking ref would detach HEAD.
  */
 export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }: Props) {
   const [title, setTitle] = useState("");
+  const [query, setQuery] = useState("");
+  // null = the pinned "New branch" row; otherwise the chosen existing branch.
+  const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [base, setBase] = useState("");
+  const [place, setPlace] = useState<Place>("worktree");
   const create = useCreateWorkstream(projectPath);
   const bases = useWorkstreamBases(projectPath, open);
 
-  // Pre-select the detected default once the branch list loads (unless the user
-  // already chose one), falling back to the first branch when detection turns
-  // up nothing — so the controlled <select> always matches a real option.
-  // Keyed on the dialog being open so reopening re-defaults.
   const defaultBase = bases.data?.defaultBase ?? "";
-  // Memoized so its identity is stable across renders — otherwise the `?? []`
-  // literal would re-fire the default-selection effect every render.
+  const currentBranch = bases.data?.currentBranch ?? "";
+  // Memoized so identities are stable across renders — otherwise the `?? []`
+  // literals would re-fire the default-selection effect every render.
   const branches = useMemo(() => bases.data?.branches ?? [], [bases.data?.branches]);
+  const localBranches = useMemo(
+    () => bases.data?.localBranches ?? [],
+    [bases.data?.localBranches],
+  );
+  const filtered = useMemo(() => filterBranches(localBranches, query), [localBranches, query]);
+
+  const isNew = selectedBranch === null;
+  // The current branch is already checked out in the project's own tree, so it
+  // can't also be checked out into a dedicated worktree — git refuses a branch
+  // already checked out elsewhere. Only "My checkout" (in-place) is valid for it.
+  const currentSelected = !isNew && !!currentBranch && selectedBranch === currentBranch;
+
+  // Force in-place when the current branch is picked — a new worktree for it
+  // would error. Keyed on the selection so switching to another branch frees the
+  // choice again.
+  useEffect(() => {
+    if (currentSelected && place === "worktree") setPlace("here");
+  }, [currentSelected, place]);
+
+  // Pre-select the new-branch base once the branch list loads (unless the user
+  // already chose one): the detected default, else the first branch — so the
+  // controlled <select> always matches a real option. Keyed on `open` so
+  // reopening re-defaults.
   useEffect(() => {
     if (!open || base) return;
     const initial = defaultBase || branches[0];
     if (initial) setBase(initial);
   }, [open, base, defaultBase, branches]);
 
+  const reset = () => {
+    setTitle("");
+    setQuery("");
+    setSelectedBranch(null);
+    setBase("");
+    setPlace("worktree");
+    create.reset();
+  };
+
   const close = () => {
     if (create.isPending) return;
-    setTitle("");
-    setBase("");
-    create.reset();
+    reset();
     onClose();
+  };
+
+  // Resolve the combobox state into the backend's (mode, base, branch) shape.
+  const resolved = (): { mode: WorkstreamMode; base: string | null; branch: string | null } => {
+    if (isNew) return { mode: "isolated", base: base || null, branch: null };
+    if (place === "here") return { mode: "inplace", base: null, branch: selectedBranch };
+    return { mode: "existing", base: null, branch: selectedBranch };
   };
 
   const submit = () => {
     const trimmed = title.trim();
     if (!trimmed || create.isPending) return;
     create.mutate(
-      { title: trimmed, base: base || null },
+      { title: trimmed, ...resolved() },
       {
         onSuccess: (view) => {
           // Creation succeeded — close and jump straight to the new workstream.
           // Seed-copy problems (e.g. a missing .env) surface at the project level
           // (the sidebar warning), not here, so the dialog always dismisses.
-          setTitle("");
-          setBase("");
-          create.reset();
+          reset();
           onClose();
           onCreated(view);
         },
@@ -67,9 +126,19 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
   };
 
   // A detected default that isn't in the branch list (rare) still needs an
-  // option so the Select can show it as selected.
-  const options =
+  // option so the base <select> can show it as selected.
+  const baseOptions =
     defaultBase && !branches.includes(defaultBase) ? [defaultBase, ...branches] : branches;
+
+  const inplace = !isNew && place === "here";
+  const busyLabel = inplace ? "Switching branch…" : "Provisioning worktree…";
+  const hint = isNew
+    ? "Creates a new branch named from your title, in a dedicated worktree."
+    : inplace
+      ? currentSelected
+        ? `Attaches a workstream to ${selectedBranch} in your current checkout. No worktree is created.`
+        : `Switches your checkout to ${selectedBranch}. No worktree is created.`
+      : `Checks ${selectedBranch} out into a dedicated worktree.`;
 
   return (
     <Dialog open={open} onClose={close} title="New workstream">
@@ -87,23 +156,84 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
           autoFocus
           disabled={create.isPending}
         />
-        <Field label="Base branch">
-          <Select
-            value={base}
-            onChange={(e) => setBase(e.target.value)}
-            disabled={create.isPending || bases.isLoading}
-          >
-            {bases.isLoading && <option value="">Loading branches…</option>}
-            {options.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </Select>
+
+        <Field label="Branch">
+          <div className="overflow-hidden rounded-md border border-edge">
+            <TextInput
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search branches…"
+              disabled={create.isPending || bases.isLoading}
+              className="!rounded-none !border-0 !border-b !border-edge/60"
+            />
+            <ul className="max-h-48 overflow-y-auto py-1">
+              {/* Pinned: start a fresh branch. Always present, even while filtering. */}
+              <BranchRow
+                icon={<PlusIcon size={14} />}
+                label="New branch"
+                detail="named from your title"
+                selected={isNew}
+                disabled={create.isPending}
+                onSelect={() => setSelectedBranch(null)}
+              />
+              {bases.isLoading && (
+                <li className="px-3 py-2 text-sm text-ink-dim">Loading branches…</li>
+              )}
+              {!bases.isLoading && filtered.length === 0 && query.trim() !== "" && (
+                <li className="px-3 py-2 text-sm text-ink-dim">No branches match “{query}”.</li>
+              )}
+              {filtered.map((b) => (
+                <BranchRow
+                  key={b}
+                  icon={<SplitIcon size={14} />}
+                  label={b}
+                  detail={b === currentBranch ? "active" : undefined}
+                  selected={selectedBranch === b}
+                  disabled={create.isPending}
+                  onSelect={() => setSelectedBranch(b)}
+                />
+              ))}
+            </ul>
+          </div>
         </Field>
-        <p className="text-xs leading-relaxed text-ink-dim">
-          Creates a dedicated branch and worktree, branched from the base above.
-        </p>
+
+        {isNew ? (
+          <Field label="Branched from">
+            <Select
+              value={base}
+              onChange={(e) => setBase(e.target.value)}
+              disabled={create.isPending || bases.isLoading}
+            >
+              {bases.isLoading && <option value="">Loading branches…</option>}
+              {baseOptions.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : (
+          <Field label="Where">
+            <Segmented
+              value={place}
+              onChange={setPlace}
+              disabled={create.isPending}
+              options={[
+                {
+                  value: "worktree",
+                  label: "New worktree",
+                  disabled: currentSelected,
+                  title: currentSelected
+                    ? `${selectedBranch} is already checked out here — use My checkout.`
+                    : undefined,
+                },
+                { value: "here", label: "My checkout" },
+              ]}
+            />
+          </Field>
+        )}
+
+        <p className="text-xs leading-relaxed text-ink-dim">{hint}</p>
         {bases.isError && <ErrorNote error={bases.error} />}
         {create.isError && <ErrorNote error={create.error} />}
         <div className="flex justify-end gap-2">
@@ -111,10 +241,83 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
             Cancel
           </Button>
           <Button type="submit" variant="primary" busy={create.isPending} disabled={!title.trim()}>
-            {create.isPending ? "Provisioning worktree…" : "Create"}
+            {create.isPending ? busyLabel : "Create"}
           </Button>
         </div>
       </form>
     </Dialog>
+  );
+}
+
+/** One row in the branch combobox: an icon, a label, and an optional dimmed
+ * detail/badge on the right. The selected row is highlighted. */
+function BranchRow({
+  icon,
+  label,
+  detail,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail?: string;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        disabled={disabled}
+        aria-pressed={selected}
+        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+          selected ? "bg-accent/15 text-ink ring-1 ring-inset ring-accent/30" : "hover:bg-edge/40"
+        }`}
+      >
+        <span className="shrink-0 text-ink-dim">{icon}</span>
+        <span className="min-w-0 flex-1 truncate text-ink">{label}</span>
+        {detail && <span className="shrink-0 text-xs text-ink-dim">{detail}</span>}
+      </button>
+    </li>
+  );
+}
+
+/** A compact two-or-more option segmented control — the lightweight stand-in
+ * for a dropdown when the choices are few and worth showing at a glance. */
+function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+  disabled,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string; disabled?: boolean; title?: string }[];
+  disabled?: boolean;
+}) {
+  return (
+    <div className="inline-flex rounded-md border border-edge p-0.5">
+      {options.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            disabled={disabled || opt.disabled}
+            title={opt.title}
+            aria-pressed={active}
+            className={`rounded px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+              active ? "bg-accent/20 text-ink ring-1 ring-inset ring-accent/30" : "text-ink-dim hover:text-ink"
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

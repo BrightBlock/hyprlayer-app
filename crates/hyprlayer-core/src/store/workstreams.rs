@@ -15,6 +15,11 @@ pub struct Workstream {
     pub branch: String,
     pub worktree_path: String,
     pub base_branch: String,
+    /// How the workstream is backed: `isolated` (app-created branch + dedicated
+    /// worktree), `existing` (user's local branch in a dedicated worktree), or
+    /// `inplace` (no worktree — the project's own checkout). Governs whether the
+    /// branch + directory are app-owned and safe to drop on archive/delete.
+    pub worktree_mode: String,
     /// general | research | plan | implement | validate | ship
     pub stage: String,
     /// active | archived
@@ -35,6 +40,20 @@ impl Workstream {
             None => self.branch.clone(),
         }
     }
+
+    /// `inplace` workstreams have no dedicated worktree — `worktree_path` IS the
+    /// project's main checkout. The archive/restore/delete paths special-case
+    /// these so they never move, remove, or re-link the user's repo.
+    pub fn is_inplace(&self) -> bool {
+        self.worktree_mode == "inplace"
+    }
+
+    /// True only when the app created the branch (`isolated`). `existing` and
+    /// `inplace` workstreams adopt a branch the user already had, so the app must
+    /// never delete it on archive/cleanup.
+    pub fn app_owns_branch(&self) -> bool {
+        self.worktree_mode == "isolated"
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +73,8 @@ pub struct NewWorkstream {
     pub branch: String,
     pub worktree_path: String,
     pub base_branch: String,
+    /// isolated | existing | inplace — see [`Workstream::worktree_mode`].
+    pub worktree_mode: String,
 }
 
 fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
@@ -65,6 +86,7 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
         branch: row.get("branch")?,
         worktree_path: row.get("worktree_path")?,
         base_branch: row.get("base_branch")?,
+        worktree_mode: row.get("worktree_mode")?,
         stage: row.get("stage")?,
         status: row.get("status")?,
         pr_number: row.get("pr_number")?,
@@ -75,7 +97,7 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
 }
 
 const COLS: &str = "id, project_path, title, slug, branch, worktree_path, base_branch, \
-                    stage, status, pr_number, created_at, updated_at, archived_at";
+                    worktree_mode, stage, status, pr_number, created_at, updated_at, archived_at";
 
 impl Db {
     pub fn insert_workstream(&self, new: NewWorkstream) -> Result<Workstream> {
@@ -88,6 +110,7 @@ impl Db {
             branch: new.branch,
             worktree_path: new.worktree_path,
             base_branch: new.base_branch,
+            worktree_mode: new.worktree_mode,
             stage: "general".into(),
             status: "active".into(),
             pr_number: None,
@@ -98,9 +121,9 @@ impl Db {
         self.with(|conn| {
             conn.execute(
                 "INSERT INTO workstreams (id, project_path, title, slug, branch, worktree_path,
-                                         base_branch, stage, status, pr_number, created_at,
-                                         updated_at, archived_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                                         base_branch, worktree_mode, stage, status, pr_number,
+                                         created_at, updated_at, archived_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
                 params![
                     item.id,
                     item.project_path,
@@ -109,6 +132,7 @@ impl Db {
                     item.branch,
                     item.worktree_path,
                     item.base_branch,
+                    item.worktree_mode,
                     item.stage,
                     item.status,
                     item.pr_number,
@@ -311,6 +335,7 @@ mod tests {
             branch: format!("hyprlayer/{title}-abcd"),
             worktree_path: format!("/wt/{title}"),
             base_branch: "origin/main".into(),
+            worktree_mode: "isolated".into(),
         })
         .unwrap()
     }
@@ -325,6 +350,11 @@ mod tests {
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, a.id);
         assert_eq!(listed[0].stage, "general");
+        // The fixture creates isolated workstreams: app owns the branch, has a
+        // dedicated worktree.
+        assert_eq!(listed[0].worktree_mode, "isolated");
+        assert!(listed[0].app_owns_branch());
+        assert!(!listed[0].is_inplace());
 
         db.update_workstream_stage(&a.id, "research").unwrap();
         db.update_workstream_title(&a.id, "Auth revamp").unwrap();

@@ -16,6 +16,9 @@ export function WorkstreamCard({
   onContextMenu?: (view: WorkstreamView, x: number, y: number) => void;
 }) {
   const { item } = view;
+  // In-place workstreams have no dedicated worktree — they run in the project's
+  // own checkout. Flag that so the branch pill isn't mistaken for a worktree.
+  const inplace = item.worktreeMode === "inplace";
   return (
     <div
       role="button"
@@ -36,7 +39,7 @@ export function WorkstreamCard({
         }
       }}
       className="group cursor-pointer rounded-lg border border-edge bg-panel-2 p-3 text-left transition-colors hover:border-ink-dim/50"
-      title={`${item.title} · ${item.branch}`}
+      title={`${item.title} · ${item.branch}${inplace ? " · main checkout (no worktree)" : ""}`}
     >
       <div className="flex items-start gap-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{item.title}</span>
@@ -46,6 +49,7 @@ export function WorkstreamCard({
         <span className="max-w-full truncate rounded bg-edge/60 px-1.5 py-0.5 font-mono text-xs text-ink-dim">
           {item.branch}
         </span>
+        {inplace && <Badge tone="dim">no worktree</Badge>}
         <WorkstreamGitChip view={view} />
         {item.prNumber != null && <Badge tone="accent">PR #{item.prNumber}</Badge>}
       </div>

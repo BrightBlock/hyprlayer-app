@@ -64,7 +64,7 @@ export const commands = {
 	 *  resolvable main/master still lists its branches.
 	 */
 	listWorkstreamBases: (projectPath: string) => typedError<WorkstreamBases, AppError>(__TAURI_INVOKE("list_workstream_bases", { projectPath })),
-	createWorkstream: (projectPath: string, title: string, base: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base })),
+	createWorkstream: (projectPath: string, title: string, base: string | null, mode: string, branch: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base, mode, branch })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
 	setWorkstreamStage: (id: string, stage: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
 	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
@@ -77,6 +77,10 @@ export const commands = {
 	 *  for [`restore_workstream`]. Husks (worktree dir without `.git`) can't be
 	 *  moved; they're pruned + cleaned, the row still flips to archived, and
 	 *  restore for that row will fail with `archive_missing`.
+	 * 
+	 *  In-place workstreams have no dedicated worktree (their path IS the project
+	 *  checkout), so archive is purely a status flip: the directory, branch, and
+	 *  thoughts links are left exactly as they are.
 	 */
 	archiveWorkstream: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id })),
 	/**  All archived workstreams across every project, newest-first. */
@@ -1229,6 +1233,13 @@ export type Workstream = {
 	branch: string,
 	worktreePath: string,
 	baseBranch: string,
+	/**
+	 *  How the workstream is backed: `isolated` (app-created branch + dedicated
+	 *  worktree), `existing` (user's local branch in a dedicated worktree), or
+	 *  `inplace` (no worktree — the project's own checkout). Governs whether the
+	 *  branch + directory are app-owned and safe to drop on archive/delete.
+	 */
+	worktreeMode: string,
 	/**  general | research | plan | implement | validate | ship */
 	stage: string,
 	/**  active | archived */
@@ -1240,12 +1251,17 @@ export type Workstream = {
 };
 
 /**
- *  Base-branch choices for the "new workstream" dialog: every local + remote
- *  branch, plus the auto-detected default the picker pre-selects.
+ *  Branch choices for the "new workstream" dialog, covering all three modes.
+ *  `branches` (local + remote) feeds the *isolated* base picker; `local_branches`
+ *  feeds the *existing*\/*in-place* pickers (a remote ref would detach HEAD);
+ *  `current_branch` pre-selects the in-place default (whatever the checkout is
+ *  already on).
  */
 export type WorkstreamBases = {
 	branches: string[],
+	localBranches: string[],
 	defaultBase: string,
+	currentBranch: string | null,
 };
 
 export type WorkstreamDoc = {

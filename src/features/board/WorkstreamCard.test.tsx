@@ -19,6 +19,7 @@ function makeView(over: Partial<{ prNumber: number | null }> = {}): WorkstreamVi
       branch: "feature/my-test",
       worktreePath: "/worktrees/my-test",
       baseBranch: "main",
+      worktreeMode: "isolated",
       stage: "implement",
       status: "active",
       prNumber: over.prNumber !== undefined ? over.prNumber : null,

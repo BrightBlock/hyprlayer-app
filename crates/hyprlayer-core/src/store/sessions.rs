@@ -358,6 +358,7 @@ mod tests {
             branch: "hyprlayer/t-1".into(),
             worktree_path: "/wt".into(),
             base_branch: "main".into(),
+            worktree_mode: "isolated".into(),
         })
         .unwrap();
         let ws = db.list_active_workstreams().unwrap().pop().unwrap();
@@ -410,6 +411,7 @@ mod tests {
             branch: format!("hyprlayer/t-{session_id}"),
             worktree_path: "/wt".into(),
             base_branch: "main".into(),
+            worktree_mode: "isolated".into(),
         })
         .unwrap();
         let ws = db.list_active_workstreams().unwrap().pop().unwrap();

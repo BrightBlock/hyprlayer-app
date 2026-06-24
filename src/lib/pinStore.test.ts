@@ -13,6 +13,7 @@ function makeView(id: string, projectPath = "/project"): WorkstreamView {
       branch: `feature/${id}`,
       worktreePath: `/worktrees/${id}`,
       baseBranch: "main",
+      worktreeMode: "isolated",
       stage: "general",
       status: "active",
       prNumber: null,
