@@ -80,6 +80,29 @@ export function parseQuestions(json: string): Question[] {
   return out;
 }
 
+/**
+ * Build the `answers` map sent back for an `AskUserQuestion` from the user's
+ * option picks plus any "Other" free-text. For each question the selected option
+ * labels and a trimmed custom answer are merged (custom appended last) and
+ * comma-joined — the shape the driver feeds to claude. Questions with neither a
+ * pick nor custom text are omitted; an all-empty result is the "dismissed"
+ * signal (the agent then re-asks in prose).
+ */
+export function buildQuestionAnswers(
+  questions: Question[],
+  selections: Record<string, string[]>,
+  custom: Record<string, string>,
+): Record<string, string> {
+  const answers: Record<string, string> = {};
+  for (const q of questions) {
+    const picks = [...(selections[q.question] ?? [])];
+    const extra = (custom[q.question] ?? "").trim();
+    if (extra) picks.push(extra);
+    if (picks.length > 0) answers[q.question] = picks.join(", ");
+  }
+  return answers;
+}
+
 /** Set on items produced inside a subagent (the `Task` tool-use id); the UI
  *  nests them under that Task instead of inlining them in the main thread. */
 type Parented = { parentId?: string | null };

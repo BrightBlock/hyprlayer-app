@@ -65,7 +65,14 @@ import {
   type QueuedMessage,
 } from "./sessionStore";
 import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
-import { describeState, isBusy, isTerminal, isWorking, type PendingQuestion } from "./transcript";
+import {
+  buildQuestionAnswers,
+  describeState,
+  isBusy,
+  isTerminal,
+  isWorking,
+  type PendingQuestion,
+} from "./transcript";
 import {
   AutocompleteDropdown,
   HighlightBackdrop,
@@ -491,8 +498,10 @@ function HandoffBanner({
 /**
  * The interactive answer panel for an `AskUserQuestion`, pinned just above the
  * composer. Questions are asked one at a time (a stepper): each question shows
- * its options (single- or multi-select), "Next" advances, and the last question's
- * "Submit" sends every collected answer back to the agent in one go. Selections
+ * its options (single- or multi-select) plus an always-present "Other" field for
+ * a custom free-text answer when none of the options fit (parity with Claude
+ * Code's question UI). "Next" advances, and the last question's "Submit" sends
+ * every collected answer back to the agent in one go. Selections and custom text
  * accumulate across steps (keyed by question text) and "Back" revisits them.
  * "Skip" sends no answer, which the agent handles by asking again in prose.
  * Remounted per prompt (keyed on requestId) so state never leaks between asks.
@@ -546,6 +555,10 @@ function QuestionPrompt({
   onSubmit: (answers: Record<string, string>) => void;
 }) {
   const [selections, setSelections] = useState<Record<string, string[]>>({});
+  // Free-text "Other" answers, keyed by question text. A present entry means the
+  // field is open for that question; its text is sent alongside (multi) or
+  // instead of (single) the option picks.
+  const [custom, setCustom] = useState<Record<string, string>>({});
   const [step, setStep] = useState(0);
   // Latch on the first submit/skip so a double-click can't answer twice (the
   // panel unmounts once the optimistic resolve clears the pending question).
@@ -576,8 +589,21 @@ function QuestionPrompt({
   }
 
   const chosen = selections[question.question] ?? [];
-  const currentAnswered = chosen.length > 0;
+  // A present `custom` entry means the "Other" free-text field is open for this
+  // question; its trimmed text counts as an answer alongside any option picks.
+  const otherText = custom[question.question];
+  const otherOpen = otherText !== undefined;
+  const currentAnswered = chosen.length > 0 || (otherText ?? "").trim().length > 0;
   const isLast = step === total - 1;
+
+  // Close the "Other" field for this question, dropping its text.
+  const closeOther = () =>
+    setCustom((prev) => {
+      if (!(question.question in prev)) return prev;
+      const next = { ...prev };
+      delete next[question.question];
+      return next;
+    });
 
   const toggle = (label: string) => {
     setSelections((prev) => {
@@ -590,16 +616,23 @@ function QuestionPrompt({
       }
       return { ...prev, [question.question]: [label] };
     });
+    // Single-select: a preset option and the free-text "Other" are mutually
+    // exclusive, so picking an option closes the field.
+    if (!question.multiSelect) closeOther();
   };
 
-  const submitAll = () => {
-    const answers: Record<string, string> = {};
-    for (const q of pending.questions) {
-      const picks = selections[q.question] ?? [];
-      if (picks.length > 0) answers[q.question] = picks.join(", ");
+  // Open/close the "Other" free-text field. Single-select clears any preset pick
+  // so the two stay mutually exclusive; multi-select keeps picks and appends.
+  const toggleOther = () => {
+    if (otherOpen) {
+      closeOther();
+      return;
     }
-    send(answers);
+    setCustom((prev) => ({ ...prev, [question.question]: "" }));
+    if (!question.multiSelect) setSelections((prev) => ({ ...prev, [question.question]: [] }));
   };
+
+  const submitAll = () => send(buildQuestionAnswers(pending.questions, selections, custom));
 
   // "Next" until the last question, which becomes "Submit"; both need an answer.
   const advance = () => {
@@ -607,6 +640,24 @@ function QuestionPrompt({
     if (isLast) submitAll();
     else setStep((s) => s + 1);
   };
+
+  // The radio/checkbox dot for the "Other" row — filled (accent) when its
+  // free-text field is open. `mt` aligns it with the label's first line in the
+  // closed two-line layout; the open inline-input row centers it instead.
+  const otherDot = (mt: string) => (
+    <span
+      className={`flex h-4 w-4 shrink-0 items-center justify-center border ${mt} ${
+        question.multiSelect ? "rounded" : "rounded-full"
+      } ${otherOpen ? "border-accent bg-accent" : "border-ink-dim/50"}`}
+      aria-hidden="true"
+    >
+      {otherOpen && (
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+          <path d="m2.5 6 2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent-ink" />
+        </svg>
+      )}
+    </span>
+  );
 
   return (
     <div className="mb-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-3.5">
@@ -668,6 +719,67 @@ function QuestionPrompt({
             </button>
           );
         })}
+        {/* "Other": a free-text answer, always offered so the user isn't boxed
+            into the preset options (parity with Claude Code's question UI). When
+            open the option row itself becomes an inline input — its text is
+            appended to any picks for multi-select, or replaces them for
+            single-select. */}
+        <div
+          className={`rounded-lg border transition-colors ${
+            otherOpen
+              ? "border-accent bg-accent/15"
+              : "border-edge bg-panel-2 hover:border-edge hover:bg-edge/50"
+          }`}
+        >
+          {otherOpen ? (
+            <div className="flex items-center gap-2.5 px-3 py-2">
+              <button
+                type="button"
+                disabled={submitted}
+                onClick={toggleOther}
+                aria-pressed={otherOpen}
+                aria-label="Remove custom answer"
+                className="shrink-0 disabled:opacity-50"
+              >
+                {otherDot("")}
+              </button>
+              <input
+                autoFocus
+                disabled={submitted}
+                value={otherText ?? ""}
+                aria-label="Custom answer"
+                onChange={(e) =>
+                  setCustom((prev) => ({ ...prev, [question.question]: e.target.value }))
+                }
+                onKeyDown={(e) => {
+                  // Enter submits the custom answer (single-line inline field).
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    advance();
+                  }
+                }}
+                placeholder="Type your answer…"
+                className="min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-dim focus:outline-none disabled:opacity-50"
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={submitted}
+              onClick={toggleOther}
+              aria-pressed={otherOpen}
+              className="flex w-full items-start gap-2.5 px-3 py-2 text-left disabled:opacity-50"
+            >
+              {otherDot("mt-0.5")}
+              <span className="min-w-0">
+                <span className="block text-sm text-ink">Other…</span>
+                <span className="mt-0.5 block text-xs leading-snug text-ink-dim">
+                  Write a custom answer
+                </span>
+              </span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="mt-3 flex items-center gap-2">

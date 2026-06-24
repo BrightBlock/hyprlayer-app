@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "../../lib/bindings";
 import {
   addUserMessage,
+  buildQuestionAnswers,
   cancelPendingPrompts,
   describeState,
   hasPendingPermission,
@@ -18,6 +19,7 @@ import {
   resolveQuestion,
   restoredView,
   viewToText,
+  type Question,
   type SessionView,
   type TranscriptItem,
 } from "./transcript";
@@ -441,6 +443,32 @@ describe("question flow", () => {
     expect(parseQuestions(mixed)).toEqual([
       { question: "Real?", header: "", multiSelect: false, options: [{ label: "Yes", description: "" }] },
     ]);
+  });
+
+  it("buildQuestionAnswers merges option picks with custom 'Other' text", () => {
+    const single: Question = { question: "Color?", header: "", multiSelect: false, options: [] };
+    const multi: Question = { question: "Langs?", header: "", multiSelect: true, options: [] };
+
+    // Single-select via a preset pick.
+    expect(buildQuestionAnswers([single], { "Color?": ["Red"] }, {})).toEqual({ "Color?": "Red" });
+
+    // Single-select via "Other" only (no pick) — the custom text is the answer.
+    expect(buildQuestionAnswers([single], {}, { "Color?": "Chartreuse" })).toEqual({
+      "Color?": "Chartreuse",
+    });
+
+    // Multi-select appends the custom text after the picks.
+    expect(
+      buildQuestionAnswers([multi], { "Langs?": ["Rust", "TS"] }, { "Langs?": "Zig" }),
+    ).toEqual({ "Langs?": "Rust, TS, Zig" });
+
+    // Custom text is trimmed; whitespace-only and absent answers are omitted.
+    expect(
+      buildQuestionAnswers([single, multi], {}, { "Color?": "  Teal  ", "Langs?": "   " }),
+    ).toEqual({ "Color?": "Teal" });
+
+    // Nothing chosen anywhere → empty map (the "dismissed" signal).
+    expect(buildQuestionAnswers([single, multi], {}, {})).toEqual({});
   });
 
   it("describeState labels a pending question as needing an answer", () => {
