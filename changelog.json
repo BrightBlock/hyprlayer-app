@@ -1,6 +1,19 @@
 {
   "versions": [
     {
+      "version": "0.3.2",
+      "date": "2026-06-24",
+      "summary": "Start workstreams from existing branches or in-place, pin worktrees, attach PRs, and Escape-to-close.",
+      "notes": [
+        "New workstreams can now start three ways: an isolated new branch in its own worktree (the default), an existing local branch checked out into its own worktree, or in-place — switching the project's own checkout onto a branch with no separate worktree. The New Workstream dialog replaces the base-branch dropdown with a searchable branch picker, and in-place rows carry a “no worktree” badge in the sidebar and board. Archive, restore, and delete never move, re-link, or remove a branch or repo the app didn't create.",
+        "Attach a specific open PR to a workstream by number, overriding branch-name detection for status, preview, and merge — handy when a workstream's branch doesn't match its pull request. The new picker offers free-text search and a live preview of the number you enter.",
+        "Pin frequently used worktrees to a new “Pinned” section at the top of the project sidebar so they're reachable without expanding their project tree. Pin or unpin from a worktree row's context menu; pins persist per user and drop out automatically when a worktree is archived or deleted.",
+        "Press Escape to close the topmost open surface — a dialog, context menu, or the Settings page — through one shared handler stack, so a modal opened over a page closes first and the next Escape falls through to the page beneath. Escape still reaches the terminal or editor when nothing dismissible is open.",
+        "⌘W can no longer close the last window on macOS. The Close Window menu item — one key away from ⌘⇧W (Close Agent Tab) — has been removed, so a slipped shortcut can't shut the window out from under running sessions; ⌘Q and the red traffic-light button remain the deliberate exits.",
+        "The Ship / PR / Archive controls now stay pinned to the window's right edge and no longer shift when a diff sidebar opens."
+      ]
+    },
+    {
       "version": "0.3.1",
       "date": "2026-06-23",
       "summary": "An animated brand mark beside the working timer, plus terminal-toggle and repo-path placeholder fixes.",
