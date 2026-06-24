@@ -473,6 +473,27 @@ export function QuestionIcon({ size = 14, strokeWidth = 1.8, className }: IconPr
   );
 }
 
+/** Thumbtack — marks a pinned worktree and the sidebar's "Pinned" section. */
+export function PinIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 17v5" />
+      <path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.3v.7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.7a2 2 0 0 0-1.1-1.8l-1.8-.9A2 2 0 0 1 15 10.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </svg>
+  );
+}
+
 /** Glyph for a pipeline stage / agent mode; unknown modes render as general chat. */
 export function ModeIcon({ mode, size = 16, strokeWidth = 1.8 }: IconProps & { mode: string }) {
   switch (mode) {

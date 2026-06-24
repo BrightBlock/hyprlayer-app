@@ -38,6 +38,7 @@ import { WorkstreamActivityDot } from "../features/session/WorkstreamActivity";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
 import { useUiStore } from "../lib/uiStore";
+import { selectPinnedViews, usePinStore } from "../lib/pinStore";
 import { onboardingDismissed } from "./onboardingState";
 import { useCommand } from "../lib/keybindings/registry";
 import { useKeybindings } from "../lib/keybindings/useKeybindings";
@@ -53,6 +54,7 @@ import {
   FolderIcon,
   GitCommitIcon,
   GitPullRequestIcon,
+  PinIcon,
   PlusIcon,
   TerminalIcon,
   WarningTriangleIcon,
@@ -431,6 +433,16 @@ export function Root() {
     group.push(view);
     itemsByProject.set(view.item.projectPath, group);
   }
+  // Pinned worktrees — a user-curated shortcut list rendered above the project
+  // tree (see `pinStore`). Resolved against the live active list so a pin whose
+  // workstream was archived/deleted simply drops out; `projectByPath` gives each
+  // pinned row its project's repo avatar + name (it sits outside its tree).
+  const pinnedIds = usePinStore((state) => state.pinnedIds);
+  const pinnedSectionCollapsed = usePinStore((state) => state.collapsed);
+  const togglePin = usePinStore((state) => state.togglePin);
+  const togglePinnedSection = usePinStore((state) => state.toggleCollapsed);
+  const pinnedViews = selectPinnedViews(pinnedIds, allWorkstreams.data ?? []);
+  const projectByPath = new Map(projects.map((project) => [project.path, project]));
   const activeWorkstreamId = currentProjectPath ? locationSearch.item : undefined;
   const activeWorkstream = activeWorkstreamId
     ? (allWorkstreams.data ?? []).find((view) => view.item.id === activeWorkstreamId)
@@ -881,6 +893,66 @@ export function Root() {
                 )}
               </p>
             )}
+
+            {/* Pinned worktrees: a quick-access list above the project tree.
+                Hidden on the icon rail (collapsed) and when nothing is pinned,
+                so the header never takes space until the user pins something.
+                Pin/unpin lives on the worktree row's right-click menu. */}
+            {!collapsed && pinnedViews.length > 0 && (
+              <div className="mb-1 border-b border-edge/60 pb-1.5">
+                <button
+                  type="button"
+                  onClick={togglePinnedSection}
+                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium uppercase tracking-wider text-ink-dim hover:text-ink"
+                  aria-expanded={!pinnedSectionCollapsed}
+                  title={pinnedSectionCollapsed ? "Expand pinned" : "Collapse pinned"}
+                >
+                  <ChevronDownIcon
+                    size={12}
+                    className={`shrink-0 transition-transform ${
+                      pinnedSectionCollapsed ? "-rotate-90" : ""
+                    }`}
+                  />
+                  <PinIcon size={12} className="shrink-0" />
+                  <span>Pinned</span>
+                </button>
+                {!pinnedSectionCollapsed &&
+                  pinnedViews.map((view) => {
+                    const project = projectByPath.get(view.item.projectPath);
+                    const projectName = project?.mappedName ?? "";
+                    const isActiveItem =
+                      currentProjectPath === view.item.projectPath &&
+                      activeWorkstreamId === view.item.id;
+                    return (
+                      <Link
+                        key={`pin-${view.item.id}`}
+                        to="/projects/$projectPath"
+                        params={{ projectPath: view.item.projectPath }}
+                        search={{ item: view.item.id }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setProjectMenu(null);
+                          setItemMenu({ x: e.clientX, y: e.clientY, view });
+                        }}
+                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-edge/60 hover:text-ink ${
+                          isActiveItem ? "bg-edge text-ink" : "text-ink-dim"
+                        }`}
+                        title={`${projectName} · ${view.item.title} · ${view.item.branch}`}
+                      >
+                        <WorkstreamActivityDot workstreamId={view.item.id} />
+                        <RepoAvatar source={project?.originUrl} name={projectName} size={16} />
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="text-ink-dim/70">{projectName}</span>
+                          <span className="px-1 text-ink-dim/40">›</span>
+                          {view.item.title}
+                        </span>
+                        <WorkstreamGitChip view={view} />
+                      </Link>
+                    );
+                  })}
+              </div>
+            )}
+
             {projects.map((p) => {
               const children = itemsByProject.get(p.path) ?? [];
               const isCurrent = currentProjectPath === p.path;
@@ -1065,6 +1137,14 @@ export function Root() {
             }}
           >
             Open
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              togglePin(itemMenu.view.item.id);
+              setItemMenu(null);
+            }}
+          >
+            {pinnedIds.includes(itemMenu.view.item.id) ? "Unpin workstream" : "Pin workstream"}
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => {
