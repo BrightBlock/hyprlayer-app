@@ -1,6 +1,19 @@
 {
   "versions": [
     {
+      "version": "0.3.3",
+      "date": "2026-06-24",
+      "summary": "A redesigned sidebar nav rail and unified Library, plus light-theme polish and session-recovery fixes.",
+      "notes": [
+        "The left sidebar is rebuilt around a fixed activity-bar nav rail that stays visible at all times — Home, Projects, and Library up top, with Archive, Settings, and the update pill at the foot. The Projects button now toggles the project panel VS Code-style, the project panel and the diff sidebar glide open and closed instead of snapping, and project and workstream rows are restyled with an accent spine on the active row, larger repo avatars, and an even column of status dots.",
+        "The Library is now a single master–detail view: a resizable, collapsible doc list beside an inline detail pane, so opening a document keeps your list scroll and filters instead of swapping pages. It adds a project switcher, an inline filter box, type tabs, docs grouped by type, a per-field-editable frontmatter card, a Narrow/Wide width toggle, and a “View on GitHub” link for the open doc. Switching documents now always seeds a fresh editor buffer, fixing a case where one doc's unsaved edits could be saved over another.",
+        "Light theme: the pipeline-stage badges, doc-type chips, diff add/delete colors, knowledge-graph nodes, and live-activity dots now deepen to legible tints on the cream surface instead of washing out, while the dark themes are left visually unchanged.",
+        "Question prompts now offer a custom “Other…” free-text answer when none of the preset options fit — for a single-select question the typed text and a preset pick are mutually exclusive, for multi-select the text is appended after the picked options, and pressing Enter advances or submits.",
+        "Fixed sessions that could wedge forever as “working” when you hit Stop or changed the permission mode while the agent was parked on a permission prompt or question. Stop now declines the prompt and settles the session to idle, and changing the permission level clears the card, restarts into the new mode, and flushes any queued messages.",
+        "Fixed the undersized, blurry Windows app icon by regenerating it with a full set of resolutions (16–256px) from a dedicated full-bleed source, so the taskbar, Alt-Tab, Start menu, and large-icon shell views all render sharp."
+      ]
+    },
+    {
       "version": "0.3.2",
       "date": "2026-06-24",
       "summary": "Start workstreams from existing branches or in-place, pin worktrees, attach PRs, and Escape-to-close.",
