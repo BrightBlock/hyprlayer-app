@@ -154,7 +154,7 @@ function ActionTile({
 }) {
   const tones: Record<Tone, { icon: string; hover: string }> = {
     brand: { icon: "text-brand", hover: "hover:border-brand/50" },
-    violet: { icon: "text-[#c084fc]", hover: "hover:border-[#c084fc]/50" },
+    violet: { icon: "text-revise", hover: "hover:border-revise/50" },
     neutral: { icon: "text-ink-dim", hover: "hover:border-ink-dim/50" },
   };
   return (

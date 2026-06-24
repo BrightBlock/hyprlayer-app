@@ -16,10 +16,10 @@ const ACTIVITY_STYLE: Record<
   { color: string; anim: "ping" | "work" | "none"; label: string }
 > = {
   "needs-you": { color: "bg-warn", anim: "ping", label: "Waiting on you" },
-  working: { color: "bg-sky-400", anim: "work", label: "Working" },
+  working: { color: "bg-working", anim: "work", label: "Working" },
   error: { color: "bg-bad", anim: "none", label: "Errored" },
   review: { color: "bg-ok", anim: "none", label: "Turn done" },
-  background: { color: "bg-violet-400", anim: "work", label: "Background tasks running" },
+  background: { color: "bg-background", anim: "work", label: "Background tasks running" },
 };
 
 function ActivityBadge({ activity }: { activity: WorkstreamActivity }) {

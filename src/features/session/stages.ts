@@ -135,8 +135,11 @@ export function composeStagePrompt(stage: string, input: string): string {
  * Tailwind class fragments per stage: the active mode button, the inline
  * badge, the composer textarea border, and the standalone icon accent (the
  * text-hue alone, for a colored icon on a neutral chip — see the board tiles).
- * Each stage owns one accent hue (research=sky, plan=amber, implement=emerald,
- * validate=violet, commit=teal, ship=emerald to match the header Ship action).
+ * Each stage binds one themed accent token (research/plan/implement/validate/
+ * revise, plus the shared commit/ship tokens) rather than a hardcoded Tailwind
+ * shade, so every hue recolors per theme and deepens on the light surface
+ * instead of washing out. The tokens live in src/index.css; commit/ship reuse
+ * the header action-button tokens so a stage badge matches its header action.
  */
 export const MODE_STYLES: Record<
   StageKey,
@@ -154,45 +157,45 @@ export const MODE_STYLES: Record<
     text: "text-ink-dim",
   },
   research: {
-    activeButton: "border-sky-400/40 bg-sky-400/10 text-sky-300",
-    badge: "bg-sky-400/10 text-sky-300",
-    composer: "border-sky-400/40",
-    text: "text-sky-300",
+    activeButton: "border-research/40 bg-research/10 text-research",
+    badge: "bg-research/10 text-research",
+    composer: "border-research/40",
+    text: "text-research",
   },
   plan: {
-    activeButton: "border-amber-400/40 bg-amber-400/10 text-amber-300",
-    badge: "bg-amber-400/10 text-amber-300",
-    composer: "border-amber-400/40",
-    text: "text-amber-300",
+    activeButton: "border-plan/40 bg-plan/10 text-plan",
+    badge: "bg-plan/10 text-plan",
+    composer: "border-plan/40",
+    text: "text-plan",
   },
   implement: {
-    activeButton: "border-emerald-400/40 bg-emerald-400/10 text-emerald-300",
-    badge: "bg-emerald-400/10 text-emerald-300",
-    composer: "border-emerald-400/40",
-    text: "text-emerald-300",
+    activeButton: "border-implement/40 bg-implement/10 text-implement",
+    badge: "bg-implement/10 text-implement",
+    composer: "border-implement/40",
+    text: "text-implement",
   },
   validate: {
-    activeButton: "border-violet-400/40 bg-violet-400/10 text-violet-300",
-    badge: "bg-violet-400/10 text-violet-300",
-    composer: "border-violet-400/40",
-    text: "text-violet-300",
+    activeButton: "border-validate/40 bg-validate/10 text-validate",
+    badge: "bg-validate/10 text-validate",
+    composer: "border-validate/40",
+    text: "text-validate",
   },
   commit: {
-    activeButton: "border-teal-400/40 bg-teal-400/10 text-teal-300",
-    badge: "bg-teal-400/10 text-teal-300",
-    composer: "border-teal-400/40",
-    text: "text-teal-300",
+    activeButton: "border-commit/40 bg-commit/10 text-commit",
+    badge: "bg-commit/10 text-commit",
+    composer: "border-commit/40",
+    text: "text-commit",
   },
   ship: {
-    activeButton: "border-emerald-400/40 bg-emerald-400/10 text-emerald-300",
-    badge: "bg-emerald-400/10 text-emerald-300",
-    composer: "border-emerald-400/40",
-    text: "text-emerald-300",
+    activeButton: "border-ship/40 bg-ship/10 text-ship",
+    badge: "bg-ship/10 text-ship",
+    composer: "border-ship/40",
+    text: "text-ship",
   },
   revise: {
-    activeButton: "border-purple-400/40 bg-purple-400/10 text-purple-300",
-    badge: "bg-purple-400/10 text-purple-300",
-    composer: "border-purple-400/40",
-    text: "text-purple-300",
+    activeButton: "border-revise/40 bg-revise/10 text-revise",
+    badge: "bg-revise/10 text-revise",
+    composer: "border-revise/40",
+    text: "text-revise",
   },
 };

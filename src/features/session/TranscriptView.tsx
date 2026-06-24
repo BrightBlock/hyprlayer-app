@@ -284,7 +284,7 @@ function ToolResultOutput({ result }: { result: { content: string; isError: bool
   return (
     <pre
       className={`selectable max-h-96 overflow-auto rounded p-2 font-mono text-[11px] leading-relaxed ${
-        result.isError ? "bg-bad/10 text-rose-300" : "bg-surface/60 text-ink-dim"
+        result.isError ? "bg-bad/10 text-bad" : "bg-surface/60 text-ink-dim"
       }`}
     >
       {result.content || (result.isError ? "(error, no output)" : "(no output)")}
@@ -467,7 +467,7 @@ const ToolBlock = memo(function ToolBlock({
             ⎿
           </span>
           <span
-            className={`truncate font-mono text-[11px] ${result?.isError ? "text-rose-300/90" : ""}`}
+            className={`truncate font-mono text-[11px] ${result?.isError ? "text-bad/90" : ""}`}
           >
             {preview}
           </span>
@@ -521,12 +521,12 @@ const PermissionCard = memo(function PermissionCard({
   }
 
   return (
-    <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-3">
-      <div className="flex items-center gap-2 text-amber-200">
+    <div className="rounded-lg border border-warn/40 bg-warn/10 p-3">
+      <div className="flex items-center gap-2 text-warn">
         <ShieldIcon />
         <span className="text-sm font-medium">Permission required</span>
       </div>
-      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-amber-400/20 bg-surface/40 px-2.5 py-2">
+      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-warn/20 bg-surface/40 px-2.5 py-2">
         <span className="shrink-0 font-mono text-xs font-medium text-ink">{item.toolName}</span>
         {filePath ? (
           <FileChip path={filePath} />

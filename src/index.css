@@ -36,9 +36,38 @@
      tokens — not the shared status hues — so the light theme can deepen them
      for contrast without disturbing OK/WARN/BAD. These bright tints read well
      on the dark themes; `html.light` overrides them to a darker shade so the
-     buttons don't wash out against the cream surface. */
+     buttons don't wash out against the cream surface. The Ship/Commit pipeline
+     stages reuse these same tokens (see MODE_STYLES in features/session/stages.ts),
+     so a stage badge and its matching header action always read the same hue. */
   --color-ship: #34d399;
   --color-commit: #2dd4bf;
+  /* Pipeline-stage + doc-type + activity accent hues. Each agent stage, library
+     doc type, and live-activity dot owns one hue here instead of a hardcoded
+     Tailwind shade, so they (a) recolor per theme and (b) can be deepened for the
+     light surface. Defaults are the bright Tailwind -400 tints that read on the
+     dark themes; `html.light` deepens every one. Stage research/plan also drive
+     the matching doc-type chips; working/background are the two live-activity
+     dot hues (blue = a turn running, violet = passive background shells). */
+  --color-research: #38bdf8; /* sky-400 — Research stage + research docs */
+  --color-plan: #fbbf24; /* amber-400 — Plan stage + plan docs */
+  --color-implement: #34d399; /* emerald-400 — Implement stage */
+  --color-validate: #a78bfa; /* violet-400 — Validate stage */
+  --color-revise: #c084fc; /* purple-400 — Revise stage + PR Archive */
+  --color-handoff: #fb923c; /* orange-400 — handoff docs */
+  --color-working: #38bdf8; /* sky-400 — live "working" activity */
+  --color-background: #a78bfa; /* violet-400 — passive background activity */
+  /* Knowledge-graph node hues (dashboard doc graph). Its own categorical palette,
+     deliberately distinct from the stage/doc-chip hues because it carries extra
+     categories (note, pr). Bright Tailwind tints here for the dark themes; the
+     `html.light` block deepens them so the amber/green nodes don't vanish on the
+     cream surface. Consumed as raw `var()` in SVG fills + the legend, not as
+     utility classes (see TYPE_COLORS in features/dashboard/graph.ts). */
+  --color-graph-plan: #60a5fa;
+  --color-graph-research: #c084fc;
+  --color-graph-handoff: #fbbf24;
+  --color-graph-note: #4ade80;
+  --color-graph-pr: #f472b6;
+  --color-graph-other: #9aa3af;
 }
 
 /* Light — warm neutral creams + ivories, terracotta accent shifted darker so
@@ -62,6 +91,25 @@ html.light {
   --color-brand: #1d4ed8;
   --color-brand-soft: #7c3aed;
   --color-bad: #b91c1c;
+  /* Stage/doc/activity accent hues — deepened to -600/-700 tints so the stage
+     badges, doc-type chips, and activity dots keep contrast on the cream surface
+     (the bright -400 defaults wash out on light). */
+  --color-research: #0284c7; /* sky-600 */
+  --color-plan: #b45309; /* amber-700 */
+  --color-implement: #047857; /* emerald-700 */
+  --color-validate: #6d28d9; /* violet-700 */
+  --color-revise: #7e22ce; /* purple-700 */
+  --color-handoff: #c2410c; /* orange-700 */
+  --color-working: #0284c7; /* sky-600 */
+  --color-background: #6d28d9; /* violet-700 */
+  /* Knowledge-graph node hues — deepened to -700 tints so the amber/green/pink
+     nodes keep contrast on the cream surface. */
+  --color-graph-plan: #1d4ed8; /* blue-700 */
+  --color-graph-research: #7e22ce; /* purple-700 */
+  --color-graph-handoff: #b45309; /* amber-700 */
+  --color-graph-note: #15803d; /* green-700 */
+  --color-graph-pr: #be185d; /* pink-700 */
+  --color-graph-other: #6b7280; /* gray-500 */
   color-scheme: light;
 }
 

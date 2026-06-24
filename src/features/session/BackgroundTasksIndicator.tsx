@@ -66,7 +66,7 @@ export function BackgroundTasksIndicator({
         title={countLabel}
         aria-label={countLabel}
         aria-expanded={open}
-        className="flex h-8 items-center gap-1.5 rounded-md px-2 text-violet-400 hover:bg-edge/50"
+        className="flex h-8 items-center gap-1.5 rounded-md px-2 text-background hover:bg-edge/50"
       >
         <TerminalIcon size={14} className="animate-work-pulse" />
         <span className="font-mono text-[11px]">{tasks.length}</span>

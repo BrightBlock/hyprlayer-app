@@ -107,7 +107,7 @@ const DOT_COLOR: Record<ReturnType<typeof describeState>["tone"], string> = {
   warn: "bg-warn",
   bad: "bg-bad",
   dim: "bg-ink-dim/50",
-  accent: "bg-sky-400",
+  accent: "bg-working",
 };
 
 /** A tiny status dot for an agent tab encoding the session's tone (none until a
@@ -451,8 +451,8 @@ function HandoffBanner({
       ? "Creating…"
       : "Create handoff";
   return (
-    <div className="mb-2 flex items-center gap-2 rounded-md border border-amber-400/40 bg-amber-400/5 px-3 py-2">
-      <span className="shrink-0 text-amber-300">
+    <div className="mb-2 flex items-center gap-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2">
+      <span className="shrink-0 text-warn">
         <SparkleIcon size={14} />
       </span>
       <span className="min-w-0 flex-1 text-xs text-ink-dim">
@@ -471,7 +471,7 @@ function HandoffBanner({
         type="button"
         disabled={disabled}
         onClick={isReady ? onClearAndResume : onCreateHandoff}
-        className="shrink-0 rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-xs font-medium text-amber-300 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-amber-400/10"
+        className="shrink-0 rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-xs font-medium text-warn hover:bg-warn/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-warn/10"
       >
         {actionLabel}
       </button>
@@ -564,7 +564,7 @@ function QuestionPrompt({
   // session, let the user dismiss it (the agent then re-asks in prose).
   if (!question) {
     return (
-      <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-sky-400/30 bg-sky-400/[0.06] p-3.5">
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-3.5">
         <span className="text-sm text-ink-dim">
           The agent asked a question that couldn’t be displayed.
         </span>
@@ -609,8 +609,8 @@ function QuestionPrompt({
   };
 
   return (
-    <div className="mb-2 rounded-xl border border-sky-400/30 bg-sky-400/[0.06] p-3.5">
-      <div className="mb-2.5 flex items-center gap-2 text-sky-200">
+    <div className="mb-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-3.5">
+      <div className="mb-2.5 flex items-center gap-2 text-brand">
         <QuestionIcon size={15} />
         <span className="text-sm font-medium">The agent is asking</span>
         {total > 1 && (
@@ -1525,7 +1525,7 @@ export function SessionChat({
                         aria-label="Clear context"
                         className={
                           showHandoffReady
-                            ? "flex h-8 w-8 animate-pulse items-center justify-center rounded-md text-amber-300 ring-1 ring-amber-400/50 hover:bg-amber-400/10"
+                            ? "flex h-8 w-8 animate-pulse items-center justify-center rounded-md text-warn ring-1 ring-warn/50 hover:bg-warn/10"
                             : "flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/50 hover:text-ink"
                         }
                       >

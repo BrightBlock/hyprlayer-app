@@ -24,15 +24,17 @@ export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 const TOPIC_GROUP_MAX = 6;
 
 /** Node fill per doc type. Mirrors the Library's vocabulary, with a neutral
- *  fallback for anything off-schema. Kept here (not in CSS) so the SVG and the
- *  legend read from one source. */
+ *  fallback for anything off-schema. Each hue binds a themed token (defined in
+ *  src/index.css and deepened on the light surface) so the graph recolors per
+ *  theme and its amber/green nodes stay legible on cream; the type→token mapping
+ *  stays here so the SVG fills and the legend read from one source. */
 export const TYPE_COLORS: Record<string, string> = {
-  plan: "#60a5fa",
-  research: "#c084fc",
-  handoff: "#fbbf24",
-  note: "#4ade80",
-  pr: "#f472b6",
-  other: "#9aa3af",
+  plan: "var(--color-graph-plan)",
+  research: "var(--color-graph-research)",
+  handoff: "var(--color-graph-handoff)",
+  note: "var(--color-graph-note)",
+  pr: "var(--color-graph-pr)",
+  other: "var(--color-graph-other)",
 };
 
 export function colorForType(type: string): string {

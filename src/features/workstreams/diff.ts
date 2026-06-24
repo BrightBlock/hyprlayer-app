@@ -54,11 +54,14 @@ export function parsePatchLines(patch: string): PatchLine[] {
 }
 
 /** Tailwind classes per diff-line kind — shared by every diff view so additions,
- *  deletions, and hunk headers read the same everywhere. */
+ *  deletions, and hunk headers read the same everywhere. Additions/deletions/hunks
+ *  bind the themed status tokens (ok/bad/brand) rather than fixed emerald/rose/sky
+ *  shades, so a diff reads native to the active theme and legible on the light
+ *  surface. */
 export const PATCH_LINE_CLASSES: Record<PatchLineKind, string> = {
-  add: "bg-emerald-400/10 text-emerald-300",
-  del: "bg-rose-400/10 text-rose-300",
-  hunk: "text-sky-300",
+  add: "bg-ok/10 text-ok",
+  del: "bg-bad/10 text-bad",
+  hunk: "text-brand",
   meta: "text-ink-dim/70",
   context: "text-ink-dim",
 };

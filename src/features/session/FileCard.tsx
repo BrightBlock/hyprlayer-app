@@ -41,10 +41,10 @@ function DiffPopover({
           {path}
         </span>
         {diff.additions > 0 && (
-          <span className="shrink-0 font-mono text-[11px] text-emerald-300">+{diff.additions}</span>
+          <span className="shrink-0 font-mono text-[11px] text-ok">+{diff.additions}</span>
         )}
         {diff.deletions > 0 && (
-          <span className="shrink-0 font-mono text-[11px] text-rose-300">-{diff.deletions}</span>
+          <span className="shrink-0 font-mono text-[11px] text-bad">-{diff.deletions}</span>
         )}
       </div>
       <pre

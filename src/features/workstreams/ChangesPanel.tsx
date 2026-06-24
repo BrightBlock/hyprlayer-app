@@ -306,10 +306,13 @@ function ChangeSection({
 
 // ── Documents section (workstream research/plan docs) ────────────────────────
 
+// Doc-type accent hues bind themed tokens (research/plan share the matching
+// pipeline-stage tokens; handoff its own) so the chips recolor per theme and
+// stay legible on the light surface instead of washing out. See src/index.css.
 const DOC_TONE: Record<DocKind, string> = {
-  research: "bg-sky-400/10 text-sky-300",
-  plan: "bg-amber-400/10 text-amber-300",
-  handoff: "bg-orange-400/10 text-orange-300",
+  research: "bg-research/10 text-research",
+  plan: "bg-plan/10 text-plan",
+  handoff: "bg-handoff/10 text-handoff",
 };
 
 function DocsSection({

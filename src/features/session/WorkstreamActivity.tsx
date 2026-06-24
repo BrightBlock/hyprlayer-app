@@ -16,12 +16,12 @@ const ACTIVITY_STYLE: Record<
   // Radar ping reads as "alert" — fits a session blocked on you.
   "needs-you": { color: "bg-warn", anim: "ping", label: "Waiting on you" },
   // Soft breathing reads as "live, ongoing work" — same language as the tab glow.
-  working: { color: "bg-sky-400 text-sky-400", anim: "work", label: "Working" },
+  working: { color: "bg-working text-working", anim: "work", label: "Working" },
   error: { color: "bg-bad", anim: "none", label: "Errored" },
   review: { color: "bg-ok", anim: "none", label: "Turn done — ready for review" },
   // Violet breathing = "passive background work" (turn done, but shells running).
   // Distinct hue from blue "working" so the two are visually separable.
-  background: { color: "bg-violet-400 text-violet-400", anim: "work", label: "Background tasks running" },
+  background: { color: "bg-background text-background", anim: "work", label: "Background tasks running" },
 };
 
 /**

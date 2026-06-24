@@ -95,7 +95,7 @@ export function PrStatusBar({
 
       {isOpen && data.checks === "failing" && (
         <PillButton
-          tint="border-rose-400/40 bg-rose-400/10 text-rose-300 hover:bg-rose-400/20"
+          tint="border-bad/40 bg-bad/10 text-bad hover:bg-bad/20"
           onClick={() => void addressPrFeedback(id, "ci", data.number)}
           title="Hand the failing checks to the agent to fix on this branch"
         >
@@ -104,7 +104,7 @@ export function PrStatusBar({
       )}
       {isOpen && data.reviewDecision === "CHANGES_REQUESTED" && (
         <PillButton
-          tint="border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20"
+          tint="border-warn/40 bg-warn/10 text-warn hover:bg-warn/20"
           onClick={() => void addressPrFeedback(id, "comments", data.number)}
           title="Hand the review feedback to the agent to address on this branch"
         >
@@ -146,7 +146,7 @@ export function PrStatusBar({
       )}
       {isMerged && (
         <PillButton
-          tint="border-purple-400/40 bg-purple-400/10 text-purple-300 hover:bg-purple-400/20"
+          tint="border-revise/40 bg-revise/10 text-revise hover:bg-revise/20"
           onClick={() => onArchive(view)}
           title="Merged — remove this workstream's git worktree"
         >
