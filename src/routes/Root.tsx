@@ -22,6 +22,7 @@ import {
   useAllWorkstreams,
   useArchiveWorkstream,
   useBootstrap,
+  useDetachPr,
   useEditorTargets,
   useWorkstreamPr,
   useWorktreeFilesCheck,
@@ -63,6 +64,7 @@ import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstre
 import { WorkstreamGitChip } from "../features/workstreams/WorkstreamGitChip";
 import { PrStatusBar } from "../features/workstreams/PrStatusBar";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
+import { AttachPrDialog } from "../features/workstreams/AttachPrDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
 import { RemoveProjectDialog } from "../features/projects/RemoveProjectDialog";
@@ -554,6 +556,9 @@ export function Root() {
   } | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
   const [renameTarget, setRenameTarget] = useState<WorkstreamView | null>(null);
+  const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(null);
+  // Detach acts on whichever item's menu is open; the hook rebinds to its id.
+  const detachPr = useDetachPr(itemMenu?.view.item.id ?? "");
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [projectMenu, setProjectMenu] = useState<{ x: number; y: number; project: Project } | null>(
     null,
@@ -1070,6 +1075,24 @@ export function Root() {
             Rename workstream…
           </ContextMenuItem>
           <ContextMenuItem
+            onClick={() => {
+              setAttachPrTarget(itemMenu.view);
+              setItemMenu(null);
+            }}
+          >
+            {itemMenu.view.item.prNumber === null ? "Attach PR…" : "Change PR…"}
+          </ContextMenuItem>
+          {itemMenu.view.item.prNumber !== null && (
+            <ContextMenuItem
+              onClick={() => {
+                detachPr.mutate();
+                setItemMenu(null);
+              }}
+            >
+              Detach PR #{itemMenu.view.item.prNumber}
+            </ContextMenuItem>
+          )}
+          <ContextMenuItem
             danger
             onClick={() => {
               setArchiveTarget(itemMenu.view);
@@ -1147,6 +1170,8 @@ export function Root() {
       )}
 
       <RenameWorkstreamDialog target={renameTarget} onClose={() => setRenameTarget(null)} />
+
+      <AttachPrDialog target={attachPrTarget} onClose={() => setAttachPrTarget(null)} />
 
       <ArchiveWorkstreamDialog
         target={archiveTarget}

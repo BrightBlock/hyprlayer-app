@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use hyprlayer_core::gitops::{DirEntry, FileSides, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
-use hyprlayer_core::pr::{self, MergeMethod, PrStatus};
+use hyprlayer_core::pr::{self, MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::skills::SlashCommand;
 use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
@@ -51,6 +51,19 @@ async fn load_item(state: &AppState, id: &str) -> CmdResult<Workstream> {
     db_task(state.db.clone(), move |db| db.get_workstream(&id_owned))
         .await?
         .ok_or_else(|| item_not_found(id))
+}
+
+/// The directory to run `gh` PR commands in for an item: its worktree when on
+/// disk, else the main repo. Both share the same remote, so PR number/branch
+/// resolution is identical; the fallback keeps PR ops working for a workstream
+/// whose worktree was removed (e.g. just archived).
+fn pr_dir(item: &Workstream) -> &Path {
+    let worktree = Path::new(&item.worktree_path);
+    if worktree.is_dir() {
+        worktree
+    } else {
+        Path::new(&item.project_path)
+    }
 }
 
 /// Live git + thoughts-link status for one item (blocking work).
@@ -905,10 +918,10 @@ pub async fn worktree_search_files(
     .await
 }
 
-/// The pull request for a workstream's branch, or `None` when there's no PR yet.
-/// Derived live from `gh`. Degrades to `None` (never an error) when gh is
-/// missing/unauthenticated or the call fails — the PR bar simply stays hidden,
-/// matching `list_recent_repos`.
+/// The pull request for a workstream — the manually attached PR (by number) when
+/// one is set, otherwise the branch's own PR. Derived live from `gh`. Degrades to
+/// `None` (never an error) when gh is missing/unauthenticated or the call fails —
+/// the PR bar simply stays hidden, matching `list_recent_repos`.
 #[tauri::command]
 #[specta::specta]
 pub async fn workstream_pr_status(
@@ -919,13 +932,138 @@ pub async fn workstream_pr_status(
     let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
         return Ok(None);
     };
-    match pr::pr_status(&gh, Path::new(&item.worktree_path), &item.branch).await {
+    let pr_ref = item.pr_ref();
+    match pr::pr_status(&gh, Path::new(&item.worktree_path), &pr_ref).await {
         Ok(status) => Ok(status),
         Err(e) => {
-            log::debug!("gh pr status unavailable for {}: {e}", item.branch);
+            log::debug!("gh pr status unavailable for {pr_ref}: {e}");
             Ok(None)
         }
     }
+}
+
+/// Open PRs in the workstream's repo for the "Attach PR" picker, filtered by
+/// `query` (free-text GitHub search when non-empty). Degrades to an empty list
+/// (never an error) when gh is missing/unauthenticated or the repo has none, so
+/// the picker shows its "No open PRs found" state rather than failing.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_workstream_open_prs(
+    state: State<'_, AppState>,
+    id: String,
+    query: String,
+) -> CmdResult<Vec<PrSummary>> {
+    let item = load_item(&state, &id).await?;
+    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
+        return Ok(Vec::new());
+    };
+    // List from the worktree when it's on disk, else the main repo — both
+    // resolve to the same remote, and a just-archived worktree shouldn't error.
+    let dir = pr_dir(&item);
+    match pr::list_open_prs(&gh, dir, &query, 50).await {
+        Ok(prs) => Ok(prs),
+        Err(e) => {
+            log::debug!("gh pr list unavailable for {}: {e}", item.project_path);
+            Ok(Vec::new())
+        }
+    }
+}
+
+/// A live preview of the PR a user typed into the attach picker (by number), or
+/// `None` when no such PR exists. Degrades to `None` (never an error) on any gh
+/// failure, so the picker shows its "not found" hint rather than failing.
+#[tauri::command]
+#[specta::specta]
+pub async fn preview_workstream_pr(
+    state: State<'_, AppState>,
+    id: String,
+    pr_number: u32,
+) -> CmdResult<Option<PrSummary>> {
+    let item = load_item(&state, &id).await?;
+    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
+        return Ok(None);
+    };
+    match pr::pr_summary(&gh, pr_dir(&item), &pr_number.to_string()).await {
+        Ok(summary) => Ok(summary),
+        Err(e) => {
+            log::debug!("gh pr preview unavailable for #{pr_number}: {e}");
+            Ok(None)
+        }
+    }
+}
+
+/// Attach PR `pr_number` to a workstream, overriding branch-based detection.
+/// Validates the number resolves to a real PR in the repo before persisting, so
+/// a typo'd number surfaces an error in the dialog instead of silently hiding
+/// the PR bar. Returns the freshly fetched status (what the bar then renders).
+#[tauri::command]
+#[specta::specta]
+pub async fn attach_workstream_pr(
+    state: State<'_, AppState>,
+    id: String,
+    pr_number: u32,
+) -> CmdResult<Option<PrStatus>> {
+    let item = load_item(&state, &id).await?;
+    let gh = state
+        .binaries
+        .require(BinaryKind::Gh)
+        .await
+        .map_err(AppError::from)?;
+    let status = match pr::pr_status(&gh, pr_dir(&item), &pr_number.to_string()).await {
+        Ok(Some(status)) => status,
+        Ok(None) => return Err(attach_pr_error(pr_number, None)),
+        // A bad number doesn't hit the "no pull requests found" path — gh fails
+        // with GitHub's own message ("Could not resolve to a PullRequest…").
+        // Surface that text rather than the framed `gh` exec error.
+        Err(e) => return Err(attach_pr_error(pr_number, Some(e))),
+    };
+    db_task(state.db.clone(), move |db| {
+        db.set_workstream_pr(&id, Some(pr_number))
+    })
+    .await?;
+    Ok(Some(status))
+}
+
+/// Build a dialog-facing error for a failed PR attach. Surfaces GitHub's own
+/// message (from gh's stderr) without the underlying `gh …` invocation framing;
+/// falls back to a plain "not found" when there's no usable detail.
+fn attach_pr_error(pr_number: u32, err: Option<CoreError>) -> AppError {
+    let detail = match err {
+        Some(CoreError::Exec { stderr_tail, .. }) => clean_gh_stderr(&stderr_tail),
+        _ => String::new(),
+    };
+    let message = if detail.is_empty() {
+        format!("No pull request #{pr_number} found in this repository")
+    } else {
+        detail
+    };
+    AppError {
+        code: "pr_not_found".into(),
+        message,
+        remedy: None,
+    }
+}
+
+/// Strip gh/GraphQL decoration from a stderr line so the user sees just the
+/// message: drops a leading `GraphQL: ` tag and a trailing space-free
+/// `(path.hint)` GraphQL field path (e.g. `(repository.pullRequest)`).
+fn clean_gh_stderr(stderr: &str) -> String {
+    let mut s = stderr.trim();
+    s = s.strip_prefix("GraphQL: ").unwrap_or(s);
+    if let Some(open) = s.rfind(" (") {
+        if s.ends_with(')') && !s[open + 2..s.len() - 1].contains(' ') {
+            s = s[..open].trim_end();
+        }
+    }
+    s.to_string()
+}
+
+/// Detach any manually attached PR, reverting to branch-based detection.
+#[tauri::command]
+#[specta::specta]
+pub async fn detach_workstream_pr(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    load_item(&state, &id).await?;
+    db_task(state.db.clone(), move |db| db.set_workstream_pr(&id, None)).await
 }
 
 /// Merge a workstream's PR with the chosen method (squash/merge/rebase).
@@ -946,10 +1084,48 @@ pub async fn merge_workstream_pr(
     pr::merge_pr(
         &gh,
         Path::new(&item.worktree_path),
-        &item.branch,
+        &item.pr_ref(),
         method,
         auto,
     )
     .await
     .map_err(AppError::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_gh_stderr_strips_graphql_decoration() {
+        // The real "unknown PR number" message: GraphQL tag + trailing field path.
+        assert_eq!(
+            clean_gh_stderr(
+                "GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)"
+            ),
+            "Could not resolve to a PullRequest with the number of 999."
+        );
+        // A plain message is passed through untouched (trimmed only).
+        assert_eq!(clean_gh_stderr("  not found  "), "not found");
+        // A trailing parenthetical that isn't a field path (has spaces) is kept.
+        assert_eq!(clean_gh_stderr("failed (try again later)"), "failed (try again later)");
+    }
+
+    #[test]
+    fn attach_pr_error_uses_gh_message_then_falls_back() {
+        let err = CoreError::Exec {
+            program: "gh pr view".into(),
+            exit: Some(1),
+            stderr_tail: "GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)".into(),
+        };
+        // The exec error's stderr becomes the message — no `gh` framing leaks.
+        let app = attach_pr_error(999, Some(err));
+        assert_eq!(app.message, "Could not resolve to a PullRequest with the number of 999.");
+        assert!(!app.message.contains("gh"));
+        // No usable detail → a plain not-found fallback.
+        assert_eq!(
+            attach_pr_error(7, None).message,
+            "No pull request #7 found in this repository"
+        );
+    }
 }

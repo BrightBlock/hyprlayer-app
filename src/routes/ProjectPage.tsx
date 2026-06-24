@@ -14,7 +14,7 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "../components/icons";
-import { commands } from "../lib/bindings";
+import { commands, type WorkstreamView } from "../lib/bindings";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { ChangesPanel } from "../features/workstreams/ChangesPanel";
 import { PrChecksPanel } from "../features/workstreams/PrChecksPanel";
@@ -44,7 +44,8 @@ import {
 } from "../features/session/workstreamTabs";
 import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
 import { ProjectBoard } from "../features/board/ProjectBoard";
-import { useBootstrap, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
+import { AttachPrDialog } from "../features/workstreams/AttachPrDialog";
+import { useBootstrap, useDetachPr, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
 import { basename } from "../lib/path";
 import { clamp, startEdgeDrag } from "../lib/resize";
 import { DIFF_SIDEBAR_MAX, DIFF_SIDEBAR_MIN, useUiStore } from "../lib/uiStore";
@@ -208,6 +209,12 @@ export function ProjectPage() {
   const tabsByWs = useWorkstreamTabsStore((s) => s.byWs);
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  // Board-card right-click menu (Attach/Change/Detach PR) and the attach dialog.
+  const [cardMenu, setCardMenu] = useState<{ x: number; y: number; view: WorkstreamView } | null>(
+    null,
+  );
+  const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(null);
+  const detachPr = useDetachPr(cardMenu?.view.item.id ?? "");
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   // Which shell's "+" opened the library picker modal (null = closed).
@@ -996,7 +1003,31 @@ export function ProjectPage() {
           views={views}
           onOpen={(id) => selectItem(id)}
           onNewWorkstream={() => setCreateOpen(true)}
+          onCardContextMenu={(view, x, y) => setCardMenu({ x, y, view })}
         />
+        {cardMenu && (
+          <ContextMenu position={cardMenu} onClose={() => setCardMenu(null)}>
+            <ContextMenuItem
+              onClick={() => {
+                setAttachPrTarget(cardMenu.view);
+                setCardMenu(null);
+              }}
+            >
+              {cardMenu.view.item.prNumber === null ? "Attach PR…" : "Change PR…"}
+            </ContextMenuItem>
+            {cardMenu.view.item.prNumber !== null && (
+              <ContextMenuItem
+                onClick={() => {
+                  detachPr.mutate();
+                  setCardMenu(null);
+                }}
+              >
+                Detach PR #{cardMenu.view.item.prNumber}
+              </ContextMenuItem>
+            )}
+          </ContextMenu>
+        )}
+        <AttachPrDialog target={attachPrTarget} onClose={() => setAttachPrTarget(null)} />
         <CreateWorkstreamDialog
           projectPath={projectPath}
           open={createOpen}

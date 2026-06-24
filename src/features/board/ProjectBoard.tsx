@@ -13,10 +13,12 @@ export function ProjectBoard({
   views,
   onOpen,
   onNewWorkstream,
+  onCardContextMenu,
 }: {
   views: WorkstreamView[];
   onOpen: (id: string) => void;
   onNewWorkstream: () => void;
+  onCardContextMenu?: (view: WorkstreamView, x: number, y: number) => void;
 }) {
   const grouped = groupByColumn(views);
 
@@ -55,7 +57,7 @@ export function ProjectBoard({
             >
               {grouped[col.key].map((view) => (
                 <div key={view.item.id} role="listitem">
-                  <WorkstreamCard view={view} onOpen={onOpen} />
+                  <WorkstreamCard view={view} onOpen={onOpen} onContextMenu={onCardContextMenu} />
                 </div>
               ))}
             </BoardColumn>

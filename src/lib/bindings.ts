@@ -151,10 +151,10 @@ export const commands = {
 	 */
 	watchWorktree: (workstreamId: string) => typedError<null, AppError>(__TAURI_INVOKE("watch_worktree", { workstreamId })),
 	/**
-	 *  The pull request for a workstream's branch, or `None` when there's no PR yet.
-	 *  Derived live from `gh`. Degrades to `None` (never an error) when gh is
-	 *  missing/unauthenticated or the call fails — the PR bar simply stays hidden,
-	 *  matching `list_recent_repos`.
+	 *  The pull request for a workstream — the manually attached PR (by number) when
+	 *  one is set, otherwise the branch's own PR. Derived live from `gh`. Degrades to
+	 *  `None` (never an error) when gh is missing/unauthenticated or the call fails —
+	 *  the PR bar simply stays hidden, matching `list_recent_repos`.
 	 */
 	workstreamPrStatus: (id: string) => typedError<{
 	number: number,
@@ -183,6 +183,64 @@ export const commands = {
 	 */
 	reviewDecision: string | null,
 } | null, AppError>(__TAURI_INVOKE("workstream_pr_status", { id })),
+	/**
+	 *  Open PRs in the workstream's repo for the "Attach PR" picker, filtered by
+	 *  `query` (free-text GitHub search when non-empty). Degrades to an empty list
+	 *  (never an error) when gh is missing/unauthenticated or the repo has none, so
+	 *  the picker shows its "No open PRs found" state rather than failing.
+	 */
+	listWorkstreamOpenPrs: (id: string, query: string) => typedError<PrSummary[], AppError>(__TAURI_INVOKE("list_workstream_open_prs", { id, query })),
+	/**
+	 *  A live preview of the PR a user typed into the attach picker (by number), or
+	 *  `None` when no such PR exists. Degrades to `None` (never an error) on any gh
+	 *  failure, so the picker shows its "not found" hint rather than failing.
+	 */
+	previewWorkstreamPr: (id: string, prNumber: number) => typedError<{
+	number: number,
+	title: string,
+	/**
+	 *  The PR's source branch, shown as a subtitle so two PRs with similar
+	 *  titles are still distinguishable.
+	 */
+	headRefName: string,
+	url: string,
+	isDraft: boolean,
+} | null, AppError>(__TAURI_INVOKE("preview_workstream_pr", { id, prNumber })),
+	/**
+	 *  Attach PR `pr_number` to a workstream, overriding branch-based detection.
+	 *  Validates the number resolves to a real PR in the repo before persisting, so
+	 *  a typo'd number surfaces an error in the dialog instead of silently hiding
+	 *  the PR bar. Returns the freshly fetched status (what the bar then renders).
+	 */
+	attachWorkstreamPr: (id: string, prNumber: number) => typedError<{
+	number: number,
+	url: string,
+	title: string,
+	state: PrState,
+	/**
+	 *  GitHub reports the PR cleanly mergeable (no conflicts). True only for
+	 *  `MERGEABLE`; the Merge button gates on this.
+	 */
+	mergeable: boolean,
+	/**
+	 *  GitHub's full mergeability verdict. Carries the `CONFLICTING` distinction
+	 *  `mergeable` discards, so the checks panel can show a merge-conflict row.
+	 */
+	mergeableState: MergeableState,
+	checks: ChecksState,
+	checksTotal: number,
+	checksPassed: number,
+	checksFailed: number,
+	/**  The individual checks, for the "which ran?" breakdown popover. */
+	checksList: PrCheck[],
+	/**
+	 *  `APPROVED` | `CHANGES_REQUESTED` | `REVIEW_REQUIRED`, or None when the PR
+	 *  requires no review / has no decision yet.
+	 */
+	reviewDecision: string | null,
+} | null, AppError>(__TAURI_INVOKE("attach_workstream_pr", { id, prNumber })),
+	/**  Detach any manually attached PR, reverting to branch-based detection. */
+	detachWorkstreamPr: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("detach_workstream_pr", { id })),
 	/**  Merge a workstream's PR with the chosen method (squash/merge/rebase). */
 	mergeWorkstreamPr: (id: string, method: MergeMethod) => typedError<null, AppError>(__TAURI_INVOKE("merge_workstream_pr", { id, method })),
 	/**
@@ -822,6 +880,22 @@ export type PrStatus = {
  */
 export type PrStatusChanged = {
 	workstreamId: string,
+};
+
+/**
+ *  A lightweight open-PR row for the "Attach PR" picker: enough to display a
+ *  choice and attach it by number. From `gh pr list --json …`.
+ */
+export type PrSummary = {
+	number: number,
+	title: string,
+	/**
+	 *  The PR's source branch, shown as a subtitle so two PRs with similar
+	 *  titles are still distinguishable.
+	 */
+	headRefName: string,
+	url: string,
+	isDraft: boolean,
 };
 
 export type Project = {

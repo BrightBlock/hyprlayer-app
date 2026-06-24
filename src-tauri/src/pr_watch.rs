@@ -157,7 +157,7 @@ async fn poll_all(gh: &Path, items: Vec<Workstream>) -> Vec<(String, Result<Opti
         }
         let gh = gh.to_path_buf();
         set.spawn(async move {
-            let res = pr::pr_status(&gh, Path::new(&item.worktree_path), &item.branch).await;
+            let res = pr::pr_status(&gh, Path::new(&item.worktree_path), &item.pr_ref()).await;
             (item.id, res)
         });
     }

@@ -409,6 +409,53 @@ export function useMergePr(id: string) {
   });
 }
 
+/** Open PRs in a workstream's repo for the "Attach PR" picker, filtered live by
+ *  `query` (GitHub search syntax). Enabled only while the picker is open. */
+export function useWorkstreamOpenPrs(id: string, query: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "open-prs", query],
+    queryFn: () => unwrap(commands.listWorkstreamOpenPrs(id, query)),
+    enabled: enabled && id.length > 0,
+    // Each `gh pr list` is a subprocess; keep results briefly so reopening the
+    // picker or backspacing to a prior query doesn't re-run it.
+    staleTime: 15_000,
+  });
+}
+
+/** Live preview of the PR a user typed into the attach picker (by number), or
+ *  null when no such PR exists — confirms the number before attaching. */
+export function useWorkstreamPrPreview(id: string, prNumber: number | null, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "pr-preview", prNumber],
+    queryFn: () => unwrap(commands.previewWorkstreamPr(id, prNumber as number)),
+    enabled: enabled && id.length > 0 && prNumber !== null,
+    staleTime: 15_000,
+  });
+}
+
+/** Attach a PR (by number) to a workstream, then refresh the PR bar + sidebar.
+ *  Errors (e.g. unknown number) surface to the dialog via the mutation state. */
+export function useAttachPr(id: string) {
+  return useMutation({
+    mutationFn: (prNumber: number) => unwrap(commands.attachWorkstreamPr(id, prNumber)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstream(id);
+    },
+  });
+}
+
+/** Detach a workstream's manually attached PR, reverting to branch detection. */
+export function useDetachPr(id: string) {
+  return useMutation({
+    mutationFn: () => unwrap(commands.detachWorkstreamPr(id)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstream(id);
+    },
+  });
+}
+
 // ── Source-control panel ──────────────────────────────────────────────────
 
 /** Invalidate the things a staging action changes: the split status and the

@@ -25,6 +25,18 @@ pub struct Workstream {
     pub archived_at: Option<f64>,
 }
 
+impl Workstream {
+    /// The argument to pass `gh pr view`/`gh pr merge` for this workstream's PR:
+    /// a manually attached PR number when one is set, otherwise the branch name
+    /// (gh then resolves the branch's own open PR — the default behavior).
+    pub fn pr_ref(&self) -> String {
+        match self.pr_number {
+            Some(n) => n.to_string(),
+            None => self.branch.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -332,6 +344,23 @@ mod tests {
             .is_some());
 
         assert!(db.get_workstream("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn pr_ref_prefers_attached_number_then_branch() {
+        let db = Db::open_in_memory().unwrap();
+        let a = item(&db, "auth");
+        // No attached PR → gh resolves the branch's own PR.
+        assert_eq!(a.pr_ref(), a.branch);
+
+        db.set_workstream_pr(&a.id, Some(42)).unwrap();
+        let attached = db.get_workstream(&a.id).unwrap().unwrap();
+        assert_eq!(attached.pr_ref(), "42");
+
+        // Detaching reverts to branch-based resolution.
+        db.set_workstream_pr(&a.id, None).unwrap();
+        let detached = db.get_workstream(&a.id).unwrap().unwrap();
+        assert_eq!(detached.pr_ref(), detached.branch);
     }
 
     #[test]

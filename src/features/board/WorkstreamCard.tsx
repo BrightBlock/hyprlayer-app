@@ -4,13 +4,16 @@ import { WorkstreamGitChip } from "../workstreams/WorkstreamGitChip";
 import { Badge } from "../../components/ui";
 
 /** A clickable kanban card representing one active workstream. Clicking (or
- *  pressing Enter / Space) calls `onOpen` with the workstream's id. */
+ *  pressing Enter / Space) calls `onOpen` with the workstream's id; right-click
+ *  opens the card's context menu via `onContextMenu` (e.g. Attach PR). */
 export function WorkstreamCard({
   view,
   onOpen,
+  onContextMenu,
 }: {
   view: WorkstreamView;
   onOpen: (id: string) => void;
+  onContextMenu?: (view: WorkstreamView, x: number, y: number) => void;
 }) {
   const { item } = view;
   return (
@@ -19,6 +22,13 @@ export function WorkstreamCard({
       tabIndex={0}
       aria-label={item.title}
       onClick={() => onOpen(item.id)}
+      onContextMenu={
+        onContextMenu &&
+        ((e) => {
+          e.preventDefault();
+          onContextMenu(view, e.clientX, e.clientY);
+        })
+      }
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();

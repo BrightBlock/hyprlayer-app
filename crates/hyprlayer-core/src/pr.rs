@@ -97,6 +97,21 @@ pub struct PrCheck {
     pub url: Option<String>,
 }
 
+/// A lightweight open-PR row for the "Attach PR" picker: enough to display a
+/// choice and attach it by number. From `gh pr list --json …`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct PrSummary {
+    pub number: u32,
+    pub title: String,
+    /// The PR's source branch, shown as a subtitle so two PRs with similar
+    /// titles are still distinguishable.
+    pub head_ref_name: String,
+    pub url: String,
+    pub is_draft: bool,
+}
+
 /// A branch's pull request as the PR status bar renders it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -288,17 +303,19 @@ fn parse_pr(stdout: &str) -> Result<PrStatus> {
     })
 }
 
-/// The PR for `branch`, or `None` when the branch has no pull request. Runs
-/// `gh pr view <branch> --json …` in `worktree`. A missing PR is the common,
-/// non-error case (`gh` exits non-zero with "no pull requests found"), reported
-/// as `Ok(None)`; any other failure is a real error.
-pub async fn pr_status(gh: &Path, worktree: &Path, branch: &str) -> Result<Option<PrStatus>> {
+/// The PR identified by `pr_ref`, or `None` when there's no matching pull
+/// request. `pr_ref` is whatever `gh pr view` accepts as its argument — a branch
+/// name (the default: the branch's open PR), a PR number (a manually attached
+/// PR), or a URL. Runs `gh pr view <pr_ref> --json …` in `worktree`. A missing
+/// PR is the common, non-error case (`gh` exits non-zero with "no pull requests
+/// found"), reported as `Ok(None)`; any other failure is a real error.
+pub async fn pr_status(gh: &Path, worktree: &Path, pr_ref: &str) -> Result<Option<PrStatus>> {
     let out = Exec::new(gh)
         .cwd(worktree)
         .args([
             "pr",
             "view",
-            branch,
+            pr_ref,
             "--json",
             "number,url,title,state,mergeable,reviewDecision,statusCheckRollup",
         ])
@@ -321,10 +338,120 @@ pub async fn pr_status(gh: &Path, worktree: &Path, branch: &str) -> Result<Optio
     })
 }
 
-/// Merge `branch`'s PR with the chosen method. Does not pass `--delete-branch`:
-/// gh would try to delete the local branch checked out in this worktree (and
-/// switch branches), which fails. Local branch + worktree teardown is the
-/// archive step's job; GitHub auto-deletes the remote branch if so configured.
+/// `headRefName` + `isDraft` over [`RawPr`]'s shared fields, for the picker rows
+/// (`gh pr list` returns an array of these).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPrSummary {
+    number: u32,
+    title: String,
+    head_ref_name: String,
+    url: String,
+    #[serde(default)]
+    is_draft: bool,
+}
+
+impl From<RawPrSummary> for PrSummary {
+    fn from(r: RawPrSummary) -> Self {
+        PrSummary {
+            number: r.number,
+            title: r.title,
+            head_ref_name: r.head_ref_name,
+            url: r.url,
+            is_draft: r.is_draft,
+        }
+    }
+}
+
+/// Up to `limit` open PRs in `dir`'s repo for the attach picker, newest first.
+/// When `query` is non-empty it's passed to `gh pr list --search`, so the same
+/// box does free-text filtering (GitHub search syntax). An unauthenticated or
+/// repo-less directory yields an error the caller degrades to an empty list.
+pub async fn list_open_prs(
+    gh: &Path,
+    dir: &Path,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<PrSummary>> {
+    let limit = limit.to_string();
+    let mut args = vec![
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--limit",
+        &limit,
+        "--json",
+        "number,title,headRefName,url,isDraft",
+    ];
+    let query = query.trim();
+    if !query.is_empty() {
+        args.push("--search");
+        args.push(query);
+    }
+    let out = Exec::new(gh)
+        .cwd(dir)
+        .args(args)
+        .timeout(Duration::from_secs(30))
+        .run()
+        .await?;
+    parse_pr_list(&out.stdout)
+}
+
+/// Parse a `gh pr list --json` array into [`PrSummary`] rows. Split out from
+/// [`list_open_prs`] so the mapping is unit-testable without `gh`.
+fn parse_pr_list(stdout: &str) -> Result<Vec<PrSummary>> {
+    let raw: Vec<RawPrSummary> =
+        serde_json::from_str(stdout).map_err(|e| CoreError::OutputParse {
+            program: "gh pr list".into(),
+            detail: e.to_string(),
+        })?;
+    Ok(raw.into_iter().map(PrSummary::from).collect())
+}
+
+/// A one-line summary of the PR identified by `pr_ref` (number/branch/URL), or
+/// `None` when no such PR exists — the attach picker's live preview when a user
+/// types a number. Like [`pr_status`] but fetches only the fields the row shows.
+/// A missing PR is the common, non-error case: gh reports either "no pull
+/// requests found" (branch) or "Could not resolve to a PullRequest" (number).
+pub async fn pr_summary(gh: &Path, dir: &Path, pr_ref: &str) -> Result<Option<PrSummary>> {
+    let out = Exec::new(gh)
+        .cwd(dir)
+        .args([
+            "pr",
+            "view",
+            pr_ref,
+            "--json",
+            "number,title,headRefName,url,isDraft",
+        ])
+        .timeout(Duration::from_secs(30))
+        .run_unchecked()
+        .await?;
+
+    if out.exit_code == Some(0) {
+        let raw: RawPrSummary =
+            serde_json::from_str(&out.stdout).map_err(|e| CoreError::OutputParse {
+                program: "gh pr view".into(),
+                detail: e.to_string(),
+            })?;
+        return Ok(Some(raw.into()));
+    }
+    let stderr = out.stderr.to_lowercase();
+    if stderr.contains("no pull requests found") || stderr.contains("could not resolve") {
+        return Ok(None);
+    }
+    Err(CoreError::Exec {
+        program: "gh".into(),
+        exit: out.exit_code,
+        stderr_tail: out.stderr.trim().to_string(),
+    })
+}
+
+/// Merge `pr_ref`'s PR with the chosen method (`pr_ref` is a branch, PR number,
+/// or URL — see [`pr_status`]). Does not pass `--delete-branch`: gh would try to
+/// delete the local branch checked out in this worktree (and switch branches),
+/// which fails. Local branch + worktree teardown is the archive step's job;
+/// GitHub auto-deletes the remote branch if so configured.
 ///
 /// When `auto` is set, passes `--auto` so GitHub queues the merge until
 /// required checks pass (the repo must have auto-merge enabled). With `auto`
@@ -332,11 +459,11 @@ pub async fn pr_status(gh: &Path, worktree: &Path, branch: &str) -> Result<Optio
 pub async fn merge_pr(
     gh: &Path,
     worktree: &Path,
-    branch: &str,
+    pr_ref: &str,
     method: MergeMethod,
     auto: bool,
 ) -> Result<()> {
-    let mut args = vec!["pr", "merge", branch, method.flag()];
+    let mut args = vec!["pr", "merge", pr_ref, method.flag()];
     if auto {
         args.push("--auto");
     }
@@ -375,6 +502,39 @@ mod tests {
         let (state, total, passed, failed) = summarize(&[]);
         assert_eq!(state, ChecksState::None);
         assert_eq!((total, passed, failed), (0, 0, 0));
+    }
+
+    #[test]
+    fn pr_list_parses_rows_and_defaults_draft() {
+        // `isDraft` is omitted on the second row → defaults to false.
+        let json = r#"[
+            {"number": 12, "title": "Add thing", "headRefName": "feat/thing",
+             "url": "https://x/12", "isDraft": true},
+            {"number": 9, "title": "Fix bug", "headRefName": "fix/bug", "url": "https://x/9"}
+        ]"#;
+        let rows = parse_pr_list(json).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].number, 12);
+        assert_eq!(rows[0].head_ref_name, "feat/thing");
+        assert!(rows[0].is_draft);
+        assert_eq!(rows[1].number, 9);
+        assert!(!rows[1].is_draft);
+    }
+
+    #[test]
+    fn pr_list_empty_array_is_empty() {
+        assert!(parse_pr_list("[]").unwrap().is_empty());
+    }
+
+    #[test]
+    fn pr_summary_maps_single_object_and_defaults_draft() {
+        // `gh pr view --json` returns one object (not an array); `isDraft` omitted.
+        let raw: RawPrSummary =
+            serde_json::from_str(r#"{"number":98,"title":"t","headRefName":"b","url":"u"}"#)
+                .unwrap();
+        let s = PrSummary::from(raw);
+        assert_eq!((s.number, s.head_ref_name.as_str()), (98, "b"));
+        assert!(!s.is_draft);
     }
 
     #[test]
