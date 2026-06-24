@@ -80,17 +80,53 @@ The Astro site serves `public/` at the root, so the first release creates
 `https://brightblock.ai/hyprlayer/updates/latest.json` — which is the endpoint
 configured in `tauri.conf.json`. No site change needed; Vercel deploys on push.
 
-## Code signing (not yet configured)
+## Code signing
 
-Builds are currently **ad-hoc-signed (macOS)** and **unsigned (Windows)**, so
-first-launch users see Gatekeeper / SmartScreen warnings. The in-app updater is
-unaffected — it relies on the separate ed25519 signature. To remove the OS
-warnings later, add these secrets and the mac job picks them up automatically:
+**macOS builds are Developer ID–signed and notarized** by `release-local.sh`, so
+first-launch users get no Gatekeeper warning. **Windows is still unsigned**, so
+SmartScreen shows an "unknown publisher" prompt (*More info → Run anyway*). The
+in-app updater is independent of OS code signing — it verifies the separate
+ed25519 signature baked into the app, regardless of Developer ID status.
 
-- macOS: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
-  `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`,
-  `APPLE_API_KEY_CONTENT` (Developer ID + notarization).
-- Windows: add a code-signing step with an EV/OV certificate.
+### macOS (Developer ID + notarization)
+
+One-time setup on the build Mac:
+
+1. **Developer ID Application certificate** — create it in the
+   [Apple Developer portal](https://developer.apple.com/account/resources/certificates/list)
+   (certificate type **Developer ID Application** — *not* "Apple Distribution",
+   which is App-Store-only). Generate the CSR from Keychain Access so the private
+   key stays local, then double-click the downloaded `.cer` to install it into
+   your **login** keychain. Confirm with `security find-identity -v -p codesigning`.
+2. **App Store Connect API key** for notarization — generate a Team Key under
+   [App Store Connect → Integrations](https://appstoreconnect.apple.com/access/integrations/api),
+   download the one-time `.p8`, and save it (default `~/.tauri/AuthKey_*.p8`).
+
+`release-local.sh` then signs + notarizes automatically — Tauri reads these from
+the env during `tauri build`. They're wired as env-overridable defaults in the
+script's config block:
+
+| Variable | Holds |
+| --- | --- |
+| `APPLE_SIGNING_IDENTITY` | Developer ID identity string (`Developer ID Application: … (TEAMID)`) |
+| `APPLE_API_KEY` | Notary key ID |
+| `APPLE_API_ISSUER` | Notary issuer ID |
+| `APPLE_API_KEY_PATH` | Path to the `.p8` notary key (the only secret — kept off the repo) |
+
+Tauri enables the hardened runtime automatically and staples the notarization
+ticket to the `.app` (and the updater tarball) during the build — no extra
+entitlements needed for a standard webview app. A plain `pnpm tauri build` (for
+local testing) stays ad-hoc-signed and skips notarization; only the release path
+signs. Verify a cut build with `spctl -a -vvv -t install <app>` and
+`xcrun stapler validate <dmg>`.
+
+> **Back up** both the Developer ID `.p12` (export from Keychain Access) and the
+> notary `.p8` — the `.p8` can only be downloaded once.
+
+### Windows (not yet signed)
+
+Still unsigned. To drop the SmartScreen prompt, add a signing step with an EV/OV
+(or Azure Trusted Signing) certificate to `scripts/release-win-remote.ps1`.
 
 ## Local development
 

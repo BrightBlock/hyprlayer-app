@@ -2,7 +2,8 @@
 # Cut a macOS (Apple Silicon) + Windows (x64) release entirely from this machine.
 # This is THE release path: GitHub Actions was removed to save minutes, so there
 # is no CI release — everything below is published from here, end to end:
-#   1. build + ed25519-sign the arm64 .dmg and updater .app.tar.gz (locally)
+#   1. build, Developer ID–sign + notarize, and ed25519-sign the arm64 .dmg and
+#      updater .app.tar.gz (locally)
 #   2. build the Windows x64 NSIS installer on a remote Windows builder over SSH
 #      (nexus-win by default), copy it back, and ed25519-sign it HERE — so the
 #      signing key never leaves this Mac and the builder needs no secrets
@@ -35,6 +36,10 @@
 #   * the Tauri updater signing key at ~/.tauri/hyprlayer_updater.key
 #     (override with TAURI_SIGNING_PRIVATE_KEY_PATH). If it's password-protected,
 #     export TAURI_SIGNING_PRIVATE_KEY_PASSWORD before running.
+#   * the Developer ID Application cert in your login keychain + the App Store
+#     Connect notary key (.p8) on disk, for macOS code signing + notarization.
+#     Override the identity / key location via APPLE_SIGNING_IDENTITY and
+#     APPLE_API_KEY_PATH (defaults are wired in the config block below).
 #   * (unless --mac-only) SSH access to the Windows builder. Override the host
 #     with HYPRLAYER_WIN_SSH_HOST (default: nexus-win).
 set -euo pipefail
@@ -49,6 +54,13 @@ WEBSITE_MANIFEST_PATH="public/updates/latest.json"
 WEBSITE_CHANGELOG_PATH="public/updates/changelog.json"
 CASK_PATH="Casks/hyprlayer-desktop.rb"
 SIGNING_KEY_PATH="${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/hyprlayer_updater.key}"
+# Apple Developer ID signing + notarization (macOS). The .p8 notary key stays on
+# disk like the updater key; only its non-secret identifiers live here. Tauri
+# reads these from the env during `tauri build` (see step 1b). All env-overridable.
+APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: JON TSIROS (V6KMPZJD7H)}"
+APPLE_API_KEY="${APPLE_API_KEY:-JUMDZ7DQF5}"
+APPLE_API_ISSUER="${APPLE_API_ISSUER:-4724564e-817f-4077-8b88-b4411b7978e9}"
+APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH:-$HOME/.tauri/AuthKey_JUMDZ7DQF5.p8}"
 # Remote Windows builder, reached over SSH (a Tailscale MagicDNS name by default).
 WIN_SSH_HOST="${HYPRLAYER_WIN_SSH_HOST:-nexus-win}"
 WIN_HELPER="scripts/release-win-remote.ps1"
@@ -88,6 +100,11 @@ for tool in "${REQUIRED_TOOLS[@]}"; do
 done
 gh auth status >/dev/null 2>&1 || die "gh not authenticated — run: gh auth login"
 [[ -f "$SIGNING_KEY_PATH" ]] || die "signing key not found at $SIGNING_KEY_PATH (set TAURI_SIGNING_PRIVATE_KEY_PATH)"
+# Apple signing preflight — fail now, not 5 minutes into a build, if the cert or
+# notary key is missing.
+[[ -f "$APPLE_API_KEY_PATH" ]] || die "notarization key not found at $APPLE_API_KEY_PATH (set APPLE_API_KEY_PATH)"
+security find-identity -v -p codesigning 2>/dev/null | grep -qF "$APPLE_SIGNING_IDENTITY" \
+  || die "signing identity not in keychain: '$APPLE_SIGNING_IDENTITY' — import the Developer ID Application cert or set APPLE_SIGNING_IDENTITY"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 [[ "$BRANCH" == "main" ]] || die "releases are cut from main only (on $BRANCH)"
@@ -139,7 +156,14 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
 fi
 
 # ─── 1b. build + sign mac arm64 ─────────────────────────────────────
-say "Building + signing arm64 bundle (compiles Rust — a few minutes)…"
+say "Building, signing + notarizing arm64 bundle (compiles Rust, then waits on Apple's notary — several minutes)…"
+# APPLE_* → Tauri Developer-ID-signs the .app, submits it to Apple's notary, and
+# staples the ticket (hardened runtime is enabled automatically). TAURI_SIGNING_*
+# is the separate ed25519 updater signature. Both run in this one build.
+APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
+APPLE_API_KEY="$APPLE_API_KEY" \
+APPLE_API_ISSUER="$APPLE_API_ISSUER" \
+APPLE_API_KEY_PATH="$APPLE_API_KEY_PATH" \
 TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_PATH")" \
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
   pnpm tauri build --target aarch64-apple-darwin
@@ -220,13 +244,9 @@ cat > "$NOTES_FILE" <<EOF
 
 ### macOS (Apple Silicon)
 
-Download \`$DMG_NAME\` below and drag it to /Applications. Apple Silicon only;
-builds aren't notarized yet, so strip the quarantine flag once so Gatekeeper
-lets it launch:
-
-\`\`\`sh
-xattr -dr com.apple.quarantine /Applications/Hyprlayer.app
-\`\`\`
+Download \`$DMG_NAME\` below and drag it to /Applications. Apple Silicon only.
+Signed with a Developer ID and notarized by Apple, so it launches with no
+Gatekeeper warning.
 EOF
 if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
 cat >> "$NOTES_FILE" <<EOF
