@@ -41,11 +41,13 @@ import { composeStagePrompt } from "./stages";
 import { openCommitTab, openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
 import {
   addUserMessage,
+  cancelPendingPrompts,
   hasPendingPermission,
   initialSessionView,
   isBusy,
   isTerminal,
   isWorking,
+  parkedState,
   reduceEvent,
   resolvePermission,
   resolveQuestion,
@@ -211,7 +213,17 @@ function dispatch(sessionId: string, event: SessionEvent): void {
   // resuming into an idle process that emits no `init` and hangs on "connecting".
   if (event.kind === "exited" && current.reloading) {
     channels.delete(sessionId);
-    setEntry(sessionId, { ...current, live: false, reloading: false, state: "idle" });
+    // The kill abandoned whatever turn was in flight, so cancel any permission
+    // card or pending question it was parked on — its request id died with the
+    // old process, so leaving it open would strand the session `isBusy` forever
+    // (composer locked, queue frozen) on an ask no live claude can answer.
+    setEntry(sessionId, {
+      ...current,
+      ...cancelPendingPrompts(current),
+      live: false,
+      reloading: false,
+      state: "idle",
+    });
     void queryClient.invalidateQueries({ queryKey: ["workstream", current.workstreamId, "diff"] });
     return;
   }
@@ -421,12 +433,21 @@ async function restartSession(sessionId: string, mode: string | null): Promise<v
   activate(sessionId);
   const after = entryOf(sessionId);
   if (after) {
+    // The restart abandoned the in-flight turn (the resumed claude is silent until
+    // the next message), so cancel any permission/question it was parked on —
+    // otherwise the session stays `isBusy` forever on a dead ask and the composer
+    // (and the queue behind it) lock up with no way to recover. Settle to ready.
     setEntry(sessionId, {
       ...after,
+      ...cancelPendingPrompts(after),
       live: true,
       reloading: false,
-      state: after.state === "starting" ? "idle" : after.state,
+      streaming: false,
+      state: "idle",
     });
+    // The turn is free again — deliver the next queued follow-up under the new
+    // mode, the same one-per-turn steering as a turn finishing normally.
+    flushQueuedMessage(sessionId);
   }
 }
 
@@ -696,6 +717,29 @@ export async function interruptSession(sessionId: string): Promise<void> {
 const STOP_ESCALATION_MS = 3000;
 export async function stopSession(sessionId: string): Promise<void> {
   if (!channels.has(sessionId)) return;
+
+  // A turn parked on a permission/question isn't computing — it's blocked on the
+  // user, and claude is blocked on stdin waiting for that control response. "Stop"
+  // here means cancel the ask: decline the permission (or dismiss the question) so
+  // the live driver unblocks, and clear the card so the composer unlocks. The
+  // decline goes out FIRST, while the request id is still live, so it lands even
+  // if the interrupt below can't reach a claude that's still blocked on the ask.
+  const parked = entryOf(sessionId);
+  if (parked && isBusy(parked) && !isWorking(parked)) {
+    const cleared = cancelPendingPrompts(parked);
+    setEntry(sessionId, { ...parked, ...cleared, streaming: false, state: parkedState(cleared) });
+    try {
+      if (parked.pendingQuestion) {
+        await unwrap(commands.answerQuestion(sessionId, parked.pendingQuestion.requestId, "{}"));
+      } else {
+        const requestId = openPermissionRequestId(parked);
+        if (requestId) await unwrap(commands.respondPermission(sessionId, requestId, false, null));
+      }
+    } catch {
+      // The driver may already be gone; the interrupt/kill below still runs.
+    }
+  }
+
   try {
     await interruptSession(sessionId);
   } catch {
@@ -709,6 +753,17 @@ export async function stopSession(sessionId: string): Promise<void> {
   } catch {
     // Best-effort hard stop; the user can't do anything more from the composer.
   }
+}
+
+/** The request id of the permission ask a parked session owes an answer to: the
+ *  tracked `pendingPermission`, else the first still-open card (a subagent can
+ *  hold one open while `pendingPermission` tracks another). Null if none. */
+function openPermissionRequestId(entry: SessionEntry): string | null {
+  if (entry.pendingPermission) return entry.pendingPermission.requestId;
+  for (const it of entry.items) {
+    if (it.kind === "permission" && it.decision === null) return it.requestId;
+  }
+  return null;
 }
 
 /** Resolve as soon as the session's view matches `predicate`, or `false` if the

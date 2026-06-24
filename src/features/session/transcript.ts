@@ -862,6 +862,23 @@ export function resolveQuestion(view: SessionView, requestId: string): SessionVi
   return { ...next, state: parkedState(next), streaming: true };
 }
 
+/**
+ * Cancel every still-open permission card and any pending question — for a turn
+ * that's being *abandoned* wholesale rather than answered (a permission-mode
+ * restart kills the asking process; Stop cancels the ask outright). Open cards
+ * are marked `deny` (the tool never ran) and both pending prompts cleared, so the
+ * session can't stay `isBusy` — composer locked, queue frozen — parked on a
+ * prompt that no live claude will ever resolve (its request id died with the old
+ * process, or the user chose to stop instead of answering). The caller settles
+ * `state`/`streaming`. Idempotent: a view with nothing parked is returned as-is.
+ */
+export function cancelPendingPrompts(view: SessionView): SessionView {
+  const items = view.items.map((it) =>
+    it.kind === "permission" && it.decision === null ? { ...it, decision: "deny" as const } : it,
+  );
+  return { ...view, items, pendingPermission: null, pendingQuestion: null };
+}
+
 /* -------------------------------- display -------------------------------- */
 
 export type StatusTone = "ok" | "warn" | "bad" | "dim" | "accent";

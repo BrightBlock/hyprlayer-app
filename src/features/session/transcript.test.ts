@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "../../lib/bindings";
 import {
   addUserMessage,
+  cancelPendingPrompts,
   describeState,
   hasPendingPermission,
   initialSessionView,
@@ -10,6 +11,7 @@ import {
   isCompactSummary,
   isTerminal,
   isWorking,
+  parkedState,
   parseQuestions,
   reduceEvent,
   resolvePermission,
@@ -349,6 +351,25 @@ describe("permission flow", () => {
     view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null });
     expect(view.state).toBe("awaiting_permission");
     expect(isBusy(view)).toBe(true);
+  });
+
+  it("cancelPendingPrompts denies every open card and clears both pending prompts", () => {
+    // The escape hatch when a turn is abandoned (permission-mode restart / Stop)
+    // rather than answered: the parked state must clear or the session is stuck
+    // `isBusy` forever on an ask no live claude can resolve.
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-2", toolName: "Bash", input: "{}" });
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+    expect(isBusy(view)).toBe(true);
+
+    view = cancelPendingPrompts(view);
+    expect(view.pendingPermission).toBeNull();
+    expect(view.pendingQuestion).toBeNull();
+    expect(hasPendingPermission(view)).toBe(false);
+    expect(view.items.every((it) => it.kind !== "permission" || it.decision === "deny")).toBe(true);
+    // Nothing is parked anymore, so once the caller settles state the turn is free.
+    expect(isBusy({ ...view, state: parkedState(view), streaming: false })).toBe(false);
   });
 });
 

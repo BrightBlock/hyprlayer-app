@@ -21,6 +21,14 @@ const h = vi.hoisted(() => {
   const resumeSession = vi.fn(async () => ({ status: "ok", data: {} }));
   const interruptSession = vi.fn(async () => ({ status: "ok", data: null }));
   const killSession = vi.fn(async () => ({ status: "ok", data: null }));
+  const respondPermission = vi.fn(async () => ({ status: "ok", data: null }));
+  const answerQuestion = vi.fn(async () => ({ status: "ok", data: null }));
+  // A permission-mode restart: capture the fresh channel the store hands over so
+  // post-restart `emit`s reach it, exactly like `startStageSession`.
+  const restartSession = vi.fn(async (...args: unknown[]) => {
+    state.lastChannel = args[args.length - 1] as FakeChannel;
+    return { status: "ok", data: null };
+  });
   return {
     FakeChannel,
     state,
@@ -29,6 +37,9 @@ const h = vi.hoisted(() => {
     resumeSession,
     interruptSession,
     killSession,
+    respondPermission,
+    answerQuestion,
+    restartSession,
   };
 });
 
@@ -40,6 +51,9 @@ vi.mock("../../lib/bindings", () => ({
     resumeSession: h.resumeSession,
     interruptSession: h.interruptSession,
     killSession: h.killSession,
+    respondPermission: h.respondPermission,
+    answerQuestion: h.answerQuestion,
+    restartSession: h.restartSession,
   },
 }));
 
@@ -49,10 +63,12 @@ const {
   sendMessage,
   cancelQueuedMessage,
   stopSession,
+  applyPermissionMode,
   classifyEntry,
   workstreamShipBusy,
   useSessionStore,
 } = await import("./sessionStore");
+const { isBusy } = await import("./transcript");
 
 const INIT: SessionEvent = { kind: "init", claudeSessionId: "c1", model: "m" };
 const TURN_DONE: SessionEvent = {
@@ -87,6 +103,9 @@ beforeEach(() => {
   h.resumeSession.mockClear();
   h.interruptSession.mockClear();
   h.killSession.mockClear();
+  h.respondPermission.mockClear();
+  h.answerQuestion.mockClear();
+  h.restartSession.mockClear();
   h.state.lastChannel = null;
 });
 
@@ -301,6 +320,98 @@ describe("taskStartedAt — per-task elapsed timestamps", () => {
 // ─── classifyEntry — background activity ────────────────────────────────────
 
 const entryOf = (id: string) => useSessionStore.getState().sessions[id]!;
+
+// ─── recovering a turn parked on a permission/question ───────────────────────
+// Changing the permission mode or hitting Stop while claude is asking for an
+// approval/question used to strand the session `isBusy` forever (the dangling
+// card kept the composer locked and the queue frozen, with no live claude able
+// to answer the dead request). These guard the recovery.
+
+describe("parked-turn recovery (permission mode change / stop)", () => {
+  const PERMISSION_ASK: SessionEvent = {
+    kind: "permissionAsk",
+    requestId: "req-1",
+    toolName: "Bash",
+    input: "{}",
+  };
+  const QUESTION_ASK: SessionEvent = {
+    kind: "questionAsk",
+    requestId: "q-1",
+    questions: JSON.stringify([
+      { question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }] },
+    ]),
+  };
+
+  it("changing the permission mode while parked on a permission un-sticks the session", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(PERMISSION_ASK);
+    expect(isBusy(entryOf(id))).toBe(true); // parked → composer locked
+
+    await applyPermissionMode(id, "bypassPermissions"); // restart into the new mode
+    await Promise.resolve();
+
+    expect(h.restartSession).toHaveBeenCalledWith(id, "bypassPermissions", expect.anything());
+    const entry = entryOf(id);
+    expect(entry.pendingPermission).toBeNull();
+    // The dangling card is resolved (deny = the tool never ran), so isBusy clears.
+    expect(entry.items.some((it) => it.kind === "permission" && it.decision === null)).toBe(false);
+    expect(isBusy(entry)).toBe(false);
+  });
+
+  it("auto-sends queued follow-ups after a permission-mode restart", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(PERMISSION_ASK);
+    await sendMessage(id, "do it now"); // parked → queued, not sent
+    expect(queued(id)).toEqual(["do it now"]);
+    expect(h.sendUserMessage).not.toHaveBeenCalled();
+
+    await applyPermissionMode(id, "acceptEdits");
+    await Promise.resolve();
+
+    // The restart freed the turn, so the queue flushes under the new mode.
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", []);
+    expect(queued(id)).toEqual([]);
+  });
+
+  it("stop while parked on a permission declines the live ask, interrupts, and unlocks", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(PERMISSION_ASK);
+    expect(isBusy(entryOf(id))).toBe(true);
+
+    await stopSession(id);
+
+    // The decline goes to the LIVE driver (releases a claude blocked on the ask),
+    // then the interrupt halts the turn. No hard kill — it wasn't wedged-computing.
+    expect(h.respondPermission).toHaveBeenCalledWith(id, "req-1", false, null);
+    expect(h.interruptSession).toHaveBeenCalledWith(id);
+    expect(h.killSession).not.toHaveBeenCalled();
+
+    const entry = entryOf(id);
+    expect(entry.pendingPermission).toBeNull();
+    expect(isBusy(entry)).toBe(false);
+  });
+
+  it("stop while parked on a question dismisses it, interrupts, and unlocks", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit({ kind: "toolUse", id: "tu-q", name: "AskUserQuestion", input: "{}", parentId: null });
+    emit(QUESTION_ASK);
+    expect(entryOf(id).pendingQuestion).not.toBeNull();
+
+    await stopSession(id);
+
+    expect(h.answerQuestion).toHaveBeenCalledWith(id, "q-1", "{}"); // empty = dismiss
+    expect(h.interruptSession).toHaveBeenCalledWith(id);
+    expect(h.respondPermission).not.toHaveBeenCalled();
+
+    const entry = entryOf(id);
+    expect(entry.pendingQuestion).toBeNull();
+    expect(isBusy(entry)).toBe(false);
+  });
+});
 
 describe("classifyEntry — background activity state", () => {
   it("returns 'background' for a live resting session with a running background task", async () => {
