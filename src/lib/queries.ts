@@ -116,6 +116,18 @@ export function useRevealDoc() {
   });
 }
 
+/** Best-effort "View on GitHub" URL for a doc, or null when no GitHub-shaped
+ *  origin resolves (the backend degrades to None rather than erroring). The
+ *  doc's repo/remote rarely changes mid-session, so cache generously. */
+export function useDocWebUrl(id: string) {
+  return useQuery({
+    queryKey: ["doc-web-url", id],
+    queryFn: () => unwrap(commands.docWebUrl(id)),
+    enabled: id.length > 0,
+    staleTime: 5 * 60_000,
+  });
+}
+
 /** Refresh everything a project add/remove touches: the sidebar list,
  *  per-project detail, the doc index, and the cross-project workstream tree
  *  (a removed project drops its workstreams from the sidebar). */

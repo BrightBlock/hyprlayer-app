@@ -690,7 +690,7 @@ export function ProjectPage() {
     }
   };
   const openDoc = (id: string) => {
-    void navigate({ to: "/library/doc", search: { id, mode: "preview" } });
+    void navigate({ to: "/library", search: { doc: id } });
   };
   // Library attach/detach mutate the shell whose composer opened the modal.
   const attachDocToShell = (path: string, role: string) => {

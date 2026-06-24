@@ -6,8 +6,8 @@ import { Dashboard } from "./routes/Dashboard";
 
 // The shell (Root) and the landing dashboard load eagerly; everything else is
 // code-split so the initial bundle doesn't carry CodeMirror + its language
-// grammars (DocPage / file viewer) or xterm (ProjectPage's terminal). Each
-// chunk loads on first navigation, behind the Suspense boundary in Root.
+// grammars (the Library's doc editor / file viewer) or xterm (ProjectPage's
+// terminal). Each chunk loads on first navigation, behind Root's Suspense.
 const Archive = lazy(() => import("./routes/Archive").then((m) => ({ default: m.Archive })));
 const Onboarding = lazy(() =>
   import("./routes/Onboarding").then((m) => ({ default: m.Onboarding })),
@@ -16,21 +16,20 @@ const Settings = lazy(() => import("./routes/Settings").then((m) => ({ default: 
 const ProjectPage = lazy(() =>
   import("./routes/ProjectPage").then((m) => ({ default: m.ProjectPage })),
 );
-const ProjectDocsPage = lazy(() =>
-  import("./routes/ProjectDocsPage").then((m) => ({ default: m.ProjectDocsPage })),
-);
 const LibraryPage = lazy(() =>
   import("./routes/LibraryPage").then((m) => ({ default: m.LibraryPage })),
 );
-const DocPage = lazy(() => import("./routes/DocPage").then((m) => ({ default: m.DocPage })));
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 /**
- * Library filter state lives in the URL so views are shareable/restorable.
- * `type`/`status`/`scope` hold comma-separated multi-selections.
+ * The Library is a single master–detail view: filters, the selected document,
+ * and its body mode all live in the URL so a view is shareable/restorable.
+ * `type`/`status`/`scope` hold comma-separated multi-selections; `project` is
+ * the scope selector (a thoughts-project key); `doc` is the selected doc's
+ * absolute-path id and `mode` its body editing mode.
  */
 export type LibrarySearch = {
   type?: string;
@@ -40,14 +39,12 @@ export type LibrarySearch = {
   author?: string;
   tag?: string;
   q?: string;
-};
-
-export type ProjectDocsSearch = Omit<LibrarySearch, "project">;
-
-export type DocSearch = {
-  /** Absolute-path doc id. */
-  id: string;
-  mode: "edit" | "preview";
+  doc?: string;
+  mode?: "edit" | "preview";
+  /** Repo path of the project the user opened the Library from, when they came
+   *  via a project's "Docs" affordance — powers the header's back-to-project
+   *  button. Absent when the Library is opened standalone (the nav rail). */
+  from?: string;
 };
 
 const rootRoute = createRootRoute({ component: Root });
@@ -91,16 +88,9 @@ const libraryRoute = createRoute({
     author: optionalString(search.author),
     tag: optionalString(search.tag),
     q: optionalString(search.q),
-  }),
-});
-
-const docRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/library/doc",
-  component: DocPage,
-  validateSearch: (search: Record<string, unknown>): DocSearch => ({
-    id: typeof search.id === "string" ? search.id : "",
-    mode: search.mode === "edit" ? "edit" : "preview",
+    doc: optionalString(search.doc),
+    mode: search.mode === "edit" ? "edit" : undefined,
+    from: optionalString(search.from),
   }),
 });
 
@@ -121,28 +111,12 @@ const projectRoute = createRoute({
   }),
 });
 
-const projectDocsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/projects/$projectPath/docs",
-  component: ProjectDocsPage,
-  validateSearch: (search: Record<string, unknown>): ProjectDocsSearch => ({
-    type: optionalString(search.type),
-    status: optionalString(search.status),
-    scope: optionalString(search.scope),
-    author: optionalString(search.author),
-    tag: optionalString(search.tag),
-    q: optionalString(search.q),
-  }),
-});
-
 const routeTree = rootRoute.addChildren([
   indexRoute,
   onboardingRoute,
   settingsRoute,
   archiveRoute,
   libraryRoute,
-  docRoute,
-  projectDocsRoute,
   projectRoute,
 ]);
 

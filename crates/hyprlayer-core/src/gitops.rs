@@ -114,6 +114,79 @@ pub fn current_branch(repo_path: &Path) -> Option<String> {
     head.shorthand().map(|s| s.to_string())
 }
 
+/// Map a git remote URL to its https web base, e.g.
+/// `git@github.com:acme/repo.git` → `https://github.com/acme/repo`,
+/// `https://github.com/acme/repo.git` → `https://github.com/acme/repo`. Handles
+/// the `scheme://[user@]host[:port]/path` and scp-like `[user@]host:path` shapes;
+/// returns `None` for anything we can't confidently map to a web host (local
+/// paths, `file://`, hosts without a dot). Best-effort — only used to build the
+/// library's "View on GitHub" link.
+fn remote_to_web_url(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let (host, path) = if let Some(rest) = raw
+        .strip_prefix("ssh://")
+        .or_else(|| raw.strip_prefix("git://"))
+        .or_else(|| raw.strip_prefix("https://"))
+        .or_else(|| raw.strip_prefix("http://"))
+    {
+        // scheme://[user@]host[:port]/owner/repo
+        let (authority, path) = rest.split_once('/')?;
+        let host = authority.rsplit('@').next().unwrap_or(authority);
+        let host = host.split(':').next().unwrap_or(host);
+        (host.to_string(), path.to_string())
+    } else if let Some((authority, path)) = raw.split_once(':') {
+        // scp-like: [user@]host:owner/repo. A Windows path (`C:\…`) has a
+        // backslash in the "path" half — reject it so it can't masquerade as one.
+        if path.contains('\\') {
+            return None;
+        }
+        let host = authority.rsplit('@').next().unwrap_or(authority);
+        (host.to_string(), path.to_string())
+    } else {
+        return None;
+    };
+
+    // A real web host has a dot (github.com, gitlab.example.com); this drops
+    // `file`, `localhost`, and other non-web remotes.
+    if !host.contains('.') {
+        return None;
+    }
+    let path = path.trim_start_matches('/').trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    if path.is_empty() {
+        return None;
+    }
+    Some(format!("https://{host}/{path}"))
+}
+
+/// Best-effort web URL for a file tracked in a git repo: its `origin` remote
+/// mapped to an https host, at the repo's current branch — e.g.
+/// `https://github.com/acme/thoughts/blob/main/repos/app/research/x.md`. Returns
+/// `None` when the file isn't inside a git repo, there's no `origin`, HEAD is
+/// detached, or the remote can't be mapped to a web host. Drives the library's
+/// "View on GitHub" link, so a `None` simply hides the link.
+pub fn file_web_url(file_abs: &Path) -> Option<String> {
+    let start = file_abs.parent().unwrap_or(file_abs);
+    let repo = git2::Repository::discover(start).ok()?;
+    let workdir = repo.workdir()?;
+    let rel = file_abs.strip_prefix(workdir).ok()?.to_str()?.replace('\\', "/");
+    if rel.is_empty() {
+        return None;
+    }
+    let web = repo
+        .find_remote("origin")
+        .ok()
+        .and_then(|r| r.url().map(str::to_string))
+        .as_deref()
+        .and_then(remote_to_web_url)?;
+    let head = repo.head().ok()?;
+    if !head.is_branch() {
+        return None;
+    }
+    let branch = head.shorthand()?;
+    Some(format!("{web}/blob/{branch}/{rel}"))
+}
+
 pub fn thoughts_repo_status(repo_path: &Path) -> Result<ThoughtsRepoStatus> {
     let repo = open_repo(repo_path)?;
 
@@ -939,5 +1012,55 @@ mod tests {
             read_text_file(dir.path(), "../escape"),
             Err(CoreError::InvalidPath { .. })
         ));
+    }
+
+    #[test]
+    fn remote_to_web_url_maps_common_shapes() {
+        let web = |u: &str| remote_to_web_url(u);
+        assert_eq!(
+            web("git@github.com:acme/repo.git").as_deref(),
+            Some("https://github.com/acme/repo")
+        );
+        assert_eq!(
+            web("https://github.com/acme/repo.git").as_deref(),
+            Some("https://github.com/acme/repo")
+        );
+        assert_eq!(
+            web("https://github.com/acme/repo").as_deref(),
+            Some("https://github.com/acme/repo")
+        );
+        assert_eq!(
+            web("ssh://git@github.com/acme/repo.git").as_deref(),
+            Some("https://github.com/acme/repo")
+        );
+        // http upgrades to https; a :port in the authority is dropped.
+        assert_eq!(
+            web("http://git.example.com:443/team/docs.git").as_deref(),
+            Some("https://git.example.com/team/docs")
+        );
+        // Local paths and non-web hosts don't map.
+        assert_eq!(web("/srv/git/repo.git"), None);
+        assert_eq!(web("C:\\repos\\thing"), None);
+        assert_eq!(web("file:///srv/git/repo.git"), None);
+        assert_eq!(web("git@localhost:repo.git"), None);
+    }
+
+    #[test]
+    fn file_web_url_builds_blob_link() {
+        let dir = repo_with_commit();
+        let repo = open_repo(dir.path()).unwrap();
+        repo.remote("origin", "git@github.com:acme/thoughts.git")
+            .unwrap();
+        let branch = current_branch(dir.path()).unwrap();
+
+        let url = file_web_url(&dir.path().join("a.md")).unwrap();
+        assert_eq!(
+            url,
+            format!("https://github.com/acme/thoughts/blob/{branch}/a.md")
+        );
+
+        // No origin remote → no link.
+        let bare = repo_with_commit();
+        assert_eq!(file_web_url(&bare.path().join("a.md")), None);
     }
 }

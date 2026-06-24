@@ -126,6 +126,14 @@ export function ChevronRightIcon({ size = 16, strokeWidth = 2, className }: Icon
   );
 }
 
+export function ChevronLeftIcon({ size = 16, strokeWidth = 2, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="m15 6-6 6 6 6" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function ChevronDownIcon({ size = 14, strokeWidth = 2, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -186,6 +194,27 @@ export function PencilIcon({ size = 12, strokeWidth = 1.8, className }: IconProp
     >
       <path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17.5V20Z" />
       <path d="m14 8 2.5 2.5" />
+    </svg>
+  );
+}
+
+/** Magnifying glass — the document's preview/read mode. */
+export function SearchIcon({ size = 14, strokeWidth = 1.9, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
     </svg>
   );
 }

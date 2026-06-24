@@ -208,7 +208,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
     e.stopPropagation();
     const d = dragNode.current;
     dragNode.current = null;
-    if (d && !d.moved) void navigate({ to: "/library/doc", search: { id, mode: "preview" } });
+    if (d && !d.moved) void navigate({ to: "/library", search: { doc: id } });
   };
 
   const resetView = () => setView({ scale: 1, tx: 0, ty: 0 });

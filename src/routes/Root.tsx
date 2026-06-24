@@ -23,11 +23,14 @@ import {
   useArchiveWorkstream,
   useBootstrap,
   useDetachPr,
+  useDoc,
+  useDocWebUrl,
   useEditorTargets,
   useWorkstreamPr,
   useWorktreeFilesCheck,
   useWorktreeGitStatus,
 } from "../lib/queries";
+import { docTitle } from "../features/library/text";
 import { useElementWidth } from "../lib/useElementWidth";
 import {
   commitWorkstream,
@@ -37,8 +40,10 @@ import {
 import { WorkstreamActivityDot } from "../features/session/WorkstreamActivity";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
+import { useIsFullscreen } from "../lib/useFullscreen";
 import { useUiStore } from "../lib/uiStore";
 import { selectPinnedViews, usePinStore } from "../lib/pinStore";
+import { useLibraryScope } from "../lib/libraryScope";
 import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "../lib/keybindings/registry";
 import { useKeybindings } from "../lib/keybindings/useKeybindings";
@@ -48,6 +53,7 @@ import { RepoAvatar } from "../components/RepoAvatar";
 import {
   BookIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
   ChevronRightIcon,
   ClipboardIcon,
   CodeIcon,
@@ -93,7 +99,11 @@ const NAV_RAIL_WIDTH = 56;
 // mirror the cluster's Tailwind layout so the inset is derived, not hard-coded
 // (and stays correct as controls are added — the old fixed 148 only covered the
 // 2-icon macOS cluster and ignored the later-added docs button + all of Linux).
-const LEFT_CLUSTER_LEFT = IS_MACOS ? 92 : 12; // left-[92px] (clears traffic lights) / left-3
+// The cluster's left edge is decided at runtime (see `leftClusterLeft` in the
+// component): it clears the macOS traffic lights only when they're actually
+// present — i.e. on macOS AND not in fullscreen, which hides them.
+const LEFT_CLUSTER_WITH_LIGHTS = 92; // left-[92px]: clears the macOS traffic lights
+const LEFT_CLUSTER_NO_LIGHTS = 12; // left-3: no lights to clear (Windows/Linux, or fullscreen)
 const LEFT_CLUSTER_ICON = 28; // each control is h-7 w-7
 const LEFT_CLUSTER_GAP = 4; // gap-1 between controls
 const HEADER_CONTENT_PAD = 16; // pl-4 on the content row, before the breadcrumb
@@ -107,6 +117,22 @@ function PanelRightIcon() {
       <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
       <path
         d="M18.5 4.5H15v15h3.5A2.5 2.5 0 0 0 21 17V7a2.5 2.5 0 0 0-2.5-2.5Z"
+        fill="currentColor"
+        opacity="0.9"
+      />
+    </svg>
+  );
+}
+
+/** Mirror of `PanelRightIcon` with the filled pane on the left — the header's
+ *  explicit toggle for the left project panel (the diff sidebar's right-panel
+ *  toggle uses the un-mirrored one). */
+function PanelLeftIcon() {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M5.5 4.5H9v15H5.5A2.5 2.5 0 0 1 3 17V7a2.5 2.5 0 0 1 2.5-2.5Z"
         fill="currentColor"
         opacity="0.9"
       />
@@ -277,9 +303,7 @@ function routeProjectPath(pathname: string): string | null {
 }
 
 function routeSection(pathname: string): string {
-  if (pathname.startsWith("/projects/") && pathname.endsWith("/docs")) return "Docs";
   if (pathname.startsWith("/projects/")) return "Agent";
-  if (pathname.startsWith("/library/doc")) return "Document";
   if (pathname.startsWith("/library")) return "Library";
   if (pathname.startsWith("/settings")) return "Settings";
   if (pathname.startsWith("/archive")) return "Archive";
@@ -476,6 +500,8 @@ export function Root() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const locationSearch = useRouterState({ select: (s) => s.location.search }) as {
     item?: string;
+    doc?: string;
+    from?: string;
   };
   const [collapsed, setCollapsed] = useState(false);
   // Default to the widest we allow; the user can drag it narrower if desired.
@@ -494,6 +520,38 @@ export function Root() {
     ? projects.find((project) => project.path === currentProjectPath)
     : null;
   const currentSection = routeSection(pathname);
+  // The Library owns the second column itself (its own list panel), so the
+  // shell's project tree steps aside on this route.
+  const onLibrary = pathname.startsWith("/library");
+  // Breadcrumb title for the selected doc — cache-shared with the detail pane's
+  // own `useDoc`, so no extra fetch; disabled (empty id) off the library route.
+  const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "");
+  const libDocTitle = libDoc.data ? docTitle(libDoc.data.meta) : undefined;
+  // Best-effort "View on GitHub" for the open library doc, surfaced in the
+  // window's top-right (cache-shared with the detail pane's own usage).
+  const libDocUrl = useDocWebUrl(onLibrary ? (locationSearch.doc ?? "") : "");
+  // When the Library was opened from a project (its "Docs" affordance set
+  // `from`), resolve that project so the breadcrumb can lead back to it. Dropped
+  // if the project no longer exists.
+  const backProject =
+    onLibrary && locationSearch.from
+      ? projects.find((p) => p.path === locationSearch.from)
+      : undefined;
+
+  // Remember the project the user is working in so the Library opens scoped to
+  // the most relevant project, not every project's docs at once. Keyed on the
+  // thoughts-project string (not the recomputed object) so it only writes on a
+  // real project switch. Resolved back to a live project before use, so a
+  // removed project simply falls back to "all".
+  const setLastProject = useLibraryScope((s) => s.setLastProject);
+  const lastProject = useLibraryScope((s) => s.lastProject);
+  const currentThoughtsProject = currentProject?.thoughtsProject;
+  useEffect(() => {
+    if (currentThoughtsProject) setLastProject(currentThoughtsProject);
+  }, [currentThoughtsProject, setLastProject]);
+  const defaultLibraryProject = projects.find(
+    (p) => p.thoughtsProject === lastProject,
+  )?.thoughtsProject;
 
   // The sidebar tree: every project's active workstreams, nested beneath it.
   const allWorkstreams = useAllWorkstreams(projects.length > 0);
@@ -564,19 +622,28 @@ export function Root() {
     else fallback();
   };
   const toggleNav = (target: "/library" | "/settings" | "/archive") => {
-    if (pathname.startsWith(target)) closeOrBack(() => void navigate({ to: "/" }));
-    else void navigate({ to: target });
-  };
-  const toggleProjectDocs = (projectPath: string) => {
-    const onDocs = pathname.startsWith("/projects/") && pathname.endsWith("/docs");
-    if (onDocs) {
-      closeOrBack(() =>
-        void navigate({ to: "/projects/$projectPath", params: { projectPath }, search: {} }),
-      );
+    if (pathname.startsWith(target)) {
+      closeOrBack(() => void navigate({ to: "/" }));
+    } else if (target === "/library") {
+      // Open the Library scoped to the most-recently-used project (the most
+      // relevant docs); the switcher's "All projects" can still widen it.
+      void navigate({
+        to: "/library",
+        search: defaultLibraryProject ? { project: defaultLibraryProject } : {},
+      });
     } else {
-      void navigate({ to: "/projects/$projectPath/docs", params: { projectPath } });
+      void navigate({ to: target });
     }
   };
+  // The per-project "Docs" affordance now opens the consolidated Library scoped
+  // to this project (the dedicated project-docs route is gone). It leaves the
+  // project context — the Library is its own top-level section (rail icon) — so
+  // it records `from` (the repo path) to power the header's back-to-project link.
+  const openProjectDocs = (project: Project) =>
+    void navigate({
+      to: "/library",
+      search: { project: project.thoughtsProject, from: project.path },
+    });
 
   // Make the dashboard the launch view: once per cold start, if we opened on a
   // restored deeper route, redirect home. In-session navigation is untouched.
@@ -649,23 +716,44 @@ export function Root() {
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
+  const libraryCollapsed = useUiStore((state) => state.libraryCollapsed);
+  const toggleLibrary = useUiStore((state) => state.toggleLibrary);
 
+  // The header sidebar toggle acts on whichever left panel the route shows: the
+  // Library's list panel on /library, the project tree everywhere else. Both
+  // collapse the same way, so one button drives both (and reads each one's
+  // shown/hidden state for its label).
+  const sidebarShown = onLibrary ? !libraryCollapsed : !collapsed;
+  const toggleSidebar = () => (onLibrary ? toggleLibrary() : setCollapsed((value) => !value));
+
+  // Reserve the traffic-light inset only when the lights are actually present:
+  // macOS, and not in fullscreen (which hides them). Off macOS there are none,
+  // so the cluster hugs the edge. This drives both the cluster's own position
+  // and the breadcrumb floor (`minContentOffset`) derived from it.
+  const isFullscreen = useIsFullscreen();
+  const macTrafficLights = IS_MACOS && !isFullscreen;
+  const leftClusterLeft = macTrafficLights ? LEFT_CLUSTER_WITH_LIGHTS : LEFT_CLUSTER_NO_LIGHTS;
   // Floor for the header inset: clear the absolutely-positioned left cluster so
   // the breadcrumb never collides with it when the sidebar is collapsed. The
-  // cluster carries only the docs button, and only on a project route.
-  const leftClusterIcons = currentProject ? 1 : 0;
+  // cluster carries the sidebar toggle (every route has a collapsible left
+  // panel) plus the docs button (project routes only).
+  const leftClusterIcons = 1 + (currentProject ? 1 : 0);
   const leftClusterRight =
-    LEFT_CLUSTER_LEFT +
+    leftClusterLeft +
     leftClusterIcons * LEFT_CLUSTER_ICON +
     (leftClusterIcons - 1) * LEFT_CLUSTER_GAP;
   const minContentOffset = leftClusterRight + LEFT_CLUSTER_CLEARANCE - HEADER_CONTENT_PAD;
   // The breadcrumb clears the whole left region — the nav rail plus the project
   // panel (fully hidden when collapsed) — so it sits above the main content,
   // not floating over the panel.
-  const contentOffset = Math.max(
-    NAV_RAIL_WIDTH + (collapsed ? 0 : sidebarWidth),
-    minContentOffset,
-  );
+  // On the Library route the project panel is hidden and the route renders its
+  // own list panel, so the breadcrumb sits just after the rail (over the panel).
+  // It still floors at `minContentOffset` so it clears the macOS traffic lights —
+  // the 56px rail alone is narrower than their inset, so the bare rail width
+  // would slide the breadcrumb under the close/minimize/zoom buttons.
+  const contentOffset = onLibrary
+    ? Math.max(NAV_RAIL_WIDTH, minContentOffset)
+    : Math.max(NAV_RAIL_WIDTH + (collapsed ? 0 : sidebarWidth), minContentOffset);
   // Collapse the labelled header controls (the "Ship" button) to icon-only when
   // the toolbar gets crowded — measured off the header's content row so it
   // accounts for the sidebar width, not just the window.
@@ -764,10 +852,10 @@ export function Root() {
   useCommand("nav.settings", () => toggleNav("/settings"));
   useCommand(
     "nav.projectDocs",
-    currentProject ? () => toggleProjectDocs(currentProject.path) : null,
+    currentProject ? () => openProjectDocs(currentProject) : null,
   );
   useCommand("nav.back", canGoBack ? () => router.history.back() : null);
-  useCommand("view.toggleProjectSidebar", () => setCollapsed((value) => !value));
+  useCommand("view.toggleProjectSidebar", toggleSidebar);
   useCommand(
     "view.toggleChangesSidebar",
     currentSection === "Agent" ? () => toggleDiff() : null,
@@ -795,22 +883,31 @@ export function Root() {
         data-tauri-drag-region
       >
         <div
-          className={`absolute top-1/2 flex -translate-y-1/2 items-center gap-1 ${
-            IS_MACOS ? "left-[92px]" : "left-3"
-          }`}
+          className="absolute top-1/2 flex -translate-y-1/2 items-center gap-1"
+          style={{ left: leftClusterLeft }}
         >
+          {/* Explicit sidebar toggle — the discoverable way to collapse or show
+              the left panel (the project tree, or the Library's list panel on
+              /library). The nav rail's Projects entry also toggles the tree, but
+              less obviously. Sits in the traffic-light-aware cluster, so it stays
+              clear of the macOS lights and hugs the edge on Windows/fullscreen. */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
+            title={sidebarShown ? "Hide sidebar" : "Show sidebar"}
+            aria-label={sidebarShown ? "Hide sidebar" : "Show sidebar"}
+          >
+            <PanelLeftIcon />
+          </button>
           {/* Project docs lives here (a fixed left anchor) rather than in the
               right cluster, so it doesn't shift when the diff sidebar inset
               changes. */}
           {currentProject && (
             <button
               type="button"
-              onClick={() => toggleProjectDocs(currentProject.path)}
-              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-edge/60 hover:text-ink ${
-                pathname.startsWith("/projects/") && pathname.endsWith("/docs")
-                  ? "bg-edge text-ink"
-                  : "text-ink-dim"
-              }`}
+              onClick={() => openProjectDocs(currentProject)}
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
               title="Project docs"
               aria-label="Project docs"
             >
@@ -842,12 +939,75 @@ export function Root() {
                 </span>
                 <span className="truncate text-ink-dim">{crumb}</span>
               </>
+            ) : onLibrary ? (
+              <>
+                {/* Opened from a project ("Docs"): a back link to it, leading the
+                    breadcrumb. Goes straight to the project (deterministic — not
+                    history, which an in-Library navigation could have muddied). */}
+                {backProject && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void navigate({
+                          to: "/projects/$projectPath",
+                          params: { projectPath: backProject.path },
+                          search: {},
+                        })
+                      }
+                      className="flex shrink-0 items-center gap-0.5 font-medium text-ink-dim hover:text-ink"
+                      title={`Back to ${backProject.mappedName}`}
+                      aria-label={`Back to ${backProject.mappedName}`}
+                    >
+                      <ChevronLeftIcon size={14} />
+                      <span className="max-w-40 truncate">{backProject.mappedName}</span>
+                    </button>
+                    <span className="text-ink-dim">
+                      <ChevronRightIcon />
+                    </span>
+                  </>
+                )}
+                {/* "Library" returns to the list (drops the selected doc) while
+                    keeping the current scope + filters. */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    void navigate({
+                      to: "/library",
+                      search: (prev) => ({ ...prev, doc: undefined, mode: undefined }),
+                    })
+                  }
+                  className="shrink-0 font-medium text-ink hover:text-ink"
+                >
+                  Library
+                </button>
+                {libDocTitle && (
+                  <>
+                    <span className="text-ink-dim">
+                      <ChevronRightIcon />
+                    </span>
+                    <span className="truncate text-ink-dim">{libDocTitle}</span>
+                  </>
+                )}
+              </>
             ) : (
               <span className="truncate font-medium text-ink">{currentSection}</span>
             )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {/* "View on GitHub" for the open library doc lives at the window's
+                very top-right (onLibrary and currentProject are exclusive). */}
+            {onLibrary && libDocUrl.data && (
+              <a
+                href={libDocUrl.data}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-medium text-ink-dim hover:text-ink"
+              >
+                View on GitHub ↗
+              </a>
+            )}
             {currentProject && (
               <>
                 {/* Ship/PR/Archive sit just left of the pane icons; the whole
@@ -978,7 +1138,9 @@ export function Root() {
             collapse/expand glides instead of snapping. overflow-hidden clips
             the fixed-width inner shell (pinned to the rail edge) so its content
             never reflows mid-animation; the transition is dropped while the
-            resize handle is dragged so the panel tracks the cursor. */}
+            resize handle is dragged so the panel tracks the cursor. The Library
+            route hides it entirely — that route renders its own list panel. */}
+        {!onLibrary && (
         <aside
           className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
             resizingSidebar
@@ -1207,8 +1369,9 @@ export function Root() {
           </nav>
           </div>
         </aside>
+        )}
 
-        {!collapsed && (
+        {!collapsed && !onLibrary && (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -1220,7 +1383,7 @@ export function Root() {
 
         <main className="min-w-0 flex-1 overflow-y-auto">
           {/* Boundary for the code-split route chunks (see router.tsx): shows a
-              spinner during the one-time fetch of a heavy route (DocPage's
+              spinner during the one-time fetch of a heavy route (the Library's
               CodeMirror, ProjectPage's xterm), then it's cached. */}
           <Suspense
             fallback={

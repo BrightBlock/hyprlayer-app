@@ -105,7 +105,7 @@ function dispatchNav(
       if (activeWorkstreamId) {
         openDocPreviewTab(activeWorkstreamId, nav.id, result.title);
       } else {
-        void navigate({ to: "/library/doc", search: { id: nav.id, mode: "preview" } });
+        void navigate({ to: "/library", search: { doc: nav.id } });
       }
       break;
     case "file":

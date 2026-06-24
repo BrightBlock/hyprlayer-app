@@ -378,6 +378,27 @@ pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()>
         .map_err(|e| AppError::internal(format!("reveal: {e}")))
 }
 
+/// Best-effort "View on GitHub" target for a library doc: the doc's own git
+/// repo (the thoughts repo, not the project's) mapped to its `origin` web host
+/// at the current branch. `None` (link hidden) when the id is unknown, the file
+/// isn't in a git repo, there's no GitHub-shaped origin, or HEAD is detached —
+/// so this never errors, mirroring `list_recent_repos`'s degrade-to-empty policy.
+#[tauri::command]
+#[specta::specta]
+pub async fn doc_web_url(state: State<'_, AppState>, id: String) -> CmdResult<Option<String>> {
+    let Some(id) = state.index.resolve_id(&id) else {
+        return Ok(None);
+    };
+    let abs = PathBuf::from(&id);
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        hyprlayer_core::gitops::file_web_url(&abs)
+    })
+    .await
+    .ok()
+    .flatten();
+    Ok(url)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn get_thoughts_git_status(

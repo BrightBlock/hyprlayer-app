@@ -53,6 +53,14 @@ export const commands = {
 	patchDocFrontmatter: (id: string, patch: FmPatchDto, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("patch_doc_frontmatter", { id, patch, baseMtimeMs })),
 	createDoc: (input: CreateDocInput) => typedError<DocMeta, AppError>(__TAURI_INVOKE("create_doc", { input })),
 	revealDoc: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_doc", { id })),
+	/**
+	 *  Best-effort "View on GitHub" target for a library doc: the doc's own git
+	 *  repo (the thoughts repo, not the project's) mapped to its `origin` web host
+	 *  at the current branch. `None` (link hidden) when the id is unknown, the file
+	 *  isn't in a git repo, there's no GitHub-shaped origin, or HEAD is detached —
+	 *  so this never errors, mirroring `list_recent_repos`'s degrade-to-empty policy.
+	 */
+	docWebUrl: (id: string) => typedError<string | null, AppError>(__TAURI_INVOKE("doc_web_url", { id })),
 	getThoughtsGitStatus: (projectPath: string) => typedError<ThoughtsRepoStatus, AppError>(__TAURI_INVOKE("get_thoughts_git_status", { projectPath })),
 	listWorkstreams: (projectPath: string, includeArchived: boolean) => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_workstreams", { projectPath, includeArchived })),
 	/**  Active workstreams across every project — feeds the sidebar tree. */
