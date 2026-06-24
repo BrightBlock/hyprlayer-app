@@ -579,7 +579,6 @@ export function Root() {
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
-  const diffWidth = useUiStore((state) => state.diffWidth);
 
   // Floor for the header inset: clear the absolutely-positioned left cluster so
   // the breadcrumb never collides with it when the sidebar is collapsed. The
@@ -594,16 +593,6 @@ export function Root() {
     collapsed ? PROJECT_SIDEBAR_COLLAPSED : sidebarWidth,
     minContentOffset,
   );
-  // Inset the agent-pane controls (file opener + changes toggle + docs) so they
-  // sit at the agent pane's right margin, mirroring how the breadcrumb tracks
-  // the left sidebar. Only the workstream chat view has the diff sidebar; on
-  // the board view or anywhere else the controls stay flush to the window edge.
-  const rightOffset = currentSection === "Agent" && !diffHidden && !onBoard ? diffWidth : 0;
-  // The Ship/PR/Archive cluster always pins to the window's right edge,
-  // independent of the pane icons. While the diff sidebar is open it floats
-  // above the sidebar (absolutely positioned, to the RIGHT of the inset pane
-  // icons); otherwise it flows inline just to the LEFT of those icons.
-  const shipFloating = rightOffset > 0;
   // Collapse the labelled header controls (the "Ship" button) to icon-only when
   // the toolbar gets crowded — measured off the header's content row so it
   // accounts for the sidebar width, not just the window.
@@ -621,9 +610,8 @@ export function Root() {
     });
   };
 
-  // Ship / PR / Archive controls. Rendered in exactly one place per layout
-  // (inline left of the pane icons when the sidebar is collapsed, or floating
-  // at the window's right edge when it's open), so this is a shared fragment.
+  // Ship / PR / Archive controls, a shared fragment rendered inline just left
+  // of the pane icons and pinned with them to the window's right edge.
   // Ship opens the PR, so it's pointless once one is live. Hide it while the
   // branch already has an open or merged PR (the PR bar's Merge/Archive takes
   // over) — otherwise the agent committing mid-turn leaves the branch `ahead`
@@ -801,16 +789,13 @@ export function Root() {
             )}
           </div>
 
-          <div
-            className="flex shrink-0 items-center gap-2"
-            style={{ marginRight: rightOffset }}
-          >
+          <div className="flex shrink-0 items-center gap-2">
             {currentProject && (
               <>
-                {/* Sidebar collapsed → Ship/PR/Archive flow just left of the
-                    pane icons. Sidebar open → they float at the window edge
-                    (rendered below), to the right of the inset icons. */}
-                {!shipFloating && shipControls}
+                {/* Ship/PR/Archive sit just left of the pane icons; the whole
+                    cluster stays pinned to the window's right edge regardless
+                    of sidebar state, so nothing shifts when a sidebar opens. */}
+                {shipControls}
                 {/* New-workstream affordance for the whole project. Preserves the
                     selected workstream (if any) so opening it from a chat doesn't
                     yank you to the board; ProjectPage strips `create` once the
@@ -846,15 +831,6 @@ export function Root() {
             )}
           </div>
         </div>
-
-        {/* Ship/PR/Archive pinned to the window's right edge while the diff
-            sidebar is open, so they float above it independently of the
-            agent-pane icons (which stay inset to the pane's right margin). */}
-        {shipFloating && shipControls && (
-          <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
-            {shipControls}
-          </div>
-        )}
       </header>
 
       <div className="flex min-h-0 flex-1">
