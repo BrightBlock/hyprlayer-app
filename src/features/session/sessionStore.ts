@@ -816,7 +816,9 @@ export async function killSession(sessionId: string): Promise<void> {
  * Commit a workstream's changes from the header action: start a commit-stage
  * session — stage + commit only, no push or PR — in a dedicated, reusable
  * "Commit" tab and select it. Lets users checkpoint incrementally and open the
- * PR later via Ship. Reuses the live commit session's tab if one is running.
+ * PR later via Ship. If a commit session is still live, re-run `/commit` in it
+ * as a follow-up turn (focusing the tab) so a second click after making more
+ * changes checkpoints them in the same agent window rather than no-op'ing.
  */
 export async function commitWorkstream(workstreamId: string): Promise<void> {
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
@@ -824,7 +826,8 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
   if (commitTab?.sessionId) {
     const entry = entryOf(commitTab.sessionId);
     if (entry && !isTerminal(entry.state)) {
-      openCommitTab(workstreamId, commitTab.sessionId); // re-select the live commit tab
+      openCommitTab(workstreamId, commitTab.sessionId); // focus the live commit tab
+      await sendMessage(commitTab.sessionId, composeStagePrompt("commit", ""));
       return;
     }
   }
