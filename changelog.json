@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.3.5",
+      "date": "2026-06-25",
+      "summary": "Scrollable tabs and OpenCode stability fixes.",
+      "notes": [
+        "The tab strip is now scrollable: when tabs overflow, edge chevrons appear so you can scroll left and right without losing any open session.",
+        "Fixed live OpenCode model switching, auth token refresh, and Claude session resume and permission-mode handling so backend state stays consistent across reconfigurations."
+      ]
+    },
+    {
       "version": "0.3.4",
       "date": "2026-06-25",
       "summary": "OpenCode as an alternative agent backend, plus a re-runnable Commit action and a background-task fix.",
