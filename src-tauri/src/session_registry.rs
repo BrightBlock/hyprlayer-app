@@ -1,6 +1,7 @@
-//! Live-session registry: the in-memory map of running [`ClaudeDriver`]s. Session
-//! rows and event logs live in SQLite; this holds only the handles needed to talk
-//! to a process while it's alive.
+//! Live-session registry: the in-memory map of running drivers. Each entry is an
+//! `Arc<dyn AgentDriver>`, so Claude and OpenCode sessions share one map without
+//! the registry knowing the harness. Session rows and event logs live in SQLite;
+//! this holds only the handles needed to talk to a live session.
 //!
 //! There is no concurrency cap — the number of simultaneous agent sessions is
 //! bounded only by the host's resources. Sessions across all projects share this
@@ -9,12 +10,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use hyprlayer_core::claude::ClaudeDriver;
+use hyprlayer_core::agent::AgentDriver;
 use tokio::sync::Mutex;
 
 #[derive(Default)]
 pub struct SessionRegistry {
-    live: Mutex<HashMap<String, Arc<ClaudeDriver>>>,
+    live: Mutex<HashMap<String, Arc<dyn AgentDriver>>>,
 }
 
 impl SessionRegistry {
@@ -22,11 +23,11 @@ impl SessionRegistry {
         Self::default()
     }
 
-    pub async fn insert(&self, id: String, driver: Arc<ClaudeDriver>) {
+    pub async fn insert(&self, id: String, driver: Arc<dyn AgentDriver>) {
         self.live.lock().await.insert(id, driver);
     }
 
-    pub async fn get(&self, id: &str) -> Option<Arc<ClaudeDriver>> {
+    pub async fn get(&self, id: &str) -> Option<Arc<dyn AgentDriver>> {
         self.live.lock().await.get(id).cloned()
     }
 

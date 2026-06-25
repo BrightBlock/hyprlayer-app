@@ -187,6 +187,55 @@ pub async fn spawn_cli_terminal(
     Ok(terminal_id)
 }
 
+/// Open a PTY running a single command line through the user's login shell, in
+/// the home directory. Used by the Harnesses settings page to run interactive
+/// flows that aren't the hyprlayer CLI — e.g. `claude auth login` or the
+/// OpenCode installer (`curl -fsSL https://opencode.ai/install | bash`). The
+/// command is run exactly as if the user typed it into their own shell.
+#[tauri::command]
+#[specta::specta]
+pub async fn spawn_shell_terminal(
+    state: State<'_, AppState>,
+    command: String,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<TerminalEvent>,
+) -> CmdResult<String> {
+    let path = state.binaries.augmented_path().await;
+    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+
+    // Login shell so the command sees the user's full PATH/profile. `-lc` on
+    // unix; PowerShell's `-Command` on Windows (where default_shell() is pwsh).
+    #[cfg(not(windows))]
+    let args = vec!["-lc".to_string(), command];
+    #[cfg(windows)]
+    let args = vec!["-NoProfile".to_string(), "-Command".to_string(), command];
+
+    let session = PtySession::spawn(SpawnTerminal {
+        shell: default_shell(),
+        args,
+        cwd,
+        cols,
+        rows,
+        env: vec![("PATH".into(), path.to_string_lossy().into_owned())],
+        workstream_id: "harness".into(),
+    })
+    .map_err(|e| AppError::internal(format!("open pty: {e}")))?;
+
+    let terminal_id = uuid::Uuid::new_v4().to_string();
+    state
+        .terminals
+        .insert(terminal_id.clone(), session.clone())
+        .await;
+    attach_stream(
+        &session,
+        on_event,
+        state.terminals.clone(),
+        terminal_id.clone(),
+    );
+    Ok(terminal_id)
+}
+
 /// Replay scrollback then forward live output — the shared open/attach path.
 /// Snapshots scrollback and subscribes atomically (see
 /// [`PtySession::subscribe_with_scrollback`]) so no output is lost or duplicated
@@ -233,7 +282,7 @@ fn forward(
 }
 
 #[cfg(not(windows))]
-fn default_shell() -> PathBuf {
+pub(crate) fn default_shell() -> PathBuf {
     // `$SHELL` is the user's login shell (folded in from the login environment
     // for GUI launches); `/bin/sh` is the POSIX-guaranteed fallback when it's
     // unset, which `/bin/zsh` is not on every Unix.
@@ -243,7 +292,7 @@ fn default_shell() -> PathBuf {
 }
 
 #[cfg(windows)]
-fn default_shell() -> PathBuf {
+pub(crate) fn default_shell() -> PathBuf {
     // Windows has no `$SHELL`, and the Unix `/bin/sh` fallback doesn't exist —
     // it would fail to spawn and leave the terminal blank. Prefer PowerShell 7
     // (`pwsh`), fall back to the built-in Windows PowerShell, then `%ComSpec%`

@@ -9,12 +9,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use hyprlayer_core::agent::AgentDriver;
 use hyprlayer_core::claude::{ClaudeDriver, PermissionMode, SessionEvent, SpawnConfig};
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent, Workstream};
 use serde::Serialize;
 use tauri::ipc::Channel;
+use tauri::Manager;
 use tauri::State;
 use tauri_specta::Event;
 use tokio::sync::broadcast;
@@ -52,7 +54,7 @@ pub(crate) async fn kill_and_await_exit(state: &AppState, session_id: &str) {
 /// The live driver for a session, or `session_not_found`. The single lookup the
 /// turn/permission/interrupt/kill commands share instead of each poking
 /// `state.sessions` directly.
-async fn live_driver(state: &AppState, session_id: &str) -> CmdResult<Arc<ClaudeDriver>> {
+async fn live_driver(state: &AppState, session_id: &str) -> CmdResult<Arc<dyn AgentDriver>> {
     state
         .sessions
         .get(session_id)
@@ -81,6 +83,21 @@ async fn load_workstream(state: &AppState, id: &str) -> CmdResult<Workstream> {
         })
 }
 
+/// Composer choices for a new session, bundled so the command stays within
+/// specta's argument-count limit.
+#[derive(Debug, Default, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StartOpts {
+    /// Which harness to run: `"claude"` (default) or `"opencode"`.
+    pub harness: Option<String>,
+    /// For Claude: a model key/flag. For OpenCode: a `"provider/model"` id.
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// `--permission-mode` override (`default` | `acceptEdits` | `plan` |
+    /// `bypassPermissions`); `None`/unrecognized keeps the stage's default.
+    pub permission_mode: Option<String>,
+}
+
 /// Everything `launch_session` needs that isn't shared. `resume` toggles
 /// `--resume` (continue claude's conversation) vs a fresh `--session-id`, and
 /// `start_seq` is where the persisted log should continue (0 fresh, else the
@@ -101,7 +118,7 @@ struct LaunchParams {
 
 /// Spawn the claude driver for a session and wire up its forwarder — the launch
 /// pipeline shared by [`start_stage_session`] and [`resume_session`].
-async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc<ClaudeDriver>> {
+async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc<dyn AgentDriver>> {
     let LaunchParams {
         app,
         session,
@@ -114,45 +131,96 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
         channel,
     } = params;
 
-    let claude = state
-        .binaries
-        .require(BinaryKind::Claude)
-        .await
-        .map_err(AppError::from)?;
+    let (driver, rx): (Arc<dyn AgentDriver>, broadcast::Receiver<SessionEvent>) =
+        if session.harness == "opencode" {
+            // OpenCode: drive a session on the shared `opencode serve`. Tools and
+            // permissions are OpenCode's own concern, so the stage policy /
+            // permission-mode / add-dirs don't apply here; `model` is a
+            // `"provider/model"` id chosen in the composer.
+            let bin = state
+                .binaries
+                .require(BinaryKind::OpenCode)
+                .await
+                .map_err(AppError::from)?;
+            let path = state.binaries.augmented_path().await;
+            // App-owned OpenCode data home, so its session DB is ours (never the
+            // user's possibly-incompatible global ~/.local/share/opencode).
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map(|d| d.join("opencode"))
+                .map_err(|e| AppError::internal(format!("resolve app data dir: {e}")))?;
+            let server = state
+                .opencode
+                .ensure(bin, path, data_dir)
+                .await
+                .map_err(AppError::internal)?;
+            let (driver, rx) = crate::opencode::OpenCodeDriver::spawn(server, &session.cwd, model)
+                .await
+                .map_err(AppError::internal)?;
+            let driver: Arc<dyn AgentDriver> = driver;
+            (driver, rx)
+        } else {
+            let claude = state
+                .binaries
+                .require(BinaryKind::Claude)
+                .await
+                .map_err(AppError::from)?;
 
-    // Grant read access to the thoughts root (outside the worktree) so skills
-    // can write research/plan docs through the symlinks.
-    let effective = effective_for(state, &project_path).await?;
-    let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
-    let policy = pipeline::policy_for(Stage::parse(&session.stage));
-    // The stage sets a default permission posture; an explicit user choice in the
-    // composer (e.g. "Bypass permissions") overrides just the mode, keeping the
-    // stage's allow/deny tool lists as guardrails.
-    let permission_mode = permission_mode.unwrap_or(policy.permission_mode);
+            // Grant read access to the thoughts root (outside the worktree) so
+            // skills can write research/plan docs through the symlinks.
+            let effective = effective_for(state, &project_path).await?;
+            let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
+            let policy = pipeline::policy_for(Stage::parse(&session.stage));
+            // The stage sets a default permission posture; an explicit user choice
+            // in the composer (e.g. "Bypass permissions") overrides just the mode,
+            // keeping the stage's allow/deny tool lists as guardrails.
+            let permission_mode = permission_mode.unwrap_or(policy.permission_mode);
 
-    // The child inherits our env; we only override PATH with the resolver's
-    // augmented PATH (login-shell + well-known dirs) so it finds git/gh/etc.
-    let path = state.binaries.augmented_path().await;
-    let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+            // The child inherits our env; we override PATH with the resolver's
+            // augmented PATH so it finds git/gh/etc, and — for enterprise "API
+            // key" auth — inject the Anthropic credentials/routing so the spawned
+            // `claude` uses them instead of the user's logged-in session.
+            let path = state.binaries.augmented_path().await;
+            let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+            let claude_cfg = state.settings.get().await.providers.claude;
+            if claude_cfg.auth_mode.as_deref() == Some("apiKey") {
+                if let Some(key) = claude_cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
+                    env.push(("ANTHROPIC_API_KEY".to_string(), key.to_string()));
+                }
+                if let Some(url) = claude_cfg.base_url.as_deref().filter(|u| !u.is_empty()) {
+                    env.push(("ANTHROPIC_BASE_URL".to_string(), url.to_string()));
+                }
+                if claude_cfg.use_bedrock {
+                    env.push(("CLAUDE_CODE_USE_BEDROCK".to_string(), "1".to_string()));
+                }
+                if claude_cfg.use_vertex {
+                    env.push(("CLAUDE_CODE_USE_VERTEX".to_string(), "1".to_string()));
+                }
+            }
 
-    let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
-        claude_bin: claude,
-        cwd: PathBuf::from(&session.cwd),
-        session_id: session.id.clone(),
-        permission_mode,
-        allowed_tools: policy.allowed_tools,
-        disallowed_tools: policy.disallowed_tools,
-        add_dirs,
-        // claude persisted the conversation under the id we passed as
-        // `--session-id`, so resume by that same id.
-        resume: resume.then(|| session.id.clone()),
-        fork: false,
-        max_budget_usd: None,
-        model,
-        effort,
-        env,
-    })
-    .map_err(AppError::from)?;
+            let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
+                claude_bin: claude,
+                cwd: PathBuf::from(&session.cwd),
+                session_id: session.id.clone(),
+                permission_mode,
+                allowed_tools: policy.allowed_tools,
+                disallowed_tools: policy.disallowed_tools,
+                add_dirs,
+                // claude persisted the conversation under the id we passed as
+                // `--session-id`, so resume by that same id.
+                resume: resume.then(|| session.id.clone()),
+                fork: false,
+                max_budget_usd: None,
+                model,
+                effort,
+                chrome: claude_cfg.chrome_enabled,
+                env,
+            })
+            .map_err(AppError::from)?;
+            let driver: Arc<dyn AgentDriver> = Arc::new(driver);
+            (driver, rx)
+        };
 
     if let Some(pid) = driver.pid() {
         let sid = session.id.clone();
@@ -162,7 +230,6 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
         .await;
     }
 
-    let driver = Arc::new(driver);
     state
         .sessions
         .insert(session.id.clone(), driver.clone())
@@ -195,13 +262,15 @@ pub async fn start_stage_session(
     stage: String,
     input: String,
     attached_docs: Vec<String>,
-    model: Option<String>,
-    effort: Option<String>,
-    // Optional `--permission-mode` override (`default` | `acceptEdits` | `plan` |
-    // `bypassPermissions`); `None`/unrecognized keeps the stage's default posture.
-    permission_mode: Option<String>,
+    opts: StartOpts,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
+    let StartOpts {
+        harness,
+        model,
+        effort,
+        permission_mode,
+    } = opts;
     let ws = {
         let id = workstream_id.clone();
         db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
@@ -222,6 +291,10 @@ pub async fn start_stage_session(
             id: uuid::Uuid::new_v4().to_string(),
             workstream_id: ws.id.clone(),
             stage: stage_kind.as_str().to_string(),
+            harness: match harness.as_deref() {
+                Some("opencode") => "opencode".to_string(),
+                _ => "claude".to_string(),
+            },
             cwd: ws.worktree_path.clone(),
         };
         db_task(state.db.clone(), move |db| db.insert_session(new)).await?
@@ -625,7 +698,7 @@ pub async fn attach_session(
 /// when the backend session is still live — e.g. an HMR/UI reload dropped the
 /// frontend's channel but the claude process survived, so there's nothing to
 /// re-spawn; we just re-wire the new channel to the running stream.
-fn tail_live(driver: Arc<ClaudeDriver>, on_event: Channel<SessionEvent>) {
+fn tail_live(driver: Arc<dyn AgentDriver>, on_event: Channel<SessionEvent>) {
     let mut rx = driver.subscribe();
     tauri::async_runtime::spawn(async move {
         loop {

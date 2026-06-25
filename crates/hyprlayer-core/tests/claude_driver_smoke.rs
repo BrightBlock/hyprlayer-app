@@ -28,6 +28,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         max_budget_usd: Some(1.0),
         model: None,
         effort: None,
+        chrome: false,
         env: std::env::vars().collect(),
     })
     .expect("spawn claude");

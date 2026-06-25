@@ -475,9 +475,9 @@ function appended(
 
 export function reduceEvent(view: SessionView, event: SessionEvent): SessionView {
   const next = reduceEventInner(view, event);
-  // "starting" means: spawned, no output yet — the "Connecting to claude…"
+  // "starting" means: spawned, no output yet — the "Connecting to <harness>…"
   // state. The first sign of life (any event that leaves a turn streaming) means
-  // claude is up and producing, so leave the connecting state even if we never
+  // the harness is up and producing, so leave the connecting state even if we never
   // saw an `init`: a live session re-tailed after a UI/HMR reload doesn't
   // re-emit one, which otherwise pinned the spinner on forever while the turn
   // ran fine. `init`/permission/question/turnDone/exit already set their own

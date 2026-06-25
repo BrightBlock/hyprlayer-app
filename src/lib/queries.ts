@@ -199,6 +199,18 @@ export function useRedetectBinaries() {
   });
 }
 
+/** Install OpenCode in the background (no terminal). The backend re-detects on
+ *  success; refresh the bootstrap cache so the status badge flips to Installed. */
+export function useInstallOpencode() {
+  return useMutation({
+    mutationFn: () => unwrap(commands.installOpencode()),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      void queryClient.invalidateQueries({ queryKey: ["health"] });
+    },
+  });
+}
+
 /** Persist app settings (whole-object replace) and refresh the bootstrap cache. */
 export function useSetAppSettings() {
   return useMutation({
@@ -617,6 +629,72 @@ export function useWorktreeFilesCheck(path: string) {
   return useQuery({
     queryKey: ["worktree-files-check", path],
     queryFn: () => unwrap(commands.checkWorktreeFiles(path)),
+  });
+}
+
+// ── Harnesses (Claude Code + OpenCode) ─────────────────────────────────────
+
+/** The models.dev provider/model catalog backing the OpenCode pickers. Cached
+ *  hard (the backend already does disk caching + a bundled fallback); the
+ *  "Refresh" affordance forces a network refetch via [`useRefreshOpencodeCatalog`]. */
+export function useOpencodeCatalog(enabled = true) {
+  return useQuery({
+    queryKey: ["opencode-catalog"],
+    queryFn: () => unwrap(commands.opencodeCatalog(false)),
+    enabled,
+    staleTime: 60 * 60_000,
+  });
+}
+
+/** Force a network refresh of the models.dev catalog (bypasses the disk cache). */
+export function useRefreshOpencodeCatalog() {
+  return useMutation({
+    mutationFn: () => unwrap(commands.opencodeCatalog(true)),
+    onSuccess: (next) => queryClient.setQueryData(["opencode-catalog"], next),
+  });
+}
+
+/** Providers with a credential in OpenCode's auth.json (never the raw keys). */
+export function useOpencodeAuth() {
+  return useQuery({
+    queryKey: ["opencode-auth"],
+    queryFn: () => unwrap(commands.opencodeAuthList()),
+  });
+}
+
+export function useSetOpencodeProviderKey() {
+  return useMutation({
+    mutationFn: ({ provider, key }: { provider: string; key: string }) =>
+      unwrap(commands.opencodeSetProviderKey(provider, key)),
+    onSuccess: (next) => queryClient.setQueryData(["opencode-auth"], next),
+  });
+}
+
+export function useRemoveOpencodeProvider() {
+  return useMutation({
+    mutationFn: (provider: string) => unwrap(commands.opencodeRemoveProvider(provider)),
+    onSuccess: (next) => queryClient.setQueryData(["opencode-auth"], next),
+  });
+}
+
+/** Set the OpenCode default model (persists to app settings + mirrors to
+ *  opencode.json), then refresh the bootstrap so the composer picks it up. */
+export function useSetOpencodeDefaultModel() {
+  return useMutation({
+    mutationFn: (model: string | null) => unwrap(commands.opencodeSetDefaultModel(model)),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
+  });
+}
+
+/** Current Claude auth/account status (for the Claude Code harness tab). The
+ *  command runs `claude auth status --json`, so refetch is explicit (a Refresh
+ *  button) rather than on a timer. */
+export function useClaudeAuthStatus(enabled = true) {
+  return useQuery({
+    queryKey: ["claude-auth-status"],
+    queryFn: () => unwrap(commands.claudeAuthStatus()),
+    enabled,
+    staleTime: 5 * 60_000,
   });
 }
 

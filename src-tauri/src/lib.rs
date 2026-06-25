@@ -2,6 +2,7 @@ mod commands;
 mod editors;
 mod error;
 mod events;
+mod opencode;
 mod pr_watch;
 mod session_registry;
 mod settings;
@@ -98,12 +99,20 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::github_username,
             commands::system::default_username,
             commands::system::play_sound,
+            commands::harnesses::opencode_catalog,
+            commands::harnesses::opencode_auth_list,
+            commands::harnesses::opencode_set_provider_key,
+            commands::harnesses::opencode_remove_provider,
+            commands::harnesses::opencode_set_default_model,
+            commands::harnesses::install_opencode,
+            commands::harnesses::claude_auth_status,
             commands::terminal::terminal_open,
             commands::terminal::terminal_attach,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_close,
             commands::terminal::spawn_cli_terminal,
+            commands::terminal::spawn_shell_terminal,
             commands::onboarding::get_ai_status,
             commands::onboarding::probe_default_thoughts,
             commands::onboarding::init_thoughts_repo,
@@ -248,6 +257,7 @@ pub fn run() {
                 index_watch: tokio::sync::Mutex::new(None),
                 worktree_watch: tokio::sync::Mutex::new(None),
                 sessions: Arc::new(session_registry::SessionRegistry::new()),
+                opencode: Arc::new(opencode::OpenCodeManager::new()),
                 terminals: Arc::new(terminal_registry::TerminalRegistry::new()),
                 focused,
                 focus_changed,

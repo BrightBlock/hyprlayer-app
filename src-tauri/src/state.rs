@@ -18,8 +18,11 @@ pub struct AppState {
     pub db: Arc<Db>,
     pub worktrees: Arc<WorktreeManager>,
     pub index: Arc<ThoughtsIndex>,
-    /// Live agent sessions (running claude drivers), keyed by session id.
+    /// Live agent sessions (Claude or OpenCode drivers), keyed by session id.
     pub sessions: Arc<SessionRegistry>,
+    /// The shared `opencode serve` process + global event stream, started on
+    /// first use of the OpenCode harness.
+    pub opencode: Arc<crate::opencode::OpenCodeManager>,
     /// Live PTY terminals, keyed by terminal id.
     pub terminals: Arc<TerminalRegistry>,
     /// Live filesystem watcher over the thoughts roots; rebuilt whenever the

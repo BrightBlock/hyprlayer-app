@@ -93,6 +93,12 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE workstreams ADD COLUMN worktree_mode TEXT NOT NULL DEFAULT 'isolated';
     ",
+    // v5: which harness backs a session. Existing rows predate OpenCode, so they
+    // are Claude Code. `claude_session_id` keeps its name but is now the generic
+    // harness session id (claude's for Claude, the opencode session id for OpenCode).
+    "
+    ALTER TABLE sessions ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude';
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

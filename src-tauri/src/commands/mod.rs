@@ -1,4 +1,5 @@
 pub mod attachments;
+pub mod harnesses;
 pub mod library;
 pub mod onboarding;
 pub mod projects;

@@ -196,6 +196,10 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
 }
 
 export function ErrorNote({ error }: { error: unknown }) {
+  // No error → render nothing. Without this a null/undefined error (e.g. a
+  // mutation that hasn't run yet) paints a box reading "null", since
+  // `errorMessage(null)` stringifies to "null".
+  if (error == null) return null;
   const remedy = errorRemedy(error);
   return (
     <div className="selectable rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">

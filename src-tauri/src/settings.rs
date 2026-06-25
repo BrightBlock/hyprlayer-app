@@ -67,14 +67,16 @@ impl Default for NotificationSettings {
     }
 }
 
-/// Defaults for each agent provider. Claude is the only working provider
-/// today; Codex is stubbed so the section can render now and gain real
-/// fields later without a settings migration.
+/// Defaults for each agent provider/harness. Claude and OpenCode are wired up;
+/// Codex is stubbed so the section can render now and gain real fields later
+/// without a settings migration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderSettings {
     /// Anthropic Claude (the `claude` CLI).
     pub claude: ClaudeSettings,
+    /// OpenCode (the `opencode` CLI) — multi-provider harness.
+    pub opencode: OpenCodeSettings,
     /// OpenAI Codex — not wired up yet; reserved so the providers section is
     /// stable as we build it out.
     pub codex: CodexSettings,
@@ -98,6 +100,26 @@ pub struct ClaudeSettings {
     /// custom model ids the user added).
     pub visible_models: Option<Vec<String>>,
 
+    // --- Authentication (Settings → Harnesses → Claude Code). ---
+    /// How `claude` authenticates: `"cli"` (subscription/login, the default and
+    /// historical behaviour — the spawned process inherits the user's env and
+    /// `~/.claude` state) or `"apiKey"` (enterprise — the app injects an API key
+    /// into the spawn env). `None`/absent is treated as `"cli"`.
+    pub auth_mode: Option<String>,
+    /// Anthropic API key, injected as `ANTHROPIC_API_KEY` at spawn when
+    /// `auth_mode == "apiKey"`. Stored in plaintext settings.json (see module
+    /// note); empty/`None` means "no key set".
+    pub api_key: Option<String>,
+    /// Override the API endpoint (`ANTHROPIC_BASE_URL`) for a proxy/gateway.
+    pub base_url: Option<String>,
+    /// Route through Amazon Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`).
+    pub use_bedrock: bool,
+    /// Route through Google Vertex (`CLAUDE_CODE_USE_VERTEX=1`).
+    pub use_vertex: bool,
+    /// Enable the "Claude in Chrome" browser-control feature — adds `--chrome`
+    /// at spawn so sessions can drive the connected Chrome extension.
+    pub chrome_enabled: bool,
+
     // --- Not wired up yet (UI stubs; nothing consumes these). ---
     /// Default model for in-app code reviews. Reserved — no review feature yet.
     pub review_model: Option<String>,
@@ -105,6 +127,22 @@ pub struct ClaudeSettings {
     pub review_effort: Option<String>,
     /// Start new sessions in fast mode. Reserved — not a `claude` spawn flag yet.
     pub default_fast_mode: bool,
+}
+
+/// OpenCode harness defaults (Settings → Harnesses → OpenCode). Provider API
+/// keys themselves are NOT stored here — they live in OpenCode's own
+/// `auth.json` so the `opencode` CLI uses them natively (see `opencode::config`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OpenCodeSettings {
+    /// Default model for new OpenCode sessions, as a `"provider/model"` id
+    /// (e.g. `"anthropic/claude-sonnet-4-5"`). Mirrored into `opencode.json`'s
+    /// `model` field so the CLI agrees. `None` keeps OpenCode's own default.
+    pub default_model: Option<String>,
+    /// The `"provider/model"` ids the user picked to expose in the composer's
+    /// model picker when the OpenCode harness is selected. Empty = none chosen
+    /// yet (the OpenCode tab prompts the user to add some).
+    pub selected_models: Vec<String>,
 }
 
 /// Codex provider defaults. Stub — Codex isn't supported yet; this exists so
@@ -293,6 +331,43 @@ mod tests {
         let raw = r#"{"providers":{"claude":{"defaultModel":"sonnet"}}}"#;
         let s: AppSettings = serde_json::from_str(raw).unwrap();
         assert_eq!(s.providers.claude.default_model.as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn claude_auth_defaults_to_cli() {
+        // Old settings.json without auth fields: cli mode, no key, no chrome.
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.providers.claude.auth_mode, None);
+        assert_eq!(s.providers.claude.api_key, None);
+        assert!(!s.providers.claude.use_bedrock);
+        assert!(!s.providers.claude.chrome_enabled);
+    }
+
+    #[test]
+    fn claude_auth_fields_round_trip() {
+        let raw = r#"{"providers":{"claude":{"authMode":"apiKey","apiKey":"sk-x","useBedrock":true,"chromeEnabled":true}}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        let c = &s.providers.claude;
+        assert_eq!(c.auth_mode.as_deref(), Some("apiKey"));
+        assert_eq!(c.api_key.as_deref(), Some("sk-x"));
+        assert!(c.use_bedrock);
+        assert!(c.chrome_enabled);
+    }
+
+    #[test]
+    fn opencode_settings_default_and_round_trip() {
+        // Absent section -> empty defaults (no migration needed).
+        let empty: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty.providers.opencode.default_model, None);
+        assert!(empty.providers.opencode.selected_models.is_empty());
+
+        let raw = r#"{"providers":{"opencode":{"defaultModel":"anthropic/claude-sonnet-4-5","selectedModels":["anthropic/claude-sonnet-4-5","openai/gpt-4o"]}}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            s.providers.opencode.default_model.as_deref(),
+            Some("anthropic/claude-sonnet-4-5")
+        );
+        assert_eq!(s.providers.opencode.selected_models.len(), 2);
     }
 
     #[test]

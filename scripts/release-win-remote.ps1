@@ -74,6 +74,18 @@ if ($new -eq $txt) {
 Step "pnpm install (frozen lockfile)"
 Run 'pnpm install --frozen-lockfile'
 
+# tauri-winres shells out to the Windows SDK resource compiler (rc.exe) to embed
+# the app icon/version. Over a bare SSH session the SDK bin is not always on PATH,
+# so the build script panics with "have RC.EXE in your $PATH ... or $RC is set?".
+# Pin $RC to the newest x64 rc.exe so the build is reproducible regardless of PATH.
+if (-not $env:RC) {
+  $rc = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter rc.exe -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -like '*\x64\*' } |
+    Sort-Object FullName -Descending | Select-Object -First 1
+  if ($rc) { $env:RC = $rc.FullName; Step ("Pinned RC=" + $env:RC) }
+  else { Write-Warning "rc.exe not found under Windows Kits; winres may fail" }
+}
+
 Step "tauri build --bundles nsis"
 $env:CARGO_TARGET_DIR = $TargetDir
 Run 'pnpm tauri build --bundles nsis'

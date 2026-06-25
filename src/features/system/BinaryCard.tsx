@@ -8,6 +8,7 @@ import { Badge, Button } from "../../components/ui";
 const DESCRIPTIONS: Record<BinaryStatus["kind"], string> = {
   hyprlayer: "Manages thoughts storage, agent skills, and project mappings.",
   claude: "Runs the AI agent sessions for research, planning, and implementation.",
+  opencode: "Optional — the OpenCode harness for agent sessions across many providers.",
   git: "Required for worktrees, commits, and thoughts syncing.",
   gh: "Optional — used to create and track pull requests.",
 };

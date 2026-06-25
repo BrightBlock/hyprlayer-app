@@ -318,7 +318,9 @@ export async function startSession(args: {
   /** Files/library docs attached to the first turn. Their paths go to the
    *  backend prompt; they render as pin cards in the echo so no raw path shows. */
   attachments?: Attachment[];
-  /** `--model` value, or null/undefined for claude's default. */
+  /** Which harness to run: "claude" (default) or "opencode". */
+  harness?: string | null;
+  /** Claude: a `--model` value. OpenCode: a `provider/model` id. Null = default. */
   model?: string | null;
   /** `--effort` level, or null/undefined for claude's default. */
   effort?: string | null;
@@ -334,9 +336,12 @@ export async function startSession(args: {
       args.stage,
       args.input,
       attachments.map((a) => a.path),
-      args.model ?? null,
-      args.effort ?? null,
-      args.permissionMode ?? null,
+      {
+        harness: args.harness ?? null,
+        model: args.model ?? null,
+        effort: args.effort ?? null,
+        permissionMode: args.permissionMode ?? null,
+      },
       channel,
     ),
   );

@@ -260,7 +260,7 @@ export const commands = {
 	 *  spawns the driver, and streams events back over `on_event`. Returns the
 	 *  persisted [`Session`] row.
 	 */
-	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], model: string | null, effort: string | null, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, model, effort, permissionMode, onEvent })),
+	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
 	/**
 	 *  Resume a previously-started session that's no longer live (e.g. after an app
 	 *  restart) by re-spawning claude with `--resume`, so the conversation continues
@@ -361,6 +361,39 @@ export const commands = {
 	 */
 	playSound: () => typedError<null, AppError>(__TAURI_INVOKE("play_sound")),
 	/**
+	 *  The models.dev catalog. Fresh in-memory-of-disk cache first (unless `force`),
+	 *  then a live fetch (cached on success), then any stale cache, then the bundled
+	 *  snapshot. `source` tells the UI which tier answered.
+	 */
+	opencodeCatalog: (force: boolean) => typedError<OpencodeCatalog, AppError>(__TAURI_INVOKE("opencode_catalog", { force })),
+	opencodeAuthList: () => typedError<OpencodeAuthEntry[], AppError>(__TAURI_INVOKE("opencode_auth_list")),
+	opencodeSetProviderKey: (provider: string, key: string) => typedError<OpencodeAuthEntry[], AppError>(__TAURI_INVOKE("opencode_set_provider_key", { provider, key })),
+	opencodeRemoveProvider: (provider: string) => typedError<OpencodeAuthEntry[], AppError>(__TAURI_INVOKE("opencode_remove_provider", { provider })),
+	/**
+	 *  Set the OpenCode default model: persisted to app settings (drives the
+	 *  composer) AND mirrored into `opencode.json`'s `model` so the CLI agrees.
+	 */
+	opencodeSetDefaultModel: (model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("opencode_set_default_model", { model })),
+	/**
+	 *  Install OpenCode in the background — no terminal UI. The frontend shows a
+	 *  spinner and reacts to ok/err; on success we re-detect binaries so the version
+	 *  badge flips to "Installed". `run()` fails on a non-zero exit, carrying the
+	 *  stderr tail into the error message the UI shows.
+	 * 
+	 *  The installer differs by platform: OpenCode's `curl … | bash` one-liner needs
+	 *  a Unix shell, which Windows doesn't have (piping it through PowerShell just
+	 *  fails with "Program 'curl.exe' failed to run: The pipe is being closed"). On
+	 *  Windows we use `npm install -g opencode-ai` instead — OpenCode's documented
+	 *  cross-platform method — and surface an actionable remedy if npm is missing.
+	 */
+	installOpencode: () => typedError<null, AppError>(__TAURI_INVOKE("install_opencode")),
+	/**
+	 *  Current Claude authentication, parsed from `claude auth status --json`.
+	 *  Never errors on a logged-out / missing CLI — returns a disconnected status so
+	 *  the UI degrades gracefully.
+	 */
+	claudeAuthStatus: () => typedError<ClaudeAuthStatus, AppError>(__TAURI_INVOKE("claude_auth_status")),
+	/**
 	 *  Open a new PTY for the given workstream, spawn the user's shell in the
 	 *  worktree directory, and start forwarding output to `on_event`.
 	 * 
@@ -389,6 +422,14 @@ export const commands = {
 	 *  PTY — the only difference is how it is opened (binary + args vs. shell in cwd).
 	 */
 	spawnCliTerminal: (args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_cli_terminal", { args, cols, rows, onEvent })),
+	/**
+	 *  Open a PTY running a single command line through the user's login shell, in
+	 *  the home directory. Used by the Harnesses settings page to run interactive
+	 *  flows that aren't the hyprlayer CLI — e.g. `claude auth login` or the
+	 *  OpenCode installer (`curl -fsSL https://opencode.ai/install | bash`). The
+	 *  command is run exactly as if the user typed it into their own shell.
+	 */
+	spawnShellTerminal: (command: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_shell_terminal", { command, cols, rows, onEvent })),
 	/**
 	 *  Read the AI tool install state without running `ai configure`.
 	 *  Gates the AI step: if already installed, the step shows "configured" with
@@ -511,7 +552,7 @@ export type Area =
 /**  Binary statuses were re-probed (override set, redetect requested). */
 export type BinariesChanged = null;
 
-export type BinaryKind = "hyprlayer" | "claude" | "gh" | "git";
+export type BinaryKind = "hyprlayer" | "claude" | "opencode" | "gh" | "git";
 
 export type BinaryState = { state: "ok" } | { state: "missing" } | { state: "tooOld"; min: string };
 
@@ -532,6 +573,23 @@ export type Bootstrap = {
 	settings: AppSettings,
 };
 
+export type CatalogModel = {
+	id: string,
+	name: string,
+};
+
+export type CatalogProvider = {
+	id: string,
+	name: string,
+	/**
+	 *  Env var names the provider's API key maps to (e.g. `["ANTHROPIC_API_KEY"]`).
+	 *  An empty list usually signals an OAuth-only provider.
+	 */
+	env: string[],
+	doc: string | null,
+	models: CatalogModel[],
+};
+
 export type CheckStatus = "pass" | "warn" | "fail";
 
 /**  The rolled-up state of the PR's CI checks, derived from `statusCheckRollup`. */
@@ -544,6 +602,14 @@ export type ChecksState =
 "passing" | 
 /**  At least one check failed, errored, or timed out. */
 "failing";
+
+export type ClaudeAuthStatus = {
+	connected: boolean,
+	provider: string | null,
+	plan: string | null,
+	org: string | null,
+	account: string | null,
+};
 
 /**  Claude provider defaults. */
 export type ClaudeSettings = {
@@ -566,6 +632,30 @@ export type ClaudeSettings = {
 	 *  custom model ids the user added).
 	 */
 	visibleModels?: string[] | null,
+	/**
+	 *  How `claude` authenticates: `"cli"` (subscription/login, the default and
+	 *  historical behaviour — the spawned process inherits the user's env and
+	 *  `~/.claude` state) or `"apiKey"` (enterprise — the app injects an API key
+	 *  into the spawn env). `None`/absent is treated as `"cli"`.
+	 */
+	authMode?: string | null,
+	/**
+	 *  Anthropic API key, injected as `ANTHROPIC_API_KEY` at spawn when
+	 *  `auth_mode == "apiKey"`. Stored in plaintext settings.json (see module
+	 *  note); empty/`None` means "no key set".
+	 */
+	apiKey?: string | null,
+	/**  Override the API endpoint (`ANTHROPIC_BASE_URL`) for a proxy/gateway. */
+	baseUrl?: string | null,
+	/**  Route through Amazon Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`). */
+	useBedrock?: boolean,
+	/**  Route through Google Vertex (`CLAUDE_CODE_USE_VERTEX=1`). */
+	useVertex?: boolean,
+	/**
+	 *  Enable the "Claude in Chrome" browser-control feature — adds `--chrome`
+	 *  at spawn so sessions can drive the connected Chrome extension.
+	 */
+	chromeEnabled?: boolean,
 	/**  Default model for in-app code reviews. Reserved — no review feature yet. */
 	reviewModel?: string | null,
 	/**  Default effort for in-app code reviews. Reserved. */
@@ -842,6 +932,43 @@ export type NotificationSettings = {
 	sound?: boolean,
 };
 
+/**
+ *  OpenCode harness defaults (Settings → Harnesses → OpenCode). Provider API
+ *  keys themselves are NOT stored here — they live in OpenCode's own
+ *  `auth.json` so the `opencode` CLI uses them natively (see `opencode::config`).
+ */
+export type OpenCodeSettings = {
+	/**
+	 *  Default model for new OpenCode sessions, as a `"provider/model"` id
+	 *  (e.g. `"anthropic/claude-sonnet-4-5"`). Mirrored into `opencode.json`'s
+	 *  `model` field so the CLI agrees. `None` keeps OpenCode's own default.
+	 */
+	defaultModel?: string | null,
+	/**
+	 *  The `"provider/model"` ids the user picked to expose in the composer's
+	 *  model picker when the OpenCode harness is selected. Empty = none chosen
+	 *  yet (the OpenCode tab prompts the user to add some).
+	 */
+	selectedModels?: string[],
+};
+
+/**
+ *  One configured provider credential, as surfaced to the UI. The raw key is
+ *  deliberately never returned — only that a credential exists and its kind.
+ */
+export type OpencodeAuthEntry = {
+	/**  models.dev provider id (e.g. `"anthropic"`, `"openai"`). */
+	provider: string,
+	/**  The stored credential `type`: `"api"`, `"oauth"`, `"wellknown"`, … */
+	kind: string,
+};
+
+export type OpencodeCatalog = {
+	providers: CatalogProvider[],
+	/**  `"network"` | `"cache"` | `"bundled"` — lets the UI show an offline hint. */
+	source: string,
+};
+
 /**  One CI check on the PR's head commit, for the per-check breakdown popover. */
 export type PrCheck = {
 	name: string,
@@ -938,13 +1065,15 @@ export type ProjectDetail = {
 };
 
 /**
- *  Defaults for each agent provider. Claude is the only working provider
- *  today; Codex is stubbed so the section can render now and gain real
- *  fields later without a settings migration.
+ *  Defaults for each agent provider/harness. Claude and OpenCode are wired up;
+ *  Codex is stubbed so the section can render now and gain real fields later
+ *  without a settings migration.
  */
 export type ProviderSettings = {
 	/**  Anthropic Claude (the `claude` CLI). */
 	claude?: ClaudeSettings,
+	/**  OpenCode (the `opencode` CLI) — multi-provider harness. */
+	opencode?: OpenCodeSettings,
 	/**
 	 *  OpenAI Codex — not wired up yet; reserved so the providers section is
 	 *  stable as we build it out.
@@ -987,7 +1116,12 @@ export type Session = {
 	id: string,
 	workstreamId: string,
 	stage: string,
-	/**  claude's own session id (set on the init event; drives `--resume`). */
+	/**  Which harness backs the session: `"claude"` | `"opencode"`. */
+	harness: string,
+	/**
+	 *  The harness's own session id (set on init; drives resume). claude's
+	 *  session id for Claude Code, the opencode session id for OpenCode.
+	 */
 	claudeSessionId: string | null,
 	cwd: string,
 	/**
@@ -1110,6 +1244,23 @@ export type SlashCommand = {
 export type SortKey = 
 /**  Text-match score; without `text` this falls through to `Date`. */
 "relevance" | "date" | "mtime" | "title";
+
+/**
+ *  Composer choices for a new session, bundled so the command stays within
+ *  specta's argument-count limit.
+ */
+export type StartOpts = {
+	/**  Which harness to run: `"claude"` (default) or `"opencode"`. */
+	harness?: string | null,
+	/**  For Claude: a model key/flag. For OpenCode: a `"provider/model"` id. */
+	model?: string | null,
+	effort?: string | null,
+	/**
+	 *  `--permission-mode` override (`default` | `acceptEdits` | `plan` |
+	 *  `bypassPermissions`); `None`/unrecognized keeps the stage's default.
+	 */
+	permissionMode?: string | null,
+};
 
 /**  Payload of `hyprlayer storage info --json`. */
 export type StorageInfo = {

@@ -34,15 +34,19 @@ const strToB64 = (s: string): string => {
 };
 
 type Props = {
-  /** Arguments passed to `hyprlayer`, e.g. ["ai", "configure"]. */
-  args: string[];
+  /** Arguments passed to `hyprlayer`, e.g. ["ai", "configure"]. Ignored when
+   *  `shellCommand` is set. */
+  args?: string[];
+  /** Run a single command line through the user's login shell instead of the
+   *  hyprlayer CLI — e.g. `"claude auth login"` or an installer one-liner. */
+  shellCommand?: string;
   /** Called once when the process exits. `code` is null on SIGKILL. */
   onExit?: (code: number | null) => void;
   /** Extra CSS classes on the outer wrapper. */
   className?: string;
 };
 
-export function SetupTerminal({ args, onExit, className = "" }: Props) {
+export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<TerminalEngine | null>(null);
   const idRef = useRef<string | undefined>(undefined);
@@ -80,7 +84,11 @@ export function SetupTerminal({ args, onExit, className = "" }: Props) {
 
     void (async () => {
       const g = engine.grid();
-      const termId = await unwrap(commands.spawnCliTerminal(args, g.cols, g.rows, channel));
+      const termId = await unwrap(
+        shellCommand !== undefined
+          ? commands.spawnShellTerminal(shellCommand, g.cols, g.rows, channel)
+          : commands.spawnCliTerminal(args ?? [], g.cols, g.rows, channel),
+      );
       if (disposed) {
         void commands.terminalClose(termId);
         return;

@@ -64,10 +64,18 @@ const onboardingRoute = createRoute({
   component: Onboarding,
 });
 
+/** Deep-link a Settings section (e.g. the composer's "Harnesses →" footer). */
+export type SettingsSearch = {
+  section?: string;
+};
+
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
   component: Settings,
+  validateSearch: (search: Record<string, unknown>): SettingsSearch => ({
+    section: optionalString(search.section),
+  }),
 });
 
 const archiveRoute = createRoute({

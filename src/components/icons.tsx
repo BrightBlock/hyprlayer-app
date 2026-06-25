@@ -241,6 +241,27 @@ export function CodeIcon({ size = 13, strokeWidth = 1.9, className }: IconProps)
   );
 }
 
+/** A nested-hexagon mark standing in for the OpenAI/Codex harness. */
+export function OpenAiIcon({ size = 13, strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 2 20 7 V17 L12 22 4 17 V7 Z" />
+      <path d="M12 7 16 9.5 V14.5 L12 17 8 14.5 V9.5 Z" />
+    </svg>
+  );
+}
+
 /** A terminal window: `>_` prompt — terminal emulators. */
 export function TerminalIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (

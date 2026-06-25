@@ -439,15 +439,16 @@ const ToolBlock = memo(function ToolBlock({
 }) {
   const [open, setOpen] = useState(false);
   const result = item.result;
-  // Edit/MultiEdit already show the change in the card (basename + hover diff),
-  // so their "file … updated successfully" confirmation is redundant noise — and
-  // it re-leaks the full path. Suppress that preview on success; keep it on error.
-  const isEdit = item.name === "Edit" || item.name === "MultiEdit";
+  // A file tool already names its target in the chip (and Edit/MultiEdit preview
+  // the diff on hover), so the success result line — the read's `<path>…` echo,
+  // "file updated successfully", etc. — is redundant noise that re-leaks the full
+  // path and clutters the stream. Suppress it on success; keep it on error.
+  const isFileTool = toolFilePath(item.name, item.input) !== null;
   // A Skill row already names the skill in its header, so the "Launching skill: X"
   // result is redundant noise — and its body folds into the expanded view below.
   const isSkill = item.name === "Skill";
   const preview =
-    result && !((isEdit || isSkill) && !result.isError)
+    result && !((isFileTool || isSkill) && !result.isError)
       ? resultPreview(result.content, result.isError)
       : null;
 
@@ -958,6 +959,9 @@ type Props = {
   busy: boolean;
   /** True before the first event lands, to show a connecting spinner. */
   connecting: boolean;
+  /** The harness this session runs on (e.g. "Claude Code" / "OpenCode") — names
+   *  the connecting spinner so it isn't always "claude". */
+  harnessLabel: string;
   /** Epoch ms when the current working stretch began, or null when idle —
    *  drives the bottom-left elapsed counter. */
   workingSince: number | null;
@@ -984,7 +988,7 @@ const RELOCK_MS = 200;
 
 export const TranscriptView = memo(
   forwardRef<TranscriptHandle, Props>(function TranscriptView(
-    { items, busy, connecting, workingSince, permission, prompt },
+    { items, busy, connecting, harnessLabel, workingSince, permission, prompt },
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -1105,7 +1109,7 @@ export const TranscriptView = memo(
           {connecting && (
             <div className="mt-3 flex items-center gap-2 text-sm text-ink-dim">
               <Spinner size={14} />
-              Connecting to claude…
+              Connecting to {harnessLabel}…
             </div>
           )}
           {workingSince !== null && <ElapsedCounter since={workingSince} />}

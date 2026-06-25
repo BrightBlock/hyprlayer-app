@@ -25,14 +25,16 @@ use crate::process::Exec;
 pub enum BinaryKind {
     Hyprlayer,
     Claude,
+    OpenCode,
     Gh,
     Git,
 }
 
 impl BinaryKind {
-    pub const ALL: [BinaryKind; 4] = [
+    pub const ALL: [BinaryKind; 5] = [
         BinaryKind::Hyprlayer,
         BinaryKind::Claude,
+        BinaryKind::OpenCode,
         BinaryKind::Gh,
         BinaryKind::Git,
     ];
@@ -41,6 +43,7 @@ impl BinaryKind {
         match self {
             BinaryKind::Hyprlayer => "hyprlayer",
             BinaryKind::Claude => "claude",
+            BinaryKind::OpenCode => "opencode",
             BinaryKind::Gh => "gh",
             BinaryKind::Git => "git",
         }
@@ -51,13 +54,17 @@ impl BinaryKind {
         match self {
             // Control-protocol floor for the headless session driver.
             BinaryKind::Claude => Some(("2.1.0", [2, 1, 0])),
+            // Server mode (`opencode serve`) + the HTTP/SSE session API the
+            // OpenCode driver speaks. A conservative floor — tune if needed.
+            BinaryKind::OpenCode => Some(("1.0.0", [1, 0, 0])),
             _ => None,
         }
     }
 
     /// Whether the app can function without this binary.
     pub fn optional(self) -> bool {
-        matches!(self, BinaryKind::Gh)
+        // The app runs fine on Claude alone; OpenCode and gh are extras.
+        matches!(self, BinaryKind::Gh | BinaryKind::OpenCode)
     }
 }
 
@@ -187,17 +194,18 @@ impl BinaryResolver {
         status
     }
 
-    /// All four statuses, probed concurrently — worst case is one probe
-    /// timeout, not four in a row.
+    /// All statuses, probed concurrently — worst case is one probe timeout,
+    /// not N in a row.
     pub async fn status_all(&self) -> Vec<BinaryStatus> {
-        let [a, b, c, d] = BinaryKind::ALL;
-        let (a, b, c, d) = tokio::join!(
+        let [a, b, c, d, e] = BinaryKind::ALL;
+        let (a, b, c, d, e) = tokio::join!(
             self.status(a),
             self.status(b),
             self.status(c),
-            self.status(d)
+            self.status(d),
+            self.status(e)
         );
-        vec![a, b, c, d]
+        vec![a, b, c, d, e]
     }
 
     pub async fn set_override(&self, kind: BinaryKind, path: Option<PathBuf>) {
@@ -319,6 +327,7 @@ fn well_known_dirs() -> Vec<PathBuf> {
         ".local/bin",
         ".cargo/bin",
         ".claude/local",
+        ".opencode/bin",
         ".bun/bin",
         ".volta/bin",
     ]

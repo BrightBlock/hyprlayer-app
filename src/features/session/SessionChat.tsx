@@ -16,11 +16,14 @@ import { Badge, Button, ErrorNote, Spinner } from "../../components/ui";
 import {
   BookIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
+  CodeIcon,
   DocIcon,
   EffortIcon,
   EraserIcon,
   ImageIcon,
   ModeIcon,
+  OpenAiIcon,
   PlusIcon,
   QuestionIcon,
   SendIcon,
@@ -34,7 +37,7 @@ import { eventToChord, hasPrimaryModifier } from "../../lib/keybindings/chord";
 import { effectiveChord } from "../../lib/keybindings/resolve";
 import { basename } from "../../lib/path";
 import { IS_MACOS } from "../../lib/platform";
-import { useBootstrap } from "../../lib/queries";
+import { useBootstrap, useOpencodeCatalog } from "../../lib/queries";
 import type { WorkstreamView } from "../../lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
 import { AttachmentCards } from "./AttachmentCard";
@@ -43,6 +46,7 @@ import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "./stages";
 import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
+import { DEFAULT_HARNESS_KEY, harnessOption, opencodeModelLabel, opencodeModelNames } from "./harnessing";
 import { PERMISSION_MODES, permissionModeOption } from "./permissions";
 import { docFromTool, formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
@@ -156,13 +160,26 @@ type MenuItem = {
   danger?: boolean;
 };
 
+/** A labelled section in a grouped menu (the model picker groups models by
+ *  harness). A `disabled` group is shown greyed with non-selectable rows — used
+ *  for "coming soon" harnesses like Codex. */
+type MenuGroup = {
+  key: string;
+  label: string;
+  icon?: ReactNode;
+  items: MenuItem[];
+  disabled?: boolean;
+};
+
 /** A compact composer-toolbar dropdown (model / effort / mode). Opens upward —
  *  the composer sits at the bottom of the pane. */
 function ComposerMenu({
   leading,
   label,
   hint,
-  items,
+  items = [],
+  groups,
+  footer,
   activeKey,
   onSelect,
   title,
@@ -172,7 +189,13 @@ function ComposerMenu({
   leading: ReactNode;
   label: string;
   hint?: string;
-  items: MenuItem[];
+  items?: MenuItem[];
+  /** When set, render a grouped menu (section headers + per-group rows) instead
+   *  of the flat `items` list. The model picker uses this to group models by
+   *  harness. `items`/`custom` are ignored in grouped mode. */
+  groups?: MenuGroup[];
+  /** An action row pinned to the bottom of the menu (e.g. "Harnesses →"). */
+  footer?: { label: string; icon?: ReactNode; onClick: () => void };
   activeKey: string;
   onSelect: (key: string) => void;
   title: string;
@@ -187,10 +210,12 @@ function ComposerMenu({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
+  // Every selectable row across flat items and any groups.
+  const allItems = groups ? groups.flatMap((g) => (g.disabled ? [] : g.items)) : items;
   // The active selection is "custom" when it matches none of the preset items.
-  const customActive = custom != null && !items.some((it) => it.key === activeKey);
+  const customActive = custom != null && !allItems.some((it) => it.key === activeKey);
   // A risky active choice (e.g. "Bypass permissions") tints the whole trigger red.
-  const activeDanger = items.some((it) => it.key === activeKey && it.danger);
+  const activeDanger = allItems.some((it) => it.key === activeKey && it.danger);
 
   const close = () => {
     setOpen(false);
@@ -229,7 +254,9 @@ function ComposerMenu({
         <span className="shrink-0">{leading}</span>
         {!compact && (
           <>
-            <span className={`font-medium ${activeDanger ? "text-bad" : "text-ink"}`}>{label}</span>
+            <span className={`max-w-[12rem] truncate font-medium ${activeDanger ? "text-bad" : "text-ink"}`}>
+              {label}
+            </span>
             {hint && <span className={activeDanger ? "text-bad/80" : "text-ink-dim"}>{hint}</span>}
             <ChevronDownIcon size={12} />
           </>
@@ -238,52 +265,115 @@ function ComposerMenu({
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={close} aria-hidden="true" />
-          <div className="absolute bottom-full left-0 z-30 mb-1.5 min-w-[190px] overflow-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
-            {items.map((it) => (
-              <button
-                key={it.key}
-                type="button"
-                onClick={() => {
-                  onSelect(it.key);
-                  close();
-                }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
-                  it.danger ? "text-bad" : it.key === activeKey ? "text-ink" : "text-ink-dim"
-                }`}
-              >
-                {it.icon && <span className="shrink-0">{it.icon}</span>}
-                <span className="font-medium">{it.label}</span>
-                {it.hint && <span className="text-ink-dim">{it.hint}</span>}
-                {it.key === activeKey && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
-              </button>
-            ))}
-            {custom && (
+          <div className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[60vh] min-w-[190px] max-w-[22rem] overflow-y-auto overflow-x-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
+            {groups ? (
               <>
-                <div className="my-1 border-t border-edge" />
-                {editing ? (
-                  <div className="px-2 py-1">
-                    <input
-                      autoFocus
-                      value={text}
-                      onChange={(e) => setText(e.target.value)}
-                      onKeyDown={onCustomKey}
-                      onBlur={commitCustom}
-                      placeholder={custom.placeholder}
-                      spellCheck={false}
-                      className="w-full rounded-md border border-edge bg-base px-2 py-1 text-xs text-ink placeholder:text-ink-dim focus:border-accent focus:outline-none"
-                    />
+                {groups.map((g, gi) => (
+                  <div key={g.key}>
+                    {gi > 0 && <div className="my-1 border-t border-edge" />}
+                    <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-medium text-ink-dim/70">
+                      {g.icon && <span className="shrink-0">{g.icon}</span>}
+                      <span>{g.label}</span>
+                    </div>
+                    {g.items.map((it) =>
+                      g.disabled ? (
+                        <div
+                          key={it.key}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim/40"
+                        >
+                          {it.icon && <span className="shrink-0">{it.icon}</span>}
+                          <span className="min-w-0 truncate font-medium">{it.label}</span>
+                          <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
+                        </div>
+                      ) : (
+                        <button
+                          key={it.key}
+                          type="button"
+                          onClick={() => {
+                            onSelect(it.key);
+                            close();
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
+                            it.key === activeKey ? "text-ink" : "text-ink-dim"
+                          }`}
+                        >
+                          {it.icon && <span className="shrink-0">{it.icon}</span>}
+                          <span className="min-w-0 truncate font-medium">{it.label}</span>
+                          {it.hint && <span className="shrink-0 text-ink-dim">{it.hint}</span>}
+                          {it.key === activeKey && (
+                            <span className="ml-auto shrink-0 text-[11px] text-ink">✓</span>
+                          )}
+                        </button>
+                      ),
+                    )}
                   </div>
-                ) : (
+                ))}
+                {footer && (
+                  <>
+                    <div className="my-1 border-t border-edge" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        footer.onClick();
+                        close();
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim hover:bg-edge/50 hover:text-ink"
+                    >
+                      <span className="font-medium">{footer.label}</span>
+                      {footer.icon && <span className="ml-auto shrink-0">{footer.icon}</span>}
+                    </button>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                {items.map((it) => (
                   <button
+                    key={it.key}
                     type="button"
-                    onClick={beginCustom}
+                    onClick={() => {
+                      onSelect(it.key);
+                      close();
+                    }}
                     className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
-                      customActive ? "text-ink" : "text-ink-dim"
+                      it.danger ? "text-bad" : it.key === activeKey ? "text-ink" : "text-ink-dim"
                     }`}
                   >
-                    <span className="font-medium">{customActive ? activeKey : custom.label}</span>
-                    {customActive && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
+                    {it.icon && <span className="shrink-0">{it.icon}</span>}
+                    <span className="font-medium">{it.label}</span>
+                    {it.hint && <span className="text-ink-dim">{it.hint}</span>}
+                    {it.key === activeKey && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
                   </button>
+                ))}
+                {custom && (
+                  <>
+                    <div className="my-1 border-t border-edge" />
+                    {editing ? (
+                      <div className="px-2 py-1">
+                        <input
+                          autoFocus
+                          value={text}
+                          onChange={(e) => setText(e.target.value)}
+                          onKeyDown={onCustomKey}
+                          onBlur={commitCustom}
+                          placeholder={custom.placeholder}
+                          spellCheck={false}
+                          className="w-full rounded-md border border-edge bg-base px-2 py-1 text-xs text-ink placeholder:text-ink-dim focus:border-accent focus:outline-none"
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={beginCustom}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
+                          customActive ? "text-ink" : "text-ink-dim"
+                        }`}
+                      >
+                        <span className="font-medium">{customActive ? activeKey : custom.label}</span>
+                        {customActive && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
+                      </button>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -807,6 +897,14 @@ type Props = {
   onModelChange: (key: string) => void;
   onEffortChange: (key: string) => void;
   onPermissionModeChange: (key: string) => void;
+  /** Persist the chosen harness (claude|opencode) on the tab so it survives a
+   *  tab switch; fixed once the session starts. */
+  onHarnessChange: (key: string) => void;
+  /** Persist the chosen OpenCode `provider/model` id on the tab (the Claude model
+   *  lives in `onModelChange`). */
+  onOpencodeModelChange: (key: string) => void;
+  /** Open Settings → Harnesses (the model menu's "Harnesses →" footer). */
+  onOpenHarnessSettings: () => void;
   onSessionStarted: (sessionId: string) => void;
   onResetSession: () => void;
   onOpenDoc: (id: string) => void;
@@ -841,6 +939,9 @@ export function SessionChat({
   onModelChange,
   onEffortChange,
   onPermissionModeChange,
+  onHarnessChange,
+  onOpencodeModelChange,
+  onOpenHarnessSettings,
   onSessionStarted,
   onResetSession,
   onOpenDoc,
@@ -926,6 +1027,88 @@ export function SessionChat({
     shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
   );
   const modelItems = visibleModels(claudeDefaults?.visibleModels);
+
+  // The harness is implied by which model you pick: the model menu groups models
+  // by harness (Claude / Codex[soon] / OpenCode), so selecting one sets BOTH the
+  // model and the harness. Both persist on the tab — like effort — so switching
+  // tabs and coming back keeps the choice. Menu keys are namespaced `harness:key`
+  // so the select handler knows which harness a row belongs to.
+  const opencodeDefaults = useBootstrap().data?.settings.providers?.opencode;
+  const harness = harnessOption(shell.harness ?? DEFAULT_HARNESS_KEY);
+  const usingOpencode = harness.key === "opencode";
+  const ocModels = opencodeDefaults?.selectedModels ?? [];
+  const ocModel = shell.opencodeModel ?? opencodeDefaults?.defaultModel ?? ocModels[0] ?? null;
+  const startModelFlag = usingOpencode ? ocModel : model.flag;
+  // Friendly OpenCode model names from the models.dev catalog — the raw ids are
+  // long `provider/model` paths. Only fetched when this tab has OpenCode models
+  // to label; the query is cached hard and falls back to a bundled snapshot.
+  const ocCatalog = useOpencodeCatalog(ocModels.length > 0);
+  const ocNames = useMemo(
+    () => opencodeModelNames(ocCatalog.data?.providers ?? []),
+    [ocCatalog.data],
+  );
+
+  const modelGroups: MenuGroup[] = [
+    {
+      key: "claude",
+      label: "Claude Code",
+      icon: <SparkleIcon size={13} />,
+      items: modelItems.map((m) => ({
+        key: `claude:${m.key}`,
+        label: m.label,
+        hint: m.hint,
+        icon: <SparkleIcon size={13} />,
+      })),
+    },
+    {
+      key: "codex",
+      label: "Codex",
+      icon: <OpenAiIcon size={13} />,
+      disabled: true,
+      items: [
+        { key: "codex:gpt-5.5", label: "GPT-5.5", icon: <OpenAiIcon size={13} /> },
+        { key: "codex:gpt-5.4", label: "GPT-5.4", icon: <OpenAiIcon size={13} /> },
+      ],
+    },
+    {
+      key: "opencode",
+      label: "OpenCode",
+      icon: <CodeIcon size={13} />,
+      items: ocModels.map((id) => ({
+        key: `opencode:${id}`,
+        label: opencodeModelLabel(id, ocNames),
+        hint: ocNames.get(id)?.provider,
+        icon: <CodeIcon size={13} />,
+      })),
+    },
+  ];
+  // Trigger reflects the active model; the active row carries a ✓ in the menu.
+  const composerModelLabel = usingOpencode
+    ? ocModel
+      ? opencodeModelLabel(ocModel, ocNames)
+      : "Select a model"
+    : model.label;
+  const composerModelHint = usingOpencode ? undefined : model.hint;
+  const composerModelActiveKey = usingOpencode
+    ? ocModel
+      ? `opencode:${ocModel}`
+      : ""
+    : `claude:${model.key}`;
+
+  // Picking a model selects its harness too (Codex rows are disabled, so never
+  // fire here). `onHarnessChange` + the per-harness model setter both patch the tab.
+  const onPickModel = (namespaced: string) => {
+    const sep = namespaced.indexOf(":");
+    const pickedHarness = namespaced.slice(0, sep);
+    const pickedModel = namespaced.slice(sep + 1);
+    if (pickedHarness === "opencode") {
+      onHarnessChange("opencode");
+      onOpencodeModelChange(pickedModel);
+    } else {
+      onHarnessChange("claude");
+      onModelChange(pickedModel);
+    }
+  };
 
   // A tab bound to a session but with no transcript in memory means we came
   // back after an app restart — rebuild it from the persisted event log. Use the
@@ -1225,7 +1408,8 @@ export function SessionChat({
         stage: shell.mode,
         input,
         attachments: atts,
-        model: model.flag,
+        harness: harness.key,
+        model: startModelFlag,
         effort: effort.key,
         permissionMode: permissionMode.flag,
       });
@@ -1386,6 +1570,7 @@ export function SessionChat({
           items={session?.items ?? []}
           busy={working}
           connecting={!session || session.state === "starting"}
+          harnessLabel={harness.label}
           workingSince={session?.workingSince ?? null}
           permission={permission}
           prompt={prompt}
@@ -1571,47 +1756,55 @@ export function SessionChat({
                       compact={compactComposer}
                     />
                   )}
-                  {/* Model + effort stay visible/selectable; mid-session changes
-                      take effect on the next session this tab starts. */}
+                  {/* Model picker, grouped by harness — picking a model also picks
+                      its harness. Mid-session changes take effect on the next
+                      session this tab starts. The "Harnesses →" footer opens the
+                      settings where providers/models are configured. */}
                   <ComposerMenu
                     title="Model"
-                    leading={<SparkleIcon size={14} />}
-                    label={model.label}
-                    hint={model.hint}
-                    items={modelItems.map((m) => ({ key: m.key, label: m.label, hint: m.hint }))}
-                    activeKey={model.key}
-                    onSelect={onModelChange}
-                    custom={{ label: "Custom…", placeholder: "alias or claude-…" }}
+                    leading={usingOpencode ? <CodeIcon size={14} /> : <SparkleIcon size={14} />}
+                    label={composerModelLabel}
+                    hint={composerModelHint}
+                    groups={modelGroups}
+                    activeKey={composerModelActiveKey}
+                    onSelect={onPickModel}
+                    footer={{
+                      label: "Harnesses",
+                      icon: <ChevronRightIcon size={14} />,
+                      onClick: onOpenHarnessSettings,
+                    }}
                     compact={compactComposer}
                   />
-                  <ComposerMenu
-                    title="Reasoning effort"
-                    leading={<EffortIcon size={14} />}
-                    label={effort.label}
-                    items={EFFORTS.map((e) => ({ key: e.key, label: e.label }))}
-                    activeKey={effort.key}
-                    onSelect={onEffortChange}
-                    compact={compactComposer}
-                  />
-                  {/* Permission posture for the next session this tab starts.
-                      "Bypass permissions" runs claude with no approval prompts —
-                      same as the CLI's --dangerously-skip-permissions. Fixed at
-                      spawn, so a change applies to the next session, not this one. */}
-                  <ComposerMenu
-                    title="Permission mode"
-                    leading={<ShieldIcon size={14} />}
-                    label={permissionMode.label}
-                    hint={permissionMode.hint}
-                    items={PERMISSION_MODES.map((p) => ({
-                      key: p.key,
-                      label: p.label,
-                      hint: p.hint,
-                      danger: p.danger,
-                    }))}
-                    activeKey={permissionMode.key}
-                    onSelect={(k) => void handlePermissionModeChange(k)}
-                    compact={compactComposer}
-                  />
+                  {/* Effort + permission mode are Claude-only; OpenCode manages
+                      its own reasoning/permission settings. */}
+                  {!usingOpencode && (
+                    <ComposerMenu
+                      title="Reasoning effort"
+                      leading={<EffortIcon size={14} />}
+                      label={effort.label}
+                      items={EFFORTS.map((e) => ({ key: e.key, label: e.label }))}
+                      activeKey={effort.key}
+                      onSelect={onEffortChange}
+                      compact={compactComposer}
+                    />
+                  )}
+                  {!usingOpencode && (
+                    <ComposerMenu
+                      title="Permission mode"
+                      leading={<ShieldIcon size={14} />}
+                      label={permissionMode.label}
+                      hint={permissionMode.hint}
+                      items={PERMISSION_MODES.map((p) => ({
+                        key: p.key,
+                        label: p.label,
+                        hint: p.hint,
+                        danger: p.danger,
+                      }))}
+                      activeKey={permissionMode.key}
+                      onSelect={(k) => void handlePermissionModeChange(k)}
+                      compact={compactComposer}
+                    />
+                  )}
 
                   <div className="ml-auto flex items-center gap-1">
                     <AttachMenu

@@ -89,6 +89,12 @@ export type ShellTab = {
   /** Permission-mode key chosen for the NEXT session (see permissions.ts);
    *  fixed at spawn. Undefined → "auto" (the stage's default posture). */
   permissionMode?: string;
+  /** Which harness the NEXT session runs on ("claude" | "opencode"); fixed at
+   *  spawn, persisted so switching tabs doesn't reset it. Undefined → "claude". */
+  harness?: string;
+  /** OpenCode `provider/model` id for the NEXT session when `harness` is
+   *  "opencode" (Claude's model lives in `model`). Undefined → the OpenCode default. */
+  opencodeModel?: string;
   sessionId?: string;
   /** When set, this tab is a read-only markdown preview of a doc (its path),
    *  not an agent chat — opened from the diff sidebar, closed when done. */
@@ -395,6 +401,8 @@ export function ProjectPage() {
         | "model"
         | "effort"
         | "permissionMode"
+        | "harness"
+        | "opencodeModel"
         | "sessionId"
         | "handoffNudgeDismissed"
         | "terminalView"
@@ -776,6 +784,9 @@ export function ProjectPage() {
     onModelChange: (key: string) => patchShell(shell.id, { model: key }),
     onEffortChange: (key: string) => patchShell(shell.id, { effort: key }),
     onPermissionModeChange: (key: string) => patchShell(shell.id, { permissionMode: key }),
+    onHarnessChange: (key: string) => patchShell(shell.id, { harness: key }),
+    onOpencodeModelChange: (key: string) => patchShell(shell.id, { opencodeModel: key }),
+    onOpenHarnessSettings: () => void navigate({ to: "/settings", search: { section: "harnesses" } }),
     // Strip the auto-captured handoff chip(s) once the new session has started:
     // by then they've already ridden through `handleStart` as attachments, so the
     // bridge has served its purpose — keeping the chip would leave the ready

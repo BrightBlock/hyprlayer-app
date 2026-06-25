@@ -14,7 +14,10 @@ pub struct Session {
     pub id: String,
     pub workstream_id: String,
     pub stage: String,
-    /// claude's own session id (set on the init event; drives `--resume`).
+    /// Which harness backs the session: `"claude"` | `"opencode"`.
+    pub harness: String,
+    /// The harness's own session id (set on init; drives resume). claude's
+    /// session id for Claude Code, the opencode session id for OpenCode.
     pub claude_session_id: Option<String>,
     pub cwd: String,
     /// starting | running | awaiting_permission | awaiting_question | completed |
@@ -45,10 +48,11 @@ pub struct NewSession {
     pub id: String,
     pub workstream_id: String,
     pub stage: String,
+    pub harness: String,
     pub cwd: String,
 }
 
-const COLS: &str = "id, workstream_id, stage, claude_session_id, cwd, state, model, \
+const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, state, model, \
                     cost_usd, started_at, ended_at, exit_summary";
 
 fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
@@ -56,6 +60,7 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         id: row.get("id")?,
         workstream_id: row.get("workstream_id")?,
         stage: row.get("stage")?,
+        harness: row.get("harness")?,
         claude_session_id: row.get("claude_session_id")?,
         cwd: row.get("cwd")?,
         state: row.get("state")?,
@@ -73,6 +78,7 @@ impl Db {
             id: new.id,
             workstream_id: new.workstream_id,
             stage: new.stage,
+            harness: new.harness,
             claude_session_id: None,
             cwd: new.cwd,
             state: "starting".into(),
@@ -84,13 +90,14 @@ impl Db {
         };
         self.with(|conn| {
             conn.execute(
-                "INSERT INTO sessions (id, workstream_id, stage, claude_session_id, cwd, state,
-                                       model, cost_usd, started_at, ended_at, exit_summary)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                "INSERT INTO sessions (id, workstream_id, stage, harness, claude_session_id, cwd,
+                                       state, model, cost_usd, started_at, ended_at, exit_summary)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                 params![
                     session.id,
                     session.workstream_id,
                     session.stage,
+                    session.harness,
                     session.claude_session_id,
                     session.cwd,
                     session.state,
@@ -368,6 +375,7 @@ mod tests {
                 id: "s1".into(),
                 workstream_id: ws.id.clone(),
                 stage: "research".into(),
+                harness: "claude".into(),
                 cwd: "/wt".into(),
             })
             .unwrap();
@@ -419,6 +427,7 @@ mod tests {
             id: session_id.into(),
             workstream_id: ws.id,
             stage: "general".into(),
+            harness: "claude".into(),
             cwd: "/wt".into(),
         })
         .unwrap();

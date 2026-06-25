@@ -87,7 +87,10 @@ pub struct SpawnConfig {
     pub model: Option<String>,
     /// Reasoning effort level (`low|medium|high|xhigh|max`); else claude's default.
     pub effort: Option<String>,
-    /// Augmented PATH + any extra env for the child.
+    /// Enable the "Claude in Chrome" browser-control feature (`--chrome`).
+    pub chrome: bool,
+    /// Augmented PATH + any extra env for the child (e.g. `ANTHROPIC_API_KEY`
+    /// for enterprise API-key auth).
     pub env: Vec<(String, String)>,
 }
 
@@ -159,6 +162,9 @@ impl ClaudeDriver {
         }
         if let Some(effort) = &config.effort {
             cmd.args(["--effort", effort]);
+        }
+        if config.chrome {
+            cmd.arg("--chrome");
         }
 
         cmd.current_dir(&config.cwd)
