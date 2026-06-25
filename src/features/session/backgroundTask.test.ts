@@ -98,6 +98,15 @@ function taskUpdate(
   return { kind: "taskUpdate", id: `up-${taskId}-${status}`, taskId, toolUseId: spawnToolUseId, status };
 }
 
+/** A process-boundary marker (backend relaunch). Clears tracked tasks. */
+function relaunchedMarker(id = "relaunch-1"): Extract<TranscriptItem, { kind: "relaunched" }> {
+  return { kind: "relaunched", id };
+}
+
+function exitItem(id = "exit-1"): Extract<TranscriptItem, { kind: "exit" }> {
+  return { kind: "exit", id, outcome: "killed", code: 143, stderrTail: "" };
+}
+
 function replayFixture(events: unknown[]): TranscriptItem[] {
   let view = initialSessionView();
   for (const ev of events) {
@@ -280,6 +289,48 @@ describe("backgroundTasksFromItems", () => {
       taskUpdate("completely-unknown", null, "completed"),
     ];
     expect(backgroundTasksFromItems(items)).toHaveLength(1);
+  });
+
+  // ── errored spawn (denied / hook-blocked) — no phantom ─────────────────────
+
+  it("does not track a background spawn whose result is an error", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", {
+        description: "Blocked build",
+        result: { content: "Permission to use Bash was denied.", isError: true },
+      }),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  // ── process death (relaunch / exit) clears orphaned tasks ──────────────────
+
+  it("clears tracked tasks at a relaunched boundary (resume/restart/rewind)", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { description: "Windows build", result: SPAWN_RESULT("task-a") }),
+      relaunchedMarker(),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("keeps a task spawned AFTER the relaunch boundary (the new process is alive)", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { description: "Old gen", result: SPAWN_RESULT("task-a") }),
+      relaunchedMarker(),
+      bgBash("t2", { description: "New gen", result: SPAWN_RESULT("task-b") }),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("task-b");
+    expect(tasks[0].label).toBe("New gen");
+  });
+
+  it("clears tracked tasks at an exit item (the process ended)", () => {
+    const items: TranscriptItem[] = [
+      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
+      exitItem(),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
   // ── output-file read (the dominant real-world terminus) ────────────────────
@@ -496,5 +547,44 @@ describe("backgroundTasksFromItems — fixture replay", () => {
       { kind: "toolUse", id: "rd-1", name: "Bash", input: JSON.stringify({ command: "tail -25 /private/tmp/tasks/task-z.output" }), parentId: null },
     ]);
     expect(backgroundTasksFromItems(afterRead)).toHaveLength(0);
+  });
+
+  it("keeps a fire-and-forget task alive across a later turn's init (init is per-turn, not a restart)", () => {
+    // Regression guard: `init` is per-turn (prod: 19 inits / 3 exits), so a task
+    // must SURVIVE a later turn's init. Clearing on init wrongly dropped it.
+    const before = replayFixture([
+      { kind: "init", claudeSessionId: "sess-1", model: "claude-haiku-4-5-20251001" },
+      { kind: "toolUse", id: "bg-1", name: "Bash", input: JSON.stringify({ command: "sleep 600", description: "Long build", run_in_background: true }), parentId: null },
+      { kind: "toolResult", toolUseId: "bg-1", content: SPAWN_RESULT("task-z").content, isError: false, parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null },
+    ]);
+    expect(backgroundTasksFromItems(before)).toHaveLength(1);
+
+    const afterNextTurn = replayFixture([
+      { kind: "init", claudeSessionId: "sess-1", model: "claude-haiku-4-5-20251001" },
+      { kind: "toolUse", id: "bg-1", name: "Bash", input: JSON.stringify({ command: "sleep 600", description: "Long build", run_in_background: true }), parentId: null },
+      { kind: "toolResult", toolUseId: "bg-1", content: SPAWN_RESULT("task-z").content, isError: false, parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null },
+      { kind: "userMessage", text: "reply ok", stage: null },
+      { kind: "init", claudeSessionId: "sess-1", model: "claude-haiku-4-5-20251001" },
+      { kind: "assistantText", text: "ok", parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null },
+    ]);
+    const live = backgroundTasksFromItems(afterNextTurn);
+    expect(live).toHaveLength(1);
+    expect(live[0].taskId).toBe("task-z");
+  });
+
+  it("a relaunched event clears a fire-and-forget task end-to-end", () => {
+    const events: SessionEvent[] = [
+      { kind: "init", claudeSessionId: "s1", model: "claude-opus-4-8" },
+      { kind: "toolUse", id: "bg-1", name: "Bash", input: JSON.stringify({ command: "ssh nexus-win 'cargo build --release'", description: "Windows build", run_in_background: true }), parentId: null },
+      { kind: "toolResult", toolUseId: "bg-1", content: SPAWN_RESULT("task-z").content, isError: false, parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null },
+    ];
+    expect(backgroundTasksFromItems(replayFixture(events))).toHaveLength(1);
+
+    const afterRelaunch = replayFixture([...events, { kind: "relaunched" }]);
+    expect(backgroundTasksFromItems(afterRelaunch)).toHaveLength(0);
   });
 });

@@ -140,6 +140,12 @@ pub enum SessionEvent {
         tool_use_id: Option<String>,
         status: String,
     },
+    /// A new `claude` process took over an existing session via `--resume`
+    /// (permission/model change, rewind, app-restart resume). The forwarder
+    /// emits it once at the start of a relaunch — distinct from claude's
+    /// per-turn `init` — so the UI drops background tasks the now-dead prior
+    /// process owned (their completion notification can never arrive).
+    Relaunched {},
     /// An unparseable / unknown stdout line — surfaced, never fatal.
     ProtocolError { detail: String, raw: String },
     /// The process ended. Terminal: no further events for this session.
@@ -168,8 +174,24 @@ impl SessionEvent {
             SessionEvent::TurnDone { .. } => "turnDone",
             SessionEvent::CompactBoundary { .. } => "compactBoundary",
             SessionEvent::BackgroundTaskUpdate { .. } => "backgroundTaskUpdate",
+            SessionEvent::Relaunched { .. } => "relaunched",
             SessionEvent::ProtocolError { .. } => "protocolError",
             SessionEvent::Exited { .. } => "exited",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins the wire shape the UI keys on (`kind: "relaunched"`, no payload).
+    #[test]
+    fn relaunched_serializes_with_kind_tag() {
+        assert_eq!(
+            serde_json::to_string(&SessionEvent::Relaunched {}).unwrap(),
+            r#"{"kind":"relaunched"}"#
+        );
+        assert_eq!(SessionEvent::Relaunched {}.kind(), "relaunched");
     }
 }

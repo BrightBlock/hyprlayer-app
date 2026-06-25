@@ -427,6 +427,19 @@ describe("classifyEntry — background activity state", () => {
     expect(classifyEntry(entry)).toBe("background");
   });
 
+  it("returns 'review' (not 'background') for a DETACHED session (live:false)", async () => {
+    // Restored-after-restart: no live process, so its leftover spawn isn't running.
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit(BASH_BG_RESULT("tu-1", "task-a"));
+    emit(TURN_DONE);
+
+    const live = entryOf(id);
+    expect(classifyEntry(live)).toBe("background"); // sanity: live → background
+    expect(classifyEntry({ ...live, live: false })).toBe("review");
+  });
+
   it("flips from 'background' to 'review' once the task completes via notification", async () => {
     const id = await startBusySession();
     emit(INIT);

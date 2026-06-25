@@ -629,6 +629,18 @@ describe("connecting state (leaves 'starting' on first sign of life)", () => {
   });
 });
 
+describe("relaunched process-boundary marker", () => {
+  it("appends exactly one non-rendering 'relaunched' marker", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "assistantText", text: "before relaunch", parentId: null });
+    view = reduceEvent(view, { kind: "relaunched" });
+
+    expect(view.items.filter((i) => i.kind === "relaunched")).toHaveLength(1);
+    // Non-rendering: the copied transcript is just the assistant block.
+    expect(viewToText(view).trim()).toBe("## Assistant\nbefore relaunch");
+  });
+});
+
 describe("replay determinism", () => {
   it("rebuilds the same transcript from a recorded stream", () => {
     const events: SessionEvent[] = [

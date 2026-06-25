@@ -211,6 +211,13 @@ export type TranscriptItem =
       toolUseId: string | null;
       status: string;
     }
+  /** Non-rendering marker for the backend's `relaunched` event (a new process
+   *  took over the session). `backgroundTasksFromItems` drops the dead prior
+   *  generation's background tasks at it. */
+  | {
+      kind: "relaunched";
+      id: string;
+    }
   | {
       kind: "exit";
       id: string;
@@ -802,6 +809,13 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           }),
           true,
         ),
+      };
+
+    case "relaunched":
+      // Inert boundary marker; the new process's own `init` (next) sets state.
+      return {
+        ...view,
+        ...appended(view, (id) => ({ kind: "relaunched", id })),
       };
 
     case "backgroundTaskUpdate":

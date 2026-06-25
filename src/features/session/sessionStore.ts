@@ -1078,11 +1078,10 @@ export function useSessionBackgroundTasks(sessionId: string | undefined): LiveBa
       if (!sessionId) return [] as string[];
       const entry = s.sessions[sessionId];
       if (!entry) return [] as string[];
-      // A terminal session's process group is dead, so its background shells
-      // are too — even though an un-stopped spawn still sits in `items`. Don't
-      // surface phantom "running" tasks. (SessionChat also hides the bar behind
-      // its `terminal` gate; this keeps the selector correct on its own.)
-      if (isTerminal(entry.state)) return [] as string[];
+      // No live process → its background shells are dead (a terminal session, or
+      // one restored detached after an app restart), so an un-stopped spawn in
+      // `items` can never complete-notify. Don't surface it as a phantom.
+      if (isTerminal(entry.state) || !entry.live) return [] as string[];
       const tasks = backgroundTasksFromItems(entry.items);
       return tasks.map((t) => {
         const startedAt = entry.taskStartedAt[t.toolUseId] ?? 0;
@@ -1158,7 +1157,8 @@ export function classifyEntry(entry: SessionEntry): WorkstreamActivity {
     // shells still running gets the distinct pulse instead of the static
     // "review" green. A "completed" session is terminal — its process group and
     // its shells are already dead — so it reads as "review", not "background".
-    if (!isTerminal(entry.state) && backgroundTasksFromItems(entry.items).length > 0) {
+    // `live` too: a detached/restored session's leftover spawns aren't running.
+    if (entry.live && !isTerminal(entry.state) && backgroundTasksFromItems(entry.items).length > 0) {
       return "background";
     }
     return "review";

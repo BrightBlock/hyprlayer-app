@@ -1215,6 +1215,14 @@ export type SessionEvent =
  *  call (the UI's direct transcript key), `task_id` the background shell id.
  */
 { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | 
+/**
+ *  A new `claude` process took over an existing session via `--resume`
+ *  (permission/model change, rewind, app-restart resume). The forwarder
+ *  emits it once at the start of a relaunch — distinct from claude's
+ *  per-turn `init` — so the UI drops background tasks the now-dead prior
+ *  process owned (their completion notification can never arrive).
+ */
+{ kind: "relaunched" } | 
 /**  An unparseable / unknown stdout line — surfaced, never fatal. */
 { kind: "protocolError"; detail: string; raw: string } | 
 /**  The process ended. Terminal: no further events for this session. */

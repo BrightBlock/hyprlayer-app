@@ -775,6 +775,28 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
     tauri::async_runtime::spawn(async move {
         let mut seq: i64 = start_seq;
 
+        // A relaunch (resume/restart/rewind) advances `start_seq` past the prior
+        // generation's events; emit the `Relaunched` boundary before the new
+        // process's stream (see the event's doc). Skipped on a fresh start.
+        if start_seq > 0 {
+            let event = SessionEvent::Relaunched {};
+            let kind = event.kind();
+            if let Ok(payload) = serde_json::to_string(&event) {
+                let _ = channel.send(event);
+                let cur_seq = seq;
+                let db = db.clone();
+                let sid = session_id.clone();
+                let persisted = tauri::async_runtime::spawn_blocking(move || {
+                    db.append_session_event(&sid, cur_seq, kind, &payload).is_ok()
+                })
+                .await
+                .unwrap_or(false);
+                if persisted {
+                    seq += 1;
+                }
+            }
+        }
+
         loop {
             let event = match rx.recv().await {
                 Ok(event) => event,

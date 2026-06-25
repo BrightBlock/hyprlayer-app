@@ -120,10 +120,23 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
       continue;
     }
 
+    // The owning process is gone — a `relaunched` boundary (new process took
+    // over) or an `exit`. Its background shells are dead and can never
+    // complete-notify, so drop everything tracked so far; spawns after the
+    // boundary survive. (Per-turn `init` does NOT land here — process is alive.)
+    if (item.kind === "relaunched" || item.kind === "exit") {
+      tasks.clear();
+      taskIdToToolUseId.clear();
+      continue;
+    }
+
     if (item.kind !== "tool") continue;
 
     // ── 1. Background Bash spawn ─────────────────────────────────────────────
     if (isBackgroundSpawn(item)) {
+      // A spawn that errored (denied / hook-blocked / bad command) never started
+      // a shell — no task_id, nothing to complete it — so don't track a phantom.
+      if (item.result?.isError) continue;
       const parsed = parseToolInput(item.input);
       const descStr = str(parsed?.description);
       const cmdStr = str(parsed?.command);
