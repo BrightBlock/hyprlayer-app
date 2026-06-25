@@ -300,6 +300,13 @@ export const commands = {
 	answerQuestion: (sessionId: string, requestId: string, answers: string) => typedError<null, AppError>(__TAURI_INVOKE("answer_question", { sessionId, requestId, answers })),
 	interruptSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_session", { sessionId })),
 	killSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("kill_session", { sessionId })),
+	/**
+	 *  Switch a live session's model so its next turn uses it (OpenCode sends a model
+	 *  per prompt, so it can change mid-session). A no-op when the session isn't live
+	 *  — the tab's selection still rides into a fresh session at launch — and for
+	 *  Claude, whose model is fixed at launch (its driver ignores this).
+	 */
+	setSessionModel: (sessionId: string, model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_model", { sessionId, model })),
 	listSessions: (workstreamId: string) => typedError<Session[], AppError>(__TAURI_INVOKE("list_sessions", { workstreamId })),
 	getSessionLog: (sessionId: string) => typedError<StoredEvent[], AppError>(__TAURI_INVOKE("get_session_log", { sessionId })),
 	/**

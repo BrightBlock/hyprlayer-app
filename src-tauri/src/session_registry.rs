@@ -11,11 +11,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use hyprlayer_core::agent::AgentDriver;
+use hyprlayer_core::claude::PermissionMode;
 use tokio::sync::Mutex;
+
+/// One live session's handle plus the `--permission-mode` its process was
+/// actually launched with.
+struct LiveSession {
+    driver: Arc<dyn AgentDriver>,
+    /// The mode the running claude process was launched with — `None` for
+    /// OpenCode (which has no permission modes). claude binds its mode at launch
+    /// and only changes it by relaunching, so this stays accurate for the life of
+    /// the process. `resume_session` consults it to tell a stale re-attach (the
+    /// UI wants a mode the live process isn't in) from a genuine no-change resume.
+    permission_mode: Option<PermissionMode>,
+}
 
 #[derive(Default)]
 pub struct SessionRegistry {
-    live: Mutex<HashMap<String, Arc<dyn AgentDriver>>>,
+    live: Mutex<HashMap<String, LiveSession>>,
 }
 
 impl SessionRegistry {
@@ -23,12 +36,29 @@ impl SessionRegistry {
         Self::default()
     }
 
-    pub async fn insert(&self, id: String, driver: Arc<dyn AgentDriver>) {
-        self.live.lock().await.insert(id, driver);
+    pub async fn insert(
+        &self,
+        id: String,
+        driver: Arc<dyn AgentDriver>,
+        permission_mode: Option<PermissionMode>,
+    ) {
+        self.live.lock().await.insert(
+            id,
+            LiveSession {
+                driver,
+                permission_mode,
+            },
+        );
     }
 
     pub async fn get(&self, id: &str) -> Option<Arc<dyn AgentDriver>> {
-        self.live.lock().await.get(id).cloned()
+        self.live.lock().await.get(id).map(|s| s.driver.clone())
+    }
+
+    /// The `--permission-mode` the live session's process is actually running, or
+    /// `None` if the session isn't live or has no mode (OpenCode).
+    pub async fn permission_mode(&self, id: &str) -> Option<PermissionMode> {
+        self.live.lock().await.get(id).and_then(|s| s.permission_mode)
     }
 
     pub async fn remove(&self, id: &str) {

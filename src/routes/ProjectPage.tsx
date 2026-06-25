@@ -785,7 +785,14 @@ export function ProjectPage() {
     onEffortChange: (key: string) => patchShell(shell.id, { effort: key }),
     onPermissionModeChange: (key: string) => patchShell(shell.id, { permissionMode: key }),
     onHarnessChange: (key: string) => patchShell(shell.id, { harness: key }),
-    onOpencodeModelChange: (key: string) => patchShell(shell.id, { opencodeModel: key }),
+    onOpencodeModelChange: (key: string) => {
+      patchShell(shell.id, { opencodeModel: key });
+      // Push the switch to the live session too: OpenCode takes a model per
+      // prompt, so this retargets the next turn without a restart. A no-op on the
+      // backend when the session isn't live — a fresh session picks up the shell
+      // value at launch instead.
+      if (shell.sessionId) void commands.setSessionModel(shell.sessionId, key);
+    },
     onOpenHarnessSettings: () => void navigate({ to: "/settings", search: { section: "harnesses" } }),
     // Strip the auto-captured handoff chip(s) once the new session has started:
     // by then they've already ridden through `handleStart` as attachments, so the

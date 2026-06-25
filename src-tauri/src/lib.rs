@@ -85,6 +85,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::answer_question,
             commands::sessions::interrupt_session,
             commands::sessions::kill_session,
+            commands::sessions::set_session_model,
             commands::sessions::list_sessions,
             commands::sessions::get_session_log,
             commands::sessions::attach_session,

@@ -63,12 +63,13 @@ const {
   sendMessage,
   cancelQueuedMessage,
   stopSession,
+  resumeSession,
   applyPermissionMode,
   classifyEntry,
   workstreamShipBusy,
   useSessionStore,
 } = await import("./sessionStore");
-const { isBusy } = await import("./transcript");
+const { isBusy, isWorking } = await import("./transcript");
 
 const INIT: SessionEvent = { kind: "init", claudeSessionId: "c1", model: "m" };
 const TURN_DONE: SessionEvent = {
@@ -410,6 +411,102 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     const entry = entryOf(id);
     expect(entry.pendingQuestion).toBeNull();
     expect(isBusy(entry)).toBe(false);
+  });
+});
+
+// ─── resuming a silent process ───────────────────────────────────────────────
+// A `--resume`d claude emits `init` only with a turn, never on bare spawn, so a
+// re-attach onto a quiet process leaves the session in `starting` forever:
+// "Connecting…" never clears, the activity pill keeps pulsing (`isWorking` stays
+// true), and a queued follow-up never flushes. resumeSession settles out of
+// `starting` once the (empty) resume burst has flushed.
+
+const EXITED: SessionEvent = { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" };
+
+describe("resuming a silent process settles out of `starting`", () => {
+  it("a silent resume settles to a resting state instead of pulsing 'Connecting'", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(TURN_DONE);
+    emit(EXITED); // process gone, channel dropped → detached
+
+    await resumeSession(id); // backend re-attaches; the process stays silent (no events)
+
+    const entry = entryOf(id);
+    expect(entry.state).not.toBe("starting"); // not stuck "Connecting…"
+    expect(isWorking(entry)).toBe(false); // pill stops pulsing
+    expect(classifyEntry(entry)).not.toBe("working");
+  });
+
+  it("flushes a queued follow-up after a silent resume", async () => {
+    const id = await startBusySession(); // "starting" → busy
+    await sendMessage(id, "later"); // queued behind the in-flight turn
+    expect(queued(id)).toEqual(["later"]);
+    emit(EXITED); // turn dies with a follow-up still queued → detached
+
+    await resumeSession(id);
+
+    // The resumed process is idle, so the queued turn is released rather than
+    // sitting forever behind a turn that will never arrive.
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", []);
+    expect(queued(id)).toEqual([]);
+  });
+
+  it("does not clobber a resume that re-attaches onto a genuinely mid-turn process", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(TURN_DONE);
+    emit(EXITED); // detach
+
+    // Resume, but this time the re-attached process IS mid-turn: its stream lands
+    // during the resume burst, advancing us past `starting`. The settle must leave
+    // that real working state alone.
+    h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
+      const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
+      ch.onmessage?.({ kind: "partialText", text: "thinking" } as SessionEvent);
+      return { status: "ok", data: {} };
+    });
+
+    await resumeSession(id);
+
+    expect(isWorking(entryOf(id))).toBe(true); // still streaming — not settled to idle
+  });
+});
+
+// ─── closing the streaming caret on turn abandonment ─────────────────────────
+// An open assistant block renders a blinking caret while `streaming: true`. A
+// turn that's abandoned (permission-mode restart, or a mid-turn crash) used to
+// settle the session's `streaming` flag but leave the block's own flag set, so
+// the caret kept pulsing after the conversation had already stopped.
+
+const PARTIAL = (text: string): SessionEvent =>
+  ({ kind: "partialText", text, parentId: null }) as SessionEvent;
+const hasStreamingBlock = (id: string) =>
+  entryOf(id).items.some((it) => it.kind === "assistant" && it.streaming);
+
+describe("turn abandonment closes the streaming caret", () => {
+  it("a permission-mode restart mid-stream closes the open assistant block", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(PARTIAL("thinking…"));
+    expect(hasStreamingBlock(id)).toBe(true); // caret pulsing
+
+    await applyPermissionMode(id, "bypassPermissions"); // restart interrupts the turn
+    await Promise.resolve();
+
+    expect(hasStreamingBlock(id)).toBe(false); // caret stopped
+    expect(entryOf(id).streaming).toBe(false);
+  });
+
+  it("a crash mid-stream closes the open assistant block", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(PARTIAL("thinking…"));
+    expect(hasStreamingBlock(id)).toBe(true);
+
+    emit(EXITED); // process dies mid-turn
+
+    expect(hasStreamingBlock(id)).toBe(false);
   });
 });
 

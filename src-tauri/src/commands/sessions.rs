@@ -131,6 +131,10 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
         channel,
     } = params;
 
+    // The `--permission-mode` the process is actually launched with, recorded in
+    // the registry so a later `resume_session` can tell a stale re-attach from a
+    // real no-change resume. `None` for OpenCode (no permission modes).
+    let mut launched_mode: Option<PermissionMode> = None;
     let (driver, rx): (Arc<dyn AgentDriver>, broadcast::Receiver<SessionEvent>) =
         if session.harness == "opencode" {
             // OpenCode: drive a session on the shared `opencode serve`. Tools and
@@ -176,6 +180,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             // in the composer (e.g. "Bypass permissions") overrides just the mode,
             // keeping the stage's allow/deny tool lists as guardrails.
             let permission_mode = permission_mode.unwrap_or(policy.permission_mode);
+            launched_mode = Some(permission_mode);
 
             // The child inherits our env; we override PATH with the resolver's
             // augmented PATH so it finds git/gh/etc, and — for enterprise "API
@@ -232,7 +237,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
 
     state
         .sessions
-        .insert(session.id.clone(), driver.clone())
+        .insert(session.id.clone(), driver.clone(), launched_mode)
         .await;
 
     spawn_forwarder(ForwarderCtx {
@@ -352,14 +357,32 @@ pub async fn resume_session(
     .ok_or_else(|| session_not_found(&session_id))?;
 
     // Already live (a race, an HMR/UI reload that dropped the frontend's channel
-    // while the backend process survived, or a session that never actually
-    // died): don't re-spawn — re-wire the caller's new channel to the running
-    // event stream so events flow again. Without this the new channel gets
-    // nothing and the UI is pinned on "Connecting to claude…" forever even
-    // though the turn runs fine.
+    // while the backend process survived, or a session that never actually died).
+    // Normally we don't re-spawn — we just re-wire the caller's new channel to the
+    // running event stream so events flow again (without this the new channel gets
+    // nothing and the UI is pinned on "Connecting to claude…" forever even though
+    // the turn runs fine).
+    //
+    // BUT the reload may have outlived a permission-mode change: the tab now wants
+    // (say) bypass, while the survivor process still runs the mode it launched
+    // with. claude binds its mode at launch, so a silent re-attach would leave the
+    // UI badge advertising a mode the process isn't in — and because the frontend
+    // then believes the entry already holds the new mode, it never relaunches to
+    // fix it (the picker no-ops on "same mode"). So when the requested mode is
+    // resolvable AND differs from what's actually running, fall through to the
+    // relaunch path below (kill + `--resume` into the new mode, conversation
+    // preserved). Otherwise just re-wire.
     if let Some(driver) = state.sessions.get(&session_id).await {
-        tail_live(driver, on_event);
-        return Ok(session);
+        let requested = permission_mode.as_deref().and_then(PermissionMode::from_flag);
+        let running = state.sessions.permission_mode(&session_id).await;
+        if requested.is_none() || requested == running {
+            tail_live(driver, on_event);
+            return Ok(session);
+        }
+        // Drop the stale-mode process; the resume path below relaunches it with
+        // the requested mode. Wait for it to actually exit first so the relaunch
+        // can't race the still-dying old process.
+        kill_and_await_exit(&state, &session_id).await;
     }
 
     let ws = {
@@ -644,6 +667,23 @@ pub async fn interrupt_session(state: State<'_, AppState>, session_id: String) -
 #[specta::specta]
 pub async fn kill_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
     live_driver(&state, &session_id).await?.kill();
+    Ok(())
+}
+
+/// Switch a live session's model so its next turn uses it (OpenCode sends a model
+/// per prompt, so it can change mid-session). A no-op when the session isn't live
+/// — the tab's selection still rides into a fresh session at launch — and for
+/// Claude, whose model is fixed at launch (its driver ignores this).
+#[tauri::command]
+#[specta::specta]
+pub async fn set_session_model(
+    state: State<'_, AppState>,
+    session_id: String,
+    model: Option<String>,
+) -> CmdResult<()> {
+    if let Some(driver) = state.sessions.get(&session_id).await {
+        driver.set_model(model);
+    }
     Ok(())
 }
 

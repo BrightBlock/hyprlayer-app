@@ -450,7 +450,7 @@ function firstCompactAwaitingSummary(items: TranscriptItem[]): number {
 }
 
 /** Mark the open streaming assistant block (if any) as finished. */
-function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
+export function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
   const idx = openAssistantIndex(items);
   if (idx === -1) return items;
   const block = items[idx] as Extract<TranscriptItem, { kind: "assistant" }>;
@@ -766,11 +766,15 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       };
     }
 
-    case "exited":
+    case "exited": {
+      // Close the open assistant block too: a process that exits mid-turn (crash,
+      // or a kill while streaming) leaves its block `streaming: true`, so its
+      // blinking caret keeps pulsing even though the turn is over.
+      const closed = { ...view, items: closeOpenAssistant(view.items) };
       return {
-        ...view,
+        ...closed,
         ...appended(
-          view,
+          closed,
           (id) => ({
             kind: "exit",
             id,
@@ -785,6 +789,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
         pendingPermission: null,
         pendingQuestion: null,
       };
+    }
 
     case "protocolError":
       return {

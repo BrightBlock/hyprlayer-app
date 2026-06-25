@@ -233,17 +233,29 @@ pub async fn opencode_auth_list() -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn opencode_set_provider_key(
+    state: State<'_, AppState>,
     provider: String,
     key: String,
 ) -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
     oc::set_provider_key(&provider, &key).map_err(AppError::from)?;
+    // `opencode serve` snapshots auth.json once at startup, so recycle the shared
+    // server: the next session re-reads it and sees the new credential. Without
+    // this the provider's models stay unknown (ProviderModelNotFoundError) until
+    // the whole app is restarted.
+    state.opencode.invalidate().await;
     oc::list_auth().map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn opencode_remove_provider(provider: String) -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
+pub async fn opencode_remove_provider(
+    state: State<'_, AppState>,
+    provider: String,
+) -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
     oc::remove_provider(&provider).map_err(AppError::from)?;
+    // See `opencode_set_provider_key`: recycle so the removed provider stops
+    // being served without a full app restart.
+    state.opencode.invalidate().await;
     oc::list_auth().map_err(AppError::from)
 }
 

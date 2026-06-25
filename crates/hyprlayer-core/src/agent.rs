@@ -22,6 +22,12 @@ pub trait AgentDriver: Send + Sync {
     /// follow-up (`stage = None`).
     fn send_user_turn(&self, text: &str, stage: Option<&str>) -> Result<()>;
 
+    /// Switch the model used for subsequent turns, if the harness supports
+    /// changing it mid-session. OpenCode sends the model with every prompt, so it
+    /// can switch live; Claude binds the model at launch, so this is a no-op there
+    /// (its model changes by restarting the session). `None` clears any override.
+    fn set_model(&self, _model: Option<String>) {}
+
     /// Answer a `PermissionAsk` (allow/deny, with an optional message).
     fn respond_permission(&self, request_id: &str, allow: bool, message: Option<&str>)
         -> Result<()>;

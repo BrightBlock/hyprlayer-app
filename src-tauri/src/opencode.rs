@@ -71,6 +71,22 @@ impl OpenCodeManager {
         *guard = Some(server.clone());
         Ok(server)
     }
+
+    /// Drop the cached server so the next [`ensure`](Self::ensure) spawns a fresh
+    /// one. Call this whenever provider credentials change (a key added, updated,
+    /// or removed): OpenCode reads `auth.json` only once, at `serve` startup —
+    /// we inject it via `OPENCODE_AUTH_CONTENT` in [`OpenCodeServer::start`] — and
+    /// never re-scans it, so a running server can't see a newly-added provider and
+    /// rejects its models with `ProviderModelNotFoundError` until restarted. This
+    /// avoids forcing a full app restart for that.
+    ///
+    /// In-flight sessions are undisturbed: each [`OpenCodeDriver`] holds its own
+    /// `Arc<OpenCodeServer>`, so the old process keeps serving them (and is killed
+    /// when its last session drops); only newly-started sessions get the
+    /// refreshed server that re-reads the updated `auth.json`.
+    pub async fn invalidate(&self) {
+        *self.inner.lock().await = None;
+    }
 }
 
 pub struct OpenCodeServer {
@@ -242,7 +258,9 @@ pub struct OpenCodeDriver {
     server: Arc<OpenCodeServer>,
     session_id: String,
     /// `(providerID, modelID)` to send with each prompt, if a model was chosen.
-    model: Option<(String, String)>,
+    /// Behind a `Mutex` so it can be switched live mid-session (OpenCode takes a
+    /// model per prompt) via [`AgentDriver::set_model`].
+    model: std::sync::Mutex<Option<(String, String)>>,
     events: broadcast::Sender<SessionEvent>,
     killed: Arc<AtomicBool>,
     filter_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -340,7 +358,7 @@ impl OpenCodeDriver {
         let driver = Arc::new(Self {
             server,
             session_id,
-            model,
+            model: std::sync::Mutex::new(model),
             events,
             killed: Arc::new(AtomicBool::new(false)),
             filter_task: Mutex::new(Some(task)),
@@ -408,11 +426,21 @@ impl AgentDriver for OpenCodeDriver {
             stage: stage.map(str::to_string),
         });
         let mut body = json!({ "parts": [{ "type": "text", "text": text }] });
-        if let Some((provider, model)) = &self.model {
+        // Read the (possibly live-switched) model under the lock.
+        if let Some((provider, model)) = self.model.lock().ok().and_then(|m| m.clone()) {
             body["model"] = json!({ "providerID": provider, "modelID": model });
         }
         self.prompt_async(body);
         Ok(())
+    }
+
+    fn set_model(&self, model: Option<String>) {
+        // OpenCode honors a per-prompt model, so switching mid-session just swaps
+        // what the next turn sends. `provider/model` ids only; anything that
+        // doesn't split into both clears the override (falls back to the default).
+        if let Ok(mut m) = self.model.lock() {
+            *m = model.as_deref().and_then(parse_model);
+        }
     }
 
     fn respond_permission(
