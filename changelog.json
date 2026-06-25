@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.3.4",
+      "date": "2026-06-25",
+      "summary": "OpenCode as an alternative agent backend, plus a re-runnable Commit action and a background-task fix.",
+      "notes": [
+        "Run your agents on OpenCode as an alternative to the Claude CLI. A new Settings → Harnesses section configures each backend — model and provider pickers with per-provider API keys — and the session composer gains a harness and model picker. OpenCode Zen's free models work without a key.",
+        "The header Commit action now re-runs: clicking it again after making more changes sends a follow-up /commit turn to the still-live commit tab, instead of just re-selecting it.",
+        "Fixed phantom background tasks that could linger as “running” forever after the owning process died on an app restart, resume, rewind, or session exit."
+      ]
+    },
+    {
       "version": "0.3.3",
       "date": "2026-06-24",
       "summary": "A redesigned sidebar nav rail and unified Library, plus light-theme polish and session-recovery fixes.",
