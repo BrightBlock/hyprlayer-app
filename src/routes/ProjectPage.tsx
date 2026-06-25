@@ -14,6 +14,7 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "../components/icons";
+import { ScrollableTabStrip } from "../components/ScrollableTabs";
 import { commands, type WorkstreamView } from "../lib/bindings";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { ChangesPanel } from "../features/workstreams/ChangesPanel";
@@ -1102,7 +1103,16 @@ export function ProjectPage() {
                   maxRight ? "hidden" : ""
                 } ${dropPane === "main" ? "bg-accent/10" : ""}`}
               >
-                <div className="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto">
+                <ScrollableTabStrip
+                  activeId={activeShell?.id ?? null}
+                  trailing={
+                    activeView ? (
+                      <IconButton onClick={addShell} title="New tab" aria-label="New tab">
+                        <PlusIcon />
+                      </IconButton>
+                    ) : null
+                  }
+                >
                   {activeView &&
                     mainShells.map((shell) =>
                       renderTabPill(shell, {
@@ -1113,12 +1123,7 @@ export function ProjectPage() {
                         closable: mainShells.length > 1,
                       }),
                     )}
-                  {activeView && (
-                    <IconButton onClick={addShell} title="New tab" aria-label="New tab">
-                      <PlusIcon />
-                    </IconButton>
-                  )}
-                </div>
+                </ScrollableTabStrip>
                 {activeView && (
                   <div className="flex shrink-0 items-center gap-1">
                     <IconButton
@@ -1150,7 +1155,15 @@ export function ProjectPage() {
                   } ${dropPane === "right" ? "bg-accent/10" : ""}`}
                   style={{ width: maxRight ? "100%" : `${rightRatio * 100}%` }}
                 >
-                  <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+                  <ScrollableTabStrip
+                    grow
+                    activeId={rightActiveShell?.id ?? null}
+                    trailing={
+                      <IconButton onClick={addRightShell} title="New tab" aria-label="New tab">
+                        <PlusIcon />
+                      </IconButton>
+                    }
+                  >
                     {rightShells.map((shell) =>
                       renderTabPill(shell, {
                         active: shell.id === rightActiveShell?.id,
@@ -1160,10 +1173,7 @@ export function ProjectPage() {
                         closable: true,
                       }),
                     )}
-                    <IconButton onClick={addRightShell} title="New tab" aria-label="New tab">
-                      <PlusIcon />
-                    </IconButton>
-                  </div>
+                  </ScrollableTabStrip>
                   <IconButton onClick={closeRightSplit} title="Close split" aria-label="Close split">
                     <XIcon />
                   </IconButton>
