@@ -319,6 +319,9 @@ export async function startSession(args: {
   workstreamId: string;
   stage: string;
   input: string;
+  /** The workstream's target branch — named in the Ship echo so it matches the
+   *  backend prompt (other stages ignore it). The backend reads its own copy. */
+  baseBranch?: string;
   /** Files/library docs attached to the first turn. Their paths go to the
    *  backend prompt; they render as pin cards in the echo so no raw path shows. */
   attachments?: Attachment[];
@@ -360,7 +363,7 @@ export async function startSession(args: {
   // raw paths never appear in the user bubble.
   view = addUserMessage(
     view,
-    composeStagePrompt(args.stage, args.input),
+    composeStagePrompt(args.stage, args.input, args.baseBranch),
     args.stage,
     attachments,
     Date.now(),
@@ -866,12 +869,15 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
 }
 
 /**
- * Ship a workstream from the header action (rather than a chat mode): start a
+ * Ship a workstream from the GIT-panel action (rather than a chat mode): start a
  * ship-stage session — commit, push, open a PR — in a dedicated, reusable
  * "Ship" tab and select it. If a ship session is already running for this
- * workstream, just focus its tab instead of spawning a second one.
+ * workstream, just focus its tab instead of spawning a second one. `baseBranch`
+ * is the workstream's target, named in the ship directive so the PR opens
+ * against it (e.g. `develop`) — required so the directive never renders an
+ * empty target.
  */
-export async function shipWorkstream(workstreamId: string): Promise<void> {
+export async function shipWorkstream(workstreamId: string, baseBranch: string): Promise<void> {
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
   const shipTab = tabs?.shells.find((s) => s.mode === "ship");
   if (shipTab?.sessionId) {
@@ -885,6 +891,7 @@ export async function shipWorkstream(workstreamId: string): Promise<void> {
     workstreamId,
     stage: "ship",
     input: "",
+    baseBranch,
   });
   openShipTab(workstreamId, session.id);
 }

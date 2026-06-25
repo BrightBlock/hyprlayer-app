@@ -238,8 +238,9 @@ function GitSection({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Delete the local branch when archiving a workspace. The remote branch is left to
-          GitHub’s “automatically delete head branches” setting.
+          Delete the workspace’s branch instead of keeping it. The remote branch on GitHub is
+          removed as soon as a merged workspace is archived; the local branch is removed when the
+          archive is permanently deleted. Branches the app didn’t create are never touched.
         </SettingRow>
 
         <SettingRow

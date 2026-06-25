@@ -59,7 +59,7 @@ impl Stage {
     }
 
     /// The skill slash-command this stage invokes, or `None` for stages that send
-    /// a plain prompt (General chat; Ship and Revise send [`SHIP_PROMPT`] /
+    /// a plain prompt (General chat; Ship and Revise send [`ship_prompt`] /
     /// [`REVISE_PROMPT`] prose, not a skill). Single source of truth for the
     /// command, mirrored by the frontend `stageCommand`
     /// (src/features/session/stages.ts) for its optimistic echo.
@@ -174,17 +174,26 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
 }
 
 /// The Ship directive, run in order: commit first, then (only once that
-/// succeeds) push, open the PR, and hand the description off to the
-/// `/describe_pr` skill so every shipped PR follows the repo's template instead
-/// of a free-improvised body. `/describe_pr` edits an existing PR, so the PR
-/// must be opened before it runs. The policy pre-approves push + `gh`.
-/// Kept byte-identical to the frontend `SHIP_PROMPT` (src/features/session/stages.ts)
+/// succeeds) push, open the PR against the workstream's target (`base`) branch,
+/// and hand the description off to the `/describe_pr` skill so every shipped PR
+/// follows the repo's template instead of a free-improvised body. `/describe_pr`
+/// edits an existing PR, so the PR must be opened before it runs. The policy
+/// pre-approves push + `gh`. Naming the base (rather than "the default branch")
+/// lets a re-targeted workstream open its PR against e.g. `develop`.
+/// Kept byte-identical to the frontend `shipPrompt` (src/features/session/stages.ts)
 /// so the optimistic transcript echo matches what claude receives.
-pub const SHIP_PROMPT: &str =
-    "First commit all changes in this worktree, then push the branch to its remote. Only \
-after the commit and push succeed, open a pull request against the default branch with a \
-clear title and run the /describe_pr skill to write the PR description from the \
-repository's template and update the PR.";
+pub fn ship_prompt(base: &str) -> String {
+    // The stored base is a git rev (e.g. `origin/main`); a PR targets the GitHub
+    // branch name, so strip the remote prefix before naming it. Mirrors the
+    // frontend `shipPrompt` so the optimistic echo stays byte-identical.
+    let base = base.strip_prefix("origin/").unwrap_or(base);
+    format!(
+        "First commit all changes in this worktree, then push the branch to its remote. Only \
+after the commit and push succeed, open a pull request against `{base}` with a clear title \
+and run the /describe_pr skill to write the PR description from the repository's template \
+and update the PR."
+    )
+}
 
 /// The Revise directive: address PR feedback on a branch that already has a PR.
 /// The specific feedback (failing CI vs. requested changes) rides in the input.
@@ -206,8 +215,14 @@ fn skill_prompt(skill: &str, input: &str) -> String {
 /// user's input, with any attached context docs listed for the skill to pick up
 /// (e.g. `/create_plan` consuming the research doc produced by `/research_codebase`).
 /// General is pure passthrough (plain chat); Ship and Revise send the
-/// [`SHIP_PROMPT`] / [`REVISE_PROMPT`] directives rather than a skill.
-pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> String {
+/// [`ship_prompt`] / [`REVISE_PROMPT`] directives rather than a skill. Ship names
+/// `base_branch` as the PR target; other stages ignore it.
+pub fn compose_prompt(
+    stage: Stage,
+    input: &str,
+    base_branch: &str,
+    attached_docs: &[String],
+) -> String {
     let input = input.trim();
     let prompt = match stage {
         // Plain chat: the input verbatim — no skill prefix. Explicitly attached
@@ -216,15 +231,15 @@ pub fn compose_prompt(stage: Stage, input: &str, attached_docs: &[String]) -> St
         // Ship/Revise send a prose directive (not a skill); extra context, if
         // any, is appended below it.
         Stage::Ship | Stage::Revise => {
-            let base = if matches!(stage, Stage::Ship) {
-                SHIP_PROMPT
+            let directive = if matches!(stage, Stage::Ship) {
+                ship_prompt(base_branch)
             } else {
-                REVISE_PROMPT
+                REVISE_PROMPT.to_string()
             };
             if input.is_empty() {
-                base.to_string()
+                directive
             } else {
-                format!("{base}\n\n{input}")
+                format!("{directive}\n\n{input}")
             }
         }
         // research/plan/implement/validate/commit each invoke their skill.
@@ -277,17 +292,17 @@ mod tests {
         assert_eq!(Stage::General.command(), None);
         assert_eq!(Stage::Ship.command(), None);
         // compose_prompt uses the command, so the two never drift.
-        let composed = compose_prompt(Stage::Plan, "x", &[]);
+        let composed = compose_prompt(Stage::Plan, "x", "main", &[]);
         assert!(composed.starts_with(Stage::Plan.command().unwrap()));
     }
 
     #[test]
     fn general_passes_input_through_verbatim() {
-        assert_eq!(compose_prompt(Stage::General, "  hello  ", &[]), "hello");
+        assert_eq!(compose_prompt(Stage::General, "  hello  ", "main", &[]), "hello");
         // Plain chat sends no skill prefix, but explicitly attached docs (e.g. a
         // pasted screenshot) are still listed so the agent can read them.
         assert_eq!(
-            compose_prompt(Stage::General, "hello", &["a.png".into()]),
+            compose_prompt(Stage::General, "hello", "main", &["a.png".into()]),
             "hello\n\nRelevant documents:\n- a.png"
         );
     }
@@ -295,7 +310,7 @@ mod tests {
     #[test]
     fn research_invokes_the_skill() {
         assert_eq!(
-            compose_prompt(Stage::Research, "how does auth work?", &[]),
+            compose_prompt(Stage::Research, "how does auth work?", "main", &[]),
             "/research_codebase how does auth work?"
         );
     }
@@ -305,6 +320,7 @@ mod tests {
         let prompt = compose_prompt(
             Stage::Plan,
             "build it",
+            "main",
             &["repos/p/shared/research/2026-auth.md".into()],
         );
         assert!(prompt.starts_with("/create_plan build it"));
@@ -315,23 +331,39 @@ mod tests {
     #[test]
     fn empty_input_still_invokes_the_skill() {
         assert_eq!(
-            compose_prompt(Stage::Research, "", &[]),
+            compose_prompt(Stage::Research, "", "main", &[]),
             "/research_codebase"
         );
     }
 
     #[test]
     fn ship_sends_the_directive_not_a_skill() {
-        // Button-driven ship has no input: the bare directive.
-        assert_eq!(compose_prompt(Stage::Ship, "", &[]), SHIP_PROMPT);
+        // Button-driven ship has no input: the bare directive, naming the base.
+        assert_eq!(compose_prompt(Stage::Ship, "", "main", &[]), ship_prompt("main"));
+        // The target branch is named in the directive (git-flow re-targeting).
+        assert!(compose_prompt(Stage::Ship, "", "develop", &[]).contains("`develop`"));
+        // The stored base is a git rev; the PR targets the branch, so `origin/`
+        // is stripped — and the frontend `shipPrompt` mirrors this.
+        assert_eq!(ship_prompt("origin/develop"), ship_prompt("develop"));
+        assert!(ship_prompt("origin/main").contains("`main`"));
+        // Golden literal — must stay byte-identical to the TS `shipPrompt` test
+        // (src/features/session/stages.test.ts). Editing one side fails its
+        // golden, forcing both to move together so the echo can never drift.
+        assert_eq!(
+            ship_prompt("main"),
+            "First commit all changes in this worktree, then push the branch to its remote. \
+Only after the commit and push succeed, open a pull request against `main` with a clear \
+title and run the /describe_pr skill to write the PR description from the repository's \
+template and update the PR."
+        );
         // Extra context is appended below the directive.
         assert_eq!(
-            compose_prompt(Stage::Ship, "skip the changelog", &[]),
-            format!("{SHIP_PROMPT}\n\nskip the changelog"),
+            compose_prompt(Stage::Ship, "skip the changelog", "main", &[]),
+            format!("{}\n\nskip the changelog", ship_prompt("main")),
         );
         // It does not delegate to the /commit skill — Ship owns its own ordered
         // commit-then-push-then-PR directive.
-        assert!(!compose_prompt(Stage::Ship, "", &[]).starts_with('/'));
+        assert!(!compose_prompt(Stage::Ship, "", "main", &[]).starts_with('/'));
     }
 
     #[test]
@@ -340,9 +372,9 @@ mod tests {
         assert_eq!(Stage::Commit.as_str(), "commit");
         assert_eq!(Stage::Commit.command(), Some("/commit"));
         // Button-driven: bare skill invocation. Extra input rides as its argument.
-        assert_eq!(compose_prompt(Stage::Commit, "", &[]), "/commit");
+        assert_eq!(compose_prompt(Stage::Commit, "", "main", &[]), "/commit");
         assert_eq!(
-            compose_prompt(Stage::Commit, "split into two commits", &[]),
+            compose_prompt(Stage::Commit, "split into two commits", "main", &[]),
             "/commit split into two commits",
         );
         // It commits but is hard-denied from pushing or opening a PR — that's
@@ -366,10 +398,10 @@ mod tests {
         assert_eq!(Stage::Revise.as_str(), "revise");
         assert_eq!(Stage::Revise.command(), None);
         // Bare directive when there's no extra context...
-        assert_eq!(compose_prompt(Stage::Revise, "", &[]), REVISE_PROMPT);
+        assert_eq!(compose_prompt(Stage::Revise, "", "main", &[]), REVISE_PROMPT);
         // ...the specific feedback is appended below it.
         assert_eq!(
-            compose_prompt(Stage::Revise, "CI is failing", &[]),
+            compose_prompt(Stage::Revise, "CI is failing", "main", &[]),
             format!("{REVISE_PROMPT}\n\nCI is failing"),
         );
         // Revise shares Ship's push/gh posture.

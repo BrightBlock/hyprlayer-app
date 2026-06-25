@@ -450,8 +450,9 @@ impl WorktreeManager {
         Ok(())
     }
 
-    /// Permanent purge: prune the archive directory + delete the branch.
-    /// Used by the "Delete permanently" action on the archive history view.
+    /// Permanent purge: prune the archive directory + delete the branch (local
+    /// and, best-effort, its `origin` counterpart). Used by the "Delete
+    /// permanently" action on the archive history view.
     pub async fn purge_archive(
         &self,
         git: &Path,
@@ -472,6 +473,10 @@ impl WorktreeManager {
             let _ = git_in(git, project_repo, &["branch", "-D", branch])
                 .run()
                 .await;
+            // Also drop the remote branch so it doesn't linger on GitHub. Best
+            // effort: the branch may have been deleted already (at archive, for a
+            // merged PR) or never pushed at all.
+            let _ = delete_remote_branch(git, project_repo, branch).await;
         }
         Ok(())
     }
@@ -511,6 +516,118 @@ fn git_in(git: &Path, repo: &Path, args: &[&str]) -> Exec {
         .arg("-C")
         .arg(repo_arg)
         .args(args.iter().copied())
+}
+
+/// What [`pull_base`] did — surfaced to the GIT panel so it can report the
+/// result inline (a clean merge vs. conflicts the user must resolve by hand).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PullOutcome {
+    /// The branch already contains the base's commits — nothing to pull.
+    UpToDate,
+    /// The base merged cleanly (fast-forward or a new merge commit).
+    Merged,
+    /// The merge stopped on conflicts. The worktree is left mid-merge (NOT
+    /// aborted) so the listed files show up conflicted in the Changes panel; the
+    /// user resolves them and commits (or runs `git merge --abort`).
+    Conflicts { files: Vec<String> },
+}
+
+/// Pull the target (`base`) branch's new commits into `worktree`: fetch the
+/// remote, then merge. The freshest base is its remote-tracking ref, so we merge
+/// `origin/<base>` when it exists (falling back to the base as given for a
+/// purely-local target). Deterministic — no agent. On conflicts the merge is
+/// left in progress for manual resolution; a precondition failure (e.g. a dirty
+/// working tree that git refuses to merge over) surfaces git's own message.
+pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOutcome> {
+    let branch = base.strip_prefix("origin/").unwrap_or(base);
+
+    // Freshen the remote ref. Best effort: offline, or a base with no remote
+    // counterpart, just means we merge whatever ref resolves below.
+    let _ = git_in(git, worktree, &["fetch", "origin", branch])
+        .timeout(Duration::from_secs(60))
+        .run()
+        .await;
+
+    // Prefer the remote-tracking ref (it carries the new commits); fall back to
+    // the base as given (a local-only target branch).
+    let remote_ref = format!("origin/{branch}");
+    let merge_ref = if git_in(git, worktree, &["rev-parse", "--verify", "--quiet", &remote_ref])
+        .run()
+        .await
+        .is_ok()
+    {
+        remote_ref
+    } else {
+        base.to_string()
+    };
+
+    let out = git_in(git, worktree, &["merge", "--no-edit", &merge_ref])
+        .timeout(Duration::from_secs(120))
+        .run_unchecked()
+        .await?;
+
+    if out.exit_code == Some(0) {
+        return Ok(if out.stdout.contains("Already up to date") {
+            PullOutcome::UpToDate
+        } else {
+            PullOutcome::Merged
+        });
+    }
+
+    // Non-zero: a conflicted merge (unmerged paths, merge in progress) vs. a
+    // precondition failure (e.g. dirty tree) that we surface as git's error.
+    let files = unmerged_files(git, worktree).await;
+    if !files.is_empty() {
+        return Ok(PullOutcome::Conflicts { files });
+    }
+    Err(CoreError::Exec {
+        program: "git merge".into(),
+        exit: out.exit_code,
+        stderr_tail: out.stderr.trim().to_string(),
+    })
+}
+
+/// `git fetch --prune origin` in the worktree — refreshes remote-tracking refs so
+/// ahead/behind (and a subsequent `gh pr view`) reflect what's on the remote now.
+/// Used by the GIT panel's refresh; deletes-then-recomputes are the caller's job.
+pub async fn fetch_remote(git: &Path, worktree: &Path) -> Result<()> {
+    git_in(git, worktree, &["fetch", "--prune", "origin"])
+        .timeout(Duration::from_secs(60))
+        .run()
+        .await?;
+    Ok(())
+}
+
+/// Delete `branch` on the `origin` remote (`git push origin --delete <branch>`).
+/// The local branch name equals the remote head name for app-created branches,
+/// so this clears the leftover GitHub branch after a merged PR is archived (the
+/// app no longer relies on GitHub's "auto-delete head branches" setting). Callers
+/// treat it as best-effort: a branch never pushed, or already deleted, just errors.
+pub async fn delete_remote_branch(git: &Path, repo: &Path, branch: &str) -> Result<()> {
+    git_in(git, repo, &["push", "origin", "--delete", branch])
+        .timeout(Duration::from_secs(60))
+        .run()
+        .await?;
+    Ok(())
+}
+
+/// Paths git reports as unmerged (conflicted) in the worktree.
+async fn unmerged_files(git: &Path, worktree: &Path) -> Vec<String> {
+    match git_in(git, worktree, &["diff", "--name-only", "--diff-filter=U"])
+        .run()
+        .await
+    {
+        Ok(out) => out
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(String::from)
+            .collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// `origin/HEAD` symref when set, else the first of origin/main,

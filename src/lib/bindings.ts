@@ -74,6 +74,26 @@ export const commands = {
 	listWorkstreamBases: (projectPath: string) => typedError<WorkstreamBases, AppError>(__TAURI_INVOKE("list_workstream_bases", { projectPath })),
 	createWorkstream: (projectPath: string, title: string, base: string | null, mode: string, branch: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base, mode, branch })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
+	/**
+	 *  Change a workstream's target (base) branch. Re-targets the live PR via
+	 *  `gh pr edit --base` when one is open, then persists the new base — so the
+	 *  next status recompute measures ahead/behind against it and a future Ship
+	 *  opens its PR there. Lets git-flow teams merge into `develop`, not `main`.
+	 */
+	setWorkstreamBaseBranch: (id: string, base: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_base_branch", { id, base })),
+	/**
+	 *  Pull the target (base) branch's new commits into the workstream's worktree
+	 *  (fetch + merge). Deterministic — no agent. On conflicts the merge is left in
+	 *  progress so the user resolves the conflicted files (they surface in the
+	 *  Changes panel) and commits; a dirty-tree precondition surfaces git's message.
+	 */
+	updateWorkstreamFromBase: (id: string) => typedError<PullOutcome, AppError>(__TAURI_INVOKE("update_workstream_from_base", { id })),
+	/**
+	 *  Fetch the workstream's remote (`git fetch --prune origin`) so ahead/behind and
+	 *  the PR view reflect remote branch changes. The frontend refetches the
+	 *  workstream status + PR afterward.
+	 */
+	fetchWorkstreamRemote: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("fetch_workstream_remote", { id })),
 	setWorkstreamStage: (id: string, stage: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
 	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
 	detachWorkstreamDoc: (id: string, docPath: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("detach_workstream_doc", { id, docPath })),
@@ -1087,6 +1107,22 @@ export type ProviderSettings = {
 	 */
 	codex?: CodexSettings,
 };
+
+/**
+ *  What [`pull_base`] did — surfaced to the GIT panel so it can report the
+ *  result inline (a clean merge vs. conflicts the user must resolve by hand).
+ */
+export type PullOutcome = 
+/**  The branch already contains the base's commits — nothing to pull. */
+{ kind: "upToDate" } | 
+/**  The base merged cleanly (fast-forward or a new merge commit). */
+{ kind: "merged" } | 
+/**
+ *  The merge stopped on conflicts. The worktree is left mid-merge (NOT
+ *  aborted) so the listed files show up conflicted in the Changes panel; the
+ *  user resolves them and commits (or runs `git merge --abort`).
+ */
+{ kind: "conflicts"; files: string[] };
 
 export type QueryResult = {
 	/**  Matches before limit/offset. */

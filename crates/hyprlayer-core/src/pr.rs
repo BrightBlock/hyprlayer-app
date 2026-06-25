@@ -450,8 +450,10 @@ pub async fn pr_summary(gh: &Path, dir: &Path, pr_ref: &str) -> Result<Option<Pr
 /// Merge `pr_ref`'s PR with the chosen method (`pr_ref` is a branch, PR number,
 /// or URL — see [`pr_status`]). Does not pass `--delete-branch`: gh would try to
 /// delete the local branch checked out in this worktree (and switch branches),
-/// which fails. Local branch + worktree teardown is the archive step's job;
-/// GitHub auto-deletes the remote branch if so configured.
+/// which fails. Local branch + worktree teardown is the archive step's job; the
+/// remote branch is dropped when a merged workstream is archived (see
+/// `archive_workstream` / `delete_branch_on_archive`), independent of GitHub's
+/// own "auto-delete head branches" setting.
 ///
 /// When `auto` is set, passes `--auto` so GitHub queues the merge until
 /// required checks pass (the repo must have auto-merge enabled). With `auto`
@@ -471,6 +473,22 @@ pub async fn merge_pr(
         .cwd(worktree)
         .args(args)
         .timeout(Duration::from_secs(60))
+        .run()
+        .await?;
+    Ok(())
+}
+
+/// Re-target an open PR's base branch (`gh pr edit <ref> --base <branch>`).
+/// Run when a workstream's target branch changes after its PR is already open,
+/// so GitHub merges it into the new base. `base` must exist on the remote.
+pub async fn edit_pr_base(gh: &Path, worktree: &Path, pr_ref: &str, base: &str) -> Result<()> {
+    // `gh pr edit --base` wants the GitHub branch name; the stored base may be a
+    // git rev (e.g. `origin/main`), so strip the remote prefix.
+    let base = base.strip_prefix("origin/").unwrap_or(base);
+    Exec::new(gh)
+        .cwd(worktree)
+        .args(["pr", "edit", pr_ref, "--base", base])
+        .timeout(Duration::from_secs(30))
         .run()
         .await?;
     Ok(())

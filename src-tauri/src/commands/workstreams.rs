@@ -9,7 +9,7 @@ use hyprlayer_core::skills::SlashCommand;
 use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{
-    self, archive_dir_for, CreateMode, CreateSpec, RemovePolicy, WorktreeStatus,
+    self, archive_dir_for, CreateMode, CreateSpec, PullOutcome, RemovePolicy, WorktreeStatus,
 };
 use hyprlayer_core::CoreError;
 use serde::Serialize;
@@ -473,6 +473,81 @@ pub async fn rename_workstream(
     .await
 }
 
+/// Change a workstream's target (base) branch. Re-targets the live PR via
+/// `gh pr edit --base` when one is open, then persists the new base — so the
+/// next status recompute measures ahead/behind against it and a future Ship
+/// opens its PR there. Lets git-flow teams merge into `develop`, not `main`.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_workstream_base_branch(
+    state: State<'_, AppState>,
+    id: String,
+    base: String,
+) -> CmdResult<()> {
+    let item = load_item(&state, &id).await?;
+    let base = base.trim().to_string();
+    if base.is_empty() {
+        return Err(AppError::internal("base branch cannot be empty"));
+    }
+    // Re-target an already-open PR so GitHub merges into the new base. The PR
+    // lookup is best effort — a local-only branch has none (Ok(None)) and a
+    // transient gh/network blip shouldn't block the local base change — but a
+    // real failure to edit an existing PR (e.g. the base isn't pushed yet)
+    // propagates to the dialog so the user can fix it.
+    if let Ok(gh) = state.binaries.require(BinaryKind::Gh).await {
+        let dir = pr_dir(&item);
+        if let Ok(Some(status)) = pr::pr_status(&gh, dir, &item.pr_ref()).await {
+            if status.state == pr::PrState::Open {
+                pr::edit_pr_base(&gh, dir, &item.pr_ref(), &base)
+                    .await
+                    .map_err(AppError::from)?;
+            }
+        }
+    }
+    db_task(state.db.clone(), move |db| {
+        db.update_workstream_base_branch(&id, &base)
+    })
+    .await
+}
+
+/// Pull the target (base) branch's new commits into the workstream's worktree
+/// (fetch + merge). Deterministic — no agent. On conflicts the merge is left in
+/// progress so the user resolves the conflicted files (they surface in the
+/// Changes panel) and commits; a dirty-tree precondition surfaces git's message.
+#[tauri::command]
+#[specta::specta]
+pub async fn update_workstream_from_base(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<PullOutcome> {
+    let item = load_item(&state, &id).await?;
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+    worktree::pull_base(&git, Path::new(&item.worktree_path), &item.base_branch)
+        .await
+        .map_err(AppError::from)
+}
+
+/// Fetch the workstream's remote (`git fetch --prune origin`) so ahead/behind and
+/// the PR view reflect remote branch changes. The frontend refetches the
+/// workstream status + PR afterward.
+#[tauri::command]
+#[specta::specta]
+pub async fn fetch_workstream_remote(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let item = load_item(&state, &id).await?;
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+    worktree::fetch_remote(&git, Path::new(&item.worktree_path))
+        .await
+        .map_err(AppError::from)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn set_workstream_stage(
@@ -584,6 +659,28 @@ pub async fn archive_workstream(state: State<'_, AppState>, id: String) -> CmdRe
     let worktree_path = Path::new(&item.worktree_path);
     let archive_path = archive_dir_for(project_path, &item.slug);
     let live = worktree::is_live_worktree(worktree_path);
+
+    // Delete the remote branch when archiving a *merged* workstream, so a shipped
+    // branch doesn't linger on GitHub (we no longer lean on GitHub's "auto-delete
+    // head branches" setting). Gated on the user's opt-in + an app-created branch,
+    // and on the PR actually being merged — an unmerged branch's remote copy may
+    // be its only backup, so we never delete that. The local branch stays put
+    // (restore needs it; permanent delete drops it). Best-effort: a `gh`/network
+    // hiccup or an already-deleted branch must not block the archive. Done before
+    // the worktree moves so the PR lookup runs from the live checkout.
+    if state.settings.get().await.git.delete_branch_on_archive && item.app_owns_branch() {
+        if let Ok(gh) = state.binaries.require(BinaryKind::Gh).await {
+            if let Ok(Some(status)) = pr::pr_status(&gh, pr_dir(&item), &item.pr_ref()).await {
+                if status.state == pr::PrState::Merged {
+                    if let Err(e) =
+                        worktree::delete_remote_branch(&git, project_path, &item.branch).await
+                    {
+                        log::warn!("delete remote branch {} on archive failed: {e}", item.branch);
+                    }
+                }
+            }
+        }
+    }
 
     // Uninit so the worktree's absolute-path symlinks + repoMappings don't
     // accumulate stale entries pointing at the archive location. Restore

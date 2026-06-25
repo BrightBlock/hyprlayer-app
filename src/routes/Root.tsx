@@ -28,15 +28,8 @@ import {
   useEditorTargets,
   useWorkstreamPr,
   useWorktreeFilesCheck,
-  useWorktreeGitStatus,
 } from "../lib/queries";
 import { docTitle } from "../features/library/text";
-import { useElementWidth } from "../lib/useElementWidth";
-import {
-  commitWorkstream,
-  shipWorkstream,
-  useWorkstreamShipBusy,
-} from "../features/session/sessionStore";
 import { WorkstreamActivityDot } from "../features/session/WorkstreamActivity";
 import { startEdgeDrag } from "../lib/resize";
 import { IS_MACOS } from "../lib/platform";
@@ -58,8 +51,6 @@ import {
   ClipboardIcon,
   CodeIcon,
   FolderIcon,
-  GitCommitIcon,
-  GitPullRequestIcon,
   PinIcon,
   PlusIcon,
   TerminalIcon,
@@ -70,7 +61,8 @@ import { SearchPalette } from "../features/search/SearchPalette";
 import { toggleSearch } from "../features/search/searchStore";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { WorkstreamGitChip } from "../features/workstreams/WorkstreamGitChip";
-import { PrStatusBar } from "../features/workstreams/PrStatusBar";
+import { useWorkstreamGitActions } from "../features/workstreams/useGitActions";
+import { AheadBehind } from "../features/workstreams/AheadBehind";
 import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
 import { AttachPrDialog } from "../features/workstreams/AttachPrDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
@@ -510,8 +502,6 @@ export function Root() {
   // transition (which smooths the collapse/expand) is suppressed during a drag
   // so the panel tracks the cursor instead of trailing it by the animation.
   const [resizingSidebar, setResizingSidebar] = useState(false);
-  const [shipping, setShipping] = useState(false);
-  const [committing, setCommitting] = useState(false);
 
   const projects = bootstrap.data?.projects ?? [];
   const configReady = bootstrap.data?.config.state === "ready";
@@ -671,20 +661,9 @@ export function Root() {
   const archiveOnMerge = bootstrap.data?.settings.git?.archiveOnMerge ?? false;
   const autoArchive = useArchiveWorkstream();
   const autoArchivedRef = useRef<Set<string>>(new Set());
-  // Enabled for any active workstream (not just archive-on-merge): the Ship
-  // button gates on this too. Shares the query cache with PrStatusBar's
-  // observer, so it adds no extra `gh` calls.
+  // Observe the active workstream's PR for archive-on-merge. Shares the query
+  // cache with the GIT panel's PR controls, so it adds no extra `gh` calls.
   const activePr = useWorkstreamPr(activeWorkstreamId ?? "", Boolean(activeWorkstream));
-  // Live uncommitted-change count for the active worktree — the SAME query the
-  // Changes panel renders, so the Commit/Ship buttons can never disagree with
-  // what the panel shows. The sidebar list's `git.dirty` is a cross-workstream
-  // snapshot refreshed only on explicit invalidation; it goes stale when the
-  // worktree changes outside the app's invalidation paths (e.g. a commit in the
-  // integrated terminal), which is what left a Commit button hovering over an
-  // empty panel. Keyed identically to the panel's query, so it adds no extra IPC.
-  const activeStatus = useWorktreeGitStatus(activeWorkstreamId ?? "", Boolean(activeWorkstream));
-  const activeChangedCount =
-    (activeStatus.data?.staged.length ?? 0) + (activeStatus.data?.unstaged.length ?? 0);
   useEffect(() => {
     if (!archiveOnMerge || !activeWorkstream) return;
     if (activePr.data?.state !== "merged") return;
@@ -754,12 +733,6 @@ export function Root() {
   const contentOffset = onLibrary
     ? Math.max(NAV_RAIL_WIDTH, minContentOffset)
     : Math.max(NAV_RAIL_WIDTH + (collapsed ? 0 : sidebarWidth), minContentOffset);
-  // Collapse the labelled header controls (the "Ship" button) to icon-only when
-  // the toolbar gets crowded — measured off the header's content row so it
-  // accounts for the sidebar width, not just the window.
-  const headerRef = useRef<HTMLDivElement>(null);
-  const headerWidth = useElementWidth(headerRef);
-  const compactHeader = headerWidth > 0 && headerWidth < 680;
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (collapsed) return;
     startEdgeDrag(event, {
@@ -773,74 +746,12 @@ export function Root() {
     });
   };
 
-  // Ship / PR / Archive controls, a shared fragment rendered inline just left
-  // of the pane icons and pinned with them to the window's right edge.
-  // Ship opens the PR, so it's pointless once one is live. Hide it while the
-  // branch already has an open or merged PR (the PR bar's Merge/Archive takes
-  // over) — otherwise the agent committing mid-turn leaves the branch `ahead`
-  // and Ship would flicker back even though there's nothing left to ship.
-  const hasLivePr = activePr.data?.state === "open" || activePr.data?.state === "merged";
-  // Commit / Ship actions + their enablement, defined once so the toolbar
-  // buttons and the keyboard commands (below) share a single source of truth.
-  // Gate on the live `activeChangedCount` (the Changes panel's query), NOT the
-  // list's `git.dirty` snapshot, so the buttons stay in lockstep with the panel.
-  //
-  // Hide Commit while Ship is mid-turn (`shipBusy`) or just being kicked off
-  // (`shipping`): Ship commits these same changes itself, so a manual Commit
-  // would be redundant and could race it. Once the ship turn parks, the
-  // turn-done invalidation has dropped the live count to 0, so Commit stays
-  // hidden until *new* uncommitted changes land on the branch.
-  const shipBusy = useWorkstreamShipBusy(activeWorkstreamId ?? null);
-  const canCommit =
-    Boolean(activeWorkstream) && activeChangedCount > 0 && !shipBusy && !shipping;
-  const doCommit = () => {
-    if (!activeWorkstream) return;
-    setCommitting(true);
-    void commitWorkstream(activeWorkstream.item.id).finally(() => setCommitting(false));
-  };
-  const canShip = Boolean(
-    activeWorkstream &&
-      !hasLivePr &&
-      (activeChangedCount > 0 || activeWorkstream.git.ahead > 0),
-  );
-  const doShip = () => {
-    if (!activeWorkstream) return;
-    setShipping(true);
-    void shipWorkstream(activeWorkstream.item.id).finally(() => setShipping(false));
-  };
-  const shipControls = currentProject ? (
-    <>
-      {/* Commit checkpoints the worktree locally, independent of opening a PR —
-          shown whenever there are uncommitted changes, even alongside a live PR. */}
-      {canCommit && (
-        <button
-          type="button"
-          disabled={committing}
-          onClick={doCommit}
-          className="inline-flex h-7 items-center gap-2 rounded-md border border-commit/50 bg-commit/15 px-3 text-sm font-medium text-commit hover:bg-commit/25 disabled:opacity-60"
-          title="Commit this worktree's changes (no push or pull request)"
-          aria-label="Commit"
-        >
-          <GitCommitIcon />
-          {!compactHeader && "Commit"}
-        </button>
-      )}
-      {canShip && (
-        <button
-          type="button"
-          disabled={shipping}
-          onClick={doShip}
-          className="inline-flex h-7 items-center gap-2 rounded-md border border-ship/50 bg-ship/15 px-3 text-sm font-medium text-ship hover:bg-ship/25 disabled:opacity-60"
-          title="Commit, push, and open a pull request"
-          aria-label="Ship"
-        >
-          <GitPullRequestIcon />
-          {!compactHeader && "Ship"}
-        </button>
-      )}
-      <PrStatusBar view={activeWorkstream ?? null} onArchive={setArchiveTarget} />
-    </>
-  ) : null;
+  // Commit / Ship gating + actions, shared with the GIT panel's buttons via
+  // `useWorkstreamGitActions` so the keyboard commands below stay in lockstep
+  // with what the sidebar shows. The buttons (and the PR controls) now live in
+  // the GIT panel at the top of the changes sidebar — the header carries no git
+  // actions; ⌘ commit/ship remain the path when that sidebar is collapsed.
+  const gitActions = useWorkstreamGitActions(activeWorkstream ?? null);
 
   // Global keyboard shortcuts. The dispatcher reads the user's overrides from
   // bootstrap; each command below registers its handler only while it's usable
@@ -860,8 +771,11 @@ export function Root() {
     "view.toggleChangesSidebar",
     currentSection === "Agent" ? () => toggleDiff() : null,
   );
-  useCommand("ws.commit", canCommit && !committing ? doCommit : null);
-  useCommand("ws.ship", canShip && !shipping ? doShip : null);
+  useCommand(
+    "ws.commit",
+    gitActions.canCommit && !gitActions.committing ? gitActions.doCommit : null,
+  );
+  useCommand("ws.ship", gitActions.canShip && !gitActions.shipping ? gitActions.doShip : null);
   useCommand("search.open", () => toggleSearch());
   // Escape closes Settings, mirroring how ⌘, toggles it shut. A dialog/menu open
   // over it shadows this on the shared Escape stack, so it closes first.
@@ -917,7 +831,6 @@ export function Root() {
         </div>
 
         <div
-          ref={headerRef}
           className={`flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3 ${
             resizingSidebar ? "" : "transition-[margin] duration-200 ease-out motion-reduce:transition-none"
           }`}
@@ -1010,10 +923,20 @@ export function Root() {
             )}
             {currentProject && (
               <>
-                {/* Ship/PR/Archive sit just left of the pane icons; the whole
-                    cluster stays pinned to the window's right edge regardless
-                    of sidebar state, so nothing shifts when a sidebar opens. */}
-                {shipControls}
+                {/* Ahead/behind of the active workstream's base — a fallback for the
+                    GIT panel header, shown ONLY while the changes sidebar is
+                    collapsed (otherwise the panel already shows it, so mirroring it
+                    here would just duplicate). Gated on a diverged branch so it
+                    stays out of the way when there's nothing to report. */}
+                {diffHidden &&
+                  activeWorkstream &&
+                  (activeWorkstream.git.ahead > 0 || activeWorkstream.git.behind > 0) && (
+                    <AheadBehind
+                      ahead={activeWorkstream.git.ahead}
+                      behind={activeWorkstream.git.behind}
+                      className="px-1"
+                    />
+                  )}
                 {/* New-workstream affordance for the whole project. Preserves the
                     selected workstream (if any) so opening it from a chat doesn't
                     yank you to the board; ProjectPage strips `create` once the

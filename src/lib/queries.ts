@@ -494,6 +494,48 @@ export function useDetachPr(id: string) {
   });
 }
 
+/** Re-target a workstream's base (merge target) branch. Re-points an open PR via
+ *  `gh pr edit --base` (backend), then refreshes ahead/behind, the PR bar, and the
+ *  sidebar's stored base. Errors (e.g. base not on the remote) surface to the UI. */
+export function useSetWorkstreamBase(id: string) {
+  return useMutation({
+    mutationFn: (base: string) => unwrap(commands.setWorkstreamBaseBranch(id, base)),
+    onSuccess: () => {
+      invalidateWorktreeGit(id); // ahead/behind recompute against the new base
+      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstream(id); // sidebar list shows the stored base
+    },
+  });
+}
+
+/** Pull the target branch's new commits into the worktree (fetch + merge). The
+ *  resolved `PullOutcome` (data) tells the caller whether it merged cleanly, was
+ *  already up to date, or stopped on conflicts to resolve by hand. Refreshes
+ *  ahead/behind + the Changes panel (conflicted files surface there). */
+export function useUpdateFromBase(id: string) {
+  return useMutation({
+    mutationFn: () => unwrap(commands.updateWorkstreamFromBase(id)),
+    onSuccess: () => {
+      invalidateWorktreeGit(id); // ahead/behind drops; merged/conflicted files refresh
+      invalidateWorkstream(id);
+    },
+  });
+}
+
+/** Fetch the workstream's remote (`git fetch --prune origin`), then refresh the
+ *  remote-derived state: ahead/behind (recomputed against the updated refs) and
+ *  the PR view. `onSettled` so an offline/failed fetch still refreshes local
+ *  state rather than leaving the panel stale. */
+export function useFetchWorkstreamRemote(id: string) {
+  return useMutation({
+    mutationFn: () => unwrap(commands.fetchWorkstreamRemote(id)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorktreeGit(id); // also invalidates the workstreams list (ahead/behind)
+    },
+  });
+}
+
 // ── Source-control panel ──────────────────────────────────────────────────
 
 /** Invalidate the things a staging action changes: the split status and the

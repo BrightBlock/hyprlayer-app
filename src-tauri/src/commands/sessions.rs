@@ -287,7 +287,9 @@ pub async fn start_stage_session(
     })?;
 
     let stage_kind = Stage::parse(&stage);
-    let prompt = pipeline::compose_prompt(stage_kind, &input, &attached_docs);
+    // Ship names the workstream's target branch in its directive; other stages
+    // ignore it. So a re-targeted workstream opens its PR against e.g. `develop`.
+    let prompt = pipeline::compose_prompt(stage_kind, &input, &ws.base_branch, &attached_docs);
 
     // Persist the session row before spawning, so a crash before init still
     // leaves a record.

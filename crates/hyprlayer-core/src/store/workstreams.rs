@@ -225,6 +225,12 @@ impl Db {
         self.touch(id, "title", title)
     }
 
+    /// Re-target the workstream's merge base. The next status recompute measures
+    /// ahead/behind against it; a future Ship opens its PR there.
+    pub fn update_workstream_base_branch(&self, id: &str, base: &str) -> Result<()> {
+        self.touch(id, "base_branch", base)
+    }
+
     pub fn set_workstream_pr(&self, id: &str, pr_number: Option<u32>) -> Result<()> {
         self.with(|conn| {
             conn.execute(

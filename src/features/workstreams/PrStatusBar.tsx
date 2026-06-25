@@ -81,7 +81,8 @@ export function PrStatusBar({
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-1.5">
+    // flex-wrap so the pills stack cleanly inside the narrow GIT-panel card.
+    <div className="flex shrink-0 flex-wrap items-center gap-1.5">
       {/* The PR link, opens in the user's default browser. */}
       <button
         type="button"

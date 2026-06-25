@@ -18,6 +18,7 @@ import { ScrollableTabStrip } from "../components/ScrollableTabs";
 import { commands, type WorkstreamView } from "../lib/bindings";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
 import { ChangesPanel } from "../features/workstreams/ChangesPanel";
+import { GitPanel } from "../features/workstreams/GitPanel";
 import { PrChecksPanel } from "../features/workstreams/PrChecksPanel";
 import { DiffTab } from "../features/workstreams/DiffTab";
 import { FileViewerTab } from "../features/workstreams/FileViewerTab";
@@ -1367,6 +1368,7 @@ export function ProjectPage() {
         inert={diffHidden}
       >
         <div className="absolute inset-y-0 right-0 flex flex-col" style={{ width: diffWidth }}>
+          <GitPanel view={activeView ?? null} />
           <div className="flex min-h-0 flex-1 flex-col">
             <ChangesPanel
               workstreamId={activeView?.item.id ?? null}
