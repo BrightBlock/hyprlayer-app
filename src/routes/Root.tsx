@@ -17,6 +17,7 @@ import {
   type ReactNode,
 } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { listen } from "@tauri-apps/api/event";
 
 import {
   useAllWorkstreams,
@@ -69,6 +70,9 @@ import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
 import { RemoveProjectDialog } from "../features/projects/RemoveProjectDialog";
 import { UpdatePill } from "../features/system/updates";
+import { useUpdate } from "../lib/updater";
+import { useToast } from "../lib/toast";
+import { Toast } from "../components/Toast";
 import type { Project, WorkstreamView } from "../lib/bindings";
 
 // One-shot guard (module scope, so it survives re-renders but resets on a cold
@@ -785,6 +789,35 @@ export function Root() {
       : null,
   );
 
+  const checkNow = useUpdate((s) => s.checkNow);
+  const currentVersion = useUpdate((s) => s.currentVersion);
+  const showToast = useToast((s) => s.show);
+
+  useEffect(() => {
+    const unlisten = Promise.all([
+      listen("menu:check-for-updates", () => {
+        void checkNow().then((result) => {
+          if (result === "uptodate") {
+            showToast(
+              "You're up to date!",
+              `You're running the latest version of Hyprlayer${currentVersion ? ` (v${currentVersion})` : ""}.`,
+              "ok",
+            );
+          } else if (result === "available") {
+            showToast("Update available", "A new version of Hyprlayer is ready to install.", "ok");
+          } else {
+            showToast("Couldn't check for updates", "Check your connection and try again.", "bad");
+          }
+        });
+      }),
+      listen("menu:open-settings", () => {
+        void navigate({ to: "/settings" });
+      }),
+    ]);
+    return () => { void unlisten.then(([a, b]) => { a(); b(); }); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="flex h-full flex-col bg-surface">
       {/* A tall toolbar with the breadcrumb + window controls vertically
@@ -1036,7 +1069,7 @@ export function Root() {
             </button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-3">
-            <UpdatePill collapsed />
+            {collapsed && <UpdatePill collapsed />}
             <button
               type="button"
               onClick={() => toggleNav("/archive")}
@@ -1290,6 +1323,7 @@ export function Root() {
             })}
 
           </nav>
+          <UpdatePill collapsed={false} />
           </div>
         </aside>
         )}
@@ -1470,6 +1504,7 @@ export function Root() {
       />
 
       <SearchPalette />
+      <Toast />
     </div>
   );
 }

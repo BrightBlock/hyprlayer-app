@@ -119,8 +119,7 @@ export function OllamaHarnessTab({
         <Card>
           <Badge tone="warn">OpenCode required</Badge>
           <p className="mt-2 text-xs text-ink-dim">
-            Local models run through OpenCode, which isn't installed yet. Install it from the
-            OpenCode tab to use Ollama models.
+            Ollama models require OpenCode. Install it from the OpenCode tab.
           </p>
         </Card>
       )}
@@ -150,8 +149,7 @@ export function OllamaHarnessTab({
           </div>
         </Field>
         <p className="mt-1 text-xs text-ink-dim">
-          Default <span className="font-mono">{DEFAULT_ENDPOINT}</span>. A local install isn't
-          required — point at any reachable host (e.g. <span className="font-mono">http://nexus:11434</span>).
+          Default <span className="font-mono">{DEFAULT_ENDPOINT}</span>. Point at any reachable host (e.g. <span className="font-mono">http://nexus:11434</span>).
         </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -173,12 +171,7 @@ export function OllamaHarnessTab({
         </div>
         {!reachable && !probe.isFetching && (
           <p className="mt-2 text-xs text-ink-dim">
-            Couldn't reach Ollama at that URL. Make sure it's running (<span className="font-mono">ollama serve</span>)
-            and the URL/port are correct. Get Ollama at{" "}
-            <a className="text-accent hover:underline" href={DOCS_URL} target="_blank" rel="noreferrer">
-              ollama.com
-            </a>
-            .
+            Can't reach Ollama. Make sure it's running (<span className="font-mono">ollama serve</span>).
           </p>
         )}
       </Card>
@@ -197,9 +190,7 @@ export function OllamaHarnessTab({
           ) : (
             <>
               <p className="mt-1 mb-3 text-xs text-ink-dim">
-                Choose which installed models appear in the composer. Coding/tool-calling models
-                (e.g. <span className="font-mono">qwen2.5-coder</span>, <span className="font-mono">devstral</span>)
-                drive the agent most reliably.
+                Choose which installed models appear in the composer.
               </p>
               <div className="space-y-1.5">
                 {installedModels.map((m) => (
@@ -251,8 +242,7 @@ export function OllamaHarnessTab({
         <Card>
           <CardTitle>Local install (optional)</CardTitle>
           <p className="mb-2 text-xs text-ink-dim">
-            Only needed if you run Ollama on this machine. Override the auto-detected
-            executable here; remote setups can ignore this.
+            Only needed for local Ollama installs. Remote setups can ignore this.
           </p>
           <BinaryCard status={status} />
         </Card>

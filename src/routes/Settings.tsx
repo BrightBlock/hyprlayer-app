@@ -32,11 +32,21 @@ import {
 } from "../components/ui";
 import { SetupTerminal } from "../features/onboarding/SetupTerminal";
 import { BinaryCard } from "../features/system/BinaryCard";
-import { UpdatesCard } from "../features/system/updates";
 import { KeyboardSettings } from "../features/settings/KeyboardSettings";
 import { HarnessesSection } from "../features/settings/harnesses/HarnessesSection";
 import { SettingRow } from "../features/settings/parts";
 import { THEMES, useThemeStore } from "../lib/theme";
+import { AnytypeIcon, ClipboardIcon, GitBranchIcon, NotionIcon, ObsidianIcon, PersonIcon } from "../components/icons";
+
+function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
+  switch (kind) {
+    case "git": return <GitBranchIcon size={size} />;
+    case "obsidian": return <ObsidianIcon size={size} />;
+    case "notion": return <NotionIcon size={size} />;
+    case "anytype": return <AnytypeIcon size={size} />;
+    default: return null;
+  }
+}
 
 /** [surface, panel-2, accent] preview colors per theme. Kept explicit (rather
  *  than relying on the cascade) since the theme overrides in index.css are
@@ -194,7 +204,6 @@ function GitSection({ settings }: { settings: AppSettings }) {
         {/* Branch name prefix */}
         <div className="py-3.5">
           <p className="text-sm text-ink">Branch name prefix</p>
-          <p className="mt-0.5 text-xs text-ink-dim">Prefix for new workspace branch names.</p>
           <div className="mt-3 space-y-2.5">
             {radio("default", <span>Default ({DEFAULT_PREFIX})</span>)}
             {radio(
@@ -242,9 +251,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Delete the workspace’s branch instead of keeping it. The remote branch on GitHub is
-          removed as soon as a merged workspace is archived; the local branch is removed when the
-          archive is permanently deleted. Branches the app didn’t create are never touched.
+          Removes the branch when the workspace is archived. Only branches the app created are affected.
         </SettingRow>
 
         <SettingRow
@@ -270,8 +277,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Queue a GitHub auto-merge so a PR lands once required checks pass. Requires auto-merge
-          enabled in your GitHub repository settings.
+          Enable GitHub auto-merge when required checks pass. Requires auto-merge enabled in the repo settings.
         </SettingRow>
 
         <SettingRow
@@ -284,9 +290,9 @@ function GitSection({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Remove git-ignored files (build output, dependencies) when archiving so archives stay
-          small. Files in your repo's <code className="font-mono text-xs">worktree.copy</code> list
-          (e.g. <code className="font-mono text-xs">.env</code>) are kept.
+          Remove git-ignored files when archiving. Files in{" "}
+          <code className="font-mono text-xs">worktree.copy</code> (e.g.{" "}
+          <code className="font-mono text-xs">.env</code>) are kept.
         </SettingRow>
       </div>
     </Card>
@@ -333,9 +339,7 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
     <Card>
       <CardTitle>Notifications</CardTitle>
       <p className="mt-1 text-xs text-ink-dim">
-        Native OS toasts when an agent needs your input. Quiet when you’re
-        already looking at the waiting session; fires otherwise — including
-        when you’re on a different tab or workstream inside Hyprlayer.
+        Native OS toasts when an agent needs your input.
       </p>
 
       {save.isError && (
@@ -377,8 +381,7 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
             <Button onClick={runTest}>Send test</Button>
           }
         >
-          Send a sample toast right now to confirm your OS notification
-          permissions are set up. Ignores the toggles above.
+          Confirm your OS notification permissions are working.
           {testStatus?.ok === true && (
             <span className="ml-2 text-ok">Sent — check the top-right.</span>
           )}
@@ -430,8 +433,7 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
     <Card>
       <CardTitle>Tab titles</CardTitle>
       <p className="mt-1 text-xs text-ink-dim">
-        Automatically name each new agent tab by summarizing its first prompt
-        with a small model. A tab you rename by hand is never changed.
+        Automatically name each agent tab from its first prompt. Manual renames are preserved.
       </p>
 
       {save.isError && (
@@ -451,8 +453,7 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Title a new agent tab from its first message. Off keeps the default
-          “Agent N” name.
+          Off keeps the default “Agent N” name.
         </SettingRow>
 
         <SettingRow
@@ -485,8 +486,7 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
             </Select>
           }
         >
-          Which model writes the titles. Defaults to Claude Haiku — cheap and
-          fast. Pick one of your OpenCode models if you don’t use Claude.
+          Defaults to Claude Haiku. Pick an OpenCode model if you don’t use Claude.
         </SettingRow>
       </div>
     </Card>
@@ -545,9 +545,8 @@ function AiToolCard() {
         title="Configure AI tool"
         className="max-w-2xl"
       >
-        <p className="mb-3 text-sm text-ink-dim">
-          Use the terminal below to select and install your AI coding assistant.
-          The dialog closes automatically on success.
+        <p className="mb-3 text-xs text-ink-dim">
+          Select and install your AI coding assistant below.
         </p>
         <div className="relative h-80 rounded-lg border border-edge bg-surface overflow-hidden">
           <SetupTerminal
@@ -563,40 +562,65 @@ function AiToolCard() {
 
 function HyprlayerConfigCard({ config }: { config: ReturnType<typeof useBootstrap>["data"] }) {
   const data = config!;
+  const [pathCopied, setPathCopied] = useState(false);
+
+  function copyPath(path: string) {
+    void navigator.clipboard.writeText(path).then(() => {
+      setPathCopied(true);
+      window.setTimeout(() => setPathCopied(false), 1200);
+    });
+  }
   return (
     <Card>
-      <CardTitle>Hyprlayer config</CardTitle>
-      {data.config.state === "ready" && (
-        <div className="space-y-1 text-sm">
-          <p>
-            <Badge tone="ok">Found</Badge>
-            <span className="selectable ml-2 font-mono text-xs text-ink-dim">
-              {data.config.path}
-            </span>
-          </p>
-          <p className="text-ink-dim">
-            User <span className="font-mono text-ink">{data.config.user || "—"}</span> · default
-            backend <span className="font-mono text-ink">{data.config.backendKind}</span>
-            {!data.config.configured && (
-              <span className="ml-2">
-                <Badge tone="warn">incomplete</Badge>
-              </span>
-            )}
-          </p>
-          <p className="mt-2 text-xs text-ink-dim">
-            The hyprlayer CLI owns this file; the app reads it and follows changes live.
-          </p>
-        </div>
-      )}
+      <div className="flex items-center justify-between gap-4">
+        <CardTitle className="mb-0">Hyprlayer</CardTitle>
+        {data.config.state === "ready" && (
+          <span className="flex items-center gap-1.5 text-sm text-ink">
+            <BackendIcon kind={data.config.backendKind} size={15} />
+            <span className="font-mono font-semibold">{data.config.backendKind}</span>
+            {!data.config.configured && <Badge tone="warn">incomplete</Badge>}
+          </span>
+        )}
+      </div>
+      {data.config.state === "ready" && (() => {
+        const hlBinary = data.binaries.find((b) => b.kind === "hyprlayer");
+        const binaryOk = hlBinary?.state.state === "ok";
+        return (
+          <div className="mt-2 flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-2">
+              {hlBinary && (
+                <Badge tone={binaryOk ? "ok" : "warn"}>{binaryOk ? "Found" : "Missing"}</Badge>
+              )}
+              <button
+                type="button"
+                onClick={() => copyPath(data.config.path)}
+                title={pathCopied ? "Copied!" : "Copy path"}
+                className="group flex min-w-0 items-center gap-1.5 text-left"
+              >
+                <span className="truncate font-mono text-xs text-ink-dim group-hover:text-ink">
+                  {data.config.path}
+                </span>
+                <span className="shrink-0 text-ink-dim opacity-0 transition-opacity group-hover:opacity-100">
+                  {pathCopied ? <span className="text-xs text-ok">✓</span> : <ClipboardIcon size={11} />}
+                </span>
+              </button>
+            </div>
+            <p className="flex shrink-0 items-center gap-1 font-mono text-sm text-ink-dim">
+              <PersonIcon size={13} />
+              <span>{data.config.user || "—"}</span>
+            </p>
+          </div>
+        );
+      })()}
       {data.config.state === "missing" && (
         <div className="space-y-2 text-sm">
           <p>
             <Badge tone="warn">Not set up yet</Badge>
           </p>
           <p className="text-ink-dim">
-            No hyprlayer config was found at{" "}
+            No config found at{" "}
             <span className="selectable font-mono text-xs">{data.config.path}</span>. Add your
-            first project from the dashboard — the app sets up your thoughts storage automatically.
+            first project from the dashboard.
           </p>
         </div>
       )}
@@ -696,13 +720,12 @@ export function Settings() {
       <div className="min-w-0 flex-1 space-y-4">
         {section === "general" && (
           <>
-            <UpdatesCard />
             <AiToolCard />
             <HyprlayerConfigCard config={data} />
             <TabTitlesCard settings={data.settings} />
             <Card>
               <CardTitle>Setup wizard</CardTitle>
-              <p className="mb-3 text-sm text-ink-dim">
+              <p className="mb-3 text-xs text-ink-dim">
                 Re-run the guided setup to reconfigure your AI tool or change your thoughts
                 repository.
               </p>

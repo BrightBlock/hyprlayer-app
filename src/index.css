@@ -377,3 +377,32 @@ a {
     opacity: var(--hl-base);
   }
 }
+
+/* ── Toast enter / exit animations ──────────────────────────────────────── */
+@keyframes toast-in {
+  0%   { opacity: 0; transform: translateY(calc(100% + 48px)); }
+  70%  { opacity: 1; transform: translateY(-8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Bump up then slide down off-screen */
+@keyframes toast-out {
+  0%   { opacity: 1; transform: translateY(0); }
+  20%  { opacity: 1; transform: translateY(-8px); }
+  100% { opacity: 0; transform: translateY(calc(100% + 48px)); }
+}
+
+.animate-toast-in {
+  animation: toast-in 200ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-toast-out {
+  animation: toast-out 380ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-in,
+  .animate-toast-out {
+    animation: none;
+  }
+}

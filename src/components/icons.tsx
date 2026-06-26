@@ -590,3 +590,62 @@ export function ModeIcon({ mode, size = 16, strokeWidth = 1.8 }: IconProps & { m
       );
   }
 }
+
+/** Person silhouette — a user/account. */
+export function PersonIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Git — branch fork with three commit nodes. */
+export function GitBranchIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <circle cx="7" cy="5" r="2.2" stroke="currentColor" strokeWidth={strokeWidth} />
+      <circle cx="17" cy="14" r="2.2" stroke="currentColor" strokeWidth={strokeWidth} />
+      <circle cx="7" cy="19" r="2.2" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M7 7.2V16.8" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M7 9.5C7 9.5 17 9.5 17 11.8" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Obsidian — faceted diamond. */
+export function ObsidianIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M12 3L21 9L12 21L3 9L12 3Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
+      <path d="M3 9L12 13L21 9" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
+      <path d="M12 13V21" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Notion — bold N letterform (left stroke, right stroke, diagonal). */
+export function NotionIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M6 5v14M18 5v14M6 5L18 19"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Anytype — triangle with crossbar (A-shape). */
+export function AnytypeIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M12 4L3 20h18L12 4Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
+      <path d="M7.5 14.5h9" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}

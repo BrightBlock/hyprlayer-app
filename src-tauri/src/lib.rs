@@ -17,7 +17,7 @@ use std::time::Duration;
 use hyprlayer_core::config::ConfigService;
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryResolver};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
 use crate::settings::SettingsStore;
@@ -319,6 +319,16 @@ pub fn run() {
             //    without the frontend polling gh on a timer.
             pr_watch::spawn(app.handle().clone());
 
+            // Relay macOS menu item clicks to the frontend as Tauri events.
+            #[cfg(target_os = "macos")]
+            app.on_menu_event(|app, event| {
+                match event.id().as_ref() {
+                    "check-updates" => { let _ = app.emit("menu:check-for-updates", ()); }
+                    "open-settings" => { let _ = app.emit("menu:open-settings", ()); }
+                    _ => {}
+                }
+            });
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -355,8 +365,16 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         ..Default::default()
     };
 
+    let check_updates =
+        tauri::menu::MenuItem::with_id(handle, "check-updates", "Check for Updates…", true, None::<&str>)?;
+    let open_settings =
+        tauri::menu::MenuItem::with_id(handle, "open-settings", "Settings", true, Some("CmdOrCtrl+,"))?;
+
     let app_menu = SubmenuBuilder::new(handle, &pkg.name)
         .about(Some(about))
+        .separator()
+        .item(&check_updates)
+        .item(&open_settings)
         .separator()
         .services()
         .separator()

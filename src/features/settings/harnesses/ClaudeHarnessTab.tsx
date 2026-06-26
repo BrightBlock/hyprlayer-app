@@ -112,8 +112,7 @@ export function ClaudeHarnessTab({
       <Card>
         <CardTitle>Defaults</CardTitle>
         <p className="mt-1 text-xs text-ink-dim">
-          What new Claude chats start with. You can still change any of these per tab in the
-          composer.
+          Defaults for new chats. Overridable per tab in the composer.
         </p>
         <div className="mt-3 divide-y divide-edge/50">
           <SettingRow
@@ -161,8 +160,7 @@ export function ClaudeHarnessTab({
               />
             }
           >
-            Start new chats in plan mode — the agent researches and proposes a plan before making
-            any edits.
+            Start new chats in plan mode.
           </SettingRow>
         </div>
       </Card>
@@ -170,7 +168,7 @@ export function ClaudeHarnessTab({
       <Card>
         <CardTitle>Models visible in composer</CardTitle>
         <p className="mt-1 text-xs text-ink-dim">
-          Choose which Claude models are shown when starting or switching chats.
+          Choose which Claude models appear in the composer.
         </p>
         <div className="mt-3">
           <VisibleModelsPanel claude={claude} patchClaude={patchClaude} />
@@ -211,8 +209,7 @@ function ClaudeAdvancedCard({ status }: { status?: BinaryStatus }) {
 
           <div className="border-t border-edge/50 pt-4">
             <p className="mb-2 text-xs text-ink-dim">
-              Override the Claude Code executable with a custom one. Leave unset to use the
-              auto-detected version.
+              Override the auto-detected Claude Code executable.
             </p>
             {status ? (
               <BinaryCard status={status} />
@@ -316,9 +313,8 @@ function CliAuthPanel() {
         title="Sign in to Claude Code"
         className="max-w-2xl"
       >
-        <p className="mb-3 text-sm text-ink-dim">
-          Follow the prompts below to sign in. This runs <code className="font-mono">claude auth login</code> in
-          a terminal.
+        <p className="mb-3 text-xs text-ink-dim">
+          Runs <code className="font-mono">claude auth login</code> in a terminal.
         </p>
         <div className="relative h-80 overflow-hidden rounded-lg border border-edge bg-surface">
           <SetupTerminal
@@ -368,8 +364,7 @@ function ApiKeyAuthPanel({
           </Button>
         </div>
         <p className="mt-1 text-xs text-ink-dim">
-          Injected as <code className="font-mono">ANTHROPIC_API_KEY</code> when running Claude
-          Code. Stored locally in the app settings.
+          Injected as <code className="font-mono">ANTHROPIC_API_KEY</code>. Stored locally.
         </p>
       </div>
 

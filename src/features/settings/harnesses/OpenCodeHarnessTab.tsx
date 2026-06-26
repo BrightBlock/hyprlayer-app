@@ -325,8 +325,7 @@ function AdvancedCard({
 
           <div>
             <p className="mb-2 text-xs text-ink-dim">
-              Override the bundled OpenCode executable with a custom one. Leave unset to use the
-              auto-detected version.
+              Override the auto-detected OpenCode executable.
             </p>
             {status ? (
               <BinaryCard status={status} />
