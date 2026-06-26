@@ -32,10 +32,12 @@ import {
 } from "../components/ui";
 import { SetupTerminal } from "../features/onboarding/SetupTerminal";
 import { BinaryCard } from "../features/system/BinaryCard";
+import { UpdatesCard } from "../features/system/updates";
 import { KeyboardSettings } from "../features/settings/KeyboardSettings";
 import { HarnessesSection } from "../features/settings/harnesses/HarnessesSection";
 import { SettingRow } from "../features/settings/parts";
 import { THEMES, useThemeStore } from "../lib/theme";
+import { IS_WINDOWS } from "../lib/platform";
 import { AnytypeIcon, ClipboardIcon, GitBranchIcon, NotionIcon, ObsidianIcon, PersonIcon } from "../components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
@@ -720,6 +722,9 @@ export function Settings() {
       <div className="min-w-0 flex-1 space-y-4">
         {section === "general" && (
           <>
+            {/* macOS checks for updates from the app menu; Windows has no such
+                menu, so keep the manual "Check now" card there. */}
+            {IS_WINDOWS && <UpdatesCard />}
             <AiToolCard />
             <HyprlayerConfigCard config={data} />
             <TabTitlesCard settings={data.settings} />
