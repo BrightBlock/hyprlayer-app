@@ -354,6 +354,16 @@ export const commands = {
 	saveAttachment: (workstreamId: string, fileName: string, data: number[]) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
+	/**
+	 *  hyprlayer CLI install options for this OS (macOS → Homebrew; Windows →
+	 *  winget + Scoop), each flagged by whether its package manager is installed.
+	 */
+	detectCliInstallMethods: () => typedError<CliInstallMethod[], AppError>(__TAURI_INVOKE("detect_cli_install_methods")),
+	/**
+	 *  Install the hyprlayer CLI via the chosen package manager, in the background
+	 *  (no terminal). Re-detects on success so the UI flips to "installed".
+	 */
+	installHyprlayerCli: (method: CliInstallMethodId) => typedError<null, AppError>(__TAURI_INVOKE("install_hyprlayer_cli", { method })),
 	getAppSettings: () => typedError<AppSettings, AppError>(__TAURI_INVOKE("get_app_settings")),
 	setAppSettings: (settings: AppSettings) => typedError<AppSettings, AppError>(__TAURI_INVOKE("set_app_settings", { settings })),
 	/**
@@ -723,6 +733,22 @@ export type ClaudeSettings = {
 	/**  Start new sessions in fast mode. Reserved — not a `claude` spawn flag yet. */
 	defaultFastMode?: boolean,
 };
+
+/**
+ *  One way to install the hyprlayer CLI: the command to run and whether its
+ *  package manager is present.
+ */
+export type CliInstallMethod = {
+	id: CliInstallMethodId,
+	/**  Package manager name, e.g. "Homebrew". */
+	label: string,
+	/**  Install command, run through the login shell. */
+	command: string,
+	available: boolean,
+};
+
+/**  A package manager that can install the hyprlayer CLI. */
+export type CliInstallMethodId = "homebrew" | "winget" | "scoop";
 
 /**
  *  Codex provider defaults. Stub — Codex isn't supported yet; this exists so

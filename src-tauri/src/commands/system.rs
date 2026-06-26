@@ -1,6 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
 
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
+use hyprlayer_core::process::Exec;
 use tauri::State;
 use tauri_specta::Event;
 
@@ -132,4 +136,133 @@ pub fn default_username() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "user".to_string())
+}
+
+/* ----------------------- hyprlayer CLI install ------------------------- */
+
+/// A package manager that can install the hyprlayer CLI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CliInstallMethodId {
+    Homebrew,
+    Winget,
+    Scoop,
+}
+
+/// One way to install the hyprlayer CLI: the command to run and whether its
+/// package manager is present.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CliInstallMethod {
+    pub id: CliInstallMethodId,
+    /// Package manager name, e.g. "Homebrew".
+    pub label: String,
+    /// Install command, run through the login shell.
+    pub command: String,
+    pub available: bool,
+}
+
+/// A package-manager install option for this OS, before availability probing.
+struct CliCandidate {
+    id: CliInstallMethodId,
+    label: &'static str,
+    command: &'static str,
+    /// Binary that must resolve for the manager to count as installed.
+    probe: &'static str,
+}
+
+fn cli_install_candidates() -> &'static [CliCandidate] {
+    #[cfg(target_os = "macos")]
+    let candidates: &[CliCandidate] = &[CliCandidate {
+        id: CliInstallMethodId::Homebrew,
+        label: "Homebrew",
+        command: "brew install brightblock/tap/hyprlayer",
+        probe: "brew",
+    }];
+    #[cfg(target_os = "windows")]
+    let candidates: &[CliCandidate] = &[
+        CliCandidate {
+            id: CliInstallMethodId::Winget,
+            label: "winget",
+            command: "winget install BrightBlock.Hyprlayer --accept-source-agreements --accept-package-agreements",
+            probe: "winget",
+        },
+        CliCandidate {
+            id: CliInstallMethodId::Scoop,
+            label: "Scoop",
+            command: "scoop install hyprlayer",
+            probe: "scoop",
+        },
+    ];
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let candidates: &[CliCandidate] = &[];
+    candidates
+}
+
+/// hyprlayer CLI install options for this OS (macOS → Homebrew; Windows →
+/// winget + Scoop), each flagged by whether its package manager is installed.
+#[tauri::command]
+#[specta::specta]
+pub async fn detect_cli_install_methods(
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<CliInstallMethod>> {
+    let path = state.binaries.augmented_path().await;
+    let shell = super::terminal::default_shell();
+
+    let mut methods = Vec::new();
+    for c in cli_install_candidates() {
+        methods.push(CliInstallMethod {
+            id: c.id,
+            label: c.label.to_string(),
+            command: c.command.to_string(),
+            available: package_manager_available(&shell, &path, c.probe).await,
+        });
+    }
+    Ok(methods)
+}
+
+/// Install the hyprlayer CLI via the chosen package manager, in the background
+/// (no terminal). Re-detects on success so the UI flips to "installed".
+#[tauri::command]
+#[specta::specta]
+pub async fn install_hyprlayer_cli(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    method: CliInstallMethodId,
+) -> CmdResult<()> {
+    let command = cli_install_candidates()
+        .iter()
+        .find(|c| c.id == method)
+        .map(|c| c.command)
+        .ok_or_else(|| AppError {
+            code: "cli_install_unsupported".into(),
+            message: "That install method isn't available on this platform.".into(),
+            remedy: None,
+        })?;
+
+    let path = state.binaries.augmented_path().await;
+    let shell = super::terminal::default_shell();
+
+    Exec::new(&shell)
+        .args(super::terminal::login_shell_args(command))
+        .env("PATH", path)
+        .timeout(Duration::from_secs(300))
+        .run()
+        .await
+        .map_err(AppError::from)?;
+
+    state.binaries.redetect().await;
+    let _ = BinariesChanged.emit(&app);
+    Ok(())
+}
+
+/// True when `manager --version` exits cleanly through the login shell.
+async fn package_manager_available(shell: &Path, path: &std::ffi::OsStr, manager: &str) -> bool {
+    Exec::new(shell)
+        .args(super::terminal::login_shell_args(&format!("{manager} --version")))
+        .env("PATH", path)
+        .timeout(Duration::from_secs(15))
+        .run()
+        .await
+        .is_ok()
 }

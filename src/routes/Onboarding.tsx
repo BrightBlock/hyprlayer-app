@@ -10,10 +10,9 @@
  *
  * Re-enterable from Settings at any time.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { HyprlayerLogo } from "../components/Logo";
 import {
   Button,
   Card,
@@ -29,37 +28,16 @@ import {
   useInitThoughtsRepo,
   useProbeDefaultThoughts,
 } from "../lib/queries";
+import { CliInstallStep } from "../features/onboarding/CliInstallStep";
 import { SetupTerminal } from "../features/onboarding/SetupTerminal";
+import { Step } from "../features/onboarding/StepShell";
 import { RepoSourcePicker, type RepoSource } from "../features/projects/RepoSourcePicker";
 import type { ThoughtsSource } from "../lib/bindings";
+import { useEscape } from "../lib/keybindings/registry";
 import { dismissOnboarding } from "./onboardingState";
 
-// ── Step shell ────────────────────────────────────────────────────────────────
-
-type StepProps = {
-  number: number;
-  total: number;
-  title: string;
-  children: ReactNode;
-  /** Footer actions (Next / Set up / etc.) */
-  footer?: ReactNode;
-};
-
-function Step({ number, total, title, children, footer }: StepProps) {
-  return (
-    <div className="flex min-h-full flex-col gap-6">
-      <header className="mb-2 flex flex-col items-center gap-4 text-center">
-        <HyprlayerLogo height={60} />
-        <p className="text-xs font-medium uppercase tracking-[0.25em] text-ink-dim">
-          Setup {number} of {total}
-        </p>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
-      </header>
-      <div className="flex-1">{children}</div>
-      {footer && <div className="flex justify-end gap-2 pt-2">{footer}</div>}
-    </div>
-  );
-}
+/** Total wizard steps — bump when adding/removing a step. */
+const TOTAL_STEPS = 4;
 
 // ── Step 1: Welcome + name ────────────────────────────────────────────────────
 
@@ -75,7 +53,7 @@ function Step1({
   return (
     <Step
       number={1}
-      total={3}
+      total={TOTAL_STEPS}
       title="Welcome to Hyprlayer"
       footer={
         <Button
@@ -165,7 +143,7 @@ function Step2({ onNext }: { onNext: () => void }) {
 
   if (aiStatus.isLoading) {
     return (
-      <Step number={2} total={3} title="AI harness">
+      <Step number={3} total={TOTAL_STEPS} title="AI harness">
         <Card className="flex items-center justify-center py-12">
           <Spinner />
         </Card>
@@ -177,8 +155,8 @@ function Step2({ onNext }: { onNext: () => void }) {
   if (phase.kind === "running") {
     return (
       <Step
-        number={2}
-        total={3}
+        number={3}
+        total={TOTAL_STEPS}
         title="AI harness"
         footer={
           <Button variant="primary" disabled>
@@ -209,8 +187,8 @@ function Step2({ onNext }: { onNext: () => void }) {
   // Idle or checking: configured card, re-check spinner, or a (re)start prompt.
   return (
     <Step
-      number={2}
-      total={3}
+      number={3}
+      total={TOTAL_STEPS}
       title="AI harness"
       footer={
         <Button variant="primary" onClick={onNext} disabled={!isInstalled}>
@@ -288,8 +266,8 @@ function Step3({ user }: { user: string }) {
   if (alreadyConfigured) {
     return (
       <Step
-        number={3}
-        total={3}
+        number={4}
+        total={TOTAL_STEPS}
         title="Your thoughts repository"
         footer={
           <Button variant="primary" onClick={() => void navigate({ to: "/" })}>
@@ -346,8 +324,8 @@ function Step3({ user }: { user: string }) {
 
   return (
     <Step
-      number={3}
-      total={3}
+      number={4}
+      total={TOTAL_STEPS}
       title="Your thoughts repository"
       footer={
         <>
@@ -415,7 +393,7 @@ function Step3({ user }: { user: string }) {
  *  also reachable via Settings → "Re-run setup". */
 export function Onboarding() {
   const navigate = useNavigate();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [user, setUser] = useState("");
 
   // Prefill the name from the shell username ($USER) — the same default the CLI
@@ -430,6 +408,14 @@ export function Onboarding() {
     }
   }, [defaultUser.data]);
 
+  // Escape closes the wizard from any step (same as "Exit setup"). Rides the
+  // shared Escape stack, so a dialog open over it closes first.
+  const exit = () => {
+    dismissOnboarding();
+    void navigate({ to: "/" });
+  };
+  useEscape(exit);
+
   return (
     <div className="flex min-h-screen items-start justify-center bg-surface px-4 py-12">
       <div className="w-full max-w-xl">
@@ -438,32 +424,33 @@ export function Onboarding() {
           <div className="mb-4 flex items-center justify-between">
             <button
               type="button"
-              onClick={() => setStep((s) => (s - 1) as 1 | 2 | 3)}
+              onClick={() => setStep((s) => (s - 1) as 1 | 2 | 3 | 4)}
               className="text-xs text-ink-dim hover:text-ink"
             >
               ← Back
             </button>
             <button
               type="button"
-              onClick={() => {
-                dismissOnboarding();
-                void navigate({ to: "/" });
-              }}
+              onClick={exit}
               className="text-xs text-ink-dim hover:text-ink"
             >
               Exit setup
             </button>
           </div>
         )}
-        {step === 1 && (
-          <Step1
-            user={user}
-            onChange={setUser}
-            onNext={() => setStep(2)}
-          />
-        )}
-        {step === 2 && <Step2 onNext={() => setStep(3)} />}
-        {step === 3 && <Step3 user={user} />}
+        {/* Keyed by step so each change remounts and replays the enter animation. */}
+        <div key={step} className="animate-step-in">
+          {step === 1 && (
+            <Step1
+              user={user}
+              onChange={setUser}
+              onNext={() => setStep(2)}
+            />
+          )}
+          {step === 2 && <CliInstallStep onNext={() => setStep(3)} />}
+          {step === 3 && <Step2 onNext={() => setStep(4)} />}
+          {step === 4 && <Step3 user={user} />}
+        </div>
       </div>
     </div>
   );

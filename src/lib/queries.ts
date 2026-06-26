@@ -6,6 +6,7 @@ import {
   type AppSettings,
   type BinaryKind,
   type Bootstrap,
+  type CliInstallMethodId,
   type CreateDocInput,
   type FmPatchDto,
   type MergeMethod,
@@ -192,6 +193,27 @@ export function useSetBinaryOverride() {
 export function useRedetectBinaries() {
   return useMutation({
     mutationFn: () => unwrap(commands.redetectBinaries()),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      void queryClient.invalidateQueries({ queryKey: ["health"] });
+    },
+  });
+}
+
+/** hyprlayer CLI install options for this OS, flagged by manager availability.
+ *  Drives the onboarding install step. */
+export function useCliInstallMethods() {
+  return useQuery({
+    queryKey: ["cli-install-methods"],
+    queryFn: () => unwrap(commands.detectCliInstallMethods()),
+  });
+}
+
+/** Install the hyprlayer CLI via a package manager (background, no terminal).
+ *  Re-detects on success so the install gate flips to "installed". */
+export function useInstallHyprlayerCli() {
+  return useMutation({
+    mutationFn: (method: CliInstallMethodId) => unwrap(commands.installHyprlayerCli(method)),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["health"] });

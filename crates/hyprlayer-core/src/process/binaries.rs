@@ -347,10 +347,12 @@ fn well_known_dirs() -> Vec<PathBuf> {
         PathBuf::from("/usr/local/bin"),
     ];
     #[cfg(target_os = "windows")]
-    // scoop shims + standard npm global prefix
+    // scoop shims + winget link shims + standard npm global prefix
     let platform = [
         dirs::data_local_dir().map(|local| local.join("Programs")),
         dirs::home_dir().map(|profile| profile.join("scoop").join("shims")),
+        // winget shim dir — else a winget-installed CLI isn't found until restart.
+        dirs::data_local_dir().map(|local| local.join("Microsoft").join("WinGet").join("Links")),
         dirs::data_dir().map(|appdata| appdata.join("npm")),
     ]
     .into_iter()

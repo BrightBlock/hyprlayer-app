@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { Button, Spinner } from "../../components/ui";
+import { useCopyFeedback } from "../../lib/clipboard";
 import { HyprlayerMark } from "../../components/Logo";
 import {
   ChevronRightIcon,
@@ -54,20 +55,6 @@ export type PromptHandlers = {
 };
 
 /* -------------------------------- pieces --------------------------------- */
-
-/** A short-lived "Copied!" confirmation under the copy button (Claude-Code
- *  style). Re-renders the toolbar on tick to fade the label after 1.2s. */
-function useCopyFeedback() {
-  const [copied, setCopied] = useState(false);
-  const trigger = (text: string) => {
-    if (!text) return;
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    });
-  };
-  return { copied, trigger };
-}
 
 /**
  * Re-render a relative-time label on a schedule that matches its precision:

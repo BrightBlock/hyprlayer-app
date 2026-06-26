@@ -204,12 +204,8 @@ pub async fn spawn_shell_terminal(
     let path = state.binaries.augmented_path().await;
     let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
 
-    // Login shell so the command sees the user's full PATH/profile. `-lc` on
-    // unix; PowerShell's `-Command` on Windows (where default_shell() is pwsh).
-    #[cfg(not(windows))]
-    let args = vec!["-lc".to_string(), command];
-    #[cfg(windows)]
-    let args = vec!["-NoProfile".to_string(), "-Command".to_string(), command];
+    // Login shell so the command sees the user's full PATH/profile.
+    let args = login_shell_args(&command);
 
     let session = PtySession::spawn(SpawnTerminal {
         shell: default_shell(),
@@ -303,4 +299,21 @@ pub(crate) fn default_shell() -> PathBuf {
         .ok()
         .or_else(|| std::env::var_os("ComSpec").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("powershell.exe"))
+}
+
+/// Args to run `command` through [`default_shell`]: `-lc` on unix, PowerShell's
+/// `-NoProfile -Command` on Windows.
+pub(crate) fn login_shell_args(command: &str) -> Vec<String> {
+    #[cfg(not(windows))]
+    {
+        vec!["-lc".to_string(), command.to_string()]
+    }
+    #[cfg(windows)]
+    {
+        vec![
+            "-NoProfile".to_string(),
+            "-Command".to_string(),
+            command.to_string(),
+        ]
+    }
 }

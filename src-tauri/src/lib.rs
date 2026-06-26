@@ -97,6 +97,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::attachments::save_attachment,
             commands::system::set_binary_override,
             commands::system::redetect_binaries,
+            commands::system::detect_cli_install_methods,
+            commands::system::install_hyprlayer_cli,
             commands::system::get_app_settings,
             commands::system::set_app_settings,
             commands::system::detect_editors,

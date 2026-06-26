@@ -15,6 +15,7 @@ import { Fragment, memo, useEffect, useMemo, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 
 import { ClipboardIcon } from "../../components/icons";
+import { useCopyFeedback } from "../../lib/clipboard";
 import { highlightToHast, resolveLang } from "./shikiHighlight";
 
 // 150ms is long enough that streaming never triggers a highlight mid-token
@@ -58,13 +59,7 @@ function ShikiCodeBlockImpl({
 
   const langLabel = resolveLang(rawLang);
 
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    void navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    });
-  };
+  const { copied, trigger: handleCopy } = useCopyFeedback();
 
   return (
     <div className="group relative my-3 overflow-hidden rounded-md border border-edge bg-panel">
@@ -74,7 +69,7 @@ function ShikiCodeBlockImpl({
         </span>
         <button
           type="button"
-          onClick={handleCopy}
+          onClick={() => handleCopy(code)}
           className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-dim opacity-0 transition hover:bg-edge hover:text-ink group-hover:opacity-100"
           aria-label="Copy code"
         >
