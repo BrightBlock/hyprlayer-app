@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.3.8",
+      "date": "2026-06-26",
+      "summary": "macOS app menu shortcuts and settings redesign.",
+      "notes": [
+        "Added Check for Updates and Settings (Cmd+,) to the macOS app menu. Checking for updates shows a toast with the result; Settings navigates directly.",
+        "Redesigned the Hyprlayer config card with an inline backend badge, a Found/Missing indicator, and a click-to-copy config path. Tightened settings copy throughout and removed the redundant updates card from General."
+      ]
+    },
+    {
       "version": "0.3.7",
       "date": "2026-06-26",
       "summary": "OpenCode transcript fixes and a session-locked model picker.",
