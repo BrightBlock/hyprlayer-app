@@ -705,19 +705,25 @@ impl Translator {
     }
 
     fn handle_part(&mut self, part: &Value) -> Vec<SessionEvent> {
+        let pid = part.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
+        let ptype = part.get("type").and_then(Value::as_str).unwrap_or_default();
+        // Remember this part's type *before* the role gate. A reasoning part can be
+        // announced (this `message.part.updated`) before its owning message's role
+        // is known; if we skipped it here, its later `field:"text"` deltas — which
+        // the delta handler suppresses only when the part is known to be reasoning
+        // — would be misclassified as visible assistant text, leaking the thought
+        // into prose. Recording it unconditionally keeps that suppression reliable
+        // regardless of message/part event ordering. (Harmless for user parts: the
+        // delta handler gates on role before ever consulting this map.)
+        if !pid.is_empty() {
+            self.part_types.insert(pid.clone(), ptype.to_string());
+        }
         // Only assistant output: the user's echoed prompt part is already shown
         // (we emit UserMessage in send_user_turn). Roles arrive via message.updated
         // before the message's parts, so an unknown role means "not assistant yet".
         let mid = part.get("messageID").and_then(Value::as_str).unwrap_or_default();
         if self.roles.get(mid).map(String::as_str) != Some("assistant") {
             return Vec::new();
-        }
-        let pid = part.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
-        let ptype = part.get("type").and_then(Value::as_str).unwrap_or_default();
-        // Remember this part's type so the delta handler can tell reasoning text
-        // (which it must not stream live) from real assistant text.
-        if !pid.is_empty() {
-            self.part_types.insert(pid.clone(), ptype.to_string());
         }
         let mut out = Vec::new();
 
@@ -930,6 +936,58 @@ mod tests {
 
         let (name, _) = normalize_tool("bash", json!({ "command": "echo hi" }));
         assert_eq!(name, "Bash");
+    }
+
+    fn oc(kind: &str, properties: Value) -> OcEvent {
+        OcEvent { kind: kind.to_string(), properties }
+    }
+
+    #[test]
+    fn reasoning_announced_before_role_is_not_leaked_as_text() {
+        // Regression: a reasoning part can be announced before its message's role
+        // is known. Its text streams as `field:"text"` deltas under the reasoning
+        // part id, which must be suppressed and surfaced only as a Thinking block —
+        // never as visible assistant text. This works only if the part's type is
+        // recorded even while the role is still unknown.
+        let mut x = Translator::default();
+
+        // 1. Reasoning part announced BEFORE the owning message's role arrives.
+        let out = x.handle(&oc(
+            "message.part.updated",
+            json!({ "part": { "id": "r1", "type": "reasoning", "messageID": "m1" } }),
+        ));
+        assert!(out.is_empty());
+
+        // 2. Now the role lands.
+        x.handle(&oc("message.updated", json!({ "info": { "id": "m1", "role": "assistant" } })));
+
+        // 3. Reasoning streams as field:"text" deltas — must be suppressed.
+        let out = x.handle(&oc(
+            "message.part.delta",
+            json!({ "messageID": "m1", "partID": "r1", "field": "text", "delta": "secret plan" }),
+        ));
+        assert!(
+            out.is_empty(),
+            "reasoning delta leaked as a live event: {out:?}"
+        );
+
+        // 4. The reasoning part completes → exactly one Thinking block, no text.
+        let out = x.handle(&oc(
+            "message.part.updated",
+            json!({ "part": { "id": "r1", "type": "reasoning", "messageID": "m1", "text": "secret plan", "time": { "end": 1 } } }),
+        ));
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            SessionEvent::Thinking { text, .. } => assert_eq!(text, "secret plan"),
+            other => panic!("expected Thinking, got {other:?}"),
+        }
+        assert!(
+            !out.iter().any(|e| matches!(
+                e,
+                SessionEvent::PartialText { .. } | SessionEvent::AssistantText { .. }
+            )),
+            "reasoning surfaced as assistant text"
+        );
     }
 
     #[test]

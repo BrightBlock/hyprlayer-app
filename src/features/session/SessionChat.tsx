@@ -48,7 +48,14 @@ import { generateTabTitle } from "./tabTitles";
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "./stages";
 import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
-import { DEFAULT_HARNESS_KEY, harnessOption, opencodeModelLabel, opencodeModelNames } from "./harnessing";
+import {
+  DEFAULT_HARNESS_KEY,
+  harnessOption,
+  lockedSessionProvider,
+  modelProvider,
+  opencodeModelLabel,
+  opencodeModelNames,
+} from "./harnessing";
 import { PERMISSION_MODES, permissionModeOption } from "./permissions";
 import { docFromTool, formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
@@ -160,6 +167,10 @@ type MenuItem = {
   icon?: ReactNode;
   /** Render in red (e.g. "Bypass permissions") to flag a risky choice. */
   danger?: boolean;
+  /** Greyed and non-selectable — used by the model picker to lock a started
+   *  session to its provider (see `lockedProvider` in SessionChat). Like a group's
+   *  `disabled`, but per-row (no badge; the greyed-out row is signal enough). */
+  disabled?: boolean;
 };
 
 /** A labelled section in a grouped menu (the model picker groups models by
@@ -212,8 +223,11 @@ function ComposerMenu({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
-  // Every selectable row across flat items and any groups.
-  const allItems = groups ? groups.flatMap((g) => (g.disabled ? [] : g.items)) : items;
+  // Every selectable row across flat items and any groups (a `disabled` group or
+  // row is not selectable).
+  const allItems = groups
+    ? groups.flatMap((g) => (g.disabled ? [] : g.items.filter((it) => !it.disabled)))
+    : items;
   // The active selection is "custom" when it matches none of the preset items.
   const customActive = custom != null && !allItems.some((it) => it.key === activeKey);
   // A risky active choice (e.g. "Bypass permissions") tints the whole trigger red.
@@ -278,14 +292,21 @@ function ComposerMenu({
                       <span>{g.label}</span>
                     </div>
                     {g.items.map((it) =>
-                      g.disabled ? (
+                      g.disabled || it.disabled ? (
                         <div
                           key={it.key}
+                          title={
+                            it.disabled && !g.disabled
+                              ? "Locked to this session's provider — start a new agent to use a different provider"
+                              : undefined
+                          }
                           className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim/40"
                         >
                           {it.icon && <span className="shrink-0">{it.icon}</span>}
                           <span className="min-w-0 truncate font-medium">{it.label}</span>
-                          <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
+                          {g.disabled && (
+                            <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
+                          )}
                         </div>
                       ) : (
                         <button
@@ -1061,6 +1082,19 @@ export function SessionChat({
     [ocCatalog.data],
   );
 
+  // Once a session has started, its provider is LOCKED: a mid-session switch
+  // replays the session's tool history to a different API endpoint, and a stricter
+  // provider (e.g. OpenCode Zen / DeepSeek) rejects the synthesized tool_call_ids
+  // ("Duplicate value for 'tool_call_id'…") — hard-failing the turn. Same-provider
+  // model switches are safe (and are the only kind Claude ever offers, since all
+  // its models share one provider), so we grey out cross-provider rows until the
+  // user starts a new agent. The lock keys on the *underlying* provider — the id
+  // prefix (`openrouter/…`, `opencode/…`, `ollama/…`) — not the harness, because
+  // e.g. Kimi (OpenRouter) → Big Pickle (Zen) is cross-provider within OpenCode.
+  const lockedProvider = lockedSessionProvider(started, harness.key, ocModel);
+  const lockOther = (itemProvider: string): Pick<MenuItem, "disabled"> =>
+    lockedProvider !== null && itemProvider !== lockedProvider ? { disabled: true } : {};
+
   const modelGroups: MenuGroup[] = [
     {
       key: "claude",
@@ -1071,6 +1105,7 @@ export function SessionChat({
         label: m.label,
         hint: m.hint,
         icon: <SparkleIcon size={13} />,
+        ...lockOther("claude"),
       })),
     },
     {
@@ -1092,6 +1127,7 @@ export function SessionChat({
         label: opencodeModelLabel(id, ocNames),
         hint: ocNames.get(id)?.provider,
         icon: <CodeIcon size={13} />,
+        ...lockOther(modelProvider("opencode", id) ?? ""),
       })),
     },
     // Local models, routed through the OpenCode harness. Hidden until the user
@@ -1107,6 +1143,7 @@ export function SessionChat({
               label: id.replace(/^ollama\//, ""),
               hint: "Ollama",
               icon: <TerminalIcon size={13} />,
+              ...lockOther(modelProvider("opencode", id) ?? ""),
             })),
           },
         ]
@@ -1131,6 +1168,10 @@ export function SessionChat({
     const sep = namespaced.indexOf(":");
     const pickedHarness = namespaced.slice(0, sep);
     const pickedModel = namespaced.slice(sep + 1);
+    // Enforce the provider lock even if a disabled row is somehow activated: a
+    // started session can only change models within its own provider.
+    const pickedProvider = modelProvider(pickedHarness, pickedModel);
+    if (lockedProvider !== null && pickedProvider !== lockedProvider) return;
     if (pickedHarness === "opencode") {
       onHarnessChange("opencode");
       onOpencodeModelChange(pickedModel);

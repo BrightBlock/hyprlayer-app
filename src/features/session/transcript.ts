@@ -142,6 +142,66 @@ export function isCompactSummary(text: string): boolean {
   return text.startsWith(COMPACT_SUMMARY_PREFIX);
 }
 
+/** Matches an opening or closing think tag — `<think>`, `</think>`, and the
+ *  `<thinking>`/`</thinking>` spelling — case-insensitively. */
+const THINK_TAG = /<\/?think(?:ing)?>/gi;
+
+/**
+ * Split a completed assistant block into its reasoning and the visible answer.
+ *
+ * Some OpenCode models emit chain-of-thought inline in the *text* channel rather
+ * than as a structured reasoning part — wrapped in `<think>…</think>`, or with
+ * an orphaned leading `</think>` when the opening tag was stripped upstream (the
+ * AI-SDK reasoning extraction is provider-dependent and the long tail of free
+ * models leaks). Left alone it renders as prose with a raw tag, like the
+ * `…Let's list src. </think>` blocks in a real OpenCode transcript.
+ *
+ * Returns `reasoning: null` when there's no think marker (the overwhelmingly
+ * common path — Claude, and OpenCode models whose reasoning arrives as its own
+ * part — so it's a cheap regex test then passthrough). Otherwise `reasoning` is
+ * the joined thought(s) and `answer` is the cleaned prose. Tolerates: a normal
+ * `<think>R</think>A` pair; an orphan `R</think>A` (no opener → the prefix is
+ * reasoning); and an unclosed `<think>R` (the remainder is reasoning).
+ */
+export function splitInlineThinking(text: string): { reasoning: string | null; answer: string } {
+  THINK_TAG.lastIndex = 0;
+  if (!THINK_TAG.test(text)) return { reasoning: null, answer: text };
+  THINK_TAG.lastIndex = 0;
+
+  const reasoning: string[] = [];
+  let answer = "";
+  let buf = ""; // text since the last tag, classified when the next tag (or end) arrives
+  let inThink = false;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = THINK_TAG.exec(text)) !== null) {
+    buf += text.slice(last, m.index);
+    last = m.index + m[0].length;
+    const isClose = m[0][1] === "/";
+    if (isClose) {
+      // A close ends the current thought. An orphan close (we weren't in a
+      // think) means everything buffered so far — including prior answer text —
+      // was actually the reasoning whose opener got stripped.
+      reasoning.push(inThink ? buf : answer + buf);
+      if (!inThink) answer = "";
+      buf = "";
+      inThink = false;
+    } else {
+      // An opener starts a thought; text before it is answer prose.
+      answer += buf;
+      buf = "";
+      inThink = true;
+    }
+  }
+  buf += text.slice(last);
+  // Trailing text after the last tag: reasoning if a think was left open, else answer.
+  if (inThink) reasoning.push(buf);
+  else answer += buf;
+
+  const joined = reasoning.map((r) => r.trim()).filter(Boolean).join("\n\n");
+  return joined ? { reasoning: joined, answer: answer.trim() } : { reasoning: null, answer: text };
+}
+
 export type TranscriptItem =
   | {
       kind: "user";
@@ -417,6 +477,29 @@ function openAssistantIndex(items: TranscriptItem[]): number {
   return -1;
 }
 
+/**
+ * Index of the main-thread assistant block that already streamed `text`, when no
+ * block is still open. OpenCode ends a text part *after* the tool it precedes, so
+ * the tool's `toolUse` closes the streamed block before its authoritative
+ * `assistantText` arrives — and that late final, finding nothing open, would
+ * append a verbatim duplicate (every intro line doubling around its tool batch).
+ * Scanning back over only quiet steps (tool/thinking) finds the block it streamed
+ * so the final coalesces into it. Prefix-matches (not just equals) so a stream
+ * cut off mid-part still reunites with its completed final. -1 when the nearest
+ * assistant block isn't a prefix of the final (genuinely new prose) or a
+ * non-quiet item (a user turn, a permission card) intervenes.
+ */
+function streamedAssistantIndex(items: TranscriptItem[], text: string): number {
+  if (!text.length) return -1;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "tool" || it.kind === "thinking") continue;
+    if (it.kind === "assistant" && !it.parentId && it.text.length > 0 && text.startsWith(it.text)) return i;
+    return -1;
+  }
+  return -1;
+}
+
 /** The earliest `Skill` tool row in the same thread (`parentId`) still awaiting
  *  its injected body, so a skill-body block folds into its invocation row rather
  *  than repeating the header as a separate block. Scans front-to-back so that if
@@ -618,6 +701,27 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           streaming: true,
         };
       }
+      // Reasoning some OpenCode models emit inline in the text channel (see
+      // `splitInlineThinking`) — route it to a thinking block instead of letting
+      // a raw `</think>` leak into prose.
+      const { reasoning, answer } = splitInlineThinking(event.text);
+      if (reasoning) {
+        // Replace the streamed block — still open, or already closed by a tool/
+        // thinking step it preceded — with the thought followed by the cleaned
+        // answer, so the thinking lands where the text streamed (before any such
+        // tool) rather than after it. Append when nothing streamed.
+        const open = openAssistantIndex(view.items);
+        const at = open !== -1 ? open : streamedAssistantIndex(view.items, event.text);
+        const built: TranscriptItem[] = [{ kind: "thinking", id: `i${view.counter}`, text: reasoning, parentId: null }];
+        if (answer.length)
+          built.push({ kind: "assistant", id: `i${view.counter + 1}`, text: answer, streaming: false });
+        const items =
+          at === -1
+            ? [...view.items, ...built]
+            : [...view.items.slice(0, at), ...built, ...view.items.slice(at + 1)];
+        return { ...view, items, counter: view.counter + built.length, streaming: true };
+      }
+
       const idx = openAssistantIndex(view.items);
       if (idx !== -1) {
         // The completed block is authoritative; fall back to the streamed text
@@ -632,6 +736,16 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
         return { ...view, items, streaming: true };
       }
       if (!event.text.length) return view; // empty block, nothing open → ignore
+      // The streamed block was closed by a tool/thinking step before this final
+      // arrived (OpenCode ends a text part after the tool it precedes) — coalesce
+      // into it rather than appending a duplicate.
+      const streamed = streamedAssistantIndex(view.items, event.text);
+      if (streamed !== -1) {
+        const block = view.items[streamed] as Extract<TranscriptItem, { kind: "assistant" }>;
+        const items = view.items.slice();
+        items[streamed] = { ...block, text: event.text, streaming: false };
+        return { ...view, items, streaming: true };
+      }
       return {
         ...view,
         ...appended(view, (id) => ({ kind: "assistant", id, text: event.text, streaming: false })),

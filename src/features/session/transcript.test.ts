@@ -18,6 +18,7 @@ import {
   resolvePermission,
   resolveQuestion,
   restoredView,
+  splitInlineThinking,
   viewToText,
   type Question,
   type SessionView,
@@ -221,6 +222,98 @@ describe("thinking", () => {
     view = reduceEvent(view, { kind: "thinking", text: "reasoning", parentId: null });
     expect(kinds(view)).toEqual(["assistant", "thinking"]);
     expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: false });
+  });
+});
+
+describe("OpenCode: late final text coalesces (no duplicate around tools)", () => {
+  it("does not duplicate the intro when its text part ends after the tool starts", () => {
+    // Captured from a live `opencode serve` trace: the model streams an intro,
+    // calls a tool, and the intro text part only gets its `time.end` *after* the
+    // tool — so `toolUse` closes the streamed block and the authoritative
+    // `assistantText` lands with nothing open. It must reunite with the streamed
+    // block, not append a verbatim second copy.
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "partialText", text: "I'm going to run the echo command.", parentId: null });
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: '{"command":"echo hi"}', parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: "I'm going to run the echo command.", parentId: null });
+
+    expect(kinds(view)).toEqual(["assistant", "tool"]);
+    expect(view.items[0]).toMatchObject({ kind: "assistant", text: "I'm going to run the echo command.", streaming: false });
+  });
+
+  it("completes a stream that was cut off mid-part by the tool", () => {
+    // The stream was closed by the tool before the last delta; the longer final
+    // still coalesces into the streamed block (prefix match) rather than dupes.
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "partialText", text: "Reading the", parentId: null });
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Read", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: "Reading the config file.", parentId: null });
+
+    expect(kinds(view)).toEqual(["assistant", "tool"]);
+    expect(view.items[0]).toMatchObject({ text: "Reading the config file.", streaming: false });
+  });
+
+  it("still appends genuinely new prose after a tool", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "partialText", text: "Looking…", parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: "Looking…", parentId: null });
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: "All done.", parentId: null });
+    expect(kinds(view)).toEqual(["assistant", "tool", "assistant"]);
+    expect(view.items[2]).toMatchObject({ text: "All done." });
+  });
+});
+
+describe("OpenCode: inline <think> reasoning is split out of prose", () => {
+  it("splits a <think>…</think> prefix into a thinking block + clean answer", () => {
+    let view = initialSessionView("running");
+    const raw = "<think>Check divisibility of 91.</think>No, 91 = 7 × 13.";
+    view = reduceEvent(view, { kind: "partialText", text: raw, parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: raw, parentId: null });
+    expect(kinds(view)).toEqual(["thinking", "assistant"]);
+    expect(view.items[0]).toMatchObject({ kind: "thinking", text: "Check divisibility of 91." });
+    expect(view.items[1]).toMatchObject({ kind: "assistant", text: "No, 91 = 7 × 13.", streaming: false });
+  });
+
+  it("treats an orphaned leading </think> (stripped opener) as reasoning", () => {
+    // The exact shape in the reported transcript: reasoning, a bare </think>, answer.
+    let view = initialSessionView("running");
+    const raw = "We need to find the homepage. Let's list src. </think>I'll add it near the bottom.";
+    view = reduceEvent(view, { kind: "assistantText", text: raw, parentId: null });
+    expect(kinds(view)).toEqual(["thinking", "assistant"]);
+    expect(view.items[0]).toMatchObject({ kind: "thinking", text: "We need to find the homepage. Let's list src." });
+    expect(view.items[1]).toMatchObject({ text: "I'll add it near the bottom." });
+    // The raw closing tag never reaches the rendered/copied transcript.
+    expect(viewToText(view)).not.toContain("</think>");
+  });
+
+  it("places the thought where the text streamed — before a tool it preceded", () => {
+    // Reasoning leaked inline, the block was closed by a tool, then the final lands.
+    let view = initialSessionView("running");
+    const raw = "<think>Plan the edit.</think>Editing now.";
+    view = reduceEvent(view, { kind: "partialText", text: raw, parentId: null });
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Edit", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "assistantText", text: raw, parentId: null });
+    expect(kinds(view)).toEqual(["thinking", "assistant", "tool"]);
+    expect(view.items[0]).toMatchObject({ kind: "thinking", text: "Plan the edit." });
+    expect(view.items[1]).toMatchObject({ kind: "assistant", text: "Editing now." });
+  });
+
+  it("emits only a thinking block when the part is all reasoning", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "assistantText", text: "<think>Still working on it.</think>", parentId: null });
+    expect(kinds(view)).toEqual(["thinking"]);
+    expect(view.items[0]).toMatchObject({ kind: "thinking", text: "Still working on it." });
+  });
+
+  it("splitInlineThinking handles pairs, orphans, unclosed, and plain prose", () => {
+    expect(splitInlineThinking("plain answer")).toEqual({ reasoning: null, answer: "plain answer" });
+    expect(splitInlineThinking("<think>R</think>A")).toEqual({ reasoning: "R", answer: "A" });
+    expect(splitInlineThinking("<thinking>R</thinking>A")).toEqual({ reasoning: "R", answer: "A" });
+    expect(splitInlineThinking("R</think>A")).toEqual({ reasoning: "R", answer: "A" });
+    expect(splitInlineThinking("<think>R only")).toEqual({ reasoning: "R only", answer: "" });
+    // Answer prose that genuinely precedes a real think pair is preserved.
+    expect(splitInlineThinking("A1<think>R</think>A2")).toEqual({ reasoning: "R", answer: "A1A2" });
   });
 });
 

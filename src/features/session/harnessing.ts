@@ -51,3 +51,38 @@ export function opencodeModelLabel(
 ): string {
   return names.get(id)?.model ?? id.split("/").pop() ?? id;
 }
+
+/**
+ * The underlying provider behind a model pick — what the upstream API endpoint is
+ * keyed on. OpenCode model ids are `provider/model…`, so the provider is the first
+ * segment (`openrouter`, `opencode`, `ollama`, …); every Claude model shares the
+ * single `claude` provider. Returns `null` only for an OpenCode harness with no
+ * model resolved yet.
+ */
+export function modelProvider(
+  harnessKey: string,
+  opencodeModelId: string | null | undefined,
+): string | null {
+  if (harnessKey === "opencode") return opencodeModelId ? opencodeModelId.split("/")[0] || null : null;
+  return "claude";
+}
+
+/**
+ * The provider a started session is locked to, or `null` when nothing is locked
+ * (the session hasn't started, or its OpenCode model isn't resolved yet).
+ *
+ * A started session may only switch models *within* this provider. Switching
+ * across providers mid-session replays the session's accumulated tool history to a
+ * different endpoint, and a stricter provider (e.g. OpenCode Zen / DeepSeek)
+ * rejects OpenCode's synthesized `functions.{tool}:{n}` ids as duplicates
+ * ("Duplicate value for 'tool_call_id'…"), hard-failing the turn. Claude is immune
+ * because all its models are one provider — so model switching there is seamless;
+ * this keeps OpenCode to the same rule (same-provider switches only).
+ */
+export function lockedSessionProvider(
+  started: boolean,
+  harnessKey: string,
+  opencodeModelId: string | null | undefined,
+): string | null {
+  return started ? modelProvider(harnessKey, opencodeModelId) : null;
+}
