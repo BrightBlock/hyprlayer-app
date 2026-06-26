@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.3.7",
+      "date": "2026-06-26",
+      "summary": "OpenCode transcript fixes and a session-locked model picker.",
+      "notes": [
+        "Fixed OpenCode reasoning leaking into the chat: pre-role reasoning, late-arriving text after a tool call (which could append a duplicate), and inline <think> tags from some free models now render as proper thinking blocks instead of prose.",
+        "The model picker now locks to a started session's provider, greying out cross-provider rows. Switching mid-session to a stricter provider could replay the tool history to a new endpoint and hard-fail the turn."
+      ]
+    },
+    {
       "version": "0.3.6",
       "date": "2026-06-26",
       "summary": "Ollama harness, auto-named agent tabs, and a dedicated workstream GIT panel.",
