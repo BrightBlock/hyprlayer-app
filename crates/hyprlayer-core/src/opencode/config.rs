@@ -10,11 +10,16 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::error::{CoreError, Result};
 
 const CONFIG_SCHEMA_URL: &str = "https://opencode.ai/config.json";
+
+/// Ollama defaults to a 4096-token context regardless of the model card, which is
+/// far too small for OpenCode's agentic loop. Pin a generous window in every
+/// generated model entry so local models don't silently truncate the conversation.
+const OLLAMA_DEFAULT_NUM_CTX: u64 = 32768;
 
 /// One configured provider credential, as surfaced to the UI. The raw key is
 /// deliberately never returned — only that a credential exists and its kind.
@@ -125,6 +130,91 @@ pub fn set_default_model(model: Option<&str>) -> Result<()> {
             obj.remove("model");
         }
     }
+    write_json_atomic(&path, &Value::Object(obj), 0o644)
+}
+
+/// Mirror the Ollama provider definition into `opencode.json` as a
+/// `provider.ollama` block so `opencode serve` can route `ollama/<model>` ids to
+/// a local or remote Ollama server (its OpenAI-compatible endpoint). The app owns
+/// this block; other providers and unrelated keys are merge-preserved, and — like
+/// [`set_default_model`] — we bail on a non-strict-JSON (JSONC) file rather than
+/// risk dropping the user's comments.
+///
+/// `base_url` is the Ollama base (e.g. `http://localhost:11434` or a remote host);
+/// we append `/v1` for the OpenAI-compatible adapter. `models` are bare Ollama ids
+/// (e.g. `qwen2.5-coder:7b`). An empty `models` removes the block (and the
+/// `provider` object if it becomes empty), so disabling Ollama leaves a clean
+/// config. Callers must recycle the shared server (`OpenCodeManager::invalidate`)
+/// afterwards: `opencode serve` snapshots config only at startup.
+pub fn set_ollama_provider(base_url: &str, models: &[String]) -> Result<()> {
+    let Some(path) = config_json_path() else {
+        return Ok(());
+    };
+    let mut obj = match std::fs::read_to_string(&path) {
+        Ok(s) if s.trim().is_empty() => Map::new(),
+        Ok(s) => match serde_json::from_str::<Value>(&s) {
+            Ok(Value::Object(m)) => m,
+            // Non-object or unparseable (JSONC) — don't clobber the user's file.
+            // Ollama sessions route through this provider block, so unlike the
+            // standalone defaults we leave a breadcrumb: the mirror silently
+            // didn't happen and `ollama/*` ids won't resolve until it's fixed.
+            Ok(_) | Err(_) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    "opencode.json is not strict JSON; skipped Ollama provider sync"
+                );
+                return Ok(());
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Map::new(),
+        Err(e) => return Err(e.into()),
+    };
+    if !obj.contains_key("$schema") {
+        obj.insert("$schema".into(), Value::String(CONFIG_SCHEMA_URL.into()));
+    }
+
+    // Take (or start) the `provider` object so sibling providers are preserved.
+    let mut providers = match obj.remove("provider") {
+        Some(Value::Object(m)) => m,
+        _ => Map::new(),
+    };
+
+    if models.is_empty() {
+        providers.remove("ollama");
+    } else {
+        let base = base_url.trim_end_matches('/');
+        let mut model_map = Map::new();
+        for id in models {
+            model_map.insert(
+                id.clone(),
+                json!({
+                    "name": id,
+                    // Declare tool support so OpenCode lets the model drive tools;
+                    // actual reliability still depends on the model itself.
+                    "tool_call": true,
+                    "options": { "num_ctx": OLLAMA_DEFAULT_NUM_CTX },
+                }),
+            );
+        }
+        providers.insert(
+            "ollama".into(),
+            json!({
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Ollama",
+                // Ollama ignores the key but the adapter may send one; a dummy
+                // value avoids a 401 on stricter proxies in front of Ollama.
+                "options": { "baseURL": format!("{base}/v1"), "apiKey": "ollama" },
+                "models": Value::Object(model_map),
+            }),
+        );
+    }
+
+    if providers.is_empty() {
+        obj.remove("provider");
+    } else {
+        obj.insert("provider".into(), Value::Object(providers));
+    }
+
     write_json_atomic(&path, &Value::Object(obj), 0o644)
 }
 
@@ -290,5 +380,31 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(v.get("model").is_none());
         assert_eq!(v["theme"], "dark");
+
+        // --- ollama provider block (merge-preserving) ---
+        // Seed an unrelated sibling provider to prove it survives our writes.
+        let mut obj = v.as_object().unwrap().clone();
+        obj.insert("provider".into(), serde_json::json!({ "openai": { "npm": "x" } }));
+        std::fs::write(&path, serde_json::to_string_pretty(&Value::Object(obj)).unwrap()).unwrap();
+
+        set_ollama_provider(
+            "http://nexus:11434/",
+            &["qwen2.5-coder:7b".into(), "llama3.2:latest".into()],
+        )
+        .unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["theme"], "dark"); // unrelated key preserved
+        assert_eq!(v["provider"]["openai"]["npm"], "x"); // sibling provider preserved
+        assert_eq!(v["provider"]["ollama"]["options"]["baseURL"], "http://nexus:11434/v1");
+        assert_eq!(v["provider"]["ollama"]["options"]["apiKey"], "ollama");
+        assert_eq!(v["provider"]["ollama"]["npm"], "@ai-sdk/openai-compatible");
+        assert_eq!(v["provider"]["ollama"]["models"]["qwen2.5-coder:7b"]["tool_call"], true);
+        assert!(v["provider"]["ollama"]["models"]["llama3.2:latest"].is_object());
+
+        // Empty list removes only the ollama block; siblings stay.
+        set_ollama_provider("http://localhost:11434", &[]).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(v["provider"].get("ollama").is_none());
+        assert_eq!(v["provider"]["openai"]["npm"], "x");
     }
 }

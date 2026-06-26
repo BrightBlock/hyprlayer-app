@@ -28,15 +28,17 @@ pub enum BinaryKind {
     OpenCode,
     Gh,
     Git,
+    Ollama,
 }
 
 impl BinaryKind {
-    pub const ALL: [BinaryKind; 5] = [
+    pub const ALL: [BinaryKind; 6] = [
         BinaryKind::Hyprlayer,
         BinaryKind::Claude,
         BinaryKind::OpenCode,
         BinaryKind::Gh,
         BinaryKind::Git,
+        BinaryKind::Ollama,
     ];
 
     pub fn command_name(self) -> &'static str {
@@ -46,6 +48,7 @@ impl BinaryKind {
             BinaryKind::OpenCode => "opencode",
             BinaryKind::Gh => "gh",
             BinaryKind::Git => "git",
+            BinaryKind::Ollama => "ollama",
         }
     }
 
@@ -63,8 +66,11 @@ impl BinaryKind {
 
     /// Whether the app can function without this binary.
     pub fn optional(self) -> bool {
-        // The app runs fine on Claude alone; OpenCode and gh are extras.
-        matches!(self, BinaryKind::Gh | BinaryKind::OpenCode)
+        // The app runs fine on Claude alone; OpenCode, gh, and Ollama are extras.
+        matches!(
+            self,
+            BinaryKind::Gh | BinaryKind::OpenCode | BinaryKind::Ollama
+        )
     }
 }
 
@@ -197,15 +203,16 @@ impl BinaryResolver {
     /// All statuses, probed concurrently — worst case is one probe timeout,
     /// not N in a row.
     pub async fn status_all(&self) -> Vec<BinaryStatus> {
-        let [a, b, c, d, e] = BinaryKind::ALL;
-        let (a, b, c, d, e) = tokio::join!(
+        let [a, b, c, d, e, f] = BinaryKind::ALL;
+        let (a, b, c, d, e, f) = tokio::join!(
             self.status(a),
             self.status(b),
             self.status(c),
             self.status(d),
-            self.status(e)
+            self.status(e),
+            self.status(f)
         );
-        vec![a, b, c, d, e]
+        vec![a, b, c, d, e, f]
     }
 
     pub async fn set_override(&self, kind: BinaryKind, path: Option<PathBuf>) {

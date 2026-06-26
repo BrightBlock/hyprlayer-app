@@ -4,8 +4,9 @@ import type { AppSettings, BinaryStatus } from "../../../lib/bindings";
 import { Badge, Card, CardTitle } from "../../../components/ui";
 import { ClaudeHarnessTab } from "./ClaudeHarnessTab";
 import { OpenCodeHarnessTab } from "./OpenCodeHarnessTab";
+import { OllamaHarnessTab } from "./OllamaHarnessTab";
 
-type HarnessId = "claude" | "codex" | "opencode";
+type HarnessId = "claude" | "codex" | "opencode" | "ollama";
 
 type TabDef = {
   id: HarnessId;
@@ -19,6 +20,7 @@ const TABS: TabDef[] = [
   { id: "claude", label: "Claude Code", ready: true },
   { id: "codex", label: "Codex", ready: false },
   { id: "opencode", label: "OpenCode", ready: true, badge: "NEW" },
+  { id: "ollama", label: "Ollama", ready: true, badge: "NEW" },
 ];
 
 /** Settings → Harnesses: per-harness configuration behind a horizontal tab
@@ -33,6 +35,7 @@ export function HarnessesSection({
   const [active, setActive] = useState<HarnessId>("claude");
   const opencode = binaries.find((b) => b.kind === "opencode");
   const claude = binaries.find((b) => b.kind === "claude");
+  const ollama = binaries.find((b) => b.kind === "ollama");
 
   return (
     <div className="space-y-4">
@@ -66,6 +69,13 @@ export function HarnessesSection({
 
       {active === "claude" && <ClaudeHarnessTab settings={settings} status={claude} />}
       {active === "opencode" && <OpenCodeHarnessTab settings={settings} status={opencode} />}
+      {active === "ollama" && (
+        <OllamaHarnessTab
+          settings={settings}
+          status={ollama}
+          opencodeInstalled={opencode?.state.state === "ok"}
+        />
+      )}
       {active === "codex" && <ComingSoon name="Codex" />}
     </div>
   );

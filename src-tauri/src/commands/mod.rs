@@ -1,6 +1,7 @@
 pub mod attachments;
 pub mod harnesses;
 pub mod library;
+pub mod ollama;
 pub mod onboarding;
 pub mod projects;
 pub mod sessions;

@@ -110,8 +110,9 @@ impl Default for NotificationSettings {
 }
 
 /// Defaults for each agent provider/harness. Claude and OpenCode are wired up;
-/// Codex is stubbed so the section can render now and gain real fields later
-/// without a settings migration.
+/// Ollama runs local models *through* the OpenCode harness; Codex is stubbed so
+/// the section can render now and gain real fields later without a settings
+/// migration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderSettings {
@@ -119,6 +120,8 @@ pub struct ProviderSettings {
     pub claude: ClaudeSettings,
     /// OpenCode (the `opencode` CLI) — multi-provider harness.
     pub opencode: OpenCodeSettings,
+    /// Ollama — local/remote model server, surfaced through the OpenCode harness.
+    pub ollama: OllamaSettings,
     /// OpenAI Codex — not wired up yet; reserved so the providers section is
     /// stable as we build it out.
     pub codex: CodexSettings,
@@ -185,6 +188,56 @@ pub struct OpenCodeSettings {
     /// model picker when the OpenCode harness is selected. Empty = none chosen
     /// yet (the OpenCode tab prompts the user to add some).
     pub selected_models: Vec<String>,
+}
+
+/// Default Ollama base URL when none is configured. A local install isn't
+/// required — the endpoint may point at a remote host (e.g. `http://nexus:11434`).
+pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://localhost:11434";
+
+/// Ollama harness defaults (Settings → Harnesses → Ollama). Local models are run
+/// *through* the OpenCode harness: selecting one sets `harness=opencode` with an
+/// `"ollama/<model>"` model id. The provider definition (base URL + model list)
+/// is mirrored into OpenCode's `opencode.json` as a `provider.ollama` block —
+/// see `hyprlayer_core::opencode::config::set_ollama_provider`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OllamaSettings {
+    /// Base URL of the Ollama server. `None`/empty ⇒ [`DEFAULT_OLLAMA_ENDPOINT`].
+    /// May be a remote host; a local install is not required.
+    pub endpoint: Option<String>,
+    /// Bare Ollama model ids the user chose to expose (e.g. `"qwen2.5-coder:7b"`).
+    /// Each surfaces as an `"ollama/<id>"` row in the composer's model picker.
+    pub selected_models: Vec<String>,
+    /// Default local model for new sessions, as an `"ollama/<id>"` id. `None`
+    /// keeps no Ollama default.
+    pub default_model: Option<String>,
+}
+
+impl OllamaSettings {
+    /// The effective base URL, falling back to the default and trimming any
+    /// trailing slash so callers can append `/v1` or `/api/tags` cleanly.
+    pub fn effective_endpoint(&self) -> String {
+        self.endpoint
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .unwrap_or(DEFAULT_OLLAMA_ENDPOINT)
+            .trim_end_matches('/')
+            .to_string()
+    }
+
+    /// Clear `default_model` if its underlying id is no longer in
+    /// `selected_models`. Call after mutating `selected_models` so the default
+    /// (stored as `"ollama/<id>"`) can never dangle past the model it names.
+    pub fn reconcile_default(&mut self) {
+        let kept = self.default_model.as_deref().is_some_and(|def| {
+            def.strip_prefix("ollama/")
+                .is_some_and(|id| self.selected_models.iter().any(|m| m == id))
+        });
+        if !kept {
+            self.default_model = None;
+        }
+    }
 }
 
 /// Codex provider defaults. Stub — Codex isn't supported yet; this exists so
@@ -410,6 +463,31 @@ mod tests {
             Some("anthropic/claude-sonnet-4-5")
         );
         assert_eq!(s.providers.opencode.selected_models.len(), 2);
+    }
+
+    #[test]
+    fn ollama_settings_default_and_round_trip() {
+        // Absent section -> empty defaults, endpoint resolves to the local default.
+        let empty: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty.providers.ollama.endpoint, None);
+        assert!(empty.providers.ollama.selected_models.is_empty());
+        assert_eq!(
+            empty.providers.ollama.effective_endpoint(),
+            DEFAULT_OLLAMA_ENDPOINT
+        );
+
+        // A remote endpoint round-trips; effective_endpoint trims the trailing slash.
+        let raw = r#"{"providers":{"ollama":{"endpoint":"http://nexus:11434/","selectedModels":["qwen2.5-coder:7b"],"defaultModel":"ollama/qwen2.5-coder:7b"}}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            s.providers.ollama.effective_endpoint(),
+            "http://nexus:11434"
+        );
+        assert_eq!(s.providers.ollama.selected_models, vec!["qwen2.5-coder:7b"]);
+        assert_eq!(
+            s.providers.ollama.default_model.as_deref(),
+            Some("ollama/qwen2.5-coder:7b")
+        );
     }
 
     #[test]

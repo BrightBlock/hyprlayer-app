@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- macOS 15+/Tahoe gates connections to local-network hosts (LAN IPs,
+         `.local`/mDNS) behind a per-app Local Network permission. The Ollama
+         harness probes a local/remote Ollama server (default
+         http://localhost:11434), so declare the usage string; without it macOS
+         silently blocks those connections while public hosts still work. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Hyprlayer connects to a local or self-hosted Ollama server on your network to list and run local models.</string>
+</dict>
+</plist>

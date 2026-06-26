@@ -420,6 +420,30 @@ export const commands = {
 	 *  the UI degrades gracefully.
 	 */
 	claudeAuthStatus: () => typedError<ClaudeAuthStatus, AppError>(__TAURI_INVOKE("claude_auth_status")),
+	/**  Probe the configured Ollama endpoint for reachability + installed models. */
+	ollamaStatus: () => typedError<OllamaStatus, AppError>(__TAURI_INVOKE("ollama_status")),
+	/**
+	 *  Set (or clear, on `None`/empty) the Ollama base URL, re-sync the OpenCode
+	 *  provider block, and return a fresh status probe of the new endpoint.
+	 */
+	ollamaSetEndpoint: (endpoint: string | null) => typedError<OllamaStatus, AppError>(__TAURI_INVOKE("ollama_set_endpoint", { endpoint })),
+	/**
+	 *  Set the bare Ollama model ids to expose in the composer (e.g.
+	 *  `["qwen2.5-coder:7b"]`). Drops the stored default if it's no longer selected,
+	 *  then re-syncs the OpenCode provider block.
+	 */
+	ollamaSetSelectedModels: (models: string[]) => typedError<null, AppError>(__TAURI_INVOKE("ollama_set_selected_models", { models })),
+	/**
+	 *  Set the default Ollama model for the composer, as an `"ollama/<id>"` id
+	 *  (`None`/empty clears it). Stored in app settings only — it doesn't touch
+	 *  `opencode.json`, since the provider block already lists every selected model.
+	 * 
+	 *  The command is the state boundary, so it validates rather than trusting the
+	 *  UI: only an `"ollama/<id>"` whose id is currently selected is persisted; any
+	 *  stale or arbitrary value clears the default instead, so SessionChat can never
+	 *  seed a model the `provider.ollama` block doesn't list.
+	 */
+	ollamaSetDefaultModel: (model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("ollama_set_default_model", { model })),
 	/**
 	 *  Summarize `text` (the user's first prompt) into a short tab title using the
 	 *  configured (small, cheap) model. Best-effort: every failure path (disabled,
@@ -588,7 +612,7 @@ export type Area =
 /**  Binary statuses were re-probed (override set, redetect requested). */
 export type BinariesChanged = null;
 
-export type BinaryKind = "hyprlayer" | "claude" | "opencode" | "gh" | "git";
+export type BinaryKind = "hyprlayer" | "claude" | "opencode" | "gh" | "git" | "ollama";
 
 export type BinaryState = { state: "ok" } | { state: "missing" } | { state: "tooOld"; min: string };
 
@@ -968,6 +992,58 @@ export type NotificationSettings = {
 	sound?: boolean,
 };
 
+/**  One model installed on the Ollama server, from `GET /api/tags`. */
+export type OllamaModelInfo = {
+	/**
+	 *  The canonical id, e.g. `"qwen2.5-coder:7b"` (the `models[].name` field).
+	 *  Used verbatim as the `models` key in the `provider.ollama` block and, with
+	 *  an `ollama/` prefix, as the composer model id.
+	 */
+	id: string,
+	/**  Architecture family (e.g. `"qwen2"`), for display. */
+	family: string | null,
+	/**  Human parameter size (e.g. `"7.6B"`), for display. */
+	parameterSize: string | null,
+};
+
+/**
+ *  Ollama harness defaults (Settings → Harnesses → Ollama). Local models are run
+ *  *through* the OpenCode harness: selecting one sets `harness=opencode` with an
+ *  `"ollama/<model>"` model id. The provider definition (base URL + model list)
+ *  is mirrored into OpenCode's `opencode.json` as a `provider.ollama` block —
+ *  see `hyprlayer_core::opencode::config::set_ollama_provider`.
+ */
+export type OllamaSettings = {
+	/**
+	 *  Base URL of the Ollama server. `None`/empty ⇒ [`DEFAULT_OLLAMA_ENDPOINT`].
+	 *  May be a remote host; a local install is not required.
+	 */
+	endpoint?: string | null,
+	/**
+	 *  Bare Ollama model ids the user chose to expose (e.g. `"qwen2.5-coder:7b"`).
+	 *  Each surfaces as an `"ollama/<id>"` row in the composer's model picker.
+	 */
+	selectedModels?: string[],
+	/**
+	 *  Default local model for new sessions, as an `"ollama/<id>"` id. `None`
+	 *  keeps no Ollama default.
+	 */
+	defaultModel?: string | null,
+};
+
+/**  Reachability + installed-model snapshot for the configured Ollama endpoint. */
+export type OllamaStatus = {
+	/**
+	 *  `true` when `GET <endpoint>/api/tags` answered. This is the authoritative
+	 *  "Ollama is usable" signal for both local and remote setups.
+	 */
+	reachable: boolean,
+	/**  The effective base URL probed (default or user-configured). */
+	endpoint: string,
+	/**  Models installed on the server, sorted by id. Empty when unreachable. */
+	models: OllamaModelInfo[],
+};
+
 /**
  *  OpenCode harness defaults (Settings → Harnesses → OpenCode). Provider API
  *  keys themselves are NOT stored here — they live in OpenCode's own
@@ -1102,14 +1178,17 @@ export type ProjectDetail = {
 
 /**
  *  Defaults for each agent provider/harness. Claude and OpenCode are wired up;
- *  Codex is stubbed so the section can render now and gain real fields later
- *  without a settings migration.
+ *  Ollama runs local models *through* the OpenCode harness; Codex is stubbed so
+ *  the section can render now and gain real fields later without a settings
+ *  migration.
  */
 export type ProviderSettings = {
 	/**  Anthropic Claude (the `claude` CLI). */
 	claude?: ClaudeSettings,
 	/**  OpenCode (the `opencode` CLI) — multi-provider harness. */
 	opencode?: OpenCodeSettings,
+	/**  Ollama — local/remote model server, surfaced through the OpenCode harness. */
+	ollama?: OllamaSettings,
 	/**
 	 *  OpenAI Codex — not wired up yet; reserved so the providers section is
 	 *  stable as we build it out.

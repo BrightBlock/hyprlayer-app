@@ -30,6 +30,7 @@ import {
   ShieldIcon,
   SparkleIcon,
   StopIcon,
+  TerminalIcon,
   XIcon,
 } from "../../components/icons";
 import { errorMessage } from "../../lib/ipc";
@@ -1034,11 +1035,22 @@ export function SessionChat({
   // model and the harness. Both persist on the tab — like effort — so switching
   // tabs and coming back keeps the choice. Menu keys are namespaced `harness:key`
   // so the select handler knows which harness a row belongs to.
-  const opencodeDefaults = useBootstrap().data?.settings.providers?.opencode;
+  const bootstrapSettings = useBootstrap().data?.settings;
+  const opencodeDefaults = bootstrapSettings?.providers?.opencode;
+  const ollamaDefaults = bootstrapSettings?.providers?.ollama;
   const harness = harnessOption(shell.harness ?? DEFAULT_HARNESS_KEY);
   const usingOpencode = harness.key === "opencode";
   const ocModels = opencodeDefaults?.selectedModels ?? [];
-  const ocModel = shell.opencodeModel ?? opencodeDefaults?.defaultModel ?? ocModels[0] ?? null;
+  // Ollama models run *through* the OpenCode harness as `ollama/<id>` ids, so they
+  // share the opencode harness/model machinery — they're just a separate picker group.
+  const ollamaModels = (ollamaDefaults?.selectedModels ?? []).map((id) => `ollama/${id}`);
+  const ocModel =
+    shell.opencodeModel ??
+    opencodeDefaults?.defaultModel ??
+    ollamaDefaults?.defaultModel ??
+    ocModels[0] ??
+    ollamaModels[0] ??
+    null;
   const startModelFlag = usingOpencode ? ocModel : model.flag;
   // Friendly OpenCode model names from the models.dev catalog — the raw ids are
   // long `provider/model` paths. Only fetched when this tab has OpenCode models
@@ -1082,6 +1094,23 @@ export function SessionChat({
         icon: <CodeIcon size={13} />,
       })),
     },
+    // Local models, routed through the OpenCode harness. Hidden until the user
+    // selects some in Settings → Harnesses → Ollama.
+    ...(ollamaModels.length > 0
+      ? [
+          {
+            key: "ollama",
+            label: "Ollama (local)",
+            icon: <TerminalIcon size={13} />,
+            items: ollamaModels.map((id) => ({
+              key: `opencode:${id}`,
+              label: id.replace(/^ollama\//, ""),
+              hint: "Ollama",
+              icon: <TerminalIcon size={13} />,
+            })),
+          },
+        ]
+      : []),
   ];
   // Trigger reflects the active model; the active row carries a ✓ in the menu.
   const composerModelLabel = usingOpencode

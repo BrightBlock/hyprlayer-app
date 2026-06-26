@@ -728,6 +728,50 @@ export function useSetOpencodeDefaultModel() {
   });
 }
 
+/** Reachability + installed models for the configured Ollama endpoint (local or
+ *  remote). Keyed by `endpoint` so changing the server (here or elsewhere)
+ *  refetches against the new host instead of showing the old one's cache. The
+ *  probe is cheap but can change (server up/down, models pulled), so it's lightly
+ *  cached and the Ollama tab exposes a Refresh via `refetch`. */
+export function useOllamaStatus(endpoint?: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["ollama-status", endpoint ?? null],
+    queryFn: () => unwrap(commands.ollamaStatus()),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+/** Set the Ollama base URL (local or remote). The command returns a fresh status
+ *  probe of the new endpoint, which we seed into that endpoint's cache key;
+ *  settings changed, so refresh the bootstrap too. */
+export function useSetOllamaEndpoint() {
+  return useMutation({
+    mutationFn: (endpoint: string | null) => unwrap(commands.ollamaSetEndpoint(endpoint)),
+    onSuccess: (next, endpoint) =>
+      queryClient.setQueryData(["ollama-status", endpoint ?? null], next),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
+  });
+}
+
+/** Set which installed Ollama models are exposed in the composer. Mirrors them
+ *  into OpenCode's provider block backend-side; refresh bootstrap so the composer
+ *  picks up the new list. */
+export function useSetOllamaModels() {
+  return useMutation({
+    mutationFn: (models: string[]) => unwrap(commands.ollamaSetSelectedModels(models)),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
+  });
+}
+
+/** Set the default Ollama model (an `"ollama/<id>"` id), then refresh bootstrap. */
+export function useSetOllamaDefaultModel() {
+  return useMutation({
+    mutationFn: (model: string | null) => unwrap(commands.ollamaSetDefaultModel(model)),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
+  });
+}
+
 /** Current Claude auth/account status (for the Claude Code harness tab). The
  *  command runs `claude auth status --json`, so refetch is explicit (a Refresh
  *  button) rather than on a timer. */
