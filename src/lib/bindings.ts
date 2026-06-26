@@ -421,6 +421,13 @@ export const commands = {
 	 */
 	claudeAuthStatus: () => typedError<ClaudeAuthStatus, AppError>(__TAURI_INVOKE("claude_auth_status")),
 	/**
+	 *  Summarize `text` (the user's first prompt) into a short tab title using the
+	 *  configured (small, cheap) model. Best-effort: every failure path (disabled,
+	 *  no binary, logged out, timeout, unparseable/empty output) surfaces as an
+	 *  error the caller is expected to swallow, leaving the tab's default name.
+	 */
+	suggestTabTitle: (text: string) => typedError<string, AppError>(__TAURI_INVOKE("suggest_tab_title", { text })),
+	/**
 	 *  Open a new PTY for the given workstream, spawn the user's shell in the
 	 *  worktree directory, and start forwarding output to `on_event`.
 	 * 
@@ -544,6 +551,8 @@ export type AppSettings = {
 	providers?: ProviderSettings,
 	/**  OS-toast behaviour when a session transitions to "needs you". */
 	notifications?: NotificationSettings,
+	/**  Auto-generated agent tab titles (enable + which model). Settings → General. */
+	tabTitles?: TabTitleSettings,
 };
 
 /**
@@ -1354,6 +1363,28 @@ export type StoredEvent = {
 
 export type SyncReport = {
 	output: string,
+};
+
+/**
+ *  Auto-generated agent-tab titles. When enabled, a new agent tab summarizes the
+ *  user's first prompt into a short title via a small model. Surfaced in
+ *  Settings → General. The model can be a Claude model or — so opencode-only
+ *  users are covered — one of their configured OpenCode models.
+ */
+export type TabTitleSettings = {
+	/**
+	 *  Master switch. `true` (default) titles each new agent tab from its first
+	 *  prompt; `false` leaves the default `Agent N` name in place.
+	 */
+	enabled?: boolean,
+	/**
+	 *  Which model generates titles, as a tagged id:
+	 *    `"claude:<flag>"`        → `claude -p --model <flag>` (empty flag = default)
+	 *    `"opencode:<prov>/<id>"` → a one-shot OpenCode turn with that model
+	 *  `None`/absent uses the built-in default ([`DEFAULT_TAB_TITLE_MODEL`],
+	 *  Claude Haiku).
+	 */
+	model?: string | null,
 };
 
 /**  How multiple `tags` filters combine. */

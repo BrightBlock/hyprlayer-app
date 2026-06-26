@@ -6,6 +6,7 @@ pub mod projects;
 pub mod sessions;
 pub mod system;
 pub mod terminal;
+pub mod titles;
 pub mod workstreams;
 
 use std::sync::Arc;
@@ -26,6 +27,31 @@ where
         .await
         .map_err(|e| AppError::internal(format!("db task: {e}")))?
         .map_err(AppError::from)
+}
+
+/// Environment variables that carry Claude API-key-mode auth/routing into a
+/// spawned `claude` process. Empty for CLI-login auth (the child inherits the
+/// user's `~/.claude` session). Shared by the session driver spawn
+/// ([`crate::commands::sessions`]) and the one-shot tab-title generator
+/// ([`crate::commands::titles`]) so the two never drift.
+pub(crate) fn claude_auth_env(cfg: &crate::settings::ClaudeSettings) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if cfg.auth_mode.as_deref() != Some("apiKey") {
+        return env;
+    }
+    if let Some(key) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
+        env.push(("ANTHROPIC_API_KEY".to_string(), key.to_string()));
+    }
+    if let Some(url) = cfg.base_url.as_deref().filter(|u| !u.is_empty()) {
+        env.push(("ANTHROPIC_BASE_URL".to_string(), url.to_string()));
+    }
+    if cfg.use_bedrock {
+        env.push(("CLAUDE_CODE_USE_BEDROCK".to_string(), "1".to_string()));
+    }
+    if cfg.use_vertex {
+        env.push(("CLAUDE_CODE_USE_VERTEX".to_string(), "1".to_string()));
+    }
+    env
 }
 
 /// Run filesystem/CPU-bound work on the blocking pool.

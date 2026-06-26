@@ -189,20 +189,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             let path = state.binaries.augmented_path().await;
             let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
             let claude_cfg = state.settings.get().await.providers.claude;
-            if claude_cfg.auth_mode.as_deref() == Some("apiKey") {
-                if let Some(key) = claude_cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
-                    env.push(("ANTHROPIC_API_KEY".to_string(), key.to_string()));
-                }
-                if let Some(url) = claude_cfg.base_url.as_deref().filter(|u| !u.is_empty()) {
-                    env.push(("ANTHROPIC_BASE_URL".to_string(), url.to_string()));
-                }
-                if claude_cfg.use_bedrock {
-                    env.push(("CLAUDE_CODE_USE_BEDROCK".to_string(), "1".to_string()));
-                }
-                if claude_cfg.use_vertex {
-                    env.push(("CLAUDE_CODE_USE_VERTEX".to_string(), "1".to_string()));
-                }
-            }
+            env.extend(super::claude_auth_env(&claude_cfg));
 
             let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
                 claude_bin: claude,

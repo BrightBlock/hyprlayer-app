@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::error::{CoreError, Result};
 
@@ -23,6 +23,10 @@ pub struct Exec {
     args: Vec<OsString>,
     cwd: Option<PathBuf>,
     env: Vec<(OsString, OsString)>,
+    /// Bytes to feed the child on stdin (then close it). `None` = no stdin
+    /// (`/dev/null`). Use this for sensitive input that must not appear in argv,
+    /// which is world-readable via process listing.
+    stdin: Option<Vec<u8>>,
     timeout: Duration,
 }
 
@@ -40,6 +44,7 @@ impl Exec {
             args: Vec::new(),
             cwd: None,
             env: Vec::new(),
+            stdin: None,
             timeout: DEFAULT_TIMEOUT,
         }
     }
@@ -73,6 +78,14 @@ impl Exec {
         self
     }
 
+    /// Feed `data` to the child on stdin, then close it (EOF). Prefer this over
+    /// [`Exec::arg`] for secrets or user content — argv is visible to any local
+    /// process listing, stdin is not.
+    pub fn stdin(mut self, data: impl Into<Vec<u8>>) -> Self {
+        self.stdin = Some(data.into());
+        self
+    }
+
     /// Run to completion, capturing output. Fails on non-zero exit.
     pub async fn run(self) -> Result<ExecOutput> {
         let output = self.run_unchecked().await?;
@@ -91,7 +104,11 @@ impl Exec {
     pub async fn run_unchecked(&self) -> Result<ExecOutput> {
         let mut cmd = tokio::process::Command::new(&self.program);
         cmd.args(&self.args)
-            .stdin(Stdio::null())
+            .stdin(if self.stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
@@ -121,17 +138,33 @@ impl Exec {
 
         let mut stdout_pipe = child.stdout.take().expect("stdout piped");
         let mut stderr_pipe = child.stderr.take().expect("stderr piped");
+        // Take the stdin pipe (present only when `self.stdin` is set); writing it
+        // lives inside the `join!` below so a child that blocks on stdout can't
+        // deadlock us, and the pipe is dropped afterwards to signal EOF.
+        let mut stdin_pipe = child.stdin.take();
+        let stdin_data = self.stdin.clone();
 
         let work = async {
             let mut stdout = Vec::new();
             let mut stderr = Vec::new();
-            let (out_res, err_res, status) = tokio::join!(
+            let write_stdin = async {
+                if let Some(mut pipe) = stdin_pipe.take() {
+                    if let Some(data) = &stdin_data {
+                        pipe.write_all(data).await?;
+                    }
+                    // `pipe` drops here → child sees EOF on stdin.
+                }
+                Ok::<(), std::io::Error>(())
+            };
+            let (out_res, err_res, in_res, status) = tokio::join!(
                 stdout_pipe.read_to_end(&mut stdout),
                 stderr_pipe.read_to_end(&mut stderr),
+                write_stdin,
                 child.wait(),
             );
             out_res?;
             err_res?;
+            in_res?;
             let status = status?;
             Ok::<ExecOutput, std::io::Error>(ExecOutput {
                 stdout: String::from_utf8_lossy(&stdout).into_owned(),

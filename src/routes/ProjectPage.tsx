@@ -24,6 +24,7 @@ import { DiffTab } from "../features/workstreams/DiffTab";
 import { FileViewerTab } from "../features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
+import { TabTitle } from "../features/session/TabTitle";
 import { TerminalTab } from "../features/session/TerminalTab";
 import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
 import { killSession, stopSession, transcriptToText, useSession } from "../features/session/sessionStore";
@@ -68,6 +69,10 @@ export type AttachedDoc = {
 export type ShellTab = {
   id: number;
   title: string;
+  /** Set once the title is "claimed" — either auto-generated from the first
+   *  prompt or manually renamed — so auto-titling never overwrites it (the
+   *  "one-time only" policy). Undefined on a fresh `Agent N` tab. */
+  titleLocked?: boolean;
   mode: StageKey;
   draft: string;
   docs: AttachedDoc[];
@@ -396,6 +401,7 @@ export function ProjectPage() {
       Pick<
         ShellTab,
         | "title"
+        | "titleLocked"
         | "mode"
         | "draft"
         | "docs"
@@ -842,7 +848,9 @@ export function ProjectPage() {
     if (!shellBeingRenamed) return;
     const nextTitle = renameValue.trim();
     if (!nextTitle) return;
-    patchShell(shellBeingRenamed.id, { title: nextTitle });
+    // A manual rename claims the title for good — lock it so auto-titling (which
+    // only fires on an unlocked tab) can never overwrite the user's choice.
+    patchShell(shellBeingRenamed.id, { title: nextTitle, titleLocked: true });
     closeRenameShell();
   };
   const copyShellTranscript = (shell: ShellTab) => {
@@ -944,7 +952,7 @@ export function ProjectPage() {
           <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
         )}
         <span className="max-w-[160px] truncate" title={shell.title}>
-          {shell.title}
+          <TabTitle workstreamId={wsId ?? ""} shellId={shell.id} title={shell.title} />
         </span>
         {!isViewerShell(shell) && !isTerminalShell(shell) && (
           <SessionTabDot sessionId={shell.sessionId} />

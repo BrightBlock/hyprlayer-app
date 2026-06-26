@@ -110,6 +110,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::harnesses::opencode_set_default_model,
             commands::harnesses::install_opencode,
             commands::harnesses::claude_auth_status,
+            commands::titles::suggest_tab_title,
             commands::terminal::terminal_open,
             commands::terminal::terminal_attach,
             commands::terminal::terminal_write,

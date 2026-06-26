@@ -43,6 +43,7 @@ import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips
 import { AttachmentCards } from "./AttachmentCard";
 import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
 import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
+import { generateTabTitle } from "./tabTitles";
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "./stages";
 import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
@@ -1414,6 +1415,12 @@ export function SessionChat({
         permissionMode: permissionMode.flag,
       });
       onSessionStarted(created.id);
+      // Auto-title this tab from the first prompt (best-effort, fire-and-forget;
+      // a no-op for already-locked tabs and when the feature is off). Skip
+      // attachment-only starts — there's no prompt text to summarize.
+      if (input) {
+        void generateTabTitle({ workstreamId: view.item.id, shellId: shell.id, input });
+      }
       onDraftChange("");
       setHistoryNav(IDLE_NAV);
       recalledValueRef.current = null;

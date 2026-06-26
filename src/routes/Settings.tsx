@@ -5,6 +5,7 @@ import {
   useAiStatus,
   useBootstrap,
   useGithubUsername,
+  useOpencodeCatalog,
   useRedetectBinaries,
   useSetAppSettings,
 } from "../lib/queries";
@@ -12,7 +13,9 @@ import type {
   AppSettings,
   GitSettings,
   NotificationSettings,
+  TabTitleSettings,
 } from "../lib/bindings";
+import { MODELS } from "../features/session/models";
 import { invalidateNotificationSettingsCache, sendTestNotification } from "../lib/notifications";
 import {
   Badge,
@@ -23,6 +26,7 @@ import {
   ErrorNote,
   PageError,
   PageSpinner,
+  Select,
   TextInput,
   Toggle,
 } from "../components/ui";
@@ -394,6 +398,101 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
 
 /* ------------------------------- General --------------------------------- */
 
+/** Built-in default title model (mirrors the backend's DEFAULT_TAB_TITLE_MODEL). */
+const DEFAULT_TAB_TITLE_MODEL = "claude:haiku";
+
+/** Toggle auto-generated agent-tab titles and pick the model that writes them —
+ *  any Claude model, or one of the user's configured OpenCode models so
+ *  opencode-only users are covered. The choice is stored as a tagged id
+ *  (`claude:<flag>` / `opencode:<provider/model>`) the backend routes on. */
+function TabTitlesCard({ settings }: { settings: AppSettings }) {
+  const save = useSetAppSettings();
+  const catalog = useOpencodeCatalog();
+  const tab: Required<TabTitleSettings> = {
+    enabled: settings.tabTitles?.enabled ?? true,
+    model: settings.tabTitles?.model ?? null,
+  };
+  const selectedModel = tab.model && tab.model.length > 0 ? tab.model : DEFAULT_TAB_TITLE_MODEL;
+  const opencodeModels = settings.providers?.opencode?.selectedModels ?? [];
+  // Friendly name for a "provider/model" id, from the cached models.dev catalog.
+  const modelName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of catalog.data?.providers ?? [])
+      for (const m of p.models) map.set(`${p.id}/${m.id}`, m.name);
+    return map;
+  }, [catalog.data]);
+
+  function patch(next: Partial<TabTitleSettings>) {
+    save.mutate({ ...settings, tabTitles: { ...tab, ...next } });
+  }
+
+  return (
+    <Card>
+      <CardTitle>Tab titles</CardTitle>
+      <p className="mt-1 text-xs text-ink-dim">
+        Automatically name each new agent tab by summarizing its first prompt
+        with a small model. A tab you rename by hand is never changed.
+      </p>
+
+      {save.isError && (
+        <div className="mt-3">
+          <ErrorNote error={save.error} />
+        </div>
+      )}
+
+      <div className="mt-3 divide-y divide-edge/50">
+        <SettingRow
+          title="Auto-generate tab titles"
+          control={
+            <Toggle
+              aria-label="Auto-generate tab titles"
+              checked={tab.enabled}
+              onChange={(v) => patch({ enabled: v })}
+            />
+          }
+        >
+          Title a new agent tab from its first message. Off keeps the default
+          “Agent N” name.
+        </SettingRow>
+
+        <SettingRow
+          title="Title model"
+          control={
+            <Select
+              aria-label="Title model"
+              className="w-56"
+              disabled={!tab.enabled}
+              value={selectedModel}
+              onChange={(e) => patch({ model: e.target.value })}
+            >
+              <optgroup label="Claude">
+                {MODELS.map((m) => (
+                  <option key={m.key} value={`claude:${m.flag ?? ""}`}>
+                    {m.label}
+                    {m.hint ? ` (${m.hint})` : ""}
+                  </option>
+                ))}
+              </optgroup>
+              {opencodeModels.length > 0 && (
+                <optgroup label="OpenCode">
+                  {opencodeModels.map((id) => (
+                    <option key={id} value={`opencode:${id}`}>
+                      {modelName.get(id) ?? id}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </Select>
+          }
+        >
+          Which model writes the titles. Defaults to Claude Haiku — cheap and
+          fast. Pick one of your OpenCode models if you don’t use Claude.
+        </SettingRow>
+      </div>
+    </Card>
+  );
+}
+
 /** AI tool card — shows current agent-tool status and lets users reconfigure
  *  via the embedded terminal without leaving Settings. */
 function AiToolCard() {
@@ -600,6 +699,7 @@ export function Settings() {
             <UpdatesCard />
             <AiToolCard />
             <HyprlayerConfigCard config={data} />
+            <TabTitlesCard settings={data.settings} />
             <Card>
               <CardTitle>Setup wizard</CardTitle>
               <p className="mb-3 text-sm text-ink-dim">

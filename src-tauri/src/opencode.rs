@@ -16,6 +16,7 @@
 //!   - `POST /session/{id}/prompt_async`→ `{ parts:[{type:"text",text}], model:{providerID,modelID} }`
 //!   - `POST /session/{id}/permissions/{permissionID}` → `{ response: once|always|reject }`
 //!   - `POST /session/{id}/abort`
+//!   - `DELETE /session/{id}`            → remove a session (used for throwaways)
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -411,6 +412,24 @@ impl OpenCodeDriver {
                 });
             }
         });
+    }
+
+    /// Remove this session from the server's store. Throwaway sessions (e.g.
+    /// one-shot title generation) call this so they don't accumulate; interactive
+    /// sessions keep theirs for resume and only [`AgentDriver::kill`]. Best-effort
+    /// — a failure just leaves the record behind, so the caller can ignore it.
+    pub async fn delete_session(&self) {
+        let url = format!("{}/session/{}", self.server.base_url, self.session_id);
+        if let Err(e) = self
+            .server
+            .client
+            .delete(url)
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+        {
+            log::warn!("opencode session delete failed: {e}");
+        }
     }
 }
 

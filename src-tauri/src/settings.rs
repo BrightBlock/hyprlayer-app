@@ -42,6 +42,48 @@ pub struct AppSettings {
     pub providers: ProviderSettings,
     /// OS-toast behaviour when a session transitions to "needs you".
     pub notifications: NotificationSettings,
+    /// Auto-generated agent tab titles (enable + which model). Settings → General.
+    pub tab_titles: TabTitleSettings,
+}
+
+/// Auto-generated agent-tab titles. When enabled, a new agent tab summarizes the
+/// user's first prompt into a short title via a small model. Surfaced in
+/// Settings → General. The model can be a Claude model or — so opencode-only
+/// users are covered — one of their configured OpenCode models.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TabTitleSettings {
+    /// Master switch. `true` (default) titles each new agent tab from its first
+    /// prompt; `false` leaves the default `Agent N` name in place.
+    pub enabled: bool,
+    /// Which model generates titles, as a tagged id:
+    ///   `"claude:<flag>"`        → `claude -p --model <flag>` (empty flag = default)
+    ///   `"opencode:<prov>/<id>"` → a one-shot OpenCode turn with that model
+    /// `None`/absent uses the built-in default ([`DEFAULT_TAB_TITLE_MODEL`],
+    /// Claude Haiku).
+    pub model: Option<String>,
+}
+
+/// Built-in default title model: cheap, fast Claude Haiku.
+pub const DEFAULT_TAB_TITLE_MODEL: &str = "claude:haiku";
+
+impl Default for TabTitleSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model: None,
+        }
+    }
+}
+
+impl TabTitleSettings {
+    /// The effective model tag, falling back to the built-in default.
+    pub fn effective_model(&self) -> &str {
+        self.model
+            .as_deref()
+            .filter(|m| !m.is_empty())
+            .unwrap_or(DEFAULT_TAB_TITLE_MODEL)
+    }
 }
 
 /// Controls native OS notifications fired when a session moves into the

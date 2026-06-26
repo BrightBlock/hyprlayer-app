@@ -71,7 +71,10 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
     // v2 added `attachments` to every shell.
     // v3 added `dismissedSuggestions` to every shell — backfill it on rehydrate
     // so tabs persisted by an older build don't crash on accessing the field.
-    version: 3,
+    // v4 added `titleLocked`: lock every pre-existing tab so auto-titling never
+    // rewrites a name the user has already been looking at (custom or default);
+    // only tabs created after this build start unlocked and get auto-titled.
+    version: 4,
     migrate: (persisted) => {
       const state = persisted as TabsStore | undefined;
       if (!state?.byWs) return { byWs: {} };
@@ -81,6 +84,7 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
           docs: s.docs ?? [],
           attachments: s.attachments ?? [],
           dismissedSuggestions: s.dismissedSuggestions ?? [],
+          titleLocked: s.titleLocked ?? true,
         }));
       }
       return state;
