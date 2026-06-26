@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.3.6",
+      "date": "2026-06-26",
+      "summary": "Ollama harness, auto-named agent tabs, and a dedicated workstream GIT panel.",
+      "notes": [
+        "Run your agents on local or remote Ollama models. Settings → Harnesses → Ollama probes any reachable server for its installed models and exposes them in the composer picker.",
+        "New agent tabs now auto-title from a summary of your first prompt with a small model (configurable in Settings → General). The title types out in the tab strip and locks once set — a manual rename is never overwritten.",
+        "A new GIT panel in the changes sidebar collects per-workstream git controls: an ahead/behind chip, base-branch retargeting that re-points an already-open PR, pull-base (fetch + merge), and a prune-fetch refresh. Archiving a merged workstream can now also delete its remote branch when you've opted in."
+      ]
+    },
+    {
       "version": "0.3.5",
       "date": "2026-06-25",
       "summary": "Scrollable tabs and OpenCode stability fixes.",
