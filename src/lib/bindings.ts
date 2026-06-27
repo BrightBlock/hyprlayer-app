@@ -1350,6 +1350,15 @@ export type SessionEvent =
  */
 { kind: "usage"; contextTokens: number } | 
 /**
+ *  The model's context window in tokens — the meter's DENOMINATOR (`Usage` is
+ *  the numerator). Emitted once at session start when the backend knows the
+ *  value authoritatively: an Ollama model is launched with a fixed `num_ctx`
+ *  the UI can't infer from the `provider/model` id. Absent for models we
+ *  don't pin (Claude, hosted OpenCode providers) — the UI then falls back to
+ *  its own per-model table. Persisted so it survives a restart/replay.
+ */
+{ kind: "contextWindow"; tokens: number } | 
+/**
  *  A turn finished; carries cumulative cost so far and the context-window
  *  fill (input tokens in context for the turn) for the UI's context meter.
  */

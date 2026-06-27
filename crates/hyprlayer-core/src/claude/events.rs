@@ -112,6 +112,13 @@ pub enum SessionEvent {
     /// only at `TurnDone`. Persisted (it's tiny) so the meter survives a restart
     /// even when a turn was interrupted before its `TurnDone` ever landed.
     Usage { context_tokens: u32 },
+    /// The model's context window in tokens — the meter's DENOMINATOR (`Usage` is
+    /// the numerator). Emitted once at session start when the backend knows the
+    /// value authoritatively: an Ollama model is launched with a fixed `num_ctx`
+    /// the UI can't infer from the `provider/model` id. Absent for models we
+    /// don't pin (Claude, hosted OpenCode providers) — the UI then falls back to
+    /// its own per-model table. Persisted so it survives a restart/replay.
+    ContextWindow { tokens: u32 },
     /// A turn finished; carries cumulative cost so far and the context-window
     /// fill (input tokens in context for the turn) for the UI's context meter.
     TurnDone {
@@ -171,6 +178,7 @@ impl SessionEvent {
             SessionEvent::PermissionAsk { .. } => "permissionAsk",
             SessionEvent::QuestionAsk { .. } => "questionAsk",
             SessionEvent::Usage { .. } => "usage",
+            SessionEvent::ContextWindow { .. } => "contextWindow",
             SessionEvent::TurnDone { .. } => "turnDone",
             SessionEvent::CompactBoundary { .. } => "compactBoundary",
             SessionEvent::BackgroundTaskUpdate { .. } => "backgroundTaskUpdate",

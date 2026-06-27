@@ -94,6 +94,12 @@ pub struct OpenCodeServer {
     base_url: String,
     client: reqwest::Client,
     events: broadcast::Sender<OcEvent>,
+    /// `provider/model` id → context window (tokens), read once from
+    /// `GET /config/providers` at startup. This is OpenCode's own resolved limit
+    /// for each model (the value it runs the agentic loop against), so it's the
+    /// authoritative meter denominator for hosted providers — the UI can't infer
+    /// it from the id. Empty if the fetch failed (the UI then falls back).
+    model_context: std::collections::HashMap<String, u32>,
     /// Kept alive for the app's lifetime; killed on drop (app exit).
     _child: Mutex<tokio::process::Child>,
 }
@@ -171,6 +177,12 @@ impl OpenCodeServer {
             return Err("`opencode serve` did not become healthy in time".into());
         }
 
+        // Read each model's context window once, now that the server is up. Best
+        // effort: a failure just leaves the map empty (the UI falls back). The
+        // server is shared + recycled on auth changes, so this stays in step with
+        // the configured providers.
+        let model_context = fetch_model_context(&client, &base_url).await;
+
         let (events, _) = broadcast::channel(EVENT_CAP);
         spawn_sse(base_url.clone(), client.clone(), events.clone());
 
@@ -178,8 +190,16 @@ impl OpenCodeServer {
             base_url,
             client,
             events,
+            model_context,
             _child: Mutex::new(child),
         })
+    }
+
+    /// The context window (tokens) OpenCode runs `model_id` (`provider/model`)
+    /// with, when known — the meter's denominator. `None` falls back to the UI's
+    /// own table.
+    fn context_window(&self, model_id: &str) -> Option<u32> {
+        self.model_context.get(model_id).copied()
     }
 
     async fn is_healthy(&self) -> bool {
@@ -254,6 +274,78 @@ fn free_port() -> Result<u16, String> {
         .map_err(|e| format!("allocate a local port: {e}"))
 }
 
+/// Read each configured model's context window from `GET /config/providers` and
+/// index it by `provider/model` id (the same id the composer sends). OpenCode
+/// resolves these limits itself (models.dev + any provider config), so this is
+/// the authoritative denominator for hosted providers. Best effort — a transport
+/// or parse failure yields an empty map and the UI falls back to its own table.
+async fn fetch_model_context(
+    client: &reqwest::Client,
+    base_url: &str,
+) -> std::collections::HashMap<String, u32> {
+    let body = match client
+        .get(format!("{base_url}/config/providers"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+    {
+        Ok(r) => match r.text().await {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!("opencode /config/providers read failed: {e}");
+                return std::collections::HashMap::new();
+            }
+        },
+        Err(e) => {
+            log::warn!("opencode /config/providers fetch failed: {e}");
+            return std::collections::HashMap::new();
+        }
+    };
+    parse_model_context(&body)
+}
+
+/// Pure parse of `GET /config/providers` → `provider/model` id → context window.
+/// Tolerant: unknown fields ignored, models without a positive `limit.context`
+/// skipped. Split out from the HTTP so it's unit-testable against a captured body.
+fn parse_model_context(body: &str) -> std::collections::HashMap<String, u32> {
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        #[serde(default)]
+        providers: Vec<ProviderEntry>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ProviderEntry {
+        id: String,
+        #[serde(default)]
+        models: std::collections::HashMap<String, ModelEntry>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ModelEntry {
+        #[serde(default)]
+        limit: Option<LimitEntry>,
+    }
+    #[derive(serde::Deserialize)]
+    struct LimitEntry {
+        #[serde(default)]
+        context: Option<u64>,
+    }
+
+    let mut out = std::collections::HashMap::new();
+    let Ok(parsed) = serde_json::from_str::<Resp>(body) else {
+        log::warn!("opencode /config/providers parse failed");
+        return out;
+    };
+    for p in parsed.providers {
+        for (model_id, m) in p.models {
+            if let Some(ctx) = m.limit.and_then(|l| l.context).filter(|c| *c > 0) {
+                out.insert(format!("{}/{model_id}", p.id), ctx.min(u32::MAX as u64) as u32);
+            }
+        }
+    }
+    out
+}
+
 /// A single OpenCode session.
 pub struct OpenCodeDriver {
     server: Arc<OpenCodeServer>,
@@ -316,6 +408,19 @@ impl OpenCodeDriver {
             claude_session_id: session_id.clone(),
             model: model.as_ref().map(|(p, m)| format!("{p}/{m}")),
         });
+
+        // Tell the UI this model's real context window — the meter's denominator —
+        // so it doesn't fall back to the Claude 1M default. Ollama models run with
+        // a fixed `num_ctx` we set ourselves (authoritative, and the UI can't infer
+        // it); every other provider uses the limit OpenCode resolved at startup.
+        // `None` (model unknown) keeps the UI's own per-model table.
+        if let Some(tokens) = model.as_ref().and_then(|(p, m)| {
+            let id = format!("{p}/{m}");
+            hyprlayer_core::opencode::config::opencode_model_context_window(&id)
+                .or_else(|| server.context_window(&id))
+        }) {
+            let _ = events.send(SessionEvent::ContextWindow { tokens });
+        }
 
         // Filter the global stream by this session and translate. The translator
         // is stateful (tracks message roles + per-part streaming progress), so it
@@ -917,6 +1022,50 @@ mod tests {
             input,
             json!({ "file_path": "/w/a.txt", "old_string": "a", "new_string": "b" })
         );
+    }
+
+    #[test]
+    fn parse_model_context_indexes_by_provider_slash_model() {
+        // Shape captured from `GET /config/providers` (opencode 1.17.10): models
+        // are keyed by an id that can itself contain slashes; each carries
+        // `limit.context`. The map key must be `provider/<model id>` so it matches
+        // the `provider/model` id the composer sends.
+        let body = r#"{
+            "providers": [
+                {
+                    "id": "fireworks-ai",
+                    "name": "Fireworks AI",
+                    "models": {
+                        "accounts/fireworks/routers/kimi-k2p6-turbo": {
+                            "id": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                            "limit": { "context": 262000, "output": 262000 }
+                        }
+                    }
+                },
+                {
+                    "id": "openrouter",
+                    "models": {
+                        "no-limit-model": { "id": "no-limit-model" },
+                        "zero-ctx-model": { "id": "zero-ctx-model", "limit": { "context": 0 } }
+                    }
+                }
+            ]
+        }"#;
+        let map = parse_model_context(body);
+        assert_eq!(
+            map.get("fireworks-ai/accounts/fireworks/routers/kimi-k2p6-turbo"),
+            Some(&262_000)
+        );
+        // Models without a positive context limit are skipped (no bogus denominator).
+        assert!(!map.contains_key("openrouter/no-limit-model"));
+        assert!(!map.contains_key("openrouter/zero-ctx-model"));
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn parse_model_context_tolerates_garbage() {
+        assert!(parse_model_context("not json").is_empty());
+        assert!(parse_model_context(r#"{"providers":[]}"#).is_empty());
     }
 
     #[test]

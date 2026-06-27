@@ -587,6 +587,17 @@ describe("turn + exit lifecycle", () => {
     expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: false });
   });
 
+  it("contextWindow sets the meter denominator without touching anything else", () => {
+    // The backend reports a model's real window (e.g. an Ollama model's fixed
+    // num_ctx) so the meter doesn't fall back to the Claude 1M default.
+    let view = initialSessionView("running");
+    expect(view.contextWindow).toBeNull();
+    view = reduceEvent(view, { kind: "contextWindow", tokens: 32768 });
+    expect(view.contextWindow).toBe(32768);
+    expect(view.state).toBe("running");
+    expect(view.items).toHaveLength(0);
+  });
+
   it("exited appends a terminal block and sets the outcome state", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, {

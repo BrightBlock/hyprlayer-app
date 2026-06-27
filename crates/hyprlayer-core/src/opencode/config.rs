@@ -21,6 +21,20 @@ const CONFIG_SCHEMA_URL: &str = "https://opencode.ai/config.json";
 /// generated model entry so local models don't silently truncate the conversation.
 const OLLAMA_DEFAULT_NUM_CTX: u64 = 32768;
 
+/// The context window (tokens) the app launches a started OpenCode model with,
+/// when *we* pin it — the meter's denominator. We launch every Ollama model with
+/// a fixed `num_ctx` (see [`OLLAMA_DEFAULT_NUM_CTX`]), so that IS its real window
+/// and the UI can't infer it from the id. `None` for models we don't pin (hosted
+/// providers) — the caller falls back to the limit OpenCode itself reports. Takes
+/// a full `provider/model` id (e.g. `ollama/qwen2.5-coder`).
+pub fn opencode_model_context_window(model_id: &str) -> Option<u32> {
+    if model_id.starts_with("ollama/") {
+        Some(OLLAMA_DEFAULT_NUM_CTX as u32)
+    } else {
+        None
+    }
+}
+
 /// One configured provider credential, as surfaced to the UI. The raw key is
 /// deliberately never returned — only that a credential exists and its kind.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,6 +294,18 @@ fn write_json_atomic(path: &Path, value: &Value, mode: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ollama models report the fixed `num_ctx` they're launched with (the UI
+    /// can't infer it); hosted providers report `None` (UI falls back).
+    #[test]
+    fn context_window_pins_ollama_only() {
+        assert_eq!(
+            opencode_model_context_window("ollama/qwen2.5-coder"),
+            Some(OLLAMA_DEFAULT_NUM_CTX as u32)
+        );
+        assert_eq!(opencode_model_context_window("opencode/grok-code"), None);
+        assert_eq!(opencode_model_context_window("anthropic/claude-opus-4-6"), None);
+    }
 
     /// A temp HOME so the XDG fallbacks resolve into an isolated dir.
     struct TmpHome {

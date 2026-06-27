@@ -1402,8 +1402,13 @@ export function SessionChat({
   //      Eraser button lights up; "Clear & resume" runs handleClear and
   //      prefills `/resume_handoff`.
   const HANDOFF_NUDGE_THRESHOLD = 0.6;
+  // The meter's denominator: the backend-reported window for this session (e.g.
+  // an Ollama model's fixed num_ctx) when known, else our per-model table. The
+  // `model` table only knows Claude models, so for an OpenCode/Ollama session it
+  // would otherwise wrongly read the 1M Opus default.
+  const contextWindow = session?.contextWindow ?? model.contextWindow;
   const contextPct =
-    session?.contextTokens != null ? session.contextTokens / model.contextWindow : 0;
+    session?.contextTokens != null ? session.contextTokens / contextWindow : 0;
   const handoffDoc = shell.docs.find((d) => d.role === "handoff") ?? null;
   // Last handoff doc written in the CURRENT session's items, ignoring ones the
   // user already dismissed. We scan the live transcript rather than the
@@ -1957,7 +1962,7 @@ export function SessionChat({
                     />
                     {/* Drop or paste a screenshot anytime — see the pane drop overlay. */}
                     {session?.contextTokens != null && (
-                      <ContextMeter tokens={session.contextTokens} windowSize={model.contextWindow} />
+                      <ContextMeter tokens={session.contextTokens} windowSize={contextWindow} />
                     )}
                     {/* Stop stays available while a turn runs; Send stays too, so
                         a follow-up can be queued mid-turn (conversation steering). */}

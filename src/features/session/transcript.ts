@@ -297,6 +297,10 @@ export type SessionView = {
   numTurns: number | null;
   /** Input tokens in context as of the last finished turn (the meter's fill). */
   contextTokens: number | null;
+  /** The model's context window (meter denominator), when the backend reported
+   *  it for this session (e.g. an Ollama model's fixed `num_ctx`). Null leaves
+   *  the UI to fall back to its own per-model table. */
+  contextWindow: number | null;
   model: string | null;
   claudeSessionId: string | null;
   /** The unanswered permission ask, if the session is parked on one. */
@@ -314,6 +318,7 @@ export function initialSessionView(state: SessionState = "idle"): SessionView {
     costUsd: null,
     numTurns: null,
     contextTokens: null,
+    contextWindow: null,
     model: null,
     claudeSessionId: null,
     pendingPermission: null,
@@ -863,6 +868,11 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
     case "usage":
       // A live context reading mid-turn — update the meter, touch nothing else.
       return { ...view, contextTokens: event.contextTokens };
+
+    case "contextWindow":
+      // The backend told us the model's real window (the meter denominator) —
+      // e.g. an Ollama model's fixed num_ctx. Set it; touch nothing else.
+      return { ...view, contextWindow: event.tokens };
 
     case "turnDone": {
       // A turnDone can arrive (e.g. a subagent finishing) while the user still
