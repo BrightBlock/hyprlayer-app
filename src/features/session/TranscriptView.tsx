@@ -981,6 +981,19 @@ const RELOCK_MS = 200;
 const SEND_GLIDE_FACTOR = 0.12;
 const SEND_GLIDE_MS = 600;
 
+/** Decide whether the view is stuck to the bottom after a scroll event, from the
+ *  previous scrollTop, the current scrollTop, and the current gap to the bottom
+ *  (`scrollHeight - clientHeight - scrollTop`). Releases only on a genuine
+ *  scroll-up — scrollTop dropped *and* a real gap opened. A drop that keeps the
+ *  gap ~0 is the browser clamping scrollTop after the viewport grew (e.g. the
+ *  composer shrank) or the content shrank, not a gesture, so it holds the stick.
+ *  Re-sticks once back within RESTICK_PX of the bottom; otherwise unchanged. */
+export function stickAfterScroll(prevTop: number, top: number, gap: number, wasStuck: boolean): boolean {
+  if (top < prevTop - 1 && gap > 2) return false;
+  if (gap < RESTICK_PX) return true;
+  return wasStuck;
+}
+
 export const TranscriptView = memo(
   forwardRef<TranscriptHandle, Props>(function TranscriptView(
     { items, busy, connecting, harnessLabel, workingSince, permission, prompt },
@@ -988,11 +1001,9 @@ export const TranscriptView = memo(
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const atBottom = useRef(true);
-    // Previous scrollTop + scrollHeight, to read scroll *direction* and to tell a
-    // real user scroll-up apart from a content-shrink clamp (both lower scrollTop,
-    // but only the former should release the stick).
+    // Previous scrollTop, to read scroll *direction*; a drop is a candidate
+    // scroll-up, confirmed against the gap to the bottom in onScroll.
     const lastTop = useRef(0);
-    const lastHeight = useRef(0);
     // performance.now() until which a freshly re-stuck view eases the remaining
     // gap to the bottom instead of snapping (a smooth "catch up" on re-lock).
     const relockUntil = useRef(0);
@@ -1051,22 +1062,12 @@ export const TranscriptView = memo(
       const el = scrollRef.current;
       if (!el) return;
       const top = el.scrollTop;
-      const height = el.scrollHeight;
+      const gap = el.scrollHeight - el.clientHeight - top; // distance to the bottom
       const wasBottom = atBottom.current;
-      // A drop in scrollTop while the content height held is the user scrolling
-      // up — release at once so streaming stops yanking them back. (A drop the
-      // content *shrinking* forces — scrollTop clamps down on its own — is not a
-      // gesture, so it must not release.) Otherwise, re-stick once they're back
-      // within reach of the bottom.
-      if (top < lastTop.current - 1 && height >= lastHeight.current - 1) {
-        atBottom.current = false;
-      } else if (height - top - el.clientHeight < RESTICK_PX) {
-        atBottom.current = true;
-      }
+      atBottom.current = stickAfterScroll(lastTop.current, top, gap, wasBottom);
       // On the transition back to stuck, glide the catch-up to the exact bottom.
       if (!wasBottom && atBottom.current) relockUntil.current = performance.now() + RELOCK_MS;
       lastTop.current = top;
-      lastHeight.current = height;
     };
 
     // A wheel/trackpad scroll-up releases synchronously, before the next frame's
