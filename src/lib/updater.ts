@@ -6,8 +6,9 @@
 // the new version.
 //
 // Surfaces that consume this store:
-//   - UpdatePill   (sidebar footer) — appears only when an update is pending.
-//   - Settings → Updates card        — current version + manual "Check now".
+//   - Toast (bottom-right)    — the single update nudge: a "Restart to update"
+//     toast, shown by the background probe and the explicit "Check for Updates".
+//   - Settings → Updates card — current version + manual "Check now".
 //
 // The changelog is a separate, human-authored file fetched over plain HTTP
 // (CSP is null in tauri.conf.json, so no allow-listing needed). It's optional
@@ -18,6 +19,8 @@ import { persist } from "zustand/middleware";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
+
+import { useToast } from "./toast";
 
 const MANIFEST_BASE = "https://brightblock.ai/hyprlayer/updates";
 const CHANGELOG_URL = `${MANIFEST_BASE}/changelog.json`;
@@ -65,6 +68,9 @@ interface UpdateState {
 }
 
 let _initialized = false;
+// Version we've already auto-toasted this session, so the 3h re-probe doesn't
+// re-pop the same nudge. The explicit menu check ignores this (always shows).
+let toastedVersion: string | null = null;
 
 async function fetchChangelog(set: (p: Partial<UpdateState>) => void) {
   try {
@@ -110,11 +116,14 @@ export const useUpdate = create<UpdateState>()(
                 {
                   version: "9.9.9",
                   date: "2026-06-17",
-                  summary: "A mock release so the update pill is developable in dev.",
+                  summary: "A mock release so the update toast is developable in dev.",
                   notes: ["Mock note one.", "Mock note two."],
                 },
               ],
             });
+            // Mirror the prod probe's launch nudge so the toast is visible in dev.
+            toastedVersion = "9.9.9";
+            showUpdateToast();
           }
           return;
         }
@@ -124,9 +133,16 @@ export const useUpdate = create<UpdateState>()(
         const probe = async () => {
           try {
             pendingUpdate = await check();
-            set({ pendingVersion: pendingUpdate?.version ?? null });
+            const v = pendingUpdate?.version ?? null;
+            set({ pendingVersion: v });
+            // Nudge once per session for a freshly-found version the user hasn't
+            // already dismissed. The explicit menu check always re-shows it.
+            if (v && v !== toastedVersion && v !== get().dismissedVersion) {
+              toastedVersion = v;
+              showUpdateToast();
+            }
           } catch (e) {
-            // Network down / malformed manifest — no pill, no harm.
+            // Network down / malformed manifest — no toast, no harm.
             console.warn("[updater] check failed:", e);
           }
         };
@@ -137,7 +153,15 @@ export const useUpdate = create<UpdateState>()(
       },
 
       checkNow: async () => {
-        if (import.meta.env.DEV) return "uptodate";
+        if (import.meta.env.DEV) {
+          // Mirror init()'s mock so the "Restart to update" toast is developable
+          // in dev — install() is a safe no-op (there's no real Update handle).
+          if (import.meta.env.VITE_MOCK_UPDATE) {
+            set({ currentVersion: "0.1.0", pendingVersion: "9.9.9" });
+            return "available";
+          }
+          return "uptodate";
+        }
         void fetchChangelog(set);
         try {
           pendingUpdate = await check();
@@ -176,3 +200,22 @@ export const useUpdate = create<UpdateState>()(
     },
   ),
 );
+
+/** Surface the pending update as a sticky bottom-right toast carrying a one-click
+ *  "Restart to update" action — the single update surface now that the sidebar
+ *  pill is gone. Used by the background probe and the explicit "Check for
+ *  Updates" menu action. No-op when nothing is pending. */
+export function showUpdateToast(): void {
+  const { pendingVersion, changelog, install, dismissUpdate } = useUpdate.getState();
+  if (!pendingVersion) return;
+  const summary = changelog?.find((e) => e.version === pendingVersion)?.summary;
+  useToast.getState().show(
+    "Update available",
+    summary ? `v${pendingVersion} — ${summary}` : `Hyprlayer v${pendingVersion} is ready to install.`,
+    {
+      tone: "ok",
+      action: { label: "Restart to update", busyLabel: "Updating…", onClick: () => install() },
+      onDismiss: dismissUpdate,
+    },
+  );
+}

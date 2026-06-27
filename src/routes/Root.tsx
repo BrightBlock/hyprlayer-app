@@ -69,8 +69,7 @@ import { AttachPrDialog } from "../features/workstreams/AttachPrDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
 import { RemoveProjectDialog } from "../features/projects/RemoveProjectDialog";
-import { UpdatePill } from "../features/system/updates";
-import { useUpdate } from "../lib/updater";
+import { useUpdate, showUpdateToast } from "../lib/updater";
 import { useToast } from "../lib/toast";
 import { Toast } from "../components/Toast";
 import type { Project, WorkstreamView } from "../lib/bindings";
@@ -790,23 +789,27 @@ export function Root() {
   );
 
   const checkNow = useUpdate((s) => s.checkNow);
-  const currentVersion = useUpdate((s) => s.currentVersion);
   const showToast = useToast((s) => s.show);
 
   useEffect(() => {
     const unlisten = Promise.all([
       listen("menu:check-for-updates", () => {
         void checkNow().then((result) => {
-          if (result === "uptodate") {
+          if (result === "available") {
+            // Single update surface: a bottom-right toast carrying a one-click
+            // "Restart to update" button (no separate sidebar pill).
+            showUpdateToast();
+          } else if (result === "uptodate") {
+            const v = useUpdate.getState().currentVersion;
             showToast(
               "You're up to date!",
-              `You're running the latest version of Hyprlayer${currentVersion ? ` (v${currentVersion})` : ""}.`,
-              "ok",
+              `You're running the latest version of Hyprlayer${v ? ` (v${v})` : ""}.`,
+              { tone: "ok" },
             );
-          } else if (result === "available") {
-            showToast("Update available", "A new version of Hyprlayer is ready to install.", "ok");
           } else {
-            showToast("Couldn't check for updates", "Check your connection and try again.", "bad");
+            showToast("Couldn't check for updates", "Check your connection and try again.", {
+              tone: "bad",
+            });
           }
         });
       }),
@@ -1069,7 +1072,6 @@ export function Root() {
             </button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-3">
-            {collapsed && <UpdatePill collapsed />}
             <button
               type="button"
               onClick={() => toggleNav("/archive")}
@@ -1323,7 +1325,6 @@ export function Root() {
             })}
 
           </nav>
-          <UpdatePill collapsed={false} />
           </div>
         </aside>
         )}
