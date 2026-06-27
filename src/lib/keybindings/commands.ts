@@ -223,6 +223,13 @@ export const COMMANDS: CommandDef[] = [
     defaults: { mac: "mod+shift+k", other: "mod+shift+k" },
   },
   {
+    id: "session.togglePlan",
+    label: "Show / Hide Tasks",
+    category: "Session",
+    when: "session",
+    defaults: { mac: "mod+shift+t", other: "mod+shift+t" },
+  },
+  {
     id: "session.historyPrev",
     label: "Recall Previous Prompt",
     category: "Session",

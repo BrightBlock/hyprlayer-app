@@ -36,6 +36,7 @@ import {
   type BackgroundTask,
   type BackgroundTaskStatus,
 } from "./backgroundTask";
+import { planTasksFromItems, type PlanTask, type PlanTaskStatus } from "./planTasks";
 import { type Attachment } from "./attachments";
 import { composeStagePrompt } from "./stages";
 import { openCommitTab, openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
@@ -1134,6 +1135,33 @@ export function useSessionBackgroundTasks(sessionId: string | undefined): LiveBa
           label,
           command: cmdParts.join("\0"),
         } satisfies LiveBackgroundTask;
+      }),
+    [keys],
+  );
+}
+
+/**
+ * The agent's live plan/to-do list for one session, derived from the transcript
+ * by `planTasksFromItems`. Same `useShallow` string-key pattern as
+ * `useSessionBackgroundTasks` so streaming deltas don't churn the list. Unlike
+ * background shells the plan is conversation-scoped, so it's kept for terminal
+ * and restored sessions too.
+ */
+export function useSessionPlanTasks(sessionId: string | undefined): PlanTask[] {
+  // Key: "id\0subject\0status"  (\0 is safe — none of these carry NUL bytes).
+  const keys = useSessionStore(
+    useShallow((s) => {
+      if (!sessionId) return [] as string[];
+      const entry = s.sessions[sessionId];
+      if (!entry) return [] as string[];
+      return planTasksFromItems(entry.items).map((t) => [t.id ?? "", t.subject, t.status].join("\0"));
+    }),
+  );
+  return useMemo(
+    () =>
+      keys.map((k) => {
+        const [id, subject, status] = k.split("\0");
+        return { id: id || null, subject, status: status as PlanTaskStatus } satisfies PlanTask;
       }),
     [keys],
   );

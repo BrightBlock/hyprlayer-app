@@ -285,6 +285,31 @@ export function TerminalIcon({ size = 13, strokeWidth = 1.8, className }: IconPr
   );
 }
 
+/** Checklist — a ticked box over ruled lines. */
+export function ChecklistIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+    >
+      <path
+        d="m3 6 1.4 1.4L7.2 4.4"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M11 6h10" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M4 12h17" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M4 18h17" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Two stacked sheets — copy to clipboard. */
 export function ClipboardIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (

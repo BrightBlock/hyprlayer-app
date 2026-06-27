@@ -407,6 +407,31 @@ a {
   }
 }
 
+/* ── Task toast: a tab that merges into the composer ────────────────────── */
+/* Each ::before/::after paints a concave quarter-circle fillet just outside a
+   bottom corner, in --color-panel-2, bridging the tab into the composer. */
+.task-toast::before,
+.task-toast::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  height: 0.5rem;
+  width: 0.5rem;
+}
+.task-toast::before {
+  left: -0.5rem;
+  background: radial-gradient(circle at top left, transparent 0.5rem, var(--color-panel-2) 0.5rem);
+}
+.task-toast::after {
+  right: -0.5rem;
+  background: radial-gradient(circle at top right, transparent 0.5rem, var(--color-panel-2) 0.5rem);
+}
+/* Once retracted (cleared) drop the fillets, else they linger as nubs. */
+.task-toast.is-folded::before,
+.task-toast.is-folded::after {
+  content: none;
+}
+
 /* ── Onboarding step transition ─────────────────────────────────────────── */
 @keyframes step-in {
   0%   { opacity: 0; transform: translateY(12px); }

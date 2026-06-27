@@ -75,9 +75,11 @@ import {
   useSession,
   useMostRecentDoc,
   useSessionBackgroundTasks,
+  useSessionPlanTasks,
   type QueuedMessage,
 } from "./sessionStore";
 import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
+import { PlanTasksPanel } from "./PlanTasksView";
 import {
   buildQuestionAnswers,
   describeState,
@@ -1321,6 +1323,26 @@ export function SessionChat({
   // Background tasks bar.
   const backgroundTasks = useSessionBackgroundTasks(sid);
 
+  // The agent's live plan, shown as a drawer above the composer. Starts
+  // minimized so the expanded list never covers an approval card.
+  const planTasks = useSessionPlanTasks(sid);
+  const [planCollapsed, setPlanCollapsed] = useState(true);
+  const [planDismissed, setPlanDismissed] = useState(false);
+  const planHasIncomplete = planTasks.some((t) => t.status !== "completed");
+  const planAllDone = planTasks.length > 0 && !planHasIncomplete;
+  // Auto-clear once the plan finishes and the turn ends; stays dismissed (and
+  // re-minimized for the next plan) until a fresh incomplete task appears.
+  useEffect(() => {
+    if (planHasIncomplete) {
+      setPlanDismissed(false);
+    } else if (planAllDone && !working) {
+      setPlanDismissed(true);
+      setPlanCollapsed(true);
+    }
+  }, [planHasIncomplete, planAllDone, working]);
+  const togglePlan = useCallback(() => setPlanCollapsed((v) => !v), []);
+  useCommand("session.togglePlan", planTasks.length > 0 && !planDismissed ? togglePlan : null);
+
   // Prompt history navigation: derive prompts from the live transcript,
   // hold ephemeral nav state, and register focus-gated recall commands.
   const prompts = useMemo(
@@ -1755,7 +1777,15 @@ export function SessionChat({
                   }}
                 />
               )}
+              {/* The agent's live plan, a drawer docked above the composer. */}
               <div className="relative rounded-xl bg-panel-2">
+                <PlanTasksPanel
+                  tasks={planTasks}
+                  working={working}
+                  collapsed={planCollapsed}
+                  cleared={planDismissed}
+                  onToggle={togglePlan}
+                />
                 <AutocompleteDropdown state={autocomplete} />
                 {attachments.length > 0 && (
                   <div className="px-3.5 pt-3">
