@@ -36,6 +36,16 @@ function taskUpdate(
   return makeTool("TaskUpdate", JSON.stringify(fields), toolUseId, ok(`Updated task #${fields.taskId} status`));
 }
 
+/** A TaskUpdate that deletes a task (`status:"deleted"` per the tool schema). */
+function taskDelete(toolUseId: string, taskId: string): Extract<TranscriptItem, { kind: "tool" }> {
+  return makeTool(
+    "TaskUpdate",
+    JSON.stringify({ taskId, status: "deleted" }),
+    toolUseId,
+    ok(`Task #${taskId} deleted`),
+  );
+}
+
 function taskList(toolUseId: string, snapshot: string): Extract<TranscriptItem, { kind: "tool" }> {
   return makeTool("TaskList", "{}", toolUseId, ok(snapshot));
 }
@@ -132,6 +142,69 @@ describe("planTasksFromItems", () => {
     expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
       { id: "1", subject: "Build parser", status: "in_progress" },
       { id: "2", subject: "Wire UI", status: "pending" },
+    ]);
+  });
+
+  it("removes a task when TaskUpdate sets status to deleted", () => {
+    const items: TranscriptItem[] = [
+      taskCreate("t1", "Keep me", { id: 1 }),
+      taskCreate("t2", "Delete me", { id: 2 }),
+      taskDelete("t3", "2"),
+    ];
+    expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
+      { id: "1", subject: "Keep me", status: "pending" },
+    ]);
+  });
+
+  it("drops every task when all are deleted, leaving an empty list", () => {
+    const items: TranscriptItem[] = [
+      taskCreate("t1", "One", { id: 1 }),
+      taskCreate("t2", "Two", { id: 2 }),
+      taskCreate("t3", "Three", { id: 3 }),
+      taskDelete("t4", "1"),
+      taskDelete("t5", "2"),
+      taskDelete("t6", "3"),
+    ];
+    expect(planTasksFromItems(items)).toEqual([]);
+  });
+
+  it("does not count deleted tasks after a recreate (the 'TASKS 3/6' bug)", () => {
+    // Repro of the reported bug: create three, delete all three, then recreate
+    // three and mark them completed. The deleted #1–#3 must NOT linger and
+    // inflate the total to six — the list is exactly the three live tasks.
+    const items: TranscriptItem[] = [
+      taskCreate("t1", "Design the data model", { id: 1 }),
+      taskCreate("t2", "Implement the API endpoints", { id: 2 }),
+      taskCreate("t3", "Write integration tests", { id: 3 }),
+      taskUpdate("t4", { taskId: "1", status: "completed" }),
+      taskUpdate("t5", { taskId: "2", status: "in_progress" }),
+      // clean up: delete all three
+      taskDelete("t6", "1"),
+      taskDelete("t7", "2"),
+      taskDelete("t8", "3"),
+      taskList("t9", "No tasks found"),
+      // recreate three and complete them
+      taskCreate("t10", "Design the data model", { id: 4 }),
+      taskCreate("t11", "Implement the API endpoints", { id: 5 }),
+      taskCreate("t12", "Write integration tests", { id: 6 }),
+      taskUpdate("t13", { taskId: "4", status: "completed" }),
+      taskUpdate("t14", { taskId: "5", status: "completed" }),
+      taskUpdate("t15", { taskId: "6", status: "completed" }),
+    ];
+    expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
+      { id: "4", subject: "Design the data model", status: "completed" },
+      { id: "5", subject: "Implement the API endpoints", status: "completed" },
+      { id: "6", subject: "Write integration tests", status: "completed" },
+    ]);
+  });
+
+  it("ignores a delete for an unknown task id", () => {
+    const items: TranscriptItem[] = [
+      taskCreate("t1", "Keep me", { id: 1 }),
+      taskDelete("t2", "99"),
+    ];
+    expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
+      { id: "1", subject: "Keep me", status: "pending" },
     ]);
   });
 

@@ -112,11 +112,19 @@ export function planTasksFromItems(items: TranscriptItem[]): PlanTask[] {
         const parsed = parseToolInput(item.input);
         const id = str(parsed?.taskId);
         if (!id) break;
+        const status = str(parsed?.status);
+        // `status:"deleted"` permanently removes a task — drop it from the list
+        // rather than retaining it with a phantom "deleted" status, which would
+        // otherwise render as a pending row and inflate the n/total count.
+        if (status === "deleted") {
+          tasks.delete(id);
+          break;
+        }
         const existing = tasks.get(id);
         tasks.set(id, {
           id,
           subject: str(parsed?.subject) || existing?.subject || "",
-          status: str(parsed?.status) || existing?.status || "pending",
+          status: status || existing?.status || "pending",
         });
         break;
       }
