@@ -866,9 +866,11 @@ export function Root() {
           )}
         </div>
 
+        {/* marginLeft tracks the sidebar width; not reduced-motion-gated so it
+            stays in lockstep with the (also un-gated) sidebar slide on Windows. */}
         <div
           className={`flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3 ${
-            resizingSidebar ? "" : "transition-[margin] duration-200 ease-out motion-reduce:transition-none"
+            resizingSidebar ? "" : "transition-[margin] duration-200 ease-out"
           }`}
           style={{ marginLeft: contentOffset }}
           data-tauri-drag-region
@@ -1097,13 +1099,15 @@ export function Root() {
             the fixed-width inner shell (pinned to the rail edge) so its content
             never reflows mid-animation; the transition is dropped while the
             resize handle is dragged so the panel tracks the cursor. The Library
-            route hides it entirely — that route renders its own list panel. */}
+            route hides it entirely — that route renders its own list panel. The
+            width transition is not reduced-motion-gated — Windows maps that to the
+            often-off "Animation effects" toggle, which would otherwise snap it. */}
         {!onLibrary && (
         <aside
           className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
             resizingSidebar
               ? ""
-              : "transition-[width] duration-200 ease-out motion-reduce:transition-none"
+              : "transition-[width] duration-200 ease-out"
           }`}
           style={{ width: collapsed ? 0 : sidebarWidth }}
           inert={collapsed}

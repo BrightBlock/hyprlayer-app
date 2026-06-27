@@ -85,7 +85,10 @@ export function PlanTasksPanel({
   const label = `${open ? "Hide" : "Show"} tasks — ${done}/${tasks.length} done${
     active ? ` · ${active.subject}` : ""
   }`;
-  const fold = "transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+  // Shared fold transition for the grids below. Not gated on reduced motion —
+  // Windows maps that to the often-off "Animation effects" toggle, which would
+  // otherwise snap the drawer instead of folding it.
+  const fold = "transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]";
   return (
     <div
       aria-hidden={cleared}

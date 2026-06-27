@@ -1365,12 +1365,14 @@ export function ProjectPage() {
       {/* Changes sidebar — width-animates between 0 and diffWidth so toggling it
           glides instead of snapping. overflow-hidden clips the fixed-width inner
           shell (pinned to the window edge) so its content never reflows; the
-          transition is dropped while the resize handle is dragged. */}
+          transition is dropped while the resize handle is dragged. It is not
+          reduced-motion-gated — Windows maps that to the often-off "Animation
+          effects" toggle, which would otherwise snap it. */}
       <aside
         className={`relative shrink-0 overflow-hidden border-l border-edge bg-panel ${
           resizingDiff
             ? ""
-            : "transition-[width] duration-200 ease-out motion-reduce:transition-none"
+            : "transition-[width] duration-200 ease-out"
         }`}
         style={{ width: diffHidden ? 0 : diffWidth }}
         inert={diffHidden}

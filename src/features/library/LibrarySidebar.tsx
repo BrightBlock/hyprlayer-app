@@ -49,11 +49,13 @@ export function LibrarySidebar({
   // Width-animates between 0 and `width` so a collapse/expand glides instead of
   // snapping (matching the project + diff panels). overflow-hidden clips the
   // fixed-width inner shell so its content never reflows mid-animation; the
-  // transition is dropped while the resize handle is dragged.
+  // transition is dropped while the resize handle is dragged. It is not gated on
+  // reduced motion — Windows maps that to the often-off "Animation effects"
+  // toggle, which would otherwise snap the panel.
   return (
     <aside
       className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
-        resizing ? "" : "transition-[width] duration-200 ease-out motion-reduce:transition-none"
+        resizing ? "" : "transition-[width] duration-200 ease-out"
       }`}
       style={{ width: collapsed ? 0 : width }}
       inert={collapsed}
