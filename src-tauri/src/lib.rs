@@ -161,7 +161,20 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Restore the last window geometry, but ONLY size/position/maximized:
+        // never FULLSCREEN (so the app can't boot into a jarring full-screen
+        // flash), never VISIBLE (the window starts hidden on Windows/Linux and
+        // the frontend reveals it after first paint — see main.tsx), and never
+        // DECORATIONS (config owns that — frameless off-macOS).
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(

@@ -70,15 +70,19 @@ pub enum ParsedLine {
         /// Token count just before the compact ran, when reported.
         pre_tokens: Option<u32>,
     },
-    /// `{"type":"system","subtype":"task_notification",...}` — a background shell
-    /// task (spawned by `Bash{run_in_background:true}`) reached a terminal state.
-    /// claude emits this ASYNCHRONOUSLY as the task finishes, even when the agent
-    /// never polled it (the common fire-and-forget case) — realizing the spawn
-    /// result's promise that "you will be notified when it completes". It's the
-    /// authoritative "this background shell is done" signal the UI needs to drop a
-    /// finished task from its live indicator. `status` is "completed" or "failed"
-    /// at terminal; `tool_use_id` is the spawning `Bash` call (the UI's direct
-    /// transcript key), `task_id` the background shell id.
+    /// A background shell task (spawned by `Bash{run_in_background:true}`) reached
+    /// a terminal state. claude emits this ASYNCHRONOUSLY as the task finishes,
+    /// even when the agent never polled it (the common fire-and-forget case) —
+    /// realizing the spawn result's promise that "you will be notified when it
+    /// completes". It's the authoritative "this background shell is done" signal
+    /// the UI needs to drop a finished task from its live indicator. `status` is
+    /// "completed" or "failed" at terminal; `tool_use_id` is the spawning `Bash`
+    /// call (the UI's direct transcript key), `task_id` the background shell id.
+    ///
+    /// Two wire shapes, both handled: the older flat
+    /// `{"type":"system","subtype":"task_notification",...}` line, and (claude
+    /// 2.1.195+) a `{"type":"queue-operation",...,"content":"<task-notification>…"}`
+    /// line carrying the same fields inside a `<task-notification>` XML block.
     TaskNotification {
         task_id: String,
         tool_use_id: Option<String>,
@@ -166,6 +170,12 @@ pub fn parse_line(line: &str) -> ParsedLine {
                 },
             }
         }
+        // claude 2.1.195+ delivers the background-task completion notification as
+        // a `queue-operation` line carrying a `<task-notification>` XML block,
+        // instead of the flat `system`/`task_notification` line older builds used
+        // (handled above). Same payload, different envelope — see
+        // `parse_queue_operation`.
+        Some("queue-operation") => parse_queue_operation(&v),
         Some("assistant") => ParsedLine::Assistant {
             blocks: parse_blocks(v.get("message")),
             context_tokens: context_tokens(v.get("message").and_then(|m| m.get("usage"))),
@@ -225,6 +235,40 @@ fn parse_stream_event(v: &Value) -> ParsedLine {
 
 fn request_field<'a>(request: &'a Value, key: &str) -> Option<&'a str> {
     request.get(key).and_then(Value::as_str)
+}
+
+/// A `{"type":"queue-operation",…,"content":"<task-notification>…"}` line.
+/// claude 2.1.195 delivers the async background-task completion notification this
+/// way — a queued out-of-band event whose `content` holds a flat
+/// `<task-notification>` XML block — rather than the `system`/`task_notification`
+/// JSON line earlier builds emitted. When that block is present we pull the same
+/// fields and emit `TaskNotification` (so the UI drops the finished task); any
+/// other queue-operation is a known-but-inert line, kept as informational
+/// `System` rather than a scary `Unknown`/protocol error.
+fn parse_queue_operation(v: &Value) -> ParsedLine {
+    let content = v.get("content").and_then(Value::as_str).unwrap_or("");
+    if content.contains("<task-notification>") {
+        if let Some(task_id) = xml_tag(content, "task-id") {
+            return ParsedLine::TaskNotification {
+                task_id: task_id.to_string(),
+                tool_use_id: xml_tag(content, "tool-use-id").map(str::to_string),
+                status: xml_tag(content, "status").map(str::to_string).unwrap_or_default(),
+            };
+        }
+    }
+    ParsedLine::System {
+        subtype: "queue-operation".into(),
+    }
+}
+
+/// Text of the first `<tag>…</tag>` in `s`, trimmed. The task-notification block
+/// is flat (no nesting or attributes), so a plain find/slice is enough.
+fn xml_tag<'a>(s: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = s.find(&open)? + open.len();
+    let end = s[start..].find(&close)? + start;
+    Some(s[start..end].trim())
 }
 
 fn parse_control_request(v: &Value) -> ParsedLine {
@@ -460,5 +504,50 @@ mod tests {
                 ParsedLine::System { subtype: s } if s == subtype
             ));
         }
+    }
+
+    /// claude 2.1.195 delivers the completion notification as a `queue-operation`
+    /// whose `content` is a `<task-notification>` XML block (verified live against
+    /// session 88c21580). It must parse to the SAME `TaskNotification` the flat
+    /// `system` shape did, or finished background tasks linger in the live
+    /// indicator forever. Line shape is verbatim from a real session.
+    #[test]
+    fn task_notification_via_queue_operation_parses() {
+        let line = r#"{"type":"queue-operation","operation":"add","timestamp":"2026-06-27T19:00:00Z","sessionId":"s","content":"<task-notification>\n<task-id>b9vew92w3</task-id>\n<tool-use-id>toolu_01KXEEjFzSxWBxnYuvAz9pdG</tool-use-id>\n<output-file>/tmp/b9vew92w3.output</output-file>\n<status>completed</status>\n<summary>Background command \"Run NSIS build\" completed (exit code 0)</summary>\n</task-notification>"}"#;
+        match parse_line(line) {
+            ParsedLine::TaskNotification {
+                task_id,
+                tool_use_id,
+                status,
+            } => {
+                assert_eq!(task_id, "b9vew92w3");
+                assert_eq!(tool_use_id.as_deref(), Some("toolu_01KXEEjFzSxWBxnYuvAz9pdG"));
+                assert_eq!(status, "completed");
+            }
+            other => panic!("expected TaskNotification, got {other:?}"),
+        }
+    }
+
+    /// A `failed` background command over the queue-operation envelope reports the
+    /// terminal status the same way — the UI still drops it.
+    #[test]
+    fn task_notification_via_queue_operation_failed_parses() {
+        let line = r#"{"type":"queue-operation","content":"<task-notification>\n<task-id>bzx</task-id>\n<tool-use-id>toolu_9</tool-use-id>\n<status>failed</status>\n</task-notification>"}"#;
+        assert!(matches!(
+            parse_line(line),
+            ParsedLine::TaskNotification { status, .. } if status == "failed"
+        ));
+    }
+
+    /// A queue-operation that isn't a task notification (e.g. a queued user
+    /// message) is a known-but-inert line — informational `System`, not a scary
+    /// `Unknown`/protocol error.
+    #[test]
+    fn non_task_queue_operation_is_system() {
+        let line = r#"{"type":"queue-operation","operation":"add","content":"some queued prompt"}"#;
+        assert!(matches!(
+            parse_line(line),
+            ParsedLine::System { subtype } if subtype == "queue-operation"
+        ));
     }
 }

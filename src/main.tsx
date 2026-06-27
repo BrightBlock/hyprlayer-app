@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { attachEventListeners } from "./lib/events";
 import { queryClient } from "./lib/queryClient";
@@ -48,3 +49,20 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// The window starts hidden on Windows/Linux (visible:false) so users never see
+// the webview's white pre-paint frame or the window-state geometry restore
+// happening mid-view. Reveal it once the dark UI has actually painted (two rAFs
+// = one composited frame), with a timeout backstop so a missed frame can never
+// strand the window hidden. On macOS the window is already visible, so show()
+// is a harmless no-op.
+{
+  let revealed = false;
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    void getCurrentWindow().show().catch(() => {});
+  };
+  requestAnimationFrame(() => requestAnimationFrame(reveal));
+  setTimeout(reveal, 2000);
+}

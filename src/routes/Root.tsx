@@ -44,6 +44,8 @@ import { useKeybindings } from "../lib/keybindings/useKeybindings";
 import type { Overrides } from "../lib/keybindings/resolve";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
 import { RepoAvatar } from "../components/RepoAvatar";
+import { HyprlayerMark } from "../components/Logo";
+import { WindowControls } from "../components/WindowControls";
 import {
   BookIcon,
   ChevronDownIcon,
@@ -718,8 +720,10 @@ export function Root() {
   // Floor for the header inset: clear the absolutely-positioned left cluster so
   // the breadcrumb never collides with it when the sidebar is collapsed. The
   // cluster carries the sidebar toggle (every route has a collapsible left
-  // panel) plus the docs button (project routes only).
-  const leftClusterIcons = 1 + (currentProject ? 1 : 0);
+  // panel) plus the docs button (project routes only) — and, off macOS, the
+  // leading Hyprlayer mark (the VSCode-style product icon; macOS shows none, its
+  // icon lives in the Dock, so the cluster there clears only the controls).
+  const leftClusterIcons = (IS_MACOS ? 0 : 1) + 1 + (currentProject ? 1 : 0);
   const leftClusterRight =
     leftClusterLeft +
     leftClusterIcons * LEFT_CLUSTER_ICON +
@@ -836,6 +840,23 @@ export function Root() {
           className="absolute top-1/2 flex -translate-y-1/2 items-center gap-1"
           style={{ left: leftClusterLeft }}
         >
+          {/* Off macOS the native title bar is gone (decorations: false), so the
+              top-left corner is ours to fill — lead the cluster with the
+              Hyprlayer mark, the VSCode-style product icon. macOS keeps its
+              native traffic lights here and shows no in-app logo (its icon lives
+              in the Dock), so this renders only off macOS. `drag-region="deep"`
+              (not bare) so the glyph itself drags the window, not just the box's
+              padding ring — the SVG is the click target, and a bare region only
+              drags on a direct hit. */}
+          {!IS_MACOS && (
+            <span
+              className="flex h-7 w-7 shrink-0 items-center justify-center"
+              data-tauri-drag-region="deep"
+              aria-hidden="true"
+            >
+              <HyprlayerMark size={20} />
+            </span>
+          )}
           {/* Explicit sidebar toggle — the discoverable way to collapse or show
               the left panel (the project tree, or the Library's list panel on
               /library). The nav rail's Projects entry also toggles the tree, but
@@ -1010,6 +1031,12 @@ export function Root() {
             )}
           </div>
         </div>
+
+        {/* Off-macOS, the native title bar is removed (decorations: false), so
+            we draw our own caption buttons flush in the top-right corner — the
+            VSCode look. macOS keeps its overlaid traffic lights, so the
+            component renders nothing there. */}
+        <WindowControls />
       </header>
 
       <div className="flex min-h-0 flex-1">
