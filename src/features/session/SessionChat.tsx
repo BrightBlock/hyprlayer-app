@@ -1510,6 +1510,10 @@ export function SessionChat({
     setError(null);
     try {
       await sendMessage(sid, text, attachments);
+      // Sending is an explicit "bring me back to the conversation" — re-stick to
+      // the bottom so the user sees their message (and the reply) even if they'd
+      // scrolled up. No-ops when already at the bottom.
+      transcriptRef.current?.scrollToBottom();
       onDraftChange("");
       setHistoryNav(IDLE_NAV);
       recalledValueRef.current = null;

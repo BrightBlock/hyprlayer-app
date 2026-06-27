@@ -960,6 +960,8 @@ type Props = {
 export type TranscriptHandle = {
   /** Scroll the transcript to the tool row with the given `toolUseId`. */
   scrollToTool: (toolUseId: string) => void;
+  /** Re-stick to the bottom and jump there — for after the user sends a message. */
+  scrollToBottom: () => void;
 };
 
 /** How close to the bottom (px) counts as "stuck to the bottom" — the gate for
@@ -972,6 +974,12 @@ const RESTICK_PX = 24;
 /** When the view re-sticks from a gap, ease the catch-up to the exact bottom
  *  shut over roughly this long instead of jumping — keeps the re-lock smooth. */
 const RELOCK_MS = 200;
+
+/** The post-send glide to the bottom is intentionally gentler than the mid-stream
+ *  re-lock — a smaller per-frame step over a slightly longer window — so it reads
+ *  as a deliberate scroll rather than a snap. */
+const SEND_GLIDE_FACTOR = 0.12;
+const SEND_GLIDE_MS = 600;
 
 export const TranscriptView = memo(
   forwardRef<TranscriptHandle, Props>(function TranscriptView(
@@ -988,6 +996,25 @@ export const TranscriptView = memo(
     // performance.now() until which a freshly re-stuck view eases the remaining
     // gap to the bottom instead of snapping (a smooth "catch up" on re-lock).
     const relockUntil = useRef(0);
+    // rAF id of an in-flight send-ease (the glide to bottom after a send); 0 = none.
+    const easeFrame = useRef(0);
+
+    // Keep the view at the bottom while stuck. A fresh re-lock (see `relockUntil`)
+    // eases the gap shut over a few frames so it glides rather than jumps; steady
+    // streaming pins hard so it tracks the live output tightly. No-ops the instant
+    // the user scrolls up (atBottom cleared), so it never fights them.
+    const pin = useCallback((factor = 0.3) => {
+      const el = scrollRef.current;
+      if (!el || !atBottom.current) return;
+      const target = el.scrollHeight - el.clientHeight;
+      const gap = target - el.scrollTop;
+      if (gap <= 0) return;
+      if (gap > 2 && performance.now() < relockUntil.current) {
+        el.scrollTop += Math.max(1, gap * factor);
+      } else {
+        el.scrollTop = target;
+      }
+    }, []);
 
     useImperativeHandle(ref, () => ({
       scrollToTool(toolUseId) {
@@ -996,24 +1023,29 @@ export const TranscriptView = memo(
         const el = container.querySelector(`[data-tooluse-id="${toolUseId}"]`);
         if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
       },
+      // Re-engage the stick and *glide* to the bottom, reusing pin's relock ease,
+      // so a send from a scrolled-up spot animates down instead of snapping. pin
+      // re-targets the live bottom each frame, so it lands true even as the new
+      // message renders; after the window the normal pin loop / idle-snap keeps it
+      // pinned for the streaming reply. No-op when already at the bottom.
+      scrollToBottom() {
+        atBottom.current = true;
+        const el = scrollRef.current;
+        if (!el || el.scrollHeight - el.clientHeight - el.scrollTop <= 0) return;
+        relockUntil.current = performance.now() + SEND_GLIDE_MS;
+        if (easeFrame.current) return; // an ease is already gliding — it'll see the refreshed window
+        const tick = () => {
+          pin(SEND_GLIDE_FACTOR);
+          if (performance.now() < relockUntil.current) {
+            easeFrame.current = requestAnimationFrame(tick);
+          } else {
+            pin(SEND_GLIDE_FACTOR); // final settle onto the exact bottom
+            easeFrame.current = 0;
+          }
+        };
+        easeFrame.current = requestAnimationFrame(tick);
+      },
     }));
-
-    // Keep the view at the bottom while stuck. A fresh re-lock (see `relockUntil`)
-    // eases the gap shut over a few frames so it glides rather than jumps; steady
-    // streaming pins hard so it tracks the live output tightly. No-ops the instant
-    // the user scrolls up (atBottom cleared), so it never fights them.
-    const pin = useCallback(() => {
-      const el = scrollRef.current;
-      if (!el || !atBottom.current) return;
-      const target = el.scrollHeight - el.clientHeight;
-      const gap = target - el.scrollTop;
-      if (gap <= 0) return;
-      if (gap > 2 && performance.now() < relockUntil.current) {
-        el.scrollTop += Math.max(1, gap * 0.3);
-      } else {
-        el.scrollTop = target;
-      }
-    }, []);
 
     const onScroll = () => {
       const el = scrollRef.current;
@@ -1048,7 +1080,10 @@ export const TranscriptView = memo(
     useEffect(() => {
       if (busy) return;
       const el = scrollRef.current;
-      if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+      if (!el || !atBottom.current) return;
+      // A send-ease is gliding to the bottom — let it animate, don't snap past it.
+      if (easeFrame.current && performance.now() < relockUntil.current) return;
+      el.scrollTop = el.scrollHeight;
     }, [items, busy]);
 
     // While a turn is in flight the visible text grows between store updates, so
@@ -1061,6 +1096,14 @@ export const TranscriptView = memo(
       });
       return () => cancelAnimationFrame(frame);
     }, [busy, pin]);
+
+    // Cancel any in-flight send-ease on unmount so it can't tick after teardown.
+    useEffect(
+      () => () => {
+        if (easeFrame.current) cancelAnimationFrame(easeFrame.current);
+      },
+      [],
+    );
 
     // Subagent items nest under their `Task`; the main thread shows the rest.
     const childrenByParent: ChildMap = new Map();
