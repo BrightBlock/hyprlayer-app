@@ -276,7 +276,9 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
               {pull.data?.kind === "upToDate" && (
                 <p className="px-1 text-[11px] text-ink-dim">Already up to date.</p>
               )}
-              {pull.isError && <ErrorNote error={pull.error} />}
+              {/* Dismiss clears the mutation back to idle; re-running the local
+                  merge (the pull button) re-throws and re-shows it on failure. */}
+              {pull.isError && <ErrorNote error={pull.error} onDismiss={() => pull.reset()} />}
             </div>
 
             {/* Commit / Ship. Both gate on the live changed-count; neither shows

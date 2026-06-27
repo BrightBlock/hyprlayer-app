@@ -9,6 +9,7 @@ import type {
 
 import { errorMessage, errorRemedy } from "../lib/ipc";
 import { useEscape } from "../lib/keybindings/registry";
+import { XIcon } from "./icons";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -195,15 +196,33 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
   );
 }
 
-export function ErrorNote({ error }: { error: unknown }) {
+export function ErrorNote({
+  error,
+  onDismiss,
+}: {
+  error: unknown;
+  /** When provided, renders a × that clears the note. The caller owns the
+   *  dismissal (e.g. resetting the mutation) so a fresh attempt re-shows it. */
+  onDismiss?: () => void;
+}) {
   // No error → render nothing. Without this a null/undefined error (e.g. a
   // mutation that hasn't run yet) paints a box reading "null", since
   // `errorMessage(null)` stringifies to "null".
   if (error == null) return null;
   const remedy = errorRemedy(error);
   return (
-    <div className="selectable rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
-      <p className="text-bad">{errorMessage(error)}</p>
+    <div className="selectable relative rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss error"
+          className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-bad/70 hover:bg-bad/15 hover:text-bad"
+        >
+          <XIcon size={11} />
+        </button>
+      )}
+      <p className={cx("text-bad", onDismiss && "pr-5")}>{errorMessage(error)}</p>
       {remedy && <p className="mt-1 text-ink-dim">{remedy}</p>}
     </div>
   );
