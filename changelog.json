@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.3.11",
+      "date": "2026-06-27",
+      "summary": "Minor stability improvements and internal updates.",
+      "notes": [
+        "Minor stability improvements and internal updates."
+      ]
+    },
+    {
       "version": "0.3.10",
       "date": "2026-06-27",
       "summary": "Stability and polish improvements.",
