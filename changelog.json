@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.3.14",
+      "date": "2026-06-27",
+      "summary": "VSCode-style frameless window on Windows and Linux.",
+      "notes": [
+        "Windows and Linux now use a frameless window with a custom title bar, matching the macOS look."
+      ]
+    },
+    {
       "version": "0.3.13",
       "date": "2026-06-27",
       "summary": "Agent archive, real context meter, smoother animations.",
