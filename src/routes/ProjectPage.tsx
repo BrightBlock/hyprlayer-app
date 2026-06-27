@@ -13,7 +13,7 @@ import {
 } from "../components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "../components/icons";
+import { ArchiveIcon, DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "../components/icons";
 import { ScrollableTabStrip } from "../components/ScrollableTabs";
 import { commands, type WorkstreamView } from "../lib/bindings";
 import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
@@ -23,12 +23,19 @@ import { PrChecksPanel } from "../features/workstreams/PrChecksPanel";
 import { DiffTab } from "../features/workstreams/DiffTab";
 import { FileViewerTab } from "../features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
+import { ArchivedAgentsView } from "../features/session/ArchivedAgentsView";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { TabTitle } from "../features/session/TabTitle";
 import { TerminalTab } from "../features/session/TerminalTab";
 import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
-import { killSession, stopSession, transcriptToText, useSession } from "../features/session/sessionStore";
-import { isBusy } from "../features/session/transcript";
+import {
+  killSession,
+  stopSession,
+  transcriptToText,
+  useSession,
+  useSessionStore,
+} from "../features/session/sessionStore";
+import { isBusy, isTerminal, type SessionState } from "../features/session/transcript";
 import { useCommand } from "../lib/keybindings/registry";
 import {
   importDroppedPaths,
@@ -37,12 +44,17 @@ import {
 } from "../features/session/attachments";
 import { nextModeStage, stageLabel, type StageKey } from "../features/session/stages";
 import {
+  archiveShellState,
+  clearArchiveOnRefocus,
   cycleActiveTab,
   defaultTabState,
   nextShellId,
+  removeShellState,
   requestComposerFocus,
+  unarchiveShellState,
   updateWorkstreamTabs,
   useWorkstreamTabsStore,
+  type ArchivedStatus,
   type WsTabState,
 } from "../features/session/workstreamTabs";
 import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
@@ -142,6 +154,55 @@ function isAgentShell(shell: ShellTab): boolean {
   return !isViewerShell(shell) && !isTerminalShell(shell);
 }
 
+/** The disabled-reason shown when a still-working agent can't be archived yet. */
+const AGENT_BUSY_HINT = "Agent is still working — stop it first.";
+
+/** Snapshot an agent's lifecycle into a coarse archive-row label at archive time
+ *  (the live entry isn't kept around while archived). */
+function classifyArchivedStatus(state: SessionState | undefined): ArchivedStatus {
+  if (!state) return "idle";
+  if (state === "completed") return "done";
+  if (isTerminal(state)) return "stopped";
+  return "idle";
+}
+
+/** The tab's "×": archives an agent (keeping its session/branch/transcript)
+ *  rather than ending it — closing moves to right-click → Close. Terminals and
+ *  viewers just close. Soft-disabled (reactively) while the agent is working. */
+function TabCloseControl({
+  shell,
+  onArchive,
+  onClose,
+}: {
+  shell: ShellTab;
+  onArchive: () => void;
+  onClose: () => void;
+}) {
+  const session = useSession(shell.sessionId);
+  const agent = isAgentShell(shell);
+  const busy = agent && session ? isBusy(session) : false;
+  const label = agent ? (busy ? AGENT_BUSY_HINT : `Archive ${shell.title}`) : `Close ${shell.title}`;
+  return (
+    <button
+      type="button"
+      aria-disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (busy) return;
+        if (agent) onArchive();
+        else onClose();
+      }}
+      className={`mr-1 inline-flex h-5 w-5 items-center justify-center rounded ${
+        busy ? "cursor-not-allowed text-ink-dim/40" : "text-ink-dim hover:bg-edge hover:text-ink"
+      }`}
+      title={label}
+      aria-label={label}
+    >
+      <XIcon />
+    </button>
+  );
+}
+
 /**
  * Detach the doc at `path` from a shell. A manually-attached doc is just removed;
  * detaching a *suggested* chip also records the path in `dismissedSuggestions` so
@@ -181,6 +242,8 @@ function ProjectCommands(props: {
   /** Cycle the focused agent's stage, or null when there's no un-started agent
    *  tab in focus (a running agent's stage is fixed; terminals have none). */
   onCycleStage: (() => void) | null;
+  /** Toggle the archived-agents pane, or null when no workstream is selected. */
+  onToggleArchived: (() => void) | null;
 }) {
   const session = useSession(props.sessionId);
   // "Stop turn" only makes sense while the focused pane's session is working /
@@ -196,6 +259,7 @@ function ProjectCommands(props: {
   useCommand("terminal.open", props.onToggleTerminal);
   useCommand("terminal.toggleFullscreen", props.onToggleTerminalFull);
   useCommand("ws.cycleStage", props.onCycleStage);
+  useCommand("view.toggleArchivedAgents", props.onToggleArchived);
   useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
   useCommand("session.clear", sid ? () => void killSession(sid) : null);
   return null;
@@ -379,13 +443,41 @@ export function ProjectPage() {
   const docsModalShell =
     docsModalShellId !== null ? (shells.find((s) => s.id === docsModalShellId) ?? null) : null;
   const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
+  const archivedShells = tabs?.archived ?? [];
+  const archiveViewOpen = tabs?.archiveOpen ?? false;
+  // One toggle for both entry points (tab-bar button + keyboard command), so a
+  // repeat flips the same state shut. Null with no workstream selected, which
+  // leaves the keyboard command inert.
+  const toggleArchived = wsId
+    ? () => updateTabs((c) => ({ ...c, archiveOpen: !c.archiveOpen }))
+    : null;
+  // The right-clicked tab is the main pane's last agent, so closing or archiving
+  // it would empty the pane — both are blocked.
+  const contextIsLastMain = !!contextShell && isMainShell(contextShell) && mainShells.length === 1;
+  // Why "Archive agent" is blocked for the right-clicked tab (null = allowed).
+  // Read non-reactively: the menu is short-lived and a hook can't run here (the
+  // early returns above forbid it).
+  const contextEntry = contextShell?.sessionId
+    ? useSessionStore.getState().sessions[contextShell.sessionId]
+    : undefined;
+  const archiveBlockedReason =
+    contextEntry && isBusy(contextEntry)
+      ? AGENT_BUSY_HINT
+      : contextIsLastMain
+        ? "Keep at least one agent in the strip."
+        : null;
   const shellBeingRenamed = renameShellId
     ? shells.find((s) => s.id === renameShellId)
     : null;
 
   const updateTabs = (updater: (current: WsTabState) => WsTabState) => {
     if (!wsId) return;
-    updateWorkstreamTabs((all) => ({ ...all, [wsId]: updater(all[wsId] ?? defaultTabState()) }));
+    updateWorkstreamTabs((all) => {
+      const current = all[wsId] ?? defaultTabState();
+      // updateTabs is the funnel every tab action passes through, so clearing the
+      // archived-agents view on refocus here means no caller has to remember to.
+      return { ...all, [wsId]: clearArchiveOnRefocus(current, updater(current)) };
+    });
   };
   // Replace one shell by id via a transform — the single "map the shells, touch
   // the matching one" primitive the per-shell mutators build on.
@@ -442,7 +534,7 @@ export function ProjectPage() {
   });
   // Append a fresh agent to the right pane and focus it (opening the split).
   const spawnRightShell = (current: WsTabState): WsTabState => {
-    const id = nextShellId(current.shells);
+    const id = nextShellId(current.shells, current.archived);
     return {
       ...current,
       shells: [...current.shells, makeShell(id, "right")],
@@ -453,7 +545,7 @@ export function ProjectPage() {
   };
   const addShell = () => {
     updateTabs((current) => {
-      const id = nextShellId(current.shells);
+      const id = nextShellId(current.shells, current.archived);
       return {
         ...current,
         shells: [...current.shells, makeShell(id, "main")],
@@ -489,7 +581,7 @@ export function ProjectPage() {
           activePane: right ? ("right" as const) : ("main" as const),
         };
       }
-      const id = nextShellId(current.shells);
+      const id = nextShellId(current.shells, current.archived);
       return {
         ...current,
         shells: [
@@ -614,7 +706,7 @@ export function ProjectPage() {
     updateTabs((current) => {
       const existing = current.shells.find(match);
       if (existing) return { ...current, activeId: existing.id, activePane: "main" };
-      const nextId = nextShellId(current.shells);
+      const nextId = nextShellId(current.shells, current.archived);
       const shell: ShellTab = {
         id: nextId,
         title,
@@ -647,37 +739,39 @@ export function ProjectPage() {
     if (!tabs) return;
     const shell = tabs.shells.find((s) => s.id === shellId);
     if (!shell) return;
-    const onRight = isRightShell(shell);
     // The main pane must always keep at least one shell.
-    if (!onRight && tabs.shells.filter(isMainShell).length === 1) return;
-    // Closing the tab ends its session — there's no End button; the window IS
-    // the handle. (No-op if the session already ended or was never started.)
+    if (isMainShell(shell) && tabs.shells.filter(isMainShell).length === 1) return;
+    // Closing ends the session — there's no End button; the window IS the handle.
+    // (No-op if the session already ended or was never started.)
     if (shell.sessionId) void killSession(shell.sessionId);
-    if (shell.terminalView?.terminalId)
-      void commands.terminalClose(shell.terminalView.terminalId);
-    updateTabs((current) => {
-      const remaining = current.shells.filter((s) => s.id !== shellId);
-      if (onRight) {
-        const rights = remaining.filter(isRightShell);
-        return {
-          ...current,
-          shells: remaining,
-          rightActiveId:
-            current.rightActiveId === shellId
-              ? rights[rights.length - 1]?.id
-              : current.rightActiveId,
-          rightSplit: rights.length > 0 ? current.rightSplit : false,
-          activePane: rights.length > 0 ? current.activePane : "main",
-        };
-      }
-      const mains = remaining.filter(isMainShell);
-      const activeId =
-        current.activeId === shellId
-          ? (mains[mains.length - 1]?.id ?? current.activeId)
-          : current.activeId;
-      return { ...current, shells: remaining, activeId };
-    });
+    if (shell.terminalView?.terminalId) void commands.terminalClose(shell.terminalView.terminalId);
+    updateTabs((current) => removeShellState(current, shellId));
   };
+  // Archive an agent: lift its tab out of the strip but keep the session, branch,
+  // worktree and transcript intact (the opposite of closeShell). The status
+  // snapshot only labels the archive row; archiveShellState no-ops if it can't.
+  const archiveShell = (shellId: number) => {
+    const shell = shells.find((s) => s.id === shellId);
+    if (!shell) return;
+    const entry = shell.sessionId
+      ? useSessionStore.getState().sessions[shell.sessionId]
+      : undefined;
+    const status = classifyArchivedStatus(entry?.state);
+    updateTabs((current) => archiveShellState(current, shellId, status, Date.now()));
+  };
+  // Restore an archived agent and focus its composer — re-mounting SessionChat
+  // re-attaches the live session or rehydrates it from the transcript.
+  const unarchiveShell = (shellId: number) => {
+    updateTabs((current) => unarchiveShellState(current, shellId));
+    requestComposerFocus(shellId);
+  };
+  // Drop an archived entry for good. The branch/worktree/transcript live on the
+  // backend and are untouched — only the resumable tab handle is forgotten.
+  const removeArchivedShell = (shellId: number) =>
+    updateTabs((current) => ({
+      ...current,
+      archived: (current.archived ?? []).filter((a) => a.shell.id !== shellId),
+    }));
   // The "Toggle Terminal" command (⌘`): open a terminal if none exists, reveal it
   // if it's hidden, or hide it when it's already on screen. Hiding preserves the
   // PTY (collapses the dock for a right-pane terminal, defocuses the tab for a
@@ -959,18 +1053,11 @@ export function ProjectPage() {
         )}
       </span>
       {opts.closable && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            closeShell(shell.id);
-          }}
-          className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
-          title={`Close ${shell.title}`}
-          aria-label={`Close ${shell.title}`}
-        >
-          <XIcon />
-        </button>
+        <TabCloseControl
+          shell={shell}
+          onArchive={() => archiveShell(shell.id)}
+          onClose={() => closeShell(shell.id)}
+        />
       )}
     </div>
   );
@@ -1096,6 +1183,7 @@ export function ProjectPage() {
             ? () => changeShellMode(focusedShell, nextModeStage(focusedShell.mode))
             : null
         }
+        onToggleArchived={toggleArchived}
       />
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
@@ -1135,6 +1223,25 @@ export function ProjectPage() {
                 </ScrollableTabStrip>
                 {activeView && (
                   <div className="flex shrink-0 items-center gap-1">
+                    {/* Subtle archive entry-point: blends into the tab bar, shows a
+                        count, and toggles the workstream's archived-agents view. */}
+                    <button
+                      type="button"
+                      onClick={() => toggleArchived?.()}
+                      title="Archived agents"
+                      aria-label="Archived agents"
+                      aria-pressed={archiveViewOpen}
+                      className={`inline-flex h-8 items-center gap-1 rounded-md px-2 transition-colors hover:bg-panel-2 hover:text-ink ${
+                        archiveViewOpen ? "bg-panel-2 text-ink" : "text-ink-dim"
+                      }`}
+                    >
+                      <ArchiveIcon size={15} />
+                      {archivedShells.length > 0 && (
+                        <span className="font-mono text-[11px] leading-none">
+                          {archivedShells.length}
+                        </span>
+                      )}
+                    </button>
                     <IconButton
                       onClick={toggleTerminal}
                       active={terminalVisible}
@@ -1156,7 +1263,7 @@ export function ProjectPage() {
               </div>
               {/* Right-pane tab strip, sized + bordered to sit over the right
                   pane below so the two read as one continuous column. */}
-              {activeView && rightSplit && (
+              {activeView && rightSplit && !archiveViewOpen && (
                 <div
                   data-pane="right"
                   className={`flex shrink-0 items-center gap-1 border-l border-edge px-3 ${
@@ -1250,14 +1357,27 @@ export function ProjectPage() {
                       Expand to full view
                     </ContextMenuItem>
                   ) : null)}
+                {isAgentShell(contextShell) && (
+                  <ContextMenuItem
+                    disabled={archiveBlockedReason !== null}
+                    hint={archiveBlockedReason ?? undefined}
+                    onClick={() => {
+                      archiveShell(contextShell.id);
+                      setShellMenu(null);
+                    }}
+                  >
+                    Archive agent
+                  </ContextMenuItem>
+                )}
                 <ContextMenuItem
-                  disabled={(contextShell.panel ?? "main") !== "right" && mainShells.length === 1}
+                  danger={isAgentShell(contextShell)}
+                  disabled={contextIsLastMain}
                   onClick={() => {
                     closeShell(contextShell.id);
                     setShellMenu(null);
                   }}
                 >
-                  Close tab
+                  {isAgentShell(contextShell) ? "Close agent" : "Close tab"}
                 </ContextMenuItem>
               </ContextMenu>
             )}
@@ -1292,46 +1412,56 @@ export function ProjectPage() {
             />
 
             {activeView ? (
-              <div ref={splitRowRef} className="flex min-h-0 flex-1">
-                <div
-                  data-pane="main"
-                  className={`relative flex min-h-0 min-w-0 flex-col ${
-                    maxRight ? "hidden" : "flex-1"
-                  } ${dropPane === "main" ? "ring-2 ring-inset ring-accent/60" : ""}`}
-                  onPointerDownCapture={() => {
-                    if (rightSplit && activePane !== "main") setActivePane("main");
-                  }}
-                >
-                  {renderPaneContent(activeShell)}
+              archiveViewOpen ? (
+                <ArchivedAgentsView
+                  workstreamTitle={activeView.item.title}
+                  branch={activeView.item.branch}
+                  archived={archivedShells}
+                  onUnarchive={unarchiveShell}
+                  onRemove={removeArchivedShell}
+                />
+              ) : (
+                <div ref={splitRowRef} className="flex min-h-0 flex-1">
+                  <div
+                    data-pane="main"
+                    className={`relative flex min-h-0 min-w-0 flex-col ${
+                      maxRight ? "hidden" : "flex-1"
+                    } ${dropPane === "main" ? "ring-2 ring-inset ring-accent/60" : ""}`}
+                    onPointerDownCapture={() => {
+                      if (rightSplit && activePane !== "main") setActivePane("main");
+                    }}
+                  >
+                    {renderPaneContent(activeShell)}
+                  </div>
+                  {rightSplit && (
+                    <>
+                      <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize agent split"
+                        className={`relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60 ${
+                          maximizedView ? "hidden" : ""
+                        }`}
+                        onPointerDown={startSplitResize}
+                      />
+                      <div
+                        data-pane="right"
+                        className={`relative flex min-h-0 flex-col border-l border-edge ${
+                          maxMain ? "hidden" : ""
+                        } ${maxRight ? "flex-1" : ""} ${
+                          dropPane === "right" ? "ring-2 ring-inset ring-accent/60" : ""
+                        }`}
+                        style={maxRight ? undefined : { width: `${rightRatio * 100}%` }}
+                        onPointerDownCapture={() => {
+                          if (activePane !== "right") setActivePane("right");
+                        }}
+                      >
+                        {renderPaneContent(rightActiveShell)}
+                      </div>
+                    </>
+                  )}
                 </div>
-                {rightSplit && (
-                  <>
-                    <div
-                      role="separator"
-                      aria-orientation="vertical"
-                      aria-label="Resize agent split"
-                      className={`relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60 ${
-                        maximizedView ? "hidden" : ""
-                      }`}
-                      onPointerDown={startSplitResize}
-                    />
-                    <div
-                      data-pane="right"
-                      className={`relative flex min-h-0 flex-col border-l border-edge ${
-                        maxMain ? "hidden" : ""
-                      } ${maxRight ? "flex-1" : ""} ${
-                        dropPane === "right" ? "ring-2 ring-inset ring-accent/60" : ""
-                      }`}
-                      style={maxRight ? undefined : { width: `${rightRatio * 100}%` }}
-                      onPointerDownCapture={() => {
-                        if (activePane !== "right") setActivePane("right");
-                      }}
-                    >
-                      {renderPaneContent(rightActiveShell)}
-                    </div>
-                  </>
-                )}
-              </div>
+              )
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto p-5">
                 <div className="mx-auto max-w-3xl space-y-4">

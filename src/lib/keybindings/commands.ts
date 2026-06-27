@@ -94,6 +94,13 @@ export const COMMANDS: CommandDef[] = [
     when: "project",
     defaults: { mac: "mod+shift+b", other: "mod+shift+b" },
   },
+  {
+    id: "view.toggleArchivedAgents",
+    label: "Toggle Archived Agents",
+    category: "View",
+    when: "workstream",
+    defaults: { mac: "mod+shift+a", other: "mod+shift+a" },
+  },
   // Workspace
   {
     id: "tab.new",

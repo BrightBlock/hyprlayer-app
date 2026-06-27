@@ -25,6 +25,28 @@ export type WsTabState = {
   rightSplit?: boolean;
   rightActiveId?: number;
   activePane?: "main" | "right";
+  /** Agents archived out of this workstream's strip, newest first. Persisted
+   *  alongside the rest of the strip, so archiving survives an app restart. */
+  archived?: ArchivedShell[];
+  /** Whether the full-pane "Archived agents" view is showing instead of the
+   *  focused tab. Owned by the tab state (not component state) so every tab
+   *  action can leave it in one place — focusing any tab clears it. */
+  archiveOpen?: boolean;
+};
+
+/** A coarse session-lifecycle bucket frozen at archive time (the live entry
+ *  isn't kept around while archived), used only to label the archive row.
+ *  `stopped` lumps interrupted/killed/crashed. */
+export type ArchivedStatus = "done" | "stopped" | "idle";
+
+/** An agent lifted out of the visible strip but kept whole: the `shell` is
+ *  restored verbatim on unarchive, so its session re-attaches (or rehydrates
+ *  from the transcript) like any reopened tab. Never touches the branch/worktree. */
+export type ArchivedShell = {
+  shell: ShellTab;
+  /** Epoch ms when archived; orders the list and renders "archived {ago}". */
+  archivedAt: number;
+  status: ArchivedStatus;
 };
 
 export const defaultTabState = (): WsTabState => ({
@@ -35,9 +57,11 @@ export const defaultTabState = (): WsTabState => ({
 });
 
 /** Next free shell id for a workstream — ids only ever grow, so a tab's id is
- *  stable for its lifetime even as siblings come and go. */
-export const nextShellId = (shells: ShellTab[]): number =>
-  Math.max(0, ...shells.map((s) => s.id)) + 1;
+ *  stable for its lifetime even as siblings come and go. Counts archived agents
+ *  too: an archived shell keeps its id, so a freshly-minted tab must never reuse
+ *  it (else unarchiving would collide with a live tab). */
+export const nextShellId = (shells: ShellTab[], archived: ArchivedShell[] = []): number =>
+  Math.max(0, ...shells.map((s) => s.id), ...archived.map((a) => a.shell.id)) + 1;
 
 /**
  * Cycle the active tab within the *focused* pane by `dir` (+1 next, -1 previous),
@@ -63,6 +87,92 @@ export function cycleActiveTab(state: WsTabState, dir: 1 | -1): WsTabState {
     : { ...state, activeId: nextId, activePane: "main" };
 }
 
+/**
+ * Remove `shellId` from the strip, settling the active id / focused pane onto a
+ * neighbour and collapsing the split when its last right-pane shell goes. The
+ * shared core of closing and archiving — neither ends the session here, that's
+ * the caller's job. Pure: returns the input unchanged when the shell is missing
+ * or is the main pane's last tab (the main pane always keeps one agent).
+ */
+export function removeShellState(state: WsTabState, shellId: number): WsTabState {
+  const shell = state.shells.find((s) => s.id === shellId);
+  if (!shell) return state;
+  const onRight = shell.panel === "right";
+  const isMain = (s: ShellTab) => (s.panel ?? "main") !== "right";
+  if (!onRight && state.shells.filter(isMain).length <= 1) return state;
+  const remaining = state.shells.filter((s) => s.id !== shellId);
+  if (onRight) {
+    const rights = remaining.filter((s) => s.panel === "right");
+    return {
+      ...state,
+      shells: remaining,
+      rightActiveId:
+        state.rightActiveId === shellId ? rights[rights.length - 1]?.id : state.rightActiveId,
+      rightSplit: rights.length > 0 ? state.rightSplit : false,
+      activePane: rights.length > 0 ? state.activePane : "main",
+    };
+  }
+  const mains = remaining.filter(isMain);
+  const activeId =
+    state.activeId === shellId ? (mains[mains.length - 1]?.id ?? state.activeId) : state.activeId;
+  return { ...state, shells: remaining, activeId };
+}
+
+/**
+ * Archive `shellId`: the same strip removal as closing (`removeShellState`), but
+ * the shell is kept whole in `archived` (newest first) instead of ended, so its
+ * branch, worktree and transcript survive to resume on unarchive. No-op when the
+ * shell is missing or is the main pane's last tab.
+ */
+export function archiveShellState(
+  state: WsTabState,
+  shellId: number,
+  status: ArchivedStatus,
+  archivedAt: number,
+): WsTabState {
+  const shell = state.shells.find((s) => s.id === shellId);
+  if (!shell) return state;
+  const next = removeShellState(state, shellId);
+  if (next === state) return state; // last main tab — nothing archived
+  return { ...next, archived: [{ shell, archivedAt, status }, ...(state.archived ?? [])] };
+}
+
+/**
+ * Restore an archived agent to the main strip and select it — re-homed into the
+ * main pane (its old pane may have since closed) but otherwise verbatim, its
+ * `sessionId` intact so the session re-attaches or rehydrates on mount. No-op
+ * when no archived entry matches `shellId`.
+ */
+export function unarchiveShellState(state: WsTabState, shellId: number): WsTabState {
+  const archived = state.archived ?? [];
+  const entry = archived.find((a) => a.shell.id === shellId);
+  if (!entry) return state;
+  const restored: ShellTab = { ...entry.shell, panel: "main" };
+  return {
+    ...state,
+    shells: [...state.shells, restored],
+    archived: archived.filter((a) => a.shell.id !== shellId),
+    activeId: restored.id,
+    activePane: "main",
+  };
+}
+
+/**
+ * Close the archived-agents view when `next` refocuses a tab relative to `prev`.
+ * A navigation (select/cycle/open a tab) clears it, but a removal (close/archive
+ * shrinks the strip) and a background patch (no focus change) leave it open — so
+ * managing the archive doesn't yank you out of the view. Pure; returns `next`
+ * unchanged when the view should stay (or was already closed).
+ */
+export function clearArchiveOnRefocus(prev: WsTabState, next: WsTabState): WsTabState {
+  const refocused =
+    next.shells.length >= prev.shells.length &&
+    (next.activeId !== prev.activeId ||
+      next.activePane !== prev.activePane ||
+      next.rightActiveId !== prev.rightActiveId);
+  return refocused && next.archiveOpen ? { ...next, archiveOpen: false } : next;
+}
+
 type TabsStore = { byWs: Record<string, WsTabState> };
 
 export const useWorkstreamTabsStore = create<TabsStore>()(
@@ -74,7 +184,8 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
     // v4 added `titleLocked`: lock every pre-existing tab so auto-titling never
     // rewrites a name the user has already been looking at (custom or default);
     // only tabs created after this build start unlocked and get auto-titled.
-    version: 4,
+    // v5 added per-workstream `archived` agents — backfill it to an empty list.
+    version: 5,
     migrate: (persisted) => {
       const state = persisted as TabsStore | undefined;
       if (!state?.byWs) return { byWs: {} };
@@ -86,6 +197,7 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
           dismissedSuggestions: s.dismissedSuggestions ?? [],
           titleLocked: s.titleLocked ?? true,
         }));
+        ws.archived = ws.archived ?? [];
       }
       return state;
     },
@@ -133,7 +245,9 @@ export function consumeComposerFocus(shellId: number): boolean {
  */
 export function openDocPreviewTab(workstreamId: string, path: string, title: string): void {
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    // Opening a tab from outside the project page also leaves the archived-agents
+    // view (the in-page `updateTabs` funnel that normally clears it can't reach).
+    const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };
     const existing = current.shells.find((s) => s.docPreviewPath === path);
     if (existing) {
       const inRightPane = existing.panel === "right";
@@ -148,7 +262,7 @@ export function openDocPreviewTab(workstreamId: string, path: string, title: str
         },
       };
     }
-    const nextId = nextShellId(current.shells);
+    const nextId = nextShellId(current.shells, current.archived);
     return {
       ...all,
       [workstreamId]: {
@@ -216,7 +330,7 @@ function openDedicatedTab(
         },
       };
     }
-    const nextId = nextShellId(current.shells);
+    const nextId = nextShellId(current.shells, current.archived);
     return {
       ...all,
       [workstreamId]: {

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   ButtonHTMLAttributes,
   HTMLAttributes,
@@ -278,9 +278,27 @@ type ContextMenuProps = {
 let closeActiveContextMenu: (() => void) | null = null;
 
 /** Fixed-position right-click menu; any window click or Escape closes it, and
- *  opening another menu closes this one. */
+ *  opening another menu closes this one. Clamps itself into the viewport so a
+ *  menu opened near a screen edge (e.g. a far-right overflow button) doesn't
+ *  spill off-screen. */
 export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
   useEscape(onClose);
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState(position);
+
+  // Measure once mounted and pull the menu back inside the viewport (before
+  // paint, so it never flashes off-screen). Re-runs when the anchor moves.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const margin = 8;
+    setPos({
+      x: Math.max(margin, Math.min(position.x, window.innerWidth - width - margin)),
+      y: Math.max(margin, Math.min(position.y, window.innerHeight - height - margin)),
+    });
+  }, [position.x, position.y]);
+
   useEffect(() => {
     // Mounting (or repositioning) closes whatever other menu was open.
     if (closeActiveContextMenu && closeActiveContextMenu !== onClose) closeActiveContextMenu();
@@ -295,9 +313,10 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
 
   return (
     <div
+      ref={ref}
       role="menu"
       className="fixed z-50 min-w-44 rounded-md border border-edge bg-panel p-1 shadow-2xl"
-      style={{ left: position.x, top: position.y }}
+      style={{ left: pos.x, top: pos.y }}
       onClick={(e) => e.stopPropagation()}
     >
       {children}
@@ -307,9 +326,12 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
 
 type ContextMenuItemProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   danger?: boolean;
+  /** A second, muted line under the label — typically why the item is disabled
+   *  (e.g. "Agent is still working — stop it first."). Rendered in warn tone. */
+  hint?: ReactNode;
 };
 
-export function ContextMenuItem({ danger, className, ...rest }: ContextMenuItemProps) {
+export function ContextMenuItem({ danger, hint, className, children, ...rest }: ContextMenuItemProps) {
   return (
     <button
       type="button"
@@ -321,6 +343,9 @@ export function ContextMenuItem({ danger, className, ...rest }: ContextMenuItemP
         className,
       )}
       {...rest}
-    />
+    >
+      {children}
+      {hint && <span className="mt-0.5 block text-xs text-warn">{hint}</span>}
+    </button>
   );
 }
