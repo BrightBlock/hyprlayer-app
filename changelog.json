@@ -3,9 +3,9 @@
     {
       "version": "0.3.11",
       "date": "2026-06-27",
-      "summary": "Minor stability improvements and internal updates.",
+      "summary": "Transcript stays pinned when the composer resizes.",
       "notes": [
-        "Minor stability improvements and internal updates."
+        "Fixed the transcript jumping away from the bottom when the composer grows or shrinks (e.g. while typing a long prompt or after a reply lands)."
       ]
     },
     {
