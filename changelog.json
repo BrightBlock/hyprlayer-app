@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.3.12",
+      "date": "2026-06-27",
+      "summary": "Sticky update toast and cleaner task lifecycle.",
+      "notes": [
+        "The update pill in the sidebar is replaced by a sticky action toast that appears when an update is ready.",
+        "Tasks deleted via TaskUpdate with status \"deleted\" are now correctly removed from the session."
+      ]
+    },
+    {
       "version": "0.3.11",
       "date": "2026-06-27",
       "summary": "Transcript stays pinned when the composer resizes.",
