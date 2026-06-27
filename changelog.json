@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.3.13",
+      "date": "2026-06-27",
+      "summary": "Agent archive, real context meter, smoother animations.",
+      "notes": [
+        "Sessions can now be archived directly from the agent view.",
+        "The context meter now reflects the model's actual context window size rather than a fixed estimate.",
+        "Sidebar and panel slide animations respect the system reduced-motion setting."
+      ]
+    },
+    {
       "version": "0.3.12",
       "date": "2026-06-27",
       "summary": "Sticky update toast and cleaner task lifecycle.",
