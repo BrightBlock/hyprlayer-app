@@ -20,6 +20,7 @@ import {
   TextInput,
 } from "../../components/ui";
 import type { CheckStatus, HealthCheck } from "../../lib/bindings";
+import { ScriptsCard } from "./ScriptsCard";
 
 const CHECK_TONE: Record<CheckStatus, "ok" | "warn" | "bad"> = {
   pass: "ok",
@@ -155,7 +156,7 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
       ) : detail.isError ? (
         <PageError error={detail.error} />
       ) : (
-        <div className="flex max-h-[68vh] flex-col space-y-3 overflow-hidden">
+        <div className="flex max-h-[80vh] flex-col space-y-3 overflow-y-auto pr-1">
           <div className="flex shrink-0 items-center justify-between gap-4">
             <p className="selectable min-w-0 truncate font-mono text-xs text-ink-dim">
               {detail.data!.project.path}
@@ -202,14 +203,16 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
 
           <WorktreeFilesCard projectPath={projectPath} />
 
-          <Card className="flex min-h-0 flex-col">
+          <ScriptsCard projectPath={projectPath} />
+
+          <Card className="shrink-0">
             <div className="flex shrink-0 items-center justify-between">
               <CardTitle className="mb-0">Backend health</CardTitle>
               <Button onClick={() => void health.refetch()} busy={health.isFetching}>
                 Run checks
               </Button>
             </div>
-            <div className="mt-2 min-h-0 flex-1 divide-y divide-edge/50 overflow-y-auto pr-1">
+            <div className="mt-2 divide-y divide-edge/50 pr-1">
               {health.isLoading && <Spinner />}
               {health.data?.checks.map((c) => <HealthRow key={c.id} check={c} />)}
               {health.isError && <ErrorNote error={health.error} />}

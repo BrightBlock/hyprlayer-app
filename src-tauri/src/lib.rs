@@ -4,6 +4,7 @@ mod error;
 mod events;
 mod opencode;
 mod pr_watch;
+mod script_registry;
 mod session_registry;
 mod settings;
 mod state;
@@ -124,6 +125,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::terminal::terminal_close,
             commands::terminal::spawn_cli_terminal,
             commands::terminal::spawn_shell_terminal,
+            commands::terminal::default_shell_name,
+            commands::scripts::get_scripts,
+            commands::scripts::set_scripts,
+            commands::scripts::script_run,
+            commands::scripts::script_stop,
+            commands::scripts::get_script_runtime,
+            commands::scripts::list_running_scripts,
+            commands::scripts::get_script_output,
             commands::onboarding::get_ai_status,
             commands::onboarding::probe_default_thoughts,
             commands::onboarding::init_thoughts_repo,
@@ -134,7 +143,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ThoughtsIndexUpdated,
             events::PrStatusChanged,
             events::WorktreeChanged,
-            events::SessionLifecycle
+            events::SessionLifecycle,
+            events::ScriptRunChanged
         ])
 }
 
@@ -283,6 +293,7 @@ pub fn run() {
                 sessions: Arc::new(session_registry::SessionRegistry::new()),
                 opencode: Arc::new(opencode::OpenCodeManager::new()),
                 terminals: Arc::new(terminal_registry::TerminalRegistry::new()),
+                scripts: Arc::new(script_registry::ScriptRegistry::new()),
                 focused,
                 focus_changed,
             });

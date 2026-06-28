@@ -236,7 +236,7 @@ pub async fn spawn_shell_terminal(
 /// Snapshots scrollback and subscribes atomically (see
 /// [`PtySession::subscribe_with_scrollback`]) so no output is lost or duplicated
 /// across the handoff, then streams the rest onto the UI channel.
-fn attach_stream(
+pub(crate) fn attach_stream(
     session: &PtySession,
     on_event: Channel<TerminalEvent>,
     registry: Arc<TerminalRegistry>,
@@ -299,6 +299,19 @@ pub(crate) fn default_shell() -> PathBuf {
         .ok()
         .or_else(|| std::env::var_os("ComSpec").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("powershell.exe"))
+}
+
+/// The default shell's display name — its file stem (e.g. "zsh", "bash", "pwsh",
+/// "powershell", "cmd"). Labels the dock's ad-hoc terminal tabs by the shell they
+/// actually spawn, instead of a hardcoded guess.
+#[tauri::command]
+#[specta::specta]
+pub fn default_shell_name() -> CmdResult<String> {
+    Ok(default_shell()
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("shell")
+        .to_string())
 }
 
 /// Args to run `command` through [`default_shell`]: `-lc` on unix, PowerShell's

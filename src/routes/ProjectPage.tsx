@@ -27,6 +27,9 @@ import { ArchivedAgentsView } from "../features/session/ArchivedAgentsView";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { TabTitle } from "../features/session/TabTitle";
 import { TerminalTab } from "../features/session/TerminalTab";
+import { ScriptDock } from "../features/session/ScriptDock";
+import { requestRun, setActiveWorkstream, useScriptsStore } from "../features/session/scriptsStore";
+import { openProjectSettings } from "../features/projects/projectSettingsStore";
 import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
 import {
   killSession,
@@ -239,6 +242,9 @@ function ProjectCommands(props: {
   onNewWorkstream: () => void;
   onToggleTerminal: () => void;
   onToggleTerminalFull: () => void;
+  /** ⌘R: run the workstream's Run script, or stop it if already live. Null when
+   *  no workstream is selected. */
+  onToggleRun: (() => void) | null;
   /** Cycle the focused agent's stage, or null when there's no un-started agent
    *  tab in focus (a running agent's stage is fixed; terminals have none). */
   onCycleStage: (() => void) | null;
@@ -258,6 +264,7 @@ function ProjectCommands(props: {
   useCommand("ws.new", props.onNewWorkstream);
   useCommand("terminal.open", props.onToggleTerminal);
   useCommand("terminal.toggleFullscreen", props.onToggleTerminalFull);
+  useCommand("scripts.run", props.onToggleRun);
   useCommand("ws.cycleStage", props.onCycleStage);
   useCommand("view.toggleArchivedAgents", props.onToggleArchived);
   useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
@@ -284,6 +291,17 @@ export function ProjectPage() {
   // id so switching workstreams never mixes tabs. Held in a module store so a
   // tab's bound session (and its draft/docs) survives leaving this page.
   const tabsByWs = useWorkstreamTabsStore((s) => s.byWs);
+  // The URL is the sole source of truth for which workstream is selected (no
+  // localStorage fallback — the project root with no ?item= shows the board).
+  // It's derived purely from the URL + the already-loaded list, so we compute it
+  // here, above the dock-open selector — which then subscribes to just THIS
+  // workstream's open flag rather than the whole dock map (the map changes on any
+  // workstream's dock interaction, which would re-render this entire page).
+  const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
+  const activeView = selectedId ? (views.find((v) => v.item.id === selectedId) ?? null) : null;
+  const wsId = activeView?.item.id ?? null;
+  const dockOpen = useScriptsStore((s) => (wsId ? !!s.dock[wsId]?.open : false));
+  const dockPosition = useScriptsStore((s) => s.dockPosition);
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   // Board-card right-click menu (Attach/Change/Detach PR) and the attach dialog.
@@ -335,12 +353,14 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.create]);
 
-  // Hooks live above the early returns. The URL is the sole source of truth
-  // for which workstream is selected. No localStorage fallback — clicking the
-  // project root (no ?item=) shows the board instead of auto-opening a chat.
-  const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
-  const activeView = selectedId ? (views.find((v) => v.item.id === selectedId) ?? null) : null;
-  const wsId = activeView?.item.id ?? null;
+  // The scripts dock is shown when the user has expanded it for this ws; its
+  // position (bottom strip vs. right sidebar) is a global preference. (views/
+  // activeView/wsId/dockOpen are computed above, with the store hooks.)
+  const rightDock = !!activeView && dockOpen && dockPosition === "right";
+  // The right sidebar's visibility is owned by its own toggle. A right-docked
+  // scripts panel only renders while that sidebar is shown (the rail icon reveals
+  // it when needed) — so the toggle still collapses the whole sidebar.
+  const showAside = !diffHidden;
   // True when no workstream is selected — the project-overview board.
   const showBoard = selectedId === undefined;
 
@@ -363,6 +383,13 @@ export function ProjectPage() {
   useEffect(() => {
     if (!wsId) return;
     void commands.watchWorktree(wsId);
+  }, [wsId]);
+
+  // Publish the on-screen workstream so the left-rail scripts icon can toggle its
+  // dock; clear it when leaving the project view.
+  useEffect(() => {
+    setActiveWorkstream(wsId);
+    return () => setActiveWorkstream(null);
   }, [wsId]);
 
   // Landing on a workstream — switching focus to it, or opening it fresh — drops
@@ -1174,6 +1201,15 @@ export function ProjectPage() {
         onNewWorkstream={() => setCreateOpen(true)}
         onToggleTerminal={toggleTerminal}
         onToggleTerminalFull={toggleTerminalFullscreen}
+        onToggleRun={
+          wsId
+            ? () => {
+                const id = wsId;
+                if (useScriptsStore.getState().running[id]) void commands.scriptStop(id);
+                else requestRun(id);
+              }
+            : null
+        }
         onCycleStage={
           // Only when an un-started agent tab holds focus: a live session's stage
           // is fixed at spawn, and terminal tabs have no stage. The composer
@@ -1242,14 +1278,6 @@ export function ProjectPage() {
                         </span>
                       )}
                     </button>
-                    <IconButton
-                      onClick={toggleTerminal}
-                      active={terminalVisible}
-                      title={terminalVisible ? "Close terminal" : "Open terminal"}
-                      aria-label={terminalVisible ? "Close terminal" : "Open terminal"}
-                    >
-                      <TerminalIcon />
-                    </IconButton>
                     <IconButton
                       onClick={toggleRightSplit}
                       active={rightSplit}
@@ -1479,11 +1507,19 @@ export function ProjectPage() {
                 </div>
               </div>
             )}
+            {activeView && dockOpen && dockPosition === "bottom" && (
+              <ScriptDock
+                key={activeView.item.id}
+                workstreamId={activeView.item.id}
+                projectPath={projectPath}
+                onEditScripts={() => openProjectSettings(projectPath)}
+              />
+            )}
           </main>
         </div>
       </section>
 
-      {!diffHidden && (
+      {showAside && (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -1504,8 +1540,8 @@ export function ProjectPage() {
             ? ""
             : "transition-[width] duration-200 ease-out"
         }`}
-        style={{ width: diffHidden ? 0 : diffWidth }}
-        inert={diffHidden}
+        style={{ width: showAside ? diffWidth : 0 }}
+        inert={!showAside}
       >
         <div className="absolute inset-y-0 right-0 flex flex-col" style={{ width: diffWidth }}>
           <GitPanel view={activeView ?? null} />
@@ -1517,6 +1553,15 @@ export function ProjectPage() {
               onOpenFile={openFile}
             />
           </div>
+          {rightDock && showAside && (
+            <ScriptDock
+              key={`${activeView!.item.id}:right`}
+              workstreamId={activeView!.item.id}
+              projectPath={projectPath}
+              onEditScripts={() => openProjectSettings(projectPath)}
+              orientation="right"
+            />
+          )}
           <PrChecksPanel view={activeView ?? null} />
         </div>
       </aside>

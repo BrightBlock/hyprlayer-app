@@ -17,6 +17,7 @@ pub mod pr;
 pub mod process;
 pub mod repo_settings;
 pub mod repos;
+pub mod scripts;
 pub mod skills;
 pub mod store;
 pub mod terminal;

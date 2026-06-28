@@ -10,6 +10,8 @@ import {
   type CreateDocInput,
   type FmPatchDto,
   type MergeMethod,
+  type ScriptKind,
+  type ScriptSettings,
   type ThoughtQuery,
   type ThoughtsSource,
   type WorkstreamView,
@@ -22,6 +24,16 @@ export function useBootstrap() {
   return useQuery({
     queryKey: ["bootstrap"],
     queryFn: () => unwrap(commands.getBootstrap()),
+  });
+}
+
+/** The default shell's name (zsh/bash/pwsh/…), to label the dock's ad-hoc
+ *  terminal tabs by the shell they spawn. Static per session. */
+export function useShellName() {
+  return useQuery({
+    queryKey: ["shell-name"],
+    queryFn: () => unwrap(commands.defaultShellName()),
+    staleTime: Infinity,
   });
 }
 
@@ -391,7 +403,10 @@ export function useSetWorkstreamStage(projectPath: string) {
 
 export function useArchiveWorkstream() {
   return useMutation({
-    mutationFn: ({ id }: { id: string }) => unwrap(commands.archiveWorkstream(id)),
+    // `skipScripts` runs the archive without the project's Archive script — used
+    // by the dialog's "Skip" path after the script failed once.
+    mutationFn: ({ id, skipScripts = false }: { id: string; skipScripts?: boolean }) =>
+      unwrap(commands.archiveWorkstream(id, skipScripts)),
     onSuccess: (_data, { id }) => {
       // Archiving kills the workstream's live sessions on the backend; release
       // their in-memory transcripts here so they don't linger for the session.
@@ -694,6 +709,59 @@ export function useWorktreeFilesCheck(path: string) {
     queryKey: ["worktree-files-check", path],
     queryFn: () => unwrap(commands.checkWorktreeFiles(path)),
   });
+}
+
+// ── Project lifecycle scripts (Setup / Run / Archive) ──────────────────────────
+
+/** The project's lifecycle scripts (`[scripts]` in `.hyprlayer/settings.toml`). */
+export function useScripts(path: string) {
+  return useQuery({
+    queryKey: ["scripts", path],
+    queryFn: () => unwrap(commands.getScripts(path)),
+  });
+}
+
+/** Persist the project's lifecycle scripts (whole-object replace). The Settings
+ *  card debounces calls into this for autosave. */
+export function useSetScripts(path: string) {
+  return useMutation({
+    mutationFn: (scripts: ScriptSettings) => unwrap(commands.setScripts(path, scripts)),
+    onSuccess: (_data, scripts) => {
+      queryClient.setQueryData(["scripts", path], scripts);
+    },
+  });
+}
+
+/** A workstream's live script runtime: the running Run process (terminal id +
+ *  detected port) and each script's last-run status. Hydrates the dock/rail on
+ *  mount; kept fresh by the `scriptRunChanged` event (see events.ts). */
+export function useScriptRuntime(workstreamId: string) {
+  return useQuery({
+    queryKey: ["script-runtime", workstreamId],
+    queryFn: () => unwrap(commands.getScriptRuntime(workstreamId)),
+    enabled: !!workstreamId,
+  });
+}
+
+/** Invalidate a workstream's script runtime (called from the scriptRunChanged
+ *  event bridge). */
+export function invalidateScriptRuntime(workstreamId: string) {
+  void queryClient.invalidateQueries({ queryKey: ["script-runtime", workstreamId] });
+}
+
+/** Captured output of a script's last run this session, or null. Drives the
+ *  dock's read-only Setup view. */
+export function useScriptOutput(workstreamId: string, kind: ScriptKind, enabled = true) {
+  return useQuery({
+    queryKey: ["script-output", workstreamId, kind],
+    queryFn: () => unwrap(commands.getScriptOutput(workstreamId, kind)),
+    enabled: enabled && !!workstreamId,
+  });
+}
+
+/** Invalidate a workstream/kind's captured output (from the event bridge). */
+export function invalidateScriptOutput(workstreamId: string, kind: ScriptKind) {
+  void queryClient.invalidateQueries({ queryKey: ["script-output", workstreamId, kind] });
 }
 
 // ── Harnesses (Claude Code + OpenCode) ─────────────────────────────────────

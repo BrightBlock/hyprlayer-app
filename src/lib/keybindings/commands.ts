@@ -214,6 +214,14 @@ export const COMMANDS: CommandDef[] = [
     when: "project",
     defaults: { mac: "mod+0", other: "mod+0" },
   },
+  {
+    id: "scripts.run",
+    label: "Run / Stop Workstream Run",
+    category: "Terminal",
+    when: "workstream",
+    // Runs the project's Run script (stopping a prior one), or stops it if live.
+    defaults: { mac: "mod+r", other: "mod+r" },
+  },
   // Session
   {
     id: "session.stop",

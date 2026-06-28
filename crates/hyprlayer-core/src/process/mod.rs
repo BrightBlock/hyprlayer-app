@@ -27,6 +27,10 @@ pub struct Exec {
     /// (`/dev/null`). Use this for sensitive input that must not appear in argv,
     /// which is world-readable via process listing.
     stdin: Option<Vec<u8>>,
+    /// Put the child in its own process group so a timeout SIGKILLs the whole
+    /// group (the command plus anything it spawned), not just the direct child.
+    /// Unix-only; a no-op on Windows.
+    own_process_group: bool,
     timeout: Duration,
 }
 
@@ -45,6 +49,7 @@ impl Exec {
             cwd: None,
             env: Vec::new(),
             stdin: None,
+            own_process_group: false,
             timeout: DEFAULT_TIMEOUT,
         }
     }
@@ -75,6 +80,14 @@ impl Exec {
 
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// Run the child in a fresh process group so a timeout kills the whole group
+    /// (e.g. a script that backgrounded a server), not just the direct child.
+    /// Unix-only; a no-op on Windows.
+    pub fn own_process_group(mut self) -> Self {
+        self.own_process_group = true;
         self
     }
 
@@ -126,6 +139,14 @@ impl Exec {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
+        #[cfg(unix)]
+        if self.own_process_group {
+            // New group with pgid == child pid, so a timeout can killpg the whole
+            // tree (see the timeout branch). `process_group` is inherent on tokio's
+            // Command on Unix.
+            cmd.process_group(0);
+        }
+
         let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 CoreError::BinaryMissing {
@@ -143,6 +164,10 @@ impl Exec {
         // deadlock us, and the pipe is dropped afterwards to signal EOF.
         let mut stdin_pipe = child.stdin.take();
         let stdin_data = self.stdin.clone();
+        // Captured before `work` borrows `child`, so the timeout branch can kill
+        // the child's whole process group.
+        #[cfg(unix)]
+        let child_pid = child.id();
 
         let work = async {
             let mut stdout = Vec::new();
@@ -175,10 +200,20 @@ impl Exec {
 
         match tokio::time::timeout(self.timeout, work).await {
             Ok(result) => Ok(result?),
-            Err(_) => Err(CoreError::ExecTimeout {
-                program: program_name(&self.program_display()),
-                seconds: self.timeout.as_secs(),
-            }),
+            Err(_) => {
+                // `kill_on_drop` only kills the direct child; when it's in its own
+                // group, SIGKILL the whole group so spawned children die too.
+                #[cfg(unix)]
+                if self.own_process_group {
+                    if let Some(pid) = child_pid {
+                        unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) };
+                    }
+                }
+                Err(CoreError::ExecTimeout {
+                    program: program_name(&self.program_display()),
+                    seconds: self.timeout.as_secs(),
+                })
+            }
         }
     }
 
@@ -202,5 +237,47 @@ fn tail(s: &str, max_chars: usize) -> String {
     } else {
         let skip = trimmed.chars().count() - max_chars;
         trimmed.chars().skip(skip).collect()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// With `own_process_group()`, a timeout must SIGKILL the whole group — a
+    /// child the command backgrounded must not outlive it.
+    #[tokio::test]
+    async fn timeout_kills_process_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        // Background a long sleep, record its pid, then hang so the timeout fires.
+        let script = format!("sleep 60 & echo $! > {}; sleep 60", pidfile.display());
+
+        let res = Exec::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .own_process_group()
+            .timeout(Duration::from_millis(500))
+            .run_unchecked()
+            .await;
+        assert!(
+            matches!(res, Err(CoreError::ExecTimeout { .. })),
+            "expected timeout, got {res:?}"
+        );
+
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .expect("pidfile written")
+            .trim()
+            .parse()
+            .expect("pid parses");
+        let mut gone = false;
+        for _ in 0..100 {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(gone, "backgrounded child {pid} survived the timeout");
     }
 }

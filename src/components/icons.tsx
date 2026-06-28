@@ -714,3 +714,81 @@ export function UnarchiveIcon({ size = 16, strokeWidth = 1.5, className }: IconP
     </svg>
   );
 }
+
+/** Filled play triangle — the Run action. */
+export function PlayIcon({ size = 13, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
+      <path d="M4.5 3.2c0-.5.54-.82.98-.57l7.2 4.8a.66.66 0 0 1 0 1.14l-7.2 4.8a.66.66 0 0 1-.98-.57Z" />
+    </svg>
+  );
+}
+
+/** Checkmark — a script's last run passed. */
+export function CheckIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        d="M3.2 8.4 6.4 11.5 12.8 4.7"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Globe — "Open :PORT" for a detected dev server. */
+export function GlobeIcon({ size = 13, strokeWidth = 1.5, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path
+        d="M2 8h12M8 2c1.8 1.7 1.8 10.3 0 12M8 2c-1.8 1.7-1.8 10.3 0 12"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Layout glyph: panel docked to the right edge. */
+export function DockRightIcon({ size = 13, strokeWidth = 1.5, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
+      <rect x="2" y="2.5" width="12" height="11" rx="1.8" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M10 2.5v11" stroke="currentColor" strokeWidth={strokeWidth} />
+      <rect x="10" y="2.5" width="4" height="11" fill="currentColor" opacity="0.35" />
+    </svg>
+  );
+}
+
+/** Layout glyph: panel docked to the bottom edge. */
+export function DockBottomIcon({ size = 13, strokeWidth = 1.5, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
+      <rect x="2" y="2.5" width="12" height="11" rx="1.8" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M2 9.5h12" stroke="currentColor" strokeWidth={strokeWidth} />
+      <rect x="2" y="9.5" width="12" height="4" fill="currentColor" opacity="0.35" />
+    </svg>
+  );
+}
+
+/** A bordered terminal panel — the rail icon for the script/terminal dock,
+ *  visually distinct from the Settings gear. */
+export function ScriptPanelIcon({ size = 18, strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
+      <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path
+        d="M4.4 6.2 6.6 8.4 4.4 10.6M8.2 10.6h3.4"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

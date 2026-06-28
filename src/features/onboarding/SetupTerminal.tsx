@@ -16,22 +16,10 @@ import { Channel } from "@tauri-apps/api/core";
 import { commands, type TerminalEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { useThemeStore } from "../../lib/theme";
+import { b64ToBytes, strToB64 } from "../session/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "../session/terminalEngine";
 import { useTerminalFontSize } from "../session/terminalFontSize";
 import { xtermThemeFromCss } from "../session/terminalTheme";
-
-const b64ToBytes = (s: string): Uint8Array =>
-  Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-
-const strToB64 = (s: string): string => {
-  const bytes = new TextEncoder().encode(s);
-  let bin = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(bin);
-};
 
 type Props = {
   /** Arguments passed to `hyprlayer`, e.g. ["ai", "configure"]. Ignored when

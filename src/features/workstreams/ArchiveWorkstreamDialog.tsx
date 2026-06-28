@@ -1,5 +1,6 @@
 import type { WorkstreamView } from "../../lib/bindings";
 import { Button, Dialog, ErrorNote } from "../../components/ui";
+import { isAppError } from "../../lib/ipc";
 import { useArchiveWorkstream } from "../../lib/queries";
 
 type Props = {
@@ -25,11 +26,11 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
     onClose();
   };
 
-  const run = () => {
+  const run = (skipScripts: boolean) => {
     if (!target || archive.isPending) return;
     const id = target.item.id;
     archive.mutate(
-      { id },
+      { id, skipScripts },
       {
         onSuccess: () => {
           archive.reset();
@@ -39,6 +40,10 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
       },
     );
   };
+
+  // The backend aborts archive (before any teardown) when the project's Archive
+  // script fails, so the user can fix it and retry, or skip the script.
+  const scriptFailed = isAppError(archive.error) && archive.error.code === "archive_script_failed";
 
   return (
     <Dialog open={target !== null} onClose={close} title="Archive workstream?">
@@ -58,13 +63,18 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
           <Button type="button" onClick={close} disabled={archive.isPending}>
             Cancel
           </Button>
-          <Button
-            type="button"
-            variant="primary"
-            busy={archive.isPending}
-            onClick={run}
-          >
-            Archive
+          {scriptFailed && (
+            <Button
+              type="button"
+              variant="danger"
+              disabled={archive.isPending}
+              onClick={() => run(true)}
+            >
+              Skip script &amp; archive
+            </Button>
+          )}
+          <Button type="button" variant="primary" busy={archive.isPending} onClick={() => run(false)}>
+            {scriptFailed ? "Retry" : "Archive"}
           </Button>
         </div>
       </div>

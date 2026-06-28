@@ -5,37 +5,44 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 type EdgeDragOptions = {
+  /** Starting size (px) along the drag axis. */
   startWidth: number;
   min: number;
   max: number;
-  /** +1 when dragging right grows the panel, -1 when it shrinks it. */
+  /** +1 when dragging toward the axis-positive direction (right / down) grows
+   *  the panel, -1 when it shrinks it. */
   direction: 1 | -1;
-  onResize: (width: number) => void;
-  /** Fired on pointer-down / release — e.g. to suppress a width transition
-   *  while dragging so the panel tracks the cursor instead of trailing it. */
+  /** Drag axis — horizontal (width, default) or vertical (height). */
+  axis?: "x" | "y";
+  onResize: (size: number) => void;
+  /** Fired on pointer-down / release — e.g. to suppress a transition while
+   *  dragging so the panel tracks the cursor instead of trailing it. */
   onStart?: () => void;
   onEnd?: () => void;
 };
 
 /**
  * Pointer-drag handler for a panel-resize separator: tracks the pointer,
- * clamps the width, and restores the body cursor/selection on release.
+ * clamps the size, and restores the body cursor/selection on release. Works on
+ * either axis (horizontal width or vertical height).
  */
 export function startEdgeDrag(
   event: ReactPointerEvent<HTMLElement>,
-  { startWidth, min, max, direction, onResize, onStart, onEnd }: EdgeDragOptions,
+  { startWidth, min, max, direction, axis = "x", onResize, onStart, onEnd }: EdgeDragOptions,
 ): void {
   event.preventDefault();
-  const startX = event.clientX;
+  const horizontal = axis === "x";
+  const startPos = horizontal ? event.clientX : event.clientY;
   const previousCursor = document.body.style.cursor;
   const previousSelect = document.body.style.userSelect;
 
-  document.body.style.cursor = "col-resize";
+  document.body.style.cursor = horizontal ? "col-resize" : "row-resize";
   document.body.style.userSelect = "none";
   onStart?.();
 
   const onPointerMove = (moveEvent: PointerEvent) => {
-    onResize(clamp(startWidth + direction * (moveEvent.clientX - startX), min, max));
+    const pos = horizontal ? moveEvent.clientX : moveEvent.clientY;
+    onResize(clamp(startWidth + direction * (pos - startPos), min, max));
   };
   const onPointerUp = () => {
     document.body.style.cursor = previousCursor;

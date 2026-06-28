@@ -1,6 +1,7 @@
 import { events } from "./bindings";
 import { queryClient } from "./queryClient";
-import { invalidateWorktreeGit } from "./queries";
+import { invalidateScriptOutput, invalidateScriptRuntime, invalidateWorktreeGit } from "./queries";
+import { setRunning } from "../features/session/scriptsStore";
 
 /**
  * Bridge backend push events into query invalidation. Call once at startup;
@@ -38,6 +39,18 @@ export function attachEventListeners(): () => void {
     // list so the search palette's Agents section tracks running agents in real time.
     events.sessionLifecycle.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
+    }),
+    // A lifecycle script (Setup/Run/Archive) started, detected its port, or
+    // finished. Refresh that workstream's runtime (dock pills + Open :PORT), and
+    // track the live-Run set so the rail's green indicator stays accurate.
+    events.scriptRunChanged.listen((event) => {
+      const { workstreamId, kind, phase, port } = event.payload;
+      invalidateScriptRuntime(workstreamId);
+      invalidateScriptOutput(workstreamId, kind);
+      if (kind === "run") {
+        if (phase === "running") setRunning(workstreamId, { port: port ?? null });
+        else setRunning(workstreamId, null); // passed | failed → no longer alive
+      }
     }),
     // The thoughts index changed: docs were (re)indexed, removed, or the tree
     // was rescanned. Refresh every list and the touched documents (all of

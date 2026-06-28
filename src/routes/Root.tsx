@@ -56,12 +56,14 @@ import {
   FolderIcon,
   PinIcon,
   PlusIcon,
+  ScriptPanelIcon,
   TerminalIcon,
   WarningTriangleIcon,
 } from "../components/icons";
 import type { EditorTarget } from "../lib/bindings";
 import { SearchPalette } from "../features/search/SearchPalette";
 import { toggleSearch } from "../features/search/searchStore";
+import { toggleDock as toggleScriptDock, useScriptsStore } from "../features/session/scriptsStore";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { WorkstreamGitChip } from "../features/workstreams/WorkstreamGitChip";
 import { useWorkstreamGitActions } from "../features/workstreams/useGitActions";
@@ -70,6 +72,11 @@ import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstream
 import { AttachPrDialog } from "../features/workstreams/AttachPrDialog";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
+import {
+  closeProjectSettings,
+  openProjectSettings,
+  useProjectSettingsStore,
+} from "../features/projects/projectSettingsStore";
 import { RemoveProjectDialog } from "../features/projects/RemoveProjectDialog";
 import { useUpdate, showUpdateToast } from "../lib/updater";
 import { useToast } from "../lib/toast";
@@ -696,10 +703,32 @@ export function Root() {
   const [projectMenu, setProjectMenu] = useState<{ x: number; y: number; project: Project } | null>(
     null,
   );
-  const [settingsProject, setSettingsProject] = useState<Project | null>(null);
+  const settingsPath = useProjectSettingsStore((s) => s.path);
+  // Left-rail scripts/terminal dock: which ws it toggles, whether that dock is
+  // open, and whether ANY Run is alive (turns the rail icon green).
+  const scriptsActiveWs = useScriptsStore((s) => s.activeWorkstream);
+  const scriptsDockOpen = useScriptsStore((s) =>
+    s.activeWorkstream ? !!s.dock[s.activeWorkstream]?.open : false,
+  );
+  const scriptsRunning = useScriptsStore((s) => Object.keys(s.running).length > 0);
+  const scriptsPosition = useScriptsStore((s) => s.dockPosition);
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
+  // Toggle the scripts dock's visibility from the rail. When it's docked in the
+  // right sidebar, "showing" it also reveals that sidebar (the panel lives in it);
+  // "hiding" just closes the dock without collapsing the sidebar.
+  const toggleScriptsDock = () => {
+    if (!scriptsActiveWs) return;
+    const inSidebar = scriptsPosition === "right";
+    const visible = scriptsDockOpen && (!inSidebar || !diffHidden);
+    if (visible) {
+      toggleScriptDock(scriptsActiveWs);
+    } else {
+      if (!scriptsDockOpen) toggleScriptDock(scriptsActiveWs);
+      if (inSidebar && diffHidden) toggleDiff();
+    }
+  };
   const libraryCollapsed = useUiStore((state) => state.libraryCollapsed);
   const toggleLibrary = useUiStore((state) => state.toggleLibrary);
 
@@ -1112,6 +1141,28 @@ export function Root() {
             </button>
             <button
               type="button"
+              onClick={toggleScriptsDock}
+              className={`${
+                scriptsRunning
+                  ? `${RAIL_ICON_BASE} relative bg-ship/15 text-ship ring-[1.5px] ring-inset ring-ship/40`
+                  : `${railNavClass(scriptsDockOpen)} relative`
+              } ${!scriptsActiveWs ? "opacity-50" : ""}`}
+              title={
+                scriptsRunning ? "Scripts — a Run is active" : "Terminal & scripts dock"
+              }
+              aria-label="Terminal and scripts dock"
+            >
+              <ScriptPanelIcon size={18} />
+              {scriptsRunning && (
+                <span
+                  aria-hidden
+                  className="absolute right-1 top-1 h-2 w-2 rounded-full bg-ship"
+                  style={{ boxShadow: "0 0 0 2px var(--color-surface), 0 0 6px var(--color-ship)" }}
+                />
+              )}
+            </button>
+            <button
+              type="button"
               onClick={() => toggleNav("/settings")}
               className={railNavClass(pathname.startsWith("/settings"))}
               title="Settings"
@@ -1474,7 +1525,7 @@ export function Root() {
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => {
-              setSettingsProject(projectMenu.project);
+              openProjectSettings(projectMenu.project.path);
               setProjectMenu(null);
             }}
           >
@@ -1504,11 +1555,8 @@ export function Root() {
         }
       />
 
-      {settingsProject && (
-        <ProjectSettingsDialog
-          projectPath={settingsProject.path}
-          onClose={() => setSettingsProject(null)}
-        />
+      {settingsPath && (
+        <ProjectSettingsDialog projectPath={settingsPath} onClose={closeProjectSettings} />
       )}
 
       <RenameWorkstreamDialog target={renameTarget} onClose={() => setRenameTarget(null)} />

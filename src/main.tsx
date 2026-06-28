@@ -4,7 +4,10 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { commands } from "./lib/bindings";
 import { attachEventListeners } from "./lib/events";
+import { hydrateRunning } from "./features/session/scriptsStore";
+import { unwrap } from "./lib/ipc";
 import { queryClient } from "./lib/queryClient";
 import { setupQueryFocus } from "./lib/queryFocus";
 import { router } from "./router";
@@ -17,6 +20,11 @@ import "./index.css";
 // the default palette.
 initTheme();
 attachEventListeners();
+// Seed the rail's green "Run alive" indicator from any runs the backend still
+// holds (survives a frontend reload; empty after a full app restart).
+void unwrap(commands.listRunningScripts())
+  .then(hydrateRunning)
+  .catch(() => {});
 // Probe for a newer signed release on launch (and every 6h thereafter).
 useUpdate.getState().init();
 // Install the focus-edge router so a notification click (via app reactivation)

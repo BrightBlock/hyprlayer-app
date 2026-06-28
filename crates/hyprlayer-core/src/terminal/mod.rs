@@ -66,6 +66,11 @@ pub struct PtySession {
     writer: StdMutex<Box<dyn Write + Send>>,
     tx: broadcast::Sender<TerminalEvent>,
     scrollback: Arc<StdMutex<VecDeque<u8>>>,
+    /// The shell's pid, captured at spawn. On Unix the PTY child is a session
+    /// leader (portable-pty `setsid`s it), so this doubles as its process-group
+    /// id — `kill()` SIGKILLs the whole group to reap children the shell spawned.
+    #[cfg(unix)]
+    pid: Option<u32>,
     pub workstream_id: String,
 }
 
@@ -93,6 +98,10 @@ impl PtySession {
         let mut child = pair.slave.spawn_command(cmd).map_err(to_io)?;
         drop(pair.slave); // so the master sees EOF when the shell exits
         let killer = child.clone_killer();
+        // Capture the pid before `child` moves to the waiter thread, so `kill()`
+        // can signal the child's whole process group.
+        #[cfg(unix)]
+        let pid = child.process_id();
 
         let reader = pair.master.try_clone_reader().map_err(to_io)?;
         let writer = pair.master.take_writer().map_err(to_io)?;
@@ -106,6 +115,8 @@ impl PtySession {
             writer: StdMutex::new(writer),
             tx: tx.clone(),
             scrollback: scrollback.clone(),
+            #[cfg(unix)]
+            pid,
             workstream_id: cfg.workstream_id,
         });
 
@@ -247,6 +258,12 @@ impl PtySession {
         (rx, snapshot)
     }
 
+    /// Snapshot the retained scrollback as raw bytes (no subscribe). Used to
+    /// capture a script run's output for the dock's read-only "last run" view.
+    pub fn scrollback_bytes(&self) -> Vec<u8> {
+        self.scrollback.lock().unwrap().iter().copied().collect()
+    }
+
     /// Write raw bytes (keyboard input) to the PTY master.
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
         let mut w = self.writer.lock().unwrap();
@@ -270,9 +287,23 @@ impl PtySession {
         }
     }
 
-    /// Send SIGKILL to the shell process. The waiter thread then reaps it, the
-    /// reader emits the final `Exited` event, and the master is dropped.
+    /// Kill the shell and everything it spawned. On Unix the child is a session
+    /// leader, so we SIGKILL its whole process group — otherwise a foreground
+    /// child (e.g. `npm run dev`) or a `&` job is orphaned and survives Stop /
+    /// terminal close / archive teardown, leaking the process and its port. The
+    /// waiter thread then reaps the shell, the reader emits the final `Exited`,
+    /// and the master is dropped.
     pub fn kill(&self) {
+        // Group kill first (children), then the leader as a fallback. getpgid
+        // confirms the leader is still alive before signalling, narrowing the
+        // window where a reaped-then-reused pid could be hit.
+        #[cfg(unix)]
+        if let Some(pid) = self.pid {
+            let pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
+            if pgid > 0 {
+                unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            }
+        }
         let _ = self.killer.lock().unwrap().kill();
     }
 }
@@ -383,5 +414,60 @@ mod tests {
         }
         assert!(seen.contains("MARKER_OK"), "got: {seen:?}");
         s.kill();
+    }
+
+    /// `kill()` must reap the child's whole process group, not just the shell:
+    /// a backgrounded grandchild (`sleep 60 &`) must be gone after kill().
+    #[tokio::test]
+    async fn kill_reaps_child_process_group() {
+        let s = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), "sleep 60 & echo PID:$!; sleep 60".into()],
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "test-group".into(),
+        })
+        .expect("spawn pty");
+
+        // Read the backgrounded child's pid from the shell's output.
+        let mut rx = s.subscribe();
+        let mut seen = String::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let child_pid: i32 = loop {
+            assert!(tokio::time::Instant::now() < deadline, "never saw pid: {seen:?}");
+            if let Ok(Ok(TerminalEvent::Output { data })) =
+                tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
+            {
+                seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
+                if let Some(pid) = seen
+                    .lines()
+                    .find_map(|l| l.strip_prefix("PID:"))
+                    .and_then(|p| p.trim().parse::<i32>().ok())
+                {
+                    break pid;
+                }
+            }
+        };
+
+        assert_eq!(
+            unsafe { libc::kill(child_pid, 0) },
+            0,
+            "backgrounded child should be alive before kill()"
+        );
+        s.kill();
+
+        // After the group kill the child must die (kill(pid, 0) -> ESRCH).
+        let mut gone = false;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline {
+            if unsafe { libc::kill(child_pid, 0) } != 0 {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(gone, "backgrounded child {child_pid} survived kill()");
     }
 }

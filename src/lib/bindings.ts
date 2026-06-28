@@ -110,7 +110,7 @@ export const commands = {
 	 *  checkout), so archive is purely a status flip: the directory, branch, and
 	 *  thoughts links are left exactly as they are.
 	 */
-	archiveWorkstream: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id })),
+	archiveWorkstream: (id: string, skipScripts: boolean) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id, skipScripts })),
 	/**  All archived workstreams across every project, newest-first. */
 	listArchivedWorkstreams: () => typedError<ArchivedWorkstreamView[], AppError>(__TAURI_INVOKE("list_archived_workstreams")),
 	/**
@@ -499,6 +499,41 @@ export const commands = {
 	 */
 	spawnShellTerminal: (command: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_shell_terminal", { command, cols, rows, onEvent })),
 	/**
+	 *  The default shell's display name — its file stem (e.g. "zsh", "bash", "pwsh",
+	 *  "powershell", "cmd"). Labels the dock's ad-hoc terminal tabs by the shell they
+	 *  actually spawn, instead of a hardcoded guess.
+	 */
+	defaultShellName: () => typedError<string, AppError>(__TAURI_INVOKE("default_shell_name")),
+	/**  Read the project's `[scripts]` block (empty strings when unconfigured). */
+	getScripts: (projectPath: string) => typedError<ScriptSettings, AppError>(__TAURI_INVOKE("get_scripts", { projectPath })),
+	/**  Overwrite the project's `[scripts]` block (autosave target for the card). */
+	setScripts: (projectPath: string, scripts: ScriptSettings) => typedError<null, AppError>(__TAURI_INVOKE("set_scripts", { projectPath, scripts })),
+	/**
+	 *  Run a script in a PTY and stream output to `on_event`. For `Run`, any prior
+	 *  Run process is stopped first; the live handle + detected port are tracked so
+	 *  the dock can show Stop / Open :PORT and the rail can show it's alive.
+	 *  Returns the `terminal_id` (use the existing `terminal_*` commands to
+	 *  write/resize/close, and `terminal_attach` to re-attach after a remount).
+	 */
+	scriptRun: (workstreamId: string, kind: ScriptKind, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("script_run", { workstreamId, kind, cols, rows, onEvent })),
+	/**  Stop the live Run process for a workstream (the dock Stop / ⌘R). */
+	scriptStop: (workstreamId: string) => typedError<null, AppError>(__TAURI_INVOKE("script_stop", { workstreamId })),
+	/**
+	 *  Current script runtime for a workstream: the live Run (if any) + last-run
+	 *  statuses. Lets the dock/rail recover state after a remount or ws switch.
+	 */
+	getScriptRuntime: (workstreamId: string) => typedError<ScriptRuntime, AppError>(__TAURI_INVOKE("get_script_runtime", { workstreamId })),
+	/**
+	 *  Workstreams that currently have a live Run process. Lets the rail's green
+	 *  "Run alive" indicator hydrate on app start (it's otherwise event-driven).
+	 */
+	listRunningScripts: () => typedError<string[], AppError>(__TAURI_INVOKE("list_running_scripts")),
+	/**
+	 *  The captured output of a script's last run this session (terminal text incl.
+	 *  ANSI), or `null` if it hasn't run. Backs the dock's read-only Setup view.
+	 */
+	getScriptOutput: (workstreamId: string, kind: ScriptKind) => typedError<string | null, AppError>(__TAURI_INVOKE("get_script_output", { workstreamId, kind })),
+	/**
 	 *  Read the AI tool install state without running `ai configure`.
 	 *  Gates the AI step: if already installed, the step shows "configured" with
 	 *  a "Reconfigure" option; if not, it prompts the user to run `ai configure`
@@ -530,6 +565,7 @@ export const events = {
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
+	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
 	worktreeChanged: makeEvent<WorktreeChanged>("worktree-changed"),
@@ -1244,6 +1280,9 @@ export type QueryResult = {
 	items: DocMeta[],
 };
 
+/**  Outcome of a script run, shown as a status pill. */
+export type RunPhase = "running" | "passed" | "failed";
+
 /**
  *  One field of the 10-field thought metadata schema
  *  (`hyprlayer-cli/src/backends/schema.rs`).
@@ -1253,6 +1292,65 @@ export type SchemaFieldInfo = {
 	kind: string,
 	options?: string[] | null,
 	required: boolean,
+};
+
+/**
+ *  Which lifecycle script. Persisted as the `[scripts]` keys and carried on the
+ *  `ScriptRunChanged` event so the UI can route a run to the right tab/pill.
+ */
+export type ScriptKind = "setup" | "run" | "archive";
+
+/**
+ *  A lifecycle script (Setup/Run/Archive) changed state for a workstream: it
+ *  started running, detected its dev-server port, or finished. Drives the dock
+ *  script tabs + status pills and the left rail's green "Run alive" indicator.
+ *  The fine-grained output streams over the per-run Channel (like terminals),
+ *  not this event.
+ */
+export type ScriptRunChanged = {
+	workstreamId: string,
+	kind: ScriptKind,
+	phase: RunPhase,
+	exitCode: number | null,
+	/**  Set when a Run's dev-server port is detected (phase stays `running`). */
+	port: number | null,
+};
+
+/**
+ *  Snapshot of a workstream's script runtime, for UI hydration on (re)mount —
+ *  the dock/rail read this to recover the live Run + last-run pills after a
+ *  remount or workstream switch.
+ */
+export type ScriptRuntime = {
+	/**  terminal_id of the live Run PTY, if one is running (else `null`). */
+	runTerminalId: string | null,
+	/**  Detected dev-server port for the live Run, if any. */
+	port: number | null,
+	/**  Last-run status per script that has run this session. */
+	statuses: ScriptStatus[],
+};
+
+/**
+ *  Per-project lifecycle scripts, inherited by every workstream. Each value is a
+ *  free-form multi-line block of shell commands run in the workstream's worktree
+ *  root; an empty string means "unconfigured". Run sequentially — a non-zero
+ *  exit halts the block (see `crate::scripts::build_block`).
+ */
+export type ScriptSettings = {
+	/**  Runs once when a new worktree is created. */
+	setup?: string,
+	/**  Runs each time the user presses Run; the prior Run process is stopped first. */
+	run?: string,
+	/**  Runs before a workstream is archived. */
+	archive?: string,
+};
+
+/**  Last-run status for one script in one workstream. `at` is unix-millis. */
+export type ScriptStatus = {
+	kind: ScriptKind,
+	phase: RunPhase,
+	exitCode: number | null,
+	at: number | null,
 };
 
 export type SeedError = {

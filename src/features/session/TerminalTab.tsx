@@ -6,24 +6,10 @@ import { commands, type TerminalEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { useCommand } from "../../lib/keybindings/registry";
 import { useThemeStore } from "../../lib/theme";
+import { b64ToBytes, strToB64 } from "./terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "./terminalEngine";
 import { useTerminalFontSize } from "./terminalFontSize";
 import { xtermThemeFromCss } from "./terminalTheme";
-
-const b64ToBytes = (s: string): Uint8Array =>
-  Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-
-const strToB64 = (s: string): string => {
-  const bytes = new TextEncoder().encode(s);
-  // Build the binary string in chunks: `String.fromCharCode(...bytes)` spreads
-  // every byte as an argument, which overflows the call stack on a large paste.
-  let bin = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(bin);
-};
 
 export function TerminalTab({
   workstreamId,

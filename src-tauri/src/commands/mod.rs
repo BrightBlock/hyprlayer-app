@@ -4,6 +4,7 @@ pub mod library;
 pub mod ollama;
 pub mod onboarding;
 pub mod projects;
+pub mod scripts;
 pub mod sessions;
 pub mod system;
 pub mod terminal;

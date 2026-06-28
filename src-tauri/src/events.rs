@@ -52,3 +52,19 @@ pub struct SessionLifecycle {
     /// Matches the `sessions.state` column.
     pub state: String,
 }
+
+/// A lifecycle script (Setup/Run/Archive) changed state for a workstream: it
+/// started running, detected its dev-server port, or finished. Drives the dock
+/// script tabs + status pills and the left rail's green "Run alive" indicator.
+/// The fine-grained output streams over the per-run Channel (like terminals),
+/// not this event.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptRunChanged {
+    pub workstream_id: String,
+    pub kind: hyprlayer_core::scripts::ScriptKind,
+    pub phase: crate::script_registry::RunPhase,
+    pub exit_code: Option<i32>,
+    /// Set when a Run's dev-server port is detected (phase stays `running`).
+    pub port: Option<u16>,
+}

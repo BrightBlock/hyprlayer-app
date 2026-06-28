@@ -5,6 +5,7 @@ use hyprlayer_core::gitops::{DirEntry, FileSides, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::pr::{self, MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::BinaryKind;
+use hyprlayer_core::scripts::ScriptKind;
 use hyprlayer_core::skills::SlashCommand;
 use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
@@ -13,7 +14,7 @@ use hyprlayer_core::worktree::{
 };
 use hyprlayer_core::CoreError;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use super::sessions::kill_and_await_exit;
@@ -235,6 +236,7 @@ pub async fn list_workstream_bases(
 #[tauri::command]
 #[specta::specta]
 pub async fn create_workstream(
+    app: AppHandle,
     state: State<'_, AppState>,
     project_path: String,
     title: String,
@@ -454,6 +456,24 @@ pub async fn create_workstream(
     };
     let item = db_task(state.db.clone(), move |db| db.insert_workstream(new_item)).await?;
 
+    // Run the project's Setup script once, in the new worktree, before the
+    // workstream reports ready (this blocks the command's return). A failure is
+    // recorded + surfaced via the ScriptRunChanged event but does NOT roll back
+    // the worktree — the user can fix the script and re-run Setup from the dock.
+    // In-place workstreams reuse the existing checkout, so there's nothing to set
+    // up.
+    //
+    // SECURITY — auto-run of UNTRUSTED code (TODO: trust gate). `.hyprlayer/
+    // settings.toml` is repo-controlled, so this executes the repo's Setup block
+    // as `sh -lc` on worktree creation with no confirmation: opening a hostile
+    // repo is RCE. Run (`script_run`) and Archive run the same repo-defined shell.
+    // Fix: gate on explicit per-repo trust (à la VS Code Workspace Trust / direnv
+    // `allow`) — content-hash the scripts, store grants in app config (not the
+    // repo), and re-prompt when the hash changes.
+    if !inplace {
+        super::scripts::run_lifecycle_script(&app, &state, &item, ScriptKind::Setup).await;
+    }
+
     let mut view = item_view(item, Some(link));
     view.seed = seed;
     Ok(view)
@@ -621,7 +641,14 @@ pub async fn list_workstream_docs(
 /// thoughts links are left exactly as they are.
 #[tauri::command]
 #[specta::specta]
-pub async fn archive_workstream(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+pub async fn archive_workstream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    // When the Archive script fails, the user can retry (`false`) or skip it
+    // (`true`) to archive anyway. `false` on a normal archive.
+    skip_scripts: bool,
+) -> CmdResult<()> {
     let item = load_item(&state, &id).await?;
 
     // Tear down any live agent sessions for this workstream BEFORE moving the
@@ -643,11 +670,31 @@ pub async fn archive_workstream(state: State<'_, AppState>, id: String) -> CmdRe
     // Same for any live terminals in this workstream: kill their shells so we
     // don't leak orphaned PTY processes against the about-to-move worktree.
     state.terminals.remove_for_workstream(&id).await;
+    // Stop any live Run process and drop this workstream's script state.
+    state.scripts.clear_workstream(&id).await;
 
     // In-place: nothing to move or unlink — just flip the row. (The shared
-    // project checkout, its branch, and its thoughts links stay put.)
+    // project checkout, its branch, and its thoughts links stay put.) Archive
+    // scripts only run for dedicated worktrees, so skip them here too.
     if item.is_inplace() {
         return db_task(state.db.clone(), move |db| db.archive_workstream(&id)).await;
+    }
+
+    // Run the project's Archive script on the still-intact worktree before any
+    // teardown. A non-zero exit aborts the archive (nothing destructive has run
+    // yet) so the user can fix it and retry — or archive again with skip_scripts.
+    if !skip_scripts
+        && matches!(
+            super::scripts::run_lifecycle_script(&app, &state, &item, ScriptKind::Archive).await,
+            Some(crate::script_registry::RunPhase::Failed)
+        )
+    {
+        return Err(AppError {
+            code: "archive_script_failed".into(),
+            message: "The Archive script failed. Fix it and retry, or skip it to archive anyway."
+                .into(),
+            remedy: Some("Re-run archive, or choose Skip to archive without the script.".into()),
+        });
     }
 
     let git = state

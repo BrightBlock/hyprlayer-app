@@ -7,6 +7,7 @@ use hyprlayer_core::process::binaries::BinaryResolver;
 use hyprlayer_core::store::Db;
 use hyprlayer_core::worktree::WorktreeManager;
 
+use crate::script_registry::ScriptRegistry;
 use crate::session_registry::SessionRegistry;
 use crate::settings::SettingsStore;
 use crate::terminal_registry::TerminalRegistry;
@@ -25,6 +26,9 @@ pub struct AppState {
     pub opencode: Arc<crate::opencode::OpenCodeManager>,
     /// Live PTY terminals, keyed by terminal id.
     pub terminals: Arc<TerminalRegistry>,
+    /// Per-workstream lifecycle-script state: the live Run process, its injected
+    /// `$HL_PORT`, and each script's last-run status.
+    pub scripts: Arc<ScriptRegistry>,
     /// Live filesystem watcher over the thoughts roots; rebuilt whenever the
     /// hyprlayer config changes (roots may move). Guarded so rebuilds replace
     /// (and thereby drop/stop) the previous watcher.
