@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.3.15",
+      "date": "2026-06-28",
+      "summary": "File and diff preview now renders correctly in release builds.",
+      "notes": [
+        "Fixed a CSP issue in release builds that caused the file and diff preview to render unstyled."
+      ]
+    },
+    {
       "version": "0.3.14",
       "date": "2026-06-27",
       "summary": "VSCode-style frameless window on Windows and Linux.",
