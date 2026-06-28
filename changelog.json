@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.3.16",
+      "date": "2026-06-28",
+      "summary": "Project lifecycle scripts: Setup, Run, and Archive.",
+      "notes": [
+        "Projects now support Setup, Run, and Archive scripts that can be configured and run directly from the app."
+      ]
+    },
+    {
       "version": "0.3.15",
       "date": "2026-06-28",
       "summary": "File and diff preview now renders correctly in release builds.",
