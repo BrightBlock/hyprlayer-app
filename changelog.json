@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.1",
+      "date": "2026-06-29",
+      "summary": "Per-tab identity and reliable session resume for multiplexer agents.",
+      "notes": [
+        "Each multiplexer agent tab now carries its own conversation identity, and session resume is gated authoritatively so agents never resume into the wrong session."
+      ]
+    },
+    {
       "version": "0.4.0",
       "date": "2026-06-29",
       "summary": "Multiplexer mode: agents run in persistent PTYs.",
