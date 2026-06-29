@@ -73,6 +73,7 @@ export function ScriptDock({
   const pending = useScriptsStore((s) => !!s.pendingRun[workstreamId]);
   const dockPosition = useScriptsStore((s) => s.dockPosition);
   const dockHeight = useScriptsStore((s) => s.dockHeight);
+  const dockMaximized = useScriptsStore((s) => s.dockMaximized);
   const runtime = useScriptRuntime(workstreamId);
   const scripts = useScripts(projectPath);
   // Label ad-hoc terminal tabs by the shell they actually spawn (zsh/pwsh/…).
@@ -141,11 +142,13 @@ export function ScriptDock({
   // CI-checks section. Persisted in the store so it survives the dock's
   // unmount/remount on a sidebar toggle; only effective while right-docked.
   const collapsed = right && (dock?.collapsed ?? false);
+  // ⌘⇧F maximizes the body to its full height; collapse (right-dock) still wins.
+  const bodyHeight = dockMaximized ? DOCK_HEIGHT_MAX : dockHeight;
 
   return (
     <div
       className={cx("relative flex shrink-0 flex-col border-t border-edge", chromeBg)}
-      style={{ height: collapsed ? undefined : dockHeight }}
+      style={{ height: collapsed ? undefined : bodyHeight }}
     >
       {/* Drag the top edge to resize the dock's height (not while collapsed). */}
       {!collapsed && (
@@ -155,7 +158,7 @@ export function ScriptDock({
           aria-label="Resize scripts dock"
           onPointerDown={(e) =>
             startEdgeDrag(e, {
-              startWidth: dockHeight,
+              startWidth: bodyHeight,
               min: DOCK_HEIGHT_MIN,
               max: DOCK_HEIGHT_MAX,
               direction: -1,

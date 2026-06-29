@@ -240,8 +240,6 @@ function ProjectCommands(props: {
   onNextTab: () => void;
   onPrevTab: () => void;
   onNewWorkstream: () => void;
-  onToggleTerminal: () => void;
-  onToggleTerminalFull: () => void;
   /** ⌘R: run the workstream's Run script, or stop it if already live. Null when
    *  no workstream is selected. */
   onToggleRun: (() => void) | null;
@@ -262,8 +260,6 @@ function ProjectCommands(props: {
   useCommand("tab.next", props.onNextTab);
   useCommand("tab.prev", props.onPrevTab);
   useCommand("ws.new", props.onNewWorkstream);
-  useCommand("terminal.open", props.onToggleTerminal);
-  useCommand("terminal.toggleFullscreen", props.onToggleTerminalFull);
   useCommand("scripts.run", props.onToggleRun);
   useCommand("ws.cycleStage", props.onCycleStage);
   useCommand("view.toggleArchivedAgents", props.onToggleArchived);
@@ -454,14 +450,6 @@ export function ProjectPage() {
     : null;
   const rightActiveShell =
     rightShells.find((s) => s.id === tabs?.rightActiveId) ?? rightShells[0] ?? null;
-  // The terminal tab (if any) and whether it's currently on screen — shared by
-  // the toggle handler and the button's label so the two can't disagree.
-  const terminalShell = shells.find(isTerminalShell) ?? null;
-  const terminalVisible = terminalShell
-    ? isRightShell(terminalShell)
-      ? rightSplit && rightActiveShell?.id === terminalShell.id
-      : activeShell?.id === terminalShell.id
-    : false;
   // The shell keyboard commands act on: the active tab of whichever pane holds
   // focus, so split-pane users stop/close the agent they're looking at.
   const focusedShell = activePane === "right" ? rightActiveShell : activeShell;
@@ -593,59 +581,6 @@ export function ProjectPage() {
       }
       return spawnRightShell(current);
     });
-  };
-  // Open a terminal in the right dock, reusing an existing terminal tab if any.
-  const addTerminal = () =>
-    updateTabs((current) => {
-      const existing = current.shells.find(isTerminalShell);
-      if (existing) {
-        const right = existing.panel === "right";
-        return {
-          ...current,
-          rightSplit: right ? true : current.rightSplit,
-          rightActiveId: right ? existing.id : current.rightActiveId,
-          activeId: right ? current.activeId : existing.id,
-          activePane: right ? ("right" as const) : ("main" as const),
-        };
-      }
-      const id = nextShellId(current.shells, current.archived);
-      return {
-        ...current,
-        shells: [
-          ...current.shells,
-          {
-            id,
-            title: "Terminal",
-            mode: "general" as const,
-            draft: "",
-            docs: [],
-            attachments: [],
-            panel: "right" as const,
-            terminalView: {},
-          },
-        ],
-        rightActiveId: id,
-        rightSplit: true,
-        activePane: "right" as const,
-      };
-    });
-  // Keyboard "fullscreen" for the terminal: maximize its pane to fill the agent
-  // view, or restore the split if it's already maximized (a toggle). Prefers the
-  // focused tab when it's a terminal, else the first terminal in the workstream.
-  const toggleTerminalFullscreen = () => {
-    if (maxPane) {
-      setMaximized(null);
-      return;
-    }
-    const term =
-      focusedShell && isTerminalShell(focusedShell)
-        ? focusedShell
-        : shells.find(isTerminalShell);
-    if (!term || !wsId) return;
-    const pane = term.panel ?? "main";
-    if (pane === "right") selectRightShell(term.id);
-    else selectShell(term.id);
-    if (rightSplit) setMaximized({ wsId, pane });
   };
   // The X on the right strip tears the split down: end its agents and drop the
   // right shells entirely (vs. the toggle, which just hides the pane).
@@ -799,33 +734,6 @@ export function ProjectPage() {
       ...current,
       archived: (current.archived ?? []).filter((a) => a.shell.id !== shellId),
     }));
-  // The "Toggle Terminal" command (⌘`): open a terminal if none exists, reveal it
-  // if it's hidden, or hide it when it's already on screen. Hiding preserves the
-  // PTY (collapses the dock for a right-pane terminal, defocuses the tab for a
-  // main-pane one) — only an explicit tab close or the split's X kills the shell,
-  // so a reveal re-attaches the same running session. The toolbar terminal button
-  // shares this handler, so clicking it toggles the same way ⌘` does.
-  const toggleTerminal = () => {
-    if (!terminalShell || !terminalVisible) {
-      addTerminal(); // create, or reveal a hidden terminal (re-show dock / focus tab)
-      return;
-    }
-    // Hide without teardown — the PTY keeps running for the next reveal.
-    if (isRightShell(terminalShell)) {
-      setMaximized(null);
-      updateTabs((current) => ({ ...current, rightSplit: false, activePane: "main" }));
-      // Hand focus to the main agent now back in full view so the user can type.
-      if (activeShell && isAgentShell(activeShell)) requestComposerFocus(activeShell.id);
-      return;
-    }
-    // Main-pane terminal: defocus to another main tab (no-op if it's the only one).
-    const others = mainShells.filter((s) => s.id !== terminalShell.id);
-    const other = others[others.length - 1];
-    if (other) {
-      selectShell(other.id);
-      if (isAgentShell(other)) requestComposerFocus(other.id);
-    }
-  };
   const openDoc = (id: string) => {
     void navigate({ to: "/library", search: { doc: id } });
   };
@@ -1199,8 +1107,6 @@ export function ProjectPage() {
         onNextTab={() => cycleTab(1)}
         onPrevTab={() => cycleTab(-1)}
         onNewWorkstream={() => setCreateOpen(true)}
-        onToggleTerminal={toggleTerminal}
-        onToggleTerminalFull={toggleTerminalFullscreen}
         onToggleRun={
           wsId
             ? () => {

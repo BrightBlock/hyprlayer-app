@@ -179,16 +179,16 @@ export const COMMANDS: CommandDef[] = [
   // Terminal
   {
     id: "terminal.open",
-    label: "Toggle Terminal",
+    label: "Toggle Terminal & Scripts Dock",
     category: "Terminal",
-    when: "project",
+    when: "workstream",
     defaults: { mac: "mod+backquote", other: "mod+backquote" },
   },
   {
     id: "terminal.toggleFullscreen",
-    label: "Toggle Terminal Full View",
+    label: "Toggle Dock Full Height",
     category: "Terminal",
-    when: "project",
+    when: "workstream",
     // Shift+punctuation can't be a binding here (the dispatcher matches on
     // e.key, so Shift+` is "~"); a shift+letter chord round-trips cleanly.
     defaults: { mac: "mod+shift+f", other: "mod+shift+f" },

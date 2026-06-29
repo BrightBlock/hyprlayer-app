@@ -63,7 +63,11 @@ import {
 import type { EditorTarget } from "../lib/bindings";
 import { SearchPalette } from "../features/search/SearchPalette";
 import { toggleSearch } from "../features/search/searchStore";
-import { toggleDock as toggleScriptDock, useScriptsStore } from "../features/session/scriptsStore";
+import {
+  toggleDock as toggleScriptDock,
+  toggleDockMaximized,
+  useScriptsStore,
+} from "../features/session/scriptsStore";
 import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
 import { WorkstreamGitChip } from "../features/workstreams/WorkstreamGitChip";
 import { useWorkstreamGitActions } from "../features/workstreams/useGitActions";
@@ -729,6 +733,11 @@ export function Root() {
       if (inSidebar && diffHidden) toggleDiff();
     }
   };
+  // ⌘⇧F: expand the dock to its full height (or restore it). Per-workstream, so
+  // it shares the dock toggle's active-workstream gate.
+  const maximizeScriptsDock = () => {
+    if (scriptsActiveWs) toggleDockMaximized(scriptsActiveWs);
+  };
   const libraryCollapsed = useUiStore((state) => state.libraryCollapsed);
   const toggleLibrary = useUiStore((state) => state.toggleLibrary);
 
@@ -803,6 +812,10 @@ export function Root() {
   );
   useCommand("nav.back", canGoBack ? () => router.history.back() : null);
   useCommand("view.toggleProjectSidebar", toggleSidebar);
+  // ⌘`: toggle the terminal & scripts dock — the same action as the rail's dock
+  // button. Inert without an active workstream (the dock is per-workstream).
+  useCommand("terminal.open", scriptsActiveWs ? toggleScriptsDock : null);
+  useCommand("terminal.toggleFullscreen", scriptsActiveWs ? maximizeScriptsDock : null);
   useCommand(
     "view.toggleChangesSidebar",
     currentSection === "Agent" ? () => toggleDiff() : null,

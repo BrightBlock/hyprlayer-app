@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 /** Which dock tab is selected: one of the three pinned lifecycle scripts, or an
  *  ad-hoc terminal addressed by its (dock-local) shell id. */
@@ -43,6 +44,9 @@ type ScriptsState = {
   dockPosition: DockPosition;
   /** Dock height (px), drag-resizable from its top edge. Global preference. */
   dockHeight: number;
+  /** ⌘⇧F: dock body expanded to its full height. A transient view state — it
+   *  restores to `dockHeight` when toggled off, and is not persisted. */
+  dockMaximized: boolean;
 };
 
 /** Drag bounds for the dock's height. */
@@ -62,28 +66,81 @@ const DEFAULT_DOCK: DockState = {
   collapsed: false,
 };
 
-export const useScriptsStore = create<ScriptsState>(() => ({
-  dock: {},
-  running: {},
-  pendingRun: {},
-  activeWorkstream: null,
-  dockPosition: "bottom",
-  dockHeight: 320,
-}));
+/** The slice we keep across restarts: where the dock lives, how tall it is, and
+ *  which workstreams left it collapsed (only the `collapsed` flag — never the
+ *  transient open/terminal/PTY state). */
+type PersistedScriptsState = {
+  dockPosition: DockPosition;
+  dockHeight: number;
+  dock: Record<string, Pick<DockState, "collapsed">>;
+};
 
-/** Set the dock height (px); caller clamps to [DOCK_HEIGHT_MIN, DOCK_HEIGHT_MAX]. */
-export const setDockHeight = (height: number): void =>
-  useScriptsStore.setState({ dockHeight: height });
+export const useScriptsStore = create<ScriptsState>()(
+  persist<ScriptsState, [], [], PersistedScriptsState>(
+    () => ({
+      dock: {},
+      running: {},
+      pendingRun: {},
+      activeWorkstream: null,
+      dockPosition: "bottom",
+      dockHeight: 320,
+      dockMaximized: false,
+    }),
+    {
+      name: "hyprlayer:scripts-dock",
+      version: 1,
+      // Persist only durable preferences. Everything else (open state, ad-hoc
+      // terminals + their live PTY ids, running / pending runs) is runtime state
+      // that must not survive a restart. Filtering to collapsed-only keeps the
+      // persisted map small and self-cleaning (expanding drops the entry).
+      partialize: (s) => ({
+        dockPosition: s.dockPosition,
+        dockHeight: s.dockHeight,
+        dock: Object.fromEntries(
+          Object.entries(s.dock)
+            .filter(([, d]) => d.collapsed)
+            .map(([id]) => [id, { collapsed: true }]),
+        ),
+      }),
+      // Rehydrate each stripped-down { collapsed } entry onto a full DEFAULT_DOCK
+      // so its transient fields (tab, terminals, …) are present again.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<PersistedScriptsState>;
+        const dock: Record<string, DockState> = {};
+        for (const [id, d] of Object.entries(p.dock ?? {})) {
+          dock[id] = { ...DEFAULT_DOCK, ...d };
+        }
+        return { ...current, ...p, dock };
+      },
+    },
+  ),
+);
+
+/** Set the dock height (px); caller clamps to [DOCK_HEIGHT_MIN, DOCK_HEIGHT_MAX].
+ *  A manual resize exits the maximized (full-height) view. */
+export const setDockHeight = (height: number): void => {
+  useScriptsStore.setState({ dockHeight: height, dockMaximized: false });
+};
+
+/** ⌘⇧F: expand the dock body to its full height (opening + uncollapsing it
+ *  first), or restore it to the user's height if it's already maximized. */
+export const toggleDockMaximized = (wsId: string): void => {
+  const next = !useScriptsStore.getState().dockMaximized;
+  if (next) patchDock(wsId, { open: true, collapsed: false });
+  useScriptsStore.setState({ dockMaximized: next });
+};
 
 /** Publish which workstream is on screen (ProjectPage owns this). */
-export const setActiveWorkstream = (wsId: string | null): void =>
+export const setActiveWorkstream = (wsId: string | null): void => {
   useScriptsStore.setState({ activeWorkstream: wsId });
+};
 
 /** Flip the dock between the bottom and the right sidebar. */
-export const toggleDockPosition = (): void =>
+export const toggleDockPosition = (): void => {
   useScriptsStore.setState((s) => ({
     dockPosition: s.dockPosition === "bottom" ? "right" : "bottom",
   }));
+};
 
 /** Read a workstream's dock state (defaulted), outside React. */
 export function dockStateFor(wsId: string): DockState {
