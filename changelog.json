@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.3.17",
+      "date": "2026-06-29",
+      "summary": "Scripts dock layout persists and keyboard shortcuts rewired.",
+      "notes": [
+        "The scripts dock now remembers its layout between sessions.",
+        "⌘` and ⌘⇧F shortcuts have been rewired for the scripts dock."
+      ]
+    },
+    {
       "version": "0.3.16",
       "date": "2026-06-28",
       "summary": "Project lifecycle scripts: Setup, Run, and Archive.",
