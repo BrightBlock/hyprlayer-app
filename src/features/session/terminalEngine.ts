@@ -56,7 +56,7 @@ class XtermEngine implements TerminalEngine {
    *  (uncaught, in the frame callback) if the renderer isn't set up yet. */
   private rendererReady = false;
 
-  constructor(opts: { fontSize: number; theme: TerminalTheme }) {
+  constructor(opts: { fontSize: number; theme: TerminalTheme; cursorBlink?: boolean }) {
     this.term = new Terminal({
       fontSize: opts.fontSize,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -68,7 +68,10 @@ class XtermEngine implements TerminalEngine {
       fontWeightBold: 700,
       lineHeight: 1.0,
       theme: opts.theme,
-      cursorBlink: true,
+      // Default on; a caller steadies it per-engine. Codex parks a *visible*
+      // cursor in its footer while mid-turn (other CLIs hide theirs), so blinking
+      // it there reads as a flicker.
+      cursorBlink: opts.cursorBlink ?? true,
       scrollback: 5000,
       convertEol: false,
       // The WebGL renderer needs the proposed-API surface (xterm gates the
@@ -192,6 +195,7 @@ class XtermEngine implements TerminalEngine {
 export function createTerminalEngine(opts: {
   fontSize: number;
   theme: TerminalTheme;
+  cursorBlink?: boolean;
 }): TerminalEngine {
   return new XtermEngine(opts);
 }

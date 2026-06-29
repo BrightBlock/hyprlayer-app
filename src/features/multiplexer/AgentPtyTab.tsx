@@ -79,7 +79,13 @@ export function AgentPtyTab({
     const host = hostRef.current;
     if (!host) return;
 
-    const eng = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
+    const eng = createTerminalEngine({
+      fontSize,
+      theme: xtermThemeFromCss(),
+      // Codex leaves a visible cursor parked in its footer while mid-turn, which
+      // blinks/flickers there; steady it for Codex (other CLIs hide theirs).
+      cursorBlink: engine.id !== "codex",
+    });
     eng.mount(host);
     engineRef.current = eng;
     appliedFontSizeRef.current = fontSize;
