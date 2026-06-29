@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.4.0",
+      "date": "2026-06-29",
+      "summary": "Multiplexer mode: agents run in persistent PTYs.",
+      "notes": [
+        "Multiplexer mode runs agent CLIs in persistent PTYs so sessions survive reconnects and tab switches.",
+        "The plan drawer now remembers its view state (collapsed/expanded sections) across tab-switch remounts.",
+        "Cursor blink is disabled for Codex agent tabs."
+      ]
+    },
+    {
       "version": "0.3.17",
       "date": "2026-06-29",
       "summary": "Scripts dock layout persists and keyboard shortcuts rewired.",
