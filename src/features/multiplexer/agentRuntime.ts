@@ -18,7 +18,7 @@ import { notifyNeedsAttention } from "../../lib/notifications";
 import { b64ToBytes } from "../session/terminalCodec";
 import { StateCoalescer } from "./coalesce";
 import { detectState, stripAnsi, type AgentState } from "./engineState";
-import type { ResolvedEngine } from "./engines";
+import { engineChecksSessionOnDisk, type ResolvedEngine } from "./engines";
 import {
   agentKey,
   removeAgent,
@@ -134,6 +134,10 @@ export type EnsureAgentOpts = {
    *  ShellTab on cold start so the shield (and a respawn's flags) survive a quit.
    *  Only seeds a freshly-created runtime; live runtimes keep their current flag. */
   bypass?: boolean;
+  /** Whether a conversation has already begun — seeds a freshly-created runtime so
+   *  a restored/resumed tab's Restart+shield resume immediately, while a fresh tab
+   *  starts false and flips on the first keystroke. */
+  started?: boolean;
 };
 
 /**
@@ -173,6 +177,7 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
       state: "idle",
       terminalId: opts.persistedTerminalId,
       bypass: opts.bypass ?? false,
+      started: opts.started ?? false,
     });
   }
 
@@ -233,6 +238,21 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
     if (r.starting === promise) r.starting = undefined;
   });
   return promise;
+}
+
+/** The resume decision for a (re)launch: does THIS tab's conversation actually
+ *  exist on disk? Authoritative for engines we can check (Claude/Codex/
+ *  Antigravity), so a pinned-but-never-used id launches fresh instead of failing
+ *  `--resume`. For others (Gemini/custom, or before an id is known) fall back to
+ *  the caller's heuristic (whether the user has typed). */
+export async function resolveResume(
+  engineId: string,
+  sessionId: string | undefined,
+  workstreamId: string,
+  fallback: boolean,
+): Promise<boolean> {
+  if (!sessionId || !engineChecksSessionOnDisk(engineId)) return fallback;
+  return unwrap(commands.agentSessionExists(workstreamId, engineId, sessionId)).catch(() => fallback);
 }
 
 /** Push the notify-on-blocked preference to every live runtime, so toggling the

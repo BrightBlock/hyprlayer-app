@@ -22,8 +22,14 @@ export interface TerminalEngine {
   mount(host: HTMLElement): void;
   /** Render emulator output: raw PTY bytes, or a UTF-8 control string. */
   write(data: Uint8Array | string): void;
-  /** Subscribe to user input (keystrokes as a string); returns an unsubscribe. */
+  /** Subscribe to all input bound for the PTY — keystrokes, paste, AND xterm's
+   *  automatic replies to the CLI's capability queries (DSR/DA). Returns an
+   *  unsubscribe. Write every byte to the PTY; don't treat it as "the user did
+   *  something" (those auto-replies fire with no user action — use `onKey`). */
   onInput(cb: (data: string) => void): () => void;
+  /** Subscribe to real key presses only (not paste or terminal auto-replies) —
+   *  the honest "the user is typing" signal. Returns an unsubscribe. */
+  onKey(cb: (e: { key: string; domEvent: KeyboardEvent }) => void): () => void;
   /** Refit to the host's current size; returns the resulting grid. */
   fit(): TerminalGrid;
   /** Force a full repaint of the visible rows, bypassing the staleness that a
@@ -118,6 +124,11 @@ class XtermEngine implements TerminalEngine {
 
   onInput(cb: (data: string) => void): () => void {
     const sub = this.term.onData(cb);
+    return () => sub.dispose();
+  }
+
+  onKey(cb: (e: { key: string; domEvent: KeyboardEvent }) => void): () => void {
+    const sub = this.term.onKey(cb);
     return () => sub.dispose();
   }
 

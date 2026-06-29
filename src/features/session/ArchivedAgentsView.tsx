@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { Badge, Button, Dialog, EmptyState, Select, TextInput, type BadgeTone } from "../../components/ui";
 import { ArchiveIcon, GitBranchIcon, ModeIcon, SearchIcon, UnarchiveIcon, XIcon } from "../../components/icons";
 import type { ShellTab } from "../../routes/ProjectPage";
+import { engineLabel } from "../multiplexer/engines";
 import { modelOption } from "./models";
 import { formatRelativeTime } from "./toolDisplay";
 import type { ArchivedShell, ArchivedStatus } from "./workstreamTabs";
@@ -22,8 +23,9 @@ const STATUS: Record<ArchivedStatus, { label: string; tone: BadgeTone }> = {
   idle: { label: "Idle", tone: "dim" },
 };
 
-/** The LLM the agent ran on, as a short label for the row. */
+/** The LLM/engine the agent ran on, as a short label for the row. */
 function modelLabel(shell: ShellTab): string {
+  if (shell.ptyAgent) return engineLabel(shell.ptyAgent.engineId);
   if (shell.harness === "opencode") return shell.opencodeModel ?? "OpenCode";
   return modelOption(shell.model).label;
 }

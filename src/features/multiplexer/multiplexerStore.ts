@@ -20,6 +20,10 @@ export type AgentRuntimeState = {
   /** This run was (re)started in bypass-permissions mode (the red shield).
    *  Session-only — never persisted, so a normal relaunch clears it. */
   bypass?: boolean;
+  /** A conversation has begun (first keystroke sent, or cold-started from a prior
+   *  session). Gates the Restart/shield resume: without it `claude --continue` has
+   *  nothing to continue and the CLI exits "No conversation found". Session-only. */
+  started?: boolean;
 };
 
 type Store = { agents: Record<string, AgentRuntimeState> };
@@ -45,13 +49,15 @@ export function upsertAgent(
       state: patch.state ?? cur?.state ?? "idle",
       terminalId: patch.terminalId ?? cur?.terminalId,
       bypass: patch.bypass ?? cur?.bypass,
+      started: patch.started ?? cur?.started,
     };
     if (
       cur &&
       cur.engineId === next.engineId &&
       cur.state === next.state &&
       cur.terminalId === next.terminalId &&
-      cur.bypass === next.bypass
+      cur.bypass === next.bypass &&
+      cur.started === next.started
     ) {
       return s;
     }
@@ -67,6 +73,18 @@ export function setStoreBypass(workstreamId: string, shellId: number, bypass: bo
     const cur = s.agents[key];
     if (!cur || !!cur.bypass === bypass) return s;
     return { agents: { ...s.agents, [key]: { ...cur, bypass } } };
+  });
+}
+
+/** Mark that a conversation has begun in an agent (first keystroke / cold-start
+ *  resume), so the Restart/shield can safely pass `--continue`. Idempotent and a
+ *  no-op for an unknown agent, so calling it on every keystroke is cheap. */
+export function markAgentStarted(workstreamId: string, shellId: number): void {
+  const key = agentKey(workstreamId, shellId);
+  useMultiplexerStore.setState((s) => {
+    const cur = s.agents[key];
+    if (!cur || cur.started) return s;
+    return { agents: { ...s.agents, [key]: { ...cur, started: true } } };
   });
 }
 

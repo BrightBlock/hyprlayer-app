@@ -35,11 +35,20 @@ import { TabTitle } from "../features/session/TabTitle";
 import { TerminalTab } from "../features/session/TerminalTab";
 import { AgentPtyTab } from "../features/multiplexer/AgentPtyTab";
 import { EngineGlyph, PtyTabDot } from "../features/multiplexer/agentStateUi";
-import { closeAgent, ensureAgent, setAllNotifyOnBlocked } from "../features/multiplexer/agentRuntime";
+import {
+  closeAgent,
+  ensureAgent,
+  resolveResume,
+  setAllNotifyOnBlocked,
+} from "../features/multiplexer/agentRuntime";
+import type { AgentState } from "../features/multiplexer/engineState";
+import { agentKey, useMultiplexerStore } from "../features/multiplexer/multiplexerStore";
 import {
   defaultEngine,
   enabledEngines,
+  engineMintsViaExec,
   engineOrFallback,
+  mintPtySessionId,
   relaunchArgs,
   useMultiplexer,
   type ResolvedEngine,
@@ -155,7 +164,20 @@ export type ShellTab = {
    *  resumes it that way (the red shield). The live working/blocked/done/idle
    *  state lives in the multiplexer store, not here.
    *  Only ever set when `multiplexer.enabled`. */
-  ptyAgent?: { engineId: string; terminalId?: string; bypass?: boolean };
+  ptyAgent?: {
+    engineId: string;
+    terminalId?: string;
+    bypass?: boolean;
+    /** This tab's own conversation id, so it resumes ITS conversation rather than
+     *  the most-recent in the worktree (two agents in one workstream no longer
+     *  collide). Minted at creation for "assign" engines (Claude, Gemini); learned
+     *  from disk after launch for "capture" engines (Codex, Antigravity). */
+    sessionId?: string;
+    /** Whether a conversation has begun (first keystroke). Persisted so a
+     *  cold-start relaunch resumes by sessionId only when there's something to
+     *  resume — and an untouched tab relaunches fresh. */
+    started?: boolean;
+  };
   /** Which pane this shell lives in. Absent/"main" → the main pane; "right" →
    *  the side-by-side right split. */
   panel?: "main" | "right";
@@ -179,10 +201,17 @@ function isTerminalShell(shell: ShellTab): boolean {
 }
 
 /** A Multiplexer agent tab — an engine CLI in a PTY, no native session/composer.
- *  Carries an engine glyph + a working/blocked/done/idle dot, and the "×" closes
- *  (kills) it rather than archiving. */
+ *  Carries an engine glyph + a working/blocked/done/idle dot. Like a native agent
+ *  the "×" archives it (keeping its conversation, resumable by id); right-click →
+ *  Close ends it for good. */
 function isPtyShell(shell: ShellTab): boolean {
   return !!shell.ptyAgent;
+}
+
+/** A tab whose "×" archives (keeps it recoverable) rather than closes: native
+ *  agents and PTY agents both. Viewers and terminals just close. */
+function isArchivable(shell: ShellTab): boolean {
+  return isAgentShell(shell) || isPtyShell(shell);
 }
 
 /** An agent chat tab (the only kind with a composer) — not a viewer, terminal,
@@ -203,9 +232,17 @@ function classifyArchivedStatus(state: SessionState | undefined): ArchivedStatus
   return "idle";
 }
 
+/** The PTY-agent equivalent: map the multiplexer's working/blocked/done/idle into
+ *  the coarse archive-row label (only "done" carries through; the rest read idle). */
+function classifyPtyArchivedStatus(state: AgentState | undefined): ArchivedStatus {
+  return state === "done" ? "done" : "idle";
+}
+
 /** The tab's "×": archives an agent (keeping its session/branch/transcript)
- *  rather than ending it — closing moves to right-click → Close. Terminals and
- *  viewers just close. Soft-disabled (reactively) while the agent is working. */
+ *  rather than ending it — closing moves to right-click → Close. PTY agents
+ *  archive too (their conversation resumes by id). Terminals and viewers just
+ *  close. A native agent is soft-disabled (reactively) while it's working; a PTY
+ *  agent isn't, since archiving it is recoverable. */
 function TabCloseControl({
   shell,
   onArchive,
@@ -216,9 +253,9 @@ function TabCloseControl({
   onClose: () => void;
 }) {
   const session = useSession(shell.sessionId);
-  const agent = isAgentShell(shell);
-  const busy = agent && session ? isBusy(session) : false;
-  const label = agent ? (busy ? AGENT_BUSY_HINT : `Archive ${shell.title}`) : `Close ${shell.title}`;
+  const archivable = isArchivable(shell);
+  const busy = isAgentShell(shell) && session ? isBusy(session) : false;
+  const label = archivable ? (busy ? AGENT_BUSY_HINT : `Archive ${shell.title}`) : `Close ${shell.title}`;
   return (
     <button
       type="button"
@@ -226,7 +263,7 @@ function TabCloseControl({
       onClick={(e) => {
         e.stopPropagation();
         if (busy) return;
-        if (agent) onArchive();
+        if (archivable) onArchive();
         else onClose();
       }}
       className={`mr-1 inline-flex h-5 w-5 items-center justify-center rounded ${
@@ -448,22 +485,34 @@ export function ProjectPage() {
     if (!wsId || !activeView) return;
     for (const s of tabsByWs[wsId]?.shells ?? []) {
       if (!s.ptyAgent) continue;
+      // An exec-mint engine (Codex) with no id yet must mint it before launch —
+      // that's AgentPtyTab's job on mount. Spawning bare here would race ahead and
+      // pre-empt the mint with a wrong (most-recent) session, so defer it.
+      if (engineMintsViaExec(s.ptyAgent.engineId) && !s.ptyAgent.sessionId) continue;
       const base = engineOrFallback(multiplexer, s.ptyAgent.engineId);
       const bypass = !!s.ptyAgent.bypass;
-      // After a full quit the PTY is dead, so this relaunches: resume the prior
-      // conversation (a persisted terminalId ⇒ there was one) and re-enter bypass
-      // mode if it was on. The args are unused when ensureAgent reattaches to a
-      // still-live PTY (a webview reload) or finds the runtime already up.
-      void ensureAgent({
-        workstreamId: wsId,
-        shellId: s.id,
-        engine: { ...base, args: relaunchArgs(base, { resume: !!s.ptyAgent.terminalId, bypass }) },
-        projectPath,
-        workstreamTitle: activeView.item.title,
-        persistedTerminalId: s.ptyAgent.terminalId,
-        notifyOnBlocked: multiplexer.notifyOnBlocked,
-        bypass,
-      });
+      const pty = s.ptyAgent;
+      // After a full quit the PTY is dead, so this relaunches: resume THIS tab's
+      // conversation by its sessionId iff it's actually on disk, else start fresh,
+      // and re-enter bypass if it was on. Falls back to the persisted started flag
+      // ("a PTY id was persisted" for older tabs) for engines we can't disk-check.
+      // Args are unused when ensureAgent reattaches a still-live PTY (webview
+      // reload) or finds the runtime already up.
+      void (async () => {
+        const fallback = pty.started ?? !!pty.terminalId;
+        const resume = await resolveResume(pty.engineId, pty.sessionId, wsId, fallback);
+        void ensureAgent({
+          workstreamId: wsId,
+          shellId: s.id,
+          engine: { ...base, args: relaunchArgs(base, { sessionId: pty.sessionId, resume, bypass }) },
+          projectPath,
+          workstreamTitle: activeView.item.title,
+          persistedTerminalId: pty.terminalId,
+          notifyOnBlocked: multiplexer.notifyOnBlocked,
+          bypass,
+          started: resume,
+        });
+      })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ptyAgentSig, wsId, multiplexer.enabled, multiplexer.persistAcrossRestarts, multiplexer.notifyOnBlocked]);
@@ -546,6 +595,11 @@ export function ProjectPage() {
     docsModalShellId !== null ? (shells.find((s) => s.id === docsModalShellId) ?? null) : null;
   const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
   const archivedShells = tabs?.archived ?? [];
+  // Conversation ids already owned in this workstream (live + archived), so a
+  // capture-mode agent reading its id off disk doesn't claim one that's taken.
+  const ptySessionIds = [...shells, ...archivedShells.map((a) => a.shell)]
+    .map((s) => s.ptyAgent?.sessionId)
+    .filter((id): id is string => !!id);
   const archiveViewOpen = tabs?.archiveOpen ?? false;
   // One toggle for both entry points (tab-bar button + keyboard command), so a
   // repeat flips the same state shut. Null with no workstream selected, which
@@ -622,6 +676,20 @@ export function ProjectPage() {
   // relaunch (after a full quit) resumes it in bypass mode rather than fresh.
   const setPtyBypass = (shellId: number, bypass: boolean) =>
     modifyShell(shellId, (s) => (s.ptyAgent ? { ...s, ptyAgent: { ...s.ptyAgent, bypass } } : s));
+  // Persist that a pty agent's conversation has begun (first keystroke), so a
+  // cold-start relaunch resumes it by sessionId instead of starting fresh.
+  const setPtyStarted = (shellId: number) =>
+    modifyShell(shellId, (s) =>
+      s.ptyAgent && !s.ptyAgent.started ? { ...s, ptyAgent: { ...s.ptyAgent, started: true } } : s,
+    );
+  // Persist a conversation id learned from disk after launch (capture-mode engines
+  // — Codex, Antigravity), so resume/restore can target this tab's conversation.
+  const setPtySessionId = (shellId: number, sessionId: string) =>
+    modifyShell(shellId, (s) =>
+      s.ptyAgent && s.ptyAgent.sessionId !== sessionId
+        ? { ...s, ptyAgent: { ...s.ptyAgent, sessionId } }
+        : s,
+    );
   const selectShell = (shellId: number) => {
     updateTabs((current) => ({ ...current, activeId: shellId, activePane: "main" }));
   };
@@ -644,7 +712,15 @@ export function ProjectPage() {
     docs: [],
     attachments: [],
     panel,
-    ...(ptyEngineId ? { ptyAgent: { engineId: ptyEngineId } } : {}),
+    // Mint the conversation id up front for engines that accept one (Claude,
+    // Gemini), so the tab owns a distinct, resumable conversation from the start.
+    // `started:false` is explicit so a never-typed new tab relaunches fresh — only
+    // legacy tabs (no `started`) fall back to "a PTY id was persisted".
+    ...(ptyEngineId
+      ? {
+          ptyAgent: { engineId: ptyEngineId, sessionId: mintPtySessionId(ptyEngineId), started: false },
+        }
+      : {}),
   });
   // Append a fresh agent to the right pane and focus it (opening the split).
   const spawnRightShell = (current: WsTabState, ptyEngineId?: string): WsTabState => {
@@ -835,20 +911,31 @@ export function ProjectPage() {
     if (shell.ptyAgent && wsId) closeAgent(wsId, shellId);
     updateTabs((current) => removeShellState(current, shellId));
   };
-  // Archive an agent: lift its tab out of the strip but keep the session, branch,
-  // worktree and transcript intact (the opposite of closeShell). The status
-  // snapshot only labels the archive row; archiveShellState no-ops if it can't.
+  // Archive an agent: lift its tab out of the strip but keep its conversation,
+  // branch and worktree intact (the opposite of closeShell). The status snapshot
+  // only labels the archive row; archiveShellState no-ops if it can't. A PTY agent
+  // keeps the ShellTab (with its sessionId) but its live PTY is killed — the
+  // conversation lives on disk and resumes by id on unarchive.
   const archiveShell = (shellId: number) => {
     const shell = shells.find((s) => s.id === shellId);
     if (!shell) return;
-    const entry = shell.sessionId
-      ? useSessionStore.getState().sessions[shell.sessionId]
-      : undefined;
-    const status = classifyArchivedStatus(entry?.state);
+    let status: ArchivedStatus;
+    if (shell.ptyAgent) {
+      const ptyState = wsId
+        ? useMultiplexerStore.getState().agents[agentKey(wsId, shellId)]?.state
+        : undefined;
+      status = classifyPtyArchivedStatus(ptyState);
+      if (wsId) closeAgent(wsId, shellId);
+    } else {
+      const entry = shell.sessionId
+        ? useSessionStore.getState().sessions[shell.sessionId]
+        : undefined;
+      status = classifyArchivedStatus(entry?.state);
+    }
     updateTabs((current) => archiveShellState(current, shellId, status, Date.now()));
   };
-  // Restore an archived agent and focus its composer — re-mounting SessionChat
-  // re-attaches the live session or rehydrates it from the transcript.
+  // Restore an archived agent and focus it — re-mounting re-attaches the live
+  // session or, for a PTY agent, relaunches and resumes its conversation by id.
   const unarchiveShell = (shellId: number) => {
     updateTabs((current) => unarchiveShellState(current, shellId));
     requestComposerFocus(shellId);
@@ -1196,10 +1283,15 @@ export function ProjectPage() {
           projectPath={projectPath}
           workstreamTitle={activeView.item.title}
           terminalId={shell.ptyAgent.terminalId}
+          sessionId={shell.ptyAgent.sessionId}
+          started={shell.ptyAgent.started}
           bypass={shell.ptyAgent.bypass}
           autoFocus={shell.id === focusedShell?.id}
+          excludeSessionIds={ptySessionIds}
           onTerminalId={(tid) => setPtyTerminalId(shell.id, engine.id, tid)}
           onBypassChange={(b) => setPtyBypass(shell.id, b)}
+          onStarted={() => setPtyStarted(shell.id)}
+          onSessionId={(sid) => setPtySessionId(shell.id, sid)}
           notifyOnBlocked={multiplexer.notifyOnBlocked}
         />
       );
@@ -1457,7 +1549,7 @@ export function ProjectPage() {
                       Expand to full view
                     </ContextMenuItem>
                   ) : null)}
-                {isAgentShell(contextShell) && (
+                {isArchivable(contextShell) && (
                   <ContextMenuItem
                     disabled={archiveBlockedReason !== null}
                     hint={archiveBlockedReason ?? undefined}
@@ -1470,14 +1562,14 @@ export function ProjectPage() {
                   </ContextMenuItem>
                 )}
                 <ContextMenuItem
-                  danger={isAgentShell(contextShell)}
+                  danger={isArchivable(contextShell)}
                   disabled={contextIsLastMain}
                   onClick={() => {
                     closeShell(contextShell.id);
                     setShellMenu(null);
                   }}
                 >
-                  {isAgentShell(contextShell) ? "Close agent" : "Close tab"}
+                  {isArchivable(contextShell) ? "Close agent" : "Close tab"}
                 </ContextMenuItem>
               </ContextMenu>
             )}

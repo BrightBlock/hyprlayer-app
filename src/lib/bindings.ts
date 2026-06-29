@@ -491,6 +491,42 @@ export const commands = {
 	 */
 	agentResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("agent_resize", { terminalId, cols, rows })),
 	/**
+	 *  Read back the conversation id a "capture-mode" CLI assigned itself, by scanning
+	 *  its on-disk session store. Codex and Antigravity auto-generate their id (unlike
+	 *  Claude/Gemini, which take one we mint), so we launch them fresh, then call this
+	 *  to learn the id and resume that exact conversation later.
+	 * 
+	 *  Returns the most recent session created after `after_ms` (epoch ms — the tab's
+	 *  launch time) that isn't already claimed by another tab (`exclude`). For Codex,
+	 *  which records its cwd, we also require it to match this workstream's worktree,
+	 *  so a session from another worktree can't be mis-attributed. Returns `None`
+	 *  until the session materialises on disk (written on the first message), so the
+	 *  frontend polls until it resolves. Best-effort: two capture-mode tabs started in
+	 *  the same worktree at nearly the same instant may swap ids (no per-process key
+	 *  exists to disambiguate); the `exclude` list still keeps the ids distinct.
+	 */
+	captureAgentSession: (workstreamId: string, engineId: string, afterMs: number | null, exclude: string[]) => typedError<string | null, AppError>(__TAURI_INVOKE("capture_agent_session", { workstreamId, engineId, afterMs, exclude })),
+	/**
+	 *  Mint a Codex conversation id *deterministically*, sidestepping the disk-scan
+	 *  attribution race: run `codex exec --json` (which emits
+	 *  `{"type":"thread.started","thread_id":…}` as its very first event), take that
+	 *  id, wait for its rollout to hit disk so a later `resume <id>` can find it, then
+	 *  kill the probe — ignoring the rest of its output. Because we read the id from
+	 *  the process we spawned, it can't be confused with a sibling tab's session. The
+	 *  interactive tab then launches `codex resume <id>`. Returns None if Codex can't
+	 *  run or never announces a thread (caller falls back to disk capture).
+	 */
+	mintCodexSession: (workstreamId: string, command: string) => typedError<string | null, AppError>(__TAURI_INVOKE("mint_codex_session", { workstreamId, command })),
+	/**
+	 *  Whether `session_id`'s conversation is actually persisted in `engine_id`'s
+	 *  on-disk store — the authoritative resume gate. A pinned-but-never-used id (a
+	 *  fresh tab whose startup terminal-query replies look like "input", or a message
+	 *  typed but not yet sent) has no file yet, so resuming it would exit "No
+	 *  conversation found"; this lets the caller launch fresh instead. Unknown engines
+	 *  (Gemini, custom) return false — the caller falls back to its own heuristic.
+	 */
+	agentSessionExists: (workstreamId: string, engineId: string, sessionId: string) => typedError<boolean, AppError>(__TAURI_INVOKE("agent_session_exists", { workstreamId, engineId, sessionId })),
+	/**
 	 *  Attach to an existing PTY: replay its scrollback then tail live output.
 	 * 
 	 *  Returns `false` if the PTY is gone (e.g. after an app restart), in which

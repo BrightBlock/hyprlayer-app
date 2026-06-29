@@ -74,6 +74,12 @@ export function resolveMultiplexer(settings?: AppSettings | null): ResolvedMulti
   };
 }
 
+/** A display label for an engine id, from the built-ins (custom engines fall back
+ *  to the id). Used where the resolved settings aren't on hand — e.g. labelling an
+ *  archived PTY agent row. */
+export const engineLabel = (engineId: string): string =>
+  BUILTIN_ENGINES.find((e) => e.id === engineId)?.label ?? engineId;
+
 export const enabledEngines = (cfg: ResolvedMultiplexer): ResolvedEngine[] =>
   cfg.engines.filter((e) => e.enabled);
 
@@ -98,40 +104,130 @@ export function defaultEngine(cfg: ResolvedMultiplexer): ResolvedEngine | undefi
   return enabledEngines(cfg)[0] ?? cfg.engines[0];
 }
 
-/** Per-engine flags for the status-bar Restart / YOLO actions:
- *   resumeArgs — relaunch continuing the prior session (Restart).
- *   bypassArgs — relaunch skipping permission/approval prompts (the red shield).
- * Best-effort defaults for the built-ins; flags can vary by CLI version, and a
- * custom engine has neither (so its tab shows Restart-only, no shield). Kept
- * frontend-side — the backend `agent_open` just runs command + args. */
-const ENGINE_ACTIONS: Record<string, { resumeArgs: string[]; bypassArgs: string[] }> = {
-  "claude-code": { resumeArgs: ["--continue"], bypassArgs: ["--dangerously-skip-permissions"] },
-  codex: { resumeArgs: [], bypassArgs: ["--dangerously-bypass-approvals-and-sandbox"] },
-  gemini: { resumeArgs: [], bypassArgs: ["--yolo"] },
-  // Verified against `agy --help`: --continue resumes the most recent
-  // conversation; --dangerously-skip-permissions auto-approves all tools.
-  antigravity: { resumeArgs: ["--continue"], bypassArgs: ["--dangerously-skip-permissions"] },
+/** How an engine handles conversation identity — so each tab owns a distinct,
+ *  resumable conversation instead of all same-dir tabs sharing "most recent":
+ *   - "assign": the CLI takes a caller-chosen id, so we mint a UUID per tab and
+ *     pin it as `--session-id` (+ `--resume`). Claude & Gemini, verified against
+ *     `--help`. (Antigravity's `--project <id>` looks similar but is rejected in
+ *     interactive mode — "Project Not Found" — so it can't assign; it captures.)
+ *   - "exec-mint": the CLI auto-assigns the id and can't take ours, but a
+ *     `codex exec --json` probe announces it as its first event — so we mint it
+ *     deterministically up front (no disk-attribution race) and launch
+ *     `codex resume <id>`. Codex.
+ *   - "capture": the CLI auto-assigns the id; launch bare, then read the id back
+ *     from its on-disk store and resume by it. Antigravity (`--conversation <id>`).
+ *   - "none": custom engines — no per-session resume; most-recent fallback only. */
+export type SessionMode = "assign" | "exec-mint" | "capture" | "none";
+
+/** Per-engine session + bypass behaviour for (re)launching. `fresh`/`resumeById`/
+ *  `resumeLatest` build the session args; `resumeLatest` is the "most recent in
+ *  this cwd" fallback used before an id is known. Kept frontend-side — the
+ *  backend `agent_open` just runs command + args. */
+type EngineSession = {
+  mode: SessionMode;
+  /** Args to start a fresh conversation; "assign" pins `id`, others ignore it. */
+  fresh: (id?: string) => string[];
+  /** Args to resume the conversation `id` (omitted ⇒ engine has no by-id resume). */
+  resumeById?: (id: string) => string[];
+  /** Most-recent-conversation resume, used when no id is known yet. */
+  resumeLatest: string[];
+  /** Bypass-permissions (YOLO) flags. Empty ⇒ no shield for this engine. */
+  bypass: string[];
 };
 
-export function engineActions(engineId: string): { resumeArgs: string[]; bypassArgs: string[] } {
-  return ENGINE_ACTIONS[engineId] ?? { resumeArgs: [], bypassArgs: [] };
+const ENGINE_SESSIONS: Record<string, EngineSession> = {
+  "claude-code": {
+    mode: "assign",
+    fresh: (id) => (id ? ["--session-id", id] : []),
+    resumeById: (id) => ["--resume", id],
+    resumeLatest: ["--continue"],
+    bypass: ["--dangerously-skip-permissions"],
+  },
+  // `gemini --help` (v0.49): --session-id pins a chosen UUID, --resume <id>
+  // resumes it, --resume latest is most-recent; --yolo auto-approves.
+  gemini: {
+    mode: "assign",
+    fresh: (id) => (id ? ["--session-id", id] : []),
+    resumeById: (id) => ["--resume", id],
+    resumeLatest: ["--resume", "latest"],
+    bypass: ["--yolo"],
+  },
+  // Codex auto-assigns a UUID (no caller-set id), so we mint it via a
+  // `codex exec` probe and always launch `codex resume <id>` — fresh just resumes
+  // the freshly-minted (empty) session. `resume` is a subcommand and accepts the
+  // bypass flag after the id (`codex resume <id> --dangerously-…`).
+  codex: {
+    mode: "exec-mint",
+    fresh: (id) => (id ? ["resume", id] : []),
+    resumeById: (id) => ["resume", id],
+    resumeLatest: ["resume", "--last"],
+    bypass: ["--dangerously-bypass-approvals-and-sandbox"],
+  },
+  // Antigravity auto-assigns a conversation id and can't take ours: interactive
+  // `agy --project <id>` warns "Project Not Found" and ignores it (only `--print`
+  // mode auto-creates a project, which we can't use for the interactive tab). So
+  // launch bare, read the conversation id from disk (capture), and resume by it
+  // with `--conversation <id>`; most-recent fallback is `--continue`.
+  antigravity: {
+    mode: "capture",
+    fresh: () => [],
+    resumeById: (id) => ["--conversation", id],
+    resumeLatest: ["--continue"],
+    bypass: ["--dangerously-skip-permissions"],
+  },
+};
+
+const NO_SESSION: EngineSession = { mode: "none", fresh: () => [], resumeLatest: [], bypass: [] };
+
+export function engineSession(engineId: string): EngineSession {
+  return ENGINE_SESSIONS[engineId] ?? NO_SESSION;
 }
 
-/** The full args for (re)launching an engine: base args, plus resume
- *  (`--continue`) when continuing a prior session, plus the bypass flags in
- *  bypass-permissions mode. The cold-start relaunch and the status-bar Restart /
- *  shield all build args through here, so a restored tab resumes exactly as a
- *  manual Restart would. */
+/** The bypass-permissions flags for an engine (empty ⇒ the tab shows no shield). */
+export const engineBypassArgs = (engineId: string): string[] => engineSession(engineId).bypass;
+
+/** Whether we mint this engine's id up front via a `codex exec` probe (codex),
+ *  rather than handing it one (assign) or reading it back from disk (capture). */
+export const engineMintsViaExec = (engineId: string): boolean =>
+  engineSession(engineId).mode === "exec-mint";
+
+/** Whether an engine can resume a specific conversation by id — gates the on-disk
+ *  capture, which only helps engines we can later resume by id (antigravity, and
+ *  codex as a fallback if its exec-mint probe failed). Assign engines also resume
+ *  by id but always already have one, so the capture's `!sessionId` guard skips. */
+export const engineResumesById = (engineId: string): boolean =>
+  engineSession(engineId).resumeById != null;
+
+/** Whether we can authoritatively check this engine's conversation on disk (the
+ *  `agent_session_exists` backend) — Claude, Codex, and Antigravity store under the
+ *  id we hold (Antigravity's captured `--conversation` id maps to its brain dir).
+ *  Gemini/custom fall back to the typed-something heuristic for the resume gate. */
+export const engineChecksSessionOnDisk = (engineId: string): boolean =>
+  engineId === "claude-code" || engineId === "codex" || engineId === "antigravity";
+
+/** A fresh conversation id for a new tab: a minted UUID for "assign" engines
+ *  (which pin it at launch), else undefined — "exec-mint" engines mint via a probe
+ *  after creation, "capture" engines read theirs from disk, "none" can't resume. */
+export function mintPtySessionId(engineId: string): string | undefined {
+  return engineSession(engineId).mode === "assign" ? globalThis.crypto?.randomUUID?.() : undefined;
+}
+
+/** The full args for (re)launching an engine: base args, plus the session args
+ *  (fresh vs resume-by-id vs most-recent), plus bypass flags. Resuming by a known
+ *  `sessionId` continues exactly that tab's conversation; without one it falls
+ *  back to the engine's most-recent resume. The cold-start relaunch, the
+ *  status-bar Restart, and the shield all build args through here. */
 export function relaunchArgs(
   engine: ResolvedEngine,
-  opts: { resume: boolean; bypass: boolean },
+  opts: { sessionId?: string; resume: boolean; bypass: boolean },
 ): string[] {
-  const a = engineActions(engine.id);
-  return [
-    ...engine.args,
-    ...(opts.resume ? a.resumeArgs : []),
-    ...(opts.bypass ? a.bypassArgs : []),
-  ];
+  const s = engineSession(engine.id);
+  const sessionArgs = opts.resume
+    ? opts.sessionId && s.resumeById
+      ? s.resumeById(opts.sessionId)
+      : s.resumeLatest
+    : s.fresh(opts.sessionId);
+  return [...engine.args, ...sessionArgs, ...(opts.bypass ? s.bypass : [])];
 }
 
 /** Reactive multiplexer config from the bootstrap query. */

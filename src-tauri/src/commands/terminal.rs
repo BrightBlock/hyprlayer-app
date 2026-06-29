@@ -7,7 +7,8 @@
 //! - `terminal_resize` notifies the PTY of a size change.
 //! - `terminal_close` kills the shell and drops the registry entry.
 
-use std::path::PathBuf;
+use std::io::BufRead;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::Engine as _;
@@ -23,6 +24,10 @@ use crate::terminal_registry::TerminalRegistry;
 
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
+
+/// Sessions whose mtime is within this window *before* a tab's launch are still
+/// considered (clock granularity / a file written a beat before the watermark).
+const CAPTURE_SKEW_MS: f64 = 2000.0;
 
 /// Open a new PTY for the given workstream, spawn the user's shell in the
 /// worktree directory, and start forwarding output to `on_event`.
@@ -321,6 +326,114 @@ pub async fn agent_resize(
     Ok(())
 }
 
+/// Read back the conversation id a "capture-mode" CLI assigned itself, by scanning
+/// its on-disk session store. Codex and Antigravity auto-generate their id (unlike
+/// Claude/Gemini, which take one we mint), so we launch them fresh, then call this
+/// to learn the id and resume that exact conversation later.
+///
+/// Returns the most recent session created after `after_ms` (epoch ms — the tab's
+/// launch time) that isn't already claimed by another tab (`exclude`). For Codex,
+/// which records its cwd, we also require it to match this workstream's worktree,
+/// so a session from another worktree can't be mis-attributed. Returns `None`
+/// until the session materialises on disk (written on the first message), so the
+/// frontend polls until it resolves. Best-effort: two capture-mode tabs started in
+/// the same worktree at nearly the same instant may swap ids (no per-process key
+/// exists to disambiguate); the `exclude` list still keeps the ids distinct.
+#[tauri::command]
+#[specta::specta]
+pub async fn capture_agent_session(
+    state: State<'_, AppState>,
+    workstream_id: String,
+    engine_id: String,
+    after_ms: f64,
+    exclude: Vec<String>,
+) -> CmdResult<Option<String>> {
+    let worktree = {
+        let id = workstream_id.clone();
+        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
+    }
+    .map(|ws| ws.worktree_path);
+    let id = tokio::task::spawn_blocking(move || match engine_id.as_str() {
+        "codex" => capture_codex(worktree.as_deref(), after_ms, &exclude),
+        "antigravity" => capture_antigravity(after_ms, &exclude),
+        _ => None,
+    })
+    .await
+    .map_err(|e| AppError::internal(format!("capture join: {e}")))?;
+    Ok(id)
+}
+
+/// Mint a Codex conversation id *deterministically*, sidestepping the disk-scan
+/// attribution race: run `codex exec --json` (which emits
+/// `{"type":"thread.started","thread_id":…}` as its very first event), take that
+/// id, wait for its rollout to hit disk so a later `resume <id>` can find it, then
+/// kill the probe — ignoring the rest of its output. Because we read the id from
+/// the process we spawned, it can't be confused with a sibling tab's session. The
+/// interactive tab then launches `codex resume <id>`. Returns None if Codex can't
+/// run or never announces a thread (caller falls back to disk capture).
+#[tauri::command]
+#[specta::specta]
+pub async fn mint_codex_session(
+    state: State<'_, AppState>,
+    workstream_id: String,
+    command: String,
+) -> CmdResult<Option<String>> {
+    let ws = {
+        let id = workstream_id.clone();
+        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
+    }
+    .ok_or_else(|| AppError {
+        code: "workstream_not_found".into(),
+        message: format!("No workstream with id {workstream_id}"),
+        remedy: None,
+    })?;
+    let path = state.binaries.augmented_path().await;
+    let worktree = PathBuf::from(&ws.worktree_path);
+    let path = path.to_string_lossy().into_owned();
+    // Bound the probe: the seed turn is normally a few seconds, but a hung CLI
+    // (auth/network) must not block the tab forever — time out to None and let the
+    // caller fall back. The orphaned probe exits on its own once its turn ends.
+    let id = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        tokio::task::spawn_blocking(move || mint_codex_blocking(&command, &worktree, &path)),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .flatten();
+    Ok(id)
+}
+
+/// Whether `session_id`'s conversation is actually persisted in `engine_id`'s
+/// on-disk store — the authoritative resume gate. A pinned-but-never-used id (a
+/// fresh tab whose startup terminal-query replies look like "input", or a message
+/// typed but not yet sent) has no file yet, so resuming it would exit "No
+/// conversation found"; this lets the caller launch fresh instead. Unknown engines
+/// (Gemini, custom) return false — the caller falls back to its own heuristic.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_exists(
+    state: State<'_, AppState>,
+    workstream_id: String,
+    engine_id: String,
+    session_id: String,
+) -> CmdResult<bool> {
+    let worktree = {
+        let id = workstream_id.clone();
+        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
+    }
+    .map(|ws| ws.worktree_path);
+    let exists = tokio::task::spawn_blocking(move || match engine_id.as_str() {
+        "claude-code" => claude_session_exists(worktree.as_deref(), &session_id),
+        "codex" => codex_rollout_exists(&session_id),
+        "antigravity" => antigravity_brain_exists(&session_id),
+        _ => false,
+    })
+    .await
+    .map_err(|e| AppError::internal(format!("session-exists join: {e}")))?;
+    Ok(exists)
+}
+
 /// Build the single command line handed to [`login_shell_args`] for an engine.
 /// On unix we `exec` the program so the CLI inherits the login shell's PID —
 /// then Ctrl-C and the process-group kill on close hit the CLI directly. Windows
@@ -354,6 +467,178 @@ fn sh_quote(s: &str) -> String {
 #[cfg(windows)]
 fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
+}
+
+/// File/dir mtime as epoch milliseconds.
+fn mtime_ms(path: &Path) -> Option<f64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    Some(modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as f64)
+}
+
+/// `(path, mtime_ms)` for every `*.jsonl` under `dir` (bounded depth) whose mtime
+/// is at or after `cutoff_ms`. Stats are cheap and the cutoff is recent, so only a
+/// handful survive — the caller reads contents for just those.
+fn recent_jsonl(dir: &Path, max_depth: usize, cutoff_ms: f64) -> Vec<(PathBuf, f64)> {
+    fn walk(dir: &Path, depth: usize, cutoff: f64, out: &mut Vec<(PathBuf, f64)>) {
+        if depth == 0 {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                walk(&path, depth - 1, cutoff, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                if let Some(m) = mtime_ms(&path) {
+                    if m >= cutoff {
+                        out.push((path, m));
+                    }
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, max_depth, cutoff_ms, &mut out);
+    out
+}
+
+/// First-line `session_meta` of a Codex rollout → `(session_id, cwd)`.
+fn codex_session_meta(file: &Path) -> Option<(String, String)> {
+    let f = std::fs::File::open(file).ok()?;
+    let mut first = String::new();
+    std::io::BufReader::new(f).read_line(&mut first).ok()?;
+    let v: serde_json::Value = serde_json::from_str(first.trim()).ok()?;
+    let payload = v.get("payload")?;
+    let id = payload.get("session_id")?.as_str()?.to_string();
+    let cwd = payload.get("cwd")?.as_str()?.to_string();
+    Some((id, cwd))
+}
+
+/// Newest Codex session created after the watermark whose recorded cwd matches the
+/// worktree and that isn't already claimed. See [`capture_agent_session`]. Codex
+/// lays sessions out as `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (depth 4).
+fn capture_codex(worktree: Option<&str>, after_ms: f64, exclude: &[String]) -> Option<String> {
+    let root = dirs::home_dir()?.join(".codex").join("sessions");
+    let cutoff = after_ms - CAPTURE_SKEW_MS;
+    let mut best: Option<(f64, String)> = None;
+    for (file, mtime) in recent_jsonl(&root, 4, cutoff) {
+        let Some((id, cwd)) = codex_session_meta(&file) else {
+            continue;
+        };
+        if worktree.is_some_and(|w| w != cwd) || exclude.iter().any(|e| e == &id) {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(m, _)| mtime > *m) {
+            best = Some((mtime, id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// Spawn `codex exec --json` in `worktree`, read its first `thread.started` event
+/// for the id, wait for the session's rollout to be on disk (so `resume` works),
+/// then kill the probe. Read-only sandbox so the throwaway prompt can't mutate the
+/// tree. See [`mint_codex_session`].
+fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<String> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(command)
+        .args(["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "hello."])
+        .current_dir(worktree)
+        .env("PATH", path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut id = None;
+    if let Some(stdout) = child.stdout.take() {
+        // Drain to EOF — let the seed turn finish and the process exit — so the
+        // session is persisted *complete*. Killing mid-turn leaves it "interrupted",
+        // which codex then surfaces on resume. The id is the first event.
+        for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+            if id.is_none() {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if v.get("type").and_then(|t| t.as_str()) == Some("thread.started") {
+                        id = v.get("thread_id").and_then(|t| t.as_str()).map(String::from);
+                    }
+                }
+            }
+        }
+    }
+    let _ = child.wait();
+    id
+}
+
+/// Whether Claude has a transcript for `session_id` under this worktree. Claude
+/// stores it at `~/.claude/projects/<cwd-with-non-alnum→->/<session_id>.jsonl`.
+fn claude_session_exists(worktree: Option<&str>, session_id: &str) -> bool {
+    let (Some(worktree), Some(home)) = (worktree, dirs::home_dir()) else {
+        return false;
+    };
+    let slug: String = worktree
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    home.join(".claude")
+        .join("projects")
+        .join(slug)
+        .join(format!("{session_id}.jsonl"))
+        .exists()
+}
+
+/// Whether a Codex rollout file for `session_id` exists yet (its id is in the
+/// `rollout-<ts>-<id>.jsonl` filename).
+fn codex_rollout_exists(session_id: &str) -> bool {
+    let Some(root) = dirs::home_dir().map(|h| h.join(".codex").join("sessions")) else {
+        return false;
+    };
+    recent_jsonl(&root, 4, 0.0)
+        .iter()
+        .any(|(p, _)| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(session_id)))
+}
+
+/// Whether an Antigravity conversation dir for `session_id` exists.
+fn antigravity_brain_exists(session_id: &str) -> bool {
+    dirs::home_dir()
+        .map(|h| {
+            h.join(".gemini")
+                .join("antigravity-cli")
+                .join("brain")
+                .join(session_id)
+                .is_dir()
+        })
+        .unwrap_or(false)
+}
+
+/// Newest Antigravity conversation dir created after the watermark and not already
+/// claimed. The store (`~/.gemini/antigravity-cli/brain/<id>/`) isn't cwd-scoped,
+/// so this is timestamp-only (no worktree match available).
+fn capture_antigravity(after_ms: f64, exclude: &[String]) -> Option<String> {
+    let root = dirs::home_dir()?
+        .join(".gemini")
+        .join("antigravity-cli")
+        .join("brain");
+    let cutoff = after_ms - CAPTURE_SKEW_MS;
+    let mut best: Option<(f64, String)> = None;
+    for entry in std::fs::read_dir(&root).ok()?.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') || exclude.iter().any(|e| e == &name) {
+            continue;
+        }
+        let Some(m) = mtime_ms(&entry.path()) else {
+            continue;
+        };
+        if m >= cutoff && best.as_ref().is_none_or(|(bm, _)| m > *bm) {
+            best = Some((m, name));
+        }
+    }
+    best.map(|(_, id)| id)
 }
 
 /// Replay scrollback then forward live output — the shared open/attach path.
