@@ -76,6 +76,9 @@ import {
   useMostRecentDoc,
   useSessionBackgroundTasks,
   useSessionPlanTasks,
+  usePlanDrawerUi,
+  setPlanDrawerUi,
+  togglePlanDrawerCollapsed,
   type QueuedMessage,
 } from "./sessionStore";
 import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
@@ -1326,21 +1329,25 @@ export function SessionChat({
   // The agent's live plan, shown as a drawer above the composer. Starts
   // minimized so the expanded list never covers an approval card.
   const planTasks = useSessionPlanTasks(sid);
-  const [planCollapsed, setPlanCollapsed] = useState(true);
-  const [planDismissed, setPlanDismissed] = useState(false);
+  // Collapsed/dismissed live in a per-session store, not local state, so they
+  // survive this component's remount on a tab switch — otherwise a dismissed
+  // (all-done) plan springs back into view when you leave the tab and return.
+  const { collapsed: planCollapsed, dismissed: planDismissed } = usePlanDrawerUi(sid);
   const planHasIncomplete = planTasks.some((t) => t.status !== "completed");
   const planAllDone = planTasks.length > 0 && !planHasIncomplete;
   // Auto-clear once the plan finishes and the turn ends; stays dismissed (and
   // re-minimized for the next plan) until a fresh incomplete task appears.
   useEffect(() => {
+    if (!sid) return;
     if (planHasIncomplete) {
-      setPlanDismissed(false);
+      setPlanDrawerUi(sid, { dismissed: false });
     } else if (planAllDone && !working) {
-      setPlanDismissed(true);
-      setPlanCollapsed(true);
+      setPlanDrawerUi(sid, { dismissed: true, collapsed: true });
     }
-  }, [planHasIncomplete, planAllDone, working]);
-  const togglePlan = useCallback(() => setPlanCollapsed((v) => !v), []);
+  }, [sid, planHasIncomplete, planAllDone, working]);
+  const togglePlan = useCallback(() => {
+    if (sid) togglePlanDrawerCollapsed(sid);
+  }, [sid]);
   useCommand("session.togglePlan", planTasks.length > 0 && !planDismissed ? togglePlan : null);
 
   // Prompt history navigation: derive prompts from the live transcript,
@@ -1741,49 +1748,60 @@ export function SessionChat({
             </div>
           ) : (
             <>
-              {(showHandoffSuggest || showHandoffReady) && (
-                <HandoffBanner
-                  mode={showHandoffReady ? "ready" : "suggest"}
-                  contextPct={contextPct}
-                  suggestRequested={handoffRequested}
-                  onCreateHandoff={() => {
-                    if (sid && !handoffRequested) void sendMessage(sid, HANDOFF_COMMAND, []);
-                  }}
-                  onClearAndResume={() => void handleClearAndResume()}
-                  onDismiss={
-                    showHandoffReady && handoffDoc
-                      ? () => onDetachDoc(handoffDoc.path)
-                      : onDismissHandoffNudge
-                  }
-                />
-              )}
-              {!started && (
-                <WorkstreamDocChips
-                  docs={shell.docs}
-                  onOpenDoc={onOpenDoc}
-                  onDetach={onDetachDoc}
-                  onBrowse={onBrowseDocs}
-                />
-              )}
-              {pendingQuestion && (
-                <QuestionPrompt
-                  key={pendingQuestion.requestId}
-                  pending={pendingQuestion}
-                  onSubmit={(answers) =>
-                    sid && void answerQuestion(sid, pendingQuestion.requestId, answers)
-                  }
-                />
-              )}
-              {session && session.queued.length > 0 && (
-                <QueuedMessages
-                  messages={session.queued}
-                  onCancel={(i) => {
-                    if (sid) cancelQueuedMessage(sid, i);
-                  }}
-                />
-              )}
-              {/* The agent's live plan, a drawer docked above the composer. */}
-              <div className="relative rounded-xl bg-panel-2">
+              {/* The plan drawer floats up from the composer over this area;
+                  keep these banners in their own stacking context so the drawer
+                  never covers the handoff box or a pending question. */}
+              <div className="relative z-30">
+                {(showHandoffSuggest || showHandoffReady) && (
+                  <HandoffBanner
+                    mode={showHandoffReady ? "ready" : "suggest"}
+                    contextPct={contextPct}
+                    suggestRequested={handoffRequested}
+                    onCreateHandoff={() => {
+                      if (sid && !handoffRequested) void sendMessage(sid, HANDOFF_COMMAND, []);
+                    }}
+                    onClearAndResume={() => void handleClearAndResume()}
+                    onDismiss={
+                      showHandoffReady && handoffDoc
+                        ? () => onDetachDoc(handoffDoc.path)
+                        : onDismissHandoffNudge
+                    }
+                  />
+                )}
+                {!started && (
+                  <WorkstreamDocChips
+                    docs={shell.docs}
+                    onOpenDoc={onOpenDoc}
+                    onDetach={onDetachDoc}
+                    onBrowse={onBrowseDocs}
+                  />
+                )}
+                {pendingQuestion && (
+                  <QuestionPrompt
+                    key={pendingQuestion.requestId}
+                    pending={pendingQuestion}
+                    onSubmit={(answers) =>
+                      sid && void answerQuestion(sid, pendingQuestion.requestId, answers)
+                    }
+                  />
+                )}
+                {session && session.queued.length > 0 && (
+                  <QueuedMessages
+                    messages={session.queued}
+                    onCancel={(i) => {
+                      if (sid) cancelQueuedMessage(sid, i);
+                    }}
+                  />
+                )}
+              </div>
+              {/* The agent's live plan, a drawer docked above the composer. The
+                  top margin reserves room for the collapsed handle so it floats
+                  into clear space instead of over the banners above. */}
+              <div
+                className={`relative rounded-xl bg-panel-2 ${
+                  planTasks.length > 0 && !planDismissed ? "mt-8" : ""
+                }`}
+              >
                 <PlanTasksPanel
                   tasks={planTasks}
                   working={working}

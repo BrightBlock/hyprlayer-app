@@ -68,6 +68,9 @@ const {
   classifyEntry,
   workstreamShipBusy,
   useSessionStore,
+  usePlanDrawerStore,
+  setPlanDrawerUi,
+  togglePlanDrawerCollapsed,
 } = await import("./sessionStore");
 const { isBusy, isWorking } = await import("./transcript");
 
@@ -99,6 +102,7 @@ function queued(id: string): string[] {
 
 beforeEach(() => {
   useSessionStore.setState({ sessions: {} });
+  usePlanDrawerStore.setState({ byId: {} });
   h.startStageSession.mockClear();
   h.sendUserMessage.mockClear();
   h.resumeSession.mockClear();
@@ -626,5 +630,38 @@ describe("workstreamShipBusy", () => {
     await startSession({ workstreamId: "ws2", stage: "ship", input: "" });
     expect(shipBusy("ws1")).toBe(false);
     expect(shipBusy("ws2")).toBe(true);
+  });
+});
+
+describe("plan drawer view state (per-session, survives tab switch)", () => {
+  const drawer = (id: string) => usePlanDrawerStore.getState().byId[id];
+
+  it("patches over the collapsed/not-dismissed default", () => {
+    setPlanDrawerUi("s1", { dismissed: true });
+    expect(drawer("s1")).toEqual({ collapsed: true, dismissed: true });
+  });
+
+  it("keeps each session's state isolated — the tab-switch bug", () => {
+    // Finish + dismiss s1's plan, then move to a fresh tab (s2) and back.
+    setPlanDrawerUi("s1", { dismissed: true, collapsed: true });
+    setPlanDrawerUi("s2", { dismissed: false, collapsed: false });
+    // s1 stays dismissed: leaving and returning to its tab must not revive it.
+    expect(drawer("s1")).toEqual({ collapsed: true, dismissed: true });
+    expect(drawer("s2")).toEqual({ collapsed: false, dismissed: false });
+  });
+
+  it("toggles only the collapsed flag", () => {
+    setPlanDrawerUi("s1", { dismissed: true });
+    togglePlanDrawerCollapsed("s1"); // true -> false
+    expect(drawer("s1")).toEqual({ collapsed: false, dismissed: true });
+    togglePlanDrawerCollapsed("s1"); // false -> true
+    expect(drawer("s1")).toEqual({ collapsed: true, dismissed: true });
+  });
+
+  it("is a no-op when nothing changes (so the auto-clear effect can re-fire freely)", () => {
+    setPlanDrawerUi("s1", { dismissed: true, collapsed: true });
+    const before = drawer("s1");
+    setPlanDrawerUi("s1", { dismissed: true, collapsed: true });
+    expect(drawer("s1")).toBe(before); // same reference: no churn
   });
 });

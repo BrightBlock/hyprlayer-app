@@ -57,11 +57,11 @@ function TaskRow({ task, working }: { task: PlanTask; working: boolean }) {
 }
 
 /**
- * The task drawer — a translucent tab anchored to the top of the composer (its
- * parent must be `relative`), floating up over the transcript so it never pushes
- * layout. The list slides open above the handle via a grid-rows `0fr↔1fr` fold,
- * and a second outer fold retracts the whole drawer on auto-clear. Animates by
- * height only — fading a `backdrop-blur` surface shimmers.
+ * The task drawer — a tab anchored to the top of the composer (its parent must
+ * be `relative`), floating up over the transcript so it never pushes layout. Its
+ * fill is solid panel-2, the same surface as the composer it merges into. The
+ * list slides open above the handle via a grid-rows `0fr↔1fr` fold, and a second
+ * outer fold retracts the whole drawer on auto-clear. Animates by height only.
  */
 export function PlanTasksPanel({
   tasks,
@@ -98,8 +98,8 @@ export function PlanTasksPanel({
       }`}
     >
       <div className="overflow-hidden">
-        {/* Fill matches the composer (panel-2), translucent so it reads as the same surface. */}
-        <div className="overflow-hidden rounded-t-xl bg-panel-2/70 backdrop-blur-sm">
+        {/* Solid panel-2 — the exact same fill as the composer below, so they read as one surface. */}
+        <div className="overflow-hidden rounded-t-xl bg-panel-2">
           {/* The list, folded open above the handle. */}
           <div className={`grid ${fold} ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
             <div className="min-h-0 overflow-hidden">
@@ -118,19 +118,19 @@ export function PlanTasksPanel({
             aria-label={label}
             aria-expanded={open}
             tabIndex={cleared ? -1 : undefined}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1 text-ink-dim hover:text-ink"
+            className="flex w-full items-center gap-1.5 px-3 py-1.5 text-ink-dim hover:text-ink"
           >
             {/* Pulse only while genuinely working — an ended turn can leave an in_progress task. */}
-            <ChecklistIcon size={13} className={active && working ? "animate-work-pulse" : undefined} />
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim/70">
+            <ChecklistIcon size={14} className={active && working ? "animate-work-pulse" : undefined} />
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim/70">
               Tasks
             </span>
-            <span className="font-mono text-[10px] text-ink-dim/60">
+            <span className="font-mono text-[11px] text-ink-dim/60">
               {done}/{tasks.length}
             </span>
             {/* Chevron points up when collapsed (pull up to open), down when open. */}
             <ChevronDownIcon
-              size={14}
+              size={15}
               className={`ml-auto transition-transform duration-300 ${open ? "" : "rotate-180"}`}
             />
           </button>
