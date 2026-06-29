@@ -5,9 +5,32 @@
  * and wants review. Nothing renders when there's no activity to flag, so a quiet
  * workstream stays visually quiet. See `useWorkstreamActivity` for the fold.
  */
+import type { AgentState } from "../multiplexer/engineState";
+import { useWorkstreamAgentRollup } from "../multiplexer/multiplexerStore";
 import { useWorkstreamActivity, type WorkstreamActivity } from "./sessionStore";
 
 type DotAnim = "ping" | "work" | "none";
+
+// Worst-first priority used to merge native-session and pty-agent activity into
+// one dot, so e.g. a blocked CLI dominates a quiet chat in the same workstream.
+const ACTIVITY_PRIORITY: Record<WorkstreamActivity, number> = {
+  error: 5,
+  "needs-you": 4,
+  working: 3,
+  background: 2,
+  review: 1,
+  idle: 0,
+};
+
+/** Map a pty agent's state onto the shared workstream-activity vocabulary. */
+const PTY_TO_ACTIVITY: Record<AgentState, WorkstreamActivity> = {
+  blocked: "needs-you",
+  working: "working",
+  done: "review",
+  idle: "idle",
+};
+const ptyToActivity = (state: AgentState | undefined): WorkstreamActivity =>
+  state ? PTY_TO_ACTIVITY[state] : "idle";
 
 const ACTIVITY_STYLE: Record<
   Exclude<WorkstreamActivity, "idle">,
@@ -36,7 +59,14 @@ export function WorkstreamActivityDot({
   workstreamId: string;
   idle?: "hide" | "dot";
 }) {
-  const activity = useWorkstreamActivity(workstreamId);
+  // Merge native-session activity with any pty agents' rollup (the latter is
+  // always "idle" when multiplexer is off, so this is a no-op then).
+  const sessionActivity = useWorkstreamActivity(workstreamId);
+  const ptyActivity = ptyToActivity(useWorkstreamAgentRollup(workstreamId));
+  const activity =
+    ACTIVITY_PRIORITY[ptyActivity] > ACTIVITY_PRIORITY[sessionActivity]
+      ? ptyActivity
+      : sessionActivity;
   if (activity === "idle") {
     if (idle === "dot") {
       return (

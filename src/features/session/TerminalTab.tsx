@@ -4,11 +4,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands, type TerminalEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
-import { useCommand } from "../../lib/keybindings/registry";
-import { useThemeStore } from "../../lib/theme";
 import { b64ToBytes, strToB64 } from "./terminalCodec";
+import { useTerminalThemeSync, useTerminalZoom } from "./terminalChrome";
 import { createTerminalEngine, type TerminalEngine } from "./terminalEngine";
-import { useTerminalFontSize } from "./terminalFontSize";
 import { xtermThemeFromCss } from "./terminalTheme";
 
 export function TerminalTab({
@@ -25,22 +23,15 @@ export function TerminalTab({
   onTerminalId: (id: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
-  // Refs let the font-size / theme effects reach the live engine without
+  // Refs let the shared zoom / theme chrome hooks reach the live engine without
   // re-running (and tearing down) the main setup effect.
   const engineRef = useRef<TerminalEngine | null>(null);
   const idRef = useRef<string | undefined>(terminalId);
   const appliedFontSizeRef = useRef<number>(0);
 
-  const fontSize = useTerminalFontSize((s) => s.fontSize);
-  const zoomIn = useTerminalFontSize((s) => s.zoomIn);
-  const zoomOut = useTerminalFontSize((s) => s.zoomOut);
-  const zoomReset = useTerminalFontSize((s) => s.reset);
-
-  // Zoom acts on whichever terminal is mounted — registering here is the
-  // context gate, so ⌘+/⌘-/⌘0 are inert when no terminal is on screen.
-  useCommand("terminal.zoomIn", zoomIn);
-  useCommand("terminal.zoomOut", zoomOut);
-  useCommand("terminal.zoomReset", zoomReset);
+  // Zoom keybindings + apply, and live theme recolor — shared with AgentPtyTab.
+  const fontSize = useTerminalZoom(engineRef, idRef, appliedFontSizeRef);
+  useTerminalThemeSync(engineRef);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -192,34 +183,6 @@ export function TerminalTab({
     // likewise read once at mount (a later focus change must not re-grab focus).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, shellId]);
-
-  // Apply zoom in place: change the font, re-fit to the new cell size, and tell
-  // the PTY its new grid. Skips the no-op initial run (engine built at fontSize).
-  useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine || appliedFontSizeRef.current === fontSize) return;
-    appliedFontSizeRef.current = fontSize;
-    const g = engine.setFontSize(fontSize);
-    if (idRef.current) void commands.terminalResize(idRef.current, g.cols, g.rows);
-  }, [fontSize]);
-
-  // Recolor live when the theme changes. Re-read on the next frame so the
-  // <html> theme class (toggled by the theme store's own subscriber) has applied
-  // before we sample the CSS variables; also covers "system" → OS-appearance.
-  useEffect(() => {
-    const recolor = () => engineRef.current?.setTheme(xtermThemeFromCss());
-    const schedule = () => requestAnimationFrame(recolor);
-    const unsub = useThemeStore.subscribe(schedule);
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-    const onMq = () => {
-      if (useThemeStore.getState().mode === "system") schedule();
-    };
-    mq?.addEventListener("change", onMq);
-    return () => {
-      unsub();
-      mq?.removeEventListener("change", onMq);
-    };
-  }, []);
 
   // Outer box flows in the flex column; the inner host is absolutely positioned
   // so the terminal's rendered size never feeds back into the page layout. The

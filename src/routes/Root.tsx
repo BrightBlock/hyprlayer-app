@@ -54,12 +54,14 @@ import {
   ClipboardIcon,
   CodeIcon,
   FolderIcon,
+  MultiplexerIcon,
   PinIcon,
   PlusIcon,
   ScriptPanelIcon,
   TerminalIcon,
   WarningTriangleIcon,
 } from "../components/icons";
+import { useMultiplexer } from "../features/multiplexer/engines";
 import type { EditorTarget } from "../lib/bindings";
 import { SearchPalette } from "../features/search/SearchPalette";
 import { toggleSearch } from "../features/search/searchStore";
@@ -86,11 +88,7 @@ import { useUpdate, showUpdateToast } from "../lib/updater";
 import { useToast } from "../lib/toast";
 import { Toast } from "../components/Toast";
 import type { Project, WorkstreamView } from "../lib/bindings";
-
-// One-shot guard (module scope, so it survives re-renders but resets on a cold
-// app load): on launch we land on the dashboard even if the webview restored a
-// deeper route from the previous session.
-let launchedToHome = false;
+import { useLastRoute } from "../lib/lastRoute";
 
 // Stable identity for "no overrides yet" so the dispatcher's memo/effect doesn't
 // churn on every Root render before settings have loaded a keybindings section.
@@ -506,12 +504,17 @@ function ProjectCopyWarning({ projectPath }: { projectPath: string }) {
 export function Root() {
   const bootstrap = useBootstrap();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const routeHref = useRouterState({ select: (s) => s.location.href });
   const locationSearch = useRouterState({ select: (s) => s.location.search }) as {
     item?: string;
     doc?: string;
     from?: string;
   };
-  const [collapsed, setCollapsed] = useState(false);
+  // Left project-sidebar collapse lives in the persisted uiStore (alongside the
+  // right diff sidebar's `diffHidden`) so the app reopens with the same layout.
+  const collapsed = useUiStore((state) => state.projectSidebarCollapsed);
+  const setProjectSidebarCollapsed = useUiStore((state) => state.setProjectSidebarCollapsed);
+  const toggleProjectSidebar = useUiStore((state) => state.toggleProjectSidebar);
   // Default to the widest we allow; the user can drag it narrower if desired.
   const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
   // True only while the resize handle is being dragged. The panel's width
@@ -651,13 +654,13 @@ export function Root() {
       search: { project: project.thoughtsProject, from: project.path },
     });
 
-  // Make the dashboard the launch view: once per cold start, if we opened on a
-  // restored deeper route, redirect home. In-session navigation is untouched.
+  // Remember the current view so the next launch can restore it (the actual
+  // restore happens before first paint in main.tsx, to avoid flashing the
+  // dashboard). Skip the onboarding wizard — never a "view" to come back to.
+  const rememberRoute = useLastRoute((s) => s.remember);
   useEffect(() => {
-    if (launchedToHome) return;
-    launchedToHome = true;
-    if (pathname !== "/") void navigate({ to: "/", replace: true });
-  }, [navigate, pathname]);
+    if (!pathname.startsWith("/onboarding")) rememberRoute(routeHref);
+  }, [routeHref, pathname, rememberRoute]);
 
   // When the viewed workstream is archived, fall back to its project view (only
   // when it was the selected item — leaves background archives alone).
@@ -719,6 +722,8 @@ export function Root() {
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
+  // Multiplexer mode indicator (set in Settings, not a toggle).
+  const mux = useMultiplexer();
   // Toggle the scripts dock's visibility from the rail. When it's docked in the
   // right sidebar, "showing" it also reveals that sidebar (the panel lives in it);
   // "hiding" just closes the dock without collapsing the sidebar.
@@ -746,7 +751,7 @@ export function Root() {
   // collapse the same way, so one button drives both (and reads each one's
   // shown/hidden state for its label).
   const sidebarShown = onLibrary ? !libraryCollapsed : !collapsed;
-  const toggleSidebar = () => (onLibrary ? toggleLibrary() : setCollapsed((value) => !value));
+  const toggleSidebar = () => (onLibrary ? toggleLibrary() : toggleProjectSidebar());
 
   // Reserve the traffic-light inset only when the lights are actually present:
   // macOS, and not in fullscreen (which hides them). Off macOS there are none,
@@ -1010,6 +1015,8 @@ export function Root() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {/* Multiplexer mode is signalled by the nav-rail Home button taking
+                the grid glyph (below) — no separate top-right marker. */}
             {/* "View on GitHub" for the open library doc lives at the window's
                 very top-right (onLibrary and currentProject are exclusive). */}
             {onLibrary && libDocUrl.data && (
@@ -1092,13 +1099,17 @@ export function Root() {
           aria-label="Primary"
         >
           <div className="flex flex-col items-center gap-3">
+            {/* Home — its glyph doubles as the Multiplexer-mode indicator: the
+                lone rounded square "splits" into a 2×2 grid of panes while the
+                mode is on (set in Settings → Advanced), reverting when off. Still
+                navigates home; the mode lives in the tooltip. */}
             <Link
               to="/"
               className={railHomeClass}
-              title="Home"
-              aria-label="Home"
+              title={mux.enabled ? "Home — Multiplexer mode on (Settings → Advanced)" : "Home"}
+              aria-label={mux.enabled ? "Home (Multiplexer mode on)" : "Home"}
             >
-              <SquareIcon />
+              {mux.enabled ? <MultiplexerIcon size={18} strokeWidth={2} /> : <SquareIcon />}
             </Link>
             <button
               type="button"
@@ -1107,12 +1118,12 @@ export function Root() {
                 // re-opens the project panel (the nav rail stays). From elsewhere
                 // it opens a project with the panel shown. Inert with no projects.
                 if (pathname.startsWith("/projects")) {
-                  setCollapsed((value) => !value);
+                  toggleProjectSidebar();
                   return;
                 }
                 const target = currentProjectPath ?? projects[0]?.path;
                 if (target) {
-                  setCollapsed(false);
+                  setProjectSidebarCollapsed(false);
                   void navigate({
                     to: "/projects/$projectPath",
                     params: { projectPath: target },

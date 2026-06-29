@@ -3,6 +3,7 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 
 import { Root } from "./routes/Root";
 import { Dashboard } from "./routes/Dashboard";
+import { useLastRoute } from "./lib/lastRoute";
 
 // The shell (Root) and the landing dashboard load eagerly; everything else is
 // code-split so the initial bundle doesn't carry CodeMirror + its language
@@ -127,6 +128,17 @@ const routeTree = rootRoute.addChildren([
   libraryRoute,
   projectRoute,
 ]);
+
+// Restore the previous session's view by seeding the URL before the router reads
+// it at construction, so a cold start mounts straight into the last workstream/
+// view instead of flashing the dashboard while a post-mount effect navigates.
+// Only when we actually booted to "/" — a deep link sets its own URL first. A
+// since-deleted project (→ PageError) or a missing config (→ onboarding gate) is
+// handled downstream once bootstrap resolves; the route is re-persisted by Root.
+const lastHref = useLastRoute.getState().href;
+if (lastHref && lastHref !== "/" && window.location.pathname === "/") {
+  window.history.replaceState(null, "", lastHref);
+}
 
 export const router = createRouter({ routeTree });
 

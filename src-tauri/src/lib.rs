@@ -119,6 +119,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::ollama::ollama_set_default_model,
             commands::titles::suggest_tab_title,
             commands::terminal::terminal_open,
+            commands::terminal::agent_open,
+            commands::terminal::agent_resize,
             commands::terminal::terminal_attach,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,

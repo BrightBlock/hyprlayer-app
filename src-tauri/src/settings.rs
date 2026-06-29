@@ -44,6 +44,14 @@ pub struct AppSettings {
     pub notifications: NotificationSettings,
     /// Auto-generated agent tab titles (enable + which model). Settings → General.
     pub tab_titles: TabTitleSettings,
+    /// Multiplexer mode — run agents as native CLIs in persistent PTYs. Off by
+    /// default; with it off the app behaves exactly as before. Settings → Advanced.
+    pub multiplexer: MultiplexerSettings,
+    /// Developer tools (web inspector, PTY byte log, IPC trace). A Settings →
+    /// Advanced sibling row; reserved/off by default — nothing consumes it yet
+    /// (a stub like [`CodexSettings`], so the row can render and gain behaviour
+    /// later without a settings migration).
+    pub dev_tools: bool,
 }
 
 /// Auto-generated agent-tab titles. When enabled, a new agent tab summarizes the
@@ -298,6 +306,98 @@ impl GitSettings {
     }
 }
 
+/// Multiplexer mode (Settings → Advanced). When enabled, a new agent tab
+/// launches a real CLI in a persistent PTY instead of the native chat, and the
+/// `+` on the agent tab strip lets the user pick which engine. The frontend is
+/// the only consumer — the backend just stores the config and (separately)
+/// spawns the chosen command via `agent_open`.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MultiplexerSettings {
+    /// Master switch. `false` (default) keeps every agent tab the native chat;
+    /// nothing about the shell changes until this is on.
+    pub enabled: bool,
+    /// Engine a new tab launches with (also bound to ⌘T). Defaults to
+    /// `"claude-code"`. If it names a disabled/removed engine the frontend falls
+    /// back to the first enabled one.
+    pub default_engine_id: String,
+    /// Badge the tab + fire a system notification when an agent is blocked.
+    pub notify_on_blocked: bool,
+    /// Reattach running PTYs when the app relaunches. A child process can't
+    /// outlive the app it was spawned from, so in practice this relaunches the
+    /// engine on next launch rather than resurrecting a dead process.
+    pub persist_across_restarts: bool,
+    /// The engines offered in the `+` menu. Seeded with the three built-ins;
+    /// users can disable any or add custom commands ("Add CLI…").
+    pub engines: Vec<Engine>,
+}
+
+impl Default for MultiplexerSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            default_engine_id: DEFAULT_ENGINE_ID.to_string(),
+            notify_on_blocked: true,
+            persist_across_restarts: true,
+            engines: Engine::builtins(),
+        }
+    }
+}
+
+/// The seeded default engine id (Claude Code).
+pub const DEFAULT_ENGINE_ID: &str = "claude-code";
+
+/// One CLI engine the multiplexer can launch in a PTY.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Engine {
+    /// Stable id: `"claude-code" | "codex" | "gemini"` for built-ins, a uuid for
+    /// custom engines.
+    pub id: String,
+    /// Display name, e.g. "Claude Code".
+    pub label: String,
+    /// Single-glyph mark shown on the tab + in the menu (e.g. "✻", "◆", "✦").
+    pub glyph: String,
+    /// Theme custom-property *name* for the engine accent (e.g. `"--color-accent"`).
+    /// Never a raw hex — the frontend applies it as `var(<token>)` so it stays
+    /// theme-aware.
+    pub accent_token: String,
+    /// Executable to run, resolved on the user's login PATH (e.g. `"claude"`).
+    pub command: String,
+    /// Extra arguments appended to the command.
+    pub args: Vec<String>,
+    /// Whether this engine appears in the `+` menu.
+    pub enabled: bool,
+    /// True for the three seeded engines; false for user-added customs.
+    pub builtin: bool,
+}
+
+impl Engine {
+    fn builtin(id: &str, label: &str, glyph: &str, accent_token: &str, command: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            label: label.to_string(),
+            glyph: glyph.to_string(),
+            accent_token: accent_token.to_string(),
+            command: command.to_string(),
+            args: Vec::new(),
+            enabled: true,
+            builtin: true,
+        }
+    }
+
+    /// The engines seeded when multiplexer mode is first enabled. Accent tokens
+    /// map onto existing theme colors: terracotta / violet / blue / teal.
+    pub fn builtins() -> Vec<Engine> {
+        vec![
+            Engine::builtin(DEFAULT_ENGINE_ID, "Claude Code", "✻", "--color-accent", "claude"),
+            Engine::builtin("codex", "Codex", "◆", "--color-validate", "codex"),
+            Engine::builtin("gemini", "Gemini", "✦", "--color-brand", "gemini"),
+            Engine::builtin("antigravity", "Antigravity", "◉", "--color-commit", "agy"),
+        ]
+    }
+}
+
 pub struct SettingsStore {
     path: PathBuf,
     cache: RwLock<AppSettings>,
@@ -505,5 +605,47 @@ mod tests {
         let s: AppSettings = serde_json::from_str(raw).unwrap();
         assert!(!s.notifications.enabled);
         assert!(!s.notifications.sound);
+    }
+
+    #[test]
+    fn multiplexer_defaults_off_with_builtins() {
+        // Old settings.json without the `multiplexer` key must default OFF with
+        // the built-in engines seeded — the feature is strictly opt-in.
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!s.multiplexer.enabled);
+        assert_eq!(s.multiplexer.default_engine_id, "claude-code");
+        assert!(s.multiplexer.notify_on_blocked);
+        assert!(s.multiplexer.persist_across_restarts);
+        let ids: Vec<&str> = s
+            .multiplexer
+            .engines
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect();
+        assert_eq!(ids, ["claude-code", "codex", "gemini", "antigravity"]);
+        assert!(s.multiplexer.engines.iter().all(|e| e.builtin && e.enabled));
+    }
+
+    #[test]
+    fn multiplexer_round_trips_custom_engine() {
+        let raw = r#"{"multiplexer":{"enabled":true,"defaultEngineId":"codex","engines":[{"id":"x","label":"My CLI","glyph":"›","accentToken":"--color-accent","command":"mycli","args":["--foo"],"enabled":true,"builtin":false}]}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert!(s.multiplexer.enabled);
+        assert_eq!(s.multiplexer.default_engine_id, "codex");
+        assert_eq!(s.multiplexer.engines.len(), 1);
+        let e = &s.multiplexer.engines[0];
+        assert_eq!(e.command, "mycli");
+        assert_eq!(e.args, vec!["--foo"]);
+        assert!(!e.builtin);
+        // A field absent from the provided object still falls back to its default.
+        assert!(s.multiplexer.notify_on_blocked);
+    }
+
+    #[test]
+    fn dev_tools_defaults_off() {
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!s.dev_tools);
+        let on: AppSettings = serde_json::from_str(r#"{"devTools":true}"#).unwrap();
+        assert!(on.dev_tools);
     }
 }

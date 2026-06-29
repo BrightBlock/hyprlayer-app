@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 /**
  * Default width (px) of the right-hand diff sidebar. Matched to the left
@@ -46,6 +47,12 @@ type UiStore = {
    *  here (not the route) so it survives leaving and re-opening the Library. */
   libraryCollapsed: boolean;
   toggleLibrary: () => void;
+  /** Whether the left project sidebar is collapsed. Persisted (like the other
+   *  collapse states) so the app reopens with the same layout. Lives here rather
+   *  than as Root-local state so it survives an app restart. */
+  projectSidebarCollapsed: boolean;
+  setProjectSidebarCollapsed: (collapsed: boolean) => void;
+  toggleProjectSidebar: () => void;
   /** Whether the Library's document detail uses the full width ("wide") instead
    *  of a centered readable column ("narrow"). A per-user reading/editing
    *  preference, applied to both preview and the editor; chosen via the header's
@@ -54,15 +61,35 @@ type UiStore = {
   setDocWide: (wide: boolean) => void;
 };
 
-export const useUiStore = create<UiStore>((set) => ({
-  diffHidden: false,
-  toggleDiff: () => set((state) => ({ diffHidden: !state.diffHidden })),
-  diffWidth: DIFF_SIDEBAR_WIDTH,
-  setDiffWidth: (width) => set({ diffWidth: width }),
-  libraryWidth: LIBRARY_SIDEBAR_WIDTH,
-  setLibraryWidth: (width) => set({ libraryWidth: width }),
-  libraryCollapsed: false,
-  toggleLibrary: () => set((state) => ({ libraryCollapsed: !state.libraryCollapsed })),
-  docWide: false,
-  setDocWide: (wide) => set({ docWide: wide }),
-}));
+export const useUiStore = create<UiStore>()(
+  persist(
+    (set) => ({
+      diffHidden: false,
+      toggleDiff: () => set((state) => ({ diffHidden: !state.diffHidden })),
+      diffWidth: DIFF_SIDEBAR_WIDTH,
+      setDiffWidth: (width) => set({ diffWidth: width }),
+      libraryWidth: LIBRARY_SIDEBAR_WIDTH,
+      setLibraryWidth: (width) => set({ libraryWidth: width }),
+      libraryCollapsed: false,
+      toggleLibrary: () => set((state) => ({ libraryCollapsed: !state.libraryCollapsed })),
+      projectSidebarCollapsed: false,
+      setProjectSidebarCollapsed: (collapsed) => set({ projectSidebarCollapsed: collapsed }),
+      toggleProjectSidebar: () =>
+        set((state) => ({ projectSidebarCollapsed: !state.projectSidebarCollapsed })),
+      docWide: false,
+      setDocWide: (wide) => set({ docWide: wide }),
+    }),
+    {
+      name: "hyprlayer:ui",
+      version: 1,
+      // Persist only the layout/preference flags — NOT the live drag widths,
+      // which would otherwise write to localStorage on every resize pointermove.
+      partialize: (s) => ({
+        diffHidden: s.diffHidden,
+        libraryCollapsed: s.libraryCollapsed,
+        projectSidebarCollapsed: s.projectSidebarCollapsed,
+        docWide: s.docWide,
+      }),
+    },
+  ),
+);

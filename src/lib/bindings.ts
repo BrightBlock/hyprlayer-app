@@ -469,6 +469,28 @@ export const commands = {
 	 */
 	terminalOpen: (workstreamId: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("terminal_open", { workstreamId, cols, rows, onEvent })),
 	/**
+	 *  Open a PTY running a Multiplexer engine CLI (Claude Code / Codex / Gemini /
+	 *  a custom command) in the workstream's worktree.
+	 * 
+	 *  The command runs through the user's login shell so it resolves on the same
+	 *  PATH and profile the user gets in their own terminal; on unix it's `exec`'d
+	 *  so the CLI takes over the shell's PID and SIGINT/exit stay clean. Shares the
+	 *  id-based write/resize/close/attach lifecycle with [`terminal_open`] — only
+	 *  the spawned program differs, so the frontend reuses `terminal_write` (e.g. a
+	 *  `\x03` to Stop), `terminal_resize`, `terminal_attach`, and `terminal_close`.
+	 */
+	agentOpen: (workstreamId: string, command: string, args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("agent_open", { workstreamId, command, args, cols, rows, onEvent })),
+	/**
+	 *  Resize an agent PTY and then "nudge" it so a TUI child (Claude Code / Codex /
+	 *  Gemini) actually repaints at the new size. A single SIGWINCH while the CLI is
+	 *  idle sometimes doesn't trigger a redraw — the composer stays pinned where the
+	 *  old bottom was, stranded mid-pane after the pane grows (e.g. hiding the
+	 *  scripts dock). Resizing off-by-one, pausing, then back to the real size forces
+	 *  the redraw (mirrors herdr's `nudge_child_redraw`). Used for discrete resizes
+	 *  (dock toggle, (re)attach); continuous drags use the plain [`terminal_resize`].
+	 */
+	agentResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("agent_resize", { terminalId, cols, rows })),
+	/**
 	 *  Attach to an existing PTY: replay its scrollback then tail live output.
 	 * 
 	 *  Returns `false` if the PTY is gone (e.g. after an app restart), in which
@@ -623,6 +645,18 @@ export type AppSettings = {
 	notifications?: NotificationSettings,
 	/**  Auto-generated agent tab titles (enable + which model). Settings → General. */
 	tabTitles?: TabTitleSettings,
+	/**
+	 *  Multiplexer mode — run agents as native CLIs in persistent PTYs. Off by
+	 *  default; with it off the app behaves exactly as before. Settings → Advanced.
+	 */
+	multiplexer?: MultiplexerSettings,
+	/**
+	 *  Developer tools (web inspector, PTY byte log, IPC trace). A Settings →
+	 *  Advanced sibling row; reserved/off by default — nothing consumes it yet
+	 *  (a stub like [`CodexSettings`], so the row can render and gain behaviour
+	 *  later without a settings migration).
+	 */
+	devTools?: boolean,
 };
 
 /**
@@ -881,6 +915,33 @@ export type EditorTarget = {
 	iconDataUrl: string | null,
 };
 
+/**  One CLI engine the multiplexer can launch in a PTY. */
+export type Engine = {
+	/**
+	 *  Stable id: `"claude-code" | "codex" | "gemini"` for built-ins, a uuid for
+	 *  custom engines.
+	 */
+	id?: string,
+	/**  Display name, e.g. "Claude Code". */
+	label?: string,
+	/**  Single-glyph mark shown on the tab + in the menu (e.g. "✻", "◆", "✦"). */
+	glyph?: string,
+	/**
+	 *  Theme custom-property *name* for the engine accent (e.g. `"--color-accent"`).
+	 *  Never a raw hex — the frontend applies it as `var(<token>)` so it stays
+	 *  theme-aware.
+	 */
+	accentToken?: string,
+	/**  Executable to run, resolved on the user's login PATH (e.g. `"claude"`). */
+	command?: string,
+	/**  Extra arguments appended to the command. */
+	args?: string[],
+	/**  Whether this engine appears in the `+` menu. */
+	enabled?: boolean,
+	/**  True for the three seeded engines; false for user-added customs. */
+	builtin?: boolean,
+};
+
 /**  How a claude process ended. */
 export type ExitOutcome = 
 /**  Emitted a terminal `result` then exited 0. */
@@ -1037,6 +1098,40 @@ export type MergeableState =
 "conflicting" | 
 /**  GitHub hasn't finished computing mergeability yet (transient). */
 "unknown";
+
+/**
+ *  Multiplexer mode (Settings → Advanced). When enabled, a new agent tab
+ *  launches a real CLI in a persistent PTY instead of the native chat, and the
+ *  `+` on the agent tab strip lets the user pick which engine. The frontend is
+ *  the only consumer — the backend just stores the config and (separately)
+ *  spawns the chosen command via `agent_open`.
+ */
+export type MultiplexerSettings = {
+	/**
+	 *  Master switch. `false` (default) keeps every agent tab the native chat;
+	 *  nothing about the shell changes until this is on.
+	 */
+	enabled?: boolean,
+	/**
+	 *  Engine a new tab launches with (also bound to ⌘T). Defaults to
+	 *  `"claude-code"`. If it names a disabled/removed engine the frontend falls
+	 *  back to the first enabled one.
+	 */
+	defaultEngineId?: string,
+	/**  Badge the tab + fire a system notification when an agent is blocked. */
+	notifyOnBlocked?: boolean,
+	/**
+	 *  Reattach running PTYs when the app relaunches. A child process can't
+	 *  outlive the app it was spawned from, so in practice this relaunches the
+	 *  engine on next launch rather than resurrecting a dead process.
+	 */
+	persistAcrossRestarts?: boolean,
+	/**
+	 *  The engines offered in the `+` menu. Seeded with the three built-ins;
+	 *  users can disable any or add custom commands ("Add CLI…").
+	 */
+	engines?: Engine[],
+};
 
 /**
  *  Controls native OS notifications fired when a session moves into the

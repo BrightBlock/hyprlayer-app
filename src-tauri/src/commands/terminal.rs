@@ -232,6 +232,130 @@ pub async fn spawn_shell_terminal(
     Ok(terminal_id)
 }
 
+/// Open a PTY running a Multiplexer engine CLI (Claude Code / Codex / Gemini /
+/// a custom command) in the workstream's worktree.
+///
+/// The command runs through the user's login shell so it resolves on the same
+/// PATH and profile the user gets in their own terminal; on unix it's `exec`'d
+/// so the CLI takes over the shell's PID and SIGINT/exit stay clean. Shares the
+/// id-based write/resize/close/attach lifecycle with [`terminal_open`] — only
+/// the spawned program differs, so the frontend reuses `terminal_write` (e.g. a
+/// `\x03` to Stop), `terminal_resize`, `terminal_attach`, and `terminal_close`.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_open(
+    state: State<'_, AppState>,
+    workstream_id: String,
+    command: String,
+    args: Vec<String>,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<TerminalEvent>,
+) -> CmdResult<String> {
+    let ws = {
+        let id = workstream_id.clone();
+        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
+    }
+    .ok_or_else(|| AppError {
+        code: "workstream_not_found".into(),
+        message: format!("No workstream with id {workstream_id}"),
+        remedy: None,
+    })?;
+
+    if command.trim().is_empty() {
+        return Err(AppError::internal("multiplexer engine command is empty"));
+    }
+
+    let path = state.binaries.augmented_path().await;
+    let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+
+    let session = PtySession::spawn(SpawnTerminal {
+        shell: default_shell(),
+        args: login_shell_args(&agent_command_line(&command, &args)),
+        cwd: PathBuf::from(&ws.worktree_path),
+        cols,
+        rows,
+        env,
+        workstream_id: ws.id.clone(),
+    })
+    .map_err(|e| AppError::internal(format!("open agent pty: {e}")))?;
+
+    let terminal_id = uuid::Uuid::new_v4().to_string();
+    state
+        .terminals
+        .insert(terminal_id.clone(), session.clone())
+        .await;
+    attach_stream(
+        &session,
+        on_event,
+        state.terminals.clone(),
+        terminal_id.clone(),
+    );
+    Ok(terminal_id)
+}
+
+/// Resize an agent PTY and then "nudge" it so a TUI child (Claude Code / Codex /
+/// Gemini) actually repaints at the new size. A single SIGWINCH while the CLI is
+/// idle sometimes doesn't trigger a redraw — the composer stays pinned where the
+/// old bottom was, stranded mid-pane after the pane grows (e.g. hiding the
+/// scripts dock). Resizing off-by-one, pausing, then back to the real size forces
+/// the redraw (mirrors herdr's `nudge_child_redraw`). Used for discrete resizes
+/// (dock toggle, (re)attach); continuous drags use the plain [`terminal_resize`].
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_resize(
+    state: State<'_, AppState>,
+    terminal_id: String,
+    cols: u16,
+    rows: u16,
+) -> CmdResult<()> {
+    let Some(session) = state.terminals.get(&terminal_id).await else {
+        return Ok(());
+    };
+    let nudge = rows.saturating_sub(1).max(2);
+    if nudge != rows {
+        let _ = session.resize(cols, nudge);
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    let _ = session.resize(cols, rows);
+    Ok(())
+}
+
+/// Build the single command line handed to [`login_shell_args`] for an engine.
+/// On unix we `exec` the program so the CLI inherits the login shell's PID —
+/// then Ctrl-C and the process-group kill on close hit the CLI directly. Windows
+/// PowerShell has no `exec`; the program runs as a child via the call operator
+/// (`&`), and the registry still tears it down by process group.
+fn agent_command_line(command: &str, args: &[String]) -> String {
+    #[cfg(not(windows))]
+    {
+        let mut parts = Vec::with_capacity(args.len() + 2);
+        parts.push("exec".to_string());
+        parts.push(sh_quote(command));
+        parts.extend(args.iter().map(|a| sh_quote(a)));
+        parts.join(" ")
+    }
+    #[cfg(windows)]
+    {
+        let mut parts = Vec::with_capacity(args.len() + 1);
+        parts.push(ps_quote(command));
+        parts.extend(args.iter().map(|a| ps_quote(a)));
+        format!("& {}", parts.join(" "))
+    }
+}
+
+/// POSIX single-quote: wrap in `'…'`, escaping embedded quotes as `'\''`.
+#[cfg(not(windows))]
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// PowerShell single-quote: wrap in `'…'`, doubling embedded single quotes.
+#[cfg(windows)]
+fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
 /// Replay scrollback then forward live output — the shared open/attach path.
 /// Snapshots scrollback and subscribes atomically (see
 /// [`PtySession::subscribe_with_scrollback`]) so no output is lost or duplicated

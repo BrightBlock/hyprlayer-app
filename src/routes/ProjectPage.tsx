@@ -1,5 +1,11 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import {
   Button,
@@ -27,6 +33,17 @@ import { ArchivedAgentsView } from "../features/session/ArchivedAgentsView";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { TabTitle } from "../features/session/TabTitle";
 import { TerminalTab } from "../features/session/TerminalTab";
+import { AgentPtyTab } from "../features/multiplexer/AgentPtyTab";
+import { EngineGlyph, PtyTabDot } from "../features/multiplexer/agentStateUi";
+import { closeAgent, ensureAgent, setAllNotifyOnBlocked } from "../features/multiplexer/agentRuntime";
+import {
+  defaultEngine,
+  enabledEngines,
+  engineOrFallback,
+  relaunchArgs,
+  useMultiplexer,
+  type ResolvedEngine,
+} from "../features/multiplexer/engines";
 import { ScriptDock } from "../features/session/ScriptDock";
 import { requestRun, setActiveWorkstream, useScriptsStore } from "../features/session/scriptsStore";
 import { openProjectSettings } from "../features/projects/projectSettingsStore";
@@ -130,6 +147,15 @@ export type ShellTab = {
   /** When set, this tab is an interactive terminal (PTY) for the worktree.
    *  `terminalId` binds it to a live backend PTY once opened; absent until then. */
   terminalView?: { terminalId?: string };
+  /** When set, this tab is a Multiplexer agent: an engine CLI running in a PTY
+   *  instead of the native chat (presence ⇒ kind "pty"; absence ⇒ "native").
+   *  `engineId` selects the engine; `terminalId` binds it to a live backend PTY
+   *  once spawned (persisted so the agent reattaches on reload). `bypass` records
+   *  whether the run is in bypass-permissions mode, so a cold-start relaunch
+   *  resumes it that way (the red shield). The live working/blocked/done/idle
+   *  state lives in the multiplexer store, not here.
+   *  Only ever set when `multiplexer.enabled`. */
+  ptyAgent?: { engineId: string; terminalId?: string; bypass?: boolean };
   /** Which pane this shell lives in. Absent/"main" → the main pane; "right" →
    *  the side-by-side right split. */
   panel?: "main" | "right";
@@ -152,9 +178,17 @@ function isTerminalShell(shell: ShellTab): boolean {
   return !!shell.terminalView;
 }
 
-/** An agent chat tab (the only kind with a composer) — not a viewer or terminal. */
+/** A Multiplexer agent tab — an engine CLI in a PTY, no native session/composer.
+ *  Carries an engine glyph + a working/blocked/done/idle dot, and the "×" closes
+ *  (kills) it rather than archiving. */
+function isPtyShell(shell: ShellTab): boolean {
+  return !!shell.ptyAgent;
+}
+
+/** An agent chat tab (the only kind with a composer) — not a viewer, terminal,
+ *  or PTY agent. */
 function isAgentShell(shell: ShellTab): boolean {
-  return !isViewerShell(shell) && !isTerminalShell(shell);
+  return !isViewerShell(shell) && !isTerminalShell(shell) && !isPtyShell(shell);
 }
 
 /** The disabled-reason shown when a still-working agent can't be archived yet. */
@@ -296,9 +330,18 @@ export function ProjectPage() {
   const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
   const activeView = selectedId ? (views.find((v) => v.item.id === selectedId) ?? null) : null;
   const wsId = activeView?.item.id ?? null;
+  // Multiplexer config (off by default). Drives whether `+`/⌘T launch a CLI in a
+  // PTY and show the engine menu; with it off everything below is inert.
+  const multiplexer = useMultiplexer();
   const dockOpen = useScriptsStore((s) => (wsId ? !!s.dock[wsId]?.open : false));
   const dockPosition = useScriptsStore((s) => s.dockPosition);
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
+  // The `+` new-agent menu (multiplexer on): anchored under the clicked button.
+  const [newAgentMenu, setNewAgentMenu] = useState<{
+    x: number;
+    y: number;
+    pane: "main" | "right";
+  } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   // Board-card right-click menu (Attach/Change/Detach PR) and the attach dialog.
   const [cardMenu, setCardMenu] = useState<{ x: number; y: number; view: WorkstreamView } | null>(
@@ -380,6 +423,50 @@ export function ProjectPage() {
     if (!wsId) return;
     void commands.watchWorktree(wsId);
   }, [wsId]);
+
+  // Multiplexer persistence: keep this workstream's pty agents spawned +
+  // monitored — so background agents still badge/notify, and a restart relaunches
+  // them (a child PTY can't outlive the app, so "persist" means relaunch-on-open
+  // here). The active tab also spawns on mount; ensureAgent is idempotent. Gated
+  // on enabled + persistAcrossRestarts → a complete no-op otherwise. Keyed on the
+  // pty-shell signature so draft edits (which rewrite the strip) don't re-run it.
+  const ptyAgentSig =
+    multiplexer.enabled && wsId
+      ? (tabsByWs[wsId]?.shells ?? [])
+          .filter((s) => s.ptyAgent)
+          .map((s) => `${s.id}:${s.ptyAgent!.engineId}`)
+          .join(",")
+      : "";
+  // Toggling "Notify when blocked" reaches already-running agents immediately,
+  // independent of the persist gate below.
+  useEffect(() => {
+    setAllNotifyOnBlocked(multiplexer.notifyOnBlocked);
+  }, [multiplexer.notifyOnBlocked]);
+
+  useEffect(() => {
+    if (!multiplexer.enabled || !multiplexer.persistAcrossRestarts) return;
+    if (!wsId || !activeView) return;
+    for (const s of tabsByWs[wsId]?.shells ?? []) {
+      if (!s.ptyAgent) continue;
+      const base = engineOrFallback(multiplexer, s.ptyAgent.engineId);
+      const bypass = !!s.ptyAgent.bypass;
+      // After a full quit the PTY is dead, so this relaunches: resume the prior
+      // conversation (a persisted terminalId ⇒ there was one) and re-enter bypass
+      // mode if it was on. The args are unused when ensureAgent reattaches to a
+      // still-live PTY (a webview reload) or finds the runtime already up.
+      void ensureAgent({
+        workstreamId: wsId,
+        shellId: s.id,
+        engine: { ...base, args: relaunchArgs(base, { resume: !!s.ptyAgent.terminalId, bypass }) },
+        projectPath,
+        workstreamTitle: activeView.item.title,
+        persistedTerminalId: s.ptyAgent.terminalId,
+        notifyOnBlocked: multiplexer.notifyOnBlocked,
+        bypass,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ptyAgentSig, wsId, multiplexer.enabled, multiplexer.persistAcrossRestarts, multiplexer.notifyOnBlocked]);
 
   // Publish the on-screen workstream so the left-rail scripts icon can toggle its
   // dock; clear it when leaving the project view.
@@ -521,11 +608,20 @@ export function ProjectPage() {
         | "sessionId"
         | "handoffNudgeDismissed"
         | "terminalView"
+        | "ptyAgent"
       >
     >,
   ) => modifyShell(shellId, (s) => ({ ...s, ...patch }));
   const setTerminalId = (shellId: number, terminalId: string) =>
     patchShell(shellId, { terminalView: { terminalId } });
+  // Persist a pty agent's backend terminal id so it reattaches on reload. Merge
+  // (don't replace ptyAgent) so the persisted bypass flag survives.
+  const setPtyTerminalId = (shellId: number, engineId: string, terminalId: string) =>
+    modifyShell(shellId, (s) => ({ ...s, ptyAgent: { ...s.ptyAgent, engineId, terminalId } }));
+  // Persist whether a pty agent is in bypass-permissions mode, so a cold-start
+  // relaunch (after a full quit) resumes it in bypass mode rather than fresh.
+  const setPtyBypass = (shellId: number, bypass: boolean) =>
+    modifyShell(shellId, (s) => (s.ptyAgent ? { ...s, ptyAgent: { ...s.ptyAgent, bypass } } : s));
   const selectShell = (shellId: number) => {
     updateTabs((current) => ({ ...current, activeId: shellId, activePane: "main" }));
   };
@@ -538,7 +634,9 @@ export function ProjectPage() {
   // Ctrl+Tab / Ctrl+Shift+Tab: move to the next/previous agent tab within the
   // focused pane, wrapping at the ends (a no-op when that pane has one tab).
   const cycleTab = (dir: 1 | -1) => updateTabs((current) => cycleActiveTab(current, dir));
-  const makeShell = (id: number, panel: "main" | "right"): ShellTab => ({
+  // `ptyEngineId` (multiplexer mode) makes the tab a CLI-in-PTY agent; absent →
+  // a native chat tab, exactly as before.
+  const makeShell = (id: number, panel: "main" | "right", ptyEngineId?: string): ShellTab => ({
     id,
     title: `Agent ${id}`,
     mode: "general",
@@ -546,30 +644,56 @@ export function ProjectPage() {
     docs: [],
     attachments: [],
     panel,
+    ...(ptyEngineId ? { ptyAgent: { engineId: ptyEngineId } } : {}),
   });
   // Append a fresh agent to the right pane and focus it (opening the split).
-  const spawnRightShell = (current: WsTabState): WsTabState => {
+  const spawnRightShell = (current: WsTabState, ptyEngineId?: string): WsTabState => {
     const id = nextShellId(current.shells, current.archived);
     return {
       ...current,
-      shells: [...current.shells, makeShell(id, "right")],
+      shells: [...current.shells, makeShell(id, "right", ptyEngineId)],
       rightActiveId: id,
       rightSplit: true,
       activePane: "right",
     };
   };
-  const addShell = () => {
+  const addShell = (ptyEngineId?: string) => {
     updateTabs((current) => {
       const id = nextShellId(current.shells, current.archived);
       return {
         ...current,
-        shells: [...current.shells, makeShell(id, "main")],
+        shells: [...current.shells, makeShell(id, "main", ptyEngineId)],
         activeId: id,
         activePane: "main",
       };
     });
   };
-  const addRightShell = () => updateTabs(spawnRightShell);
+  const addRightShell = (ptyEngineId?: string) => updateTabs((c) => spawnRightShell(c, ptyEngineId));
+  // ⌘T: a new tab launches the default engine when multiplexer is on, else a
+  // native chat. The `+` button opens the engine menu when on (see its onClick).
+  const onNewTabDefault = () => {
+    if (!multiplexer.enabled) return addShell();
+    addShell(defaultEngine(multiplexer)?.id);
+  };
+  // Open the `+` new-agent menu anchored under the clicked button. stopPropagation
+  // so the same click doesn't reach ContextMenu's window-close listener.
+  const openNewAgentMenu = (e: ReactMouseEvent, pane: "main" | "right") => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    setNewAgentMenu({ x: r.left, y: r.bottom + 4, pane });
+  };
+  // The `+` button: native chat directly when off; the engine menu when on.
+  const onPlus = (e: ReactMouseEvent, pane: "main" | "right") => {
+    if (!multiplexer.enabled) return pane === "main" ? addShell() : addRightShell();
+    openNewAgentMenu(e, pane);
+  };
+  // Resolve a tab's engine for glyph/accent + spawn, tolerating an engine that
+  // was disabled/removed in settings after the tab was created.
+  const ptyEngineFor = (engineId: string): ResolvedEngine => engineOrFallback(multiplexer, engineId);
+  // A pty tab only renders/spawns as a CLI while multiplexer is ON. With it off,
+  // a previously-created pty tab falls back to the native chat (so disabling the
+  // flag never silently launches a CLI on reopen/restart).
+  const isLivePty = (shell: ShellTab): boolean => multiplexer.enabled && !!shell.ptyAgent;
   // The split toggle in the tab strip: open the right pane (seeding a fresh
   // agent the first time) or hide it. Hiding keeps the right shells around.
   const toggleRightSplit = () => {
@@ -589,6 +713,7 @@ export function ProjectPage() {
     for (const s of rightShells) {
       if (s.sessionId) void killSession(s.sessionId);
       if (s.terminalView?.terminalId) void commands.terminalClose(s.terminalView.terminalId);
+      if (s.ptyAgent && wsId) closeAgent(wsId, s.id);
     }
     updateTabs((current) => ({
       ...current,
@@ -707,6 +832,7 @@ export function ProjectPage() {
     // (No-op if the session already ended or was never started.)
     if (shell.sessionId) void killSession(shell.sessionId);
     if (shell.terminalView?.terminalId) void commands.terminalClose(shell.terminalView.terminalId);
+    if (shell.ptyAgent && wsId) closeAgent(wsId, shellId);
     updateTabs((current) => removeShellState(current, shellId));
   };
   // Archive an agent: lift its tab out of the strip but keep the session, branch,
@@ -973,6 +1099,17 @@ export function ProjectPage() {
           <span className="text-ink-dim">
             <TerminalIcon size={13} />
           </span>
+        ) : isLivePty(shell) && shell.ptyAgent ? (
+          (() => {
+            const e = ptyEngineFor(shell.ptyAgent.engineId);
+            return (
+              <EngineGlyph
+                glyph={e.glyph}
+                accentToken={e.accentToken}
+                className="text-[11px] leading-none"
+              />
+            );
+          })()
         ) : isViewerShell(shell) ? (
           <span className="text-ink-dim">
             <DocIcon size={13} />
@@ -983,9 +1120,11 @@ export function ProjectPage() {
         <span className="max-w-[160px] truncate" title={shell.title}>
           <TabTitle workstreamId={wsId ?? ""} shellId={shell.id} title={shell.title} />
         </span>
-        {!isViewerShell(shell) && !isTerminalShell(shell) && (
+        {isLivePty(shell) ? (
+          <PtyTabDot workstreamId={wsId ?? ""} shellId={shell.id} />
+        ) : isAgentShell(shell) ? (
           <SessionTabDot sessionId={shell.sessionId} />
-        )}
+        ) : null}
       </span>
       {opts.closable && (
         <TabCloseControl
@@ -1046,6 +1185,25 @@ export function ProjectPage() {
         />
       );
     }
+    if (isLivePty(shell) && shell.ptyAgent) {
+      const engine = ptyEngineFor(shell.ptyAgent.engineId);
+      return (
+        <AgentPtyTab
+          key={`${activeView.item.id}:${shell.id}`}
+          workstreamId={activeView.item.id}
+          shellId={shell.id}
+          engine={engine}
+          projectPath={projectPath}
+          workstreamTitle={activeView.item.title}
+          terminalId={shell.ptyAgent.terminalId}
+          bypass={shell.ptyAgent.bypass}
+          autoFocus={shell.id === focusedShell?.id}
+          onTerminalId={(tid) => setPtyTerminalId(shell.id, engine.id, tid)}
+          onBypassChange={(b) => setPtyBypass(shell.id, b)}
+          notifyOnBlocked={multiplexer.notifyOnBlocked}
+        />
+      );
+    }
     return <SessionChat key={`${activeView.item.id}:${shell.id}`} {...shellChatProps(shell)} />;
   };
 
@@ -1101,7 +1259,7 @@ export function ProjectPage() {
     <div className="flex h-full min-h-0 bg-surface">
       <ProjectCommands
         sessionId={focusedShell?.sessionId}
-        onNewTab={addShell}
+        onNewTab={onNewTabDefault}
         onCloseTab={focusedShell ? () => closeShell(focusedShell.id) : null}
         onToggleSplit={toggleRightSplit}
         onNextTab={() => cycleTab(1)}
@@ -1146,7 +1304,11 @@ export function ProjectPage() {
                   activeId={activeShell?.id ?? null}
                   trailing={
                     activeView ? (
-                      <IconButton onClick={addShell} title="New tab" aria-label="New tab">
+                      <IconButton
+                        onClick={(e) => onPlus(e, "main")}
+                        title="New agent"
+                        aria-label="New agent"
+                      >
                         <PlusIcon />
                       </IconButton>
                     ) : null
@@ -1209,7 +1371,11 @@ export function ProjectPage() {
                     grow
                     activeId={rightActiveShell?.id ?? null}
                     trailing={
-                      <IconButton onClick={addRightShell} title="New tab" aria-label="New tab">
+                      <IconButton
+                        onClick={(e) => onPlus(e, "right")}
+                        title="New agent"
+                        aria-label="New agent"
+                      >
                         <PlusIcon />
                       </IconButton>
                     }
@@ -1315,6 +1481,62 @@ export function ProjectPage() {
                 </ContextMenuItem>
               </ContextMenu>
             )}
+            {newAgentMenu &&
+              (() => {
+                const menu = newAgentMenu;
+                const def = defaultEngine(multiplexer);
+                const spawn = (engineId?: string) =>
+                  menu.pane === "main" ? addShell(engineId) : addRightShell(engineId);
+                return (
+                  <ContextMenu position={menu} onClose={() => setNewAgentMenu(null)}>
+                    <div className="px-2 pb-1 pt-0.5 text-xs text-ink-dim">
+                      New agent in {activeView?.item.title ?? "workstream"}
+                    </div>
+                    {enabledEngines(multiplexer).map((engine) => (
+                      <ContextMenuItem
+                        key={engine.id}
+                        onClick={() => {
+                          spawn(engine.id);
+                          setNewAgentMenu(null);
+                        }}
+                      >
+                        <span className="flex w-full items-center gap-2">
+                          <EngineGlyph
+                            glyph={engine.glyph}
+                            accentToken={engine.accentToken}
+                            className="text-[13px] leading-none"
+                          />
+                          <span className="min-w-0 flex-1 truncate">{engine.label}</span>
+                          {engine.id === def?.id && (
+                            <span className="font-mono text-[11px] text-ink-dim">⌘T</span>
+                          )}
+                        </span>
+                      </ContextMenuItem>
+                    ))}
+                    <div className="my-1 h-px bg-edge" />
+                    <ContextMenuItem
+                      onClick={() => {
+                        spawn();
+                        setNewAgentMenu(null);
+                      }}
+                    >
+                      <span className="flex w-full items-center gap-2">
+                        <SessionTabIcon mode="general" />
+                        <span className="min-w-0 flex-1 truncate">Native chat</span>
+                      </span>
+                    </ContextMenuItem>
+                    <div className="my-1 h-px bg-edge" />
+                    <ContextMenuItem
+                      onClick={() => {
+                        setNewAgentMenu(null);
+                        void navigate({ to: "/settings", search: { section: "advanced" } });
+                      }}
+                    >
+                      Configure engines…
+                    </ContextMenuItem>
+                  </ContextMenu>
+                );
+              })()}
             <Dialog open={Boolean(shellBeingRenamed)} onClose={closeRenameShell} title="Rename tab">
               <form
                 className="space-y-3"

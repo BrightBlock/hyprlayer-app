@@ -504,6 +504,48 @@ export function StopIcon({ size = 14 }: IconProps) {
   );
 }
 
+/** Circular arrow — restart / relaunch an agent. */
+export function RestartIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v5h-5" />
+    </svg>
+  );
+}
+
+/** Four panes — the Multiplexer mode mark (Settings hero + title-bar chip). */
+export function MultiplexerIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      className={className}
+    >
+      <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+    </svg>
+  );
+}
+
 /** Wrench — a tool invocation. */
 export function WrenchIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
@@ -519,9 +561,21 @@ export function WrenchIcon({ size = 13, strokeWidth = 1.8, className }: IconProp
 }
 
 /** Shield — a permission gate. */
-export function ShieldIcon({ size = 14, strokeWidth = 1.8 }: IconProps) {
+export function ShieldIcon({
+  size = 14,
+  strokeWidth = 1.8,
+  className,
+  filled,
+}: IconProps & { filled?: boolean }) {
   return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      className={className}
+    >
       <path d="M12 3 5 6v5c0 4.2 2.8 7.6 7 9 4.2-1.4 7-4.8 7-9V6l-7-3Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
     </svg>
   );

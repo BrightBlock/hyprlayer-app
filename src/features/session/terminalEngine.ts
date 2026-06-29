@@ -37,6 +37,9 @@ export interface TerminalEngine {
   setTheme(theme: TerminalTheme): void;
   /** Give the emulator keyboard focus. */
   focus(): void;
+  /** Wipe the screen + scrollback to a clean slate (used when restarting an
+   *  agent so the prior session's output doesn't linger). */
+  reset(): void;
   /** Tear down and release resources. */
   dispose(): void;
 }
@@ -47,10 +50,8 @@ class XtermEngine implements TerminalEngine {
   /** The GPU renderer, while it's live. Disposed on context loss (xterm then
    *  falls back to its DOM renderer) and on teardown. */
   private webgl?: WebglAddon;
-  /** Pending atlas-rebuild timers, cleared on dispose. */
-  private rebuildTimers: number[] = [];
   /** Flips true the first time `fit()` reads the renderer without throwing —
-   *  proof the DOM renderer is live. Gates `refresh()`, whose `term.refresh()`
+   *  proof the renderer is live. Gates `refresh()`, whose `term.refresh()`
    *  schedules an rAF render that reads renderer dimensions and throws
    *  (uncaught, in the frame callback) if the renderer isn't set up yet. */
   private rendererReady = false;
@@ -59,6 +60,13 @@ class XtermEngine implements TerminalEngine {
     this.term = new Terminal({
       fontSize: opts.fontSize,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      // Pin the weights to 400 / 700: any other weight makes xterm's WebGL atlas
+      // interpolate, which WKWebView rasterizes soft/garbled. lineHeight 1.0 is
+      // what TUIs (claude/codex/gemini) assume — a larger value inflates each
+      // cell and shows "ribbon" gaps between bg-colored rows. (Both per termic.)
+      fontWeight: 400,
+      fontWeightBold: 700,
+      lineHeight: 1.0,
       theme: opts.theme,
       cursorBlink: true,
       scrollback: 5000,
@@ -74,18 +82,24 @@ class XtermEngine implements TerminalEngine {
   mount(host: HTMLElement): void {
     this.term.open(host);
     // Drive the grid through the WebGL renderer: it paints to a single
-    // GPU-composited <canvas> rather than per-row DOM nodes. WKWebView composites
-    // a canvas reliably, whereas the DOM renderer's incremental row mutations can
-    // be left un-repainted after a wrap/scroll — the terminal goes black until a
-    // resize forces a full re-composite. Must load AFTER open() (it needs the
-    // screen element + render service). If the GPU context drops (WKWebView can
-    // shed it when backgrounded), dispose the addon so xterm reverts to the DOM
-    // renderer instead of freezing on a dead canvas. Guarded: if WebGL can't
-    // initialise at all, the DOM renderer remains and the terminal still works.
+    // GPU-composited <canvas> rather than per-row DOM nodes, which WKWebView
+    // composites reliably (the DOM renderer can leave wraps/scrolls un-repainted
+    // until a resize). Load AFTER open() so the GL context attaches to an
+    // already-laid-out canvas (a 0×0 canvas rasterizes the glyph atlas wrong →
+    // scrambled text). If the GPU context drops (WKWebView sheds it when
+    // backgrounded), dispose the addon so xterm reverts to the DOM renderer
+    // instead of freezing on a dead canvas. Guarded: if WebGL can't initialise,
+    // the DOM renderer remains and the terminal still works. (addon-webgl ≥0.19
+    // manages its own glyph atlas across resizes — no manual clearTextureAtlas.)
     try {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => {
-        webgl.dispose();
+        // Same guard as dispose(): the addon's revert-on-dispose throws on xterm 5.5.
+        try {
+          webgl.dispose();
+        } catch {
+          // addon revert-on-dispose hit a missing xterm-5.5 core internal
+        }
         if (this.webgl === webgl) this.webgl = undefined;
       });
       this.term.loadAddon(webgl);
@@ -93,36 +107,6 @@ class XtermEngine implements TerminalEngine {
     } catch {
       // WebGL unavailable — keep the DOM renderer.
     }
-    this.scheduleAtlasRebuild();
-  }
-
-  /**
-   * Rebuild the WebGL glyph atlas once layout + DPR have settled. The atlas is
-   * rasterised from the renderer's metrics the first time it paints; on a fresh
-   * pane those can still be settling, and because BOTH xterm's `FitAddon` and our
-   * `ResizeObserver` no-op when the grid is unchanged, a stale atlas would never
-   * rebuild on its own — glyphs render blank/misaligned and the line runs off the
-   * edge without wrapping until a manual resize forces a rebuild (the reported
-   * bug). Mirroring termic, re-settle across the next few frames + a couple of
-   * timeouts: `clearTextureAtlas()` drops the stale atlas and `refresh()` repaints
-   * the whole viewport, so it comes back correct with no user resize. DOM-renderer
-   * sessions (WebGL unavailable) have no atlas, so this is a WebGL-only nudge.
-   */
-  private scheduleAtlasRebuild(): void {
-    const rebuild = () => {
-      if (!this.webgl) return;
-      try {
-        this.term.clearTextureAtlas();
-        this.term.refresh(0, this.term.rows - 1);
-      } catch {
-        // renderer mid-teardown — nothing to rebuild
-      }
-    };
-    requestAnimationFrame(() => requestAnimationFrame(rebuild));
-    this.rebuildTimers = [
-      window.setTimeout(rebuild, 250),
-      window.setTimeout(rebuild, 600),
-    ];
   }
 
   write(data: Uint8Array | string): void {
@@ -140,12 +124,11 @@ class XtermEngine implements TerminalEngine {
     // the same tick as mount therefore throws ("_renderer.value.dimensions").
     // Swallow it and return the current grid; the ResizeObserver's initial
     // callback re-fits once the renderer is live, correcting the PTY size. Left
-    // unguarded, that throw would abort TerminalTab's setup effect mid-way and
-    // the PTY would never open (blank terminal, just a blinking cursor).
+    // unguarded, that throw would abort the setup effect mid-way and the PTY
+    // would never open (blank terminal, just a blinking cursor).
     try {
       this.fitAddon.fit();
-      // `fitAddon.fit()` reads `_renderService.dimensions` first thing; reaching
-      // here without throwing means the renderer is live.
+      // Reaching here without throwing means the renderer is live.
       this.rendererReady = true;
     } catch {
       // renderer not ready yet — keep the current (default) grid for now
@@ -158,23 +141,21 @@ class XtermEngine implements TerminalEngine {
   }
 
   refresh(): void {
-    // xterm's DOM renderer flushes paints on requestAnimationFrame, which a
-    // WKWebView throttles (and can drop) while the window is unfocused — so a
-    // scroll that lands while unfocused leaves the screen stale, and it doesn't
-    // self-heal on refocus (the dropped frame is never rescheduled). Marking all
-    // rows dirty here re-queues a paint, which fires immediately once focus (and
-    // a live rAF) is back — the programmatic equivalent of nudging a resize.
-    //
-    // Gate on a live renderer: `term.refresh()` schedules an rAF render that
-    // reads the renderer's dimensions, which throws *uncaught* (inside the frame
-    // callback, past any try/catch here) if the renderer isn't set up yet. A
-    // focus event that lands before the first fit would otherwise do exactly
-    // that. A successful fit() is our proof the renderer exists.
+    // xterm flushes paints on requestAnimationFrame, which a WKWebView throttles
+    // (and can drop) while the window is unfocused — so output or a scroll that
+    // lands while you're away leaves the screen stale and doesn't self-heal on
+    // refocus. Marking all rows dirty re-queues a paint, which fires the instant
+    // focus (and a live rAF) is back. Gated on a live renderer: term.refresh()
+    // schedules an rAF render that reads renderer dimensions and throws
+    // *uncaught* (in the frame callback, past any try/catch here) if the
+    // renderer isn't set up yet. A successful fit() is our proof it exists.
     if (!this.rendererReady) return;
     this.term.refresh(0, this.term.rows - 1);
   }
 
   setFontSize(px: number): TerminalGrid {
+    // Changing the option re-rasterises the renderer's glyph atlas at the new
+    // cell size on its own; just refit so the grid (and PTY) follow.
     this.term.options.fontSize = px;
     return this.fit();
   }
@@ -187,12 +168,20 @@ class XtermEngine implements TerminalEngine {
     this.term.focus();
   }
 
+  reset(): void {
+    this.term.reset();
+  }
+
   dispose(): void {
-    for (const t of this.rebuildTimers) window.clearTimeout(t);
-    this.rebuildTimers = [];
     // Dispose the GPU renderer before the terminal so its canvas/observers are
-    // released cleanly.
-    this.webgl?.dispose();
+    // released cleanly. Guard it: addon-webgl's revert-on-dispose callback reads
+    // `_core._store._isDisposed`, which xterm 5.5's core doesn't expose → it
+    // throws. The terminal is torn down next, so the revert is moot.
+    try {
+      this.webgl?.dispose();
+    } catch {
+      // addon revert-on-dispose hit a missing xterm-5.5 core internal
+    }
     this.webgl = undefined;
     this.term.dispose();
   }
