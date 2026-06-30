@@ -134,10 +134,12 @@ export function ScriptDock({
   // The split button's primary action targets the active script (Setup tab →
   // Setup), defaulting to Run from a terminal tab.
   const mainKind: ScriptKind = activeKind === "setup" ? "setup" : "run";
-  // In the sidebar, blend with the panel tone; at the bottom, stay editor-dark.
+  // In the sidebar, blend with the panel tone; at the bottom, use the surface
+  // tone (same token the xterm bg resolves to) so chrome and bodies theme with
+  // the app instead of staying dark in light mode.
   const right = orientation === "right";
   const chromeBg = right ? "bg-panel" : "bg-surface";
-  const idleBg = right ? "bg-panel" : "bg-[#070707]";
+  const idleBg = right ? "bg-panel" : "bg-surface";
   // Right-docked, the chevron collapses the body in place (header stays), like the
   // CI-checks section. Persisted in the store so it survives the dock's
   // unmount/remount on a sidebar toggle; only effective while right-docked.

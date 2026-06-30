@@ -128,7 +128,7 @@ export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, on
   }, [workstreamId, gen]);
 
   return (
-    <div className="relative min-h-0 min-w-0 flex-1 bg-[#070707]">
+    <div className="relative min-h-0 min-w-0 flex-1 bg-surface">
       <div ref={hostRef} className="absolute inset-2 overflow-hidden" />
     </div>
   );
