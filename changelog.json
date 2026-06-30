@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.2",
+      "date": "2026-06-30",
+      "summary": "Script dock backgrounds themed with surface token.",
+      "notes": [
+        "The script dock, editor, and output panel backgrounds now use the surface theme token, blending cleanly with the rest of the UI."
+      ]
+    },
+    {
       "version": "0.4.1",
       "date": "2026-06-29",
       "summary": "Per-tab identity and reliable session resume for multiplexer agents.",
