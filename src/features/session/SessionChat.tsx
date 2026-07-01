@@ -1862,11 +1862,12 @@ export function SessionChat({
                 )}
               </div>
               {/* The agent's live plan, a drawer docked above the composer. The
-                  top margin reserves room for the collapsed handle so it floats
-                  into clear space instead of over the banners above. */}
+                  top margin reserves room for the collapsed handle plus a gap so
+                  it floats into clear space with breathing room below the banners
+                  above (queued messages / handoff nudge), not flush against them. */}
               <div
                 className={`relative rounded-xl bg-panel-2 ${
-                  planTasks.length > 0 && !planDismissed ? "mt-8" : ""
+                  planTasks.length > 0 && !planDismissed ? "mt-12" : ""
                 }`}
               >
                 <PlanTasksPanel
