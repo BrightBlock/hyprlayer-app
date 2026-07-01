@@ -64,6 +64,7 @@ const {
   cancelQueuedMessage,
   stopSession,
   resumeSession,
+  applyModel,
   applyPermissionMode,
   classifyEntry,
   workstreamShipBusy,
@@ -356,7 +357,9 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     await applyPermissionMode(id, "bypassPermissions"); // restart into the new mode
     await Promise.resolve();
 
-    expect(h.restartSession).toHaveBeenCalledWith(id, "bypassPermissions", expect.anything());
+    // A mode-only restart passes null model/effort (claude keeps the session's
+    // originals on --resume); the new mode rides in the permission_mode slot.
+    expect(h.restartSession).toHaveBeenCalledWith(id, null, null, "bypassPermissions", expect.anything());
     const entry = entryOf(id);
     expect(entry.pendingPermission).toBeNull();
     // The dangling card is resolved (deny = the tool never ran), so isBusy clears.
@@ -378,6 +381,24 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     // The restart freed the turn, so the queue flushes under the new mode.
     expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", []);
     expect(queued(id)).toEqual([]);
+  });
+
+  it("switching the model on a live session resumes it on the new model", async () => {
+    const id = await startBusySession(); // live session (channel bound)
+    emit(INIT);
+
+    // applyModel(id, modelFlag, effort, mode) relaunches via --resume onto the
+    // new model → commands.restartSession(id, model, effort, permission_mode, ch).
+    await applyModel(id, "sonnet[1m]", "ultracode", "default");
+    await Promise.resolve();
+
+    expect(h.restartSession).toHaveBeenCalledWith(
+      id,
+      "sonnet[1m]",
+      "ultracode",
+      "default",
+      expect.anything(),
+    );
   });
 
   it("stop while parked on a permission declines the live ask, interrupts, and unlocks", async () => {

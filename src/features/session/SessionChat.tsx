@@ -47,7 +47,14 @@ import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
 import { generateTabTitle } from "./tabTitles";
 import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "./stages";
-import { EFFORTS, effortOption, modelOption, visibleModels } from "./models";
+import {
+  EFFORTS,
+  effectiveEffort,
+  modelOption,
+  modelSupportsUltracode,
+  resumeModelFlag,
+  visibleModels,
+} from "./models";
 import {
   DEFAULT_HARNESS_KEY,
   harnessOption,
@@ -62,6 +69,7 @@ import { TranscriptView, type PermissionHandlers, type PromptHandlers, type Tran
 import {
   allowForSession,
   answerQuestion,
+  applyModel,
   applyPermissionMode,
   cancelQueuedMessage,
   killSession,
@@ -176,6 +184,9 @@ type MenuItem = {
    *  session to its provider (see `lockedProvider` in SessionChat). Like a group's
    *  `disabled`, but per-row (no badge; the greyed-out row is signal enough). */
   disabled?: boolean;
+  /** Tint this row in the accent color, and — when it's the active selection —
+   *  the trigger too, so a distinct choice (e.g. Ultracode) is easy to spot. */
+  accent?: boolean;
 };
 
 /** A labelled section in a grouped menu (the model picker groups models by
@@ -237,6 +248,9 @@ function ComposerMenu({
   const customActive = custom != null && !allItems.some((it) => it.key === activeKey);
   // A risky active choice (e.g. "Bypass permissions") tints the whole trigger red.
   const activeDanger = allItems.some((it) => it.key === activeKey && it.danger);
+  // An accent active choice (e.g. "Ultracode") tints the whole trigger in the
+  // accent color, so it's obvious at a glance which mode is selected.
+  const activeAccent = allItems.some((it) => it.key === activeKey && it.accent);
 
   const close = () => {
     setOpen(false);
@@ -269,13 +283,21 @@ function ComposerMenu({
         onClick={() => (open ? close() : setOpen(true))}
         title={compact ? `${title}: ${label}` : title}
         className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs hover:bg-edge/50 ${
-          activeDanger ? "text-bad hover:text-bad" : "text-ink-dim hover:text-ink"
+          activeDanger
+            ? "text-bad hover:text-bad"
+            : activeAccent
+              ? "text-accent hover:text-accent"
+              : "text-ink-dim hover:text-ink"
         }`}
       >
         <span className="shrink-0">{leading}</span>
         {!compact && (
           <>
-            <span className={`max-w-[12rem] truncate font-medium ${activeDanger ? "text-bad" : "text-ink"}`}>
+            <span
+              className={`max-w-[12rem] truncate font-medium ${
+                activeDanger ? "text-bad" : activeAccent ? "text-accent" : "text-ink"
+              }`}
+            >
               {label}
             </span>
             {hint && <span className={activeDanger ? "text-bad/80" : "text-ink-dim"}>{hint}</span>}
@@ -355,24 +377,42 @@ function ComposerMenu({
               </>
             ) : (
               <>
-                {items.map((it) => (
-                  <button
-                    key={it.key}
-                    type="button"
-                    onClick={() => {
-                      onSelect(it.key);
-                      close();
-                    }}
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
-                      it.danger ? "text-bad" : it.key === activeKey ? "text-ink" : "text-ink-dim"
-                    }`}
-                  >
-                    {it.icon && <span className="shrink-0">{it.icon}</span>}
-                    <span className="font-medium">{it.label}</span>
-                    {it.hint && <span className="text-ink-dim">{it.hint}</span>}
-                    {it.key === activeKey && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
-                  </button>
-                ))}
+                {items.map((it) =>
+                  it.disabled ? (
+                    <div
+                      key={it.key}
+                      title={it.hint || undefined}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim/40"
+                    >
+                      {it.icon && <span className="shrink-0">{it.icon}</span>}
+                      <span className="font-medium">{it.label}</span>
+                      {it.hint && <span>{it.hint}</span>}
+                    </div>
+                  ) : (
+                    <button
+                      key={it.key}
+                      type="button"
+                      onClick={() => {
+                        onSelect(it.key);
+                        close();
+                      }}
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
+                        it.danger
+                          ? "text-bad"
+                          : it.accent
+                            ? "text-accent"
+                            : it.key === activeKey
+                              ? "text-ink"
+                              : "text-ink-dim"
+                      }`}
+                    >
+                      {it.icon && <span className="shrink-0">{it.icon}</span>}
+                      <span className="font-medium">{it.label}</span>
+                      {it.hint && <span className="text-ink-dim">{it.hint}</span>}
+                      {it.key === activeKey && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
+                    </button>
+                  ),
+                )}
                 {custom && (
                   <>
                     <div className="my-1 border-t border-edge" />
@@ -1050,7 +1090,7 @@ export function SessionChat({
   // seeds the permission posture to "plan" for fresh tabs.
   const claudeDefaults = useBootstrap().data?.settings.providers?.claude;
   const model = modelOption(shell.model ?? claudeDefaults?.defaultModel ?? undefined);
-  const effort = effortOption(shell.effort ?? claudeDefaults?.defaultEffort ?? undefined);
+  const effort = effectiveEffort(shell.effort ?? claudeDefaults?.defaultEffort ?? undefined, model);
   const permissionMode = permissionModeOption(
     shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
   );
@@ -1169,6 +1209,33 @@ export function SessionChat({
 
   // Picking a model selects its harness too (Codex rows are disabled, so never
   // fire here). `onHarnessChange` + the per-harness model setter both patch the tab.
+  // Claude binds its model at launch, so switching the model on a LIVE session
+  // relaunches the process via --resume onto the new model (transcript preserved)
+  // — the model analog of handlePermissionModeChange. Effort is re-resolved for
+  // the new model so ultracode only rides an xhigh-capable one. We confirm first
+  // when a turn is in flight (the restart interrupts it). Before a session starts
+  // (or when detached) we just record the choice; it applies at the next spawn.
+  const applyClaudeModel = async (key: string) => {
+    if (key === model.key) return; // no change (re-picked the active model)
+    const next = modelOption(key);
+    const live = Boolean(sid && session && session.live && !isTerminal(session.state));
+    if (live && session && isBusy(session)) {
+      const ok = await confirm(
+        `Restart this session to switch to ${next.label}? The active turn will be interrupted.`,
+        { title: "Switch model?", kind: "warning" },
+      );
+      if (!ok) return; // declined — leave the running session (and picker) as-is
+    }
+    onModelChange(key); // persist on the tab (composer label + next fresh session)
+    if (live && sid) {
+      const nextEffort = effectiveEffort(
+        shell.effort ?? claudeDefaults?.defaultEffort ?? undefined,
+        next,
+      );
+      await applyModel(sid, resumeModelFlag(next), nextEffort.key, permissionMode.flag);
+    }
+  };
+
   const onPickModel = (namespaced: string) => {
     const sep = namespaced.indexOf(":");
     const pickedHarness = namespaced.slice(0, sep);
@@ -1182,7 +1249,7 @@ export function SessionChat({
       onOpencodeModelChange(pickedModel);
     } else {
       onHarnessChange("claude");
-      onModelChange(pickedModel);
+      void applyClaudeModel(pickedModel);
     }
   };
 
@@ -1916,7 +1983,21 @@ export function SessionChat({
                       title="Reasoning effort"
                       leading={<EffortIcon size={14} />}
                       label={effort.label}
-                      items={EFFORTS.map((e) => ({ key: e.key, label: e.label }))}
+                      items={EFFORTS.map((e) => {
+                        // Ultracode needs an xhigh-capable model; grey it out (with
+                        // the reason) on any other model so it can't be picked into
+                        // a session the CLI would reject.
+                        const blocked = e.key === "ultracode" && !modelSupportsUltracode(model);
+                        return {
+                          key: e.key,
+                          label: e.label,
+                          hint: blocked ? "needs Opus 4.7+, Sonnet 5, or Fable 5" : undefined,
+                          disabled: blocked,
+                          // Accent-tint Ultracode so it's spottable in the list and,
+                          // when selected, in the composer trigger.
+                          accent: e.key === "ultracode",
+                        };
+                      })}
                       activeKey={effort.key}
                       onSelect={onEffortChange}
                       compact={compactComposer}

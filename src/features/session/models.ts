@@ -31,13 +31,16 @@ export type ModelOption = {
  * anything not listed here (e.g. a dated id like `claude-opus-4-7-20...`).
  */
 export const MODELS: ModelOption[] = [
-  // Latest aliases (the default, Opus, leaves --model unset).
+  // Latest aliases (the default, Opus, leaves --model unset). The `sonnet`
+  // aliases now resolve to Sonnet 5 in the CLI, so only their labels change.
   { key: "opus", label: "Opus 4.8", hint: "1M", flag: null, contextWindow: 1_000_000 },
-  { key: "sonnet", label: "Sonnet 4.6", flag: "sonnet", contextWindow: 200_000 },
-  { key: "sonnet-1m", label: "Sonnet 4.6", hint: "1M", flag: "sonnet[1m]", contextWindow: 1_000_000 },
+  { key: "sonnet", label: "Sonnet 5", flag: "sonnet", contextWindow: 200_000 },
+  { key: "sonnet-1m", label: "Sonnet 5", hint: "1M", flag: "sonnet[1m]", contextWindow: 1_000_000 },
   { key: "haiku", label: "Haiku 4.5", flag: "haiku", contextWindow: 200_000 },
   { key: "fable", label: "Fable 5", flag: "fable", contextWindow: 200_000 },
-  // Previous Opus versions (full ids — these have no short alias).
+  // Previous Sonnet/Opus versions (full ids — these have no short alias).
+  { key: "sonnet-4-6", label: "Sonnet 4.6", flag: "claude-sonnet-4-6", contextWindow: 200_000 },
+  { key: "sonnet-4-6-1m", label: "Sonnet 4.6", hint: "1M", flag: "claude-sonnet-4-6[1m]", contextWindow: 1_000_000 },
   { key: "opus-4-7", label: "Opus 4.7", flag: "claude-opus-4-7", contextWindow: 200_000 },
   { key: "opus-4-7-1m", label: "Opus 4.7", hint: "1M", flag: "claude-opus-4-7[1m]", contextWindow: 1_000_000 },
   { key: "opus-4-6", label: "Opus 4.6", flag: "claude-opus-4-6", contextWindow: 200_000 },
@@ -66,6 +69,15 @@ export function modelOption(key: string | undefined): ModelOption {
     // source of truth, but this keeps the meter sane before the model reports.
     contextWindow: key.includes("[1m]") ? 1_000_000 : 200_000,
   };
+}
+
+/** The explicit `--model` value to use when RESUMING a live session onto this
+ *  model. `claude --resume` keeps the session's original model when `--model` is
+ *  omitted, so switching TO the default-Opus entry (whose launch `flag` is null)
+ *  mid-conversation needs an explicit id. Opus 4.8 is natively 1M, so
+ *  `claude-opus-4-8` matches what the null default launches. */
+export function resumeModelFlag(model: ModelOption): string {
+  return model.flag ?? "claude-opus-4-8";
 }
 
 /** The full list of preset model keys, in display order. */
@@ -108,8 +120,12 @@ export function visibleModels(keys: readonly string[] | null | undefined): Model
   return visibleModelKeys(keys).map(modelOption);
 }
 
-/** A reasoning-effort level. The `key` IS the `--effort` value the CLI accepts
- *  (low | medium | high | xhigh | max). */
+/** A reasoning-effort level. For the standard levels the `key` IS the `--effort`
+ *  value the CLI accepts (low | medium | high | xhigh | max). `ultracode` is an
+ *  app preset the driver translates to `--effort xhigh` plus the CLI's
+ *  `ultracode` settings key — xhigh effort with standing dynamic-workflow
+ *  orchestration. It needs an xhigh-capable model (Opus 4.7+, Sonnet 5, Fable 5;
+ *  not Sonnet 4.6 / Opus 4.6 / Haiku), else the CLI rejects the session. */
 export type EffortOption = { key: string; label: string };
 
 export const EFFORTS: EffortOption[] = [
@@ -118,10 +134,46 @@ export const EFFORTS: EffortOption[] = [
   { key: "high", label: "High" },
   { key: "xhigh", label: "Extra high" },
   { key: "max", label: "Max" },
+  { key: "ultracode", label: "Ultracode" },
 ];
 
 export const DEFAULT_EFFORT_KEY = "high";
 
 export function effortOption(key: string | undefined): EffortOption {
   return EFFORTS.find((e) => e.key === key) ?? EFFORTS[2];
+}
+
+// --- ultracode capability guard --------------------------------------------
+
+/** Preset keys for models that support the `xhigh` effort tier — and therefore
+ *  the `ultracode` preset (xhigh + workflows). The CLI rejects ultracode on any
+ *  other model with "switch to an xhigh-capable model (Fable 5, Opus 4.7+,
+ *  Sonnet 5)". Custom/unknown model ids resolve to a key not in this set and are
+ *  treated as unsupported. Keep in sync with the CLI's xhigh model list when
+ *  adding models. */
+const ULTRACODE_MODEL_KEYS = new Set<string>([
+  "opus", // Opus 4.8
+  "sonnet", // Sonnet 5
+  "sonnet-1m", // Sonnet 5 (1M)
+  "fable", // Fable 5
+  "opus-4-7", // Opus 4.7
+  "opus-4-7-1m", // Opus 4.7 (1M)
+]);
+
+/** Whether a model can run the `ultracode` effort preset (it needs `xhigh`). */
+export function modelSupportsUltracode(model: ModelOption): boolean {
+  return ULTRACODE_MODEL_KEYS.has(model.key);
+}
+
+/** Resolve the effective effort for a model. `ultracode` needs an xhigh-capable
+ *  model; on any other model it downgrades to `high` (the CLI's xhigh gate is the
+ *  same, so `high` is the safe floor) so the session isn't rejected. The stored
+ *  preference is left untouched, so ultracode re-activates if the user switches
+ *  back to a compatible model. */
+export function effectiveEffort(key: string | undefined, model: ModelOption): EffortOption {
+  const effort = effortOption(key);
+  if (effort.key === "ultracode" && !modelSupportsUltracode(model)) {
+    return effortOption("high");
+  }
+  return effort;
 }

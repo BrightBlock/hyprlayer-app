@@ -161,7 +161,21 @@ impl ClaudeDriver {
             cmd.args(["--model", model]);
         }
         if let Some(effort) = &config.effort {
-            cmd.args(["--effort", effort]);
+            if effort == "ultracode" {
+                // "ultracode" is our composer preset, not a CLI --effort value
+                // (the CLI rejects `--effort ultracode`). It means xhigh effort
+                // plus standing dynamic-workflow orchestration, which the CLI
+                // enables via the `ultracode` settings key. The --effort flag wins
+                // over the settings-implied xhigh, so xhigh is passed explicitly;
+                // enableWorkflows pins the workflows feature on. --settings layers
+                // over the user's settings, leaving all other keys untouched.
+                cmd.args(["--effort", "xhigh"]).args([
+                    "--settings",
+                    r#"{"ultracode":true,"enableWorkflows":true}"#,
+                ]);
+            } else {
+                cmd.args(["--effort", effort]);
+            }
         }
         if config.chrome {
             cmd.arg("--chrome");

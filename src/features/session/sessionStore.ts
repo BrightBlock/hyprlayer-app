@@ -446,7 +446,12 @@ export async function resumeSession(sessionId: string): Promise<void> {
  * race-delete it. The resumed `claude` is alive but silent until the next
  * message, so we settle to idle/ready rather than hanging on "connecting".
  */
-async function restartSession(sessionId: string, mode: string | null): Promise<void> {
+async function restartSession(
+  sessionId: string,
+  mode: string | null,
+  model: string | null = null,
+  effort: string | null = null,
+): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
 
@@ -455,7 +460,9 @@ async function restartSession(sessionId: string, mode: string | null): Promise<v
 
   const { channel, activate } = bufferedChannel();
   try {
-    await unwrap(commands.restartSession(sessionId, mode, channel));
+    // model/effort null → claude keeps the session's original values on --resume
+    // (a mode-only restart); non-null switches them mid-conversation.
+    await unwrap(commands.restartSession(sessionId, model, effort, mode, channel));
   } catch (e) {
     const latest = entryOf(sessionId);
     if (latest) setEntry(sessionId, { ...latest, reloading: false, live: false, state: "idle" });
@@ -596,6 +603,27 @@ export async function applyPermissionMode(
     return;
   }
   await restartSession(sessionId, mode);
+}
+
+/**
+ * Switch a live session's model — the model analog of [`applyPermissionMode`].
+ * Claude binds its model at launch, so a change on a running conversation
+ * relaunches the process via `--resume` onto the new model (transcript
+ * preserved). `modelFlag` is the `--model` value: an explicit id/alias, never
+ * null — a null `--model` on resume would keep the original model. `effort`
+ * re-applies the effort for the new model; `mode` keeps the current permission
+ * mode. A not-live session is a no-op — the tab's selection already rides into
+ * the next start via the composer.
+ */
+export async function applyModel(
+  sessionId: string,
+  modelFlag: string,
+  effort: string | null,
+  mode: string | null,
+): Promise<void> {
+  const current = entryOf(sessionId);
+  if (!current || !channels.has(sessionId)) return;
+  await restartSession(sessionId, mode, modelFlag, effort);
 }
 
 /**

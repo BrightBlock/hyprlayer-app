@@ -425,20 +425,27 @@ pub async fn resume_session(
     Ok(session)
 }
 
-/// Restart a *live* session into a new permission mode. Claude can't switch a
-/// running session into `bypassPermissions` (it's a launch-time decision), so
-/// the UI applies a mode change by relaunching the process. We do it atomically
-/// on the backend — kill the live driver, wait for it to actually exit (the
-/// forwarder drops it from the registry on its `Exited`), then re-spawn with
-/// `--resume` and the new mode — so the frontend can't race the resume onto the
-/// still-dying old process (which would keep the old mode). Conversation is
-/// preserved; the event log appends after its tail.
+/// Restart a *live* session into a new permission mode and/or model. Claude
+/// binds both its permission mode and its model at launch (a running session
+/// can't switch into `bypassPermissions`, nor swap models), so the UI applies
+/// such a change by relaunching the process. We do it atomically on the backend
+/// — kill the live driver, wait for it to actually exit (the forwarder drops it
+/// from the registry on its `Exited`), then re-spawn with `--resume` and the new
+/// settings — so the frontend can't race the resume onto the still-dying old
+/// process (which would keep the old settings). `model`/`effort` are `None` for a
+/// mode-only restart — claude keeps the session's original model/effort when
+/// `--model`/`--effort` are omitted on `--resume`; pass them to switch the model
+/// mid-conversation. Conversation is preserved; the event log appends after its
+/// tail.
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)]
 pub async fn restart_session(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     session_id: String,
+    model: Option<String>,
+    effort: Option<String>,
     permission_mode: Option<String>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
@@ -483,8 +490,8 @@ pub async fn restart_session(
             app,
             session: session.clone(),
             project_path: ws.project_path,
-            model: None,
-            effort: None,
+            model,
+            effort,
             permission_mode: permission_mode
                 .as_deref()
                 .and_then(PermissionMode::from_flag),
