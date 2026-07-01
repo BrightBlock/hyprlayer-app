@@ -9,6 +9,7 @@ mod session_registry;
 mod settings;
 mod state;
 mod terminal_registry;
+mod window_geometry;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -176,10 +177,13 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        // Restore the last window geometry, but ONLY size/position/maximized:
-        // never FULLSCREEN (so the app can't boot into a jarring full-screen
-        // flash), never VISIBLE (the window starts hidden on Windows/Linux and
-        // the frontend reveals it after first paint — see main.tsx), and never
+        // The window-state plugin SAVES size/position/maximized (on
+        // move/resize/close/exit). RESTORE is delegated to `window_geometry` via
+        // `skip_initial_state` below: the plugin's own restore re-applies a saved
+        // size as raw physical pixels, so the window reopens at the wrong size
+        // across a DPI/monitor change. We still never track FULLSCREEN (no
+        // full-screen boot flash), VISIBLE (the window starts hidden off-macOS and
+        // the frontend reveals it after first paint — see main.tsx), or
         // DECORATIONS (config owns that — frameless off-macOS).
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -188,6 +192,7 @@ pub fn run() {
                         | tauri_plugin_window_state::StateFlags::POSITION
                         | tauri_plugin_window_state::StateFlags::MAXIMIZED,
                 )
+                .skip_initial_state("main")
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
@@ -220,6 +225,12 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+
+            // Restore the main window's geometry before the frontend reveals it:
+            // DPI-aware, with an on-screen comfortable default when the saved
+            // monitor is gone. The window-state plugin still owns SAVING; see
+            // window_geometry for why restore lives here.
+            window_geometry::restore_main_window(app.handle());
 
             let config = Arc::new(ConfigService::with_default_path()?);
             let settings_dir = app.path().app_config_dir()?;
