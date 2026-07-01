@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.4.4",
+      "date": "2026-07-01",
+      "summary": "Plan drawer spacing fix and window size restored correctly on reopen.",
+      "notes": [
+        "The plan drawer now has breathing room below composer banners so content isn't clipped.",
+        "Fixed window reopening at the wrong size across DPI and monitor changes."
+      ]
+    },
+    {
       "version": "0.4.3",
       "date": "2026-07-01",
       "summary": "Ultracode effort preset and live model switching for Claude sessions.",
