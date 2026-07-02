@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.7",
+      "date": "2026-07-02",
+      "summary": "Wide layout for maximized big-display windows.",
+      "notes": [
+        "The dashboard now uses a wide layout when the window is maximized on large displays."
+      ]
+    },
+    {
       "version": "0.4.6",
       "date": "2026-07-02",
       "summary": "Home screen rebuilt as an operational fleet overview.",
