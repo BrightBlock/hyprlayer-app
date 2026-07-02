@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.6",
+      "date": "2026-07-02",
+      "summary": "Home screen rebuilt as an operational fleet overview.",
+      "notes": [
+        "The home screen is now a live fleet overview showing all active and recent agent sessions at a glance."
+      ]
+    },
+    {
       "version": "0.4.5",
       "date": "2026-07-02",
       "summary": "Live context meter, onboarding fix, and Windows update.",
