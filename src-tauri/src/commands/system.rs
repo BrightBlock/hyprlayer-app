@@ -184,7 +184,10 @@ fn cli_install_candidates() -> &'static [CliCandidate] {
         CliCandidate {
             id: CliInstallMethodId::Winget,
             label: "winget",
-            command: "winget install BrightBlock.Hyprlayer --accept-source-agreements --accept-package-agreements",
+            // --force: winget correlates the desktop app's ARP entry ("Hyprlayer" /
+            // BrightBlock) with this package and converts the install into an upgrade,
+            // which fails on portable-vs-NSIS (#8894). Force skips that correlation.
+            command: "winget install BrightBlock.Hyprlayer --force --accept-source-agreements --accept-package-agreements",
             probe: "winget",
         },
         CliCandidate {
