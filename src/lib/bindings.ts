@@ -434,6 +434,14 @@ export const commands = {
 	 *  the UI degrades gracefully.
 	 */
 	claudeAuthStatus: () => typedError<ClaudeAuthStatus, AppError>(__TAURI_INVOKE("claude_auth_status")),
+	/**
+	 *  Fetch authoritative per-model context windows from the Anthropic Models API,
+	 *  reusing the user's Claude auth (a configured API key, else the CLI's OAuth
+	 *  login). Best-effort: every failure path (no credentials, offline, denied
+	 *  Keychain, non-2xx, unparseable) surfaces as an error the caller is expected to
+	 *  swallow, leaving the composer's static per-model table as the denominator.
+	 */
+	claudeModelWindows: () => typedError<ModelWindow[], AppError>(__TAURI_INVOKE("claude_model_windows")),
 	/**  Probe the configured Ollama endpoint for reachability + installed models. */
 	ollamaStatus: () => typedError<OllamaStatus, AppError>(__TAURI_INVOKE("ollama_status")),
 	/**
@@ -1140,6 +1148,17 @@ export type MergeableState =
 "conflicting" | 
 /**  GitHub hasn't finished computing mergeability yet (transient). */
 "unknown";
+
+/**  One model's authoritative context window, from `GET /v1/models`. */
+export type ModelWindow = {
+	/**
+	 *  Canonical model id, e.g. `"claude-fable-5"` (`data[].id`). Bare — the API
+	 *  exposes no `[1m]` variants, so the UI strips that suffix before lookup.
+	 */
+	id: string,
+	/**  Context window in tokens (`max_input_tokens`) — the meter's denominator. */
+	contextWindow: number,
+};
 
 /**
  *  Multiplexer mode (Settings → Advanced). When enabled, a new agent tab

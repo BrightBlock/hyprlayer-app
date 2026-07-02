@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { EFFORTS, effectiveEffort, modelOption, modelSupportsUltracode } from "./models";
+import {
+  apiContextWindow,
+  EFFORTS,
+  effectiveEffort,
+  modelOption,
+  modelSupportsUltracode,
+} from "./models";
 
 describe("ultracode capability guard", () => {
   it("exposes ultracode as the last effort level", () => {
@@ -40,5 +46,29 @@ describe("ultracode capability guard", () => {
     expect(effectiveEffort("xhigh", modelOption("opus")).key).toBe("xhigh");
     // Unknown/undefined effort still falls back to the default (high).
     expect(effectiveEffort(undefined, modelOption("haiku")).key).toBe("high");
+  });
+});
+
+describe("apiContextWindow", () => {
+  const windows = new Map([
+    ["claude-fable-5", 1_000_000],
+    ["claude-opus-4-8", 1_000_000],
+    ["claude-haiku-4-5-20251001", 200_000],
+  ]);
+
+  it("returns the API window for a resolved bare id", () => {
+    expect(apiContextWindow("claude-fable-5", windows)).toBe(1_000_000);
+  });
+
+  it("strips a [1m] variant suffix before lookup (API keys on bare ids)", () => {
+    expect(apiContextWindow("claude-opus-4-8[1m]", windows)).toBe(1_000_000);
+  });
+
+  it("returns undefined for ids the catalog doesn't cover, so the caller falls back", () => {
+    // Unknown model, an OpenCode/Ollama id, or a null/absent init model.
+    expect(apiContextWindow("claude-opus-4-7", windows)).toBeUndefined();
+    expect(apiContextWindow("ollama/qwen2.5-coder", windows)).toBeUndefined();
+    expect(apiContextWindow(null, windows)).toBeUndefined();
+    expect(apiContextWindow(undefined, windows)).toBeUndefined();
   });
 });

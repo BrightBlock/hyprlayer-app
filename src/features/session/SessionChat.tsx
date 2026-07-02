@@ -49,12 +49,14 @@ import type { ShellTab } from "../../routes/ProjectPage";
 import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "./stages";
 import {
   EFFORTS,
+  apiContextWindow,
   effectiveEffort,
   modelOption,
   modelSupportsUltracode,
   resumeModelFlag,
   visibleModels,
 } from "./models";
+import { useModelWindowMap } from "./modelWindowsStore";
 import {
   DEFAULT_HARNESS_KEY,
   harnessOption,
@@ -1091,6 +1093,10 @@ export function SessionChat({
   const claudeDefaults = useBootstrap().data?.settings.providers?.claude;
   const model = modelOption(shell.model ?? claudeDefaults?.defaultModel ?? undefined);
   const effort = effectiveEffort(shell.effort ?? claudeDefaults?.defaultEffort ?? undefined, model);
+  // Live per-model context windows from the Models API (fetched once, reused);
+  // empty until it resolves, or if it can't (offline/logged out) — the static
+  // `model.contextWindow` table then covers the meter.
+  const modelWindows = useModelWindowMap();
   const permissionMode = permissionModeOption(
     shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
   );
@@ -1476,11 +1482,16 @@ export function SessionChat({
   //      Eraser button lights up; "Clear & resume" runs handleClear and
   //      prefills `/resume_handoff`.
   const HANDOFF_NUDGE_THRESHOLD = 0.6;
-  // The meter's denominator: the backend-reported window for this session (e.g.
-  // an Ollama model's fixed num_ctx) when known, else our per-model table. The
-  // `model` table only knows Claude models, so for an OpenCode/Ollama session it
-  // would otherwise wrongly read the 1M Opus default.
-  const contextWindow = session?.contextWindow ?? model.contextWindow;
+  // The meter's denominator, in precedence order: the backend-reported window
+  // for this session (e.g. an Ollama model's fixed num_ctx); else the Models API
+  // value for the session's resolved model id (the live source of truth, keyed on
+  // the id `claude` echoed at init); else our static per-model table. The `model`
+  // table only knows Claude models, so for an OpenCode/Ollama session it would
+  // otherwise wrongly read the 1M Opus default.
+  const contextWindow =
+    session?.contextWindow ??
+    apiContextWindow(session?.model, modelWindows) ??
+    model.contextWindow;
   const contextPct =
     session?.contextTokens != null ? session.contextTokens / contextWindow : 0;
   const handoffDoc = shell.docs.find((d) => d.role === "handoff") ?? null;

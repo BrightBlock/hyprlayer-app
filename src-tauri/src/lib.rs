@@ -114,6 +114,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::harnesses::opencode_set_default_model,
             commands::harnesses::install_opencode,
             commands::harnesses::claude_auth_status,
+            commands::models::claude_model_windows,
             commands::ollama::ollama_status,
             commands::ollama::ollama_set_endpoint,
             commands::ollama::ollama_set_selected_models,

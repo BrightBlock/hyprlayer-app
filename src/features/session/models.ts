@@ -37,7 +37,7 @@ export const MODELS: ModelOption[] = [
   { key: "sonnet", label: "Sonnet 5", flag: "sonnet", contextWindow: 200_000 },
   { key: "sonnet-1m", label: "Sonnet 5", hint: "1M", flag: "sonnet[1m]", contextWindow: 1_000_000 },
   { key: "haiku", label: "Haiku 4.5", flag: "haiku", contextWindow: 200_000 },
-  { key: "fable", label: "Fable 5", flag: "fable", contextWindow: 200_000 },
+  { key: "fable", label: "Fable 5", hint: "1M", flag: "fable", contextWindow: 1_000_000 },
   // Previous Sonnet/Opus versions (full ids — these have no short alias).
   { key: "sonnet-4-6", label: "Sonnet 4.6", flag: "claude-sonnet-4-6", contextWindow: 200_000 },
   { key: "sonnet-4-6-1m", label: "Sonnet 4.6", hint: "1M", flag: "claude-sonnet-4-6[1m]", contextWindow: 1_000_000 },
@@ -69,6 +69,22 @@ export function modelOption(key: string | undefined): ModelOption {
     // source of truth, but this keeps the meter sane before the model reports.
     contextWindow: key.includes("[1m]") ? 1_000_000 : 200_000,
   };
+}
+
+/** The context window the Anthropic Models API reports for a session's RESOLVED
+ *  model id (the id `claude` echoes in its `init` event, e.g. `claude-fable-5` or
+ *  `claude-opus-4-8[1m]`), or `undefined` when the fetched catalog doesn't cover
+ *  it — offline, logged out, an OpenCode/Ollama id, or a model predating the
+ *  API's `max_input_tokens` field. This is the live source of truth for the meter
+ *  denominator; callers fall back to the static [`ModelOption.contextWindow`]
+ *  table when it returns `undefined`. The catalog keys on bare ids, so any
+ *  `[…]` variant suffix (`[1m]`) is stripped before lookup. */
+export function apiContextWindow(
+  resolvedModelId: string | null | undefined,
+  windows: ReadonlyMap<string, number>,
+): number | undefined {
+  if (!resolvedModelId) return undefined;
+  return windows.get(resolvedModelId.replace(/\[[^\]]*\]$/, ""));
 }
 
 /** The explicit `--model` value to use when RESUMING a live session onto this
