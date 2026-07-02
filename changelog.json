@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.4.5",
+      "date": "2026-07-02",
+      "summary": "Live context meter, onboarding fix, and Windows update.",
+      "notes": [
+        "The context meter now sizes itself from the live Anthropic Models API so it reflects each model's real window.",
+        "Fixed the transcript pin dropping on non-scroll-wheel events (e.g. trackpad momentum).",
+        "Onboarding now repoints an existing thoughts config instead of dead-ending the wizard.",
+        "Resolved a winget identity collision between the desktop app and the CLI on Windows."
+      ]
+    },
+    {
       "version": "0.4.4",
       "date": "2026-07-01",
       "summary": "Plan drawer spacing fix and window size restored correctly on reopen.",
