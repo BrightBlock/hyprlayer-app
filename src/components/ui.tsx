@@ -211,7 +211,7 @@ export function ErrorNote({
   if (error == null) return null;
   const remedy = errorRemedy(error);
   return (
-    <div className="selectable relative rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
+    <div className="selectable relative break-words rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
       {onDismiss && (
         <button
           type="button"

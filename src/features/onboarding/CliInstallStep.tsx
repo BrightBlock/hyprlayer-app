@@ -59,7 +59,8 @@ export function CliInstallStep({ onNext }: { onNext: () => void }) {
             {hl?.path ? (
               <>
                 {" "}
-                at <span className="font-mono text-xs">{hl.path}</span>
+                {/* break-all: Windows install paths are long and unbreakable */}
+                at <span className="break-all font-mono text-xs">{hl.path}</span>
               </>
             ) : null}
             . You're ready to continue.
@@ -152,7 +153,7 @@ function InstallPicker() {
           </p>
         )}
         {install.isError && (
-          <p className="selectable text-xs text-bad">
+          <p className="selectable break-words text-xs text-bad">
             Couldn't install: {errorMessage(install.error)}
           </p>
         )}
@@ -177,7 +178,7 @@ function InstallPicker() {
           </span>
         </div>
         {override.isError && (
-          <p className="selectable text-xs text-bad">
+          <p className="selectable break-words text-xs text-bad">
             Couldn't save the path: {errorMessage(override.error)}
           </p>
         )}

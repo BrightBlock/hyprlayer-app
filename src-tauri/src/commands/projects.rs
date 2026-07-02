@@ -709,8 +709,8 @@ async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck
     // per-workstream status chips.
     let repo = Path::new(path);
     let repo_thoughts = repo.join(hyprlayer_core::worktree::THOUGHTS_DIR);
-    let missing = thoughts_links::missing_thoughts_links(repo, &effective);
-    let links_ok = missing.is_empty();
+    let broken = thoughts_links::broken_thoughts_links(repo, &effective);
+    let links_ok = broken.is_empty();
     checks.push(HealthCheck {
         id: "thoughts.symlinks".into(),
         label: "Repository thoughts/ links".into(),
@@ -718,7 +718,7 @@ async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck
         detail: Some(if links_ok {
             repo_thoughts.display().to_string()
         } else {
-            format!("missing: thoughts/{}", missing.join(", thoughts/"))
+            format!("broken or stale: thoughts/{}", broken.join(", thoughts/"))
         }),
         remedy: (!links_ok).then(|| {
             "Run `hyprlayer thoughts init` in the repository to recreate the links.".into()

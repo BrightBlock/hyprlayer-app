@@ -1,12 +1,13 @@
 /**
  * /onboarding — first-run setup wizard.
  *
- * Three steps:
+ * Four steps:
  *   1. Welcome + name — required to advance.
- *   2. AI harness — runs `hyprlayer ai configure` in an embedded PTY; skippable
+ *   2. Hyprlayer CLI — install / locate; gated until detected.
+ *   3. AI harness — runs `hyprlayer ai configure` in an embedded PTY; skippable
  *      if already installed. Auto-advances on exit 0.
- *   3. Thoughts repo — clone / open / create; "Set up" calls initThoughtsRepo
- *      then lands on the dashboard.
+ *   4. Thoughts repo — clone / open / create; "Set up" calls initThoughtsRepo
+ *      (repointing any existing thoughts config) then lands on the dashboard.
  *
  * Re-enterable from Settings at any time.
  */
@@ -256,40 +257,13 @@ function Step3({ user }: { user: string }) {
     }
   }, [probe.data, probe.isError]);
 
-  // Already set up? (Re-entering the wizard with a configured config — e.g. via
-  // Settings → "Re-run setup".) The backend refuses to rewrite an existing
-  // thoughts section, so don't present a setup form that's guaranteed to error —
-  // confirm it's done and let the user continue. Changing the repo is a CLI/
-  // Settings operation by design.
+  // Re-entering with thoughts already configured (Settings → "Re-run setup",
+  // or a config half-written by an earlier attempt) is not a dead end: the
+  // backend repoints the config at whatever the user selects, so show the same
+  // form with a note and a "keep it" exit instead of blocking on a
+  // "already set up" card.
   const cfg = bootstrap.data?.config;
   const alreadyConfigured = cfg?.state === "ready" && cfg.configured;
-  if (alreadyConfigured) {
-    return (
-      <Step
-        number={4}
-        total={TOTAL_STEPS}
-        title="Your thoughts repository"
-        footer={
-          <Button variant="primary" onClick={() => void navigate({ to: "/" })}>
-            Go to dashboard
-          </Button>
-        }
-      >
-        <Card className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">✓</span>
-            <p className="text-sm font-medium text-ink">
-              Your thoughts repository is already set up
-            </p>
-          </div>
-          <p className="text-sm text-ink-dim">
-            You're all set. To change your thoughts repository, use Settings or the
-            hyprlayer CLI.
-          </p>
-        </Card>
-      </Step>
-    );
-  }
 
   const defaultLocation = probe.data?.defaultPath ?? "~/thoughts";
   const foundExisting = probe.data?.isGitRepo === true;
@@ -337,7 +311,7 @@ function Step3({ user }: { user: string }) {
             }}
             disabled={initThoughts.isPending}
           >
-            Skip for now
+            {alreadyConfigured ? "Keep current setup" : "Skip for now"}
           </Button>
           <Button
             variant="primary"
@@ -356,11 +330,20 @@ function Step3({ user }: { user: string }) {
             Hyprlayer stores your project notes, plans, and research in a git repository.
             Clone an existing one from GitHub, open a folder you already have, or create a fresh one.
           </p>
-          {foundExisting && source?.mode === "disk" && (
+          {alreadyConfigured ? (
             <p className="mt-2 text-sm text-ink">
-              ✓ Found an existing thoughts repo at{" "}
-              <span className="font-mono text-xs">{defaultLocation}</span> — we'll use it.
+              ✓ Your thoughts repository is already set up — keep it, or select a
+              different one below and Hyprlayer will switch to it.
             </p>
+          ) : (
+            foundExisting &&
+            source?.mode === "disk" && (
+              <p className="mt-2 text-sm text-ink">
+                ✓ Found an existing thoughts repo at{" "}
+                <span className="break-all font-mono text-xs">{defaultLocation}</span> — we'll
+                use it.
+              </p>
+            )
           )}
         </Card>
         {source == null ? (

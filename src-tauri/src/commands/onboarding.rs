@@ -4,11 +4,12 @@
 //! reconfigure dialog in Settings. They do not touch the project registry —
 //! that remains in `projects.rs`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use hyprlayer_core::config;
 use hyprlayer_core::hyprcli::{AiStatus, HyprCli};
 use hyprlayer_core::repos;
+use hyprlayer_core::worktree::thoughts_links;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri_specta::Event;
@@ -90,7 +91,9 @@ pub fn probe_default_thoughts() -> ThoughtsProbe {
 ///
 /// This is the "Confirm" action in the thoughts-repo step of the wizard. The
 /// write is merge-tolerant: if `ai configure` has already created an ai-only
-/// config, the `ai` section is preserved and `thoughts` is injected.
+/// config, the `ai` section is preserved and `thoughts` is injected; if a
+/// `thoughts` section already exists (half-written or from a previous run),
+/// it is repointed at the selected repo rather than refused.
 ///
 /// On success the config watcher will eventually emit `ConfigChanged`, but we
 /// also invalidate and emit immediately so the wizard's "Step 3 complete" state
@@ -155,32 +158,101 @@ pub async fn init_thoughts_repo(
 
     // 2. Write / merge the `thoughts` section into config.json.
     let thoughts_repo_str = resolved.to_string_lossy().into_owned();
-    config::ensure_thoughts_config(state.config.path(), user.trim(), &thoughts_repo_str).map_err(
-        |e| {
-            // A clean fact + action split — the raw error already says "use
-            // Settings or the CLI", so don't repeat it in both fields.
-            if e.to_string().contains("already configured") {
-                AppError {
-                    code: "thoughts_already_configured".into(),
-                    message: "Your thoughts repository is already configured.".into(),
-                    remedy: Some("Use Settings or the hyprlayer CLI to change it.".into()),
-                }
-            } else {
-                AppError::from(e)
-            }
-        },
-    )?;
+    config::ensure_thoughts_config(state.config.path(), user.trim(), &thoughts_repo_str)
+        .map_err(AppError::from)?;
 
-    // 3. Invalidate, emit, and rebuild so the rest of the app sees the new config.
+    // 3. Drop the cached config so the relink sweep resolves the new root.
     state.config.invalidate().await;
+
+    // 4. Existing `<checkout>/thoughts/` links are absolute paths into the OLD
+    //    root — a repoint alone would leave every mapped repo and worktree
+    //    silently writing there. Re-init each live one against the new config.
+    relink_mapped_checkouts(&state).await;
+
+    // 5. A CLI invocation racing the steps above (e.g. a workstream created
+    //    mid-submit runs `thoughts init`, a stale read-modify-write of
+    //    config.json) can clobber the repoint — observed live. Verify the
+    //    write stuck; re-merge into the latest file (preserving mappings the
+    //    racer added) and re-sweep, once.
+    state.config.invalidate().await;
+    let stuck = state.config.load().await.is_ok_and(|loaded| {
+        loaded
+            .config
+            .thoughts
+            .as_ref()
+            .and_then(|t| t.backend.thoughts_root())
+            .is_some_and(|root| root == resolved)
+    });
+    if !stuck {
+        log::warn!("thoughts repoint was clobbered by a concurrent config writer; re-applying");
+        config::ensure_thoughts_config(state.config.path(), user.trim(), &thoughts_repo_str)
+            .map_err(AppError::from)?;
+        state.config.invalidate().await;
+        relink_mapped_checkouts(&state).await;
+        state.config.invalidate().await;
+    }
+
+    // 6. Emit and rebuild so the rest of the app sees the new config.
     let _ = crate::events::ConfigChanged.emit(&app);
     crate::rebuild_thoughts_index(app).await;
 
-    // 4. Return the updated bootstrap so the wizard can confirm ready state.
+    // 7. Return the updated bootstrap so the wizard can confirm ready state.
     Ok(Bootstrap {
         config: config_summary(&state).await,
         projects: registry_projects(&state).await,
         binaries: state.binaries.status_all().await,
         settings: state.settings.get().await,
     })
+}
+
+/// Re-link `thoughts/` for every mapped checkout that still exists on disk, so
+/// a repoint doesn't leave stale links writing into the old thoughts repo.
+///
+/// CLI-first per path — `thoughts init --yes` owns the target tree, links, and
+/// mapping (the same pattern as workstream creation) — with manual relinking
+/// as the fallback. Serial on purpose: every CLI run rewrites config.json, so
+/// concurrent inits would race the tmp+rename. Profile-pinned mappings resolve
+/// their own backend via `effective_config_for` and short-circuit as healthy;
+/// paths that are gone are skipped (relinking would resurrect them — pruning
+/// belongs to the CLI's orphan cleanup). Best-effort: failures are logged,
+/// never surfaced — one repo on a detached drive must not fail the wizard.
+async fn relink_mapped_checkouts(state: &AppState) {
+    let Ok(loaded) = state.config.load().await else {
+        return;
+    };
+    let Some(thoughts) = loaded.config.thoughts.as_ref() else {
+        return;
+    };
+    let cli = HyprCli::new(&state.binaries);
+    for path_str in thoughts.repo_mappings.keys() {
+        let path = Path::new(path_str);
+        if !path.is_dir() {
+            continue;
+        }
+        let effective = thoughts.effective_config_for(path_str);
+        if !effective.backend.kind().uses_filesystem() {
+            continue;
+        }
+        let Some(mapped) = effective.mapped_name.as_deref() else {
+            continue;
+        };
+        if thoughts_links::broken_thoughts_links(path, &effective).is_empty() {
+            continue; // already points at the current root
+        }
+        if let Err(init_err) = cli
+            .thoughts_init(path, mapped, effective.profile_name.as_deref())
+            .await
+        {
+            log::warn!("thoughts re-init at {path_str} failed ({init_err}); relinking manually");
+        }
+        // `thoughts init` creates the target tree and any missing links, but
+        // leaves resolving-but-stale links in place (verified against CLI
+        // v1.5.8) — exactly the state a repoint produces. Force-replace
+        // whatever it left broken; provisioning is idempotent over its links.
+        if !thoughts_links::broken_thoughts_links(path, &effective).is_empty() {
+            if let Err(e) = thoughts_links::provision_thoughts(path, &effective) {
+                log::warn!("manual relink at {path_str} failed: {e}");
+            }
+        }
+    }
 }

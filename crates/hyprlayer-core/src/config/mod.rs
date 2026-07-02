@@ -80,11 +80,17 @@ pub fn write_bootstrap_config(path: &Path, user: &str) -> Result<()> {
 ///
 /// Three cases:
 /// - **Missing** → create a fresh v4 config with the `thoughts` section.
-/// - **Exists without `thoughts`** → parse as `serde_json::Value`, inject the
-///   `thoughts` object preserving every other key (`ai`, `telemetry`, …), then
-///   atomic tmp+rename.
-/// - **Exists with `thoughts` already** → error `thoughts_already_configured`
-///   (the user should use Settings / the CLI to change it).
+/// - **Exists without `thoughts`** → inject the section, preserving every
+///   other key (`ai`, `telemetry`, …), then atomic tmp+rename.
+/// - **Exists with `thoughts`** → repoint it: set `user`, point the git
+///   backend at `thoughts_repo` (filling empty `reposDir`/`globalDir`), and
+///   preserve `repoMappings`/`profiles`. Setup is an explicit user action, so
+///   the selected repo wins — a half-written or stale section must not
+///   dead-end the wizard with "already configured".
+///
+/// Never rewrites a config it doesn't understand: newer-than-v4 errors
+/// `config_version_too_new`; pre-v4 with a `thoughts` section errors
+/// `config_needs_migration` (the CLI migrates losslessly; we would drop data).
 pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> Result<()> {
     let user = user.trim();
     if user.is_empty() {
@@ -93,16 +99,11 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
         )));
     }
 
-    let thoughts_section = serde_json::json!({
-        "user": user,
-        "backend": {
-            "kind": "git",
-            "thoughtsRepo": thoughts_repo,
-            "reposDir": "repos",
-            "globalDir": "global"
-        },
-        "repoMappings": {},
-        "profiles": {}
+    let git_backend = serde_json::json!({
+        "kind": "git",
+        "thoughtsRepo": thoughts_repo,
+        "reposDir": "repos",
+        "globalDir": "global"
     });
 
     if let Some(parent) = path.parent() {
@@ -111,28 +112,74 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
 
     let value = if path.exists() {
         let raw = std::fs::read_to_string(path)?;
-        let mut v: serde_json::Value =
-            serde_json::from_str(&raw).map_err(|e| CoreError::ConfigParse {
+        // Parsing into a Map (not a bare Value) also rejects a non-object
+        // root, which the `v[…] = …` writes below would panic on.
+        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&raw)
+            .map_err(|e| CoreError::ConfigParse {
                 path: path.to_path_buf(),
                 source: e,
             })?;
-        if v.get("thoughts").is_some() {
-            return Err(CoreError::Io(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "thoughts is already configured; use Settings or the CLI to change it",
-            )));
+        let mut v = serde_json::Value::Object(map);
+
+        let version = v.get("version").and_then(|x| x.as_u64()).unwrap_or(0);
+        if version > MAX_SUPPORTED_CONFIG_VERSION {
+            return Err(CoreError::ConfigVersionTooNew {
+                found: version,
+                max: MAX_SUPPORTED_CONFIG_VERSION,
+            });
         }
-        v["thoughts"] = thoughts_section;
-        // Ensure version is set to 4 if missing (e.g. an ai-only config written
-        // by `ai configure` before version was established).
-        if v.get("version").is_none() || v["version"].is_null() {
-            v["version"] = serde_json::json!(4);
+        let has_thoughts = v.get("thoughts").is_some_and(|t| t.is_object());
+        if has_thoughts && version < MAX_SUPPORTED_CONFIG_VERSION {
+            return Err(CoreError::ConfigNeedsMigration {
+                found: version,
+                required: MAX_SUPPORTED_CONFIG_VERSION,
+            });
+        }
+
+        if has_thoughts {
+            let t = &mut v["thoughts"];
+            t["user"] = user.into();
+            if t["backend"]["kind"] == "git" {
+                // Keep custom reposDir/globalDir; fill them when empty so a
+                // half-written section comes out fully configured.
+                let b = &mut t["backend"];
+                b["thoughtsRepo"] = thoughts_repo.into();
+                for (key, default) in [("reposDir", "repos"), ("globalDir", "global")] {
+                    if b[key].as_str().is_none_or(str::is_empty) {
+                        b[key] = default.into();
+                    }
+                }
+            } else {
+                t["backend"] = git_backend;
+            }
+            for key in ["repoMappings", "profiles"] {
+                if !t[key].is_object() {
+                    t[key] = serde_json::json!({});
+                }
+            }
+        } else {
+            v["thoughts"] = serde_json::json!({
+                "user": user,
+                "backend": git_backend,
+                "repoMappings": {},
+                "profiles": {}
+            });
+        }
+        // Stamp v4 on version-less files (e.g. an ai-only config written by
+        // `ai configure` before version was established).
+        if version < MAX_SUPPORTED_CONFIG_VERSION {
+            v["version"] = serde_json::json!(MAX_SUPPORTED_CONFIG_VERSION);
         }
         v
     } else {
         serde_json::json!({
-            "version": 4,
-            "thoughts": thoughts_section
+            "version": MAX_SUPPORTED_CONFIG_VERSION,
+            "thoughts": {
+                "user": user,
+                "backend": git_backend,
+                "repoMappings": {},
+                "profiles": {}
+            }
         })
     };
 
@@ -345,13 +392,89 @@ mod tests {
     }
 
     #[test]
-    fn ensure_thoughts_config_errors_when_thoughts_already_present() {
+    fn ensure_thoughts_config_repoints_existing_thoughts_section() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"version":4,"ai":{"agentTool":"claude"},"thoughts":{
+                "user":"alice",
+                "backend":{"kind":"git","thoughtsRepo":"~/old-thoughts","reposDir":"custom","globalDir":"shared"},
+                "repoMappings":{"/w/a":"a"},
+                "profiles":{"personal":{}}}}"#,
+        )
+        .unwrap();
+        ensure_thoughts_config(&path, "bob", "/data/thoughts").unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["thoughts"]["user"], "bob");
+        assert_eq!(v["thoughts"]["backend"]["thoughtsRepo"], "/data/thoughts");
+        // Custom dirs, mappings, profiles, and other sections survive the repoint.
+        assert_eq!(v["thoughts"]["backend"]["reposDir"], "custom");
+        assert_eq!(v["thoughts"]["backend"]["globalDir"], "shared");
+        assert_eq!(v["thoughts"]["repoMappings"]["/w/a"], "a");
+        assert!(v["thoughts"]["profiles"]["personal"].is_object());
+        assert_eq!(v["ai"]["agentTool"], "claude");
+    }
+
+    #[test]
+    fn ensure_thoughts_config_completes_half_written_section() {
+        // The stuck-wizard state: `thoughts` present but unconfigured (empty
+        // fields), which used to error "already configured" on every submit.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"version":4,"thoughts":{"user":"","backend":{"kind":"git","thoughtsRepo":"","reposDir":"","globalDir":""}}}"#,
+        )
+        .unwrap();
         ensure_thoughts_config(&path, "alice", "~/thoughts").unwrap();
-        let err = ensure_thoughts_config(&path, "alice", "~/thoughts").unwrap_err();
-        assert_eq!(err.code(), "io");
-        assert!(err.to_string().contains("already configured"));
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let cfg = parse_config(&raw, &path).unwrap();
+        assert!(cfg.thoughts.as_ref().unwrap().is_configured());
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["thoughts"]["backend"]["reposDir"], "repos");
+        assert_eq!(v["thoughts"]["repoMappings"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn ensure_thoughts_config_replaces_non_git_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"version":4,"thoughts":{
+                "user":"alice",
+                "backend":{"kind":"obsidian","vaultPath":"~/Vault","reposDir":"repos","globalDir":"global"},
+                "repoMappings":{"/w/a":"a"},"profiles":{}}}"#,
+        )
+        .unwrap();
+        ensure_thoughts_config(&path, "alice", "~/thoughts").unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["thoughts"]["backend"]["kind"], "git");
+        assert_eq!(v["thoughts"]["backend"]["thoughtsRepo"], "~/thoughts");
+        assert_eq!(v["thoughts"]["repoMappings"]["/w/a"], "a");
+    }
+
+    #[test]
+    fn ensure_thoughts_config_never_rewrites_foreign_versions() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Pre-v4 with a thoughts section: the CLI must migrate it first.
+        let old = dir.path().join("old.json");
+        std::fs::write(&old, r#"{"version":2,"thoughts":{"user":"alice","backend":"git"}}"#)
+            .unwrap();
+        let err = ensure_thoughts_config(&old, "alice", "~/thoughts").unwrap_err();
+        assert_eq!(err.code(), "config_needs_migration");
+
+        // Newer than we understand: never touched.
+        let new = dir.path().join("new.json");
+        let raw = r#"{"version":5,"thoughts":{"user":"alice"}}"#;
+        std::fs::write(&new, raw).unwrap();
+        let err = ensure_thoughts_config(&new, "alice", "~/thoughts").unwrap_err();
+        assert_eq!(err.code(), "config_version_too_new");
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), raw);
     }
 
     #[test]

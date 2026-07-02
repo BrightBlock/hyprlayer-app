@@ -7,7 +7,7 @@
 //! ADR-0002 exception #2: a Value-preserving, atomic read-modify-rename edit
 //! of the CLI's config that never touches keys the app doesn't own.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -26,30 +26,19 @@ pub enum LinkStatus {
     Broken,
 }
 
-/// Create `<worktree>/thoughts/{<user>,shared,global}` mirroring the CLI's
-/// `setup_symlinks_into` layout. On Windows, falls back to junctions when
-/// real symlinks need privileges. Idempotent.
-pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Result<LinkStatus> {
+/// Expected `<repo>/thoughts/` entries and their targets in the thoughts
+/// tree: `<root>/<reposDir>/<mapped>/{<user>,shared}` and `<root>/<globalDir>`.
+/// The single source of the link layout — provisioning creates exactly these
+/// and the health check verifies against them. None when the backend has no
+/// filesystem tree or the repo is unmapped.
+fn expected_targets(effective: &EffectiveConfig) -> Option<Vec<(String, PathBuf)>> {
     let (repos_dir, global_dir) = match &effective.backend {
         BackendConfig::Git(g) => (g.repos_dir.as_str(), g.global_dir.as_str()),
         BackendConfig::Obsidian(o) => (o.repos_dir.as_str(), o.global_dir.as_str()),
-        _ => return Ok(LinkStatus::Unsupported),
+        _ => return None,
     };
-    let Some(root) = effective.backend.thoughts_root() else {
-        return Ok(LinkStatus::Unsupported);
-    };
-    let Some(mapped) = effective.mapped_name.as_deref() else {
-        return Err(CoreError::OutputParse {
-            program: "provision_thoughts".into(),
-            detail: "main repository is not mapped in the hyprlayer config".into(),
-        });
-    };
-    if effective.user.is_empty() {
-        return Err(CoreError::OutputParse {
-            program: "provision_thoughts".into(),
-            detail: "hyprlayer config has no user".into(),
-        });
-    }
+    let root = effective.backend.thoughts_root()?;
+    let mapped = effective.mapped_name.as_deref()?;
 
     let repo_tree = root
         .join(if repos_dir.is_empty() {
@@ -64,33 +53,88 @@ pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Resul
         global_dir
     });
 
+    let mut targets = Vec::with_capacity(3);
+    if !effective.user.is_empty() {
+        targets.push((effective.user.clone(), repo_tree.join(&effective.user)));
+    }
+    targets.push(("shared".to_string(), repo_tree.join("shared")));
+    targets.push(("global".to_string(), global_tree));
+    Some(targets)
+}
+
+/// Create `<worktree>/thoughts/{<user>,shared,global}` mirroring the CLI's
+/// `setup_symlinks_into` layout, creating the target directories in the
+/// thoughts tree when absent (`thoughts init` skips mapped checkouts wholesale,
+/// so after a repoint nobody else recreates them). On Windows, falls back to
+/// junctions when real symlinks need privileges. Idempotent — replaces
+/// whatever occupies the link slots, including stale links into a previous
+/// thoughts root.
+pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Result<LinkStatus> {
+    if !effective.backend.kind().uses_filesystem() || effective.backend.thoughts_root().is_none() {
+        return Ok(LinkStatus::Unsupported);
+    }
+    if effective.mapped_name.is_none() {
+        return Err(CoreError::OutputParse {
+            program: "provision_thoughts".into(),
+            detail: "main repository is not mapped in the hyprlayer config".into(),
+        });
+    }
+    if effective.user.is_empty() {
+        return Err(CoreError::OutputParse {
+            program: "provision_thoughts".into(),
+            detail: "hyprlayer config has no user".into(),
+        });
+    }
+    let Some(targets) = expected_targets(effective) else {
+        return Ok(LinkStatus::Unsupported); // unreachable given the guards
+    };
+
     let thoughts_dir = worktree.join(super::THOUGHTS_DIR);
     std::fs::create_dir_all(&thoughts_dir)?;
-
-    link_dir(
-        &repo_tree.join(&effective.user),
-        &thoughts_dir.join(&effective.user),
-    )?;
-    link_dir(&repo_tree.join("shared"), &thoughts_dir.join("shared"))?;
-    link_dir(&global_tree, &thoughts_dir.join("global"))?;
+    for (name, target) in &targets {
+        std::fs::create_dir_all(target)?;
+        link_dir(target, &thoughts_dir.join(name))?;
+    }
 
     Ok(check_thoughts(worktree, effective))
 }
 
-/// Expected entries under `<repo>/thoughts/` that are missing or dangling.
-/// The single definition of link health — status polling and the backend
-/// health checks both build on it.
-pub fn missing_thoughts_links(repo: &Path, effective: &EffectiveConfig) -> Vec<String> {
+/// Expected entries under `<repo>/thoughts/` that are missing, dangling, or
+/// pointing outside the current thoughts tree (stale — e.g. left behind after
+/// the config was repointed at a different thoughts repo). The single
+/// definition of link health — status polling and the backend health checks
+/// both build on it.
+pub fn broken_thoughts_links(repo: &Path, effective: &EffectiveConfig) -> Vec<String> {
     let thoughts_dir = repo.join(super::THOUGHTS_DIR);
-    let mut expected = vec!["shared".to_string(), "global".to_string()];
-    if !effective.user.is_empty() {
-        expected.insert(0, effective.user.clone());
+    match expected_targets(effective) {
+        Some(targets) => targets
+            .into_iter()
+            .filter(|(name, target)| !links_to(&thoughts_dir.join(name), target))
+            .map(|(name, _)| name)
+            .collect(),
+        // No computable targets (e.g. unmapped repo): existence-only checks.
+        None => {
+            let mut expected = vec!["shared".to_string(), "global".to_string()];
+            if !effective.user.is_empty() {
+                expected.insert(0, effective.user.clone());
+            }
+            expected
+                .into_iter()
+                .filter(|name| !thoughts_dir.join(name).exists())
+                .collect()
+        }
     }
-    // exists() follows links, so a dangling symlink reports missing.
-    expected
-        .into_iter()
-        .filter(|name| !thoughts_dir.join(name).exists())
-        .collect()
+}
+
+/// True when `link` resolves to `target`. Both sides canonicalized so
+/// symlinked parents (`/tmp` → `/private/tmp` on macOS) and Windows verbatim
+/// `\\?\` junction paths compare equal; a dangling link fails canonicalize
+/// and reports broken, same as a missing one.
+fn links_to(link: &Path, target: &Path) -> bool {
+    match (std::fs::canonicalize(link), std::fs::canonicalize(target)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// Current health of the links (used by status polling).
@@ -98,7 +142,7 @@ pub fn check_thoughts(worktree: &Path, effective: &EffectiveConfig) -> LinkStatu
     if !effective.backend.kind().uses_filesystem() {
         return LinkStatus::Unsupported;
     }
-    if missing_thoughts_links(worktree, effective).is_empty() {
+    if broken_thoughts_links(worktree, effective).is_empty() {
         LinkStatus::Ok
     } else {
         LinkStatus::Broken
@@ -274,6 +318,38 @@ mod tests {
         // Breaking a target turns the check Broken.
         std::fs::remove_dir_all(thoughts.path().join("repos/myproj/shared")).unwrap();
         assert_eq!(check_thoughts(worktree.path(), &eff), LinkStatus::Broken);
+    }
+
+    #[test]
+    fn repointed_root_marks_resolving_links_stale_until_reprovisioned() {
+        let old_root = tempfile::tempdir().unwrap();
+        let new_root = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        for dir in ["repos/myproj/jt", "repos/myproj/shared", "global"] {
+            std::fs::create_dir_all(old_root.path().join(dir)).unwrap();
+        }
+        let old_eff = effective(old_root.path(), "jt", Some("myproj"));
+        let new_eff = effective(new_root.path(), "jt", Some("myproj"));
+
+        assert_eq!(
+            provision_thoughts(worktree.path(), &old_eff).unwrap(),
+            LinkStatus::Ok
+        );
+
+        // The links still resolve (the old root exists) but point at the wrong
+        // tree — an exists()-style check would call this healthy.
+        assert_eq!(check_thoughts(worktree.path(), &new_eff), LinkStatus::Broken);
+        assert_eq!(broken_thoughts_links(worktree.path(), &new_eff).len(), 3);
+
+        // Re-provisioning against a completely empty new root creates the
+        // target tree, replaces the links in place, and writes land in it.
+        assert_eq!(
+            provision_thoughts(worktree.path(), &new_eff).unwrap(),
+            LinkStatus::Ok
+        );
+        assert_eq!(check_thoughts(worktree.path(), &old_eff), LinkStatus::Broken);
+        std::fs::write(worktree.path().join("thoughts/shared/note.md"), "x").unwrap();
+        assert!(new_root.path().join("repos/myproj/shared/note.md").exists());
     }
 
     #[test]

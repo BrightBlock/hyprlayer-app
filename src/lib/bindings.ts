@@ -613,7 +613,9 @@ export const commands = {
 	 * 
 	 *  This is the "Confirm" action in the thoughts-repo step of the wizard. The
 	 *  write is merge-tolerant: if `ai configure` has already created an ai-only
-	 *  config, the `ai` section is preserved and `thoughts` is injected.
+	 *  config, the `ai` section is preserved and `thoughts` is injected; if a
+	 *  `thoughts` section already exists (half-written or from a previous run),
+	 *  it is repointed at the selected repo rather than refused.
 	 * 
 	 *  On success the config watcher will eventually emit `ConfigChanged`, but we
 	 *  also invalidate and emit immediately so the wizard's "Step 3 complete" state
