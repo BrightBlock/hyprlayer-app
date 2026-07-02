@@ -994,6 +994,31 @@ export function stickAfterScroll(prevTop: number, top: number, gap: number, wasS
   return wasStuck;
 }
 
+/** Decide whether a wheel event is a genuine attempt to scroll the transcript
+ *  up, from its deltas, modifier, and the transcript's scrollTop. Filters out
+ *  pinch-zoom (ctrl+wheel), mostly-horizontal pans (which leak a few negative
+ *  deltaY px while panning a wide code block), and wheels with no scrollback
+ *  above (scrollTop 0) — none of those can scroll the view up, so none may
+ *  unpin. The last one matters most: on a not-yet-overflowing transcript no
+ *  scroll event ever fires, so a dropped pin could never re-stick. */
+export function releaseOnWheel(deltaX: number, deltaY: number, ctrlKey: boolean, scrollTop: number): boolean {
+  if (deltaY >= 0 || ctrlKey) return false;
+  if (Math.abs(deltaY) <= Math.abs(deltaX)) return false;
+  return scrollTop > 0;
+}
+
+/** True when `target` sits inside a nested scroller (expanded tool output,
+ *  thinking block) that scrolls vertically itself — its wheel-ups stay local,
+ *  so the pin must hold. When one chains to the transcript after all (inner
+ *  scroller already at its top), the onScroll drop-release catches it. */
+export function insideNestedScroller(target: EventTarget | null, root: HTMLElement): boolean {
+  for (let el = target instanceof Element ? target : null; el && el !== root; el = el.parentElement) {
+    if (el.scrollTop > 0) return true;
+    if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY)) return true;
+  }
+  return false;
+}
+
 export const TranscriptView = memo(
   forwardRef<TranscriptHandle, Props>(function TranscriptView(
     { items, busy, connecting, harnessLabel, workingSince, permission, prompt },
@@ -1072,8 +1097,13 @@ export const TranscriptView = memo(
 
     // A wheel/trackpad scroll-up releases synchronously, before the next frame's
     // pin can fire — the scroll event alone can land after that frame's rAF.
+    // Gated to wheels that can genuinely scroll the transcript up (see
+    // releaseOnWheel / insideNestedScroller) so nothing else drops the pin.
     const onWheel = (e: WheelEvent<HTMLDivElement>) => {
-      if (e.deltaY < 0) atBottom.current = false;
+      const el = scrollRef.current;
+      if (!el || !releaseOnWheel(e.deltaX, e.deltaY, e.ctrlKey, el.scrollTop)) return;
+      if (insideNestedScroller(e.target, el)) return;
+      atBottom.current = false;
     };
 
     // Discrete updates while idle (a queued message renders, a tool result lands):
@@ -1127,7 +1157,10 @@ export const TranscriptView = memo(
         // scrolling past the top/bottom edge chains to the app-level <main>
         // scroller and drags the whole window — the agent pane must own its
         // scroll. (Newly reachable now that scroll-up isn't pinned mid-stream.)
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5"
+        // `overflow-anchor:none`: this component owns bottom-pinning; engine
+        // scroll anchoring would counter-adjust scrollTop when rows above
+        // reflow, which reads as a phantom scroll-up and drops the pin.
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 [overflow-anchor:none]"
       >
         <div className="mx-auto w-[90%]">
           <ItemList
