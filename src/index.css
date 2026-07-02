@@ -32,6 +32,12 @@
   --color-bad: #ef5350;
   --color-brand: #60a5fa;
   --color-brand-soft: #7dd3fc;
+  /* "Needs you" attention hue for the home dashboard (summary chip, banner,
+     list pills). Deliberately NOT --color-warn: that token doubles as a syntax
+     hue and its Dark+ value (#f0b13a) reads neon on charcoal, so attention
+     surfaces use this muted amber instead — the Claude theme's warn. Themes
+     that don't override it inherit this default; light deepens it below. */
+  --color-attention: #d4a056;
   /* Header action-button hues (Ship/Merge = green, Commit = teal). Their own
      tokens — not the shared status hues — so the light theme can deepen them
      for contrast without disturbing OK/WARN/BAD. These bright tints read well
@@ -56,18 +62,20 @@
   --color-handoff: #fb923c; /* orange-400 — handoff docs */
   --color-working: #38bdf8; /* sky-400 — live "working" activity */
   --color-background: #a78bfa; /* violet-400 — passive background activity */
-  /* Knowledge-graph node hues (dashboard doc graph). Its own categorical palette,
-     deliberately distinct from the stage/doc-chip hues because it carries extra
-     categories (note, pr). Bright Tailwind tints here for the dark themes; the
-     `html.light` block deepens them so the amber/green nodes don't vanish on the
-     cream surface. Consumed as raw `var()` in SVG fills + the legend, not as
-     utility classes (see TYPE_COLORS in features/dashboard/graph.ts). */
-  --color-graph-plan: #60a5fa;
-  --color-graph-research: #c084fc;
-  --color-graph-handoff: #fbbf24;
-  --color-graph-note: #4ade80;
-  --color-graph-pr: #f472b6;
-  --color-graph-other: #9aa3af;
+  /* Knowledge-graph nebula (the home card's preview and the full interactive
+     view): a radial backdrop plus a five-stop star family swept across the
+     layout (nodes, glows, and the edge gradient's 1/3/5 stops — see
+     NEBULA_COLORS in features/dashboard/graph.ts). Every theme re-tunes the
+     whole set so the constellation reads native: Dark+ keeps the sky→blue→
+     violet family from design pass 5a, and each html.<name> block below
+     swaps in its own family. */
+  --color-nebula-bg-0: #151a26;
+  --color-nebula-bg-1: #0c0d11;
+  --color-nebula-1: #7dd3fc;
+  --color-nebula-2: #93c5fd;
+  --color-nebula-3: #60a5fa;
+  --color-nebula-4: #818cf8;
+  --color-nebula-5: #a78bfa;
 }
 
 /* Light — warm neutral creams + ivories, terracotta accent shifted darker so
@@ -76,10 +84,23 @@ html.light {
   --color-surface: #faf9f6;
   --color-panel: #f3f1ec;
   --color-panel-2: #ebe8e1;
+  /* Nebula — a faint cool wash fading into the cream panel tones, with the
+     star family deepened to -600 tints so it keeps contrast without a dark
+     inset. */
+  --color-nebula-bg-0: #edf0f7;
+  --color-nebula-bg-1: #e8e6df;
+  --color-nebula-1: #0284c7;
+  --color-nebula-2: #2563eb;
+  --color-nebula-3: #4f46e5;
+  --color-nebula-4: #7c3aed;
+  --color-nebula-5: #9333ea;
   --color-edge: #d4d0c8;
   --color-ink: #1c1b1a;
   --color-ink-dim: #55534f;
   --color-accent: #c25e3d;
+  /* White on the deepened terracotta (the dark default #0c0c0c reads muddy on
+     it) — matches the nav rail's white-on-accent Home button. */
+  --color-accent-ink: #ffffff;
   /* Deepen the Ship/Commit hues so the tinted header buttons keep contrast on
      the light surface (the bright dark-theme tints wash out on cream). */
   --color-ship: #047857;
@@ -91,6 +112,9 @@ html.light {
   --color-brand: #1d4ed8;
   --color-brand-soft: #7c3aed;
   --color-bad: #b91c1c;
+  /* Attention matches warn on light — the deepened amber already reads calm
+     on cream; only the dark themes need the softer split. */
+  --color-attention: #b45309;
   /* Stage/doc/activity accent hues — deepened to -600/-700 tints so the stage
      badges, doc-type chips, and activity dots keep contrast on the cream surface
      (the bright -400 defaults wash out on light). */
@@ -102,14 +126,6 @@ html.light {
   --color-handoff: #c2410c; /* orange-700 */
   --color-working: #0284c7; /* sky-600 */
   --color-background: #6d28d9; /* violet-700 */
-  /* Knowledge-graph node hues — deepened to -700 tints so the amber/green/pink
-     nodes keep contrast on the cream surface. */
-  --color-graph-plan: #1d4ed8; /* blue-700 */
-  --color-graph-research: #7e22ce; /* purple-700 */
-  --color-graph-handoff: #b45309; /* amber-700 */
-  --color-graph-note: #15803d; /* green-700 */
-  --color-graph-pr: #be185d; /* pink-700 */
-  --color-graph-other: #6b7280; /* gray-500 */
   color-scheme: light;
 }
 
@@ -130,6 +146,15 @@ html.claude {
   --color-warn: #d4a056;
   --color-brand: #5ba3a0;
   --color-brand-soft: #c89a78;
+  /* Nebula — warm-black radial, stars sweeping the theme's own accents:
+     muted teal → sage → peach-tan → warm amber → terracotta. */
+  --color-nebula-bg-0: #252019;
+  --color-nebula-bg-1: #171410;
+  --color-nebula-1: #5ba3a0;
+  --color-nebula-2: #8fb579;
+  --color-nebula-3: #c89a78;
+  --color-nebula-4: #d4a056;
+  --color-nebula-5: #d97757;
 }
 
 /* Cobalt — Wes Bos's Cobalt 2. Deep navy surfaces, bright sky-blue accent. */
@@ -148,6 +173,15 @@ html.cobalt {
   --color-warn: #ff628c;
   --color-brand: #ffc600;
   --color-brand-soft: #9effff;
+  /* Nebula — deeper navy radial than the surface, stars in Cobalt2's
+     cyan→sky→periwinkle range so they pop without leaving the theme. */
+  --color-nebula-bg-0: #1c3a55;
+  --color-nebula-bg-1: #102538;
+  --color-nebula-1: #9effff;
+  --color-nebula-2: #66c4ff;
+  --color-nebula-3: #5b8aff;
+  --color-nebula-4: #7d6bff;
+  --color-nebula-5: #a06bff;
 }
 
 /* Matrix — CRT phosphor vibe. Near-black green-tinted surfaces, calm green
@@ -167,6 +201,14 @@ html.matrix {
   --color-warn: #d4ec78;
   --color-brand: #56d364;
   --color-brand-soft: #aff5b4;
+  /* Nebula — green-black CRT radial, mono-green phosphor stars. */
+  --color-nebula-bg-0: #0c150c;
+  --color-nebula-bg-1: #050a05;
+  --color-nebula-1: #aff5b4;
+  --color-nebula-2: #7ee787;
+  --color-nebula-3: #56d364;
+  --color-nebula-4: #3fb950;
+  --color-nebula-5: #2ea043;
 }
 
 /* Solarized Dark — Ethan Schoonover's palette (base03/02 + base0/1), with the
@@ -189,6 +231,15 @@ html.solarized {
   --color-brand: #268bd2;
   --color-brand-soft: #6c71c4;
   --color-bad: #dc322f;
+  /* Nebula — base03-adjacent radial, stars sweeping Ethan's canonical
+     accents: cyan → blue → violet → magenta. */
+  --color-nebula-bg-0: #04313e;
+  --color-nebula-bg-1: #002028;
+  --color-nebula-1: #2aa198;
+  --color-nebula-2: #268bd2;
+  --color-nebula-3: #6c71c4;
+  --color-nebula-4: #a05cbf;
+  --color-nebula-5: #d33682;
 }
 
 html,
@@ -315,6 +366,72 @@ a {
   .animate-tab-glow {
     animation: none;
     box-shadow: 0 0 2px 0 currentColor;
+  }
+}
+
+/* ── Dashboard graph expand/collapse (View Transitions) ─────────────────────
+   Every `view-transition-name`d card (knowledge card, graph stage, live
+   strip, recent list, section label) morphs between the collapsed grid and
+   the expanded stack. The trigger already skips the API under
+   prefers-reduced-motion (see toggleGraph in routes/Dashboard.tsx); this
+   just tunes the glide. */
+::view-transition-group(*) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── Knowledge-card nebula graph (MiniGraph) ────────────────────────────────
+   Two node layers drift on offset periods so the constellation feels alive
+   without churning; the hub node wears an expanding pulse ring. Transforms
+   (not SMIL) so prefers-reduced-motion can pin everything static. The svg
+   groups need fill-box/center so scale/translate stay node-local. */
+@keyframes kg-drift-a {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(3px, -4px);
+  }
+}
+@keyframes kg-drift-b {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-4px, 3px);
+  }
+}
+@keyframes kg-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+.kg-drift-a {
+  animation: kg-drift-a 11s ease-in-out infinite;
+}
+.kg-drift-b {
+  animation: kg-drift-b 13s ease-in-out infinite;
+}
+.kg-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: kg-pulse 2.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kg-drift-a,
+  .kg-drift-b,
+  .kg-pulse {
+    animation: none;
+  }
+  .kg-pulse {
+    opacity: 0.3;
   }
 }
 

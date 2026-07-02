@@ -23,22 +23,23 @@ export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
  *  meaningful pairwise link (they'd create a dense blob), so they're skipped. */
 const TOPIC_GROUP_MAX = 6;
 
-/** Node fill per doc type. Mirrors the Library's vocabulary, with a neutral
- *  fallback for anything off-schema. Each hue binds a themed token (defined in
- *  src/index.css and deepened on the light surface) so the graph recolors per
- *  theme and its amber/green nodes stay legible on cream; the type→token mapping
- *  stays here so the SVG fills and the legend read from one source. */
-export const TYPE_COLORS: Record<string, string> = {
-  plan: "var(--color-graph-plan)",
-  research: "var(--color-graph-research)",
-  handoff: "var(--color-graph-handoff)",
-  note: "var(--color-graph-note)",
-  pr: "var(--color-graph-pr)",
-  other: "var(--color-graph-other)",
-};
+/** The nebula star family, swept across the layout (design pass 5a) instead
+ *  of encoding doc types. Five themed tokens (src/index.css) so each theme
+ *  supplies its own sweep — the brand sky→blue→violet on Dark+, phosphor
+ *  greens on Matrix, etc. Shared by the home card's preview and the full
+ *  interactive view; the edge gradients use stops 1/3/5. */
+export const NEBULA_COLORS = [
+  "var(--color-nebula-1)",
+  "var(--color-nebula-2)",
+  "var(--color-nebula-3)",
+  "var(--color-nebula-4)",
+  "var(--color-nebula-5)",
+];
 
-export function colorForType(type: string): string {
-  return TYPE_COLORS[type] ?? TYPE_COLORS.other;
+/** The family hue for a node at layout `x` within a `width`-wide box. */
+export function nebulaColorAt(x: number, width: number): string {
+  const t = Math.min(0.999, Math.max(0, x / width));
+  return NEBULA_COLORS[Math.floor(t * NEBULA_COLORS.length)];
 }
 
 function normalize(value: string): string {

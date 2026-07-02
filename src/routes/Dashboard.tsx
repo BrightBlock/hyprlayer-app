@@ -1,35 +1,115 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { Link, useNavigate } from "@tanstack/react-router";
 
-import { HyprlayerLogo } from "../components/Logo";
-import { Card, PageError, Spinner } from "../components/ui";
+import { HyprlayerMark } from "../components/Logo";
+import { PageError } from "../components/ui";
 import { PlusIcon } from "../components/icons";
-import { useBootstrap, useDocs } from "../lib/queries";
-import type { Project } from "../lib/bindings";
+import { useAllWorkstreams, useArchivedWorkstreams, useBootstrap, useDocs } from "../lib/queries";
+import type { Project, WorkstreamView } from "../lib/bindings";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { DiscoverDialog } from "../features/dashboard/DiscoverDialog";
-import { KnowledgeGraph } from "../features/dashboard/KnowledgeGraph";
 import { buildGraph } from "../features/dashboard/graph";
+import { useFleet } from "../features/dashboard/fleet";
+import {
+  LiveNowCard,
+  NeedsYouBanner,
+  RecentWorkstreams,
+  type RecentRow,
+} from "../features/dashboard/HomeFleet";
+import { KnowledgeCard } from "../features/dashboard/KnowledgeCard";
+import { selectAgentTab } from "../features/search/selectAgentTab";
 
 /** How many most-recent docs feed the graph. Caps the O(n²) layout cost; the
- *  corpus may be larger (we surface that as a caption when it is). */
+ *  corpus may be larger (the graph dialog surfaces that as a caption). */
 const GRAPH_DOC_LIMIT = 200;
 
-/** The home surface: brand, the three primary actions, and a live view of the
- *  knowledge graph built from the thoughts index. */
+/** How many rows the Recent-workstreams card shows. */
+const RECENT_LIMIT = 6;
+
+/** Coarse clock for the dashboard's elapsed/age labels — half-minute beats
+ *  keep every "7m"-grade figure fresh without per-second re-renders. */
+function useSlowNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
+
+/**
+ * The home surface — an operational fleet overview: what needs you, what's
+ * running right now, what you touched recently, and the knowledge the agents
+ * are building up, with the primary actions in the header.
+ */
 export function Dashboard() {
   const navigate = useNavigate();
   const bootstrap = useBootstrap();
+  const now = useSlowNow();
 
-  // Most-recent docs feed the graph. A generous cap keeps the layout legible
-  // and the O(n²) force pass quick; `total` still reflects the full index.
+  const projects = useMemo(() => bootstrap.data?.projects ?? [], [bootstrap.data]);
+  const workstreams = useAllWorkstreams(projects.length > 0);
+  const archived = useArchivedWorkstreams();
+  const fleet = useFleet(workstreams.data ?? []);
+
+  // Most-recent docs feed the Knowledge column and the graph. A generous cap
+  // keeps the O(n²) force pass quick; `total` still reflects the full index.
   const docsQuery = useDocs({ sort: "mtime", limit: GRAPH_DOC_LIMIT });
+  const docs = useMemo(() => docsQuery.data?.items ?? [], [docsQuery.data]);
+  const graph = useMemo(() => buildGraph(docs), [docs]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [discoverOpen, setDiscoverOpen] = useState(false);
+  // Full-width knowledge-graph mode: the graph takes over the top of the page
+  // (docs rail on its right) and the fleet cards slide below. Session-local —
+  // minimizing restores the standard layout exactly.
+  const [graphExpanded, setGraphExpanded] = useState(false);
+  // Morph the swap: each `view-transition-name`d card (knowledge, graph stage,
+  // live strip, recent list) glides between its two layouts. Falls back to an
+  // instant swap without the API or under reduced motion.
+  const toggleGraph = (next: boolean) => {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const doc = document as Document & { startViewTransition?: (cb: () => void) => void };
+    if (reduceMotion || !doc.startViewTransition) {
+      setGraphExpanded(next);
+      return;
+    }
+    // flushSync so the DOM reaches the new layout inside the transition
+    // callback — the API snapshots before/after around it.
+    doc.startViewTransition(() => flushSync(() => setGraphExpanded(next)));
+  };
 
-  const docs = useMemo(() => docsQuery.data?.items ?? [], [docsQuery.data]);
-  const graph = useMemo(() => buildGraph(docs), [docs]);
+  const projectNames = useMemo(
+    () => new Map(projects.map((p) => [p.path, p.mappedName])),
+    [projects],
+  );
+  const projectName = (path: string): string =>
+    projectNames.get(path) ?? path.split(/[\\/]/).pop() ?? path;
+
+  // The single most urgent blocked agent gets the banner; everything else
+  // lives in the strip, so nothing renders twice.
+  const banner = fleet.live.find((l) => l.activity === "needs-you") ?? null;
+  const strip = banner ? fleet.live.filter((l) => l !== banner) : fleet.live;
+
+  // Quiet actives + freshly archived, newest first — the "what was I doing" list.
+  const recentRows = useMemo<RecentRow[]>(() => {
+    const active = fleet.idle.map<RecentRow>((view) => ({
+      kind: "active",
+      at: view.item.updatedAt ?? view.item.createdAt ?? 0,
+      view,
+      project: projectName(view.item.projectPath),
+    }));
+    const gone = (archived.data ?? []).map<RecentRow>((view) => ({
+      kind: "archived",
+      at: view.item.archivedAt ?? view.item.updatedAt ?? 0,
+      view,
+      project: projectName(view.item.projectPath),
+      merged: view.item.prNumber !== null,
+    }));
+    return [...active, ...gone].sort((a, b) => b.at - a.at).slice(0, RECENT_LIMIT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fleet.idle, archived.data, projectNames]);
 
   const openProject = (project: Project) =>
     void navigate({
@@ -38,27 +118,76 @@ export function Dashboard() {
       search: {},
     });
 
+  const openWorkstream = (view: WorkstreamView, sessionId?: string | null) => {
+    void navigate({
+      to: "/projects/$projectPath",
+      params: { projectPath: view.item.projectPath },
+      search: { item: view.item.id },
+    });
+    // Best-effort: focus the tab bound to the live session, when one exists.
+    if (sessionId) selectAgentTab(view.item.id, sessionId);
+  };
+
   if (bootstrap.error) return <PageError error={bootstrap.error} />;
 
   const configMissing = bootstrap.data?.config.state === "missing";
-  const projectCount = bootstrap.data?.projects.length ?? 0;
-  const docTotal = docsQuery.data?.total ?? 0;
-  const typeCount = new Set(graph.nodes.map((n) => n.type)).size;
-  // One node per fetched doc; if the corpus is bigger, the graph is a slice.
-  const graphed = graph.nodes.length;
-  const capped = docTotal > graphed;
+  const dateLabel = new Date(now).toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  const emptyHint =
+    projects.length === 0
+      ? "Add a repo to start dispatching agents."
+      : workstreams.isLoading
+        ? "Loading workstreams…"
+        : banner
+          ? "Nothing else is running."
+          : "All quiet — no agents running right now.";
 
   return (
-    <div className="mx-auto flex min-h-full max-w-5xl flex-col gap-8 p-6 lg:p-8">
-      <header className="mb-2 mt-4 flex flex-col items-center gap-4 text-center">
-        <HyprlayerLogo height={109} />
-        <p className="text-[11.5px] font-medium uppercase tracking-[0.3em] text-ink-dim">
-          Your repos, workstreams &amp; the knowledge between them
-        </p>
+    <div className="mx-auto flex min-h-full w-full max-w-[1160px] flex-col gap-[18px] px-6 py-7 lg:px-8">
+      <header className="flex items-center gap-4">
+        <HyprlayerMark size={48} />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <h1 className="text-[21px] font-bold leading-none tracking-[-0.01em] text-ink">
+            {dateLabel}
+          </h1>
+          <FleetChips counts={fleet.counts} />
+        </div>
+        <span className="min-w-0 flex-1" />
+        {/* Monolith action cluster (design pass 6b): the three header actions
+            fuse into one hairline-bordered segment control — accent segment
+            leads, dividers instead of per-button borders. */}
+        <div className="flex h-[34px] shrink-0 items-stretch overflow-hidden rounded-[10px] border border-edge bg-panel shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="inline-flex items-center gap-1.5 bg-accent px-[15px] text-[12.5px] font-semibold text-accent-ink hover:opacity-90"
+          >
+            <PlusIcon size={12} />
+            Add repo
+          </button>
+          <button
+            type="button"
+            onClick={() => setDiscoverOpen(true)}
+            className="inline-flex items-center border-l border-edge px-3.5 text-[12.5px] font-semibold text-ink hover:bg-panel-2"
+          >
+            Discover
+          </button>
+          <Link
+            to="/settings"
+            className="flex items-center border-l border-edge px-[11px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <GearIcon />
+          </Link>
+        </div>
       </header>
 
       {configMissing ? (
-        /* First-run CTA: replace the three tiles with a single prominent prompt */
+        /* First-run CTA: replace the fleet with a single prominent prompt. */
         <section className="flex flex-col items-center gap-4 rounded-xl border border-brand/30 bg-brand/5 p-8 text-center">
           <p className="text-lg font-semibold text-ink">Finish setting up Hyprlayer</p>
           <p className="text-sm text-ink-dim">
@@ -72,60 +201,76 @@ export function Dashboard() {
           </Link>
         </section>
       ) : (
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <ActionTile
-            title="Add"
-            subtitle="Clone a repo or open one from disk"
-            tone="brand"
-            icon={<PlusIcon size={20} />}
-            onClick={() => setAddOpen(true)}
-          />
-          <ActionTile
-            title="Discover"
-            subtitle="Browse your GitHub repos to clone"
-            tone="violet"
-            icon={<CompassIcon />}
-            onClick={() => setDiscoverOpen(true)}
-          />
-          <ActionTile
-            title="Settings"
-            subtitle="Binaries, roots, and preferences"
-            tone="neutral"
-            icon={<GearIcon />}
-            onClick={() => void navigate({ to: "/settings" })}
-          />
-        </section>
-      )}
-
-      <Card className="flex flex-col p-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">
-          <div>
-            <h2 className="text-sm font-semibold tracking-wide text-ink">Knowledge graph</h2>
-            {capped && (
-              <p className="mt-0.5 text-xs text-ink-dim">
-                most-recent {graphed} of {docTotal} documents
-              </p>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Stat label="documents" value={docTotal} />
-            <Stat label="links" value={graph.edges.length} />
-            <Stat label="types" value={typeCount} />
-            <Stat label="projects" value={projectCount} />
-          </div>
-        </div>
-        <div className="h-[560px] p-4">
-          {docsQuery.isLoading ? (
-            <div className="flex h-full items-center justify-center">
-              <Spinner />
-            </div>
-          ) : docsQuery.error ? (
-            <PageError error={docsQuery.error} />
-          ) : (
-            <KnowledgeGraph graph={graph} />
+        <>
+          {banner && (
+            <NeedsYouBanner item={banner} onOpen={() => openWorkstream(banner.view, banner.sessionId)} />
           )}
-        </div>
-      </Card>
+
+          {graphExpanded ? (
+            /* Graph takes the stage: full-width knowledge card up top, the
+               fleet cards pushed below. Minimize restores the grid exactly. */
+            <>
+              <KnowledgeCard
+                docs={docs}
+                total={docsQuery.data?.total ?? 0}
+                graph={graph}
+                projectCount={projects.length}
+                loading={docsQuery.isLoading}
+                now={now}
+                expanded
+                onToggleExpanded={toggleGraph}
+              />
+              <span className="-mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-dim [view-transition-name:live-label]">
+                Live now
+              </span>
+              <LiveNowCard
+                items={strip}
+                now={now}
+                onOpen={(item) => openWorkstream(item.view, item.sessionId)}
+                emptyHint={emptyHint}
+              />
+              <RecentWorkstreams
+                rows={recentRows}
+                now={now}
+                onOpenActive={(view) => openWorkstream(view)}
+                onOpenArchive={() => void navigate({ to: "/archive" })}
+              />
+            </>
+          ) : (
+            <>
+              <span className="-mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-dim [view-transition-name:live-label]">
+                Live now
+              </span>
+              <div className="grid flex-1 grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_400px]">
+                <div className="flex min-h-0 flex-col gap-4">
+                  <LiveNowCard
+                    items={strip}
+                    now={now}
+                    onOpen={(item) => openWorkstream(item.view, item.sessionId)}
+                    emptyHint={emptyHint}
+                  />
+                  <RecentWorkstreams
+                    rows={recentRows}
+                    now={now}
+                    onOpenActive={(view) => openWorkstream(view)}
+                    onOpenArchive={() => void navigate({ to: "/archive" })}
+                  />
+                </div>
+                <KnowledgeCard
+                  docs={docs}
+                  total={docsQuery.data?.total ?? 0}
+                  graph={graph}
+                  projectCount={projects.length}
+                  loading={docsQuery.isLoading}
+                  now={now}
+                  expanded={false}
+                  onToggleExpanded={toggleGraph}
+                />
+              </div>
+            </>
+          )}
+        </>
+      )}
 
       <AddProjectDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={openProject} />
       <DiscoverDialog
@@ -137,85 +282,77 @@ export function Dashboard() {
   );
 }
 
-type Tone = "brand" | "violet" | "neutral";
-
-function ActionTile({
-  title,
-  subtitle,
-  icon,
-  tone,
-  onClick,
+/** The header's dot-coded fleet summary — one chip per live state, or a quiet
+ *  "all clear" when nothing is happening. */
+function FleetChips({
+  counts,
 }: {
-  title: string;
-  subtitle: string;
-  icon: ReactNode;
-  tone: Tone;
-  onClick: () => void;
+  counts: { running: number; needsYou: number; review: number; errors: number; queued: number };
 }) {
-  const tones: Record<Tone, { icon: string; hover: string }> = {
-    brand: { icon: "text-brand", hover: "hover:border-brand/50" },
-    violet: { icon: "text-revise", hover: "hover:border-revise/50" },
-    neutral: { icon: "text-ink-dim", hover: "hover:border-ink-dim/50" },
-  };
+  const chips: Array<{ key: string; dot: string; text: string; label: string }> = [];
+  if (counts.running > 0) {
+    chips.push({
+      key: "running",
+      dot: "bg-accent animate-pulse",
+      text: "text-accent",
+      label: `${counts.running} running`,
+    });
+  }
+  if (counts.needsYou > 0) {
+    chips.push({
+      key: "needs-you",
+      dot: "bg-attention",
+      text: "text-attention",
+      label: `${counts.needsYou} needs you`,
+    });
+  }
+  if (counts.review > 0) {
+    chips.push({
+      key: "review",
+      dot: "bg-ok",
+      text: "text-ok",
+      label: `${counts.review} review`,
+    });
+  }
+  if (counts.errors > 0) {
+    chips.push({ key: "errors", dot: "bg-bad", text: "text-bad", label: `${counts.errors} errored` });
+  }
+  if (counts.queued > 0) {
+    chips.push({
+      key: "queued",
+      dot: "bg-edge",
+      text: "text-ink-dim",
+      label: `${counts.queued} queued`,
+    });
+  }
+  if (chips.length === 0) {
+    chips.push({ key: "quiet", dot: "bg-edge", text: "text-ink-dim", label: "all quiet" });
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group flex flex-col items-start gap-4 rounded-xl border border-edge bg-panel p-6 text-left transition-colors hover:bg-panel-2 ${tones[tone].hover}`}
-    >
-      <span
-        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-edge bg-panel-2 ${tones[tone].icon}`}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-lg font-semibold text-ink">{title}</span>
-        <span className="mt-0.5 block text-sm text-ink-dim">{subtitle}</span>
-      </span>
-    </button>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <span className="inline-flex items-baseline gap-1.5 rounded-md border border-edge bg-panel-2 px-2.5 py-1">
-      <span className="text-sm font-semibold tabular-nums text-ink">{value}</span>
-      <span className="text-xs text-ink-dim">{label}</span>
-    </span>
-  );
-}
-
-function CompassIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="m15.5 8.5-2 5-5 2 2-5 5-2Z"
-        fill="currentColor"
-        fillOpacity="0.25"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
+      {chips.map((chip) => (
+        <span key={chip.key} className={`inline-flex items-center gap-1.5 ${chip.text}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${chip.dot}`} />
+          {chip.label}
+        </span>
+      ))}
+    </div>
   );
 }
 
 function GearIcon() {
   return (
     <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      strokeWidth="1.4"
       aria-hidden="true"
     >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      <circle cx="8" cy="8" r="2.6" />
+      <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" />
     </svg>
   );
 }
