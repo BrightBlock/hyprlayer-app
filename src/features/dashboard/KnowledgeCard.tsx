@@ -52,7 +52,9 @@ type Props = {
   now: number;
   /** Full-width graph mode; the parent restacks the dashboard around it. */
   expanded: boolean;
-  onToggleExpanded: (expanded: boolean) => void;
+  /** Absent = no expand/minimize affordance (the wide dashboard renders the
+   *  card permanently expanded, so there's nothing to toggle). */
+  onToggleExpanded?: (expanded: boolean) => void;
 };
 
 export function KnowledgeCard({
@@ -74,13 +76,15 @@ export function KnowledgeCard({
         </span>
       )}
       <span className="flex-1" />
-      <button
-        type="button"
-        onClick={() => onToggleExpanded(!expanded)}
-        className="text-[11.5px] font-semibold text-accent hover:opacity-80"
-      >
-        {expanded ? "Minimize ↙" : "Open graph →"}
-      </button>
+      {onToggleExpanded && (
+        <button
+          type="button"
+          onClick={() => onToggleExpanded(!expanded)}
+          className="text-[11.5px] font-semibold text-accent hover:opacity-80"
+        >
+          {expanded ? "Minimize ↙" : "Open graph →"}
+        </button>
+      )}
     </div>
   );
 
@@ -110,7 +114,7 @@ export function KnowledgeCard({
       <SearchAffordance total={total} />
       <button
         type="button"
-        onClick={() => onToggleExpanded(true)}
+        onClick={() => onToggleExpanded?.(true)}
         className="block w-full shrink-0 [view-transition-name:kg-stage]"
         title="Expand knowledge graph"
         aria-label="Expand knowledge graph"

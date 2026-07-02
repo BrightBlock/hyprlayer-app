@@ -4,7 +4,7 @@
  * workstreams card (quiet actives + freshly archived ones). Pure presentation —
  * classification lives in `fleet.ts`, navigation in the parent's `onOpen`.
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { ArchivedWorkstreamView, WorkstreamView } from "../../lib/bindings";
 import { formatElapsed, formatRelativeTime, formatTokens } from "../session/toolDisplay";
@@ -148,7 +148,13 @@ function LiveRow({
   );
 }
 
-/** One slim row per live workstream — every agent state glanceable at once. */
+/** Rows shown before the strip caps and scrolls — a busy fleet otherwise grows
+ *  the card unbounded and buries whatever sits below it on the page. */
+const LIVE_CAP = 6;
+
+/** One slim row per live workstream — every agent state glanceable at once.
+ *  Past LIVE_CAP rows the strip caps to a scroll region, with a toggle to
+ *  expand it to its full height (and collapse back). */
 export function LiveNowCard({
   items,
   now,
@@ -160,17 +166,33 @@ export function LiveNowCard({
   onOpen: (item: FleetItem) => void;
   emptyHint: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const capped = items.length > LIVE_CAP && !expanded;
+
   return (
-    <div className="divide-y divide-panel-2 overflow-hidden rounded-xl border border-edge bg-panel [view-transition-name:live-now]">
+    <div className="overflow-hidden rounded-xl border border-edge bg-panel [view-transition-name:live-now]">
       {items.length === 0 ? (
         <div className="flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] text-ink-dim">
           <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-edge" />
           {emptyHint}
         </div>
       ) : (
-        items.map((item) => (
-          <LiveRow key={item.view.item.id} item={item} now={now} onOpen={onOpen} />
-        ))
+        <>
+          <div className={`divide-y divide-panel-2 ${capped ? "max-h-64 overflow-y-auto" : ""}`}>
+            {items.map((item) => (
+              <LiveRow key={item.view.item.id} item={item} now={now} onOpen={onOpen} />
+            ))}
+          </div>
+          {items.length > LIVE_CAP && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="flex w-full items-center justify-center gap-1 border-t border-panel-2 py-2 text-[11.5px] font-semibold text-accent hover:bg-panel-2/60"
+            >
+              {expanded ? "Show less ↑" : `Show all ${items.length} ↓`}
+            </button>
+          )}
+        </>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Link, useNavigate } from "@tanstack/react-router";
 
@@ -7,6 +7,7 @@ import { PageError } from "../components/ui";
 import { PlusIcon } from "../components/icons";
 import { useAllWorkstreams, useArchivedWorkstreams, useBootstrap, useDocs } from "../lib/queries";
 import type { Project, WorkstreamView } from "../lib/bindings";
+import { useElementWidth } from "../lib/useElementWidth";
 import { AddProjectDialog } from "../features/projects/AddProjectDialog";
 import { DiscoverDialog } from "../features/dashboard/DiscoverDialog";
 import { buildGraph } from "../features/dashboard/graph";
@@ -26,6 +27,16 @@ const GRAPH_DOC_LIMIT = 200;
 
 /** How many rows the Recent-workstreams card shows. */
 const RECENT_LIMIT = 6;
+
+/** Dashboard width (px) from which the wide layout — Live now on top, the
+ *  Knowledge card permanently in its expanded form, Recent workstreams below —
+ *  fits comfortably (a display bigger than a laptop panel). Measured on the
+ *  dashboard's own pane, not the window, so the resizable/collapsible project
+ *  sidebar folds in automatically. Below it the stacked layout stays as-is.
+ *  Set above a maximized 14" MacBook Pro's pane (~1376px at the "More Space"
+ *  1800-wide scaling) so the built-in panel keeps the stacked view and only
+ *  larger external displays go wide. */
+const WIDE_MIN = 1440;
 
 /** Coarse clock for the dashboard's elapsed/age labels — half-minute beats
  *  keep every "7m"-grade figure fresh without per-second re-renders. */
@@ -48,6 +59,10 @@ export function Dashboard() {
   const bootstrap = useBootstrap();
   const now = useSlowNow();
 
+  // Wide-layout gate: the pane's own width (0 until measured → stacked).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const wide = useElementWidth(rootRef) >= WIDE_MIN;
+
   const projects = useMemo(() => bootstrap.data?.projects ?? [], [bootstrap.data]);
   const workstreams = useAllWorkstreams(projects.length > 0);
   const archived = useArchivedWorkstreams();
@@ -63,7 +78,8 @@ export function Dashboard() {
   const [discoverOpen, setDiscoverOpen] = useState(false);
   // Full-width knowledge-graph mode: the graph takes over the top of the page
   // (docs rail on its right) and the fleet cards slide below. Session-local —
-  // minimizing restores the standard layout exactly.
+  // minimizing restores the standard layout exactly. Only reachable below
+  // WIDE_MIN: the wide layout carries the expanded card permanently.
   const [graphExpanded, setGraphExpanded] = useState(false);
   // Morph the swap: each `view-transition-name`d card (knowledge, graph stage,
   // live strip, recent list) glides between its two layouts. Falls back to an
@@ -146,116 +162,90 @@ export function Dashboard() {
           : "All quiet — no agents running right now.";
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-[1160px] flex-col gap-[18px] px-6 py-7 lg:px-8">
-      <header className="flex items-center gap-4">
-        <HyprlayerMark size={48} />
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <h1 className="text-[21px] font-bold leading-none tracking-[-0.01em] text-ink">
-            {dateLabel}
-          </h1>
-          <FleetChips counts={fleet.counts} />
-        </div>
-        <span className="min-w-0 flex-1" />
-        {/* Monolith action cluster (design pass 6b): the three header actions
-            fuse into one hairline-bordered segment control — accent segment
-            leads, dividers instead of per-button borders. */}
-        <div className="flex h-[34px] shrink-0 items-stretch overflow-hidden rounded-[10px] border border-edge bg-panel shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
-          <button
-            type="button"
-            onClick={() => setAddOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-accent px-[15px] text-[12.5px] font-semibold text-accent-ink hover:opacity-90"
-          >
-            <PlusIcon size={12} />
-            Add repo
-          </button>
-          <button
-            type="button"
-            onClick={() => setDiscoverOpen(true)}
-            className="inline-flex items-center border-l border-edge px-3.5 text-[12.5px] font-semibold text-ink hover:bg-panel-2"
-          >
-            Discover
-          </button>
-          <Link
-            to="/settings"
-            className="flex items-center border-l border-edge px-[11px] text-ink-dim hover:bg-panel-2 hover:text-ink"
-            title="Settings"
-            aria-label="Settings"
-          >
-            <GearIcon />
-          </Link>
-        </div>
-      </header>
+    // The outer div is the width probe — no max-width, so it reads the pane.
+    <div ref={rootRef}>
+      {/* Wide cap: sized so the expanded graph (content − rail, aspect-locked)
+          stays a component, not a takeover, on a maximized big display. */}
+      <div
+        className={`mx-auto flex w-full flex-col ${
+          wide ? "max-w-[1400px] gap-5 px-12 py-9" : "max-w-[1160px] gap-[18px] px-6 py-7 lg:px-8"
+        }`}
+      >
+        <header className="flex items-center gap-4">
+          <HyprlayerMark size={48} />
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <h1 className="text-[21px] font-bold leading-none tracking-[-0.01em] text-ink">
+              {dateLabel}
+            </h1>
+            <FleetChips counts={fleet.counts} />
+          </div>
+          <span className="min-w-0 flex-1" />
+          {/* Monolith action cluster (design pass 6b): the three header actions
+              fuse into one hairline-bordered segment control — accent segment
+              leads, dividers instead of per-button borders. */}
+          <div className="flex h-[34px] shrink-0 items-stretch overflow-hidden rounded-[10px] border border-edge bg-panel shadow-[0_1px_3px_rgba(0,0,0,0.12)]">
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="inline-flex items-center gap-1.5 bg-accent px-[15px] text-[12.5px] font-semibold text-accent-ink hover:opacity-90"
+            >
+              <PlusIcon size={12} />
+              Add repo
+            </button>
+            <button
+              type="button"
+              onClick={() => setDiscoverOpen(true)}
+              className="inline-flex items-center border-l border-edge px-3.5 text-[12.5px] font-semibold text-ink hover:bg-panel-2"
+            >
+              Discover
+            </button>
+            <Link
+              to="/settings"
+              className="flex items-center border-l border-edge px-[11px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <GearIcon />
+            </Link>
+          </div>
+        </header>
 
-      {configMissing ? (
-        /* First-run CTA: replace the fleet with a single prominent prompt. */
-        <section className="flex flex-col items-center gap-4 rounded-xl border border-brand/30 bg-brand/5 p-8 text-center">
-          <p className="text-lg font-semibold text-ink">Finish setting up Hyprlayer</p>
-          <p className="text-sm text-ink-dim">
-            Configure your AI assistant and connect your thoughts repository to get started.
-          </p>
-          <Link
-            to="/onboarding"
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-sm font-medium text-white hover:opacity-90"
-          >
-            Finish setup →
-          </Link>
-        </section>
-      ) : (
-        <>
-          {banner && (
-            <NeedsYouBanner item={banner} onOpen={() => openWorkstream(banner.view, banner.sessionId)} />
-          )}
+        {configMissing ? (
+          /* First-run CTA: replace the fleet with a single prominent prompt. */
+          <section className="flex flex-col items-center gap-4 rounded-xl border border-brand/30 bg-brand/5 p-8 text-center">
+            <p className="text-lg font-semibold text-ink">Finish setting up Hyprlayer</p>
+            <p className="text-sm text-ink-dim">
+              Configure your AI assistant and connect your thoughts repository to get started.
+            </p>
+            <Link
+              to="/onboarding"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-sm font-medium text-white hover:opacity-90"
+            >
+              Finish setup →
+            </Link>
+          </section>
+        ) : (
+          <>
+            {banner && (
+              <NeedsYouBanner item={banner} onOpen={() => openWorkstream(banner.view, banner.sessionId)} />
+            )}
 
-          {graphExpanded ? (
-            /* Graph takes the stage: full-width knowledge card up top, the
-               fleet cards pushed below. Minimize restores the grid exactly. */
-            <>
-              <KnowledgeCard
-                docs={docs}
-                total={docsQuery.data?.total ?? 0}
-                graph={graph}
-                projectCount={projects.length}
-                loading={docsQuery.isLoading}
-                now={now}
-                expanded
-                onToggleExpanded={toggleGraph}
-              />
-              <span className="-mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-dim [view-transition-name:live-label]">
-                Live now
-              </span>
-              <LiveNowCard
-                items={strip}
-                now={now}
-                onOpen={(item) => openWorkstream(item.view, item.sessionId)}
-                emptyHint={emptyHint}
-              />
-              <RecentWorkstreams
-                rows={recentRows}
-                now={now}
-                onOpenActive={(view) => openWorkstream(view)}
-                onOpenArchive={() => void navigate({ to: "/archive" })}
-              />
-            </>
-          ) : (
-            <>
-              <span className="-mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-dim [view-transition-name:live-label]">
-                Live now
-              </span>
-              <div className="grid flex-1 grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_400px]">
-                <div className="flex min-h-0 flex-col gap-4">
-                  <LiveNowCard
-                    items={strip}
-                    now={now}
-                    onOpen={(item) => openWorkstream(item.view, item.sessionId)}
-                    emptyHint={emptyHint}
-                  />
-                  <RecentWorkstreams
-                    rows={recentRows}
-                    now={now}
-                    onOpenActive={(view) => openWorkstream(view)}
-                    onOpenArchive={() => void navigate({ to: "/archive" })}
-                  />
-                </div>
+            {wide ? (
+              /* Wide layout — a maximized window on a big display spends its
+                 height, not columns: Live now leads, the Knowledge card rides
+                 permanently in its expanded form (interactive graph + docs
+                 rail), Recent workstreams closes. No expand/minimize toggle —
+                 this already is the expanded form. */
+              <>
+                <span className="-mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-dim [view-transition-name:live-label]">
+                  Live now
+                </span>
+                <LiveNowCard
+                  items={strip}
+                  now={now}
+                  onOpen={(item) => openWorkstream(item.view, item.sessionId)}
+                  emptyHint={emptyHint}
+                />
                 <KnowledgeCard
                   docs={docs}
                   total={docsQuery.data?.total ?? 0}
@@ -263,21 +253,90 @@ export function Dashboard() {
                   projectCount={projects.length}
                   loading={docsQuery.isLoading}
                   now={now}
-                  expanded={false}
+                  expanded
+                />
+                <RecentWorkstreams
+                  rows={recentRows}
+                  now={now}
+                  onOpenActive={(view) => openWorkstream(view)}
+                  onOpenArchive={() => void navigate({ to: "/archive" })}
+                />
+              </>
+            ) : graphExpanded ? (
+              /* Graph takes the stage: full-width knowledge card up top, the
+                 fleet cards pushed below. Minimize restores the grid exactly. */
+              <>
+                <KnowledgeCard
+                  docs={docs}
+                  total={docsQuery.data?.total ?? 0}
+                  graph={graph}
+                  projectCount={projects.length}
+                  loading={docsQuery.isLoading}
+                  now={now}
+                  expanded
                   onToggleExpanded={toggleGraph}
                 />
-              </div>
-            </>
-          )}
-        </>
-      )}
+                <span className="-mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-dim [view-transition-name:live-label]">
+                  Live now
+                </span>
+                <LiveNowCard
+                  items={strip}
+                  now={now}
+                  onOpen={(item) => openWorkstream(item.view, item.sessionId)}
+                  emptyHint={emptyHint}
+                />
+                <RecentWorkstreams
+                  rows={recentRows}
+                  now={now}
+                  onOpenActive={(view) => openWorkstream(view)}
+                  onOpenArchive={() => void navigate({ to: "/archive" })}
+                />
+              </>
+            ) : (
+              <>
+                <span className="-mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-dim [view-transition-name:live-label]">
+                  Live now
+                </span>
+                {/* No flex-1: the pair ends at its content (equal bottoms via the
+                    grid row) instead of stretching to the app's bottom edge. */}
+                <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_400px]">
+                  <div className="flex min-h-0 flex-col gap-4">
+                    <LiveNowCard
+                      items={strip}
+                      now={now}
+                      onOpen={(item) => openWorkstream(item.view, item.sessionId)}
+                      emptyHint={emptyHint}
+                    />
+                    <RecentWorkstreams
+                      rows={recentRows}
+                      now={now}
+                      onOpenActive={(view) => openWorkstream(view)}
+                      onOpenArchive={() => void navigate({ to: "/archive" })}
+                    />
+                  </div>
+                  <KnowledgeCard
+                    docs={docs}
+                    total={docsQuery.data?.total ?? 0}
+                    graph={graph}
+                    projectCount={projects.length}
+                    loading={docsQuery.isLoading}
+                    now={now}
+                    expanded={false}
+                    onToggleExpanded={toggleGraph}
+                  />
+                </div>
+              </>
+            )}
+          </>
+        )}
 
-      <AddProjectDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={openProject} />
-      <DiscoverDialog
-        open={discoverOpen}
-        onClose={() => setDiscoverOpen(false)}
-        onAdded={openProject}
-      />
+        <AddProjectDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={openProject} />
+        <DiscoverDialog
+          open={discoverOpen}
+          onClose={() => setDiscoverOpen(false)}
+          onAdded={openProject}
+        />
+      </div>
     </div>
   );
 }

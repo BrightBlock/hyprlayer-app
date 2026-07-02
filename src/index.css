@@ -435,6 +435,25 @@ a {
   }
 }
 
+/* Etched "watch-dial" frame for the knowledge-graph surfaces (home preview +
+   full nebula stage): a light outer hairline over a dark inner groove reads as
+   an inset dial. The 2px inset keeps the graph from painting over the groove;
+   the backing is the nebula's darkest stop so the gutter blends into the graph.
+   Dark family here; light flips the groove white and lets the card panel show. */
+.kg-dial {
+  border-radius: 10px;
+  border: 1px solid #383b44;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.7);
+  background: var(--color-nebula-bg-1);
+  padding: 2px;
+  overflow: hidden;
+}
+html.light .kg-dial {
+  border-color: #c9c5bb;
+  box-shadow: inset 0 0 0 1px #fff;
+  background: transparent;
+}
+
 /* Gentle breathing for a workstream's "working" activity dot — a soft pulse +
    halo that reads as live, ongoing work without the radar-ping's urgency. */
 @keyframes work-pulse {

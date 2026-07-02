@@ -107,7 +107,7 @@ export function MiniGraph({ graph }: { graph: Graph }) {
   );
 
   return (
-    <div className="relative w-full">
+    <div className="kg-dial relative w-full">
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="block w-full" aria-hidden="true">
         <defs>
           <linearGradient

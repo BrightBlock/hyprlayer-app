@@ -236,136 +236,151 @@ export function KnowledgeGraph({ graph: full }: Props) {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        preserveAspectRatio="xMidYMid meet"
-        className="h-full w-full flex-1 touch-none select-none"
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onLostPointerCapture={onPointerUp}
-      >
-        <defs>
-          <linearGradient
-            id="kgf-edge"
-            x1="0"
-            y1="0"
-            x2={WIDTH}
-            y2={HEIGHT}
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop offset="0" stopColor="var(--color-nebula-1)" />
-            <stop offset="0.55" stopColor="var(--color-nebula-3)" />
-            <stop offset="1" stopColor="var(--color-nebula-5)" />
-          </linearGradient>
-          <radialGradient id="kgf-bg" cx="0.38" cy="0.32" r="1">
-            <stop offset="0" stopColor="var(--color-nebula-bg-0)" />
-            <stop offset="1" stopColor="var(--color-nebula-bg-1)" />
-          </radialGradient>
-          <filter id="kgf-glow" x="-80%" y="-80%" width="260%" height="260%">
-            <feGaussianBlur stdDeviation="6" />
-          </filter>
-        </defs>
+      <div className="kg-dial min-h-0 flex-1">
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          preserveAspectRatio="xMidYMid meet"
+          className="block h-full w-full touch-none select-none"
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onLostPointerCapture={onPointerUp}
+        >
+          <defs>
+            <linearGradient
+              id="kgf-edge"
+              x1="0"
+              y1="0"
+              x2={WIDTH}
+              y2={HEIGHT}
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0" stopColor="var(--color-nebula-1)" />
+              <stop offset="0.55" stopColor="var(--color-nebula-3)" />
+              <stop offset="1" stopColor="var(--color-nebula-5)" />
+            </linearGradient>
+            {/* Anchored to the WIDTH×HEIGHT stage in user space (the matrix
+                reproduces the default objectBoundingBox mapping) so the fill
+                looks identical but no longer depends on the backdrop rect's
+                size — letting that rect over-scan without shifting the glow. */}
+            <radialGradient
+              id="kgf-bg"
+              cx="0.38"
+              cy="0.32"
+              r="1"
+              gradientUnits="userSpaceOnUse"
+              gradientTransform={`matrix(${WIDTH} 0 0 ${HEIGHT} 0 0)`}
+            >
+              <stop offset="0" stopColor="var(--color-nebula-bg-0)" />
+              <stop offset="1" stopColor="var(--color-nebula-bg-1)" />
+            </radialGradient>
+            <filter id="kgf-glow" x="-80%" y="-80%" width="260%" height="260%">
+              <feGaussianBlur stdDeviation="6" />
+            </filter>
+          </defs>
 
-        {/* Nebula backdrop doubles as the pan / reset surface — it fills the
-            visible viewBox and sits beneath the transformed content. */}
-        <rect
-          x={0}
-          y={0}
-          width={WIDTH}
-          height={HEIGHT}
-          rx={10}
-          fill="url(#kgf-bg)"
-          className="cursor-grab"
-          onPointerDown={onBgPointerDown}
-          onDoubleClick={resetView}
-        />
+          {/* Nebula backdrop doubles as the pan / reset surface. It over-scans
+              the stage (3×, centered) so the anchored gradient bleeds past any
+              xMidYMid-meet letterbox band inside the framed tile — the nebula
+              reaches the frame with no seam. The .kg-dial frame does the
+              rounding/clipping now, so no rx here. */}
+          <rect
+            x={-WIDTH}
+            y={-HEIGHT}
+            width={WIDTH * 3}
+            height={HEIGHT * 3}
+            fill="url(#kgf-bg)"
+            className="cursor-grab"
+            onPointerDown={onBgPointerDown}
+            onDoubleClick={resetView}
+          />
 
-        <g transform={`translate(${view.tx} ${view.ty}) scale(${scale})`}>
-          {/* Edges first, so nodes sit on top. Curved gradient strands — the
-              bow alternates by index so the mesh weaves instead of fanning. */}
-          {graph.edges.map((edge, i) => {
-            const a = posOf(edge.source, idToIndex.get(edge.source) ?? 0);
-            const b = posOf(edge.target, idToIndex.get(edge.target) ?? 0);
-            const litEdge = !active || edge.source === active || edge.target === active;
-            // Resting opacity: explicit refs read a touch stronger than
-            // inferred topic links.
-            const base = edge.kind === "ref" ? 0.55 : 0.32;
-            return (
-              <path
-                key={i}
-                d={curvedPath(a, b, i)}
-                fill="none"
-                stroke="url(#kgf-edge)"
-                strokeWidth={(edge.kind === "ref" ? 1.5 : 1) / scale}
-                strokeOpacity={!active ? base : litEdge ? 0.95 : 0.06}
-                style={{ transition: "stroke-opacity 160ms ease" }}
-              />
-            );
-          })}
+          <g transform={`translate(${view.tx} ${view.ty}) scale(${scale})`}>
+            {/* Edges first, so nodes sit on top. Curved gradient strands — the
+                bow alternates by index so the mesh weaves instead of fanning. */}
+            {graph.edges.map((edge, i) => {
+              const a = posOf(edge.source, idToIndex.get(edge.source) ?? 0);
+              const b = posOf(edge.target, idToIndex.get(edge.target) ?? 0);
+              const litEdge = !active || edge.source === active || edge.target === active;
+              // Resting opacity: explicit refs read a touch stronger than
+              // inferred topic links.
+              const base = edge.kind === "ref" ? 0.55 : 0.32;
+              return (
+                <path
+                  key={i}
+                  d={curvedPath(a, b, i)}
+                  fill="none"
+                  stroke="url(#kgf-edge)"
+                  strokeWidth={(edge.kind === "ref" ? 1.5 : 1) / scale}
+                  strokeOpacity={!active ? base : litEdge ? 0.95 : 0.06}
+                  style={{ transition: "stroke-opacity 160ms ease" }}
+                />
+              );
+            })}
 
-          {graph.nodes.map((node, idx) => {
-            const p = posOf(node.id, idx);
-            const r = 3 + Math.min(Math.sqrt(node.degree) * 1.7, 8);
-            const color = nebulaColorAt(p.x, WIDTH);
-            const lit = isLit(node.id);
-            const showLabel =
-              active === node.id ||
-              (active != null && lit) ||
-              (active == null && recentLabelIds.has(node.id));
-            return (
-              <g
-                key={node.id}
-                transform={`translate(${p.x} ${p.y})`}
-                className="cursor-pointer"
-                opacity={lit ? 1 : 0.18}
-                style={{ transition: "opacity 160ms ease" }}
-                onPointerDown={onNodePointerDown(node.id)}
-                onPointerUp={onNodePointerUp(node.id)}
-                onPointerEnter={() => setHovered(node.id)}
-                onPointerLeave={() => setHovered((cur) => (cur === node.id ? null : cur))}
-              >
-                {glowIds.has(node.id) && (
-                  <circle
-                    r={r * 2.2}
-                    fill={color}
-                    opacity={0.35}
-                    filter="url(#kgf-glow)"
-                    pointerEvents="none"
-                  />
-                )}
-                {node.id === hubId && (
-                  <circle
-                    className="kg-pulse"
-                    r={r + 4 / scale}
-                    fill="none"
-                    stroke={color}
-                    strokeWidth={1 / scale}
-                    pointerEvents="none"
-                  />
-                )}
-                <circle r={r} fill={color} />
-                {showLabel && (
-                  <text
-                    x={r + 4 / scale}
-                    y={4 / scale}
-                    className="fill-ink"
-                    fontSize={12 / scale}
-                    style={{
-                      paintOrder: "stroke",
-                      stroke: "var(--color-nebula-bg-1)",
-                      strokeWidth: 3 / scale,
-                    }}
-                  >
-                    {truncate(node.title, 36)}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </g>
-      </svg>
+            {graph.nodes.map((node, idx) => {
+              const p = posOf(node.id, idx);
+              const r = 3 + Math.min(Math.sqrt(node.degree) * 1.7, 8);
+              const color = nebulaColorAt(p.x, WIDTH);
+              const lit = isLit(node.id);
+              const showLabel =
+                active === node.id ||
+                (active != null && lit) ||
+                (active == null && recentLabelIds.has(node.id));
+              return (
+                <g
+                  key={node.id}
+                  transform={`translate(${p.x} ${p.y})`}
+                  className="cursor-pointer"
+                  opacity={lit ? 1 : 0.18}
+                  style={{ transition: "opacity 160ms ease" }}
+                  onPointerDown={onNodePointerDown(node.id)}
+                  onPointerUp={onNodePointerUp(node.id)}
+                  onPointerEnter={() => setHovered(node.id)}
+                  onPointerLeave={() => setHovered((cur) => (cur === node.id ? null : cur))}
+                >
+                  {glowIds.has(node.id) && (
+                    <circle
+                      r={r * 2.2}
+                      fill={color}
+                      opacity={0.35}
+                      filter="url(#kgf-glow)"
+                      pointerEvents="none"
+                    />
+                  )}
+                  {node.id === hubId && (
+                    <circle
+                      className="kg-pulse"
+                      r={r + 4 / scale}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={1 / scale}
+                      pointerEvents="none"
+                    />
+                  )}
+                  <circle r={r} fill={color} />
+                  {showLabel && (
+                    <text
+                      x={r + 4 / scale}
+                      y={4 / scale}
+                      className="fill-ink"
+                      fontSize={12 / scale}
+                      style={{
+                        paintOrder: "stroke",
+                        stroke: "var(--color-nebula-bg-1)",
+                        strokeWidth: 3 / scale,
+                      }}
+                    >
+                      {truncate(node.title, 36)}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        </svg>
+      </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 pt-2 text-xs text-ink-dim">
         <span>

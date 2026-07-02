@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useState, type RefObject } from "react";
 
 /**
  * Track an element's content-box width via ResizeObserver. Used to collapse
@@ -8,11 +8,13 @@ import { useEffect, useState, type RefObject } from "react";
  * without `container-type` establishing a containing block that would reparent
  * the existing `position: fixed` dropdown backdrops.
  *
- * Returns 0 until first measured, so guard thresholds with `w > 0`.
+ * Returns 0 until first measured, so guard thresholds with `w > 0`. The first
+ * measure runs pre-paint (layout effect), so width-dependent layouts don't
+ * flash their narrow form for a frame on mount.
  */
 export function useElementWidth(ref: RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
