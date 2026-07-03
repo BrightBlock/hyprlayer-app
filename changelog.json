@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.4.9",
+      "date": "2026-07-03",
+      "summary": "Configurable default harness, Commit/Ship model, and Library state restore.",
+      "notes": [
+        "You can now set a default harness and a separate model for Commit and Ship actions in Settings.",
+        "The Library resumes where you left off — same doc, scroll position, and panel state — when you re-enter it."
+      ]
+    },
+    {
       "version": "0.4.8",
       "date": "2026-07-03",
       "summary": "Library auto-syncs the thoughts repo on open.",
