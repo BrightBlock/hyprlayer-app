@@ -38,6 +38,20 @@ export function LibraryPage() {
     if (search.project) setLastProject(search.project);
   }, [search.project, setLastProject]);
 
+  // Remember the whole view — scope, filters, and the open doc + mode — so
+  // re-entering the Library from the nav rail resumes this tab where the user
+  // left it instead of re-scoping and dropping the open document. `from` is
+  // navigational provenance (which project's "Docs" opened it), not view state.
+  const setLastSearch = useLibraryScope((s) => s.setLastSearch);
+  const setProjectSearch = useLibraryScope((s) => s.setProjectSearch);
+  useEffect(() => {
+    const view = { ...search };
+    delete view.from; // provenance, not view state — see the store's doc comment
+    setLastSearch(view);
+    // Also under its project, so that project's "Docs" entry reopens to it.
+    if (view.project) setProjectSearch(view.project, view);
+  }, [search, setLastSearch, setProjectSearch]);
+
   // Entering the Library (or re-scoping it) opportunistically runs
   // `hyprlayer thoughts sync` — pull + push, the same command the CLI and
   // skills use — so docs synced from elsewhere show up without a manual step.

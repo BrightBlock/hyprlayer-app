@@ -634,11 +634,16 @@ export function Root() {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
     } else if (target === "/library") {
-      // Open the Library scoped to the most-recently-used project (the most
-      // relevant docs); the switcher's "All projects" can still widen it.
+      // Resume the Library where the user left it — scope, filters, and the open
+      // document — so returning doesn't force them to re-find it. Read the saved
+      // view imperatively (not a subscription) so the shell doesn't re-render on
+      // every in-Library interaction. First-ever open (no saved view) falls back
+      // to the most-recently-used project scope; "All projects" can still widen.
+      const lastSearch = useLibraryScope.getState().lastSearch;
       void navigate({
         to: "/library",
-        search: defaultLibraryProject ? { project: defaultLibraryProject } : {},
+        search:
+          lastSearch ?? (defaultLibraryProject ? { project: defaultLibraryProject } : {}),
       });
     } else {
       void navigate({ to: target });
@@ -648,11 +653,15 @@ export function Root() {
   // to this project (the dedicated project-docs route is gone). It leaves the
   // project context — the Library is its own top-level section (rail icon) — so
   // it records `from` (the repo path) to power the header's back-to-project link.
-  const openProjectDocs = (project: Project) =>
+  // It also resumes where the user last left this project's docs — the doc +
+  // filters read while scoped to it — re-stamping `from`; a bare scope first time.
+  const openProjectDocs = (project: Project) => {
+    const saved = useLibraryScope.getState().lastSearchByProject[project.thoughtsProject];
     void navigate({
       to: "/library",
-      search: { project: project.thoughtsProject, from: project.path },
+      search: { ...saved, project: project.thoughtsProject, from: project.path },
     });
+  };
 
   // Remember the current view so the next launch can restore it (the actual
   // restore happens before first paint in main.tsx, to avoid flashing the
