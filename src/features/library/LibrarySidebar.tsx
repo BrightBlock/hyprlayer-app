@@ -9,6 +9,8 @@ import { formatRelativeTime } from "../session/toolDisplay";
 import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES, STATUS_TONE } from "./constants";
 import { groupDocsByType } from "./docGroups";
 import { docTitle } from "./text";
+import { ThoughtsSyncButton } from "./ThoughtsSyncButton";
+import type { ThoughtsSyncState } from "./useThoughtsSync";
 
 type Props = {
   search: LibrarySearch;
@@ -19,6 +21,8 @@ type Props = {
   isError: boolean;
   error: unknown;
   onNewDoc: () => void;
+  /** Thoughts-repo sync state + trigger, rendered as the header's sync icon. */
+  sync: ThoughtsSyncState;
   /** Drag-resizable width (px), owned by the route so it survives navigation. */
   width: number;
   /** Collapsed (hidden) state — toggled from the header, like the project panel. */
@@ -39,6 +43,7 @@ export function LibrarySidebar({
   isError,
   error,
   onNewDoc,
+  sync,
   width,
   collapsed,
   resizing,
@@ -63,15 +68,18 @@ export function LibrarySidebar({
       <div className="absolute inset-y-0 left-0 flex flex-col" style={{ width }}>
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-edge px-4">
         <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Library</p>
-        <button
-          type="button"
-          onClick={onNewDoc}
-          className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-          title="New document"
-          aria-label="New document"
-        >
-          <PlusIcon size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          <ThoughtsSyncButton sync={sync} />
+          <button
+            type="button"
+            onClick={onNewDoc}
+            className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+            title="New document"
+            aria-label="New document"
+          >
+            <PlusIcon size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="shrink-0 space-y-2 border-b border-edge p-3">

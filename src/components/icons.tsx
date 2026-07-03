@@ -846,3 +846,24 @@ export function ScriptPanelIcon({ size = 18, strokeWidth = 1.6, className }: Ico
     </svg>
   );
 }
+
+/** Circular arrows — sync the thoughts repo (Library header). */
+export function SyncIcon({ size = 13, strokeWidth = 1.5, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        d="M2.7 8a5.3 5.3 0 0 1 10.6 0M13.3 8a5.3 5.3 0 0 1-10.6 0"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <path
+        d="M11.7 6.7 13.3 8 14.9 6.7M4.3 9.3 2.7 8 1.1 9.3"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

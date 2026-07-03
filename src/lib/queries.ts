@@ -74,6 +74,20 @@ export function useSyncThoughts(path: string) {
   });
 }
 
+/** Local-only git status of the thoughts repo (branch/dirty/ahead/behind).
+ *  Computed by libgit2 with no network I/O, so the Library refreshes it
+ *  eagerly while open. `retry: false` because failures are structural (non-git
+ *  backend, missing repo), not transient. */
+export function useThoughtsGitStatus(path: string | undefined) {
+  return useQuery({
+    queryKey: ["thoughts-git-status", path],
+    queryFn: () => unwrap(commands.getThoughtsGitStatus(path ?? "")),
+    enabled: !!path,
+    retry: false,
+    refetchInterval: 30_000,
+  });
+}
+
 export function useDocs(query: ThoughtQuery, enabled = true) {
   return useQuery({
     queryKey: ["docs", query],

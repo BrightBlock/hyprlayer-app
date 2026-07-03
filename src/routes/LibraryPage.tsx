@@ -6,6 +6,8 @@ import { CreateDocDialog } from "../features/library/CreateDocDialog";
 import { docQueryFromSearch } from "../features/library/DocFilters";
 import { DocDetail } from "../features/library/DocDetail";
 import { LibrarySidebar } from "../features/library/LibrarySidebar";
+import { resolveSyncProjectPath } from "../features/library/thoughtsSync";
+import { useThoughtsSync } from "../features/library/useThoughtsSync";
 import { useBootstrap, useDocs } from "../lib/queries";
 import { useLibraryScope } from "../lib/libraryScope";
 import { LIBRARY_SIDEBAR_MAX, LIBRARY_SIDEBAR_MIN, useUiStore } from "../lib/uiStore";
@@ -36,6 +38,15 @@ export function LibraryPage() {
     if (search.project) setLastProject(search.project);
   }, [search.project, setLastProject]);
 
+  // Entering the Library (or re-scoping it) opportunistically runs
+  // `hyprlayer thoughts sync` — pull + push, the same command the CLI and
+  // skills use — so docs synced from elsewhere show up without a manual step.
+  // The sidebar's sync icon surfaces the state and re-triggers on demand.
+  const lastProject = useLibraryScope((s) => s.lastProject);
+  const thoughtsSync = useThoughtsSync(
+    resolveSyncProjectPath(search, lastProject, bootstrap.data?.projects ?? []),
+  );
+
   // Drag-resizable list-panel width + collapsed state, in the UI store so both
   // survive leaving and re-opening the Library (the route unmounts; the store
   // doesn't). `resizingLibrary` is transient drag state, so it stays local.
@@ -61,6 +72,7 @@ export function LibraryPage() {
         isError={docs.isError}
         error={docs.error}
         onNewDoc={() => setCreateOpen(true)}
+        sync={thoughtsSync}
         width={libraryWidth}
         collapsed={libraryCollapsed}
         resizing={resizingLibrary}
