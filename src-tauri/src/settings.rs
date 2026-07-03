@@ -124,6 +124,11 @@ impl Default for NotificationSettings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderSettings {
+    /// The harness new sessions default to, and the one the Commit/Ship actions
+    /// run on: `"claude"` or `"opencode"` (Ollama runs *through* OpenCode).
+    /// `None`/absent ⇒ `"claude"`. Read by the composer and the commit/ship
+    /// launch path; the picker still overrides it per tab.
+    pub default_harness: Option<String>,
     /// Anthropic Claude (the `claude` CLI).
     pub claude: ClaudeSettings,
     /// OpenCode (the `opencode` CLI) — multi-provider harness.
@@ -146,6 +151,13 @@ pub struct ClaudeSettings {
     /// Default reasoning-effort key for new sessions (`low`..`max`). `None`
     /// keeps the built-in default (High).
     pub default_effort: Option<String>,
+    /// Model key for the Commit/Ship/Revise action agents when the default
+    /// harness is Claude — cheaper than the chat default since these stages are
+    /// mechanical git/PR plumbing. `None` ⇒ `"sonnet"`.
+    pub commit_model: Option<String>,
+    /// Reasoning-effort key for the Commit/Ship/Revise action agents (Claude).
+    /// `None` ⇒ `"medium"`.
+    pub commit_effort: Option<String>,
     /// Start new sessions in plan permission mode (`--permission-mode plan`).
     pub default_plan_mode: bool,
     /// Which model keys appear in the composer's picker. `None` shows every
@@ -192,6 +204,10 @@ pub struct OpenCodeSettings {
     /// (e.g. `"anthropic/claude-sonnet-4-5"`). Mirrored into `opencode.json`'s
     /// `model` field so the CLI agrees. `None` keeps OpenCode's own default.
     pub default_model: Option<String>,
+    /// `"provider/model"` id for the Commit/Ship/Revise action agents when the
+    /// default harness is OpenCode. `None` ⇒ falls back to `default_model` (or
+    /// the harness's own default). May be an `"ollama/<id>"` id.
+    pub commit_model: Option<String>,
     /// The `"provider/model"` ids the user picked to expose in the composer's
     /// model picker when the OpenCode harness is selected. Empty = none chosen
     /// yet (the OpenCode tab prompts the user to add some).
@@ -219,6 +235,10 @@ pub struct OllamaSettings {
     /// Default local model for new sessions, as an `"ollama/<id>"` id. `None`
     /// keeps no Ollama default.
     pub default_model: Option<String>,
+    /// `"ollama/<id>"` model for the Commit/Ship/Revise action agents when Ollama
+    /// is the default harness. `None` ⇒ falls back to `default_model`, then the
+    /// first selected model. Runs through OpenCode like every Ollama session.
+    pub commit_model: Option<String>,
 }
 
 impl OllamaSettings {
@@ -234,16 +254,21 @@ impl OllamaSettings {
             .to_string()
     }
 
-    /// Clear `default_model` if its underlying id is no longer in
-    /// `selected_models`. Call after mutating `selected_models` so the default
+    /// Clear `default_model`/`commit_model` if the underlying id is no longer in
+    /// `selected_models`. Call after mutating `selected_models` so a default
     /// (stored as `"ollama/<id>"`) can never dangle past the model it names.
     pub fn reconcile_default(&mut self) {
-        let kept = self.default_model.as_deref().is_some_and(|def| {
-            def.strip_prefix("ollama/")
-                .is_some_and(|id| self.selected_models.iter().any(|m| m == id))
-        });
-        if !kept {
+        let in_selected = |v: &Option<String>| {
+            v.as_deref().is_some_and(|def| {
+                def.strip_prefix("ollama/")
+                    .is_some_and(|id| self.selected_models.iter().any(|m| m == id))
+            })
+        };
+        if !in_selected(&self.default_model) {
             self.default_model = None;
+        }
+        if !in_selected(&self.commit_model) {
+            self.commit_model = None;
         }
     }
 }

@@ -24,7 +24,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import { useShallow } from "zustand/shallow";
 
-import { commands, type Session, type SessionEvent } from "../../lib/bindings";
+import { commands, type Bootstrap, type Session, type SessionEvent } from "../../lib/bindings";
 import { unwrap } from "../../lib/ipc";
 import { queryClient } from "../../lib/queryClient";
 import { invalidateWorktreeGit } from "../../lib/queries";
@@ -39,6 +39,7 @@ import {
 import { planTasksFromItems, type PlanTask, type PlanTaskStatus } from "./planTasks";
 import { type Attachment } from "./attachments";
 import { composeStagePrompt } from "./stages";
+import { actionAgentDefaults, actionLaunchArgs, type ActionAgentDefaults } from "./harnessing";
 import { openCommitTab, openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
 import {
   addUserMessage,
@@ -870,6 +871,12 @@ export async function killSession(sessionId: string): Promise<void> {
   await unwrap(commands.killSession(sessionId));
 }
 
+/** The Commit/Ship/Revise launch defaults resolved from current settings (read
+ *  from the bootstrap query cache — always populated on the project page). */
+function commitShipDefaults(): ActionAgentDefaults {
+  return actionAgentDefaults(queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings);
+}
+
 /**
  * Commit a workstream's changes from the header action: start a commit-stage
  * session — stage + commit only, no push or PR — in a dedicated, reusable
@@ -889,12 +896,14 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
       return;
     }
   }
+  const defaults = commitShipDefaults();
   const session = await startSession({
     workstreamId,
     stage: "commit",
     input: "",
+    ...actionLaunchArgs(defaults),
   });
-  openCommitTab(workstreamId, session.id);
+  openCommitTab(workstreamId, session.id, defaults);
 }
 
 /**
@@ -916,13 +925,15 @@ export async function shipWorkstream(workstreamId: string, baseBranch: string): 
       return;
     }
   }
+  const defaults = commitShipDefaults();
   const session = await startSession({
     workstreamId,
     stage: "ship",
     input: "",
     baseBranch,
+    ...actionLaunchArgs(defaults),
   });
-  openShipTab(workstreamId, session.id);
+  openShipTab(workstreamId, session.id, defaults);
 }
 
 /**
@@ -957,12 +968,14 @@ export async function addressPrFeedback(
       return;
     }
   }
+  const defaults = commitShipDefaults();
   const session = await startSession({
     workstreamId,
     stage: "revise",
     input: instruction,
+    ...actionLaunchArgs(defaults),
   });
-  openShipTab(workstreamId, session.id);
+  openShipTab(workstreamId, session.id, defaults);
 }
 
 /**

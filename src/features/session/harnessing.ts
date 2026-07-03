@@ -1,4 +1,5 @@
-import type { CatalogProvider } from "../../lib/bindings";
+import type { AppSettings, CatalogProvider } from "../../lib/bindings";
+import { modelOption } from "./models";
 
 /**
  * The agent harnesses a session can run on. `key` is what the backend's
@@ -14,8 +15,88 @@ export const HARNESSES: HarnessOption[] = [
 
 export const DEFAULT_HARNESS_KEY = "claude";
 
+/** The harnesses selectable as the app-wide default (Settings → General). Unlike
+ *  [`HARNESSES`], this lists Ollama as its own choice even though it runs on the
+ *  OpenCode harness (mapped by [`effectiveHarnessKey`]) — so users pick it the way
+ *  they think of it. */
+export const DEFAULT_HARNESS_OPTIONS: HarnessOption[] = [
+  { key: "claude", label: "Claude Code" },
+  { key: "opencode", label: "OpenCode" },
+  { key: "ollama", label: "Ollama" },
+];
+
 export function harnessOption(key: string | undefined | null): HarnessOption {
   return HARNESSES.find((h) => h.key === key) ?? HARNESSES[0];
+}
+
+/** The actual harness a stored default-harness key runs on: Claude stays Claude,
+ *  while OpenCode *and* Ollama both run on the OpenCode harness (Ollama's models
+ *  are `ollama/<id>` OpenCode ids). Null/unknown ⇒ Claude. Use this to turn the
+ *  three-way `providers.defaultHarness` setting into a real [`HarnessOption`] key. */
+export function effectiveHarnessKey(defaultHarness: string | null | undefined): string {
+  return defaultHarness === "opencode" || defaultHarness === "ollama" ? "opencode" : "claude";
+}
+
+/** The launch config for the action-driven agents (Commit / Ship / Revise),
+ *  resolved from settings. `model` is a model KEY when `harness === "claude"`
+ *  (see models.ts), or a `"provider/model"` id when `"opencode"`; `null` means
+ *  "let the harness pick its own default". `effort` is a Claude effort key, or
+ *  `null` for OpenCode (which has no `--effort`). */
+export type ActionAgentDefaults = {
+  harness: string;
+  model: string | null;
+  effort: string | null;
+};
+
+/** Resolve the Commit/Ship/Revise agents' defaults from settings: the default
+ *  harness (Claude / OpenCode / Ollama), and — within it — the cheaper model +
+ *  reasoning configured on that harness's Settings tab. Each harness owns its own
+ *  commit model, so switching the default never leaves an unrunnable model behind;
+ *  each falls back sensibly (Sonnet/medium for Claude, the harness's default or
+ *  first-selected model otherwise) so an action always names a runnable model. */
+export function actionAgentDefaults(
+  settings: AppSettings | null | undefined,
+): ActionAgentDefaults {
+  const providers = settings?.providers;
+  const dh = providers?.defaultHarness ?? "claude";
+  if (dh === "ollama") {
+    // Ollama runs through the OpenCode harness; its models are `ollama/<id>` ids.
+    const ollama = providers?.ollama;
+    const first = ollama?.selectedModels?.[0];
+    const model =
+      ollama?.commitModel ?? ollama?.defaultModel ?? (first ? `ollama/${first}` : null);
+    return { harness: "opencode", model: model ?? null, effort: null };
+  }
+  if (dh === "opencode") {
+    const oc = providers?.opencode;
+    const model = oc?.commitModel ?? oc?.defaultModel ?? oc?.selectedModels?.[0] ?? null;
+    return { harness: "opencode", model, effort: null };
+  }
+  const claude = providers?.claude;
+  return {
+    harness: "claude",
+    model: claude?.commitModel ?? "sonnet",
+    effort: claude?.commitEffort ?? "medium",
+  };
+}
+
+/** The `startSession` model/effort args for resolved [`ActionAgentDefaults`]:
+ *  Claude translates its model KEY to the `--model` flag (Sonnet's key and flag
+ *  coincide; `"opus"` → the null default; a custom id → itself); OpenCode passes
+ *  the `provider/model` id through and carries no effort. */
+export function actionLaunchArgs(d: ActionAgentDefaults): {
+  harness: string;
+  model: string | null;
+  effort: string | null;
+} {
+  if (d.harness === "claude") {
+    return {
+      harness: "claude",
+      model: d.model ? modelOption(d.model).flag : null,
+      effort: d.effort,
+    };
+  }
+  return { harness: d.harness, model: d.model, effort: null };
 }
 
 /** OpenCode Zen (and similar gateways) expose anonymous `-free` models that

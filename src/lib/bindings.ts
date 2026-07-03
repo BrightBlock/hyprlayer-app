@@ -814,6 +814,17 @@ export type ClaudeSettings = {
 	 *  keeps the built-in default (High).
 	 */
 	defaultEffort?: string | null,
+	/**
+	 *  Model key for the Commit/Ship/Revise action agents when the default
+	 *  harness is Claude — cheaper than the chat default since these stages are
+	 *  mechanical git/PR plumbing. `None` ⇒ `"sonnet"`.
+	 */
+	commitModel?: string | null,
+	/**
+	 *  Reasoning-effort key for the Commit/Ship/Revise action agents (Claude).
+	 *  `None` ⇒ `"medium"`.
+	 */
+	commitEffort?: string | null,
 	/**  Start new sessions in plan permission mode (`--permission-mode plan`). */
 	defaultPlanMode?: boolean,
 	/**
@@ -1247,6 +1258,12 @@ export type OllamaSettings = {
 	 *  keeps no Ollama default.
 	 */
 	defaultModel?: string | null,
+	/**
+	 *  `"ollama/<id>"` model for the Commit/Ship/Revise action agents when Ollama
+	 *  is the default harness. `None` ⇒ falls back to `default_model`, then the
+	 *  first selected model. Runs through OpenCode like every Ollama session.
+	 */
+	commitModel?: string | null,
 };
 
 /**  Reachability + installed-model snapshot for the configured Ollama endpoint. */
@@ -1274,6 +1291,12 @@ export type OpenCodeSettings = {
 	 *  `model` field so the CLI agrees. `None` keeps OpenCode's own default.
 	 */
 	defaultModel?: string | null,
+	/**
+	 *  `"provider/model"` id for the Commit/Ship/Revise action agents when the
+	 *  default harness is OpenCode. `None` ⇒ falls back to `default_model` (or
+	 *  the harness's own default). May be an `"ollama/<id>"` id.
+	 */
+	commitModel?: string | null,
 	/**
 	 *  The `"provider/model"` ids the user picked to expose in the composer's
 	 *  model picker when the OpenCode harness is selected. Empty = none chosen
@@ -1401,6 +1424,13 @@ export type ProjectDetail = {
  *  migration.
  */
 export type ProviderSettings = {
+	/**
+	 *  The harness new sessions default to, and the one the Commit/Ship actions
+	 *  run on: `"claude"` or `"opencode"` (Ollama runs *through* OpenCode).
+	 *  `None`/absent ⇒ `"claude"`. Read by the composer and the commit/ship
+	 *  launch path; the picker still overrides it per tab.
+	 */
+	defaultHarness?: string | null,
 	/**  Anthropic Claude (the `claude` CLI). */
 	claude?: ClaudeSettings,
 	/**  OpenCode (the `opencode` CLI) — multi-provider harness. */

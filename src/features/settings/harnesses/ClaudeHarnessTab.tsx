@@ -151,6 +151,41 @@ export function ClaudeHarnessTab({
           </SettingRow>
 
           <SettingRow
+            title="Commit & Ship model"
+            control={
+              <div className="flex gap-2">
+                <Select
+                  aria-label="Commit and Ship model"
+                  value={claude.commitModel ?? "sonnet"}
+                  onChange={(e) => patchClaude({ commitModel: e.target.value })}
+                  className="w-36"
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
+                      {m.hint ? ` (${m.hint})` : ""}
+                    </option>
+                  ))}
+                </Select>
+                <Select
+                  aria-label="Commit and Ship reasoning"
+                  value={claude.commitEffort ?? "medium"}
+                  onChange={(e) => patchClaude({ commitEffort: e.target.value })}
+                  className="w-32"
+                >
+                  {EFFORTS.map((eo) => (
+                    <option key={eo.key} value={eo.key}>
+                      {eo.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            }
+          >
+            A cheaper model + reasoning for the Commit and Ship agents.
+          </SettingRow>
+
+          <SettingRow
             title="Default to plan mode"
             control={
               <Toggle

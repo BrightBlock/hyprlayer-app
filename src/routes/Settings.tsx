@@ -24,6 +24,7 @@ import {
 } from "../features/multiplexer/engines";
 import { EngineGlyph } from "../features/multiplexer/agentStateUi";
 import { MODELS } from "../features/session/models";
+import { DEFAULT_HARNESS_OPTIONS } from "../features/session/harnessing";
 import { invalidateNotificationSettingsCache, sendTestNotification } from "../lib/notifications";
 import {
   Badge,
@@ -47,7 +48,7 @@ import { HarnessesSection } from "../features/settings/harnesses/HarnessesSectio
 import { SettingRow } from "../features/settings/parts";
 import { THEMES, useThemeStore } from "../lib/theme";
 import { IS_WINDOWS } from "../lib/platform";
-import { AnytypeIcon, CheckIcon, ClipboardIcon, GitBranchIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PersonIcon, PlusIcon, XIcon } from "../components/icons";
+import { AnytypeIcon, CheckIcon, ClaudeMarkIcon, ClipboardIcon, GitBranchIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, OllamaMarkIcon, OpenCodeMarkIcon, PersonIcon, PlusIcon, XIcon } from "../components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
   switch (kind) {
@@ -419,6 +420,50 @@ const DEFAULT_TAB_TITLE_MODEL = "claude:haiku";
  *  any Claude model, or one of the user's configured OpenCode models so
  *  opencode-only users are covered. The choice is stored as a tagged id
  *  (`claude:<flag>` / `opencode:<provider/model>`) the backend routes on. */
+function DefaultHarnessCard({ settings }: { settings: AppSettings }) {
+  const save = useSetAppSettings();
+  const current = settings.providers?.defaultHarness ?? "claude";
+  return (
+    <Card>
+      <CardTitle>Default harness</CardTitle>
+      <p className="mt-1 mb-3 text-xs text-ink-dim">
+        The harness new chats and the Commit &amp; Ship actions start on. Set each
+        harness's model on its own tab under Harnesses.
+      </p>
+      {save.isError && (
+        <div className="mb-3">
+          <ErrorNote error={save.error} />
+        </div>
+      )}
+      <div className="flex gap-2">
+        {DEFAULT_HARNESS_OPTIONS.map((h) => {
+          const active = current === h.key;
+          const Icon = h.key === "opencode" ? OpenCodeMarkIcon : h.key === "ollama" ? OllamaMarkIcon : ClaudeMarkIcon;
+          return (
+            <button
+              key={h.key}
+              type="button"
+              aria-pressed={active}
+              onClick={() =>
+                save.mutate({
+                  ...settings,
+                  providers: { ...(settings.providers ?? {}), defaultHarness: h.key },
+                })
+              }
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-md border bg-panel-2 px-3 py-2 text-sm transition-colors ${
+                active ? "border-accent text-ink" : "border-edge text-ink-dim hover:text-ink"
+              }`}
+            >
+              <Icon size={14} />
+              {h.label}
+            </button>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 function TabTitlesCard({ settings }: { settings: AppSettings }) {
   const save = useSetAppSettings();
   const catalog = useOpencodeCatalog();
@@ -989,6 +1034,7 @@ export function Settings() {
                 menu, so keep the manual "Check now" card there. */}
             {IS_WINDOWS && <UpdatesCard />}
             <AiToolCard />
+            <DefaultHarnessCard settings={data.settings} />
             <HyprlayerConfigCard config={data} />
             <TabTitlesCard settings={data.settings} />
             <Card>

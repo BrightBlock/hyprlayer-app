@@ -11,6 +11,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import type { ShellTab } from "../../routes/ProjectPage";
+import type { ActionAgentDefaults } from "./harnessing";
 
 /** One workstream's whole tab strip, updated atomically.
  *
@@ -292,16 +293,47 @@ export function openDocPreviewTab(workstreamId: string, path: string, title: str
  * `sessionId`, and select it. Shipping reuses one tab per workstream rather than
  * being a chosen chat mode (see `shipWorkstream` in [`sessionStore`]).
  */
-export function openShipTab(workstreamId: string, sessionId: string): void {
-  openDedicatedTab(workstreamId, sessionId, "ship", "Ship");
+/** The shell fields that make an action tab's composer show the harness/model/
+ *  effort its session launched with: Claude carries a model + effort key,
+ *  OpenCode a `provider/model` id. Cross-harness fields are cleared so a switch
+ *  (Claude ⇄ OpenCode) never leaves a stale model behind. Empty when there are
+ *  no defaults (focusing a live tab), so nothing is overwritten. */
+function shellSeedFromDefaults(d?: ActionAgentDefaults): Partial<ShellTab> {
+  if (!d) return {};
+  if (d.harness === "claude") {
+    return {
+      harness: "claude",
+      model: d.model ?? undefined,
+      effort: d.effort ?? undefined,
+      opencodeModel: undefined,
+    };
+  }
+  return {
+    harness: d.harness,
+    opencodeModel: d.model ?? undefined,
+    model: undefined,
+    effort: undefined,
+  };
+}
+
+export function openShipTab(
+  workstreamId: string,
+  sessionId: string,
+  defaults?: ActionAgentDefaults,
+): void {
+  openDedicatedTab(workstreamId, sessionId, "ship", "Ship", defaults);
 }
 
 /**
  * Open (creating if absent) the dedicated Commit tab for a workstream. Like
  * shipping, committing reuses one tab per workstream (see `commitWorkstream`).
  */
-export function openCommitTab(workstreamId: string, sessionId: string): void {
-  openDedicatedTab(workstreamId, sessionId, "commit", "Commit");
+export function openCommitTab(
+  workstreamId: string,
+  sessionId: string,
+  defaults?: ActionAgentDefaults,
+): void {
+  openDedicatedTab(workstreamId, sessionId, "commit", "Commit", defaults);
 }
 
 /** Shared logic for the action-driven tabs (Ship, Commit): reuse the workstream's
@@ -312,7 +344,12 @@ function openDedicatedTab(
   sessionId: string,
   mode: ShellTab["mode"],
   title: string,
+  defaults?: ActionAgentDefaults,
 ): void {
+  // Seed the action tab's composer to match what its session launched with, so
+  // the model/effort picker reflects the configured Commit/Ship defaults. Empty
+  // when just focusing an existing tab (no fresh launch) — nothing is touched.
+  const seed = shellSeedFromDefaults(defaults);
   updateWorkstreamTabs((all) => {
     const current = all[workstreamId] ?? defaultTabState();
     const existing = current.shells.find((s) => s.mode === mode);
@@ -322,7 +359,9 @@ function openDedicatedTab(
         ...all,
         [workstreamId]: {
           ...current,
-          shells: current.shells.map((s) => (s.id === existing.id ? { ...s, sessionId } : s)),
+          shells: current.shells.map((s) =>
+            s.id === existing.id ? { ...s, sessionId, ...seed } : s,
+          ),
           activeId: inRightPane ? current.activeId : existing.id,
           rightActiveId: inRightPane ? existing.id : current.rightActiveId,
           rightSplit: inRightPane ? true : current.rightSplit,
@@ -346,6 +385,7 @@ function openDedicatedTab(
             attachments: [],
             sessionId,
             panel: "main",
+            ...seed,
           },
         ],
         activeId: nextId,

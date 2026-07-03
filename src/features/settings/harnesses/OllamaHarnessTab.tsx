@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AppSettings, BinaryStatus, OllamaSettings } from "../../../lib/bindings";
 import {
   useOllamaStatus,
+  useSetAppSettings,
   useSetOllamaDefaultModel,
   useSetOllamaEndpoint,
   useSetOllamaModels,
@@ -20,6 +21,7 @@ import {
   Toggle,
 } from "../../../components/ui";
 import { BinaryCard } from "../../system/BinaryCard";
+import { SettingRow } from "../parts";
 
 const DOCS_URL = "https://ollama.com";
 const DEFAULT_ENDPOINT = "http://localhost:11434";
@@ -55,6 +57,7 @@ export function OllamaHarnessTab({
   const setEndpoint = useSetOllamaEndpoint();
   const setModels = useSetOllamaModels();
   const setDefault = useSetOllamaDefaultModel();
+  const save = useSetAppSettings();
 
   // Optimistic selection: a toggle mutates the whole list and only lands after a
   // bootstrap refetch, so rapid toggles would race on the stale snapshot and lose
@@ -215,21 +218,57 @@ export function OllamaHarnessTab({
               </div>
 
               {selected.length > 0 && (
-                <div className="mt-4 flex items-center justify-between border-t border-edge/50 pt-3">
-                  <span className="text-sm text-ink">Default model</span>
-                  <Select
-                    aria-label="Ollama default model"
-                    className="w-64"
-                    value={ollama.defaultModel ?? ""}
-                    onChange={(e) => setDefault.mutate(e.target.value || null)}
+                <div className="mt-4 divide-y divide-edge/50 border-t border-edge/50">
+                  <SettingRow
+                    title="Default model"
+                    control={
+                      <div className="w-56">
+                        <Select
+                          aria-label="Ollama default model"
+                          value={ollama.defaultModel ?? ""}
+                          onChange={(e) => setDefault.mutate(e.target.value || null)}
+                        >
+                          <option value="">No default</option>
+                          {selected.map((id) => (
+                            <option key={id} value={`ollama/${id}`}>
+                              {id}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    }
                   >
-                    <option value="">No default</option>
-                    {selected.map((id) => (
-                      <option key={id} value={`ollama/${id}`}>
-                        {id}
-                      </option>
-                    ))}
-                  </Select>
+                    Model new chats start on.
+                  </SettingRow>
+                  <SettingRow
+                    title="Commit & Ship model"
+                    control={
+                      <div className="w-56">
+                        <Select
+                          aria-label="Ollama Commit and Ship model"
+                          value={ollama.commitModel ?? ""}
+                          onChange={(e) =>
+                            save.mutate({
+                              ...settings,
+                              providers: {
+                                ...(settings.providers ?? {}),
+                                ollama: { ...ollama, commitModel: e.target.value || null },
+                              },
+                            })
+                          }
+                        >
+                          <option value="">No default</option>
+                          {selected.map((id) => (
+                            <option key={id} value={`ollama/${id}`}>
+                              {id}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    }
+                  >
+                    Model the Commit and Ship agents run on.
+                  </SettingRow>
                 </div>
               )}
             </>

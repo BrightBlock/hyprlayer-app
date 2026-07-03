@@ -25,6 +25,7 @@ import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "../../../com
 import { BinaryCard } from "../../system/BinaryCard";
 import { ProviderPickerModal } from "./ProviderPickerModal";
 import { ModelPickerModal } from "./ModelPickerModal";
+import { SettingRow } from "../parts";
 
 const DOCS_URL = "https://opencode.ai/docs";
 
@@ -198,21 +199,57 @@ export function OpenCodeHarnessTab({
               ))}
             </div>
 
-            <div className="mt-4 flex items-center justify-between border-t border-edge/50 pt-3">
-              <span className="text-sm text-ink">Default model</span>
-              <Select
-                aria-label="OpenCode default model"
-                className="w-64"
-                value={opencode.defaultModel ?? ""}
-                onChange={(e) => setDefault.mutate(e.target.value || null)}
+            <div className="mt-4 divide-y divide-edge/50 border-t border-edge/50">
+              <SettingRow
+                title="Default model"
+                control={
+                  <div className="w-56">
+                    <Select
+                      aria-label="OpenCode default model"
+                      value={opencode.defaultModel ?? ""}
+                      onChange={(e) => setDefault.mutate(e.target.value || null)}
+                    >
+                      <option value="">OpenCode default</option>
+                      {selectedModels.map((id) => (
+                        <option key={id} value={id}>
+                          {modelName.get(id) ?? id}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                }
               >
-                <option value="">OpenCode default</option>
-                {selectedModels.map((id) => (
-                  <option key={id} value={id}>
-                    {modelName.get(id) ?? id}
-                  </option>
-                ))}
-              </Select>
+                Model new chats start on.
+              </SettingRow>
+              <SettingRow
+                title="Commit & Ship model"
+                control={
+                  <div className="w-56">
+                    <Select
+                      aria-label="OpenCode Commit and Ship model"
+                      value={opencode.commitModel ?? ""}
+                      onChange={(e) =>
+                        save.mutate({
+                          ...settings,
+                          providers: {
+                            ...(settings.providers ?? {}),
+                            opencode: { ...opencode, commitModel: e.target.value || null },
+                          },
+                        })
+                      }
+                    >
+                      <option value="">OpenCode default</option>
+                      {selectedModels.map((id) => (
+                        <option key={id} value={id}>
+                          {modelName.get(id) ?? id}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                }
+              >
+                Model the Commit and Ship agents run on.
+              </SettingRow>
             </div>
           </>
         )}

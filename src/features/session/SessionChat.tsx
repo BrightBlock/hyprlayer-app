@@ -58,7 +58,7 @@ import {
 } from "./models";
 import { useModelWindowMap } from "./modelWindowsStore";
 import {
-  DEFAULT_HARNESS_KEY,
+  effectiveHarnessKey,
   harnessOption,
   lockedSessionProvider,
   modelProvider,
@@ -1110,7 +1110,11 @@ export function SessionChat({
   const bootstrapSettings = useBootstrap().data?.settings;
   const opencodeDefaults = bootstrapSettings?.providers?.opencode;
   const ollamaDefaults = bootstrapSettings?.providers?.ollama;
-  const harness = harnessOption(shell.harness ?? DEFAULT_HARNESS_KEY);
+  // A tab with no explicit pick falls back to the configured default harness
+  // (Settings → Harnesses → Defaults), then to Claude.
+  const harness = harnessOption(
+    shell.harness ?? effectiveHarnessKey(bootstrapSettings?.providers?.defaultHarness),
+  );
   const usingOpencode = harness.key === "opencode";
   const ocModels = opencodeDefaults?.selectedModels ?? [];
   // Ollama models run *through* the OpenCode harness as `ollama/<id>` ids, so they
