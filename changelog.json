@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.8",
+      "date": "2026-07-03",
+      "summary": "Library auto-syncs the thoughts repo on open.",
+      "notes": [
+        "Opening the Library now automatically pulls the latest changes from the thoughts repo so your docs are always up to date."
+      ]
+    },
+    {
       "version": "0.4.7",
       "date": "2026-07-02",
       "summary": "Wide layout for maximized big-display windows.",
