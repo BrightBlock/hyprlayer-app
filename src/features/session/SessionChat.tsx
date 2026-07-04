@@ -17,10 +17,12 @@ import {
   BookIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ClaudeMarkIcon,
   CodeIcon,
   DocIcon,
   EffortIcon,
   EraserIcon,
+  HandoffIcon,
   ImageIcon,
   ModeIcon,
   OpenAiIcon,
@@ -28,7 +30,6 @@ import {
   QuestionIcon,
   SendIcon,
   ShieldIcon,
-  SparkleIcon,
   StopIcon,
   TerminalIcon,
   XIcon,
@@ -621,7 +622,7 @@ function HandoffBanner({
   return (
     <div className="mb-2 flex items-center gap-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2">
       <span className="shrink-0 text-warn">
-        <SparkleIcon size={14} />
+        <HandoffIcon size={14} />
       </span>
       <span className="min-w-0 flex-1 text-xs text-ink-dim">
         {isReady ? (
@@ -1158,12 +1159,12 @@ export function SessionChat({
     {
       key: "claude",
       label: "Claude Code",
-      icon: <SparkleIcon size={13} />,
+      icon: <ClaudeMarkIcon size={13} />,
       items: modelItems.map((m) => ({
         key: `claude:${m.key}`,
         label: m.label,
         hint: m.hint,
-        icon: <SparkleIcon size={13} />,
+        icon: <ClaudeMarkIcon size={13} />,
         ...lockOther("claude"),
       })),
     },
@@ -1994,7 +1995,7 @@ export function SessionChat({
                       settings where providers/models are configured. */}
                   <ComposerMenu
                     title="Model"
-                    leading={usingOpencode ? <CodeIcon size={14} /> : <SparkleIcon size={14} />}
+                    leading={usingOpencode ? <CodeIcon size={14} /> : <ClaudeMarkIcon size={14} />}
                     label={composerModelLabel}
                     hint={composerModelHint}
                     groups={modelGroups}

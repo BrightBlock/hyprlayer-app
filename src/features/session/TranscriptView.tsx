@@ -15,9 +15,9 @@ import { HyprlayerMark } from "../../components/Logo";
 import {
   ChevronRightIcon,
   ClipboardIcon,
+  PuzzleIcon,
   RewindIcon,
   ShieldIcon,
-  SparkleIcon,
   WrenchIcon,
 } from "../../components/icons";
 import { MarkdownPreview } from "../library/MarkdownPreview";
@@ -345,7 +345,7 @@ const SkillBlock = memo(function SkillBlock({ name, body }: { name: string; body
         onClick={() => setOpen((v) => !v)}
         className={`${STEP_ROW} text-ink-dim`}
       >
-        <SparkleIcon size={12} className="shrink-0 text-ink-dim" />
+        <PuzzleIcon size={12} className="shrink-0 text-ink-dim" />
         <span className="shrink-0 font-medium text-ink">Skill</span>
         <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={name}>
           {name}
