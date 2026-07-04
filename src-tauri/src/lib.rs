@@ -66,6 +66,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::cleanup_archived_workstreams,
             commands::workstreams::reprovision_workstream,
             commands::workstreams::worktree_git_status,
+            commands::workstreams::workstream_prompt_context,
             commands::workstreams::worktree_stage,
             commands::workstreams::worktree_unstage,
             commands::workstreams::worktree_discard,

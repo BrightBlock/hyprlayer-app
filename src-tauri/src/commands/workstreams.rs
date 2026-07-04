@@ -1082,6 +1082,55 @@ pub async fn worktree_git_status(
     .await
 }
 
+/// The live values behind prompt `{{variables}}` for a workstream. The frontend
+/// fetches this at run time to substitute a custom prompt's body before sending
+/// it (built-in Commit/Ship bodies are substituted backend-side at launch).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptContext {
+    pub branch: String,
+    /// The PR target branch, `origin/`-stripped.
+    pub base_branch: String,
+    /// Working-tree change summary, e.g. `"4 files (+182 −40)"`.
+    pub changed_files: String,
+    /// Working-tree diff vs HEAD, truncated backend-side.
+    pub diff: String,
+    /// Most recent commit subject.
+    pub last_commit: String,
+}
+
+/// Resolve the prompt `{{variable}}` values for a workstream's worktree.
+#[tauri::command]
+#[specta::specta]
+pub async fn workstream_prompt_context(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<PromptContext> {
+    let item = load_item(&state, &id).await?;
+    let branch = item.branch.clone();
+    let base_branch = item
+        .base_branch
+        .strip_prefix("origin/")
+        .unwrap_or(&item.base_branch)
+        .to_string();
+    let git = blocking("workstream_prompt_context", move || {
+        hyprlayer_core::gitops::prompt_git_vars(
+            Path::new(&item.worktree_path),
+            true,
+            true,
+            true,
+        )
+    })
+    .await?;
+    Ok(PromptContext {
+        branch,
+        base_branch,
+        changed_files: git.changed_files,
+        diff: git.diff,
+        last_commit: git.last_commit,
+    })
+}
+
 /// Stage the given worktree-relative paths (HEAD→index).
 #[tauri::command]
 #[specta::specta]

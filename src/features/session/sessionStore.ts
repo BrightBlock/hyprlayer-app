@@ -38,9 +38,25 @@ import {
 } from "./backgroundTask";
 import { planTasksFromItems, type PlanTask, type PlanTaskStatus } from "./planTasks";
 import { type Attachment } from "./attachments";
-import { composeStagePrompt } from "./stages";
-import { actionAgentDefaults, actionLaunchArgs, type ActionAgentDefaults } from "./harnessing";
-import { openCommitTab, openShipTab, useWorkstreamTabsStore } from "./workstreamTabs";
+import { permissionModeOption } from "./permissions";
+import {
+  bodyHasVars,
+  effectiveBuiltinBody,
+  substitutePromptVars,
+} from "../prompts/prompts";
+import {
+  actionAgentDefaults,
+  actionLaunchArgs,
+  newChatLaunchArgs,
+  type ActionAgentDefaults,
+} from "./harnessing";
+import {
+  bindSessionToShell,
+  openCommitTab,
+  openPromptTab,
+  openShipTab,
+  useWorkstreamTabsStore,
+} from "./workstreamTabs";
 import {
   addUserMessage,
   cancelPendingPrompts,
@@ -321,9 +337,6 @@ export async function startSession(args: {
   workstreamId: string;
   stage: string;
   input: string;
-  /** The workstream's target branch — named in the Ship echo so it matches the
-   *  backend prompt (other stages ignore it). The backend reads its own copy. */
-  baseBranch?: string;
   /** Files/library docs attached to the first turn. Their paths go to the
    *  backend prompt; they render as pin cards in the echo so no raw path shows. */
   attachments?: Attachment[];
@@ -339,7 +352,7 @@ export async function startSession(args: {
   const { channel, activate } = bufferedChannel();
   const attachments = args.attachments ?? [];
 
-  const session = await unwrap(
+  const { session, prompt } = await unwrap(
     commands.startStageSession(
       args.workstreamId,
       args.stage,
@@ -360,16 +373,11 @@ export async function startSession(args: {
 
   let view = initialSessionView("starting");
   view = { ...view, model: session.model, claudeSessionId: session.claudeSessionId };
-  // Echo the composed prompt (skill command + input) — but NOT the doc/path
-  // list the backend appends; those render as pin cards instead, so the agent's
-  // raw paths never appear in the user bubble.
-  view = addUserMessage(
-    view,
-    composeStagePrompt(args.stage, args.input, args.baseBranch),
-    args.stage,
-    attachments,
-    Date.now(),
-  );
+  // Echo the prompt the backend composed (skill command / action body + input —
+  // including any Settings → Prompts override) — but NOT the doc/path list the
+  // backend appends; those render as pin cards instead, so the agent's raw
+  // paths never appear in the user bubble.
+  view = addUserMessage(view, prompt, args.stage, attachments, Date.now());
   setEntry(session.id, {
     ...view,
     workstreamId: args.workstreamId,
@@ -877,13 +885,110 @@ function commitShipDefaults(): ActionAgentDefaults {
   return actionAgentDefaults(queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings);
 }
 
+/** The effective Commit body for a FOLLOW-UP run in a live commit tab: the
+ *  Settings → Prompts override with its `{{variables}}` resolved from the
+ *  worktree, else the stock `/commit`. Session STARTS get the same treatment
+ *  backend-side (`start_stage_session`); this covers the one prompt the
+ *  frontend sends itself. */
+async function effectiveCommitText(workstreamId: string): Promise<string> {
+  const boot = queryClient.getQueryData<Bootstrap>(["bootstrap"]);
+  const raw = effectiveBuiltinBody(boot?.settings, boot?.promptDefaults, "commit");
+  // A blank override reads as unset (matching the backend's launch path) — the
+  // re-run must never send an empty turn.
+  const body = raw.trim() ? raw : (boot?.promptDefaults?.commit ?? "/commit");
+  if (!bodyHasVars(body)) return body;
+  const ctx = await unwrap(commands.workstreamPromptContext(workstreamId));
+  return substitutePromptVars(body, ctx);
+}
+
+/** Workstreams with a prompt-run session start in flight — a double-click or a
+ *  held-down shortcut must not spawn N sessions (N−1 of them orphaned). */
+const promptStartsInFlight = new Set<string>();
+
+/**
+ * Run an already-resolved prompt text in a workstream — the shared delivery
+ * path for the prompt library's surfaces (composer chips, ⌘K palette, prompt
+ * shortcuts). The focused agent tab gets it as a follow-up turn when it has a
+ * usable session (queued if a turn is in flight, resumed if detached after an
+ * app restart); an untouched plain-chat tab is started in place; anything else
+ * (doc preview, diff/file viewer, terminal, multiplexer, dead action tab) gets
+ * a fresh agent tab named after the prompt.
+ */
+export async function runPromptTextInWorkstream(
+  workstreamId: string,
+  text: string,
+  title: string,
+  /** Deliver into this shell instead of the focused one — the composer chips
+   *  pass their own tab so a chip in a split pane can't cross-fire. */
+  targetShellId?: number,
+): Promise<void> {
+  if (!text.trim()) return;
+  const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
+  const pane = tabs?.activePane ?? "main";
+  const activeId = pane === "right" ? tabs?.rightActiveId : tabs?.activeId;
+  const active = tabs?.shells.find((s) => s.id === (targetShellId ?? activeId));
+
+  if (active?.sessionId) {
+    // After an app restart the tab binding survives but the in-memory entry
+    // doesn't — rebuild it first so the run continues the conversation instead
+    // of spawning a duplicate session next to it.
+    if (!entryOf(active.sessionId)) {
+      await restoreSessionIfNeeded(
+        active.sessionId,
+        workstreamId,
+        active.mode ?? "general",
+        permissionModeOption(active.permissionMode).flag,
+      );
+    }
+    const entry = entryOf(active.sessionId);
+    if (entry && !isTerminal(entry.state)) {
+      await sendMessage(active.sessionId, text);
+      return;
+    }
+  }
+
+  if (promptStartsInFlight.has(workstreamId)) return;
+  promptStartsInFlight.add(workstreamId);
+  try {
+    const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
+    // Reuse only a plain, untouched chat tab. Every non-chat tab variant (doc
+    // preview, diff/file viewer, terminal, multiplexer PTY) renders something
+    // other than SessionChat, so binding a session there would run it headless.
+    const reuseShell =
+      active &&
+      !active.sessionId &&
+      active.mode === "general" &&
+      !active.docPreviewPath &&
+      !active.diffView &&
+      !active.filePath &&
+      !active.terminalView &&
+      !active.ptyAgent;
+    const session = await startSession({
+      workstreamId,
+      stage: "general",
+      input: text,
+      // Launch on what pressing Enter in that tab would use: the reused tab's
+      // own composer picks, else the configured new-chat defaults.
+      ...newChatLaunchArgs(settings, reuseShell ? active : null),
+    });
+    if (reuseShell) {
+      bindSessionToShell(workstreamId, active.id, session.id);
+    } else {
+      openPromptTab(workstreamId, session.id, title);
+    }
+  } finally {
+    promptStartsInFlight.delete(workstreamId);
+  }
+}
+
 /**
  * Commit a workstream's changes from the header action: start a commit-stage
- * session — stage + commit only, no push or PR — in a dedicated, reusable
- * "Commit" tab and select it. Lets users checkpoint incrementally and open the
- * PR later via Ship. If a commit session is still live, re-run `/commit` in it
- * as a follow-up turn (focusing the tab) so a second click after making more
- * changes checkpoints them in the same agent window rather than no-op'ing.
+ * session — stage + commit, then an ask-before-push (never a PR) — in a
+ * dedicated, reusable "Commit" tab and select it. Lets users checkpoint
+ * incrementally and open the PR later via Ship. If a commit session is still
+ * live, re-run the commit prompt in it as a follow-up turn (focusing the tab)
+ * so a second click after making more changes checkpoints them in the same
+ * agent window rather than no-op'ing.
  */
 export async function commitWorkstream(workstreamId: string): Promise<void> {
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
@@ -892,7 +997,7 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
     const entry = entryOf(commitTab.sessionId);
     if (entry && !isTerminal(entry.state)) {
       openCommitTab(workstreamId, commitTab.sessionId); // focus the live commit tab
-      await sendMessage(commitTab.sessionId, composeStagePrompt("commit", ""));
+      await sendMessage(commitTab.sessionId, await effectiveCommitText(workstreamId));
       return;
     }
   }
@@ -910,12 +1015,11 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
  * Ship a workstream from the GIT-panel action (rather than a chat mode): start a
  * ship-stage session — commit, push, open a PR — in a dedicated, reusable
  * "Ship" tab and select it. If a ship session is already running for this
- * workstream, just focus its tab instead of spawning a second one. `baseBranch`
- * is the workstream's target, named in the ship directive so the PR opens
- * against it (e.g. `develop`) — required so the directive never renders an
- * empty target.
+ * workstream, just focus its tab instead of spawning a second one. The ship
+ * directive names the workstream's target branch — the backend composes it from
+ * its own copy of the base (plus any Settings → Prompts override).
  */
-export async function shipWorkstream(workstreamId: string, baseBranch: string): Promise<void> {
+export async function shipWorkstream(workstreamId: string): Promise<void> {
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
   const shipTab = tabs?.shells.find((s) => s.mode === "ship");
   if (shipTab?.sessionId) {
@@ -930,7 +1034,6 @@ export async function shipWorkstream(workstreamId: string, baseBranch: string): 
     workstreamId,
     stage: "ship",
     input: "",
-    baseBranch,
     ...actionLaunchArgs(defaults),
   });
   openShipTab(workstreamId, session.id, defaults);

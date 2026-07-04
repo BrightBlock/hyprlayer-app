@@ -329,6 +329,80 @@ pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
     Ok(files)
 }
 
+/// Character cap for the `{{diff}}` prompt variable — beyond this the diff is
+/// cut (at a patch boundary where possible) with a truncation note, so a huge
+/// working tree can't balloon a prompt.
+const MAX_PROMPT_DIFF_CHARS: usize = 12_000;
+
+/// Git-derived values for prompt `{{variables}}`. Best-effort: any git failure
+/// degrades the affected field to an empty string rather than failing the send.
+#[derive(Debug, Clone, Default)]
+pub struct PromptGitVars {
+    /// Working-tree change summary vs HEAD, e.g. `"4 files (+182 −40)"`.
+    pub changed_files: String,
+    /// Working-tree diff vs HEAD (staged + unstaged + untracked), truncated at
+    /// [`MAX_PROMPT_DIFF_CHARS`].
+    pub diff: String,
+    /// Subject line of the most recent commit.
+    pub last_commit: String,
+}
+
+/// Resolve the git-derived prompt variables for a worktree. Each field is only
+/// computed when requested — the diff materializes every patch, so callers scan
+/// the prompt body for tokens first. Runs blocking git2 work; call on the
+/// blocking pool.
+pub fn prompt_git_vars(
+    worktree: &Path,
+    want_changed: bool,
+    want_diff: bool,
+    want_last: bool,
+) -> PromptGitVars {
+    let mut vars = PromptGitVars::default();
+    let Ok(repo) = open_repo(worktree) else {
+        return vars;
+    };
+    if want_last {
+        vars.last_commit = repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_commit().ok())
+            .and_then(|c| c.summary().map(str::to_string))
+            .unwrap_or_default();
+    }
+    if want_changed || want_diff {
+        // Same per-file patches (and thoughts/.hyprlayer filter) the diff panel
+        // renders, so the variable and the panel can never disagree.
+        let files = worktree_diff(worktree).unwrap_or_default();
+        if want_changed {
+            let (adds, dels) = worktree_diff_line_counts(&repo);
+            let n = files.len();
+            let plural = if n == 1 { "" } else { "s" };
+            vars.changed_files = format!("{n} file{plural} (+{adds} −{dels})");
+        }
+        if want_diff {
+            let mut out = String::new();
+            for f in &files {
+                if out.len() + f.patch.len() > MAX_PROMPT_DIFF_CHARS {
+                    if out.is_empty() {
+                        // A single oversized patch: cut at a char boundary.
+                        let mut end = MAX_PROMPT_DIFF_CHARS;
+                        while !f.patch.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        out.push_str(&f.patch[..end]);
+                        out.push('\n');
+                    }
+                    out.push_str("… (diff truncated)");
+                    break;
+                }
+                out.push_str(&f.patch);
+            }
+            vars.diff = out;
+        }
+    }
+    vars
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Source-control panel: split staged/unstaged status, staging actions, the two
 // sides of a file for the diff viewer, and a lazy worktree file listing. All of

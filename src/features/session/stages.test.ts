@@ -3,9 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MODE_STAGES,
   STAGES,
-  composeStagePrompt,
   nextModeStage,
-  shipPrompt,
   stageCommand,
   suggestedDocKind,
 } from "./stages";
@@ -59,61 +57,6 @@ describe("stageCommand", () => {
     expect(stageCommand("ship")).toBeNull();
     expect(stageCommand("revise")).toBeNull();
     expect(stageCommand("nonsense")).toBeNull();
-  });
-});
-
-// These mirror the Rust unit tests for `compose_prompt`
-// (crates/hyprlayer-core/src/pipeline.rs); keep both in sync.
-describe("composeStagePrompt", () => {
-  it("passes general input through verbatim (trimmed)", () => {
-    expect(composeStagePrompt("general", "  hello  ")).toBe("hello");
-  });
-
-  it("prepends the skill command for spec stages", () => {
-    expect(composeStagePrompt("research", "how does auth work?")).toBe(
-      "/research_codebase how does auth work?",
-    );
-  });
-
-  it("invokes the bare skill when input is empty", () => {
-    expect(composeStagePrompt("research", "")).toBe("/research_codebase");
-  });
-
-  it("ships with the standalone directive when there is no input", () => {
-    expect(composeStagePrompt("ship", "", "main")).toBe(shipPrompt("main"));
-  });
-
-  it("names the target branch in the ship directive (git-flow re-targeting)", () => {
-    expect(composeStagePrompt("ship", "", "develop")).toContain("`develop`");
-  });
-
-  // Golden literal — must stay byte-identical to the Rust `ship_prompt` test
-  // (crates/hyprlayer-core/src/pipeline.rs). Editing one side fails its golden,
-  // forcing both to move together so the optimistic echo can never drift.
-  it("renders the exact ship directive (golden, matches the backend)", () => {
-    expect(shipPrompt("main")).toBe(
-      "First commit all changes in this worktree, then push the branch to its remote. " +
-        "Only after the commit and push succeed, open a pull request against `main` with a " +
-        "clear title and run the /describe_pr skill to write the PR description from the " +
-        "repository's template and update the PR.",
-    );
-  });
-
-  it("strips the origin/ prefix so the PR targets the branch, not the rev", () => {
-    expect(shipPrompt("origin/develop")).toBe(shipPrompt("develop"));
-    expect(shipPrompt("origin/main")).toContain("`main`");
-  });
-
-  it("appends extra ship context below the directive", () => {
-    const prompt = composeStagePrompt("ship", "skip the changelog", "main");
-    expect(prompt).toBe(`${shipPrompt("main")}\n\nskip the changelog`);
-  });
-
-  it("commit invokes the /commit skill with any input as its argument", () => {
-    expect(composeStagePrompt("commit", "")).toBe("/commit");
-    expect(composeStagePrompt("commit", "split into two commits")).toBe(
-      "/commit split into two commits",
-    );
   });
 });
 

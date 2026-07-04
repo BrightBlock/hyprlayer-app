@@ -60,6 +60,26 @@ pub enum ConfigSummary {
     },
 }
 
+/// The stock bodies of the built-in prompts — what Settings → Prompts shows,
+/// edits against, and resets to. Owned by `hyprlayer_core::pipeline` (the
+/// composer), surfaced here so the frontend never mirrors the literals.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptDefaults {
+    pub commit: String,
+    /// A template — `{{base_branch}}` resolves at send time.
+    pub ship: String,
+}
+
+impl Default for PromptDefaults {
+    fn default() -> Self {
+        Self {
+            commit: hyprlayer_core::pipeline::COMMIT_PROMPT_DEFAULT.to_string(),
+            ship: hyprlayer_core::pipeline::SHIP_PROMPT_TEMPLATE.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Bootstrap {
@@ -67,6 +87,8 @@ pub struct Bootstrap {
     pub projects: Vec<Project>,
     pub binaries: Vec<BinaryStatus>,
     pub settings: AppSettings,
+    /// Stock built-in prompt bodies (see [`PromptDefaults`]).
+    pub prompt_defaults: PromptDefaults,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -209,6 +231,7 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> CmdResult<Bootstrap> {
         projects: registry_projects(&state).await,
         binaries: state.binaries.status_all().await,
         settings: state.settings.get().await,
+        prompt_defaults: PromptDefaults::default(),
     })
 }
 

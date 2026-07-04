@@ -18,7 +18,10 @@ import { eventToChord, hasPrimaryModifier } from "./chord";
 import { chordToCommand, type Overrides } from "./resolve";
 import { ESCAPE_COMMAND_ID, runCommand } from "./registry";
 
-function isEditableTarget(target: EventTarget | null): boolean {
+/** Whether keyboard focus is in an editable element — the guard that keeps
+ *  bare/shift-only chords from hijacking typing. Shared with the prompt-hotkey
+ *  dispatcher (`usePromptHotkeys`), which must apply the exact same rule. */
+export function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;

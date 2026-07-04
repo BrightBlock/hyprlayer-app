@@ -26,6 +26,39 @@ pub struct KeybindingSettings {
     pub overrides: HashMap<String, Option<String>>,
 }
 
+/// The prompt library (Settings → Prompts).
+///
+/// Built-in prompts (Commit, Ship) are global; `builtin_bodies` holds a body
+/// override keyed by prompt id (`"commit"` | `"ship"`), and an absent key means
+/// the stock text (owned by `hyprlayer_core::pipeline`). Custom prompts are
+/// user-defined and may carry per-project body overrides. Bodies may contain
+/// `{{variable}}` tokens resolved from the worktree at send time.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PromptSettings {
+    pub builtin_bodies: HashMap<String, String>,
+    pub custom: Vec<CustomPrompt>,
+}
+
+/// One user-defined prompt in the library.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CustomPrompt {
+    /// Stable id (uuid) — referenced by the palette, chips, and shortcuts.
+    pub id: String,
+    pub name: String,
+    /// The global body.
+    pub body: String,
+    /// Per-project body overrides, keyed by project path.
+    pub overrides: HashMap<String, String>,
+    /// Keyboard chord in the frontend's canonical form (e.g. `"mod+shift+t"`);
+    /// `None` = unbound. Dispatched by the frontend, stored here so it rides
+    /// with the prompt.
+    pub chord: Option<String>,
+    /// Pinned prompts render as one-click chips above the session composer.
+    pub pinned: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
@@ -38,6 +71,8 @@ pub struct AppSettings {
     pub git: GitSettings,
     /// Keyboard-shortcut overrides for app operations.
     pub keybindings: KeybindingSettings,
+    /// The prompt library: built-in prompt overrides + custom prompts.
+    pub prompts: PromptSettings,
     /// Per-provider defaults (default model, etc.). Surfaced in Settings → Models.
     pub providers: ProviderSettings,
     /// OS-toast behaviour when a session transitions to "needs you".
@@ -664,6 +699,49 @@ mod tests {
         assert!(!e.builtin);
         // A field absent from the provided object still falls back to its default.
         assert!(s.multiplexer.notify_on_blocked);
+    }
+
+    #[test]
+    fn prompts_default_empty_when_section_absent() {
+        // Old settings.json (no `prompts` key) must deserialize with no
+        // overrides and no custom prompts — no migration needed.
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(s.prompts.builtin_bodies.is_empty());
+        assert!(s.prompts.custom.is_empty());
+    }
+
+    #[test]
+    fn prompts_round_trip() {
+        let raw = r#"{"prompts":{
+            "builtinBodies":{"commit":"/commit\n\nNever use chore:."},
+            "custom":[{
+                "id":"p1","name":"Backfill tests",
+                "body":"Cover {{changed_files}} with tests.",
+                "overrides":{"/repos/app":"Use vitest for {{changed_files}}."},
+                "chord":"mod+shift+t","pinned":true
+            }]
+        }}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            s.prompts.builtin_bodies.get("commit").map(String::as_str),
+            Some("/commit\n\nNever use chore:.")
+        );
+        let p = &s.prompts.custom[0];
+        assert_eq!(p.name, "Backfill tests");
+        assert_eq!(p.chord.as_deref(), Some("mod+shift+t"));
+        assert!(p.pinned);
+        assert_eq!(
+            p.overrides.get("/repos/app").map(String::as_str),
+            Some("Use vitest for {{changed_files}}.")
+        );
+        // A custom prompt missing optional fields still deserializes (defaults).
+        let sparse: AppSettings = serde_json::from_str(
+            r#"{"prompts":{"custom":[{"id":"x","name":"N","body":""}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(sparse.prompts.custom[0].chord, None);
+        assert!(!sparse.prompts.custom[0].pinned);
+        assert!(sparse.prompts.custom[0].overrides.is_empty());
     }
 
     #[test]

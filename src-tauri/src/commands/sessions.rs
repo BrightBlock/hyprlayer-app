@@ -241,9 +241,94 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
     Ok(driver)
 }
 
+/// A freshly-started session plus the composed first prompt (pre-docs), so the
+/// frontend can echo exactly what the agent received. The composition is
+/// user-configurable (Settings → Prompts overrides + `{{variable}}`
+/// substitution), so the frontend no longer mirrors it.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartedSession {
+    pub session: Session,
+    /// The composed first prompt WITHOUT the `Relevant documents:` suffix —
+    /// attached docs render as pin cards in the echo, not as raw paths.
+    pub prompt: String,
+}
+
+/// Resolve the prompt `{{variables}}` for a workstream, computing the git-derived
+/// ones (blocking git2 work) only when `template` actually references them.
+async fn prompt_vars_for(ws: &Workstream, template: &str) -> pipeline::PromptVars {
+    let want_changed = template.contains("{{changed_files}}");
+    let want_diff = template.contains("{{diff}}");
+    let want_last = template.contains("{{last_commit}}");
+    let git_vars = if want_changed || want_diff || want_last {
+        let worktree = ws.worktree_path.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            hyprlayer_core::gitops::prompt_git_vars(
+                std::path::Path::new(&worktree),
+                want_changed,
+                want_diff,
+                want_last,
+            )
+        })
+        .await
+        .unwrap_or_default()
+    } else {
+        Default::default()
+    };
+    pipeline::PromptVars {
+        branch: ws.branch.clone(),
+        base_branch: ws
+            .base_branch
+            .strip_prefix("origin/")
+            .unwrap_or(&ws.base_branch)
+            .to_string(),
+        changed_files: git_vars.changed_files,
+        diff: git_vars.diff,
+        last_commit: git_vars.last_commit,
+    }
+}
+
+/// The effective Commit/Ship bodies for this launch: the user's Settings →
+/// Prompts override, variable-substituted. Stock behaviour (`None`) when no
+/// override exists or the stage isn't an action stage.
+async fn action_prompt_bodies(
+    state: &AppState,
+    stage: Stage,
+    ws: &Workstream,
+) -> pipeline::ActionPromptBodies {
+    let key = match stage {
+        Stage::Commit => "commit",
+        Stage::Ship => "ship",
+        _ => return Default::default(),
+    };
+    let prompts = state.settings.get().await.prompts;
+    // A blank/whitespace-only override reads as unset — a user who cleared the
+    // textarea (and navigated away) must still get the stock behaviour, never
+    // an empty first turn.
+    let Some(template) = prompts
+        .builtin_bodies
+        .get(key)
+        .filter(|t| !t.trim().is_empty())
+    else {
+        return Default::default();
+    };
+    let vars = prompt_vars_for(ws, template).await;
+    let body = pipeline::substitute_vars(template, &vars);
+    match stage {
+        Stage::Commit => pipeline::ActionPromptBodies {
+            commit: Some(body),
+            ship: None,
+        },
+        _ => pipeline::ActionPromptBodies {
+            commit: None,
+            ship: Some(body),
+        },
+    }
+}
+
 /// Start a session for a workstream stage. Composes the stage skill prompt,
 /// spawns the driver, and streams events back over `on_event`. Returns the
-/// persisted [`Session`] row.
+/// persisted [`Session`] row plus the composed prompt (for the transcript echo).
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::too_many_arguments)]
@@ -256,7 +341,7 @@ pub async fn start_stage_session(
     attached_docs: Vec<String>,
     opts: StartOpts,
     on_event: Channel<SessionEvent>,
-) -> CmdResult<Session> {
+) -> CmdResult<StartedSession> {
     let StartOpts {
         harness,
         model,
@@ -276,7 +361,12 @@ pub async fn start_stage_session(
     let stage_kind = Stage::parse(&stage);
     // Ship names the workstream's target branch in its directive; other stages
     // ignore it. So a re-targeted workstream opens its PR against e.g. `develop`.
-    let prompt = pipeline::compose_prompt(stage_kind, &input, &ws.base_branch, &attached_docs);
+    // Commit/Ship bodies honor the user's Settings → Prompts overrides.
+    let bodies = action_prompt_bodies(&state, stage_kind, &ws).await;
+    let prompt = pipeline::compose_prompt(stage_kind, &input, &ws.base_branch, &bodies);
+    // The agent additionally receives the attached-doc list; the echo does not
+    // (docs render as pin cards in the UI instead of raw paths).
+    let wire_prompt = pipeline::append_docs(prompt.clone(), &attached_docs);
 
     // Persist the session row before spawning, so a crash before init still
     // leaves a record.
@@ -312,12 +402,12 @@ pub async fn start_stage_session(
     )
     .await?;
 
-    // Kick off the first turn (the composed skill prompt).
+    // Kick off the first turn (the composed skill prompt + attached docs).
     driver
-        .send_user_turn(&prompt, Some(&session.stage))
+        .send_user_turn(&wire_prompt, Some(&session.stage))
         .map_err(AppError::from)?;
 
-    Ok(session)
+    Ok(StartedSession { session, prompt })
 }
 
 /// Resume a previously-started session that's no longer live (e.g. after an app

@@ -262,6 +262,12 @@ export function useInstallOpencode() {
 /** Persist app settings (whole-object replace) and refresh the bootstrap cache. */
 export function useSetAppSettings() {
   return useMutation({
+    // Whole-object replace: without ordering, a slow earlier write (e.g. a
+    // debounced prompt-body save) can land AFTER a fast later one (a pin
+    // toggle) and revert its delta on disk. The shared scope makes React Query
+    // queue same-scope mutations and run them serially in dispatch order, so
+    // the last-dispatched payload is also the final on-disk state.
+    scope: { id: "app-settings" },
     mutationFn: (settings: AppSettings) => unwrap(commands.setAppSettings(settings)),
     onSuccess: (next) => {
       // Optimistically fold the saved settings into the cached bootstrap so

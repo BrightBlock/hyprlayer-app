@@ -8,11 +8,33 @@ import type {
 } from "react";
 
 import { errorMessage, errorRemedy } from "../lib/ipc";
+import { formatChord } from "../lib/keybindings/chord";
 import { useEscape } from "../lib/keybindings/registry";
+import { IS_MACOS } from "../lib/platform";
 import { XIcon } from "./icons";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
+}
+
+/**
+ * A keyboard-chord hint (⌘⇧P / Ctrl+Shift+P), formatted for the host OS.
+ * macOS concatenates the modifier glyphs with no separators, so they're tracked
+ * apart to stay legible at hint sizes — the same treatment as Settings →
+ * Keyboard's larger pill, and like it deliberately NOT `font-mono` (monospace
+ * renders ⌘/⇧ heavy and oversized). Size, color, and background come from
+ * `className` (unsized it inherits the surrounding text) so each surface picks
+ * a scale that matches its labels while sharing the one glyph treatment.
+ */
+export function ChordHint({ chord, className }: { chord: string; className?: string }) {
+  return (
+    <kbd
+      className={cx("whitespace-nowrap font-medium", className)}
+      style={IS_MACOS ? { letterSpacing: "0.14em" } : undefined}
+    >
+      {formatChord(chord, IS_MACOS)}
+    </kbd>
+  );
 }
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {

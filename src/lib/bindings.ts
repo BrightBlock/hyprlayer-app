@@ -145,6 +145,8 @@ export const commands = {
 	 *  .hyprlayer/ excluded).
 	 */
 	worktreeGitStatus: (id: string) => typedError<WorktreeGitStatus, AppError>(__TAURI_INVOKE("worktree_git_status", { id })),
+	/**  Resolve the prompt `{{variable}}` values for a workstream's worktree. */
+	workstreamPromptContext: (id: string) => typedError<PromptContext, AppError>(__TAURI_INVOKE("workstream_prompt_context", { id })),
 	/**  Stage the given worktree-relative paths (HEAD→index). */
 	worktreeStage: (id: string, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("worktree_stage", { id, paths })),
 	/**  Unstage the given paths (reset index entries back to HEAD). */
@@ -278,9 +280,9 @@ export const commands = {
 	/**
 	 *  Start a session for a workstream stage. Composes the stage skill prompt,
 	 *  spawns the driver, and streams events back over `on_event`. Returns the
-	 *  persisted [`Session`] row.
+	 *  persisted [`Session`] row plus the composed prompt (for the transcript echo).
 	 */
-	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
+	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionEvent>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
 	/**
 	 *  Resume a previously-started session that's no longer live (e.g. after an app
 	 *  restart) by re-spawning claude with `--resume`, so the conversation continues
@@ -689,6 +691,8 @@ export type AppSettings = {
 	git?: GitSettings,
 	/**  Keyboard-shortcut overrides for app operations. */
 	keybindings?: KeybindingSettings,
+	/**  The prompt library: built-in prompt overrides + custom prompts. */
+	prompts?: PromptSettings,
 	/**  Per-provider defaults (default model, etc.). Surfaced in Settings → Models. */
 	providers?: ProviderSettings,
 	/**  OS-toast behaviour when a session transitions to "needs you". */
@@ -761,6 +765,8 @@ export type Bootstrap = {
 	projects: Project[],
 	binaries: BinaryStatus[],
 	settings: AppSettings,
+	/**  Stock built-in prompt bodies (see [`PromptDefaults`]). */
+	promptDefaults: PromptDefaults,
 };
 
 export type CatalogModel = {
@@ -914,6 +920,25 @@ export type CreateDocInput = {
 	date: string,
 	ticket: string | null,
 	tags?: string[],
+};
+
+/**  One user-defined prompt in the library. */
+export type CustomPrompt = {
+	/**  Stable id (uuid) — referenced by the palette, chips, and shortcuts. */
+	id?: string,
+	name?: string,
+	/**  The global body. */
+	body?: string,
+	/**  Per-project body overrides, keyed by project path. */
+	overrides?: { [key in string]: string },
+	/**
+	 *  Keyboard chord in the frontend's canonical form (e.g. `"mod+shift+t"`);
+	 *  `None` = unbound. Dispatched by the frontend, stored here so it rides
+	 *  with the prompt.
+	 */
+	chord?: string | null,
+	/**  Pinned prompts render as one-click chips above the session composer. */
+	pinned?: boolean,
 };
 
 /**
@@ -1418,6 +1443,48 @@ export type ProjectDetail = {
 };
 
 /**
+ *  The live values behind prompt `{{variables}}` for a workstream. The frontend
+ *  fetches this at run time to substitute a custom prompt's body before sending
+ *  it (built-in Commit/Ship bodies are substituted backend-side at launch).
+ */
+export type PromptContext = {
+	branch: string,
+	/**  The PR target branch, `origin/`-stripped. */
+	baseBranch: string,
+	/**  Working-tree change summary, e.g. `"4 files (+182 −40)"`. */
+	changedFiles: string,
+	/**  Working-tree diff vs HEAD, truncated backend-side. */
+	diff: string,
+	/**  Most recent commit subject. */
+	lastCommit: string,
+};
+
+/**
+ *  The stock bodies of the built-in prompts — what Settings → Prompts shows,
+ *  edits against, and resets to. Owned by `hyprlayer_core::pipeline` (the
+ *  composer), surfaced here so the frontend never mirrors the literals.
+ */
+export type PromptDefaults = {
+	commit: string,
+	/**  A template — `{{base_branch}}` resolves at send time. */
+	ship: string,
+};
+
+/**
+ *  The prompt library (Settings → Prompts).
+ * 
+ *  Built-in prompts (Commit, Ship) are global; `builtin_bodies` holds a body
+ *  override keyed by prompt id (`"commit"` | `"ship"`), and an absent key means
+ *  the stock text (owned by `hyprlayer_core::pipeline`). Custom prompts are
+ *  user-defined and may carry per-project body overrides. Bodies may contain
+ *  `{{variable}}` tokens resolved from the worktree at send time.
+ */
+export type PromptSettings = {
+	builtinBodies?: { [key in string]: string },
+	custom?: CustomPrompt[],
+};
+
+/**
  *  Defaults for each agent provider/harness. Claude and OpenCode are wired up;
  *  Ollama runs local models *through* the OpenCode harness; Codex is stubbed so
  *  the section can render now and gain real fields later without a settings
@@ -1718,6 +1785,21 @@ export type StartOpts = {
 	 *  `bypassPermissions`); `None`/unrecognized keeps the stage's default.
 	 */
 	permissionMode?: string | null,
+};
+
+/**
+ *  A freshly-started session plus the composed first prompt (pre-docs), so the
+ *  frontend can echo exactly what the agent received. The composition is
+ *  user-configurable (Settings → Prompts overrides + `{{variable}}`
+ *  substitution), so the frontend no longer mirrors it.
+ */
+export type StartedSession = {
+	session: Session,
+	/**
+	 *  The composed first prompt WITHOUT the `Relevant documents:` suffix —
+	 *  attached docs render as pin cards in the echo, not as raw paths.
+	 */
+	prompt: string,
 };
 
 /**  Payload of `hyprlayer storage info --json`. */

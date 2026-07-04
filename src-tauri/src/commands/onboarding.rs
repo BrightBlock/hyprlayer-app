@@ -202,6 +202,7 @@ pub async fn init_thoughts_repo(
         projects: registry_projects(&state).await,
         binaries: state.binaries.status_all().await,
         settings: state.settings.get().await,
+        prompt_defaults: Default::default(),
     })
 }
 

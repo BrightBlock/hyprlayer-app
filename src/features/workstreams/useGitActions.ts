@@ -46,10 +46,8 @@ export function useWorkstreamGitActions(view: WorkstreamView | null) {
   const doShip = () => {
     if (!view) return;
     setShipping(true);
-    // Pass the workstream's target so the opened PR is filed against it.
-    void shipWorkstream(view.item.id, view.item.baseBranch).finally(() =>
-      setShipping(false),
-    );
+    // The backend names the workstream's target in the directive it composes.
+    void shipWorkstream(view.item.id).finally(() => setShipping(false));
   };
 
   return {

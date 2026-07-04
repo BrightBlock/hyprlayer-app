@@ -146,13 +146,17 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
             allowed_tools: allow(&[]),
             disallowed_tools: deny(&["Write", "Edit", "Bash(git commit:*)"]),
         },
-        // Commit checkpoints the worktree locally — stage + commit, never push
-        // or touch `gh` (the explicit half of the split-out Ship flow). Push is
-        // hard-denied so an over-eager agent can't turn a commit into a ship.
+        // Commit checkpoints the worktree — stage + commit — then the stock
+        // prompt asks the user whether to also push. Push is deliberately
+        // NEITHER pre-approved NOR denied: it routes through the normal
+        // permission ask, so nothing pushes without explicit consent (even if
+        // an agent skips the prompt's question), but a user who wants the push
+        // isn't blocked either. `gh` stays hard-denied so a commit can never
+        // grow into a pull request (the explicit half of the split-out Ship flow).
         Stage::Commit => StagePolicy {
             permission_mode: PermissionMode::Default,
             allowed_tools: allow(&["Bash(git add:*)", "Bash(git commit:*)"]),
-            disallowed_tools: deny(&["Bash(git push:*)", "Bash(gh:*)"]),
+            disallowed_tools: deny(&["Bash(gh:*)"]),
         },
         // Ship and Revise both push to the branch and talk to `gh`; Revise
         // addresses PR feedback (CI failures, review comments) on a branch that
@@ -173,26 +177,91 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
     }
 }
 
-/// The Ship directive, run in order: commit first, then (only once that
-/// succeeds) push, open the PR against the workstream's target (`base`) branch,
-/// and hand the description off to the `/describe_pr` skill so every shipped PR
-/// follows the repo's template instead of a free-improvised body. `/describe_pr`
-/// edits an existing PR, so the PR must be opened before it runs. The policy
-/// pre-approves push + `gh`. Naming the base (rather than "the default branch")
-/// lets a re-targeted workstream open its PR against e.g. `develop`.
-/// Kept byte-identical to the frontend `shipPrompt` (src/features/session/stages.ts)
-/// so the optimistic transcript echo matches what claude receives.
+/// The stock Ship body — a prompt template with `{{base_branch}}` resolved at
+/// send time. Run in order: commit first, then (only once that succeeds) push,
+/// open the PR against the workstream's target branch, and hand the description
+/// off to the `/describe_pr` skill so every shipped PR follows the repo's
+/// template instead of a free-improvised body. `/describe_pr` edits an existing
+/// PR, so the PR must be opened before it runs. The policy pre-approves push +
+/// `gh`. Naming the base (rather than "the default branch") lets a re-targeted
+/// workstream open its PR against e.g. `develop`. Users can override this body
+/// in Settings → Prompts; the stock text is also surfaced there via the
+/// bootstrap's `promptDefaults`.
+pub const SHIP_PROMPT_TEMPLATE: &str =
+    "First run the /commit skill to commit all changes in this worktree, then push the branch \
+to its remote. Only after the commit and push succeed, open a pull request against \
+`{{base_branch}}` with a clear title and run the /describe_pr skill to write the PR \
+description from the repository's template and update the PR.";
+
+/// The stock Commit body: the `/commit` skill invocation, followed by an
+/// explicit ask-before-push step (the AskUserQuestion tool renders as the app's
+/// question UI). The stage policy leaves `git push` to the normal permission
+/// ask — never silent, never blocked — while `gh` stays denied so a commit
+/// never becomes a PR. Overridable in the Prompt library like
+/// [`SHIP_PROMPT_TEMPLATE`].
+pub const COMMIT_PROMPT_DEFAULT: &str = "/commit\n\nAfter the commit lands, use the \
+AskUserQuestion tool to ask whether to also push the branch and its new commits to the \
+remote, and push only if the user confirms. Never open a pull request from here — that's \
+Ship.";
+
+/// The stock Ship directive with the target branch resolved.
 pub fn ship_prompt(base: &str) -> String {
     // The stored base is a git rev (e.g. `origin/main`); a PR targets the GitHub
-    // branch name, so strip the remote prefix before naming it. Mirrors the
-    // frontend `shipPrompt` so the optimistic echo stays byte-identical.
+    // branch name, so strip the remote prefix before naming it.
     let base = base.strip_prefix("origin/").unwrap_or(base);
-    format!(
-        "First commit all changes in this worktree, then push the branch to its remote. Only \
-after the commit and push succeed, open a pull request against `{base}` with a clear title \
-and run the /describe_pr skill to write the PR description from the repository's template \
-and update the PR."
-    )
+    SHIP_PROMPT_TEMPLATE.replace("{{base_branch}}", base)
+}
+
+/// The `{{variable}}` values available to prompt bodies, resolved from the
+/// workstream at send time. A missing value substitutes as an empty string;
+/// tokens outside this set pass through untouched.
+#[derive(Debug, Clone, Default)]
+pub struct PromptVars {
+    pub branch: String,
+    /// The PR target branch, `origin/`-stripped.
+    pub base_branch: String,
+    /// Working-tree change summary, e.g. `"4 files (+182 −40)"`.
+    pub changed_files: String,
+    /// Working-tree diff vs HEAD, truncated (see `gitops::prompt_git_vars`).
+    pub diff: String,
+    /// Most recent commit subject.
+    pub last_commit: String,
+}
+
+/// Replace the known `{{variable}}` tokens in a prompt body. Deliberately a
+/// fixed token set (not a general template engine): unknown tokens stay
+/// verbatim so a body that happens to contain `{{...}}` isn't mangled.
+/// Single-pass over the ORIGINAL body — substituted values are never rescanned,
+/// so token-shaped text inside a value (e.g. a `{{diff}}` hunk touching a file
+/// that itself contains `{{last_commit}}`) survives verbatim. Mirrored by the
+/// frontend `substitutePromptVars` (src/features/prompts/prompts.ts).
+pub fn substitute_vars(body: &str, vars: &PromptVars) -> String {
+    let tokens: [(&str, &str); 5] = [
+        ("{{branch}}", &vars.branch),
+        ("{{base_branch}}", &vars.base_branch),
+        ("{{changed_files}}", &vars.changed_files),
+        ("{{diff}}", &vars.diff),
+        ("{{last_commit}}", &vars.last_commit),
+    ];
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    loop {
+        let next = tokens
+            .iter()
+            .filter_map(|&(tok, val)| rest.find(tok).map(|i| (i, tok, val)))
+            .min_by_key(|&(i, _, _)| i);
+        match next {
+            Some((i, tok, val)) => {
+                out.push_str(&rest[..i]);
+                out.push_str(val);
+                rest = &rest[i + tok.len()..];
+            }
+            None => {
+                out.push_str(rest);
+                return out;
+            }
+        }
+    }
 }
 
 /// The Revise directive: address PR feedback on a branch that already has a PR.
@@ -211,44 +280,63 @@ fn skill_prompt(skill: &str, input: &str) -> String {
     }
 }
 
+/// The effective (already variable-substituted) bodies for the overridable
+/// action prompts, resolved from settings by the caller. `None` = stock text.
+#[derive(Debug, Clone, Default)]
+pub struct ActionPromptBodies {
+    pub commit: Option<String>,
+    pub ship: Option<String>,
+}
+
+/// Join an action-prompt body with the user's extra input. A single-line
+/// slash-command body keeps skill-argument form (`/commit split it` — the stock
+/// Commit shape); a prose body gets the input as a trailing paragraph (the
+/// stock Ship/Revise shape).
+fn action_prompt(body: &str, input: &str) -> String {
+    if input.is_empty() {
+        body.to_string()
+    } else if body.starts_with('/') && !body.contains('\n') {
+        format!("{body} {input}")
+    } else {
+        format!("{body}\n\n{input}")
+    }
+}
+
 /// Compose the first prompt for a stage: the matching skill invocation plus the
-/// user's input, with any attached context docs listed for the skill to pick up
-/// (e.g. `/create_plan` consuming the research doc produced by `/research_codebase`).
-/// General is pure passthrough (plain chat); Ship and Revise send the
-/// [`ship_prompt`] / [`REVISE_PROMPT`] directives rather than a skill. Ship names
-/// `base_branch` as the PR target; other stages ignore it.
+/// user's input. General is pure passthrough (plain chat); Ship, Revise and
+/// Commit send their action bodies — the user's override from `bodies` when set
+/// (Settings → Prompts), else the stock [`ship_prompt`] / [`REVISE_PROMPT`] /
+/// [`COMMIT_PROMPT_DEFAULT`]. Ship names `base_branch` as the PR target; other
+/// stages ignore it. Attached docs are appended separately via [`append_docs`]
+/// (the caller sends the doc-suffixed prompt to the agent but echoes this one).
 pub fn compose_prompt(
     stage: Stage,
     input: &str,
     base_branch: &str,
-    attached_docs: &[String],
+    bodies: &ActionPromptBodies,
 ) -> String {
     let input = input.trim();
-    let prompt = match stage {
-        // Plain chat: the input verbatim — no skill prefix. Explicitly attached
-        // docs/screenshots are still listed below (the user asked for them).
+    match stage {
+        // Plain chat: the input verbatim — no skill prefix.
         Stage::General => input.to_string(),
-        // Ship/Revise send a prose directive (not a skill); extra context, if
-        // any, is appended below it.
-        Stage::Ship | Stage::Revise => {
-            let directive = if matches!(stage, Stage::Ship) {
-                ship_prompt(base_branch)
-            } else {
-                REVISE_PROMPT.to_string()
-            };
-            if input.is_empty() {
-                directive
-            } else {
-                format!("{directive}\n\n{input}")
-            }
+        Stage::Ship => {
+            let body = bodies
+                .ship
+                .clone()
+                .unwrap_or_else(|| ship_prompt(base_branch));
+            action_prompt(&body, input)
         }
-        // research/plan/implement/validate/commit each invoke their skill.
+        Stage::Revise => action_prompt(REVISE_PROMPT, input),
+        Stage::Commit => action_prompt(
+            bodies.commit.as_deref().unwrap_or(COMMIT_PROMPT_DEFAULT),
+            input,
+        ),
+        // research/plan/implement/validate each invoke their skill.
         _ => skill_prompt(
             stage.command().expect("skill-driven stage has a command"),
             input,
         ),
-    };
-    append_docs(prompt, attached_docs)
+    }
 }
 
 /// Append the `Relevant documents:` block listing `attached_docs` (a no-op when
@@ -292,17 +380,21 @@ mod tests {
         assert_eq!(Stage::General.command(), None);
         assert_eq!(Stage::Ship.command(), None);
         // compose_prompt uses the command, so the two never drift.
-        let composed = compose_prompt(Stage::Plan, "x", "main", &[]);
+        let composed = compose_prompt(Stage::Plan, "x", "main", &Default::default());
         assert!(composed.starts_with(Stage::Plan.command().unwrap()));
     }
 
     #[test]
     fn general_passes_input_through_verbatim() {
-        assert_eq!(compose_prompt(Stage::General, "  hello  ", "main", &[]), "hello");
+        assert_eq!(compose_prompt(Stage::General, "  hello  ", "main", &Default::default()), "hello");
         // Plain chat sends no skill prefix, but explicitly attached docs (e.g. a
-        // pasted screenshot) are still listed so the agent can read them.
+        // pasted screenshot) are still listed via append_docs so the agent can
+        // read them (the caller composes, then appends for the wire prompt).
         assert_eq!(
-            compose_prompt(Stage::General, "hello", "main", &["a.png".into()]),
+            append_docs(
+                compose_prompt(Stage::General, "hello", "main", &Default::default()),
+                &["a.png".into()],
+            ),
             "hello\n\nRelevant documents:\n- a.png"
         );
     }
@@ -310,17 +402,15 @@ mod tests {
     #[test]
     fn research_invokes_the_skill() {
         assert_eq!(
-            compose_prompt(Stage::Research, "how does auth work?", "main", &[]),
+            compose_prompt(Stage::Research, "how does auth work?", "main", &Default::default()),
             "/research_codebase how does auth work?"
         );
     }
 
     #[test]
     fn plan_lists_attached_docs() {
-        let prompt = compose_prompt(
-            Stage::Plan,
-            "build it",
-            "main",
+        let prompt = append_docs(
+            compose_prompt(Stage::Plan, "build it", "main", &Default::default()),
             &["repos/p/shared/research/2026-auth.md".into()],
         );
         assert!(prompt.starts_with("/create_plan build it"));
@@ -331,7 +421,7 @@ mod tests {
     #[test]
     fn empty_input_still_invokes_the_skill() {
         assert_eq!(
-            compose_prompt(Stage::Research, "", "main", &[]),
+            compose_prompt(Stage::Research, "", "main", &Default::default()),
             "/research_codebase"
         );
     }
@@ -339,53 +429,63 @@ mod tests {
     #[test]
     fn ship_sends_the_directive_not_a_skill() {
         // Button-driven ship has no input: the bare directive, naming the base.
-        assert_eq!(compose_prompt(Stage::Ship, "", "main", &[]), ship_prompt("main"));
+        assert_eq!(compose_prompt(Stage::Ship, "", "main", &Default::default()), ship_prompt("main"));
         // The target branch is named in the directive (git-flow re-targeting).
-        assert!(compose_prompt(Stage::Ship, "", "develop", &[]).contains("`develop`"));
+        assert!(compose_prompt(Stage::Ship, "", "develop", &Default::default()).contains("`develop`"));
         // The stored base is a git rev; the PR targets the branch, so `origin/`
         // is stripped — and the frontend `shipPrompt` mirrors this.
         assert_eq!(ship_prompt("origin/develop"), ship_prompt("develop"));
         assert!(ship_prompt("origin/main").contains("`main`"));
-        // Golden literal — must stay byte-identical to the TS `shipPrompt` test
-        // (src/features/session/stages.test.ts). Editing one side fails its
-        // golden, forcing both to move together so the echo can never drift.
+        // Golden literal — the stock directive users see in the Prompt library
+        // and the wire text when no override is set. Committing goes through
+        // the /commit skill so Ship's commits follow the same conventions.
         assert_eq!(
             ship_prompt("main"),
-            "First commit all changes in this worktree, then push the branch to its remote. \
-Only after the commit and push succeed, open a pull request against `main` with a clear \
-title and run the /describe_pr skill to write the PR description from the repository's \
-template and update the PR."
+            "First run the /commit skill to commit all changes in this worktree, then push \
+the branch to its remote. Only after the commit and push succeed, open a pull request \
+against `main` with a clear title and run the /describe_pr skill to write the PR \
+description from the repository's template and update the PR."
         );
         // Extra context is appended below the directive.
         assert_eq!(
-            compose_prompt(Stage::Ship, "skip the changelog", "main", &[]),
+            compose_prompt(Stage::Ship, "skip the changelog", "main", &Default::default()),
             format!("{}\n\nskip the changelog", ship_prompt("main")),
         );
-        // It does not delegate to the /commit skill — Ship owns its own ordered
-        // commit-then-push-then-PR directive.
-        assert!(!compose_prompt(Stage::Ship, "", "main", &[]).starts_with('/'));
+        // Ship is a prose directive (commit via the /commit skill, then push,
+        // then PR) — not itself a bare slash-command invocation.
+        assert!(!compose_prompt(Stage::Ship, "", "main", &Default::default()).starts_with('/'));
+        assert!(ship_prompt("main").contains("/commit skill"));
     }
 
     #[test]
-    fn commit_checkpoints_locally_without_push_or_pr() {
+    fn commit_invokes_the_skill_then_offers_a_push_but_never_a_pr() {
         assert_eq!(Stage::parse("commit"), Stage::Commit);
         assert_eq!(Stage::Commit.as_str(), "commit");
         assert_eq!(Stage::Commit.command(), Some("/commit"));
-        // Button-driven: bare skill invocation. Extra input rides as its argument.
-        assert_eq!(compose_prompt(Stage::Commit, "", "main", &[]), "/commit");
+        // The stock body leads with the /commit invocation and follows with the
+        // ask-before-push step (the question is the push consent gate).
+        assert!(COMMIT_PROMPT_DEFAULT.starts_with("/commit\n"));
+        assert!(COMMIT_PROMPT_DEFAULT.contains("AskUserQuestion"));
         assert_eq!(
-            compose_prompt(Stage::Commit, "split into two commits", "main", &[]),
-            "/commit split into two commits",
+            compose_prompt(Stage::Commit, "", "main", &Default::default()),
+            COMMIT_PROMPT_DEFAULT
         );
-        // It commits but is hard-denied from pushing or opening a PR — that's
-        // what keeps it distinct from Ship.
+        // A multi-line body takes prose semantics: extra input rides below as a
+        // paragraph (still reaching the /commit skill as its argument).
+        assert_eq!(
+            compose_prompt(Stage::Commit, "split into two commits", "main", &Default::default()),
+            format!("{COMMIT_PROMPT_DEFAULT}\n\nsplit into two commits"),
+        );
+        // Push is neither pre-approved nor denied — it must route through the
+        // permission ask, so a push always needs explicit user consent. `gh`
+        // stays hard-denied — a commit can never open a PR, that's Ship.
         let commit = policy_for(Stage::Commit);
         assert!(commit
             .allowed_tools
             .iter()
             .any(|t| t.contains("git commit")));
         assert!(!commit.allowed_tools.iter().any(|t| t.contains("git push")));
-        assert!(commit
+        assert!(!commit
             .disallowed_tools
             .iter()
             .any(|t| t.contains("git push")));
@@ -398,16 +498,105 @@ template and update the PR."
         assert_eq!(Stage::Revise.as_str(), "revise");
         assert_eq!(Stage::Revise.command(), None);
         // Bare directive when there's no extra context...
-        assert_eq!(compose_prompt(Stage::Revise, "", "main", &[]), REVISE_PROMPT);
+        assert_eq!(compose_prompt(Stage::Revise, "", "main", &Default::default()), REVISE_PROMPT);
         // ...the specific feedback is appended below it.
         assert_eq!(
-            compose_prompt(Stage::Revise, "CI is failing", "main", &[]),
+            compose_prompt(Stage::Revise, "CI is failing", "main", &Default::default()),
             format!("{REVISE_PROMPT}\n\nCI is failing"),
         );
         // Revise shares Ship's push/gh posture.
         let revise = policy_for(Stage::Revise);
         assert!(revise.allowed_tools.iter().any(|t| t.contains("git push")));
         assert!(revise.allowed_tools.iter().any(|t| t.contains("gh pr")));
+    }
+
+    #[test]
+    fn substitute_vars_replaces_known_tokens_only() {
+        let vars = PromptVars {
+            branch: "feature/x".into(),
+            base_branch: "main".into(),
+            changed_files: "4 files (+182 −40)".into(),
+            diff: "diff --git a b".into(),
+            last_commit: "fix(tabs): debounce".into(),
+        };
+        assert_eq!(
+            substitute_vars("On {{branch}} → {{base_branch}}: {{changed_files}}", &vars),
+            "On feature/x → main: 4 files (+182 −40)"
+        );
+        assert_eq!(
+            substitute_vars("{{last_commit}}\n{{diff}}", &vars),
+            "fix(tabs): debounce\ndiff --git a b"
+        );
+        // Unknown tokens pass through verbatim; missing values become empty.
+        assert_eq!(
+            substitute_vars("{{ticket}} on {{branch}}", &PromptVars::default()),
+            "{{ticket}} on "
+        );
+        // Single-pass: token-shaped text INSIDE a substituted value is never
+        // re-substituted (a diff hunk may legitimately contain "{{last_commit}}").
+        let tricky = PromptVars {
+            diff: "+ body.contains(\"{{last_commit}}\")".into(),
+            last_commit: "SHOULD NOT APPEAR".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            substitute_vars("{{diff}}", &tricky),
+            "+ body.contains(\"{{last_commit}}\")"
+        );
+    }
+
+    #[test]
+    fn overridden_commit_body_replaces_the_skill_invocation() {
+        let bodies = ActionPromptBodies {
+            commit: Some("Review the tree on feature/x and commit.".into()),
+            ship: None,
+        };
+        assert_eq!(
+            compose_prompt(Stage::Commit, "", "main", &bodies),
+            "Review the tree on feature/x and commit."
+        );
+        // Extra input rides below a prose body as a paragraph…
+        assert_eq!(
+            compose_prompt(Stage::Commit, "split into two", "main", &bodies),
+            "Review the tree on feature/x and commit.\n\nsplit into two"
+        );
+        // …but a single-line slash-command override keeps skill-argument form.
+        let slash = ActionPromptBodies {
+            commit: Some("/commit --strict".into()),
+            ship: None,
+        };
+        assert_eq!(
+            compose_prompt(Stage::Commit, "now", "main", &slash),
+            "/commit --strict now"
+        );
+    }
+
+    #[test]
+    fn overridden_ship_body_replaces_the_directive() {
+        let bodies = ActionPromptBodies {
+            commit: None,
+            ship: Some("Push and open a PR against `develop`. Link HYP-1.".into()),
+        };
+        assert_eq!(
+            compose_prompt(Stage::Ship, "", "main", &bodies),
+            "Push and open a PR against `develop`. Link HYP-1."
+        );
+        // The ship override never bleeds into Commit (and vice versa).
+        assert_eq!(
+            compose_prompt(Stage::Commit, "", "main", &bodies),
+            COMMIT_PROMPT_DEFAULT
+        );
+        // The stock template names the base via the same substitution path.
+        assert_eq!(
+            substitute_vars(
+                SHIP_PROMPT_TEMPLATE,
+                &PromptVars {
+                    base_branch: "main".into(),
+                    ..Default::default()
+                }
+            ),
+            ship_prompt("main")
+        );
     }
 
     #[test]

@@ -45,6 +45,13 @@ export const COMMANDS: CommandDef[] = [
     defaults: { mac: "mod+p", other: "mod+p" },
   },
   {
+    id: "prompts.palette",
+    label: "Prompt Library",
+    category: "Navigation",
+    when: "always",
+    defaults: { mac: "mod+k", other: "mod+k" },
+  },
+  {
     id: "nav.dashboard",
     label: "Go to Dashboard",
     category: "Navigation",

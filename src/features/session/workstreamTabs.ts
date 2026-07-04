@@ -238,6 +238,73 @@ export function consumeComposerFocus(shellId: number): boolean {
 }
 
 /**
+ * Bind a freshly-started session to an existing (unstarted) shell tab and focus
+ * it — the module-level twin of SessionChat's `onSessionStarted`, for prompt
+ * runs that start a session on the focused tab from outside the component.
+ */
+export function bindSessionToShell(
+  workstreamId: string,
+  shellId: number,
+  sessionId: string,
+): void {
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId] ?? defaultTabState();
+    const shell = current.shells.find((s) => s.id === shellId);
+    if (!shell) return all;
+    const inRightPane = shell.panel === "right";
+    return {
+      ...all,
+      [workstreamId]: {
+        ...current,
+        shells: current.shells.map((s) => (s.id === shellId ? { ...s, sessionId } : s)),
+        activeId: inRightPane ? current.activeId : shellId,
+        rightActiveId: inRightPane ? shellId : current.rightActiveId,
+        rightSplit: inRightPane ? true : current.rightSplit,
+        activePane: inRightPane ? "right" : "main",
+        archiveOpen: false,
+      },
+    };
+  });
+}
+
+/**
+ * Open a fresh plain-chat tab bound to `sessionId` and select it — the landing
+ * spot for a prompt run when the focused tab can't take the session (it's a doc
+ * preview, a dead action tab, or already bound). Named after the prompt so the
+ * strip reads what's running.
+ */
+export function openPromptTab(workstreamId: string, sessionId: string, title: string): void {
+  updateWorkstreamTabs((all) => {
+    const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };
+    const nextId = nextShellId(current.shells, current.archived);
+    return {
+      ...all,
+      [workstreamId]: {
+        ...current,
+        shells: [
+          ...current.shells,
+          {
+            id: nextId,
+            title,
+            mode: "general",
+            draft: "",
+            docs: [],
+            attachments: [],
+            sessionId,
+            panel: "main",
+            // The prompt's name IS the intended title — don't let auto-titling
+            // overwrite it from the first turn.
+            titleLocked: true,
+          },
+        ],
+        activeId: nextId,
+        activePane: "main",
+      },
+    };
+  });
+}
+
+/**
  * Open (or re-focus) a read-only doc-preview tab for `path` in a workstream's
  * main pane, and select it. The module-level twin of ProjectPage's
  * `openDocPreview`, callable from outside the project page (e.g. the global

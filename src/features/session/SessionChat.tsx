@@ -41,6 +41,7 @@ import { IS_MACOS } from "../../lib/platform";
 import { useBootstrap, useOpencodeCatalog } from "../../lib/queries";
 import type { WorkstreamView } from "../../lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
+import { PromptChips, usePinnedPrompts } from "../prompts/PromptChips";
 import { AttachmentCards } from "./AttachmentCard";
 import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
 import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
@@ -124,8 +125,8 @@ const STAGE_INTRO: Record<StageKey, string> = {
   plan: "Runs /create_plan to turn research into a concrete, reviewable implementation plan.",
   implement: "Runs /implement_plan to make the changes in this worktree, committing as it goes.",
   validate: "Runs /validate_plan to check the work against the plan and the project's tests.",
-  commit: "Runs /commit to commit this worktree's changes locally — no push or pull request. Use Ship when you're ready to open a PR.",
-  ship: "Commits any remaining changes, then pushes the branch and opens a pull request.",
+  commit: "Runs /commit to commit this worktree's changes, then asks whether to push them — never a pull request. Use Ship when you're ready to open a PR.",
+  ship: "Commits any remaining changes via /commit, then pushes the branch and opens a pull request.",
   revise: "Addresses PR feedback — failing CI or requested changes — then pushes fixes to the branch.",
 };
 
@@ -1087,6 +1088,9 @@ export function SessionChat({
     "ws.cycleStage",
     IS_MACOS,
   );
+  // Pinned prompt chips, anchored beside the task drawer's handle above the
+  // composer (they also drive that strip's space reservation).
+  const pinnedPrompts = usePinnedPrompts(view.item.projectPath);
   // A tab with no explicit pick falls back to the provider defaults configured
   // in Settings → Models → Claude, then to claude's own defaults. `defaultPlanMode`
   // seeds the permission posture to "plan" for fresh tabs.
@@ -1879,10 +1883,14 @@ export function SessionChat({
               {/* The agent's live plan, a drawer docked above the composer. The
                   top margin reserves room for the collapsed handle plus a gap so
                   it floats into clear space with breathing room below the banners
-                  above (queued messages / handoff nudge), not flush against them. */}
+                  above (queued messages / handoff nudge), not flush against them.
+                  Pinned prompt chips share that strip — TASKS tab left, chips
+                  right, one line — so they reserve it too. */}
               <div
                 className={`relative rounded-xl bg-panel-2 ${
-                  planTasks.length > 0 && !planDismissed ? "mt-12" : ""
+                  (planTasks.length > 0 && !planDismissed) || pinnedPrompts.length > 0
+                    ? "mt-12"
+                    : ""
                 }`}
               >
                 <PlanTasksPanel
@@ -1892,6 +1900,13 @@ export function SessionChat({
                   cleared={planDismissed}
                   onToggle={togglePlan}
                 />
+                {pinnedPrompts.length > 0 && (
+                  <PromptChips
+                    view={view}
+                    shellId={shell.id}
+                    className="absolute bottom-full right-3 z-20 mb-1.5 max-w-[70%]"
+                  />
+                )}
                 <AutocompleteDropdown state={autocomplete} />
                 {attachments.length > 0 && (
                   <div className="px-3.5 pt-3">

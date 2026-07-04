@@ -17,6 +17,22 @@ export function PlusIcon({ size = 16, strokeWidth = 2 }: IconProps) {
   );
 }
 
+export function ZapIcon({ size = 14, strokeWidth = 1.7, className }: IconProps) {
+  return (
+    // The bolt spans the viewBox like its rail siblings (Cube/Book fill ~80% of
+    // theirs) — a narrower path read a size smaller at the same render size.
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M13 2.2 3.6 13.5h8L11 21.8l9.4-11.3h-8L13 2.2Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function XIcon({ size = 14, strokeWidth = 2 }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">

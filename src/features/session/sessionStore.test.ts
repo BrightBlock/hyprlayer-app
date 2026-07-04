@@ -15,7 +15,15 @@ const h = vi.hoisted(() => {
   const startStageSession = vi.fn(async (...args: unknown[]) => {
     state.lastChannel = args[args.length - 1] as FakeChannel;
     const id = `s${(state.nextId += 1)}`;
-    return { status: "ok", data: { id, model: "claude-opus-4-8", claudeSessionId: `c-${id}` } };
+    // Mirrors the backend's StartedSession: the row plus the composed prompt
+    // (here just the raw input — composition is the backend's concern).
+    return {
+      status: "ok",
+      data: {
+        session: { id, model: "claude-opus-4-8", claudeSessionId: `c-${id}` },
+        prompt: String(args[2] ?? ""),
+      },
+    };
   });
   const sendUserMessage = vi.fn(async () => ({ status: "ok", data: null }));
   const resumeSession = vi.fn(async () => ({ status: "ok", data: {} }));

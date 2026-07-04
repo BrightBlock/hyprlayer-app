@@ -20,6 +20,9 @@ const ProjectPage = lazy(() =>
 const LibraryPage = lazy(() =>
   import("./routes/LibraryPage").then((m) => ({ default: m.LibraryPage })),
 );
+const PromptsPage = lazy(() =>
+  import("./routes/PromptsPage").then((m) => ({ default: m.PromptsPage })),
+);
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -85,6 +88,21 @@ const archiveRoute = createRoute({
   component: Archive,
 });
 
+/** The Prompt library's selection lives in the URL; a bare `/prompts` shows the
+ *  default (the built-in Commit prompt). */
+export type PromptsSearch = {
+  prompt?: string;
+};
+
+const promptsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/prompts",
+  component: PromptsPage,
+  validateSearch: (search: Record<string, unknown>): PromptsSearch => ({
+    prompt: optionalString(search.prompt),
+  }),
+});
+
 const libraryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/library",
@@ -125,6 +143,7 @@ const routeTree = rootRoute.addChildren([
   onboardingRoute,
   settingsRoute,
   archiveRoute,
+  promptsRoute,
   libraryRoute,
   projectRoute,
 ]);

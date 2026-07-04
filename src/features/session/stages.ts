@@ -33,31 +33,6 @@ export const MODE_STAGES = STAGES.filter(
 
 const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
 
-/** The instruction the Ship action runs, naming `base` as the PR target so a
- *  re-targeted workstream opens its PR against e.g. `develop`. Kept byte-identical
- *  to the backend `ship_prompt` (crates/hyprlayer-core/src/pipeline.rs) so the
- *  optimistic transcript echo matches what claude actually receives — including
- *  the `origin/` strip (the stored base is a git rev; a PR targets the branch). */
-export function shipPrompt(base: string): string {
-  const branch = base.replace(/^origin\//, "");
-  return (
-    "First commit all changes in this worktree, then push the branch to its remote. Only " +
-    "after the commit and push succeed, open a pull request against `" +
-    branch +
-    "` with a " +
-    "clear title and run the /describe_pr skill to write the PR description from the " +
-    "repository's template and update the PR."
-  );
-}
-
-/** The instruction the PR-feedback actions (Fix CI / Address comments) run when
- *  they start a fresh session. Kept byte-identical to the backend `REVISE_PROMPT`
- *  (crates/hyprlayer-core/src/pipeline.rs); the specific feedback rides in the
- *  per-action input appended below it. */
-export const REVISE_PROMPT =
-  "A pull request already exists for this branch. Address the outstanding feedback, then " +
-  "commit and push the fixes to the same branch. Do not open a new pull request.";
-
 /** Backend stage is a plain string; anything unknown renders as general. */
 export function stageOf(view: WorkstreamView): StageKey {
   return (STAGE_KEYS.has(view.item.stage) ? view.item.stage : "general") as StageKey;
@@ -100,11 +75,10 @@ export function suggestedDocKind(stage: string): DocKind | null {
 
 /**
  * The skill slash-command a stage invokes, or `null` for stages that send a
- * plain prompt (general chat; ship and revise send prose directives — see
- * [`shipPrompt`], [`REVISE_PROMPT`]). Mirror of the backend `compose_prompt`
- * (crates/hyprlayer-core/src/pipeline.rs); the backend is the source of truth
- * for what's sent — this drives the composer hint and the optimistic transcript
- * echo.
+ * plain prompt (general chat; ship and revise send prose directives). Mirror of
+ * the backend `Stage::command` (crates/hyprlayer-core/src/pipeline.rs) for UI
+ * hints only — the backend composes what's actually sent (including any
+ * Settings → Prompts override) and returns it for the transcript echo.
  */
 export function stageCommand(stage: string): string | null {
   switch (asStageKey(stage)) {
@@ -121,28 +95,6 @@ export function stageCommand(stage: string): string | null {
     default:
       return null; // general, ship, revise
   }
-}
-
-/**
- * The skill-prefixed prompt the optimistic user bubble echoes — the skill
- * command + the user's input, matching the head of the backend `compose_prompt`
- * (crates/hyprlayer-core/src/pipeline.rs). Attached docs are NOT echoed here:
- * they render as pin cards and the backend owns the `Relevant documents:` tail.
- *
- * `baseBranch` names the Ship PR target (other stages ignore it); the Ship
- * action passes the workstream's base so the echo matches the backend prompt.
- */
-export function composeStagePrompt(stage: string, input: string, baseBranch = ""): string {
-  const trimmed = input.trim();
-  const key = asStageKey(stage);
-  if (key === "general") return trimmed; // plain chat: no skill prefix
-  if (key === "ship") {
-    const ship = shipPrompt(baseBranch);
-    return trimmed ? `${ship}\n\n${trimmed}` : ship;
-  }
-  if (key === "revise") return trimmed ? `${REVISE_PROMPT}\n\n${trimmed}` : REVISE_PROMPT;
-  const command = stageCommand(key)!; // research/plan/implement/validate/commit
-  return trimmed ? `${command} ${trimmed}` : command;
 }
 
 /**

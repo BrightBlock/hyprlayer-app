@@ -1,5 +1,6 @@
 import type { AppSettings, CatalogProvider } from "../../lib/bindings";
-import { modelOption } from "./models";
+import { effectiveEffort, modelOption } from "./models";
+import { permissionModeOption } from "./permissions";
 
 /**
  * The agent harnesses a session can run on. `key` is what the backend's
@@ -97,6 +98,55 @@ export function actionLaunchArgs(d: ActionAgentDefaults): {
     };
   }
   return { harness: d.harness, model: d.model, effort: null };
+}
+
+/** A shell tab's persisted composer picks, when starting a session on its
+ *  behalf from outside SessionChat (e.g. running a prompt into an unstarted
+ *  tab). All optional — absent fields fall back to the settings defaults. */
+export type ShellLaunchPicks = {
+  harness?: string;
+  model?: string;
+  effort?: string;
+  opencodeModel?: string;
+  permissionMode?: string;
+};
+
+/** The `startSession` launch args for a NEW plain chat, resolved exactly the
+ *  way SessionChat's composer does for a fresh tab: the tab's own persisted
+ *  picks first, then the configured defaults (Settings → Harnesses, Claude's
+ *  `defaultPlanMode`), then the built-ins. The prompt-run path uses this so a
+ *  prompt fired at an unstarted tab launches on the same config pressing Enter
+ *  there would — including the permission mode. */
+export function newChatLaunchArgs(
+  settings: AppSettings | null | undefined,
+  shell: ShellLaunchPicks | null | undefined,
+): {
+  harness: string;
+  model: string | null;
+  effort: string | null;
+  permissionMode: string | null;
+} {
+  const providers = settings?.providers;
+  const claude = providers?.claude;
+  const permissionMode = permissionModeOption(
+    shell?.permissionMode ?? (claude?.defaultPlanMode ? "plan" : undefined),
+  ).flag;
+  const harnessKey = shell?.harness ?? effectiveHarnessKey(providers?.defaultHarness);
+  if (harnessKey === "opencode") {
+    const oc = providers?.opencode;
+    const ollama = providers?.ollama;
+    const first = ollama?.selectedModels?.[0];
+    const model =
+      shell?.opencodeModel ??
+      oc?.defaultModel ??
+      ollama?.defaultModel ??
+      oc?.selectedModels?.[0] ??
+      (first ? `ollama/${first}` : null);
+    return { harness: "opencode", model: model ?? null, effort: null, permissionMode };
+  }
+  const model = modelOption(shell?.model ?? claude?.defaultModel ?? undefined);
+  const effort = effectiveEffort(shell?.effort ?? claude?.defaultEffort ?? undefined, model);
+  return { harness: "claude", model: model.flag, effort: effort.key, permissionMode };
 }
 
 /** OpenCode Zen (and similar gateways) expose anonymous `-free` models that

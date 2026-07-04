@@ -42,6 +42,8 @@ import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "../lib/keybindings/registry";
 import { useKeybindings } from "../lib/keybindings/useKeybindings";
 import type { Overrides } from "../lib/keybindings/resolve";
+import { effectiveChord } from "../lib/keybindings/resolve";
+import { formatChord } from "../lib/keybindings/chord";
 import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
 import { RepoAvatar } from "../components/RepoAvatar";
 import { HyprlayerMark } from "../components/Logo";
@@ -60,11 +62,15 @@ import {
   ScriptPanelIcon,
   TerminalIcon,
   WarningTriangleIcon,
+  ZapIcon,
 } from "../components/icons";
 import { useMultiplexer } from "../features/multiplexer/engines";
 import type { EditorTarget } from "../lib/bindings";
 import { SearchPalette } from "../features/search/SearchPalette";
 import { toggleSearch } from "../features/search/searchStore";
+import { PromptPalette } from "../features/prompts/PromptPalette";
+import { togglePromptPalette } from "../features/prompts/promptsStore";
+import { usePromptHotkeys } from "../features/prompts/usePromptHotkeys";
 import {
   toggleDock as toggleScriptDock,
   toggleDockMaximized,
@@ -311,6 +317,7 @@ function routeProjectPath(pathname: string): string | null {
 function routeSection(pathname: string): string {
   if (pathname.startsWith("/projects/")) return "Agent";
   if (pathname.startsWith("/library")) return "Library";
+  if (pathname.startsWith("/prompts")) return "Prompt Library";
   if (pathname.startsWith("/settings")) return "Settings";
   if (pathname.startsWith("/archive")) return "Archive";
   if (pathname.startsWith("/onboarding")) return "Setup";
@@ -532,6 +539,9 @@ export function Root() {
   // The Library owns the second column itself (its own list panel), so the
   // shell's project tree steps aside on this route.
   const onLibrary = pathname.startsWith("/library");
+  // The Prompt library renders its own "Prompts" panel (like the Library's list
+  // panel), so the project panel hides there too.
+  const onPrompts = pathname.startsWith("/prompts");
   // Breadcrumb title for the selected doc — cache-shared with the detail pane's
   // own `useDoc`, so no extra fetch; disabled (empty id) off the library route.
   const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "");
@@ -630,7 +640,7 @@ export function Root() {
     if (canGoBack) router.history.back();
     else fallback();
   };
-  const toggleNav = (target: "/library" | "/settings" | "/archive") => {
+  const toggleNav = (target: "/library" | "/settings" | "/archive" | "/prompts") => {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
     } else if (target === "/library") {
@@ -758,9 +768,15 @@ export function Root() {
   // The header sidebar toggle acts on whichever left panel the route shows: the
   // Library's list panel on /library, the project tree everywhere else. Both
   // collapse the same way, so one button drives both (and reads each one's
-  // shown/hidden state for its label).
-  const sidebarShown = onLibrary ? !libraryCollapsed : !collapsed;
-  const toggleSidebar = () => (onLibrary ? toggleLibrary() : toggleProjectSidebar());
+  // shown/hidden state for its label). The Prompt library's panel is fixed
+  // (always shown), so the toggle is inert there rather than silently flipping
+  // the hidden project tree.
+  const sidebarShown = onLibrary ? !libraryCollapsed : onPrompts ? true : !collapsed;
+  const toggleSidebar = () => {
+    if (onPrompts) return;
+    if (onLibrary) toggleLibrary();
+    else toggleProjectSidebar();
+  };
 
   // Reserve the traffic-light inset only when the lights are actually present:
   // macOS, and not in fullscreen (which hides them). Off macOS there are none,
@@ -789,7 +805,7 @@ export function Root() {
   // It still floors at `minContentOffset` so it clears the macOS traffic lights —
   // the 56px rail alone is narrower than their inset, so the bare rail width
   // would slide the breadcrumb under the close/minimize/zoom buttons.
-  const contentOffset = onLibrary
+  const contentOffset = onLibrary || onPrompts
     ? Math.max(NAV_RAIL_WIDTH, minContentOffset)
     : Math.max(NAV_RAIL_WIDTH + (collapsed ? 0 : sidebarWidth), minContentOffset);
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -817,6 +833,12 @@ export function Root() {
   // in the current context (a null handler = "not available now"), so the chord
   // is simply inert elsewhere. Tab/session commands register from ProjectPage.
   useKeybindings(bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES);
+  // Effective ⌘K chord for the prompt-library button's tooltip.
+  const promptPaletteChord = effectiveChord(
+    bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES,
+    "prompts.palette",
+    IS_MACOS,
+  );
   useCommand("nav.dashboard", () => void navigate({ to: "/" }));
   useCommand("nav.library", () => toggleNav("/library"));
   useCommand("nav.settings", () => toggleNav("/settings"));
@@ -840,6 +862,9 @@ export function Root() {
   );
   useCommand("ws.ship", gitActions.canShip && !gitActions.shipping ? gitActions.doShip : null);
   useCommand("search.open", () => toggleSearch());
+  useCommand("prompts.palette", () => togglePromptPalette());
+  // Custom prompt shortcuts (built-ins ride ws.commit / ws.ship above).
+  usePromptHotkeys(activeWorkstream ?? null);
   // Escape closes Settings, mirroring how ⌘, toggles it shut. A dialog/menu open
   // over it shadows this on the shared Escape stack, so it closes first.
   useEscape(
@@ -1073,6 +1098,20 @@ export function Root() {
                 >
                   <PlusIcon />
                 </button>
+                {/* Prompt library: opens the ⌘K palette over the active
+                    workstream. Accent bolt among the neutral bar controls;
+                    the chord lives in the tooltip. */}
+                <button
+                  type="button"
+                  onClick={() => togglePromptPalette()}
+                  className={topIconClass}
+                  title={`Prompt library${
+                    promptPaletteChord ? ` (${formatChord(promptPaletteChord, IS_MACOS)})` : ""
+                  }`}
+                  aria-label="Prompt library"
+                >
+                  <ZapIcon size={16} className="text-accent" />
+                </button>
                 <OpenInMenu dir={activeWorkstream?.item.worktreePath ?? currentProject.path} />
                 {currentSection === "Agent" && !onBoard && (
                   <button
@@ -1161,6 +1200,17 @@ export function Root() {
             >
               <RailBookIcon />
             </button>
+            <button
+              type="button"
+              onClick={() => toggleNav("/prompts")}
+              className={railNavClass(pathname.startsWith("/prompts"))}
+              title="Prompt library"
+              aria-label="Prompt library"
+            >
+              {/* Sized with its neighbours (Cube 22 / Book 21), not the 18 of
+                  the foot icons — the top group runs visually larger. */}
+              <ZapIcon size={21} strokeWidth={1.6} />
+            </button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-3">
             <button
@@ -1213,7 +1263,7 @@ export function Root() {
             route hides it entirely — that route renders its own list panel. The
             width transition is not reduced-motion-gated — Windows maps that to the
             often-off "Animation effects" toggle, which would otherwise snap it. */}
-        {!onLibrary && (
+        {!onLibrary && !onPrompts && (
         <aside
           className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
             resizingSidebar
@@ -1617,6 +1667,7 @@ export function Root() {
       />
 
       <SearchPalette />
+      <PromptPalette activeWorkstream={activeWorkstream ?? null} />
       <Toast />
     </div>
   );

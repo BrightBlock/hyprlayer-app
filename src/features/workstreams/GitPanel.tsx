@@ -3,11 +3,15 @@ import { useNavigate } from "@tanstack/react-router";
 
 import type { WorkstreamView } from "../../lib/bindings";
 import {
+  useBootstrap,
   useFetchWorkstreamRemote,
   useSetWorkstreamBase,
   useUpdateFromBase,
   useWorkstreamBases,
 } from "../../lib/queries";
+import { IS_MACOS } from "../../lib/platform";
+import { formatChord } from "../../lib/keybindings/chord";
+import { effectiveChord } from "../../lib/keybindings/resolve";
 import { ErrorNote, IconButton, Spinner } from "../../components/ui";
 import {
   ChevronDownIcon,
@@ -192,6 +196,12 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
 export function GitPanel({ view }: { view: WorkstreamView | null }) {
   const navigate = useNavigate();
   const actions = useWorkstreamGitActions(view);
+  // Effective chords for the button tooltips — these run the same commands.
+  const kbOverrides = useBootstrap().data?.settings.keybindings?.overrides ?? {};
+  const chordHint = (commandId: string): string => {
+    const chord = effectiveChord(kbOverrides, commandId, IS_MACOS);
+    return chord ? ` (${formatChord(chord, IS_MACOS)})` : "";
+  };
   const [attachTarget, setAttachTarget] = useState<WorkstreamView | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
   // "Update from base" lives here (not a child) so the small pull button and its
@@ -291,7 +301,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     disabled={actions.committing}
                     onClick={actions.doCommit}
                     className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-panel-2 text-sm font-medium text-ink hover:bg-edge/50 disabled:opacity-60"
-                    title="Commit this worktree's changes (no push or pull request)"
+                    title={`Runs the Commit prompt — commits locally, then asks whether to push${chordHint("ws.commit")}`}
                   >
                     <GitCommitIcon size={15} />
                     Commit · {actions.changedCount}
@@ -303,7 +313,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     disabled={actions.shipping}
                     onClick={actions.doShip}
                     className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-accent text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
-                    title="Commit, push, and open a pull request"
+                    title={`Runs the Ship prompt — commit, push, and open a pull request${chordHint("ws.ship")}`}
                   >
                     <GitPullRequestIcon size={15} />
                     Ship
