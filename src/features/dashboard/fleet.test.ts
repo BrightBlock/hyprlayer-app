@@ -57,6 +57,7 @@ function view(id: string): WorkstreamView {
       untracked: 0,
       ahead: 0,
       behind: 0,
+      aheadOfBase: 0,
       thoughts: "ok",
     },
     seed: null,

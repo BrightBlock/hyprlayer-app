@@ -37,6 +37,7 @@ function makeView(
       untracked: 0,
       ahead: 0,
       behind: 0,
+      aheadOfBase: 0,
       thoughts: "ok" as const,
     },
     seed: null,

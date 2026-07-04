@@ -2045,8 +2045,21 @@ export type WorktreeStatus = {
 	deletions: number,
 	/**  Untracked files, excluding thoughts/ (informational only). */
 	untracked: number,
+	/**
+	 *  Commits ahead/behind the upstream once it exists, else the base branch.
+	 *  Drops to 0 the moment the branch is pushed — a sync indicator, not a
+	 *  "has work to ship" signal (see `ahead_of_base`).
+	 */
 	ahead: number,
 	behind: number,
+	/**
+	 *  Commits on this branch not yet in the base branch (the PR's merge
+	 *  target), always measured against `base_branch` regardless of the
+	 *  upstream. Unlike `ahead`, this does NOT drop to 0 when the branch is
+	 *  pushed, so it answers "is there anything to open a PR for?" — the signal
+	 *  Ship gates on.
+	 */
+	aheadOfBase: number,
 	thoughts: LinkStatus,
 };
 

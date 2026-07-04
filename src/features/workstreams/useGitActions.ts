@@ -19,6 +19,11 @@ import {
  * already has an open or merged PR (the PR bar takes over). Commit is hidden
  * while Ship is mid-turn (`shipBusy`) or just kicked off (`shipping`) — Ship
  * commits these same changes itself, so a manual Commit would race it.
+ *
+ * Ship gates on `aheadOfBase` (commits vs the merge target), NOT `ahead` (commits
+ * vs the upstream): `ahead` drops to 0 the moment the branch is pushed, but a
+ * pushed-yet-PR-less branch still has something to ship — so pushing must not
+ * make the button vanish.
  */
 export function useWorkstreamGitActions(view: WorkstreamView | null) {
   const id = view?.item.id ?? "";
@@ -35,7 +40,7 @@ export function useWorkstreamGitActions(view: WorkstreamView | null) {
 
   const canCommit = enabled && changedCount > 0 && !shipBusy && !shipping;
   const canShip = Boolean(
-    view && !hasLivePr && (changedCount > 0 || view.git.ahead > 0),
+    view && !hasLivePr && (changedCount > 0 || view.git.aheadOfBase > 0),
   );
 
   const doCommit = () => {

@@ -112,8 +112,17 @@ pub struct WorktreeStatus {
     pub deletions: u32,
     /// Untracked files, excluding thoughts/ (informational only).
     pub untracked: u32,
+    /// Commits ahead/behind the upstream once it exists, else the base branch.
+    /// Drops to 0 the moment the branch is pushed — a sync indicator, not a
+    /// "has work to ship" signal (see `ahead_of_base`).
     pub ahead: u32,
     pub behind: u32,
+    /// Commits on this branch not yet in the base branch (the PR's merge
+    /// target), always measured against `base_branch` regardless of the
+    /// upstream. Unlike `ahead`, this does NOT drop to 0 when the branch is
+    /// pushed, so it answers "is there anything to open a PR for?" — the signal
+    /// Ship gates on.
+    pub ahead_of_base: u32,
     pub thoughts: LinkStatus,
 }
 
@@ -683,6 +692,7 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         untracked: 0,
         ahead: 0,
         behind: 0,
+        ahead_of_base: 0,
         thoughts: thoughts.unwrap_or(LinkStatus::Broken),
     };
     if !worktree.exists() {
@@ -732,6 +742,23 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     })()
     .unwrap_or((0, 0));
 
+    // Ship gates on this, NOT `ahead`: once the branch is pushed, `ahead` (vs
+    // upstream) is 0, but there's still a PR to open — so measure against the
+    // base branch always, ignoring the upstream, so a push never hides Ship.
+    let ahead_of_base = (|| -> Option<u32> {
+        let head_ref = head.as_ref()?;
+        let local = head_ref.target()?;
+        let base = repo
+            .revparse_single(base_branch)
+            .ok()?
+            .peel_to_commit()
+            .ok()?
+            .id();
+        let (a, _) = repo.graph_ahead_behind(local, base).ok()?;
+        Some(a as u32)
+    })()
+    .unwrap_or(0);
+
     WorktreeStatus {
         exists: true,
         branch,
@@ -741,6 +768,7 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         untracked,
         ahead,
         behind,
+        ahead_of_base,
         thoughts: thoughts.unwrap_or(LinkStatus::Ok),
     }
 }
@@ -886,7 +914,7 @@ mod tests {
         sh(&wt, &["add", "README.md"]);
         sh(&wt, &["commit", "-m", "wip"]);
         let st = status(&wt, &created.base_branch, None);
-        assert_eq!((st.dirty, st.ahead), (0, 1));
+        assert_eq!((st.dirty, st.ahead, st.ahead_of_base), (0, 1, 1));
         assert_eq!(st.untracked, 0, "thoughts/ must not count");
         let err = manager
             .remove(
@@ -923,6 +951,37 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+    }
+
+    /// Regression: pushing a branch to its remote must not hide Ship. After a
+    /// push, `ahead` (vs the upstream) is 0, but the branch still carries commits
+    /// with no PR — so `ahead_of_base` (vs the base branch) must stay > 0.
+    #[test]
+    fn ahead_of_base_survives_push_while_ahead_zeroes() {
+        let (guard, repo) = fixture_repo();
+
+        // A branch one commit ahead of main, no upstream yet.
+        sh(&repo, &["checkout", "-b", "feature/x"]);
+        std::fs::write(repo.join("feature.txt"), "work\n").unwrap();
+        sh(&repo, &["add", "."]);
+        sh(&repo, &["commit", "-m", "feature work"]);
+
+        // Pre-push: no upstream, so `ahead` falls back to the base branch.
+        let before = status(&repo, "main", None);
+        assert_eq!((before.ahead, before.ahead_of_base), (1, 1));
+
+        // Push to a bare remote and set upstream — the state that hid Ship.
+        let remote = guard.path().join("remote.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        sh(&repo, &["push", "-u", "origin", "feature/x"]);
+
+        let after = status(&repo, "main", None);
+        assert_eq!(after.ahead, 0, "pushed: nothing left to push vs upstream");
+        assert_eq!(
+            after.ahead_of_base, 1,
+            "pushed: still a commit to ship vs base — Ship must stay visible",
+        );
     }
 
     /// Existing-branch mode checks a branch the user already has out into a
