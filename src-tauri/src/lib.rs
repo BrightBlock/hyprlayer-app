@@ -144,6 +144,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::onboarding::get_ai_status,
             commands::onboarding::probe_default_thoughts,
             commands::onboarding::init_thoughts_repo,
+            commands::prompts::read_prompts_file,
+            commands::prompts::write_prompts_file,
         ])
         .events(collect_events![
             events::ConfigChanged,

@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 
+import { commands } from "../../lib/bindings";
 import type { AppSettings, CustomPrompt, PromptSettings } from "../../lib/bindings";
 import { useBootstrap, useSetAppSettings } from "../../lib/queries";
 import { IS_MACOS } from "../../lib/platform";
+import { useToast } from "../../lib/toast";
+import { startEdgeDrag } from "../../lib/resize";
+import { PROMPTS_SIDEBAR_MAX, PROMPTS_SIDEBAR_MIN, useUiStore } from "../../lib/uiStore";
 import { Badge, Button, Card, ChordHint, ErrorNote, TextInput, Toggle } from "../../components/ui";
 import {
   BracesIcon,
+  ExportIcon,
   GitCommitIcon,
   GitPullRequestIcon,
+  ImportIcon,
   PlusIcon,
   ZapIcon,
 } from "../../components/icons";
@@ -28,6 +34,20 @@ import {
   isBuiltinModified,
   type BuiltinPromptId,
 } from "./prompts";
+import { ExportPromptsDialog } from "./ExportPromptsDialog";
+import { ImportPromptsDialog } from "./ImportPromptsDialog";
+import {
+  PROMPTS_FILE_EXT,
+  applyImport,
+  buildPromptsFile,
+  parsePromptsFile,
+  planImport,
+  type ExportEntry,
+  type ExportOptions,
+  type ImportCandidate,
+  type ImportDecision,
+  type LibrarySnapshot,
+} from "./promptsIo";
 
 const EMPTY_OVERRIDES: Overrides = {};
 const SAVE_DEBOUNCE_MS = 600;
@@ -119,7 +139,12 @@ export function PromptLibrary({
   const save = useSetAppSettings();
   const bootstrap = useBootstrap();
   const defaults = bootstrap.data?.promptDefaults ?? null;
-  const projects = bootstrap.data?.projects ?? [];
+  const projects = useMemo(() => bootstrap.data?.projects ?? [], [bootstrap.data?.projects]);
+
+  // Drag-resizable master-panel width, in the UI store so it survives leaving
+  // and re-opening the route (session-only, like the Library's list panel).
+  const promptsWidth = useUiStore((s) => s.promptsWidth);
+  const setPromptsWidth = useUiStore((s) => s.setPromptsWidth);
 
   // ── Draft state: the single source of truth while this page is open. ──────
   const settingsRef = useRef(settings);
@@ -186,6 +211,12 @@ export function PromptLibrary({
   const [varPickerOpen, setVarPickerOpen] = useState(false);
   const [projPickerOpen, setProjPickerOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<{
+    fileName: string;
+    source: string | null;
+    candidates: ImportCandidate[];
+  } | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   // Switching prompts resets the per-prompt editor state (scope tab, an
@@ -208,7 +239,7 @@ export function PromptLibrary({
   }, [selectedId, custom]);
 
   const kbOverrides = settings.keybindings?.overrides ?? EMPTY_OVERRIDES;
-  const asSettings = { ...settings, prompts };
+  const asSettings = useMemo(() => ({ ...settings, prompts }), [settings, prompts]);
 
   // ── Selected prompt's derived fields. ─────────────────────────────────────
   const isBuiltin = selection.kind === "builtin";
@@ -406,22 +437,198 @@ export function PromptLibrary({
     (p) => selPrompt && selPrompt.overrides?.[p.path] === undefined,
   );
 
+  // ── Import / export ────────────────────────────────────────────────────────
+  const chordLabel = (c: string) => formatChord(normalizeChord(c), IS_MACOS);
+  const basename = (p: string) => p.split(/[\\/]/).pop() || p;
+  const slugify = (name: string) =>
+    name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "prompt";
+
+  // Everything exportable, resolved to effective bodies/chords. Built-ins first,
+  // then custom — the order the sidebar and the export dialog both show.
+  const exportEntries: ExportEntry[] = useMemo(() => {
+    const builtins = BUILTIN_PROMPTS.map((b) => ({
+      id: b.id,
+      name: b.name,
+      builtin: true,
+      body: effectiveBuiltinBody(asSettings, defaults, b.id),
+      chord: effectiveChord(kbOverrides, b.commandId, IS_MACOS),
+      overrides: {},
+    }));
+    const customs = custom.map((c) => ({
+      id: c.id ?? "",
+      name: c.name ?? "",
+      builtin: false,
+      body: c.body ?? "",
+      chord: c.chord ? normalizeChord(c.chord) : null,
+      overrides: c.overrides ?? {},
+    }));
+    return [...builtins, ...customs];
+  }, [asSettings, defaults, kbOverrides, custom]);
+
+  // The export dialog omits stock built-ins — an unmodified Commit/Ship is
+  // identical to what every recipient already has, so it's just noise. Custom
+  // prompts always list; a built-in only earns a row once it's been edited.
+  // (The editor's own Export button still exports whatever prompt is open.)
+  const exportListEntries = useMemo(
+    () =>
+      exportEntries.filter(
+        (e) => !e.builtin || isBuiltinModified(asSettings, defaults, e.id as BuiltinPromptId),
+      ),
+    [exportEntries, asSettings, defaults],
+  );
+
+  // What an incoming file is matched against: existing names, bound chords, and
+  // the project name→path map used to re-home overrides.
+  const librarySnapshot: LibrarySnapshot = useMemo(() => {
+    const takenChords = new Set<string>();
+    for (const b of BUILTIN_PROMPTS) {
+      const ch = effectiveChord(kbOverrides, b.commandId, IS_MACOS);
+      if (ch) takenChords.add(ch);
+    }
+    for (const c of custom) if (c.chord) takenChords.add(normalizeChord(c.chord));
+    const projectPathByName = new Map<string, string>();
+    for (const p of projects) projectPathByName.set(p.mappedName, p.path);
+    return {
+      builtins: BUILTIN_PROMPTS.map((b) => ({ id: b.id, name: b.name })),
+      custom,
+      takenChords,
+      projectPathByName,
+    };
+  }, [kbOverrides, custom, projects]);
+
+  /** Write `content` to a user-chosen path, forcing the `.hlprompts` suffix.
+   *  Returns the final basename on success, null if cancelled, or throws. */
+  const writeToChosenPath = async (defaultName: string, content: string): Promise<string | null> => {
+    const chosen = await saveFileDialog({
+      title: "Export prompts",
+      defaultPath: defaultName,
+      filters: [{ name: "Hyprlayer prompts", extensions: [PROMPTS_FILE_EXT] }],
+    });
+    if (!chosen) return null;
+    const path = chosen.endsWith(`.${PROMPTS_FILE_EXT}`) ? chosen : `${chosen}.${PROMPTS_FILE_EXT}`;
+    const res = await commands.writePromptsFile(path, content);
+    if (res.status === "error") {
+      useToast.getState().show("Export failed", res.error.message || "Couldn't write the file.", {
+        tone: "bad",
+      });
+      return null;
+    }
+    return basename(path);
+  };
+
+  const openImportDialog = async () => {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      title: "Import prompts",
+      filters: [{ name: "Hyprlayer prompts", extensions: [PROMPTS_FILE_EXT] }],
+    });
+    const path = Array.isArray(selected) ? selected[0] : selected;
+    if (!path) return;
+    const res = await commands.readPromptsFile(path);
+    if (res.status === "error") {
+      useToast.getState().show("Import failed", res.error.message || "Couldn't read that file.", {
+        tone: "bad",
+      });
+      return;
+    }
+    const parsed = parsePromptsFile(res.data);
+    if (!parsed.ok) {
+      useToast.getState().show("Import failed", parsed.error, { tone: "bad" });
+      return;
+    }
+    setImportFile({
+      fileName: basename(path),
+      source: parsed.file.source ?? null,
+      candidates: planImport(parsed.file, librarySnapshot),
+    });
+  };
+
+  const runImport = (decisions: Record<string, ImportDecision>) => {
+    if (!importFile) return;
+    const outcome = applyImport(
+      importFile.candidates,
+      decisions,
+      promptsRef.current,
+      librarySnapshot,
+      newPromptId,
+    );
+    const from = importFile.fileName;
+    setImportFile(null);
+    if (!outcome.imported) return;
+    update(() => outcome.prompts, { immediate: true });
+    if (outcome.firstId) select(outcome.firstId);
+    useToast.getState().show(
+      "Prompts imported",
+      `Imported ${outcome.imported} prompt${outcome.imported === 1 ? "" : "s"} from ${from}.`,
+    );
+  };
+
+  const runExport = async (selected: ExportEntry[], opts: ExportOptions) => {
+    const content = buildPromptsFile(selected, { ...opts, projectName });
+    const name = await writeToChosenPath(`hyprlayer-prompts.${PROMPTS_FILE_EXT}`, content);
+    if (name === null) return;
+    setExportOpen(false);
+    useToast.getState().show(
+      "Prompts exported",
+      `Exported ${selected.length} prompt${selected.length === 1 ? "" : "s"} → ${name}.`,
+    );
+  };
+
+  // The editor's one-click export of the selected prompt — no options, carries
+  // its chord and any overrides as-is.
+  const exportSelected = async () => {
+    const entry = exportEntries.find((e) => e.id === selectedId);
+    if (!entry) return;
+    const content = buildPromptsFile([entry], {
+      includeChords: true,
+      includeOverrides: true,
+      projectName,
+    });
+    const name = await writeToChosenPath(`${slugify(entry.name)}.${PROMPTS_FILE_EXT}`, content);
+    if (name === null) return;
+    useToast.getState().show("Prompt exported", `Exported “${entry.name}” → ${name}.`);
+  };
+
   return (
     <div className="flex h-full min-h-0">
       {/* ── "Prompts" master panel — the mock's sidebar, styled like the
              project/Library panels (h-9 header band, bg-panel, border seam). ── */}
-      <aside className="flex w-64 shrink-0 flex-col border-r border-edge bg-panel">
+      <aside
+        className="flex shrink-0 flex-col border-r border-edge bg-panel"
+        style={{ width: promptsWidth }}
+      >
         <div className="flex h-9 shrink-0 items-center justify-between border-b border-edge pl-4 pr-3">
           <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Prompts</p>
-          <button
-            type="button"
-            onClick={addPrompt}
-            className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-            title="New prompt"
-            aria-label="New prompt"
-          >
-            <PlusIcon size={14} />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => void openImportDialog()}
+              className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+              title="Import prompts from a .hlprompts file"
+              aria-label="Import prompts"
+            >
+              <ImportIcon size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportOpen(true)}
+              className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+              title="Export prompts to share"
+              aria-label="Export prompts"
+            >
+              <ExportIcon size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={addPrompt}
+              className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+              title="New prompt"
+              aria-label="New prompt"
+            >
+              <PlusIcon size={14} />
+            </button>
+          </div>
         </div>
         <div className="px-3 pb-1 pt-3">
           <TextInput
@@ -500,6 +707,23 @@ export function PromptLibrary({
         </div>
       </aside>
 
+      {/* Drag separator between the master panel and the editor. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize prompts sidebar"
+        className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+        onPointerDown={(e) =>
+          startEdgeDrag(e, {
+            startWidth: promptsWidth,
+            min: PROMPTS_SIDEBAR_MIN,
+            max: PROMPTS_SIDEBAR_MAX,
+            direction: 1,
+            onResize: setPromptsWidth,
+          })
+        }
+      />
+
       {/* ── Editor ── */}
       <section className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl space-y-4 p-8">
@@ -535,6 +759,10 @@ export function PromptLibrary({
             )}
             {selModified && <Badge tone="warn">Modified</Badge>}
             <div className="ml-auto flex shrink-0 items-center gap-2">
+              <Button onClick={() => void exportSelected()} title="Save this prompt as a .hlprompts file">
+                <ExportIcon size={13} />
+                Export
+              </Button>
               {builtinDef && selModified && (
                 <Button onClick={resetBuiltin} title="Restore the stock prompt text">
                   Reset to default
@@ -825,6 +1053,29 @@ export function PromptLibrary({
           </Card>
         </div>
       </section>
+
+      {exportOpen && (
+        <ExportPromptsDialog
+          entries={exportListEntries}
+          chordLabel={chordLabel}
+          onExport={(sel, opts) => void runExport(sel, opts)}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
+      {importFile && (
+        <ImportPromptsDialog
+          fileName={importFile.fileName}
+          source={importFile.source}
+          candidates={importFile.candidates}
+          chordLabel={chordLabel}
+          onConfirm={runImport}
+          onChooseAnother={() => {
+            setImportFile(null);
+            void openImportDialog();
+          }}
+          onClose={() => setImportFile(null)}
+        />
+      )}
     </div>
   );
 }

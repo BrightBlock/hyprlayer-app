@@ -18,6 +18,14 @@ export const LIBRARY_SIDEBAR_WIDTH = 288;
 export const LIBRARY_SIDEBAR_MIN = 220;
 export const LIBRARY_SIDEBAR_MAX = 480;
 
+/** Default + drag-resize bounds (px) for the prompt library's list panel. The
+ *  default preserves the previous fixed `w-64`; the bounds keep the header
+ *  actions + chord hints readable at the low end and stop it crowding the
+ *  editor at the high end. */
+export const PROMPTS_SIDEBAR_WIDTH = 256;
+export const PROMPTS_SIDEBAR_MIN = 200;
+export const PROMPTS_SIDEBAR_MAX = 420;
+
 type UiStore = {
   /**
    * Whether the right-hand diff sidebar is hidden. Shared state so the top-bar
@@ -42,6 +50,11 @@ type UiStore = {
    *  route unmounts, but this store doesn't. */
   libraryWidth: number;
   setLibraryWidth: (width: number) => void;
+  /** Live width (px) of the prompt library's list panel. Session-only like
+   *  `libraryWidth` — survives navigation via the store but resets on restart
+   *  (excluded from `partialize`, so a drag never writes to localStorage). */
+  promptsWidth: number;
+  setPromptsWidth: (width: number) => void;
   /** Whether the Library's list panel is collapsed. Mirrors the project panel's
    *  collapse so the header sidebar toggle works the same on the Library route;
    *  here (not the route) so it survives leaving and re-opening the Library. */
@@ -70,6 +83,8 @@ export const useUiStore = create<UiStore>()(
       setDiffWidth: (width) => set({ diffWidth: width }),
       libraryWidth: LIBRARY_SIDEBAR_WIDTH,
       setLibraryWidth: (width) => set({ libraryWidth: width }),
+      promptsWidth: PROMPTS_SIDEBAR_WIDTH,
+      setPromptsWidth: (width) => set({ promptsWidth: width }),
       libraryCollapsed: false,
       toggleLibrary: () => set((state) => ({ libraryCollapsed: !state.libraryCollapsed })),
       projectSidebarCollapsed: false,

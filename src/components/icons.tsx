@@ -206,9 +206,9 @@ export function EffortIcon({ size = 14, className }: IconProps) {
   );
 }
 
-export function DocIcon({ size = 12, strokeWidth = 2 }: IconProps) {
+export function DocIcon({ size = 12, strokeWidth = 2, className }: IconProps) {
   return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
       <path d="M6 3h8l4 4v14H6V3Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
       <path d="M14 3v4h4" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
     </svg>
@@ -541,6 +541,36 @@ export function DownloadIcon({ size = 14, strokeWidth = 1.9, className }: IconPr
       <path d="M12 3v12" />
       <path d="m7 11 5 5 5-5" />
       <path d="M5 21h14" />
+    </svg>
+  );
+}
+
+/** Import — an arrow dropping into a tray. Prompt-library "import a .hlprompts". */
+export function ImportIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        d="M8 2.5v7M8 9.5 5.2 6.7M8 9.5l2.8-2.8M2.5 11.5v1.2c0 .8.7 1.4 1.5 1.4h8c.8 0 1.5-.6 1.5-1.4v-1.2"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Export — an arrow rising out of a tray. Prompt-library "export to share". */
+export function ExportIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        d="M8 9.5v-7M8 2.5 5.2 5.3M8 2.5l2.8 2.8M2.5 11.5v1.2c0 .8.7 1.4 1.5 1.4h8c.8 0 1.5-.6 1.5-1.4v-1.2"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

@@ -632,6 +632,16 @@ export const commands = {
 	 *  doesn't wait for the 2-second poll cycle.
 	 */
 	initThoughtsRepo: (user: string, source: ThoughtsSource) => typedError<Bootstrap, AppError>(__TAURI_INVOKE("init_thoughts_repo", { user, source })),
+	/**
+	 *  Read a `.hlprompts` file's UTF-8 text for the webview to parse. `path` comes
+	 *  from the native open dialog, so it is whatever file the user picked.
+	 */
+	readPromptsFile: (path: string) => typedError<string, AppError>(__TAURI_INVOKE("read_prompts_file", { path })),
+	/**
+	 *  Write `contents` to `path` (chosen via the native save dialog). The frontend
+	 *  has already ensured the path ends in `.hlprompts` and built the JSON body.
+	 */
+	writePromptsFile: (path: string, contents: string) => typedError<null, AppError>(__TAURI_INVOKE("write_prompts_file", { path, contents })),
 };
 
 /** Events */
