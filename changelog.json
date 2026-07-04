@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.4.11",
+      "date": "2026-07-04",
+      "summary": "Observatory home view, Ship gating, and rewind memory fix.",
+      "notes": [
+        "The home screen is now an Observatory view with an activity graph, live agent list, and a first-run state.",
+        "Ship is now gated on the branch being ahead of base, so the button hides correctly after a push.",
+        "Fixed rewind so memory is truly truncated and ordinal mapping stays correct across resumes."
+      ]
+    },
+    {
       "version": "0.4.10",
       "date": "2026-07-04",
       "summary": "Prompt library with ⌘K palette and import/export.",
