@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import type { CustomPrompt, WorkstreamView } from "../../lib/bindings";
 import { useBootstrap } from "../../lib/queries";
 import { ChordHint } from "../../components/ui";
-import { SparkleIcon } from "../../components/icons";
+import { ZapIcon } from "../../components/icons";
 import { customPrompts, effectiveCustomBody } from "./prompts";
 import { runCustomPrompt } from "./runPrompt";
 
@@ -59,7 +59,7 @@ export function PromptChips({
           className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs text-ink hover:border-accent/50 hover:bg-accent/10"
         >
           <span className="shrink-0 text-accent">
-            <SparkleIcon size={12} />
+            <ZapIcon size={12} />
           </span>
           <span className="max-w-44 truncate">{p.name || "Prompt"}</span>
           {p.chord && (

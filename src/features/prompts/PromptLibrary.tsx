@@ -10,7 +10,7 @@ import {
   GitCommitIcon,
   GitPullRequestIcon,
   PlusIcon,
-  SparkleIcon,
+  ZapIcon,
 } from "../../components/icons";
 import {
   eventToChord,
@@ -468,7 +468,7 @@ export function PromptLibrary({
                 .map((p) =>
                   listRow({
                     key: p.id ?? "",
-                    icon: <SparkleIcon size={14} />,
+                    icon: <ZapIcon size={14} />,
                     name: p.name ?? "",
                     chord: p.chord ? normalizeChord(p.chord) : null,
                     hasOverrides: Object.keys(p.overrides ?? {}).length > 0,
@@ -514,7 +514,7 @@ export function PromptLibrary({
                   <GitPullRequestIcon size={16} />
                 )
               ) : (
-                <SparkleIcon size={16} />
+                <ZapIcon size={16} />
               )}
             </span>
             {builtinDef ? (

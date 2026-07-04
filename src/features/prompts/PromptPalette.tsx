@@ -6,7 +6,7 @@ import { useBootstrap } from "../../lib/queries";
 import { IS_MACOS } from "../../lib/platform";
 import { ChordHint } from "../../components/ui";
 import { effectiveChord, type Overrides } from "../../lib/keybindings/resolve";
-import { GitCommitIcon, GitPullRequestIcon, PencilIcon, SparkleIcon, ZapIcon } from "../../components/icons";
+import { GitCommitIcon, GitPullRequestIcon, PencilIcon, ZapIcon } from "../../components/icons";
 import { useWorkstreamGitActions } from "../workstreams/useGitActions";
 import { closePromptPalette, usePromptPaletteStore } from "./promptsStore";
 import {
@@ -106,7 +106,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         name,
         desc: promptFirstLine(body),
         chord: p.chord ?? null,
-        icon: <SparkleIcon size={14} className="shrink-0 text-accent" />,
+        icon: <ZapIcon size={14} className="shrink-0 text-accent" />,
         disabled: noWs ?? (body.trim() ? null : "This prompt has no text yet"),
         run: () => {
           if (activeWorkstream) void runCustomPrompt(activeWorkstream, p);
