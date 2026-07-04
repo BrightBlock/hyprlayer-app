@@ -278,6 +278,14 @@ export type TranscriptItem =
       kind: "relaunched";
       id: string;
     }
+  /** Non-rendering marker for the backend's `rewound` event — a live rewind
+   *  truncated the conversation IN PLACE (same process). Like `relaunched` it's an
+   *  inert transcript boundary, but `backgroundTasksFromItems` must NOT drop tasks
+   *  at it: the process is unchanged, so its background shells are still alive. */
+  | {
+      kind: "rewound";
+      id: string;
+    }
   | {
       kind: "exit";
       id: string;
@@ -945,6 +953,15 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       return {
         ...view,
         ...appended(view, (id) => ({ kind: "relaunched", id })),
+      };
+
+    case "rewound":
+      // Inert boundary for a live in-place rewind. Same process — so, unlike
+      // `relaunched`, `backgroundTasksFromItems` does NOT clear tasks here (its
+      // still-running background shells can still complete-notify).
+      return {
+        ...view,
+        ...appended(view, (id) => ({ kind: "rewound", id })),
       };
 
     case "backgroundTaskUpdate":

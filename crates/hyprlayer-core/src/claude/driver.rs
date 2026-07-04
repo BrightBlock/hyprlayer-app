@@ -23,7 +23,7 @@ use std::sync::Mutex as StdMutex;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::events::{ExitOutcome, SessionEvent};
 use super::protocol::{self, Block, ParsedLine};
@@ -79,6 +79,12 @@ pub struct SpawnConfig {
     pub add_dirs: Vec<PathBuf>,
     /// `--resume <claude_session_id>` to continue; cwd must match the original.
     pub resume: Option<String>,
+    /// How many human turns already precede this generation in the persisted log
+    /// (0 for a fresh session; the resumed turn count otherwise). Only turns from
+    /// THIS generation echo their uuid back to us, so [`ClaudeDriver::rewind_to_ordinal`]
+    /// subtracts this to map a GLOBAL turn ordinal onto the uuids we captured —
+    /// without it a resumed session peels the wrong turn (or none).
+    pub user_turn_base: usize,
     /// Branch a resumed session instead of continuing it.
     pub fork: bool,
     /// Cost circuit-breaker.
@@ -96,6 +102,14 @@ pub struct SpawnConfig {
 
 const STDERR_RING_LINES: usize = 200;
 const EVENT_CHANNEL_CAP: usize = 1024;
+
+/// The result of one `rewind_conversation` control request. `rewound` is claude's
+/// own success flag; `error` carries its refusal reason ("stale target", "turn
+/// running", "no preceding assistant", …) when it declined.
+struct RewindOutcome {
+    rewound: bool,
+    error: Option<String>,
+}
 
 /// A handle to a live session. Dropping it does NOT kill the child (the waiter
 /// task owns it); call [`ClaudeDriver::kill`] for a hard stop.
@@ -115,6 +129,17 @@ pub struct ClaudeDriver {
     /// Tool inputs from open `can_use_tool` requests, keyed by request id —
     /// echoed back as `updatedInput` when allowing (claude's schema requires it).
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
+    /// claude message uuids of the human turns in this generation, in order
+    /// (captured from `--replay-user-messages` echoes). `rewind_to_ordinal` maps
+    /// the 1-based turn ordinal onto these to target a `rewind_conversation`.
+    user_uuids: Arc<StdMutex<Vec<String>>>,
+    /// Human turns that precede this generation (see [`SpawnConfig::user_turn_base`]).
+    /// `user_uuids[0]` is turn `user_turn_base + 1`, so a global ordinal maps to
+    /// `ordinal - user_turn_base - 1`.
+    user_turn_base: usize,
+    /// Control requests awaiting a `control_response`, keyed by request id (just
+    /// `rewind_conversation` today). The reader resolves the oneshot on reply.
+    pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
     /// Best-effort hard-kill hook (pid / process group).
     killer: Killer,
 }
@@ -132,6 +157,11 @@ impl ClaudeDriver {
             .args(["--input-format", "stream-json"])
             .arg("--verbose")
             .arg("--include-partial-messages")
+            // Echo each user turn back on stdout (tagged `isReplay`) so we can
+            // capture claude's own message uuid for it — the target a
+            // `rewind_conversation` control request needs. The reader suppresses
+            // the echo itself (it's not new content).
+            .arg("--replay-user-messages")
             .args(["--permission-prompt-tool", "stdio"])
             .args(["--permission-mode", config.permission_mode.as_flag()]);
 
@@ -225,6 +255,9 @@ impl ClaudeDriver {
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
         let killed = Arc::new(AtomicBool::new(false));
         let pending_permissions = Arc::new(StdMutex::new(HashMap::<String, Value>::new()));
+        let user_uuids = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let pending_controls =
+            Arc::new(StdMutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
 
         // Writer task: drain the queue onto stdin, one line per message.
         tokio::spawn(write_loop(stdin, stdin_rx));
@@ -240,6 +273,8 @@ impl ClaudeDriver {
             stderr_ring.clone(),
             killed.clone(),
             pending_permissions.clone(),
+            user_uuids.clone(),
+            pending_controls.clone(),
         ));
 
         Ok((
@@ -251,6 +286,9 @@ impl ClaudeDriver {
                 stderr_ring,
                 killed,
                 pending_permissions,
+                user_uuids,
+                user_turn_base: config.user_turn_base,
+                pending_controls,
                 killer: Killer { pid },
             },
             primary_rx,
@@ -340,6 +378,107 @@ impl ClaudeDriver {
         ))
     }
 
+    /// Rewind claude's OWN conversation to the 1-based `ordinal` human turn,
+    /// truncating history — and its on-disk transcript — so that turn and
+    /// everything after it leave the model's memory (a `--resume` then reloads the
+    /// shortened conversation). claude's `rewind_conversation` only accepts the
+    /// *latest* human turn as a target, so we peel from the tail down to the
+    /// target; each step is the current last turn, so none is "stale".
+    ///
+    /// `ordinal` is GLOBAL (the N-th human turn across the whole conversation), but
+    /// we only hold uuids for the turns sent in THIS generation — those after the
+    /// base — so it maps to local index `ordinal - user_turn_base - 1`. A target at
+    /// or before the base predates our captured uuids (e.g. a pre-resume turn), and
+    /// the first turn has no preceding assistant to land on; both — like a running
+    /// turn that won't interrupt or a claude refusal — leave the conversation
+    /// untouched and let the caller fall back to a log-only rewind.
+    pub async fn rewind_to_ordinal(&self, ordinal: usize) -> Result<()> {
+        let uuids = self
+            .user_uuids
+            .lock()
+            .map(|u| u.clone())
+            .unwrap_or_default();
+        // Resolve which captured uuid to peel down to (pure; unit-tested). Any
+        // unreachable target leaves the conversation untouched and drops the caller
+        // to a log-only rewind.
+        let local_idx = rewind_local_start(ordinal, self.user_turn_base, uuids.len())
+            .map_err(|detail| CoreError::OutputParse {
+                program: "claude".into(),
+                detail,
+            })?;
+        for uuid in uuids[local_idx..].iter().rev() {
+            let outcome = self.rewind_conversation(uuid, true).await?;
+            if !outcome.rewound {
+                return Err(CoreError::OutputParse {
+                    program: "claude".into(),
+                    detail: format!(
+                        "claude refused rewind_conversation: {}",
+                        outcome.error.as_deref().unwrap_or("unknown")
+                    ),
+                });
+            }
+        }
+        // Drop the peeled turns so a follow-up rewind maps ordinals correctly.
+        if let Ok(mut u) = self.user_uuids.lock() {
+            u.truncate(local_idx);
+        }
+        Ok(())
+    }
+
+    /// Send one `rewind_conversation` control request and await its reply. The
+    /// reader resolves the oneshot keyed by our request id (see [`read_and_wait`]).
+    async fn rewind_conversation(
+        &self,
+        target_uuid: &str,
+        interrupt_if_running: bool,
+    ) -> Result<RewindOutcome> {
+        let id = self.next_control_id();
+        let (tx, rx) = oneshot::channel::<Value>();
+        if let Ok(mut map) = self.pending_controls.lock() {
+            map.insert(id.clone(), tx);
+        }
+        // Reclaim the pending slot if the write fails (stdin closed) — otherwise the
+        // sender lingers forever, since no reply will ever arrive to remove it.
+        if let Err(e) = self.write_line(protocol::control_request_json(
+            &id,
+            "rewind_conversation",
+            json!({
+                "target_message_uuid": target_uuid,
+                "interrupt_if_running": interrupt_if_running,
+                "dry_run": false,
+            }),
+        )) {
+            if let Ok(mut map) = self.pending_controls.lock() {
+                map.remove(&id);
+            }
+            return Err(e);
+        }
+        let payload = match tokio::time::timeout(std::time::Duration::from_secs(20), rx).await {
+            Ok(Ok(v)) => v,
+            // Timed out or the reader dropped the sender (process exited): reclaim
+            // the slot and report so the caller falls back.
+            _ => {
+                if let Ok(mut map) = self.pending_controls.lock() {
+                    map.remove(&id);
+                }
+                return Err(CoreError::OutputParse {
+                    program: "claude".into(),
+                    detail: "rewind_conversation got no reply".into(),
+                });
+            }
+        };
+        Ok(RewindOutcome {
+            rewound: payload
+                .get("rewound")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            error: payload
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        })
+    }
+
     /// Hard stop: kill the process (group on Unix). The waiter task observes the
     /// exit and emits the terminal event (classified `Killed`).
     pub fn kill(&self) {
@@ -402,6 +541,7 @@ async fn stderr_loop(stderr: tokio::process::ChildStderr, ring: Arc<StdMutex<Vec
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn read_and_wait(
     mut child: tokio::process::Child,
     stdout: tokio::process::ChildStdout,
@@ -409,6 +549,8 @@ async fn read_and_wait(
     stderr_ring: Arc<StdMutex<Vec<String>>>,
     killed: Arc<AtomicBool>,
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
+    user_uuids: Arc<StdMutex<Vec<String>>>,
+    pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
 ) {
     let mut saw_result = false;
     let mut saw_error_result = false;
@@ -430,6 +572,35 @@ async fn read_and_wait(
                         if let Ok(mut map) = pending_permissions.lock() {
                             map.insert(request_id.clone(), input.clone());
                         }
+                    }
+                    // A `--replay-user-messages` echo: record the turn's uuid (for
+                    // rewind) and suppress it — it's a re-emission of a prompt we
+                    // sent, not new content, and would otherwise render as text.
+                    ParsedLine::User {
+                        is_replay: true,
+                        uuid,
+                        ..
+                    } => {
+                        if let Some(u) = uuid {
+                            if let Ok(mut list) = user_uuids.lock() {
+                                list.push(u.clone());
+                            }
+                        }
+                        continue;
+                    }
+                    // A reply to one of our control requests: hand it to the waiter
+                    // keyed by request id (if any), then drop it — not a transcript
+                    // event. Unmatched acks (e.g. interrupt) simply have no waiter.
+                    ParsedLine::ControlResponse {
+                        request_id,
+                        payload,
+                    } => {
+                        if let Ok(mut map) = pending_controls.lock() {
+                            if let Some(tx) = map.remove(request_id) {
+                                let _ = tx.send(payload.clone());
+                            }
+                        }
+                        continue;
                     }
                     _ => {}
                 }
@@ -497,7 +668,9 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
                 )
                 .collect()
         }
-        ParsedLine::User { blocks, parent_id } => blocks
+        ParsedLine::User {
+            blocks, parent_id, ..
+        } => blocks
             .into_iter()
             .filter_map(|b| block_to_event(b, parent_id.as_deref()))
             .collect(),
@@ -558,6 +731,9 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             detail: "unrecognized stream-json line".into(),
             raw,
         }],
+        // Replies to our control requests are routed by the reader (keyed by
+        // request id), never surfaced as transcript events.
+        ParsedLine::ControlResponse { .. } => Vec::new(),
         ParsedLine::System { .. } => Vec::new(),
     }
 }
@@ -585,6 +761,33 @@ fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<SessionEvent>
         }),
         Block::Other { .. } => None,
     }
+}
+
+/// Map a GLOBAL 1-based human-turn `ordinal` onto the local start index in this
+/// generation's captured uuids (`len` of them, preceded by `base` earlier turns)
+/// to begin peeling from. Pure so the ordinal arithmetic — the part that silently
+/// corrupted a resumed session — is exhaustively unit-tested without a live claude.
+///
+/// `Err` (target unreachable) is not fatal: the caller falls back to a log-only
+/// rewind. Unreachable when the target is the first turn (no preceding assistant
+/// to land on), predates this generation (`<= base`, so never echoed to us), or
+/// hasn't been captured yet (`>= base + len`).
+fn rewind_local_start(ordinal: usize, base: usize, len: usize) -> std::result::Result<usize, String> {
+    if ordinal < 2 {
+        return Err("rewind_conversation cannot target the first user turn".into());
+    }
+    if ordinal <= base {
+        return Err(format!(
+            "user turn {ordinal} predates this live generation (base {base})"
+        ));
+    }
+    let local_idx = ordinal - base - 1;
+    if local_idx >= len {
+        return Err(format!(
+            "no captured uuid for user turn {ordinal} (have {len} turns this generation, base {base})"
+        ));
+    }
+    Ok(local_idx)
 }
 
 /// Best-effort process-tree killer. On Unix we signal the process group we put
@@ -621,6 +824,47 @@ use std::os::windows::process::CommandExt as _;
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Fresh session (base 0): the local index is `ordinal - 1`, so peeling from
+    /// it keeps turns `1..ordinal` and drops `ordinal..` (the smoke-test case).
+    #[test]
+    fn rewind_maps_ordinals_with_no_base() {
+        assert_eq!(rewind_local_start(2, 0, 5), Ok(1));
+        assert_eq!(rewind_local_start(5, 0, 5), Ok(4));
+        // The first turn has no preceding assistant — unreachable.
+        assert!(rewind_local_start(1, 0, 5).is_err());
+        // Beyond what we've captured — unreachable.
+        assert!(rewind_local_start(6, 0, 5).is_err());
+    }
+
+    /// After a resume that carried 5 prior turns (base 5) with 2 new turns
+    /// captured this generation: turn 6 → local 0, turn 7 → local 1. This is the
+    /// regression the bug hit — the old code used `ordinal - 1` (→ index 5/6) and
+    /// either peeled the wrong turn or fell out of range.
+    #[test]
+    fn rewind_maps_ordinals_past_a_resume_base() {
+        assert_eq!(rewind_local_start(6, 5, 2), Ok(0));
+        assert_eq!(rewind_local_start(7, 5, 2), Ok(1));
+        // Turns 2..=5 predate this generation — never echoed, so unreachable
+        // (fall back to a log-only rewind), NOT silently mapped onto a live uuid.
+        for ordinal in 2..=5 {
+            assert!(
+                rewind_local_start(ordinal, 5, 2).is_err(),
+                "turn {ordinal} predates base 5 and must be unreachable"
+            );
+        }
+        // Turn 8 hasn't been sent yet this generation.
+        assert!(rewind_local_start(8, 5, 2).is_err());
+    }
+
+    /// A base with nothing captured yet (just resumed, no new turns) reaches no
+    /// live turn — every ordinal falls back.
+    #[test]
+    fn rewind_empty_generation_reaches_nothing() {
+        for ordinal in 1..=8 {
+            assert!(rewind_local_start(ordinal, 5, 0).is_err());
+        }
+    }
 
     /// AskUserQuestion is surfaced as an interactive `QuestionAsk` (carrying the
     /// questions JSON), not a yes/no `PermissionAsk`.

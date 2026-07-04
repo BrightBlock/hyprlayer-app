@@ -6,11 +6,14 @@
 //! session registry and command handlers hold `Arc<dyn AgentDriver>` so they
 //! never name a concrete harness.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use serde_json::Value;
 use tokio::sync::broadcast;
 
 use crate::claude::{ClaudeDriver, SessionEvent};
-use crate::error::Result;
+use crate::error::{CoreError, Result};
 
 /// What the app drives a live agent session through, independent of harness.
 pub trait AgentDriver: Send + Sync {
@@ -38,6 +41,23 @@ pub trait AgentDriver: Send + Sync {
 
     /// Graceful interrupt of the current turn (the session stays alive).
     fn interrupt(&self) -> Result<()>;
+
+    /// Rewind the model's OWN conversation to the 1-based `ordinal` human turn,
+    /// truncating that turn and everything after it out of the live session (and
+    /// its persisted transcript) so a resume reloads the shortened conversation.
+    /// Default: unsupported — only Claude implements it (OpenCode owns its own
+    /// history). Callers fall back to a log-only truncation on `Err`.
+    fn rewind_to_ordinal<'a>(
+        &'a self,
+        _ordinal: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async {
+            Err(CoreError::OutputParse {
+                program: "agent".into(),
+                detail: "conversation rewind is not supported by this harness".into(),
+            })
+        })
+    }
 
     /// Hard stop: terminate the session. The driver's own machinery emits the
     /// terminal `Exited` event.
@@ -70,6 +90,13 @@ impl AgentDriver for ClaudeDriver {
     }
     fn interrupt(&self) -> Result<()> {
         self.interrupt()
+    }
+    fn rewind_to_ordinal<'a>(
+        &'a self,
+        ordinal: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        // Inherent async fn of the same name wins resolution — no recursion.
+        Box::pin(self.rewind_to_ordinal(ordinal))
     }
     fn kill(&self) {
         self.kill()

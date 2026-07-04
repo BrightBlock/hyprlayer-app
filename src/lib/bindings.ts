@@ -305,17 +305,7 @@ export const commands = {
 	 *  tail.
 	 */
 	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
-	/**
-	 *  Rewind a session to the N-th (1-based) user turn, discarding everything
-	 *  after it: kill the live driver, delete persisted events at the cutoff seq
-	 *  onward, then re-spawn with `--resume` so the same conversation can continue
-	 *  — claude's underlying history is unchanged (the SDK has no "rewind"
-	 *  control), but our UI and the persisted log match the truncated state, and
-	 *  the user can re-prompt from that point. `user_turn` is the 1-based ordinal
-	 *  of the clicked user bubble (i.e. the N-th `userMessage` event). Returns
-	 *  the existing [`Session`].
-	 */
-	rewindSession: (sessionId: string, userTurn: number, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, onEvent })),
+	rewindSession: (sessionId: string, userTurn: number, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
 	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	/**
@@ -1543,6 +1533,40 @@ export type QueryResult = {
 	items: DocMeta[],
 };
 
+/**
+ *  Rewind a session to the N-th (1-based) user turn, discarding that turn and
+ *  everything after it. Two paths:
+ * 
+ *  * **Live rewind (preferred).** If the session is live, we drive claude's own
+ *    `rewind_conversation` control request (see [`ClaudeDriver::rewind_to_ordinal`])
+ *    to truncate the model's in-memory conversation to this turn, then keep that
+ *    SAME process alive and hand its event stream to the caller's new channel
+ *    (see [`live_rewind_handoff`]). The model genuinely forgets the dropped turns.
+ *    We must NOT kill + `--resume` here: `rewind_conversation` does not truncate
+ *    claude's on-disk transcript, so a resume would reload the un-rewound history.
+ *  * **Log-only fallback.** If the model rewind isn't available (session not live,
+ *    OpenCode, a turn from before the current generation, the first turn, or a
+ *    claude refusal) we kill + cut + `--resume`: the UI/log truncate but the model
+ *    keeps its memory. `permission_mode` re-applies the session's posture on this
+ *    re-spawn (as [`resume_session`]/[`restart_session`] do) — `None` would drop a
+ *    bypass session back to the stage default and start prompting again.
+ * 
+ *  `user_turn` is the 1-based ordinal of the clicked user bubble (the N-th
+ *  `userMessage` event). Returns the existing [`Session`] plus which path ran, so
+ *  the caller can tell a TRUE rewind (the model forgot) from a log-only prune (it
+ *  still recalls the dropped turns) instead of assuming success.
+ */
+export type RewindResult = {
+	session: Session,
+	/**
+	 *  True when claude's own conversation was truncated on the live process (the
+	 *  model genuinely forgot the dropped turns); false when we could only prune
+	 *  the app log (not live / OpenCode / a pre-generation or first turn / a claude
+	 *  refusal) — the model still recalls them.
+	 */
+	liveRewound: boolean,
+};
+
 /**  Outcome of a script run, shown as a status pill. */
 export type RunPhase = "running" | "passed" | "failed";
 
@@ -1744,12 +1768,21 @@ export type SessionEvent =
 { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | 
 /**
  *  A new `claude` process took over an existing session via `--resume`
- *  (permission/model change, rewind, app-restart resume). The forwarder
- *  emits it once at the start of a relaunch — distinct from claude's
- *  per-turn `init` — so the UI drops background tasks the now-dead prior
- *  process owned (their completion notification can never arrive).
+ *  (permission/model change, app-restart resume, log-only rewind fallback).
+ *  The forwarder emits it once at the start of a relaunch — distinct from
+ *  claude's per-turn `init` — so the UI drops background tasks the now-dead
+ *  prior process owned (their completion notification can never arrive).
  */
 { kind: "relaunched" } | 
+/**
+ *  A LIVE rewind truncated this session's conversation IN PLACE: the same
+ *  `claude` process had its model memory peeled by `rewind_conversation` (see
+ *  [`ClaudeDriver::rewind_to_ordinal`]). Emitted once, like [`Relaunched`], so
+ *  the UI settles the transcript at the new boundary — but the process is
+ *  UNCHANGED, so (unlike a relaunch) its still-running background tasks can
+ *  still complete-notify and must NOT be dropped.
+ */
+{ kind: "rewound" } | 
 /**  An unparseable / unknown stdout line — surfaced, never fatal. */
 { kind: "protocolError"; detail: string; raw: string } | 
 /**  The process ended. Terminal: no further events for this session. */

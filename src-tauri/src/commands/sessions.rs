@@ -19,12 +19,12 @@ use tauri::ipc::Channel;
 use tauri::Manager;
 use tauri::State;
 use tauri_specta::Event;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 
 use super::{db_task, effective_for};
 use crate::error::{AppError, CmdResult};
 use crate::events::SessionLifecycle;
-use crate::session_registry::SessionRegistry;
+use crate::session_registry::{ForwarderHandle, SessionRegistry};
 use crate::state::AppState;
 
 fn session_not_found(id: &str) -> AppError {
@@ -191,6 +191,14 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             let claude_cfg = state.settings.get().await.providers.claude;
             env.extend(super::claude_auth_env(&claude_cfg));
 
+            // Human turns already in the log precede this generation; the driver
+            // subtracts this base to map a global rewind ordinal onto the uuids it
+            // captures now (0 for a fresh session).
+            let user_turn_base = {
+                let id = session.id.clone();
+                db_task(state.db.clone(), move |db| db.count_user_messages(&id)).await?
+            };
+
             let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
                 claude_bin: claude,
                 cwd: PathBuf::from(&session.cwd),
@@ -202,6 +210,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
                 // claude persisted the conversation under the id we passed as
                 // `--session-id`, so resume by that same id.
                 resume: resume.then(|| session.id.clone()),
+                user_turn_base,
                 fork: false,
                 max_budget_usd: None,
                 model,
@@ -227,7 +236,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
         .insert(session.id.clone(), driver.clone(), launched_mode)
         .await;
 
-    spawn_forwarder(ForwarderCtx {
+    let forwarder = spawn_forwarder(ForwarderCtx {
         app,
         db: state.db.clone(),
         registry: state.sessions.clone(),
@@ -236,7 +245,11 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
         workstream_id: session.workstream_id.clone(),
         rx,
         start_seq,
+        // A relaunch (resume/restart/log-only rewind) is a NEW process; its
+        // boundary drops the dead prior process's background tasks.
+        boundary: Boundary::Relaunched,
     });
+    state.sessions.set_forwarder(&session.id, forwarder).await;
 
     Ok(driver)
 }
@@ -478,9 +491,7 @@ pub async fn resume_session(
     // running while the resumed process spins back up.
     let start_seq = {
         let id = session.id.clone();
-        db_task(state.db.clone(), move |db| db.session_events(&id))
-            .await?
-            .len() as i64
+        db_task(state.db.clone(), move |db| db.next_session_seq(&id)).await?
     };
     {
         let id = session.id.clone();
@@ -562,9 +573,7 @@ pub async fn restart_session(
 
     let start_seq = {
         let id = session.id.clone();
-        db_task(state.db.clone(), move |db| db.session_events(&id))
-            .await?
-            .len() as i64
+        db_task(state.db.clone(), move |db| db.next_session_seq(&id)).await?
     };
     {
         let id = session.id.clone();
@@ -595,14 +604,38 @@ pub async fn restart_session(
     Ok(session)
 }
 
-/// Rewind a session to the N-th (1-based) user turn, discarding everything
-/// after it: kill the live driver, delete persisted events at the cutoff seq
-/// onward, then re-spawn with `--resume` so the same conversation can continue
-/// — claude's underlying history is unchanged (the SDK has no "rewind"
-/// control), but our UI and the persisted log match the truncated state, and
-/// the user can re-prompt from that point. `user_turn` is the 1-based ordinal
-/// of the clicked user bubble (i.e. the N-th `userMessage` event). Returns
-/// the existing [`Session`].
+/// Rewind a session to the N-th (1-based) user turn, discarding that turn and
+/// everything after it. Two paths:
+///
+/// * **Live rewind (preferred).** If the session is live, we drive claude's own
+///   `rewind_conversation` control request (see [`ClaudeDriver::rewind_to_ordinal`])
+///   to truncate the model's in-memory conversation to this turn, then keep that
+///   SAME process alive and hand its event stream to the caller's new channel
+///   (see [`live_rewind_handoff`]). The model genuinely forgets the dropped turns.
+///   We must NOT kill + `--resume` here: `rewind_conversation` does not truncate
+///   claude's on-disk transcript, so a resume would reload the un-rewound history.
+/// * **Log-only fallback.** If the model rewind isn't available (session not live,
+///   OpenCode, a turn from before the current generation, the first turn, or a
+///   claude refusal) we kill + cut + `--resume`: the UI/log truncate but the model
+///   keeps its memory. `permission_mode` re-applies the session's posture on this
+///   re-spawn (as [`resume_session`]/[`restart_session`] do) — `None` would drop a
+///   bypass session back to the stage default and start prompting again.
+///
+/// `user_turn` is the 1-based ordinal of the clicked user bubble (the N-th
+/// `userMessage` event). Returns the existing [`Session`] plus which path ran, so
+/// the caller can tell a TRUE rewind (the model forgot) from a log-only prune (it
+/// still recalls the dropped turns) instead of assuming success.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindResult {
+    pub session: Session,
+    /// True when claude's own conversation was truncated on the live process (the
+    /// model genuinely forgot the dropped turns); false when we could only prune
+    /// the app log (not live / OpenCode / a pre-generation or first turn / a claude
+    /// refusal) — the model still recalls them.
+    pub live_rewound: bool,
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn rewind_session(
@@ -610,9 +643,16 @@ pub async fn rewind_session(
     state: State<'_, AppState>,
     session_id: String,
     user_turn: u32,
+    permission_mode: Option<String>,
     on_event: Channel<SessionEvent>,
-) -> CmdResult<Session> {
+) -> CmdResult<RewindResult> {
     let session = load_session(&state, &session_id).await?;
+
+    // Hold the session's op lock for the whole rewind so a concurrent `send_user_message`
+    // can't interleave a new prompt between the peel steps — the model would then
+    // receive a turn the cut below deletes from the log.
+    let op = state.sessions.op_lock(&session_id).await;
+    let _op_guard = op.lock().await;
 
     // Resolve the cutoff (the seq of the N-th userMessage). Everything at or
     // after this seq is dropped — the target user turn is removed, so the
@@ -628,8 +668,36 @@ pub async fn rewind_session(
         remedy: None,
     })?;
 
-    // Resolve the workstream before any destructive step, so a missing-row error
-    // can't strand us with the log already cut.
+    // Preferred path: a TRUE rewind on the live process. `rewind_conversation`
+    // truncates the model's in-memory conversation to this turn; we then keep the
+    // SAME process alive (a kill + `--resume` would reload its un-truncated
+    // transcript). Only turns from the current live generation carry the uuid this
+    // needs, and the first turn can't be rewound — any miss (not live, OpenCode, a
+    // pre-resume turn, a claude refusal) is non-fatal and drops to the fallback.
+    let live_rewound = if let Some(driver) = state.sessions.get(&session_id).await {
+        match driver.rewind_to_ordinal(user_turn as usize).await {
+            Ok(()) => true,
+            Err(e) => {
+                log::info!(
+                    "rewind_session {session_id}: model-level rewind unavailable ({e}); \
+                     truncating the app log only"
+                );
+                false
+            }
+        }
+    } else {
+        false
+    };
+    if live_rewound {
+        let session = live_rewind_handoff(&state, app, session, cutoff, on_event).await?;
+        return Ok(RewindResult {
+            session,
+            live_rewound: true,
+        });
+    }
+
+    // Fallback: log-only rewind. Resolve the workstream before any destructive
+    // step, so a missing-row error can't strand us with the log already cut.
     let ws = load_workstream(&state, &session.workstream_id).await?;
 
     // Take the live process down before mutating the log so its forwarder can't
@@ -656,6 +724,12 @@ pub async fn rewind_session(
         .await;
     }
 
+    // Continue the log above whatever survives the cut (see `next_session_seq`).
+    let start_seq = {
+        let id = session.id.clone();
+        db_task(state.db.clone(), move |db| db.next_session_seq(&id)).await?
+    };
+
     let launched = launch_session(
         &state,
         LaunchParams {
@@ -664,9 +738,14 @@ pub async fn rewind_session(
             project_path: ws.project_path,
             model: None,
             effort: None,
-            permission_mode: None,
+            // Preserve the session's current posture across the rewind relaunch —
+            // otherwise `None` resolves to the stage default and a bypass session
+            // starts prompting again (see the command doc).
+            permission_mode: permission_mode
+                .as_deref()
+                .and_then(PermissionMode::from_flag),
             resume: true,
-            start_seq: cutoff,
+            start_seq,
             channel: on_event,
         },
     )
@@ -683,6 +762,83 @@ pub async fn rewind_session(
         return Err(e);
     }
 
+    Ok(RewindResult {
+        session,
+        live_rewound: false,
+    })
+}
+
+/// Keep the live process — whose model memory the peel already truncated — and
+/// hand its event stream to the caller's new channel. The ordering is load-bearing:
+///
+/// 1. **Subscribe the new receiver FIRST**, before stopping the old forwarder, so
+///    an event the live process emits during the handoff (a final `TurnDone`, a
+///    background-task update) is buffered for the replacement rather than dropped
+///    into a gap — a `broadcast` send with no receiver is lost.
+/// 2. **Stop the old forwarder cooperatively** (signal + join, not abort), so any
+///    in-flight `spawn_blocking` DB append finishes BEFORE the cut — an aborted
+///    task's write can otherwise land after the cut and re-add a rewound row.
+/// 3. Cut the app log to `cutoff`, then spawn a fresh forwarder on the SAME driver
+///    at the log's new tail, draining the receiver from step 1.
+///
+/// The new forwarder emits a `Rewound` boundary: like a resume's `Relaunched` the
+/// UI settles at it, but the process is UNCHANGED, so its still-running background
+/// tasks can still complete-notify and are kept, not dropped.
+async fn live_rewind_handoff(
+    state: &AppState,
+    app: tauri::AppHandle,
+    session: Session,
+    cutoff: i64,
+    on_event: Channel<SessionEvent>,
+) -> CmdResult<Session> {
+    let driver = state
+        .sessions
+        .get(&session.id)
+        .await
+        .ok_or_else(|| session_not_found(&session.id))?;
+
+    // (1) Subscribe before we stop the old forwarder — no gap where a live event
+    // has no receiver and is lost from both the UI and the log.
+    let rx = driver.subscribe();
+
+    // (2) Stop the old forwarder cooperatively so it can't keep persisting past the
+    // cut AND any in-flight write drains before (3) cuts the tail (which drops the
+    // rewound turns and the interrupted turn's aborted tail).
+    state.sessions.stop_forwarder(&session.id).await;
+    {
+        let id = session.id.clone();
+        db_task(state.db.clone(), move |db| db.cut_session_events_from(&id, cutoff)).await?;
+    }
+    {
+        let id = session.id.clone();
+        let _ = db_task(state.db.clone(), move |db| db.set_session_state(&id, "running")).await;
+    }
+
+    // Continue above whatever survives the cut — robust to any last event the old
+    // forwarder flushed before it stopped (a resumed forwarder must never reuse a
+    // live seq). Any such event sits at seq >= cutoff and was just removed, so the
+    // replacement re-persists it once from `rx`.
+    let start_seq = {
+        let id = session.id.clone();
+        db_task(state.db.clone(), move |db| db.next_session_seq(&id)).await?
+    };
+
+    // (3) Fresh forwarder on the SAME live driver, wired to the caller's new channel
+    // and the receiver subscribed in (1).
+    let forwarder = spawn_forwarder(ForwarderCtx {
+        app,
+        db: state.db.clone(),
+        registry: state.sessions.clone(),
+        channel: on_event,
+        session_id: session.id.clone(),
+        workstream_id: session.workstream_id.clone(),
+        rx,
+        start_seq,
+        // Same process — keep its background tasks (see the `Rewound` event doc).
+        boundary: Boundary::Rewound,
+    });
+    state.sessions.set_forwarder(&session.id, forwarder).await;
+
     Ok(session)
 }
 
@@ -694,6 +850,12 @@ pub async fn send_user_message(
     text: String,
     attached_docs: Vec<String>,
 ) -> CmdResult<()> {
+    // Serialize against an in-flight rewind on this session (same op lock): a send
+    // must land entirely before or after a peel, never interleaved between its
+    // steps where the cut would then delete the turn the model just received.
+    let op = state.sessions.op_lock(&session_id).await;
+    let _op_guard = op.lock().await;
+
     // Compose the doc list server-side (same `Relevant documents:` format as
     // session start) so the wire format lives only in `pipeline`, not in the
     // frontend. The optimistic bubble still shows just `text` + pin cards.
@@ -854,6 +1016,28 @@ fn tail_live(driver: Arc<dyn AgentDriver>, on_event: Channel<SessionEvent>) {
 
 /* ------------------------------ Forwarder ------------------------------- */
 
+/// The one-time boundary marker a relaunching forwarder emits before its stream
+/// (only when `start_seq > 0`; a fresh start emits nothing). Both settle the UI at
+/// the new boundary; they differ only in background-task handling.
+#[derive(Clone, Copy)]
+enum Boundary {
+    /// A NEW process took over (resume/restart/log-only rewind) — drop the dead
+    /// prior process's background tasks.
+    Relaunched,
+    /// A live rewind truncated the SAME process in place — keep its background
+    /// tasks (they're still running and can still complete-notify).
+    Rewound,
+}
+
+impl Boundary {
+    fn event(self) -> SessionEvent {
+        match self {
+            Boundary::Relaunched => SessionEvent::Relaunched {},
+            Boundary::Rewound => SessionEvent::Rewound {},
+        }
+    }
+}
+
 struct ForwarderCtx {
     app: tauri::AppHandle,
     db: Arc<Db>,
@@ -865,6 +1049,8 @@ struct ForwarderCtx {
     /// First persisted-event sequence number — 0 for a fresh session, or the
     /// existing event count when resuming (so the log appends, not collides).
     start_seq: i64,
+    /// Which boundary marker to emit before the stream when `start_seq > 0`.
+    boundary: Boundary,
 }
 
 /// What one session event writes to the `sessions` row, captured as owned data
@@ -886,7 +1072,7 @@ enum RowWrite {
     },
 }
 
-fn spawn_forwarder(ctx: ForwarderCtx) {
+fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
     let ForwarderCtx {
         app,
         db,
@@ -896,16 +1082,21 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
         workstream_id,
         mut rx,
         start_seq,
+        boundary,
     } = ctx;
 
-    tauri::async_runtime::spawn(async move {
+    // Cooperative-stop signal: `stop_forwarder` sends (or drops) this so a live
+    // rewind can drain the loop before cutting the log (see `ForwarderHandle`).
+    let (shutdown, mut shutdown_rx) = oneshot::channel::<()>();
+
+    let join = tauri::async_runtime::spawn(async move {
         let mut seq: i64 = start_seq;
 
         // A relaunch (resume/restart/rewind) advances `start_seq` past the prior
-        // generation's events; emit the `Relaunched` boundary before the new
-        // process's stream (see the event's doc). Skipped on a fresh start.
+        // generation's events; emit the boundary marker before the new stream (see
+        // the event docs). Skipped on a fresh start.
         if start_seq > 0 {
-            let event = SessionEvent::Relaunched {};
+            let event = boundary.event();
             let kind = event.kind();
             if let Ok(payload) = serde_json::to_string(&event) {
                 let _ = channel.send(event);
@@ -924,13 +1115,21 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
         }
 
         loop {
-            let event = match rx.recv().await {
-                Ok(event) => event,
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    log::warn!("session {session_id} forwarder lagged {n} events");
-                    continue;
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
+            // Cooperative stop: a signalled (or dropped) `shutdown` breaks the loop
+            // at the next poll. Writes below the select are awaited to completion
+            // per iteration, so a stop can only land BETWEEN events — never leaving
+            // a DB append in flight when `stop_forwarder`'s join returns.
+            let event = tokio::select! {
+                biased;
+                _ = &mut shutdown_rx => break,
+                recv = rx.recv() => match recv {
+                    Ok(event) => event,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("session {session_id} forwarder lagged {n} events");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
             };
 
             // `UserMessage` is persist-only: the UI already showed it optimistically
@@ -1054,6 +1253,8 @@ fn spawn_forwarder(ctx: ForwarderCtx) {
             }
         }
     });
+
+    ForwarderHandle { join, shutdown }
 }
 
 fn emit_lifecycle(app: &tauri::AppHandle, session_id: &str, workstream_id: &str, state: &str) {

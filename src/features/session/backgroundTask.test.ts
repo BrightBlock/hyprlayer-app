@@ -103,6 +103,11 @@ function relaunchedMarker(id = "relaunch-1"): Extract<TranscriptItem, { kind: "r
   return { kind: "relaunched", id };
 }
 
+/** A live-rewind boundary (SAME process). Must NOT clear tracked tasks. */
+function rewoundMarker(id = "rewound-1"): Extract<TranscriptItem, { kind: "rewound" }> {
+  return { kind: "rewound", id };
+}
+
 function exitItem(id = "exit-1"): Extract<TranscriptItem, { kind: "exit" }> {
   return { kind: "exit", id, outcome: "killed", code: 143, stderrTail: "" };
 }
@@ -305,7 +310,7 @@ describe("backgroundTasksFromItems", () => {
 
   // ── process death (relaunch / exit) clears orphaned tasks ──────────────────
 
-  it("clears tracked tasks at a relaunched boundary (resume/restart/rewind)", () => {
+  it("clears tracked tasks at a relaunched boundary (resume/restart/log-only rewind)", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { description: "Windows build", result: SPAWN_RESULT("task-a") }),
       relaunchedMarker(),
@@ -323,6 +328,19 @@ describe("backgroundTasksFromItems", () => {
     expect(tasks).toHaveLength(1);
     expect(tasks[0].taskId).toBe("task-b");
     expect(tasks[0].label).toBe("New gen");
+  });
+
+  it("KEEPS tracked tasks at a rewound boundary (live rewind — same process)", () => {
+    // A live rewind peels the conversation but leaves the process (and its
+    // background shells) running, so the task must survive the boundary — unlike
+    // a relaunch, which kills the process.
+    const items: TranscriptItem[] = [
+      bgBash("t1", { description: "Long build", result: SPAWN_RESULT("task-a") }),
+      rewoundMarker(),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("task-a");
   });
 
   it("clears tracked tasks at an exit item (the process ended)", () => {

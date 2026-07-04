@@ -123,7 +123,9 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
     // The owning process is gone — a `relaunched` boundary (new process took
     // over) or an `exit`. Its background shells are dead and can never
     // complete-notify, so drop everything tracked so far; spawns after the
-    // boundary survive. (Per-turn `init` does NOT land here — process is alive.)
+    // boundary survive. (Per-turn `init` does NOT land here — process is alive.
+    // Nor does a `rewound` boundary: a live rewind keeps the SAME process, so its
+    // background shells are still running and must not be dropped.)
     if (item.kind === "relaunched" || item.kind === "exit") {
       tasks.clear();
       taskIdToToolUseId.clear();

@@ -148,11 +148,18 @@ pub enum SessionEvent {
         status: String,
     },
     /// A new `claude` process took over an existing session via `--resume`
-    /// (permission/model change, rewind, app-restart resume). The forwarder
-    /// emits it once at the start of a relaunch — distinct from claude's
-    /// per-turn `init` — so the UI drops background tasks the now-dead prior
-    /// process owned (their completion notification can never arrive).
+    /// (permission/model change, app-restart resume, log-only rewind fallback).
+    /// The forwarder emits it once at the start of a relaunch — distinct from
+    /// claude's per-turn `init` — so the UI drops background tasks the now-dead
+    /// prior process owned (their completion notification can never arrive).
     Relaunched {},
+    /// A LIVE rewind truncated this session's conversation IN PLACE: the same
+    /// `claude` process had its model memory peeled by `rewind_conversation` (see
+    /// [`ClaudeDriver::rewind_to_ordinal`]). Emitted once, like [`Relaunched`], so
+    /// the UI settles the transcript at the new boundary — but the process is
+    /// UNCHANGED, so (unlike a relaunch) its still-running background tasks can
+    /// still complete-notify and must NOT be dropped.
+    Rewound {},
     /// An unparseable / unknown stdout line — surfaced, never fatal.
     ProtocolError { detail: String, raw: String },
     /// The process ended. Terminal: no further events for this session.
@@ -183,6 +190,7 @@ impl SessionEvent {
             SessionEvent::CompactBoundary { .. } => "compactBoundary",
             SessionEvent::BackgroundTaskUpdate { .. } => "backgroundTaskUpdate",
             SessionEvent::Relaunched { .. } => "relaunched",
+            SessionEvent::Rewound { .. } => "rewound",
             SessionEvent::ProtocolError { .. } => "protocolError",
             SessionEvent::Exited { .. } => "exited",
         }
@@ -201,5 +209,17 @@ mod tests {
             r#"{"kind":"relaunched"}"#
         );
         assert_eq!(SessionEvent::Relaunched {}.kind(), "relaunched");
+    }
+
+    /// The live-rewind boundary is a distinct kind from `relaunched` — the UI
+    /// settles the transcript at it but must keep the (same-process) background
+    /// tasks, so the tag can't collide.
+    #[test]
+    fn rewound_serializes_with_kind_tag() {
+        assert_eq!(
+            serde_json::to_string(&SessionEvent::Rewound {}).unwrap(),
+            r#"{"kind":"rewound"}"#
+        );
+        assert_eq!(SessionEvent::Rewound {}.kind(), "rewound");
     }
 }

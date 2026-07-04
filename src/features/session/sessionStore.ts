@@ -29,6 +29,7 @@ import { unwrap } from "../../lib/ipc";
 import { queryClient } from "../../lib/queryClient";
 import { invalidateWorktreeGit } from "../../lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "../../lib/notifications";
+import { useToast } from "../../lib/toast";
 import { router } from "../../router";
 import { docFromTool, docTitle, type DocKind } from "./toolDisplay";
 import {
@@ -520,10 +521,11 @@ function userTurnOrdinal(items: SessionEntry["items"], itemId: string): number {
 /**
  * Rewind a session to the user turn identified by `itemId`, dropping that turn
  * and everything after it — Claude-Desktop-style "rewind to here". Drives the
- * backend's `rewind_session`: the live driver is killed, persisted events at
- * the cutoff onward are deleted, and the session re-spawns with `--resume` so
- * the conversation can continue from the truncated state. The user can then
- * re-prompt from that point (the original prompt is gone from the transcript).
+ * backend's `rewind_session`, which prefers a TRUE live rewind (it peels claude's
+ * own conversation on the running process, so the model genuinely forgets the
+ * dropped turns) and falls back to a log-only prune (the transcript is trimmed but
+ * the model keeps its memory — we warn when that happens). Either way the persisted
+ * tail is deleted and the user can re-prompt from that point.
  */
 export async function rewindToMessage(sessionId: string, itemId: string): Promise<void> {
   const current = entryOf(sessionId);
@@ -538,23 +540,41 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
   setEntry(sessionId, { ...current, reloading: true, live: false, state: "starting" });
 
   const { channel, activate } = bufferedChannel();
+  let liveRewound: boolean;
   try {
-    await unwrap(commands.rewindSession(sessionId, ordinal, channel));
+    // Re-apply the tab's current permission mode on the re-spawn — claude binds
+    // its mode at launch, so without carrying it a rewound bypass session drops
+    // back to the stage default and starts prompting again (as resume/restart do).
+    const result = await unwrap(
+      commands.rewindSession(sessionId, ordinal, current.permissionMode, channel),
+    );
+    liveRewound = result.liveRewound;
   } catch (e) {
     const latest = entryOf(sessionId);
     if (latest) setEntry(sessionId, { ...latest, reloading: false, live: false, state: "idle" });
     throw e;
   }
 
+  // A log-only rewind pruned the transcript but the model still remembers the
+  // dropped turns (not live / OpenCode / a pre-resume or first turn / a refusal).
+  // Say so — otherwise "rewind" silently overstates what happened.
+  if (!liveRewound) {
+    useToast.getState().show(
+      "Rewound the transcript only",
+      "The agent still remembers the removed turns — its memory couldn't be truncated in place.",
+      { tone: "warn" },
+    );
+  }
+
   // Drop the truncated tail from the visible transcript immediately — the
   // backend has removed them from SQLite, and we don't want a stale post-cut
   // tail to linger until the next attach/restore cycle.
   //
-  // Leave context-window / cost / turn-count fields untouched: claude's
-  // actual session memory is unchanged by our rewind (the CLI has no rewind),
-  // so the pre-rewind values ARE the current reality. The next assistant
-  // message's `usage` event repopulates them naturally, so any drift here
-  // self-corrects on the very next turn — no need to fake a reset.
+  // Leave context-window / cost / turn-count fields untouched. On a log-only
+  // rewind the model keeps its full memory, so the pre-rewind values ARE current;
+  // on a live rewind the model shrank, so they briefly over-report. Either way the
+  // next assistant message's `usage` event repopulates them, so any drift
+  // self-corrects on the very next turn — no need to guess a reset value.
   const latest = entryOf(sessionId);
   if (latest) {
     const truncated = truncateAtUserOrdinal(latest, ordinal);

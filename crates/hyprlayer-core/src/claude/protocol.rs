@@ -35,6 +35,13 @@ pub enum ParsedLine {
     User {
         blocks: Vec<Block>,
         parent_id: Option<String>,
+        /// The message's own `uuid`, when present. Maps a human turn to claude's
+        /// internal id, which `rewind_conversation` targets.
+        uuid: Option<String>,
+        /// `isReplay:true` — a `--replay-user-messages` echo of a prompt we sent
+        /// on stdin. Not new transcript content: the reader captures its `uuid`
+        /// (for rewind) and suppresses it, so it never renders as assistant text.
+        is_replay: bool,
     },
     /// A partial-message chunk (`type:"stream_event"`); only text deltas are
     /// surfaced, for live streaming. Everything else here is ignored (the
@@ -87,6 +94,14 @@ pub enum ParsedLine {
         task_id: String,
         tool_use_id: Option<String>,
         status: String,
+    },
+    /// A reply to one of our own control requests (`interrupt`,
+    /// `rewind_conversation`, …). We act only on the ones we're awaiting (keyed by
+    /// `request_id`); the rest — e.g. interrupt acks — are dropped. `payload` is
+    /// the innermost result object (for rewind: `{rewound, prefillText, error?}`).
+    ControlResponse {
+        request_id: String,
+        payload: Value,
     },
     /// A line we don't model — kept verbatim so the driver can log it.
     Unknown { raw: String },
@@ -184,6 +199,8 @@ pub fn parse_line(line: &str) -> ParsedLine {
         Some("user") => ParsedLine::User {
             blocks: parse_blocks(v.get("message")),
             parent_id: str_field(&v, "parent_tool_use_id"),
+            uuid: str_field(&v, "uuid"),
+            is_replay: v.get("isReplay").and_then(Value::as_bool).unwrap_or(false),
         },
         Some("stream_event") => parse_stream_event(&v),
         Some("result") => ParsedLine::Result {
@@ -194,12 +211,10 @@ pub fn parse_line(line: &str) -> ParsedLine {
             context_tokens: context_tokens(v.get("usage")),
         },
         Some("control_request") => parse_control_request(&v),
-        // Our own control requests (interrupt / set_permission_mode) get acked
-        // with a `control_response`. It's bookkeeping, not transcript content —
-        // ignore it rather than surfacing a scary "unrecognized line" warning.
-        Some("control_response") => ParsedLine::System {
-            subtype: "control_response".into(),
-        },
+        // A reply to one of our control requests. `rewind_conversation` awaits its
+        // reply (keyed by request_id); other acks (interrupt) route to no waiter
+        // and are dropped. Not transcript content, so never a transcript event.
+        Some("control_response") => parse_control_response(&v),
         // Known-but-ignored informational lines (don't surface as errors).
         Some("rate_limit_event") => ParsedLine::System {
             subtype: "rate_limit".into(),
@@ -269,6 +284,27 @@ fn xml_tag<'a>(s: &'a str, tag: &str) -> Option<&'a str> {
     let start = s.find(&open)? + open.len();
     let end = s[start..].find(&close)? + start;
     Some(s[start..end].trim())
+}
+
+/// A `{"type":"control_response","response":{"subtype":..,"request_id":..,
+/// "response":{..}}}` reply. We key on the inner `request_id` and surface the
+/// innermost result object as `payload` (for `rewind_conversation`:
+/// `{rewound, prefillText, precedingAssistantUuid, error?}`). A reply we can't
+/// key (no request_id) degrades to an ignored `System` line.
+fn parse_control_response(v: &Value) -> ParsedLine {
+    let resp = v.get("response");
+    match resp.and_then(|r| r.get("request_id")).and_then(Value::as_str) {
+        Some(id) => ParsedLine::ControlResponse {
+            request_id: id.to_string(),
+            payload: resp
+                .and_then(|r| r.get("response"))
+                .cloned()
+                .unwrap_or(Value::Null),
+        },
+        None => ParsedLine::System {
+            subtype: "control_response".into(),
+        },
+    }
 }
 
 fn parse_control_request(v: &Value) -> ParsedLine {
@@ -549,5 +585,71 @@ mod tests {
             parse_line(line),
             ParsedLine::System { subtype } if subtype == "queue-operation"
         ));
+    }
+
+    /// A `--replay-user-messages` echo carries `isReplay:true` and the turn's own
+    /// `uuid` — the id the driver captures to target a later `rewind_conversation`.
+    #[test]
+    fn replay_user_echo_carries_uuid_and_flag() {
+        let line = r#"{"type":"user","isReplay":true,"uuid":"d2052f84-2034-4399-81e7-bd28d28bc691","message":{"role":"user","content":"Reply READY"},"parent_tool_use_id":null,"session_id":"s"}"#;
+        match parse_line(line) {
+            ParsedLine::User {
+                uuid, is_replay, ..
+            } => {
+                assert!(is_replay);
+                assert_eq!(uuid.as_deref(), Some("d2052f84-2034-4399-81e7-bd28d28bc691"));
+            }
+            other => panic!("expected a User line, got {other:?}"),
+        }
+    }
+
+    /// A normal agent `user` line (tool results) is NOT a replay echo, so the
+    /// driver leaves it alone (it still emits tool-result events).
+    #[test]
+    fn tool_result_user_line_is_not_a_replay() {
+        let line = r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"ok"}]},"session_id":"s"}"#;
+        match parse_line(line) {
+            ParsedLine::User { is_replay, .. } => assert!(!is_replay),
+            other => panic!("expected a User line, got {other:?}"),
+        }
+    }
+
+    /// A `control_response` to a request we're awaiting parses to `ControlResponse`
+    /// keyed by the inner `request_id`, surfacing the innermost result as payload
+    /// (rewind's `{rewound, prefillText, …}`).
+    #[test]
+    fn control_response_routes_by_request_id() {
+        let line = r#"{"type":"control_response","response":{"subtype":"success","request_id":"app-s-3","response":{"rewound":true,"prefillText":"Reply THIRD","precedingAssistantUuid":"a1"}}}"#;
+        match parse_line(line) {
+            ParsedLine::ControlResponse {
+                request_id,
+                payload,
+            } => {
+                assert_eq!(request_id, "app-s-3");
+                assert_eq!(payload.get("rewound").and_then(Value::as_bool), Some(true));
+                assert_eq!(
+                    payload.get("prefillText").and_then(Value::as_str),
+                    Some("Reply THIRD")
+                );
+            }
+            other => panic!("expected ControlResponse, got {other:?}"),
+        }
+    }
+
+    /// A logical refusal ("stale target") still arrives as outer `subtype:success`
+    /// with the reason in the inner `error` — the driver reads `rewound:false`.
+    #[test]
+    fn control_response_surfaces_refusal_error() {
+        let line = r#"{"type":"control_response","response":{"subtype":"success","request_id":"app-s-4","response":{"rewound":false,"prefillText":null,"error":"stale target"}}}"#;
+        match parse_line(line) {
+            ParsedLine::ControlResponse { payload, .. } => {
+                assert_eq!(payload.get("rewound").and_then(Value::as_bool), Some(false));
+                assert_eq!(
+                    payload.get("error").and_then(Value::as_str),
+                    Some("stale target")
+                );
+            }
+            other => panic!("expected ControlResponse, got {other:?}"),
+        }
     }
 }

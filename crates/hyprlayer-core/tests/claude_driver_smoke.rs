@@ -24,6 +24,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         disallowed_tools: vec![],
         add_dirs: vec![],
         resume: None,
+        user_turn_base: 0,
         fork: false,
         max_budget_usd: Some(1.0),
         model: None,
@@ -90,4 +91,94 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         ExitOutcome::Killed,
         "an app-initiated kill is Killed"
     );
+}
+
+/// Send `text` as a turn and drain events until the turn completes, returning the
+/// assistant's coalesced text. Panics if the turn doesn't finish in time.
+async fn run_turn(
+    driver: &ClaudeDriver,
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    text: &str,
+) -> String {
+    driver.send_user_turn(text, None).expect("send turn");
+    let mut out = String::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, events.recv()).await {
+            Ok(Ok(SessionEvent::AssistantText { text: t, .. })) => out.push_str(&t),
+            Ok(Ok(SessionEvent::TurnDone { .. })) => return out,
+            Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
+                panic!("session exited mid-turn: {outcome:?}")
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => panic!("event channel closed mid-turn"),
+            Err(_) => panic!("turn did not finish within 60s: {text:?}"),
+        }
+    }
+}
+
+/// End-to-end: three turns, then `rewind_to_ordinal(2)` must drive claude's own
+/// `rewind_conversation` so the model genuinely forgets turns 2–3 while keeping
+/// turn 1. Exercises the whole integration: `--replay-user-messages` uuid capture,
+/// control-response routing, and tail-to-target peeling.
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes real API calls"]
+async fn rewind_to_ordinal_truncates_model_memory() {
+    let claude = which::which("claude").expect("claude on PATH");
+    let (driver, mut events) = ClaudeDriver::spawn(SpawnConfig {
+        claude_bin: claude,
+        cwd: std::env::temp_dir(),
+        session_id: uuid::Uuid::new_v4().to_string(),
+        permission_mode: PermissionMode::BypassPermissions,
+        allowed_tools: vec![],
+        disallowed_tools: vec![],
+        add_dirs: vec![],
+        resume: None,
+        user_turn_base: 0,
+        fork: false,
+        max_budget_usd: Some(1.0),
+        model: Some("haiku".into()),
+        effort: None,
+        chrome: false,
+        env: std::env::vars().collect(),
+    })
+    .expect("spawn claude");
+
+    run_turn(&driver, &mut events, "Remember: my favorite color is blue. Reply OK.").await;
+    run_turn(&driver, &mut events, "Remember: my favorite number is seven. Reply OK.").await;
+    run_turn(&driver, &mut events, "Remember: my favorite animal is the otter. Reply OK.").await;
+
+    // Rewind to turn 2: drop turns 2 (number) and 3 (animal), keep turn 1 (color).
+    driver
+        .rewind_to_ordinal(2)
+        .await
+        .expect("rewind_to_ordinal should truncate claude's conversation");
+
+    let animal = run_turn(
+        &driver,
+        &mut events,
+        "What is my favorite animal? If I never told you in this conversation, reply exactly: UNKNOWN.",
+    )
+    .await;
+    println!("post-rewind animal answer: {animal:?}");
+    assert!(
+        !animal.to_lowercase().contains("otter"),
+        "model should have FORGOTTEN the otter (turn 3 was rewound away), got: {animal:?}"
+    );
+
+    // Turn 1 survived the rewind, so the color must still be known.
+    let color = run_turn(
+        &driver,
+        &mut events,
+        "What is my favorite color? If I never told you, reply UNKNOWN.",
+    )
+    .await;
+    println!("post-rewind color answer: {color:?}");
+    assert!(
+        color.to_lowercase().contains("blue"),
+        "model should STILL remember blue (turn 1 was kept), got: {color:?}"
+    );
+
+    driver.kill();
 }
