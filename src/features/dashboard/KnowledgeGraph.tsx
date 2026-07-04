@@ -7,17 +7,19 @@ import {
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { EmptyState, Spinner } from "../../components/ui";
-import { nebulaColorAt, simulate, type Graph, type Point } from "./graph";
+import { simulate, typeColor, type Graph, type Point } from "./graph";
 
 const WIDTH = 960;
-const HEIGHT = 560;
+const HEIGHT = 640;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 6;
-/** How many docs are labeled at rest — the most recent ones, so the resting
- *  view reads as "what's fresh" instead of a hub-label pileup in the dense
- *  center. Hovering still labels a node's whole neighbourhood. */
-const RECENT_LABELS = 8;
+/** Layout margin inside the stage — small, so stars reach near the edges. */
+const STAGE_PAD = 28;
+/** Radial density equalizer (< 1): the force layout settles into a
+ *  center-heavy blob, and raising each star's normalized center distance to
+ *  this power pushes the dense core outward so the constellation fills the
+ *  whole hero. 1 = off. */
+const SPREAD = 0.68;
 /** How many of the most-linked nodes get a glow halo. Capped so the blur
  *  filter doesn't multiply across a 200-node corpus. */
 const GLOW_NODES = 12;
@@ -28,25 +30,27 @@ type Props = {
 };
 
 /**
- * Interactive nebula view of the thoughts index (design pass 5a at full
- * scale): every doc is a star in the theme's nebula family, every resolved link a curved
- * gradient edge; the most-linked docs wear glow halos and the top hub a pulse
- * ring. Connected docs pull into clusters; node size reflects how linked a
- * doc is. Scroll to zoom, drag the background to pan, drag a node to arrange,
- * hover to spotlight a doc's neighbourhood, click to open it.
+ * Interactive nebula view of the thoughts index — the Observatory home's
+ * full-bleed hero stage. Every doc is a star in the theme's nebula family,
+ * every resolved link a curved gradient edge; the most-linked docs wear glow
+ * halos and the top hub a pulse ring. Connected docs pull into clusters; node
+ * size reflects how linked a doc is. Scroll to zoom, drag the background to
+ * pan, drag a node to arrange, hover to spotlight a doc's neighbourhood,
+ * click to open it. Renders edge-to-edge in whatever box it's given: the
+ * backdrop over-scans the stage, so `meet` letterboxing never shows a seam,
+ * and an empty or still-settling graph paints the bare nebula.
  */
 export function KnowledgeGraph({ graph: full }: Props) {
   const navigate = useNavigate();
   const svgRef = useRef<SVGSVGElement>(null);
 
   // Show only the *linked* docs — the connection story. Isolated docs (no
-  // resolved link) would otherwise bury the structure in a dot-cloud; we count
-  // them instead. If nothing is linked at all, fall back to showing everything.
+  // resolved link) would otherwise bury the structure in a dot-cloud. If
+  // nothing is linked at all, fall back to showing everything.
   const graph = useMemo(() => {
     const connected = full.nodes.filter((n) => n.degree > 0);
     return connected.length > 0 ? { nodes: connected, edges: full.edges } : full;
   }, [full]);
-  const unlinkedCount = full.nodes.length - graph.nodes.length;
 
   // The force layout is O(n²) — heavy enough to stall first paint if run inline.
   // Defer it to after the shell paints (rAF) so the page is always instant; a
@@ -69,15 +73,33 @@ export function KnowledgeGraph({ graph: full }: Props) {
     setOverrides({});
     setView({ scale: 1, tx: 0, ty: 0 });
     const iterations = graph.nodes.length > 140 ? 220 : 300;
-    const raf = requestAnimationFrame(() =>
-      setLayout(simulate(graph, { width: WIDTH, height: HEIGHT, iterations })),
-    );
-    return () => cancelAnimationFrame(raf);
+    const run = () =>
+      setLayout(spread(simulate(graph, { width: WIDTH, height: HEIGHT, iterations })));
+    // rAF defers the O(n²) pass past first paint — but a hidden webview never
+    // ticks rAF (occluded window, app launched minimized), which would leave
+    // the hero starless until a repaint. Compute on a timer instead there.
+    let raf = 0;
+    let timer: number | undefined;
+    if (document.visibilityState === "hidden") timer = window.setTimeout(run, 50);
+    else raf = requestAnimationFrame(run);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
   }, [graph]);
 
   const idToIndex = useMemo(() => {
     const m = new Map<string, number>();
     graph.nodes.forEach((n, i) => m.set(n.id, i));
+    return m;
+  }, [graph]);
+
+  // Edge tint: a link between two docs of the same type wears that type's
+  // hue (a mesh of PR docs reads green, like their stars); mixed-type links
+  // keep the neutral nebula strand.
+  const idToType = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const n of graph.nodes) m.set(n.id, n.type);
     return m;
   }, [graph]);
 
@@ -99,13 +121,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
     );
     return { glowIds, hubId: ranked[0] && ranked[0].degree > 0 ? ranked[0].id : null };
   }, [graph]);
-
-  // Resting labels go to the freshest docs. The parent feeds docs mtime-desc,
-  // and buildGraph preserves that order, so "most recent" is just the head.
-  const recentLabelIds = useMemo(
-    () => new Set(graph.nodes.slice(0, RECENT_LABELS).map((n) => n.id)),
-    [graph],
-  );
 
   // Client → root SVG (viewBox) coords. Independent of the pan/zoom transform,
   // which lives on the inner <g>, so it stays valid mid-gesture.
@@ -143,9 +158,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
     };
     svg.addEventListener("wheel", onWheel, { passive: false });
     return () => svg.removeEventListener("wheel", onWheel);
-    // Re-bind once the <svg> actually mounts: during the deferred-layout phase
-    // the component renders a spinner instead, so svgRef is null on first run.
-  }, [layout]);
+  }, []);
 
   // Failsafe: clear any in-flight drag/pan if the window loses focus or the OS
   // cancels the gesture (trackpad, app switch). Without this a lost pointerup
@@ -163,26 +176,8 @@ export function KnowledgeGraph({ graph: full }: Props) {
     };
   }, []);
 
-  if (graph.nodes.length === 0) {
-    return (
-      <EmptyState title="No documents yet">
-        Capture plans, research, and notes in your projects — they’ll appear here as a connected
-        graph, linked by the <span className="font-mono">related</span> field and shared
-        tags/tickets.
-      </EmptyState>
-    );
-  }
-
-  if (!layout) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Spinner />
-      </div>
-    );
-  }
-
   const posOf = (id: string, idx: number): Point =>
-    overrides[id] ?? layout[idx] ?? { x: WIDTH / 2, y: HEIGHT / 2 };
+    overrides[id] ?? layout?.[idx] ?? { x: WIDTH / 2, y: HEIGHT / 2 };
 
   const onBgPointerDown = (e: ReactPointerEvent<SVGRectElement>) => {
     const r = clientToRoot(e.clientX, e.clientY);
@@ -235,67 +230,114 @@ export function KnowledgeGraph({ graph: full }: Props) {
   const { scale } = view;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div className="kg-dial min-h-0 flex-1">
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          preserveAspectRatio="xMidYMid meet"
-          className="block h-full w-full touch-none select-none"
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onLostPointerCapture={onPointerUp}
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+      preserveAspectRatio="xMidYMid meet"
+      className="block h-full w-full touch-none select-none"
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onLostPointerCapture={onPointerUp}
+    >
+      <defs>
+        <linearGradient
+          id="kgf-edge"
+          x1="0"
+          y1="0"
+          x2={WIDTH}
+          y2={HEIGHT}
+          gradientUnits="userSpaceOnUse"
         >
-          <defs>
-            <linearGradient
-              id="kgf-edge"
-              x1="0"
-              y1="0"
-              x2={WIDTH}
-              y2={HEIGHT}
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0" stopColor="var(--color-nebula-1)" />
-              <stop offset="0.55" stopColor="var(--color-nebula-3)" />
-              <stop offset="1" stopColor="var(--color-nebula-5)" />
-            </linearGradient>
-            {/* Anchored to the WIDTH×HEIGHT stage in user space (the matrix
-                reproduces the default objectBoundingBox mapping) so the fill
-                looks identical but no longer depends on the backdrop rect's
-                size — letting that rect over-scan without shifting the glow. */}
-            <radialGradient
-              id="kgf-bg"
-              cx="0.38"
-              cy="0.32"
-              r="1"
-              gradientUnits="userSpaceOnUse"
-              gradientTransform={`matrix(${WIDTH} 0 0 ${HEIGHT} 0 0)`}
-            >
-              <stop offset="0" stopColor="var(--color-nebula-bg-0)" />
-              <stop offset="1" stopColor="var(--color-nebula-bg-1)" />
-            </radialGradient>
-            <filter id="kgf-glow" x="-80%" y="-80%" width="260%" height="260%">
-              <feGaussianBlur stdDeviation="6" />
-            </filter>
-          </defs>
-
-          {/* Nebula backdrop doubles as the pan / reset surface. It over-scans
-              the stage (3×, centered) so the anchored gradient bleeds past any
-              xMidYMid-meet letterbox band inside the framed tile — the nebula
-              reaches the frame with no seam. The .kg-dial frame does the
-              rounding/clipping now, so no rx here. */}
+          <stop offset="0" stopColor="var(--color-nebula-1)" />
+          <stop offset="0.55" stopColor="var(--color-nebula-3)" />
+          <stop offset="1" stopColor="var(--color-nebula-5)" />
+        </linearGradient>
+        {/* Anchored to the WIDTH×HEIGHT stage in user space (the matrix
+            reproduces the default objectBoundingBox mapping) so the fill
+            looks identical but no longer depends on the backdrop rect's
+            size — letting that rect over-scan without shifting the glow. */}
+        <radialGradient
+          id="kgf-bg"
+          cx="0.58"
+          cy="0.42"
+          r="1"
+          gradientUnits="userSpaceOnUse"
+          gradientTransform={`matrix(${WIDTH} 0 0 ${HEIGHT} 0 0)`}
+        >
+          {/* One cool backdrop, tuned to the 2a mock: a tight nebula bloom
+              just right of center (behind the search bar) that falls to the
+              plain surface tone within ~a third of the stage, so the outer
+              field and borders read near-black. A single gradient —
+              layering a second wash over it reads as a muddy temperature
+              clash and multiplies banding. */}
+          <stop offset="0" stopColor="var(--color-nebula-bg-0)" />
+          <stop offset="0.18" stopColor="var(--color-nebula-bg-1)" />
+          <stop offset="0.42" stopColor="var(--color-surface)" />
+        </radialGradient>
+        <filter id="kgf-glow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="6" />
+        </filter>
+        {/* Viewport-fixed vignette for the star layer ONLY. Fading the smooth
+            nebula backdrop too (e.g. a CSS mask over the whole svg) multiplies
+            two near-black gradients and 8-bit compositing turns the product
+            into visible concentric rings; stars and edges are high-frequency,
+            so masking just them can't band. Stop opacities follow a smoothstep
+            curve; the gradient is anchored to the stage so pan/zoom slides the
+            world under a fixed porthole. */}
+        <radialGradient
+          id="kgf-fade"
+          cx="0.5"
+          cy="0.44"
+          r="0.56"
+          gradientUnits="userSpaceOnUse"
+          gradientTransform={`matrix(${WIDTH} 0 0 ${HEIGHT} 0 0)`}
+        >
+          <stop offset="0.28" stopColor="#fff" stopOpacity="1" />
+          <stop offset="0.36" stopColor="#fff" stopOpacity="0.95" />
+          <stop offset="0.44" stopColor="#fff" stopOpacity="0.83" />
+          <stop offset="0.52" stopColor="#fff" stopOpacity="0.67" />
+          <stop offset="0.6" stopColor="#fff" stopOpacity="0.49" />
+          <stop offset="0.68" stopColor="#fff" stopOpacity="0.31" />
+          <stop offset="0.76" stopColor="#fff" stopOpacity="0.16" />
+          <stop offset="0.84" stopColor="#fff" stopOpacity="0.05" />
+          <stop offset="0.92" stopColor="#fff" stopOpacity="0" />
+        </radialGradient>
+        <mask id="kgf-vignette" maskUnits="userSpaceOnUse">
           <rect
             x={-WIDTH}
             y={-HEIGHT}
             width={WIDTH * 3}
             height={HEIGHT * 3}
-            fill="url(#kgf-bg)"
-            className="cursor-grab"
-            onPointerDown={onBgPointerDown}
-            onDoubleClick={resetView}
+            fill="url(#kgf-fade)"
           />
+        </mask>
+        {/* Fine monochrome grain — dithers away any residual banding in the
+            nebula's own low-contrast radial (a smooth gradient this large
+            steps every ~50px on 8-bit displays without it). */}
+        <filter id="kgf-grain">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" stitchTiles="stitch" />
+          <feColorMatrix type="saturate" values="0" />
+        </filter>
+      </defs>
 
+      {/* Nebula backdrop doubles as the pan / reset surface. It over-scans
+          the stage (3×, centered) so the anchored gradient bleeds past any
+          xMidYMid-meet letterbox band — the nebula reaches the container's
+          edges with no seam at any aspect ratio. */}
+      <rect
+        x={-WIDTH}
+        y={-HEIGHT}
+        width={WIDTH * 3}
+        height={HEIGHT * 3}
+        fill="url(#kgf-bg)"
+        className="cursor-grab"
+        onPointerDown={onBgPointerDown}
+        onDoubleClick={resetView}
+      />
+
+      {layout && (
+        <g mask="url(#kgf-vignette)">
           <g transform={`translate(${view.tx} ${view.ty}) scale(${scale})`}>
             {/* Edges first, so nodes sit on top. Curved gradient strands — the
                 bow alternates by index so the mesh weaves instead of fanning. */}
@@ -304,15 +346,20 @@ export function KnowledgeGraph({ graph: full }: Props) {
               const b = posOf(edge.target, idToIndex.get(edge.target) ?? 0);
               const litEdge = !active || edge.source === active || edge.target === active;
               // Resting opacity: explicit refs read a touch stronger than
-              // inferred topic links.
-              const base = edge.kind === "ref" ? 0.55 : 0.32;
+              // inferred topic links. Hairline weights to match the fine stars.
+              const base = edge.kind === "ref" ? 0.45 : 0.25;
+              const typeA = idToType.get(edge.source);
+              const stroke =
+                typeA && typeA === idToType.get(edge.target)
+                  ? typeColor(typeA)
+                  : "url(#kgf-edge)";
               return (
                 <path
                   key={i}
                   d={curvedPath(a, b, i)}
                   fill="none"
-                  stroke="url(#kgf-edge)"
-                  strokeWidth={(edge.kind === "ref" ? 1.5 : 1) / scale}
+                  stroke={stroke}
+                  strokeWidth={(edge.kind === "ref" ? 1.1 : 0.75) / scale}
                   strokeOpacity={!active ? base : litEdge ? 0.95 : 0.06}
                   style={{ transition: "stroke-opacity 160ms ease" }}
                 />
@@ -321,13 +368,15 @@ export function KnowledgeGraph({ graph: full }: Props) {
 
             {graph.nodes.map((node, idx) => {
               const p = posOf(node.id, idx);
-              const r = 3 + Math.min(Math.sqrt(node.degree) * 1.7, 8);
-              const color = nebulaColorAt(p.x, WIDTH);
+              // Fine stars (≈3–10px on screen): the hero reads as a wide field
+              // of small points, not a bubble chart. Degree still sizes them,
+              // gently. An invisible hit circle keeps hover/click forgiving.
+              const r = 1.4 + Math.min(Math.sqrt(node.degree) * 0.7, 2.8);
+              const color = typeColor(node.type);
               const lit = isLit(node.id);
-              const showLabel =
-                active === node.id ||
-                (active != null && lit) ||
-                (active == null && recentLabelIds.has(node.id));
+              // Labels only on hover (the spotlit neighbourhood) — the resting
+              // hero stays a clean constellation under the overlaid dashboard.
+              const showLabel = active != null && lit;
               return (
                 <g
                   key={node.id}
@@ -340,6 +389,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
                   onPointerEnter={() => setHovered(node.id)}
                   onPointerLeave={() => setHovered((cur) => (cur === node.id ? null : cur))}
                 >
+                  <circle r={Math.max(r + 5, 8)} fill="transparent" />
                   {glowIds.has(node.id) && (
                     <circle
                       r={r * 2.2}
@@ -363,13 +413,13 @@ export function KnowledgeGraph({ graph: full }: Props) {
                   {showLabel && (
                     <text
                       x={r + 4 / scale}
-                      y={4 / scale}
+                      y={3 / scale}
                       className="fill-ink"
-                      fontSize={12 / scale}
+                      fontSize={9 / scale}
                       style={{
                         paintOrder: "stroke",
                         stroke: "var(--color-nebula-bg-1)",
-                        strokeWidth: 3 / scale,
+                        strokeWidth: 2.5 / scale,
                       }}
                     >
                       {truncate(node.title, 36)}
@@ -379,21 +429,65 @@ export function KnowledgeGraph({ graph: full }: Props) {
               );
             })}
           </g>
-        </svg>
-      </div>
+        </g>
+      )}
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 pt-2 text-xs text-ink-dim">
-        <span>
-          {graph.nodes.length} linked {graph.nodes.length === 1 ? "doc" : "docs"} ·{" "}
-          {graph.edges.length} {graph.edges.length === 1 ? "link" : "links"}
-        </span>
-        <span className="ml-auto text-ink-dim/60">
-          {unlinkedCount > 0 && `${unlinkedCount} unlinked hidden · `}scroll to zoom · drag to pan ·
-          click to open
-        </span>
-      </div>
-    </div>
+      {/* Grain sits over everything (backdrop, stars, glows) at imperceptible
+          strength — pure dither, not texture. Stage + 25% overscan keeps the
+          filter raster small; beyond it the field is flat near-black with
+          nothing left to band. */}
+      <rect
+        x={-WIDTH * 0.25}
+        y={-HEIGHT * 0.25}
+        width={WIDTH * 1.5}
+        height={HEIGHT * 1.5}
+        filter="url(#kgf-grain)"
+        opacity="0.028"
+        pointerEvents="none"
+      />
+    </svg>
   );
+}
+
+/**
+ * Fan a settled layout out across the whole stage. Two passes: stretch each
+ * axis independently to the padded box (the sim's blob rarely matches the
+ * stage's aspect), then relax the center-heavy density by raising each
+ * point's normalized distance from center to SPREAD — inner points move
+ * outward a lot, the rim barely moves, and relative arrangement (clusters,
+ * neighbourhoods) survives.
+ */
+function spread(pos: Point[]): Point[] {
+  if (pos.length < 2) return pos;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of pos) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const sx = (WIDTH - 2 * STAGE_PAD) / (maxX - minX || 1);
+  const sy = (HEIGHT - 2 * STAGE_PAD) / (maxY - minY || 1);
+  const cx = WIDTH / 2;
+  const cy = HEIGHT / 2;
+  const rx = WIDTH / 2 - STAGE_PAD;
+  const ry = HEIGHT / 2 - STAGE_PAD;
+  return pos.map((p) => {
+    const x = STAGE_PAD + (p.x - minX) * sx;
+    const y = STAGE_PAD + (p.y - minY) * sy;
+    const nx = (x - cx) / rx;
+    const ny = (y - cy) / ry;
+    const rho = Math.hypot(nx, ny);
+    if (rho < 1e-4 || rho >= 1) return { x, y };
+    const boost = Math.pow(rho, SPREAD) / rho;
+    return {
+      x: clamp(cx + (x - cx) * boost, STAGE_PAD, WIDTH - STAGE_PAD),
+      y: clamp(cy + (y - cy) * boost, STAGE_PAD, HEIGHT - STAGE_PAD),
+    };
+  });
 }
 
 /** A gently curved edge: quadratic bezier bowed perpendicular to the chord,

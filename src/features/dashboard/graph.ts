@@ -23,11 +23,9 @@ export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
  *  meaningful pairwise link (they'd create a dense blob), so they're skipped. */
 const TOPIC_GROUP_MAX = 6;
 
-/** The nebula star family, swept across the layout (design pass 5a) instead
- *  of encoding doc types. Five themed tokens (src/index.css) so each theme
- *  supplies its own sweep — the brand sky→blue→violet on Dark+, phosphor
- *  greens on Matrix, etc. Shared by the home card's preview and the full
- *  interactive view; the edge gradients use stops 1/3/5. */
+/** The nebula star family — five themed tokens (src/index.css) so each theme
+ *  supplies its own sweep. The edge gradients use stops 1/3/5; stars of
+ *  non-canonical doc types pick a stable hue from this family. */
 export const NEBULA_COLORS = [
   "var(--color-nebula-1)",
   "var(--color-nebula-2)",
@@ -36,10 +34,29 @@ export const NEBULA_COLORS = [
   "var(--color-nebula-5)",
 ];
 
-/** The family hue for a node at layout `x` within a `width`-wide box. */
-export function nebulaColorAt(x: number, width: number): string {
-  const t = Math.min(0.999, Math.max(0, x / width));
-  return NEBULA_COLORS[Math.floor(t * NEBULA_COLORS.length)];
+/** Semantic hues for the canonical doc types — the same themed tokens the
+ *  library's type chips bind (research/plan/handoff), plus the Ship/Merge
+ *  green for `pr` docs and the commit teal for notes, so every theme
+ *  recolors them and the light theme deepens them. */
+const TYPE_COLORS: Record<string, string> = {
+  research: "var(--color-research)",
+  plan: "var(--color-plan)",
+  handoff: "var(--color-handoff)",
+  pr: "var(--color-ship)",
+  note: "var(--color-commit)",
+};
+
+/** A star's hue for a doc `type` (lowercased; "other" = untyped). Canonical
+ *  types wear their semantic token; unknown types hash to a stable nebula
+ *  hue so distinct off-schema families still read apart; untyped docs rest
+ *  on the neutral mid-blue. */
+export function typeColor(type: string): string {
+  const known = TYPE_COLORS[type];
+  if (known) return known;
+  if (type === "other") return NEBULA_COLORS[2];
+  let h = 0;
+  for (let i = 0; i < type.length; i++) h = (h * 31 + type.charCodeAt(i)) >>> 0;
+  return NEBULA_COLORS[h % NEBULA_COLORS.length];
 }
 
 function normalize(value: string): string {

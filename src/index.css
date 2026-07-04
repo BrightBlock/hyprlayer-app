@@ -369,40 +369,10 @@ a {
   }
 }
 
-/* ── Dashboard graph expand/collapse (View Transitions) ─────────────────────
-   Every `view-transition-name`d card (knowledge card, graph stage, live
-   strip, recent list, section label) morphs between the collapsed grid and
-   the expanded stack. The trigger already skips the API under
-   prefers-reduced-motion (see toggleGraph in routes/Dashboard.tsx); this
-   just tunes the glide. */
-::view-transition-group(*) {
-  animation-duration: 320ms;
-  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* ── Knowledge-card nebula graph (MiniGraph) ────────────────────────────────
-   Two node layers drift on offset periods so the constellation feels alive
-   without churning; the hub node wears an expanding pulse ring. Transforms
-   (not SMIL) so prefers-reduced-motion can pin everything static. The svg
-   groups need fill-box/center so scale/translate stay node-local. */
-@keyframes kg-drift-a {
-  0%,
-  100% {
-    transform: translate(0, 0);
-  }
-  50% {
-    transform: translate(3px, -4px);
-  }
-}
-@keyframes kg-drift-b {
-  0%,
-  100% {
-    transform: translate(0, 0);
-  }
-  50% {
-    transform: translate(-4px, 3px);
-  }
-}
+/* ── Knowledge-graph nebula (Observatory hero) ──────────────────────────────
+   The top hub node wears an expanding pulse ring. A transform (not SMIL) so
+   prefers-reduced-motion can pin it static; the svg group needs
+   fill-box/center so the scale stays node-local. */
 @keyframes kg-pulse {
   0% {
     transform: scale(1);
@@ -413,45 +383,16 @@ a {
     opacity: 0;
   }
 }
-.kg-drift-a {
-  animation: kg-drift-a 11s ease-in-out infinite;
-}
-.kg-drift-b {
-  animation: kg-drift-b 13s ease-in-out infinite;
-}
 .kg-pulse {
   transform-box: fill-box;
   transform-origin: center;
   animation: kg-pulse 2.8s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .kg-drift-a,
-  .kg-drift-b,
   .kg-pulse {
     animation: none;
-  }
-  .kg-pulse {
     opacity: 0.3;
   }
-}
-
-/* Etched "watch-dial" frame for the knowledge-graph surfaces (home preview +
-   full nebula stage): a light outer hairline over a dark inner groove reads as
-   an inset dial. The 2px inset keeps the graph from painting over the groove;
-   the backing is the nebula's darkest stop so the gutter blends into the graph.
-   Dark family here; light flips the groove white and lets the card panel show. */
-.kg-dial {
-  border-radius: 10px;
-  border: 1px solid #383b44;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.7);
-  background: var(--color-nebula-bg-1);
-  padding: 2px;
-  overflow: hidden;
-}
-html.light .kg-dial {
-  border-color: #c9c5bb;
-  box-shadow: inset 0 0 0 1px #fff;
-  background: transparent;
 }
 
 /* Gentle breathing for a workstream's "working" activity dot — a soft pulse +

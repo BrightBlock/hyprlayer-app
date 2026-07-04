@@ -13,6 +13,15 @@ your config and your thoughts storage; the app gives you a workspace on top of i
 
 ## Key Features
 
+**The Observatory (home):**
+- Your knowledge graph as a full-bleed, interactive home surface — every
+  document a star colored by its type, every resolved link a strand; scroll to
+  zoom, drag to pan, hover to spotlight, click to open
+- Live agents pinned onto the field, stage-colored cards for what's running
+  right now, and a feed of the latest workstream activity
+- Global search and corpus stats front and center; a guided first-node state
+  points new users at the setup wizard until a repo is connected
+
 **The Pipeline:**
 - Spec-driven stages — research → plan → implement → validate → ship — each
   backed by a Claude Code skill
@@ -30,7 +39,8 @@ your config and your thoughts storage; the app gives you a workspace on top of i
 **Knowledge Library:**
 - Browse, search, and edit your thoughts as first-class documents with frontmatter
 - Templated document creation and a Markdown preview with GitHub-flavored rendering
-- Knowledge graph view to discover how documents connect
+- Documents link into the home Observatory's graph via `related` frontmatter
+  and shared tags/tickets
 
 **Git & Review:**
 - Fork-style Git panel for staging, unstaging, and discarding changes
