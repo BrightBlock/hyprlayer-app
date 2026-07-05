@@ -1003,6 +1003,11 @@ type Props = {
   onClearAttachments: () => void;
 };
 
+// The composer grows from one row up to this height, then scrolls. ~14 rows of
+// text-sm — generous enough to keep a whole prompt in view without letting the
+// box crowd out the transcript above it.
+const MAX_COMPOSER_HEIGHT = 320;
+
 export function SessionChat({
   view,
   shell,
@@ -1554,6 +1559,36 @@ export function SessionChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [composerScroll, setComposerScroll] = useState(0);
 
+  // Auto-grow the composer from a single row to fit its content (capped at
+  // MAX_COMPOSER_HEIGHT, then it scrolls). The composer is anchored at the
+  // bottom of the column, so a taller textarea pushes its own top edge up
+  // toward the transcript — the box grows *upward*, keeping the whole draft in
+  // view. Reset to one row is automatic: send/start clears `draft`, re-running
+  // this. `height:auto` first so the box can shrink as well as grow.
+  const autosizeComposer = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, MAX_COMPOSER_HEIGHT)}px`;
+  }, []);
+  useLayoutEffect(autosizeComposer, [autosizeComposer, draft]);
+  // Re-wrapping on a width change (split-pane drag, toolbar compaction) changes
+  // how tall the text needs to be, so recompute then too. Guarded on width:
+  // our own height mutations don't touch the width, so this can't loop.
+  const composerWidthRef = useRef(0);
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0].contentRect.width;
+      if (w === composerWidthRef.current) return;
+      composerWidthRef.current = w;
+      autosizeComposer();
+    });
+    ro.observe(ta);
+    return () => ro.disconnect();
+  }, [autosizeComposer]);
+
   // Grab focus when something swaps this agent back on screen (e.g. the terminal
   // is toggled away) so the user can type straight away. We consume the signal
   // inside the frame, not in the effect body, so React 19 StrictMode's
@@ -1941,7 +1976,7 @@ export function SessionChat({
                     onPaste={onPaste}
                     onSelect={autocomplete.syncCaret}
                     onScroll={(e) => setComposerScroll(e.currentTarget.scrollTop)}
-                    rows={3}
+                    rows={1}
                     disabled={Boolean(pendingQuestion)}
                     placeholder={
                       pendingQuestion
@@ -1954,7 +1989,7 @@ export function SessionChat({
                             ? "Send a follow-up — it'll queue until the turn finishes…"
                             : "Reply to the agent…  (Enter to send)"
                     }
-                    className="selectable relative block w-full resize-none bg-transparent px-3.5 py-3 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
+                    className="selectable relative block w-full resize-none bg-transparent px-3.5 py-4 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
                   />
                 </div>
                 {/* Single row, never wrapping: when the labelled pickers don't
