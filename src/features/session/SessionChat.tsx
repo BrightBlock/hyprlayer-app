@@ -87,14 +87,9 @@ import {
   useSession,
   useMostRecentDoc,
   useSessionBackgroundTasks,
-  useSessionPlanTasks,
-  usePlanDrawerUi,
-  setPlanDrawerUi,
-  togglePlanDrawerCollapsed,
   type QueuedMessage,
 } from "./sessionStore";
 import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
-import { PlanTasksPanel } from "./PlanTasksView";
 import {
   buildQuestionAnswers,
   describeState,
@@ -109,6 +104,7 @@ import {
   useComposerAutocomplete,
 } from "./ComposerAutocomplete";
 import { useCommand } from "../../lib/keybindings/registry";
+import { useUiStore } from "../../lib/uiStore";
 import { PromptHistoryStack } from "./PromptHistoryStack";
 import {
   IDLE_NAV,
@@ -1413,30 +1409,6 @@ export function SessionChat({
   // Background tasks bar.
   const backgroundTasks = useSessionBackgroundTasks(sid);
 
-  // The agent's live plan, shown as a drawer above the composer. Starts
-  // minimized so the expanded list never covers an approval card.
-  const planTasks = useSessionPlanTasks(sid);
-  // Collapsed/dismissed live in a per-session store, not local state, so they
-  // survive this component's remount on a tab switch — otherwise a dismissed
-  // (all-done) plan springs back into view when you leave the tab and return.
-  const { collapsed: planCollapsed, dismissed: planDismissed } = usePlanDrawerUi(sid);
-  const planHasIncomplete = planTasks.some((t) => t.status !== "completed");
-  const planAllDone = planTasks.length > 0 && !planHasIncomplete;
-  // Auto-clear once the plan finishes and the turn ends; stays dismissed (and
-  // re-minimized for the next plan) until a fresh incomplete task appears.
-  useEffect(() => {
-    if (!sid) return;
-    if (planHasIncomplete) {
-      setPlanDrawerUi(sid, { dismissed: false });
-    } else if (planAllDone && !working) {
-      setPlanDrawerUi(sid, { dismissed: true, collapsed: true });
-    }
-  }, [sid, planHasIncomplete, planAllDone, working]);
-  const togglePlan = useCallback(() => {
-    if (sid) togglePlanDrawerCollapsed(sid);
-  }, [sid]);
-  useCommand("session.togglePlan", planTasks.length > 0 && !planDismissed ? togglePlan : null);
-
   // Prompt history navigation: derive prompts from the live transcript,
   // hold ephemeral nav state, and register focus-gated recall commands.
   const prompts = useMemo(
@@ -1483,6 +1455,11 @@ export function SessionChat({
       ? () => applyRecall(recallNext(prompts, historyNav, draft))
       : null,
   );
+
+  // The plan/task list moved from the composer into the changes sidebar; keep the
+  // "Show / Hide Tasks" shortcut wired to that section's (persisted) collapse toggle.
+  const toggleTasks = useUiStore((s) => s.toggleTasks);
+  useCommand("session.togglePlan", toggleTasks);
 
   const transcriptRef = useRef<TranscriptHandle | null>(null);
 
@@ -1916,26 +1893,15 @@ export function SessionChat({
                   />
                 )}
               </div>
-              {/* The agent's live plan, a drawer docked above the composer. The
-                  top margin reserves room for the collapsed handle plus a gap so
-                  it floats into clear space with breathing room below the banners
-                  above (queued messages / handoff nudge), not flush against them.
-                  Pinned prompt chips share that strip — TASKS tab left, chips
-                  right, one line — so they reserve it too. */}
+              {/* Top margin reserves room for the pinned prompt chips, which
+                  float on their own strip just above the composer (absolute
+                  bottom-full) so they clear the banners above (queued messages /
+                  handoff nudge) with breathing room instead of sitting flush. */}
               <div
                 className={`relative rounded-xl bg-panel-2 ${
-                  (planTasks.length > 0 && !planDismissed) || pinnedPrompts.length > 0
-                    ? "mt-12"
-                    : ""
+                  pinnedPrompts.length > 0 ? "mt-12" : ""
                 }`}
               >
-                <PlanTasksPanel
-                  tasks={planTasks}
-                  working={working}
-                  collapsed={planCollapsed}
-                  cleared={planDismissed}
-                  onToggle={togglePlan}
-                />
                 {pinnedPrompts.length > 0 && (
                   <PromptChips
                     view={view}

@@ -172,8 +172,15 @@ export function ScriptDock({
         />
       )}
       {/* header — single row: the left chrome and right Run button stay pinned,
-          and the tab strip scrolls (with edge chevrons) when it gets too narrow. */}
-      <div className="flex h-[42px] shrink-0 items-center gap-1 border-b border-edge px-2 py-1">
+          and the tab strip scrolls (with edge chevrons) when it gets too narrow.
+          Right-docked it matches the other sidebar section headers (`h-9`); the
+          bottom dock keeps its taller toolbar. */}
+      <div
+        className={cx(
+          "flex shrink-0 items-center gap-1 border-b border-edge px-2 py-1",
+          right ? "h-9" : "h-[42px]",
+        )}
+      >
         <button
           type="button"
           // Right-docked: collapse the body in place (keep the header). Bottom:

@@ -1,12 +1,17 @@
 /**
- * The agent's live plan, presented as {@link PlanTasksPanel}: a drawer docked
- * above the composer with a persistent handle bar (count + chevron) that slides
- * the task list open and shut. Open/collapsed/cleared state is owned by
- * `SessionChat`.
+ * The agent's live plan/to-do list, presented as {@link SidebarTasksPanel}: a
+ * collapsible section in the right "changes" sidebar, docked directly under the
+ * Git section. A header bar (checklist glyph + count + chevron) folds the task
+ * list open and shut; the collapsed state is a persisted, sidebar-level
+ * preference in `uiStore`, so it stays put as you switch agent tabs. The panel
+ * tracks the sidebar's focused session and renders nothing until it has a plan.
  */
 
 import { Spinner } from "../../components/ui";
-import { ChecklistIcon, ChevronDownIcon } from "../../components/icons";
+import { ChecklistIcon, ChevronDownIcon, ChevronRightIcon } from "../../components/icons";
+import { useUiStore } from "../../lib/uiStore";
+import { useSession, useSessionPlanTasks } from "./sessionStore";
+import { isWorking } from "./transcript";
 import type { PlanTask } from "./planTasks";
 
 /** Completed-task count for the "n/total" progress label. */
@@ -57,85 +62,57 @@ function TaskRow({ task, working }: { task: PlanTask; working: boolean }) {
 }
 
 /**
- * The task drawer — a tab anchored to the top of the composer (its parent must
- * be `relative`), floating up over the transcript so it never pushes layout. Its
- * fill is solid panel-2, the same surface as the composer it merges into. The
- * list slides open above the handle via a grid-rows `0fr↔1fr` fold, and a second
- * outer fold retracts the whole drawer on auto-clear. Animates by height only.
+ * The Tasks section of the changes sidebar — the focused session's live plan,
+ * below the pinned Git + Changes block. Behaves like a VS Code accordion pane:
+ * expanded it grows (`flex-1`) to sit directly under Changes and share the
+ * vertical space, its list scrolling within; collapsed it drops to a bare `h-9`
+ * header (chevron + checklist glyph + "TASKS" + n/total) that sinks to the
+ * bottom under the space-filling Changes. Absent until the session has a plan;
+ * collapse state is the shared, persisted `tasksCollapsed` so it survives tab
+ * switches/restart.
  */
-export function PlanTasksPanel({
-  tasks,
-  working,
-  collapsed,
-  cleared,
-  onToggle,
-}: {
-  tasks: PlanTask[];
-  working: boolean;
-  /** List folded down to just the handle bar. */
-  collapsed: boolean;
-  /** All tasks done + turn ended → the whole drawer retracts into the composer. */
-  cleared: boolean;
-  onToggle: () => void;
-}) {
+export function SidebarTasksPanel({ sessionId }: { sessionId: string | undefined }) {
+  const tasks = useSessionPlanTasks(sessionId);
+  const session = useSession(sessionId);
+  const working = session ? isWorking(session) : false;
+  const collapsed = useUiStore((s) => s.tasksCollapsed);
+  const toggle = useUiStore((s) => s.toggleTasks);
+
   if (tasks.length === 0) return null;
   const done = doneCount(tasks);
-  const open = !collapsed && !cleared;
+  const open = !collapsed;
   const active = tasks.find((t) => t.status === "in_progress");
   const label = `${open ? "Hide" : "Show"} tasks — ${done}/${tasks.length} done${
     active ? ` · ${active.subject}` : ""
   }`;
-  // Shared fold transition for the grids below. Not gated on reduced motion —
-  // Windows maps that to the often-off "Animation effects" toggle, which would
-  // otherwise snap the drawer instead of folding it.
-  const fold = "transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]";
+
   return (
-    <div
-      aria-hidden={cleared}
-      // Outer fold: retracts the whole drawer (handle + list) when cleared.
-      className={`task-toast absolute bottom-full left-6 z-20 grid w-fit max-w-[calc(100%-3rem)] ${fold} ${
-        cleared ? "is-folded grid-rows-[0fr]" : "grid-rows-[1fr]"
-      }`}
-    >
-      <div className="overflow-hidden">
-        {/* Solid panel-2 — the exact same fill as the composer below, so they read as one surface. */}
-        <div className="overflow-hidden rounded-t-xl bg-panel-2">
-          {/* The list, folded open above the handle. */}
-          <div className={`grid ${fold} ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
-            <div className="min-h-0 overflow-hidden">
-              <ul className="max-h-56 overflow-y-auto px-1.5 pt-2">
-                {tasks.map((t, i) => (
-                  <TaskRow key={t.id ?? `pending-${i}`} task={t} working={working} />
-                ))}
-              </ul>
-            </div>
-          </div>
-          {/* Handle bar: the always-visible merged tab; click to toggle the list. */}
-          <button
-            type="button"
-            onClick={onToggle}
-            title={label}
-            aria-label={label}
-            aria-expanded={open}
-            tabIndex={cleared ? -1 : undefined}
-            className="flex w-full items-center gap-1.5 px-3 py-1.5 text-ink-dim hover:text-ink"
-          >
-            {/* Pulse only while genuinely working — an ended turn can leave an in_progress task. */}
-            <ChecklistIcon size={14} className={active && working ? "animate-work-pulse" : undefined} />
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim/70">
-              Tasks
-            </span>
-            <span className="font-mono text-[11px] text-ink-dim/60">
-              {done}/{tasks.length}
-            </span>
-            {/* Chevron points up when collapsed (pull up to open), down when open. */}
-            <ChevronDownIcon
-              size={15}
-              className={`ml-auto transition-transform duration-300 ${open ? "" : "rotate-180"}`}
-            />
-          </button>
-        </div>
-      </div>
+    <div className={`flex flex-col border-t border-edge ${open ? "min-h-0 flex-1" : "shrink-0"}`}>
+      <button
+        type="button"
+        onClick={toggle}
+        title={label}
+        aria-label={label}
+        aria-expanded={open}
+        className="flex h-9 shrink-0 items-center gap-2 px-3 text-left text-ink-dim hover:text-ink"
+      >
+        <span className="flex w-3 shrink-0 justify-center">
+          {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        </span>
+        {/* Pulse only while genuinely working — an ended turn can leave an in_progress task. */}
+        <ChecklistIcon size={14} className={active && working ? "animate-work-pulse" : undefined} />
+        <span className="text-xs font-semibold uppercase tracking-wide">Tasks</span>
+        <span className="ml-auto font-mono text-xs">
+          {done}/{tasks.length}
+        </span>
+      </button>
+      {open && (
+        <ul className="min-h-0 flex-1 overflow-y-auto border-t border-edge px-1.5 py-1">
+          {tasks.map((t, i) => (
+            <TaskRow key={t.id ?? `pending-${i}`} task={t} working={working} />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

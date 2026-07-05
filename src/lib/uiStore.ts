@@ -45,6 +45,12 @@ type UiStore = {
    */
   diffWidth: number;
   setDiffWidth: (width: number) => void;
+  /** Whether the Tasks section inside the right diff sidebar — the agent's live
+   *  plan/to-do list, docked under the Git section — is collapsed to its header.
+   *  A sidebar-level layout preference (not per-session, so it stays put as you
+   *  switch agent tabs) persisted like the other collapse flags. */
+  tasksCollapsed: boolean;
+  toggleTasks: () => void;
   /** Live width (px) of the Library's list panel. Lives here (not in the route
    *  component) so a drag survives leaving and re-opening the Library — the
    *  route unmounts, but this store doesn't. */
@@ -81,6 +87,8 @@ export const useUiStore = create<UiStore>()(
       toggleDiff: () => set((state) => ({ diffHidden: !state.diffHidden })),
       diffWidth: DIFF_SIDEBAR_WIDTH,
       setDiffWidth: (width) => set({ diffWidth: width }),
+      tasksCollapsed: false,
+      toggleTasks: () => set((state) => ({ tasksCollapsed: !state.tasksCollapsed })),
       libraryWidth: LIBRARY_SIDEBAR_WIDTH,
       setLibraryWidth: (width) => set({ libraryWidth: width }),
       promptsWidth: PROMPTS_SIDEBAR_WIDTH,
@@ -101,6 +109,7 @@ export const useUiStore = create<UiStore>()(
       // which would otherwise write to localStorage on every resize pointermove.
       partialize: (s) => ({
         diffHidden: s.diffHidden,
+        tasksCollapsed: s.tasksCollapsed,
         libraryCollapsed: s.libraryCollapsed,
         projectSidebarCollapsed: s.projectSidebarCollapsed,
         docWide: s.docWide,

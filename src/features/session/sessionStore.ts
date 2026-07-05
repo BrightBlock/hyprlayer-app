@@ -1332,48 +1332,6 @@ export function useSessionPlanTasks(sessionId: string | undefined): PlanTask[] {
 }
 
 /**
- * Per-session view state for the plan drawer: whether the task list is folded to
- * its handle (`collapsed`) and whether the whole drawer has retracted after the
- * plan finished (`dismissed`). Kept here, keyed by session, rather than as
- * `SessionChat`-local state so it survives the component's remount when the user
- * switches agent tabs — otherwise a dismissed (all-done) plan springs back into
- * view on return. In-memory only; resets on app restart, which is fine for
- * ephemeral view state.
- */
-type PlanDrawerUi = { collapsed: boolean; dismissed: boolean };
-
-/** Drawer starts folded to its handle and not yet auto-dismissed. */
-const PLAN_DRAWER_DEFAULT: PlanDrawerUi = { collapsed: true, dismissed: false };
-
-export const usePlanDrawerStore = create<{ byId: Record<string, PlanDrawerUi> }>(() => ({
-  byId: {},
-}));
-
-/** A session's plan-drawer view state (the shared default until first toggled). */
-export function usePlanDrawerUi(sessionId: string | undefined): PlanDrawerUi {
-  return usePlanDrawerStore((s) => (sessionId ? s.byId[sessionId] : undefined) ?? PLAN_DRAWER_DEFAULT);
-}
-
-/** Patch a session's plan-drawer view state (no-op when nothing changes, so the
- *  auto-clear effect re-firing on remount doesn't churn a render). */
-export function setPlanDrawerUi(sessionId: string, patch: Partial<PlanDrawerUi>): void {
-  usePlanDrawerStore.setState((s) => {
-    const prev = s.byId[sessionId] ?? PLAN_DRAWER_DEFAULT;
-    const next = { ...prev, ...patch };
-    if (next.collapsed === prev.collapsed && next.dismissed === prev.dismissed) return s;
-    return { byId: { ...s.byId, [sessionId]: next } };
-  });
-}
-
-/** Flip a session's plan drawer between folded and open. */
-export function togglePlanDrawerCollapsed(sessionId: string): void {
-  usePlanDrawerStore.setState((s) => {
-    const prev = s.byId[sessionId] ?? PLAN_DRAWER_DEFAULT;
-    return { byId: { ...s.byId, [sessionId]: { ...prev, collapsed: !prev.collapsed } } };
-  });
-}
-
-/**
  * The single live-activity signal for a whole workstream, folded from the states
  * of every session bound to it. Drives the sidebar/list activity dot so you can
  * see at a glance which workstreams are running, which are blocked on you, and

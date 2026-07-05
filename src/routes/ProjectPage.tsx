@@ -33,6 +33,7 @@ import { ArchivedAgentsView } from "../features/session/ArchivedAgentsView";
 import { DocPreviewTab } from "../features/session/DocPreviewTab";
 import { TabTitle } from "../features/session/TabTitle";
 import { TerminalTab } from "../features/session/TerminalTab";
+import { SidebarTasksPanel } from "../features/session/PlanTasksView";
 import { AgentPtyTab } from "../features/multiplexer/AgentPtyTab";
 import { EngineGlyph, PtyTabDot } from "../features/multiplexer/agentStateUi";
 import {
@@ -1773,6 +1774,7 @@ export function ProjectPage() {
               onOpenFile={openFile}
             />
           </div>
+          <SidebarTasksPanel sessionId={focusedShell?.sessionId} />
           {rightDock && showAside && (
             <ScriptDock
               key={`${activeView!.item.id}:right`}
