@@ -167,6 +167,28 @@ export function removeSessionsForWorkstream(workstreamId: string): void {
 }
 
 /**
+ * Release a single session's in-memory transcript and live channel. Called from
+ * the UI's "gone for good" paths — closing a tab, tearing down a split, forgetting
+ * an archived handle — and for a terminal session on archive. Without this the
+ * entry outlives every UI handle to it and only `removeSessionsForWorkstream`
+ * (workstream archive) ever frees it, so closed sessions pile up in the heap for
+ * the app's lifetime. The SQLite event log stays the source of truth: a reopened
+ * tab rebuilds the transcript via `restoreSessionIfNeeded` on mount, so nothing is
+ * lost. Unconditional — callers decide when an entry is safe to drop (e.g. only
+ * for a non-`live` session on archive, so a still-running archived turn keeps its
+ * channel).
+ */
+export function dropSession(sessionId: string): void {
+  channels.delete(sessionId);
+  useSessionStore.setState((s) => {
+    if (!s.sessions[sessionId]) return s;
+    const next = { ...s.sessions };
+    delete next[sessionId];
+    return { sessions: next };
+  });
+}
+
+/**
  * Epoch-ms start timestamp for each live background task (by `toolUseId`).
  * Stamped on first appearance, preserved across subsequent `setEntry` calls,
  * and naturally dropped when a task ends (it won't be in the live set anymore).

@@ -76,6 +76,7 @@ const {
   applyPermissionMode,
   classifyEntry,
   workstreamShipBusy,
+  dropSession,
   useSessionStore,
 } = await import("./sessionStore");
 const { isBusy, isWorking } = await import("./transcript");
@@ -117,6 +118,27 @@ beforeEach(() => {
   h.answerQuestion.mockClear();
   h.restartSession.mockClear();
   h.state.lastChannel = null;
+});
+
+describe("dropSession (transcript eviction)", () => {
+  it("releases the entry and a late channel event can't resurrect it", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    expect(useSessionStore.getState().sessions[id]).toBeDefined();
+
+    dropSession(id);
+    expect(useSessionStore.getState().sessions[id]).toBeUndefined();
+
+    // The channel is detached — a straggler event must not rebuild the entry
+    // (that's `restoreSessionIfNeeded`'s job, on remount, from the SQLite log).
+    emit(TURN_DONE);
+    expect(useSessionStore.getState().sessions[id]).toBeUndefined();
+  });
+
+  it("is a no-op for an unknown session id", () => {
+    expect(() => dropSession("never-existed")).not.toThrow();
+    expect(useSessionStore.getState().sessions).toEqual({});
+  });
 });
 
 describe("conversation steering (mid-turn message queue)", () => {

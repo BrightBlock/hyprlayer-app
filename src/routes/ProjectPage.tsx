@@ -59,6 +59,7 @@ import { requestRun, setActiveWorkstream, useScriptsStore } from "@/features/ses
 import { openProjectSettings } from "@/features/projects/projectSettingsStore";
 import { useTabDrag, type TabDragHandlers } from "@/features/session/useTabDrag";
 import {
+  dropSession,
   killSession,
   stopSession,
   transcriptToText,
@@ -711,6 +712,8 @@ export function ProjectPage() {
       rightActiveId: undefined,
       activePane: "main",
     }));
+    // The right shells are dropped, not hidden — free their transcripts too.
+    for (const s of rightShells) if (s.sessionId) dropSession(s.sessionId);
   };
   const moveShellToPane = (shellId: number, toPane: "main" | "right") => {
     updateTabs((current) => {
@@ -823,6 +826,8 @@ export function ProjectPage() {
     if (shell.terminalView?.terminalId) void commands.terminalClose(shell.terminalView.terminalId);
     if (shell.ptyAgent && wsId) closeAgent(wsId, shellId);
     updateTabs((current) => removeShellState(current, shellId));
+    // Tab's gone for good — free its transcript; nothing points at it anymore.
+    if (shell.sessionId) dropSession(shell.sessionId);
   };
   // Archive an agent: lift its tab out of the strip but keep its conversation,
   // branch and worktree intact (the opposite of closeShell). The status snapshot
@@ -846,6 +851,13 @@ export function ProjectPage() {
       status = classifyArchivedStatus(entry?.state);
     }
     updateTabs((current) => archiveShellState(current, shellId, status, Date.now()));
+    // Keep the tab handle warm but release a terminal session's transcript heap;
+    // unarchive rebuilds it from the SQLite log on mount. A still-live archived
+    // turn keeps its entry (and channel) so unarchive reconnects seamlessly.
+    if (!shell.ptyAgent && shell.sessionId) {
+      const entry = useSessionStore.getState().sessions[shell.sessionId];
+      if (entry && !entry.live) dropSession(shell.sessionId);
+    }
   };
   // Restore an archived agent and focus it — re-mounting re-attaches the live
   // session or, for a PTY agent, relaunches and resumes its conversation by id.
@@ -855,11 +867,15 @@ export function ProjectPage() {
   };
   // Drop an archived entry for good. The branch/worktree/transcript live on the
   // backend and are untouched — only the resumable tab handle is forgotten.
-  const removeArchivedShell = (shellId: number) =>
+  const removeArchivedShell = (shellId: number) => {
+    const sessionId = tabs?.archived?.find((a) => a.shell.id === shellId)?.shell.sessionId;
     updateTabs((current) => ({
       ...current,
       archived: (current.archived ?? []).filter((a) => a.shell.id !== shellId),
     }));
+    // Handle forgotten for good — release any transcript still held for it.
+    if (sessionId) dropSession(sessionId);
+  };
   const openDoc = (id: string) => {
     void navigate({ to: "/library", search: { doc: id } });
   };
