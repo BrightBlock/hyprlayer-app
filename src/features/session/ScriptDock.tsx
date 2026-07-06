@@ -88,8 +88,11 @@ export function ScriptDock({
   const termIds = dock?.termIds ?? {};
   const isRunning = !!running;
   const port = running?.port ?? runtime.data?.port ?? null;
-  // Setup's captured last-run output (fetched only while its tab is showing).
+  // Setup's + Run's captured last-run output (fetched only while their tab
+  // shows). Run's backs the read-only view after a Run exits — the output stays
+  // put until the next ▶ instead of snapping back to the idle prompt.
   const setupOutput = useScriptOutput(workstreamId, "setup", tab === "setup");
+  const runOutput = useScriptOutput(workstreamId, "run", tab === "run");
 
   const [view, setView] = useState<View | null>(null);
   const genRef = useRef(0);
@@ -297,16 +300,25 @@ export function ScriptDock({
           attachId={view.attachId}
           gen={view.gen}
           onStarted={(id) => setView((v) => (v ? { ...v, attachId: id } : v))}
-          onExit={() => setView(null)}
+          // A finished Run stays on screen (its output is the point) until the
+          // next ▶ remounts it; Setup hands off to its status+output body below.
+          onExit={() => setView((v) => (v?.kind === "setup" ? null : v))}
+          // Remounted onto an exited Run (tab switch / collapse): drop the view so
+          // the captured output shows, instead of the empty terminal spawning anew.
+          onDead={() => setView(null)}
         />
       ) : tab === "run" ? (
-        <RunIdle
-          empty={!cmdsFor("run").trim()}
-          onRun={() => start("run")}
-          onEdit={onEditScripts}
-          bg={idleBg}
-          runKey={runKey}
-        />
+        runOutput.data != null ? (
+          <ScriptOutputView output={runOutput.data} />
+        ) : (
+          <RunIdle
+            empty={!cmdsFor("run").trim()}
+            onRun={() => start("run")}
+            onEdit={onEditScripts}
+            bg={idleBg}
+            runKey={runKey}
+          />
+        )
       ) : (
         <SetupBody
           status={statusFor("setup")}

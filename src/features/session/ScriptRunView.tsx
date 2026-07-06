@@ -19,6 +19,9 @@ type Props = {
   onStarted?: (terminalId: string) => void;
   /** Fired when the process exits (finished or stopped). */
   onExit?: () => void;
+  /** Fired when re-attaching to an `attachId` whose PTY is already gone (the run
+   *  exited): the caller should show the captured last-run output instead. */
+  onDead?: () => void;
 };
 
 /**
@@ -29,7 +32,7 @@ type Props = {
  * dock keeps a Run alive (the rail's green dot is the signal); teardown is the
  * backend's job (Stop, archive, or app exit).
  */
-export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, onExit }: Props) {
+export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, onExit, onDead }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const fontSize = useTerminalFontSize((s) => s.fontSize);
   const attachRef = useRef(attachId);
@@ -38,6 +41,8 @@ export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, on
   onStartedRef.current = onStarted;
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
+  const onDeadRef = useRef(onDead);
+  onDeadRef.current = onDead;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -50,13 +55,20 @@ export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, on
 
     let disposed = false;
     let id: string | undefined = attachRef.current ?? undefined;
+    // A non-null attachId means we were handed an existing run to re-attach to
+    // (▶ always passes null and spawns fresh). If that PTY is gone the run has
+    // already exited — fall back to its captured output, never spawn a new one.
+    const reattaching = id != null;
 
     const newChannel = (): Channel<TerminalEvent> => {
       const channel = new Channel<TerminalEvent>();
       channel.onmessage = (ev) => {
         if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
         else if (ev.kind === "exited") {
-          engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
+          // `\x1b[?25l` hides the cursor: the finished run is a read-only log, not
+          // a live prompt (the dead PTY ignores input anyway — a blinking cursor
+          // would just imply you can type into it).
+          engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n\x1b[?25l");
           onExitRef.current?.();
         }
       };
@@ -66,7 +78,13 @@ export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, on
     void (async () => {
       if (id) {
         const ok = await unwrap(commands.terminalAttach(id, newChannel()));
-        if (!ok) id = undefined; // PTY gone → start fresh below
+        if (!ok) id = undefined; // PTY gone
+      }
+      if (reattaching && !id) {
+        // Re-attach target is gone: the run finished. Let the caller swap in the
+        // captured last-run output rather than spawning a rogue new process.
+        if (!disposed) onDeadRef.current?.();
+        return;
       }
       if (!id && !disposed) {
         // Wait two frames so xterm has measured its real grid before the PTY
@@ -86,7 +104,7 @@ export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, on
           id = opened;
           onStartedRef.current?.(opened);
         } catch (e) {
-          engine.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n`);
+          engine.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n\x1b[?25l`);
           onExitRef.current?.();
           return;
         }

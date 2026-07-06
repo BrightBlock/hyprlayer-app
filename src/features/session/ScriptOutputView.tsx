@@ -20,8 +20,9 @@ export function ScriptOutputView({ output }: { output: string }) {
     engine.mount(host);
     engine.fit();
     // xterm needs CRLF; normalize bare \n (captured Exec output) without doubling
-    // existing CRLFs (captured PTY scrollback).
-    engine.write(output.replace(/\r?\n/g, "\r\n"));
+    // existing CRLFs (captured PTY scrollback). Trailing `\x1b[?25l` hides the
+    // cursor — this is a read-only render, so it shouldn't look like a live prompt.
+    engine.write(output.replace(/\r?\n/g, "\r\n") + "\x1b[?25l");
 
     let raf = 0;
     const ro = new ResizeObserver(() => {
