@@ -63,19 +63,30 @@ export function PrStatusBar({
 
   const isMerged = data.state === "merged";
   const isOpen = data.state === "open";
-  // Gate on green CI + mergeable. A repo with no checks at all (`none`) has
-  // nothing to wait on, so it's allowed; `failing` never is. `pending` is
-  // allowed only when automerge is on — the merge then queues (`gh pr merge
-  // --auto`) until checks pass.
+  // Gate on green CI + a satisfied review + mergeable. A repo with no checks
+  // (`none`) has nothing to wait on; `failing` never merges. A required review
+  // that's still outstanding (`reviewRequired`) or negative (`changesRequested`)
+  // blocks a direct merge too — GitHub's `mergeable` bool reflects conflicts
+  // only, not branch protection, so without this the button looks enabled and a
+  // `gh pr merge` would just error. Auto-merge (when enabled) queues for anything
+  // GitHub clears on its own — pending checks or a pending review — but never a
+  // hard failure (won't clear itself) or changes-requested (author's turn).
+  const reviewRequired = data.reviewDecision === "reviewRequired";
+  const changesRequested = data.reviewDecision === "changesRequested";
+  const reviewBlocks = reviewRequired || changesRequested;
   const checksOk = data.checks === "passing" || data.checks === "none";
-  const queuesAuto = automerge && data.checks === "pending";
-  const canMerge = isOpen && data.mergeable && (checksOk || queuesAuto) && !merge.isPending;
+  const directOk = checksOk && !reviewBlocks;
+  const queuesAuto =
+    automerge && data.checks !== "failing" && (data.checks === "pending" || reviewRequired);
+  const canMerge = isOpen && data.mergeable && (directOk || queuesAuto) && !merge.isPending;
 
   const mergeTitle = () => {
-    if (queuesAuto) return "Queue auto-merge — GitHub merges once required checks pass";
+    if (queuesAuto) return "Queue auto-merge — GitHub merges once requirements are met";
     if (canMerge) return "Merge this pull request";
     if (data.checks === "pending") return "Waiting for checks to finish";
     if (data.checks === "failing") return "Fix the failing checks before merging";
+    if (reviewRequired) return "Waiting for a required review before this can merge";
+    if (changesRequested) return "A reviewer requested changes — address them before merging";
     if (!data.mergeable) return "GitHub reports this PR is not mergeable (conflicts or branch protection)";
     return "Merge unavailable";
   };
@@ -103,7 +114,7 @@ export function PrStatusBar({
           Fix CI
         </PillButton>
       )}
-      {isOpen && data.reviewDecision === "CHANGES_REQUESTED" && (
+      {isOpen && changesRequested && (
         <PillButton
           tint="border-warn/40 bg-warn/10 text-warn hover:bg-warn/20"
           onClick={() => void addressPrFeedback(id, "comments", data.number)}

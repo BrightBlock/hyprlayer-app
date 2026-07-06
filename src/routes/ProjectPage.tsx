@@ -299,7 +299,10 @@ export function ProjectPage() {
     null,
   );
   const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(null);
-  const detachPr = useDetachPr(cardMenu?.view.item.id ?? "");
+  // Id is passed at mutate time — the card menu closes on click, so a hook-arg id
+  // would churn to "" before the async detach resolves (its onSuccess invalidation
+  // would then miss the PR query, leaving the bar stale until a window refocus).
+  const detachPr = useDetachPr();
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   // Which shell's "+" opened the library picker modal (null = closed).
@@ -1252,7 +1255,7 @@ export function ProjectPage() {
             {cardMenu.view.item.prNumber !== null && (
               <ContextMenuItem
                 onClick={() => {
-                  detachPr.mutate();
+                  detachPr.mutate(cardMenu.view.item.id);
                   setCardMenu(null);
                 }}
               >

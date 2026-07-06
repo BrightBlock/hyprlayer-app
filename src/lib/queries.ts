@@ -550,11 +550,16 @@ export function useAttachPr(id: string) {
   });
 }
 
-/** Detach a workstream's manually attached PR, reverting to branch detection. */
-export function useDetachPr(id: string) {
+/** Detach a workstream's manually attached PR, reverting to branch detection.
+ *  Takes the id as the mutate variable, not a hook arg: this fires from a context
+ *  menu that closes on click, so a closed-over id churns to "" (the menu's
+ *  fallback) before the async detach resolves — and `onSuccess` would then
+ *  invalidate `["workstream", "", "pr"]`, leaving the PR bar stale until the next
+ *  window-focus refetch. Reading `id` from the mutation variable pins it. */
+export function useDetachPr() {
   return useMutation({
-    mutationFn: () => unwrap(commands.detachWorkstreamPr(id)),
-    onSuccess: () => {
+    mutationFn: (id: string) => unwrap(commands.detachWorkstreamPr(id)),
+    onSuccess: (_data, id) => {
       void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
       invalidateWorkstream(id);
     },

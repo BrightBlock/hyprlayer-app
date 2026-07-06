@@ -723,8 +723,9 @@ export function Root() {
   const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
   const [renameTarget, setRenameTarget] = useState<WorkstreamView | null>(null);
   const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(null);
-  // Detach acts on whichever item's menu is open; the hook rebinds to its id.
-  const detachPr = useDetachPr(itemMenu?.view.item.id ?? "");
+  // Detach acts on whichever item's menu is open; the id is passed at mutate time
+  // (the menu closes on click, so a hook-arg id would churn before it resolves).
+  const detachPr = useDetachPr();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [projectMenu, setProjectMenu] = useState<{ x: number; y: number; project: Project } | null>(
     null,
@@ -1561,7 +1562,7 @@ export function Root() {
           {itemMenu.view.item.prNumber !== null && (
             <ContextMenuItem
               onClick={() => {
-                detachPr.mutate();
+                detachPr.mutate(itemMenu.view.item.id);
                 setItemMenu(null);
               }}
             >

@@ -204,10 +204,11 @@ export const commands = {
 	/**  The individual checks, for the "which ran?" breakdown popover. */
 	checksList: PrCheck[],
 	/**
-	 *  `APPROVED` | `CHANGES_REQUESTED` | `REVIEW_REQUIRED`, or None when the PR
-	 *  requires no review / has no decision yet.
+	 *  GitHub's review verdict, or `None` when the PR requires no review / has no
+	 *  decision yet. The Merge button blocks while this is `ReviewRequired` or
+	 *  `ChangesRequested`.
 	 */
-	reviewDecision: string | null,
+	reviewDecision: ReviewDecision | null,
 } | null, AppError>(__TAURI_INVOKE("workstream_pr_status", { id })),
 	/**
 	 *  Open PRs in the workstream's repo for the "Attach PR" picker, filtered by
@@ -260,10 +261,11 @@ export const commands = {
 	/**  The individual checks, for the "which ran?" breakdown popover. */
 	checksList: PrCheck[],
 	/**
-	 *  `APPROVED` | `CHANGES_REQUESTED` | `REVIEW_REQUIRED`, or None when the PR
-	 *  requires no review / has no decision yet.
+	 *  GitHub's review verdict, or `None` when the PR requires no review / has no
+	 *  decision yet. The Merge button blocks while this is `ReviewRequired` or
+	 *  `ChangesRequested`.
 	 */
-	reviewDecision: string | null,
+	reviewDecision: ReviewDecision | null,
 } | null, AppError>(__TAURI_INVOKE("attach_workstream_pr", { id, prNumber })),
 	/**  Detach any manually attached PR, reverting to branch-based detection. */
 	detachWorkstreamPr: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("detach_workstream_pr", { id })),
@@ -1367,10 +1369,11 @@ export type PrStatus = {
 	/**  The individual checks, for the "which ran?" breakdown popover. */
 	checksList: PrCheck[],
 	/**
-	 *  `APPROVED` | `CHANGES_REQUESTED` | `REVIEW_REQUIRED`, or None when the PR
-	 *  requires no review / has no decision yet.
+	 *  GitHub's review verdict, or `None` when the PR requires no review / has no
+	 *  decision yet. The Merge button blocks while this is `ReviewRequired` or
+	 *  `ChangesRequested`.
 	 */
-	reviewDecision: string | null,
+	reviewDecision: ReviewDecision | null,
 };
 
 /**
@@ -1516,6 +1519,19 @@ export type QueryResult = {
 	total: number,
 	items: DocMeta[],
 };
+
+/**
+ *  GitHub's aggregate review verdict for the PR, from `gh`'s `reviewDecision`
+ *  field. The `Option` on [`PrStatus`] is `None` when the PR requires no review —
+ *  then there's nothing to gate on.
+ */
+export type ReviewDecision = 
+/**  A required review is satisfied — approved with no changes outstanding. */
+"approved" | 
+/**  A reviewer requested changes; the author must address them before merging. */
+"changesRequested" | 
+/**  A required review is still outstanding — the PR is waiting on a reviewer. */
+"reviewRequired";
 
 /**
  *  Rewind a session to the N-th (1-based) user turn, discarding that turn and

@@ -65,6 +65,36 @@ impl MergeableState {
     }
 }
 
+/// GitHub's aggregate review verdict for the PR, from `gh`'s `reviewDecision`
+/// field. The `Option` on [`PrStatus`] is `None` when the PR requires no review —
+/// then there's nothing to gate on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewDecision {
+    /// A required review is satisfied — approved with no changes outstanding.
+    Approved,
+    /// A reviewer requested changes; the author must address them before merging.
+    ChangesRequested,
+    /// A required review is still outstanding — the PR is waiting on a reviewer.
+    ReviewRequired,
+}
+
+impl ReviewDecision {
+    /// `None` for an absent/empty decision (no review required) or any value we
+    /// don't recognize — callers treat that as "nothing to gate on".
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            s if s.eq_ignore_ascii_case("APPROVED") => Some(ReviewDecision::Approved),
+            s if s.eq_ignore_ascii_case("CHANGES_REQUESTED") => {
+                Some(ReviewDecision::ChangesRequested)
+            }
+            s if s.eq_ignore_ascii_case("REVIEW_REQUIRED") => Some(ReviewDecision::ReviewRequired),
+            _ => None,
+        }
+    }
+}
+
 /// How the Merge button merges — picked per-PR by the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -133,9 +163,10 @@ pub struct PrStatus {
     pub checks_failed: u32,
     /// The individual checks, for the "which ran?" breakdown popover.
     pub checks_list: Vec<PrCheck>,
-    /// `APPROVED` | `CHANGES_REQUESTED` | `REVIEW_REQUIRED`, or None when the PR
-    /// requires no review / has no decision yet.
-    pub review_decision: Option<String>,
+    /// GitHub's review verdict, or `None` when the PR requires no review / has no
+    /// decision yet. The Merge button blocks while this is `ReviewRequired` or
+    /// `ChangesRequested`.
+    pub review_decision: Option<ReviewDecision>,
 }
 
 /// The `gh pr view --json` fields we request. Mirrors [`PrStatus`] plus the raw
@@ -286,7 +317,7 @@ fn parse_pr(stdout: &str) -> Result<PrStatus> {
     })?;
     let checks_list = build_checks(raw.status_check_rollup, &raw.url);
     let (checks, checks_total, checks_passed, checks_failed) = summarize(&checks_list);
-    let review_decision = raw.review_decision.filter(|s| !s.is_empty());
+    let review_decision = raw.review_decision.as_deref().and_then(ReviewDecision::parse);
     Ok(PrStatus {
         number: raw.number,
         url: raw.url,
@@ -587,7 +618,7 @@ mod tests {
         assert_eq!((pr.checks_total, pr.checks_passed), (3, 3));
         assert!(pr.mergeable);
         assert_eq!(pr.mergeable_state, MergeableState::Mergeable);
-        assert_eq!(pr.review_decision.as_deref(), Some("APPROVED"));
+        assert_eq!(pr.review_decision, Some(ReviewDecision::Approved));
     }
 
     #[test]
@@ -607,7 +638,7 @@ mod tests {
         // CONFLICTING is preserved distinctly so the checks panel can flag it,
         // rather than being flattened into the `mergeable` bool.
         assert_eq!(pr.mergeable_state, MergeableState::Conflicting);
-        assert_eq!(pr.review_decision, None); // empty string filtered out
+        assert_eq!(pr.review_decision, None); // empty string → None (parse rejects it)
 
         // The per-check breakdown carries each check's name, state, and link —
         // from both the CheckRun (name/detailsUrl) and StatusContext
@@ -670,6 +701,23 @@ mod tests {
         // UNKNOWN and any unexpected value fall back to Unknown (transient).
         assert_eq!(MergeableState::parse("UNKNOWN"), MergeableState::Unknown);
         assert_eq!(MergeableState::parse(""), MergeableState::Unknown);
+    }
+
+    #[test]
+    fn review_decision_parses_known_and_ignores_the_rest() {
+        let mk = |rd: &str| {
+            format!(
+                r#"{{"number":1,"url":"u","title":"t","state":"OPEN","mergeable":"MERGEABLE","reviewDecision":"{rd}","statusCheckRollup":[]}}"#
+            )
+        };
+        let rd = |raw: &str| parse_pr(&mk(raw)).unwrap().review_decision;
+        assert_eq!(rd("REVIEW_REQUIRED"), Some(ReviewDecision::ReviewRequired));
+        assert_eq!(rd("CHANGES_REQUESTED"), Some(ReviewDecision::ChangesRequested));
+        assert_eq!(rd("APPROVED"), Some(ReviewDecision::Approved));
+        // Empty (no required review) and any unrecognized value → None: nothing to
+        // gate on, so the Merge button isn't blocked by a verdict we can't read.
+        assert_eq!(rd(""), None);
+        assert_eq!(rd("SOMETHING_NEW"), None);
     }
 
     #[test]
