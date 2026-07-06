@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.13",
+      "date": "2026-07-06",
+      "summary": "Transcript memory released on tab close and archive.",
+      "notes": [
+        "In-memory transcripts are now released when a tab is closed or archived, reducing memory usage in long sessions."
+      ]
+    },
+    {
       "version": "0.4.12",
       "date": "2026-07-06",
       "summary": "Sidebar tasks, auto-growing composer, and IA enforcement refactor.",
