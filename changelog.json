@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.14",
+      "date": "2026-07-06",
+      "summary": "Run-script output persists after the script exits.",
+      "notes": [
+        "Output from run scripts is now preserved in the session after the script finishes, so you can review it after exit."
+      ]
+    },
+    {
       "version": "0.4.13",
       "date": "2026-07-06",
       "summary": "Transcript memory released on tab close and archive.",
