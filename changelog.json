@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.4.12",
+      "date": "2026-07-06",
+      "summary": "Sidebar tasks, auto-growing composer, and IA enforcement refactor.",
+      "notes": [
+        "Plan tasks now live in the project sidebar instead of the composer drawer, keeping session writing space focused.",
+        "The composer textarea now starts at one row and grows up to 320px as prompts get longer.",
+        "IA vocabulary and frontend layering enforcement moved into shared domain/core boundaries with typed enums and updated rules."
+      ]
+    },
+    {
       "version": "0.4.11",
       "date": "2026-07-04",
       "summary": "Observatory home view, Ship gating, and rewind memory fix.",
