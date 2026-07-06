@@ -443,25 +443,22 @@ function ComposerMenu({
 
 /** The composer "+" — opens upward into a small action menu for attaching
  *  context: library docs (centered modal) or files / screenshots (native OS
- *  file dialog). Unlike ComposerMenu these items are one-shot actions. */
+ *  file dialog). Available every turn — before a session starts a library doc
+ *  becomes first-turn context; mid-conversation it rides the next message as an
+ *  attachment (ProjectPage routes the lane). Unlike ComposerMenu these items are
+ *  one-shot actions. */
 function AttachMenu({
   onLibrary,
   onFiles,
   onScreenshots,
-  showLibrary = true,
 }: {
   onLibrary: () => void;
   onFiles: () => void;
   onScreenshots: () => void;
-  /** Library docs are first-turn context, so the option only shows before a
-   *  session starts; files/screenshots can be attached to any turn. */
-  showLibrary?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const items = [
-    ...(showLibrary
-      ? [{ key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary }]
-      : []),
+    { key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary },
     { key: "files", label: "Add files…", icon: <DocIcon size={14} />, run: onFiles },
     { key: "shots", label: "Add screenshots…", icon: <ImageIcon size={14} />, run: onScreenshots },
   ];
@@ -1856,14 +1853,6 @@ export function SessionChat({
                     }
                   />
                 )}
-                {!started && (
-                  <WorkstreamDocChips
-                    docs={shell.docs}
-                    onOpenDoc={onOpenDoc}
-                    onDetach={onDetachDoc}
-                    onBrowse={onBrowseDocs}
-                  />
-                )}
                 {pendingQuestion && (
                   <QuestionPrompt
                     key={pendingQuestion.requestId}
@@ -1884,8 +1873,8 @@ export function SessionChat({
               </div>
               {/* Top margin reserves room for the pinned prompt chips, which
                   float on their own strip just above the composer (absolute
-                  bottom-full) so they clear the banners above (queued messages /
-                  handoff nudge) with breathing room instead of sitting flush. */}
+                  bottom-full right) so they clear the banners above (queued
+                  messages / handoff nudge) with breathing room. */}
               <div
                 className={`relative rounded-xl bg-panel-2 ${
                   pinnedPrompts.length > 0 ? "mt-12" : ""
@@ -1899,8 +1888,20 @@ export function SessionChat({
                   />
                 )}
                 <AutocompleteDropdown state={autocomplete} />
-                {attachments.length > 0 && (
-                  <div className="px-3.5 pt-3">
+                {/* Staged context lives INSIDE the composer as cards, consistent
+                    whether or not the session has started. Pre-start, the app's
+                    automatic docs (the mode's auto-suggestion, a captured handoff)
+                    show as chips above the per-turn attachment cards — the picked
+                    docs and files the user staged. */}
+                {(attachments.length > 0 || (!started && shell.docs.length > 0)) && (
+                  <div className="space-y-1.5 px-3.5 pt-3">
+                    {!started && (
+                      <WorkstreamDocChips
+                        docs={shell.docs}
+                        onOpenDoc={onOpenDoc}
+                        onDetach={onDetachDoc}
+                      />
+                    )}
                     <AttachmentCards attachments={attachments} onRemove={onRemoveAttachment} />
                   </div>
                 )}
@@ -2048,7 +2049,6 @@ export function SessionChat({
                       onLibrary={onBrowseDocs}
                       onFiles={onAddFiles}
                       onScreenshots={onAddScreenshots}
-                      showLibrary={!started}
                     />
                     {/* Clear context: end this conversation and start fresh — the
                         manual way to dodge auto-compaction. Only meaningful once a

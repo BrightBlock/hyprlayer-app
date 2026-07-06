@@ -22,17 +22,23 @@ type Props = {
   onOpenDoc: (id: string) => void;
   /** Remove a doc from this tab — detaches a manual doc, dismisses a suggested one. */
   onDetach: (id: string) => void;
-  /** Jump to the Docs view to attach more context. */
-  onBrowse: () => void;
+  /** Positioning classes from the host (e.g. the composer-anchored absolute
+   *  strip) — mirrors PromptChips so the host owns placement and spacing. */
+  className?: string;
 };
 
 /**
- * Context documents attached to one agent tab — research/plan docs the
- * agent should carry through its spec phases. Rendered above the composer.
+ * The app's *automatic* pre-launch context for one agent tab — the mode's
+ * auto-suggested doc (research for plan mode, etc.) and a captured handoff doc —
+ * shown as chips inside the composer so it can be reviewed or dismissed before
+ * launch. Docs the user picks themselves stage as attachment cards instead (the
+ * composer's "+" menu → library, the same per-turn lane as files). Renders
+ * nothing when empty.
  */
-export function WorkstreamDocChips({ docs, onOpenDoc, onDetach, onBrowse }: Props) {
+export function WorkstreamDocChips({ docs, onOpenDoc, onDetach, className }: Props) {
+  if (docs.length === 0) return null;
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-1.5">
+    <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
       {docs.map((doc) => {
         const verb = doc.suggested ? "Dismiss" : "Detach";
         return (
@@ -70,22 +76,6 @@ export function WorkstreamDocChips({ docs, onOpenDoc, onDetach, onBrowse }: Prop
           </span>
         );
       })}
-      <button
-        type="button"
-        onClick={onBrowse}
-        className="inline-flex items-center gap-1 rounded-md border border-dashed border-edge px-1.5 py-1 text-xs text-ink-dim hover:border-accent/50 hover:text-ink"
-        title="Attach docs as context for this tab"
-      >
-        <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none">
-          <path
-            d="m20 11-8.4 8.4a5 5 0 0 1-7-7L13 4a3.3 3.3 0 0 1 4.7 4.7L9.4 17a1.7 1.7 0 0 1-2.4-2.4L14.5 7"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
-        {docs.length === 0 ? "Attach context" : "Attach"}
-      </button>
     </div>
   );
 }

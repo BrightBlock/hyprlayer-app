@@ -20,11 +20,10 @@ const PLAN = {
 function renderChips(docs = [RESEARCH, PLAN]) {
   const onOpenDoc = vi.fn();
   const onDetach = vi.fn();
-  const onBrowse = vi.fn();
-  render(
-    <WorkstreamDocChips docs={docs} onOpenDoc={onOpenDoc} onDetach={onDetach} onBrowse={onBrowse} />,
+  const { container } = render(
+    <WorkstreamDocChips docs={docs} onOpenDoc={onOpenDoc} onDetach={onDetach} />,
   );
-  return { onOpenDoc, onDetach, onBrowse };
+  return { onOpenDoc, onDetach, container };
 }
 
 describe("chipLabel", () => {
@@ -40,7 +39,6 @@ describe("WorkstreamDocChips", () => {
     renderChips();
     expect(screen.getByText("auth-research")).toBeTruthy();
     expect(screen.getByText("auth-plan")).toBeTruthy();
-    expect(screen.getByText("Attach")).toBeTruthy();
   });
 
   it("opens a doc when its chip is clicked", () => {
@@ -55,9 +53,8 @@ describe("WorkstreamDocChips", () => {
     expect(onDetach).toHaveBeenCalledWith(RESEARCH.path);
   });
 
-  it("offers 'Attach context' and browse-jump when nothing is attached", () => {
-    const { onBrowse } = renderChips([]);
-    fireEvent.click(screen.getByText("Attach context"));
-    expect(onBrowse).toHaveBeenCalled();
+  it("renders nothing when the tab has no docs (attaching is via the composer's + menu)", () => {
+    const { container } = renderChips([]);
+    expect(container.firstChild).toBeNull();
   });
 });

@@ -90,6 +90,7 @@ import {
   type WsTabState,
 } from "@/features/session/workstreamTabs";
 import { WorkstreamDocsPanel } from "@/features/workstreams/WorkstreamDocsPanel";
+import { chipLabel } from "@/features/workstreams/WorkstreamDocChips";
 import { ProjectBoard } from "@/features/board/ProjectBoard";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import { useBootstrap, useDetachPr, useSetWorkstreamStage, useWorkstreams } from "@/lib/queries";
@@ -882,17 +883,26 @@ export function ProjectPage() {
   const openDoc = (id: string) => {
     void navigate({ to: "/library", search: { doc: id } });
   };
-  // Library attach/detach mutate the shell whose composer opened the modal.
-  const attachDocToShell = (path: string, role: string) => {
+  // A library pick from the modal always stages as a per-turn attachment on the
+  // shell whose composer opened it — the same lane as files/screenshots. That way
+  // attached context is one consistent thing: a card inside the composer, sent
+  // with the next turn, whether or not the session has started. (`shell.docs`
+  // stays reserved for the app's *automatic* context — the mode's auto-suggestion
+  // and the handoff bridge.) `role` no longer distinguishes lanes.
+  const attachDocToShell = (path: string, _role: string) => {
     if (!docsModalShell) return;
-    const docs = docsModalShell.docs.some((d) => d.path === path)
-      ? docsModalShell.docs
-      : [...docsModalShell.docs, { path, role }];
-    patchShell(docsModalShell.id, { docs });
+    addAttachmentsToShell(docsModalShell.id, [{ path, name: chipLabel(path), kind: "file" }]);
+    // If the user picks the very doc the mode auto-suggested, drop the suggested
+    // chip so it doesn't double up as chip + card (the reconciler also skips
+    // re-suggesting a staged doc).
+    modifyShell(docsModalShell.id, (s) => {
+      const docs = s.docs.filter((d) => !(d.suggested && d.path === path));
+      return docs.length === s.docs.length ? s : { ...s, docs };
+    });
   };
   const detachDocFromShell = (path: string) => {
     if (!docsModalShell) return;
-    patchShell(docsModalShell.id, { docs: docsModalShell.docs.filter((d) => d.path !== path) });
+    removeAttachmentFromShell(docsModalShell.id, path);
   };
 
   // The URL is the single source of truth; the canonicalize effect persists
@@ -948,7 +958,10 @@ export function ProjectPage() {
     modifyShell(shellId, (s) => {
       const dismissed = s.dismissedSuggestions ?? [];
       const manual = s.docs.filter((d) => !d.suggested);
-      const alreadyManual = path != null && manual.some((d) => d.path === path);
+      // Don't suggest a doc the user has already staged as an attachment (the
+      // lane picked docs now live in) — it would double up as chip + card.
+      const staged = (s.attachments ?? []).some((a) => a.path === path);
+      const alreadyManual = path != null && (staged || manual.some((d) => d.path === path));
       const keepSuggested =
         path && !alreadyManual && !dismissed.includes(path)
           ? [{ path, role, suggested: true as const }]
@@ -1730,7 +1743,7 @@ export function ProjectPage() {
         <WorkstreamDocsPanel
           thoughtsProject={project.thoughtsProject}
           targetTitle={docsModalShell?.title ?? null}
-          attachedPaths={(docsModalShell?.docs ?? []).map((d) => d.path)}
+          attachedPaths={(docsModalShell?.attachments ?? []).map((a) => a.path)}
           onAttach={attachDocToShell}
           onDetach={detachDocFromShell}
           onOpenDoc={openDoc}
