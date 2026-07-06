@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.16",
+      "date": "2026-07-06",
+      "summary": "Nested untracked files now list individually in the changes panel.",
+      "notes": [
+        "The changes panel now recurses into untracked directories so nested files appear as individual entries instead of a collapsed folder."
+      ]
+    },
+    {
       "version": "0.4.15",
       "date": "2026-07-06",
       "summary": "PR review gate on Merge, smarter watcher, and context-attach fix.",
