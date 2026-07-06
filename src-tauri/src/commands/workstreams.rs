@@ -172,8 +172,13 @@ pub async fn watch_worktree(
     let app = app.clone();
     let wsid = workstream_id.clone();
     let handle = blocking("watch_worktree", move || {
-        hyprlayer_core::index::watcher::watch_path(
+        // The watcher needs the git dir to notice commits/staging in a linked
+        // worktree; fall back to `<worktree>/.git` if unresolved.
+        let git_dir =
+            hyprlayer_core::gitops::git_dir(&path).unwrap_or_else(|| path.join(".git"));
+        hyprlayer_core::index::watcher::watch_worktree(
             &path,
+            &git_dir,
             Box::new(move || {
                 let _ = crate::events::WorktreeChanged {
                     workstream_id: wsid.clone(),

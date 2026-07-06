@@ -31,6 +31,12 @@ pub(crate) fn open_repo(path: &Path) -> Result<git2::Repository> {
     })
 }
 
+/// The git directory backing `worktree` (`.git/worktrees/<name>/` for a linked
+/// worktree — outside the tree). `None` when not a git worktree.
+pub fn git_dir(worktree: &Path) -> Option<PathBuf> {
+    Some(open_repo(worktree).ok()?.path().to_path_buf())
+}
+
 /// Status options every status surface shares: untracked as single entries, submodules excluded.
 pub(crate) fn status_options() -> git2::StatusOptions {
     let mut opts = git2::StatusOptions::new();
@@ -855,6 +861,32 @@ mod tests {
 
         // An empty query lists files (capped), never errors.
         assert!(!search_files(dir.path(), "", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn git_dir_resolves_linked_worktree_metadata_outside_the_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir(&main).unwrap();
+        let repo = git2::Repository::init(&main).unwrap();
+        // A worktree needs a valid HEAD to branch from.
+        let sig = git2::Signature::now("t", "t@t.t").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let wt = tmp.path().join("wt");
+        repo.worktree("feat", &wt, None).unwrap();
+
+        // Git dir is the main repo's per-worktree metadata, outside the tree.
+        let gd = git_dir(&wt).unwrap();
+        assert!(!gd.starts_with(&wt), "git dir {gd:?} must be outside the worktree");
+        assert!(gd.ends_with("worktrees/feat"), "unexpected git dir: {gd:?}");
+        // watch_worktree's discriminator: gitfile vs. real `.git` dir.
+        assert!(wt.join(".git").is_file());
+        assert!(main.join(".git").is_dir());
+        assert!(git_dir(&main).unwrap().ends_with(".git"));
     }
 
     #[test]

@@ -2052,12 +2052,11 @@ export type WorkstreamView = {
 };
 
 /**
- *  A workstream's worktree changed on disk — a file was edited, created, or
- *  deleted outside the app (an external editor, a build, a `git checkout`). The
- *  backend watches the active worktree (`commands::workstreams::watch_worktree`)
- *  and emits this so the Changes panel and git status refresh live, without the
- *  UI waiting for window focus. The frontend refetches that workstream's
- *  worktree-git queries (see `invalidateWorktreeGit`).
+ *  A workstream's worktree changed on disk — a file edit, or git's index/HEAD
+ *  moved (`git add`/`commit`/`checkout`, incl. mid-turn). The backend watches
+ *  the active worktree and its git dir (`commands::workstreams::watch_worktree`)
+ *  and emits this so the Changes panel + git status refresh live. The frontend
+ *  refetches that workstream's worktree-git queries (see `invalidateWorktreeGit`).
  */
 export type WorktreeChanged = {
 	workstreamId: string,

@@ -98,13 +98,16 @@ pub fn watch_roots(
     })
 }
 
-/// Watch a directory tree and invoke `on_change` (on the watcher thread) once
-/// per debounced batch that touches a non-noise path. Churn under VCS/build
-/// dirs (`.git`, `node_modules`, `target`, …) is ignored, so editing source —
-/// not a dev server rewriting caches — is what fires it. Used to push live
-/// git-status refreshes for a workstream's worktree, so the Changes panel
-/// updates without waiting for window focus. Dropping the handle stops watching.
-pub fn watch_path(path: &Path, on_change: Box<dyn Fn() + Send + Sync>) -> Result<WatchHandle> {
+/// Watch a worktree for git-status-affecting changes, firing `on_change` once
+/// per debounced batch touching a relevant path. Also watches `git_dir`
+/// (`git2::Repository::path`): a linked worktree's index/HEAD/reflog live
+/// outside the tree, so a bare commit/stage leaves nothing under `worktree`.
+/// Dropping the handle stops watching.
+pub fn watch_worktree(
+    worktree: &Path,
+    git_dir: &Path,
+    on_change: Box<dyn Fn() + Send + Sync>,
+) -> Result<WatchHandle> {
     let mut debouncer = new_debouncer(
         Duration::from_millis(300),
         None,
@@ -113,7 +116,7 @@ pub fn watch_path(path: &Path, on_change: Box<dyn Fn() + Send + Sync>) -> Result
                 let relevant = events
                     .iter()
                     .flat_map(|e| e.paths.iter())
-                    .any(|p| !is_noise_path(p));
+                    .any(|p| is_relevant_change(p));
                 if relevant {
                     on_change();
                 }
@@ -122,18 +125,56 @@ pub fn watch_path(path: &Path, on_change: Box<dyn Fn() + Send + Sync>) -> Result
     )
     .map_err(notify_to_core)?;
     debouncer
-        .watch(path, RecursiveMode::Recursive)
+        .watch(worktree, RecursiveMode::Recursive)
         .map_err(notify_to_core)?;
+    // Linked worktree: `.git` is a gitfile and metadata sits outside the tree.
+    // A primary checkout's `.git` dir is already covered by the watch above.
+    if worktree.join(".git").is_file() && git_dir.is_dir() {
+        debouncer
+            .watch(git_dir, RecursiveMode::Recursive)
+            .map_err(notify_to_core)?;
+    }
     Ok(WatchHandle {
         _debouncer: debouncer,
     })
 }
 
-/// Paths whose churn shouldn't trigger a git-status refresh: VCS internals and
-/// build/dependency output that change constantly without affecting the diff.
-fn is_noise_path(path: &Path) -> bool {
+/// Whether a changed path should trigger a git-status refresh.
+fn is_relevant_change(path: &Path) -> bool {
+    if is_git_meta(path) {
+        is_git_status_signal(path)
+    } else {
+        !is_build_noise(path)
+    }
+}
+
+/// A path inside git's metadata (carries a `.git` component) — a primary
+/// checkout's `.git` or a linked worktree's `.git/worktrees/<name>/`.
+fn is_git_meta(path: &Path) -> bool {
+    path.components()
+        .any(|c| matches!(c, std::path::Component::Normal(os) if os == ".git"))
+}
+
+/// Git-metadata files whose change moves the working-tree status or HEAD
+/// (index/HEAD/merge pseudo-refs/HEAD reflog). Excludes objects, packed-refs,
+/// fetch churn (`FETCH_HEAD`, `refs/remotes`) and `*.lock`.
+fn is_git_status_signal(path: &Path) -> bool {
+    if path.extension().is_some_and(|ext| ext == "lock") {
+        return false;
+    }
+    // The HEAD reflog, not `logs/refs/**` (remote-tracking churn).
+    if path.ends_with("logs/HEAD") {
+        return true;
+    }
+    matches!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("index" | "HEAD" | "ORIG_HEAD" | "MERGE_HEAD")
+    )
+}
+
+/// Build/dependency output dirs whose churn shouldn't trigger a refresh.
+fn is_build_noise(path: &Path) -> bool {
     const NOISE: &[&str] = &[
-        ".git",
         "node_modules",
         "target",
         "dist",
@@ -309,5 +350,99 @@ mod tests {
             Box::new(|_| {}),
         );
         assert!(handle.is_ok());
+    }
+
+    // Real notify watcher: a linked-worktree commit writes only the external
+    // git dir — assert we still fire. Ignored: fs timing shouldn't gate releases.
+    #[test]
+    #[ignore = "fs-watcher timing; run explicitly with --ignored"]
+    fn watches_external_git_dir_and_fires_on_index_write() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let wt = tmp.path().join("wt");
+        let git_dir = tmp.path().join("gitdir");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(&git_dir).unwrap();
+        // Linked worktree: `.git` is a gitfile — makes watch_worktree watch git_dir.
+        std::fs::write(wt.join(".git"), "gitdir: ../gitdir\n").unwrap();
+        std::fs::write(git_dir.join("index"), b"v0").unwrap();
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let seen = hits.clone();
+        let handle = watch_worktree(
+            &wt,
+            &git_dir,
+            Box::new(move || {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }),
+        )
+        .unwrap();
+        // Let the OS arm the watch before mutating.
+        std::thread::sleep(Duration::from_millis(400));
+
+        // The bug's exact shape: only the (external) index moved, no file under wt.
+        std::fs::write(git_dir.join("index"), b"v1-after-commit").unwrap();
+
+        let fired = (0..50).any(|_| {
+            if hits.load(Ordering::SeqCst) > 0 {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            false
+        });
+        drop(handle);
+        assert!(fired, "an index write in the external git dir must fire on_change");
+    }
+
+    #[test]
+    fn relevant_change_fires_on_working_tree_edits() {
+        assert!(is_relevant_change(Path::new("/wt/src/main.rs")));
+        assert!(is_relevant_change(Path::new("/wt/README.md")));
+        // A source file that merely happens to be named like a git file.
+        assert!(is_relevant_change(Path::new("/wt/src/index")));
+    }
+
+    #[test]
+    fn relevant_change_ignores_build_and_dependency_churn() {
+        assert!(!is_relevant_change(Path::new("/wt/target/debug/app")));
+        assert!(!is_relevant_change(Path::new("/wt/node_modules/x/index.js")));
+        assert!(!is_relevant_change(Path::new("/wt/dist/bundle.js")));
+    }
+
+    #[test]
+    fn relevant_change_fires_on_stage_commit_signals() {
+        // Primary checkout (`.git` is a real dir) — stage/commit/checkout.
+        assert!(is_relevant_change(Path::new("/wt/.git/index")));
+        assert!(is_relevant_change(Path::new("/wt/.git/HEAD")));
+        assert!(is_relevant_change(Path::new("/wt/.git/logs/HEAD")));
+        assert!(is_relevant_change(Path::new("/wt/.git/ORIG_HEAD")));
+        assert!(is_relevant_change(Path::new("/wt/.git/MERGE_HEAD")));
+        // Linked worktree — metadata under `.git/worktrees/<name>/`.
+        assert!(is_relevant_change(Path::new(
+            "/repo/.git/worktrees/feat/index"
+        )));
+        assert!(is_relevant_change(Path::new(
+            "/repo/.git/worktrees/feat/logs/HEAD"
+        )));
+    }
+
+    #[test]
+    fn relevant_change_ignores_git_noise() {
+        // Object writes, packed-refs, and the commit message buffer.
+        assert!(!is_relevant_change(Path::new("/wt/.git/objects/ab/cdef123")));
+        assert!(!is_relevant_change(Path::new("/wt/.git/packed-refs")));
+        assert!(!is_relevant_change(Path::new("/wt/.git/COMMIT_EDITMSG")));
+        // A background `git fetch`: FETCH_HEAD and remote-tracking refs/reflogs.
+        assert!(!is_relevant_change(Path::new("/wt/.git/FETCH_HEAD")));
+        assert!(!is_relevant_change(Path::new(
+            "/wt/.git/refs/remotes/origin/main"
+        )));
+        assert!(!is_relevant_change(Path::new(
+            "/wt/.git/logs/refs/heads/feat"
+        )));
+        // Transient lock files bracketing an index/ref write.
+        assert!(!is_relevant_change(Path::new("/wt/.git/index.lock")));
+        assert!(!is_relevant_change(Path::new("/wt/.git/HEAD.lock")));
     }
 }
