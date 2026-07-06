@@ -529,8 +529,17 @@ fn included_paths(rels: &[String]) -> Vec<String> {
 /// Split staged/unstaged status for the source-control panel.
 pub fn worktree_git_status(worktree: &Path) -> Result<WorktreeGitStatus> {
     let repo = open_repo(worktree)?;
+    // The panel recurses into brand-new (entirely untracked) directories so each
+    // file inside shows up as its own entry — matching how a tracked dir's new
+    // files already list, and the line counts we already report from the diff.
+    // Collapsed (`recurse_untracked_dirs(false)`) would emit a single `dir/`
+    // trailing-slash entry, hiding the nested contents. The count-only surfaces
+    // (board chip, thoughts status) keep the collapsed `status_options()` so the
+    // always-rendered board never walks a huge untracked tree per card.
+    let mut opts = status_options();
+    opts.recurse_untracked_dirs(true);
     let statuses = repo
-        .statuses(Some(&mut status_options()))
+        .statuses(Some(&mut opts))
         .map_err(|e| git_err("git2 status", e))?;
 
     let mut staged = Vec::new();
@@ -1028,6 +1037,30 @@ mod tests {
         assert!(paths.contains(&"real.md"));
         assert!(!paths.iter().any(|p| p.starts_with("thoughts")));
         assert!(!paths.iter().any(|p| p.starts_with(".hyprlayer")));
+    }
+
+    #[test]
+    fn status_recurses_new_untracked_dir() {
+        let dir = repo_with_commit();
+        // A brand-new directory tree with no tracked ancestor. Git collapses this
+        // to a single `pkg/` entry by default; the panel must list each file.
+        std::fs::create_dir_all(dir.path().join("pkg/sub")).unwrap();
+        std::fs::write(dir.path().join("pkg/a.rs"), "a\n").unwrap();
+        std::fs::write(dir.path().join("pkg/sub/b.rs"), "b\n").unwrap();
+
+        let status = worktree_git_status(dir.path()).unwrap();
+        let paths = entry_paths(&status.unstaged);
+        assert!(paths.contains(&"pkg/a.rs"), "missing nested file: {paths:?}");
+        assert!(
+            paths.contains(&"pkg/sub/b.rs"),
+            "missing deeply nested file: {paths:?}"
+        );
+        // No collapsed directory entry (which would carry a trailing slash and
+        // render as a nameless row in the tree view).
+        assert!(
+            !paths.iter().any(|p| p.ends_with('/')),
+            "collapsed dir entry leaked: {paths:?}"
+        );
     }
 
     #[test]

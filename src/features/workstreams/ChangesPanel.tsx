@@ -125,17 +125,20 @@ const FileRow = memo(function FileRow({
 
 // ── Tree mode ──────────────────────────────────────────────────────────────
 
-type TreeNode = {
+export type TreeNode = {
   name: string;
   path: string;
   entry?: GitFileEntry; // leaf
   children: Map<string, TreeNode>;
 };
 
-function buildTree(entries: GitFileEntry[]): TreeNode {
+export function buildTree(entries: GitFileEntry[]): TreeNode {
   const root: TreeNode = { name: "", path: "", children: new Map() };
   for (const entry of entries) {
-    const parts = entry.path.split("/");
+    // Drop empty segments so a trailing slash (e.g. a collapsed untracked-dir
+    // entry `crates/`) never spawns a nameless phantom leaf under the folder.
+    const parts = entry.path.split("/").filter(Boolean);
+    if (parts.length === 0) continue;
     let node = root;
     parts.forEach((part, i) => {
       const path = parts.slice(0, i + 1).join("/");
