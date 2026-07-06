@@ -1,24 +1,24 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import type { WorkstreamView } from "../../lib/bindings";
+import type { WorkstreamView } from "@/lib/bindings";
 import {
   useBootstrap,
   useFetchWorkstreamRemote,
   useSetWorkstreamBase,
   useUpdateFromBase,
   useWorkstreamBases,
-} from "../../lib/queries";
-import { IS_MACOS } from "../../lib/platform";
-import { formatChord } from "../../lib/keybindings/chord";
-import { effectiveChord } from "../../lib/keybindings/resolve";
-import { ErrorNote, IconButton, Spinner } from "../../components/ui";
+} from "@/lib/queries";
+import { IS_MACOS } from "@/lib/platform";
+import { formatChord } from "@/lib/keybindings/chord";
+import { effectiveChord } from "@/lib/keybindings/resolve";
+import { ErrorNote, IconButton, Spinner } from "@/components/ui";
 import {
   ChevronDownIcon,
   GitCommitIcon,
   GitPullRequestIcon,
   SplitIcon,
-} from "../../components/icons";
+} from "@/components/icons";
 import { useWorkstreamGitActions } from "./useGitActions";
 import { AheadBehind } from "./AheadBehind";
 import { PrStatusBar } from "./PrStatusBar";

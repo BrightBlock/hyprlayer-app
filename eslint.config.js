@@ -20,4 +20,48 @@ export default tseslint.config(
       globals: { ...globals.browser },
     },
   },
+  // Layering contract (docs/adr/0003-frontend-layering.md): the import
+  // direction is routes → features → lib/components. Wiring (main.tsx,
+  // router.tsx) may import anything; everything below it only imports
+  // downward. Cross-directory imports use the @/ alias, but the relative
+  // spellings are banned too so the rule can't be dodged.
+  {
+    files: ["src/lib/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/features/*", "**/features/**"],
+              message:
+                "src/lib and src/components are the shared foundation — they must not import from src/features. Register a hook from main.tsx instead (see lib/events.registerEventBridge / lib/queries.onWorkstreamArchived).",
+            },
+            {
+              group: ["@/routes/*", "**/routes/**", "@/router", "../router", "../../router"],
+              message:
+                "Shared modules must not import routes or the router singleton. Use lib/appNav's registered seam.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/features/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/routes/*", "**/routes/**", "@/router", "../router", "../../router"],
+              message:
+                "Features must not import routes or the router singleton — routes are wiring above features. Move the shared type into the feature, or use lib/appNav.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

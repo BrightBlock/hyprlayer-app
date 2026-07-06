@@ -17,8 +17,8 @@
 
 import { create } from "zustand";
 
-import { commands } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
+import { commands } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
 import { updateWorkstreamTabs, useWorkstreamTabsStore } from "./workstreamTabs";
 
 const animKey = (workstreamId: string, shellId: number) => `${workstreamId}:${shellId}`;

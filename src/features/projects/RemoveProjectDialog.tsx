@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
-import type { Project } from "../../lib/bindings";
-import { Button, Dialog, ErrorNote } from "../../components/ui";
-import { useRemoveProject } from "../../lib/queries";
+import type { Project } from "@/lib/bindings";
+import { Button, Dialog, ErrorNote } from "@/components/ui";
+import { useRemoveProject } from "@/lib/queries";
 
 type Props = {
   /** The project being removed; null keeps the dialog closed. */
@@ -21,9 +21,8 @@ export function RemoveProjectDialog({ target, onClose, onRemoved }: Props) {
   const remove = useRemoveProject();
   const [deleteFiles, setDeleteFiles] = useState(false);
 
-  // Anything still on disk can be deleted (backend refuses while it has active
-  // workstreams). An in-place import is the user's own working copy, not an
-  // app-owned clone, so the warning is sterner.
+  // On-disk projects can be deleted (backend refuses while workstreams are
+  // active). An in-place import is the user's own working copy, so warn sterner.
   const canDeleteFiles = Boolean(target?.existsOnDisk);
   const isImported = target?.source === "disk";
 

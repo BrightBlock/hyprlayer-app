@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
-import type { AppSettings, BinaryStatus, OpenCodeSettings } from "../../../lib/bindings";
+import type { AppSettings, BinaryStatus, OpenCodeSettings } from "@/lib/bindings";
 import {
   useInstallOpencode,
   useOpencodeAuth,
@@ -11,7 +11,7 @@ import {
   useRemoveOpencodeProvider,
   useSetAppSettings,
   useSetOpencodeDefaultModel,
-} from "../../../lib/queries";
+} from "@/lib/queries";
 import {
   Badge,
   Button,
@@ -20,12 +20,12 @@ import {
   ErrorNote,
   Select,
   Spinner,
-} from "../../../components/ui";
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "../../../components/icons";
-import { BinaryCard } from "../../system/BinaryCard";
+} from "@/components/ui";
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
+import { BinaryCard } from "@/features/system/BinaryCard";
 import { ProviderPickerModal } from "./ProviderPickerModal";
 import { ModelPickerModal } from "./ModelPickerModal";
-import { SettingRow } from "../parts";
+import { SettingRow } from "@/features/settings/parts";
 
 const DOCS_URL = "https://opencode.ai/docs";
 

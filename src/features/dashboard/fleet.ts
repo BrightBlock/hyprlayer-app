@@ -13,20 +13,20 @@
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 
-import type { ActiveSessionView, WorkstreamView } from "../../lib/bindings";
-import { useActiveSessions } from "../../lib/queries";
-import type { AgentState } from "../multiplexer/engineState";
-import { rollupForWorkstream, useMultiplexerStore } from "../multiplexer/multiplexerStore";
-import { apiContextWindow } from "../session/models";
-import { useModelWindowMap } from "../session/modelWindowsStore";
+import type { ActiveSessionView, WorkstreamView } from "@/lib/bindings";
+import { useActiveSessions } from "@/lib/queries";
+import type { AgentState } from "@/features/multiplexer/engineState";
+import { rollupForWorkstream, useMultiplexerStore } from "@/features/multiplexer/multiplexerStore";
+import { apiContextWindow } from "@/lib/domain/models";
+import { useModelWindowMap } from "@/features/session/modelWindowsStore";
 import {
   classifyEntry,
   useSessionStore,
   type SessionEntry,
   type WorkstreamActivity,
-} from "../session/sessionStore";
-import { baseName, toolSummary } from "../session/toolDisplay";
-import type { TranscriptItem } from "../session/transcript";
+} from "@/features/session/sessionStore";
+import { baseName, toolSummary } from "@/features/session/toolDisplay";
+import type { TranscriptItem } from "@/features/session/transcript";
 
 export type FleetActivity = Exclude<WorkstreamActivity, "idle">;
 

@@ -7,10 +7,10 @@ import type {
   SelectHTMLAttributes,
 } from "react";
 
-import { errorMessage, errorRemedy } from "../lib/ipc";
-import { formatChord } from "../lib/keybindings/chord";
-import { useEscape } from "../lib/keybindings/registry";
-import { IS_MACOS } from "../lib/platform";
+import { errorMessage, errorRemedy } from "@/lib/ipc";
+import { formatChord } from "@/lib/keybindings/chord";
+import { useEscape } from "@/lib/keybindings/registry";
+import { IS_MACOS } from "@/lib/platform";
 import { XIcon } from "./icons";
 
 function cx(...parts: Array<string | false | null | undefined>): string {

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
-import { Badge, Button } from "../../components/ui";
-import { DocIcon, ImportIcon, WarningTriangleIcon } from "../../components/icons";
+import { Badge, Button } from "@/components/ui";
+import { DocIcon, ImportIcon, WarningTriangleIcon } from "@/components/icons";
 import { PromptRowIcon, ShareCheck, ShareModal } from "./promptShareUi";
 import { promptFirstLine } from "./prompts";
 import type { ImportCandidate, ImportDecision, ImportResolution } from "./promptsIo";

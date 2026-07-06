@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 
-import type { GithubRepo, Project } from "../../lib/bindings";
-import { Button, Dialog, ErrorNote, Field, Spinner, TextInput } from "../../components/ui";
-import { RepoAvatar } from "../../components/RepoAvatar";
-import { useBootstrap, useCloneProject, useRecentRepos } from "../../lib/queries";
+import type { GithubRepo, Project } from "@/lib/bindings";
+import { Button, Dialog, ErrorNote, Field, Spinner, TextInput } from "@/components/ui";
+import { RepoAvatar } from "@/components/RepoAvatar";
+import { useBootstrap, useCloneProject, useRecentRepos } from "@/lib/queries";
 
 type Props = {
   open: boolean;

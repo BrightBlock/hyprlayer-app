@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { homeDir, join } from "@tauri-apps/api/path";
 
-import type { Project } from "../../lib/bindings";
-import { Button, Dialog, ErrorNote, Field, TextInput } from "../../components/ui";
+import type { Project } from "@/lib/bindings";
+import { Button, Dialog, ErrorNote, Field, TextInput } from "@/components/ui";
 import {
   useAddProject,
   useBootstrap,
   useCloneProject,
   useDefaultUsername,
-} from "../../lib/queries";
+} from "@/lib/queries";
 import { RepoSourcePicker, type RepoSource } from "./RepoSourcePicker";
 
 type Props = {
@@ -19,10 +19,9 @@ type Props = {
 };
 
 /**
- * Add a project — either by cloning a hosted repo (a GitHub URL or one of the
- * user's recent repos) into the repos root, or by importing a local repo from
- * disk. A disk import is registered in place (never copied), so worktrees
- * branch off the user's existing repo rather than a duplicate.
+ * Add a project by cloning a hosted repo into the repos root, or importing a
+ * local repo from disk. A disk import is registered in place (never copied), so
+ * worktrees branch off the user's existing repo, not a duplicate.
  */
 export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
   const bootstrap = useBootstrap();

@@ -1,12 +1,12 @@
 import { useState } from "react";
 
-import type { WorkstreamView } from "../../lib/bindings";
-import { useWorkstreamPr, useWorktreeGitStatus } from "../../lib/queries";
+import type { WorkstreamView } from "@/lib/bindings";
+import { useWorkstreamPr, useWorktreeGitStatus } from "@/lib/queries";
 import {
   commitWorkstream,
   shipWorkstream,
   useWorkstreamShipBusy,
-} from "../session/sessionStore";
+} from "@/features/session/sessionStore";
 
 /**
  * The Commit / Ship gating + actions for a workstream, shared by the GIT panel's

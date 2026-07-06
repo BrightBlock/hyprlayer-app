@@ -1,8 +1,6 @@
-//! App-local persistence (SQLite via rusqlite, bundled).
-//!
-//! Holds what the app itself owns: the project registry, workstreams, and
-//! session records. Documents, comments, and git state are always derived from
-//! their sources of truth, never stored here.
+//! App-local persistence (SQLite via rusqlite, bundled): project registry,
+//! workstreams, and session records. Documents, comments, and git state are
+//! always derived from their sources of truth, never stored here.
 
 mod migrations;
 mod projects;

@@ -2,15 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { RestartIcon, ShieldIcon } from "../../components/icons";
-import { Spinner } from "../../components/ui";
-import { commands, type TerminalEvent } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { b64ToBytes, strToB64 } from "../session/terminalCodec";
-import { useTerminalThemeSync, useTerminalZoom } from "../session/terminalChrome";
-import { createTerminalEngine, type TerminalEngine } from "../session/terminalEngine";
-import { xtermThemeFromCss } from "../session/terminalTheme";
-import { useScriptsStore } from "../session/scriptsStore";
+import { RestartIcon, ShieldIcon } from "@/components/icons";
+import { Spinner } from "@/components/ui";
+import { commands, type TerminalEvent } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
+import { useTerminalThemeSync, useTerminalZoom } from "@/lib/terminal/terminalChrome";
+import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
+import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
+import { useScriptsStore } from "@/features/session/scriptsStore";
 import { closeAgent, ensureAgent, resolveResume, setAgentBypass } from "./agentRuntime";
 import { AgentStatePill, EngineGlyph } from "./agentStateUi";
 import {

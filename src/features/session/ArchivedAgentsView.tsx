@@ -7,12 +7,12 @@
 
 import { useMemo, useState } from "react";
 
-import { Badge, Button, Dialog, EmptyState, Select, TextInput, type BadgeTone } from "../../components/ui";
-import { ArchiveIcon, GitBranchIcon, ModeIcon, SearchIcon, UnarchiveIcon, XIcon } from "../../components/icons";
-import type { ShellTab } from "../../routes/ProjectPage";
-import { engineLabel } from "../multiplexer/engines";
-import { modelOption } from "./models";
-import { formatRelativeTime } from "./toolDisplay";
+import { Badge, Button, Dialog, EmptyState, Select, TextInput, type BadgeTone } from "@/components/ui";
+import { ArchiveIcon, GitBranchIcon, ModeIcon, SearchIcon, UnarchiveIcon, XIcon } from "@/components/icons";
+import type { ShellTab } from "./workstreamTabs";
+import { engineLabel } from "@/features/multiplexer/engines";
+import { modelOption } from "@/lib/domain/models";
+import { formatRelativeTime } from "@/lib/format";
 import type { ArchivedShell, ArchivedStatus } from "./workstreamTabs";
 
 type SortKey = "recent" | "name";

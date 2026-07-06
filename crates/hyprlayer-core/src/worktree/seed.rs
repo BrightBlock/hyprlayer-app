@@ -10,11 +10,11 @@ use serde::Serialize;
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SeedReport {
-    /// Repo-relative file paths actually written into the new worktree.
+    /// Repo-relative paths actually written into the worktree.
     pub copied: Vec<String>,
     /// Entries (literal or glob) that matched nothing in the repo.
     pub missing: Vec<String>,
-    /// Per-entry copy/compile errors that did not prevent other entries from being copied.
+    /// Per-entry errors that didn't prevent other entries from copying.
     pub errors: Vec<SeedError>,
 }
 
@@ -26,8 +26,7 @@ pub struct SeedError {
     pub message: String,
 }
 
-/// Maximum number of file-system entries visited during a glob walk, mirroring
-/// the cap in `gitops::search_files`.
+/// Cap on entries visited per glob walk; mirrors `gitops::search_files`.
 const MAX_VISITED: usize = 50_000;
 
 /// Returns `true` if the pattern string contains any glob metacharacter.
@@ -49,14 +48,13 @@ fn safe_rel(rel: &str) -> Option<&Path> {
     (!bad).then_some(p)
 }
 
-/// Create parent directories and overwrite `dst` with the contents of `src`.
-/// Does NOT follow symlinks for the source — copies the symlink target's content
-/// via `std::fs::copy` (which dereferences on Unix).
+/// Create parent dirs and overwrite `dst` with `src`'s contents. `std::fs::copy`
+/// dereferences symlinks on Unix (copies the target's content, not the link).
 fn copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::copy(src, dst).map(|_| ()) // overwrites
+    std::fs::copy(src, dst).map(|_| ())
 }
 
 /// Recursively copy all files under `repo/dir_rel` into `worktree/dir_rel`.
@@ -108,21 +106,17 @@ fn copy_tree(repo: &Path, worktree: &Path, dir_rel: &Path, report: &mut SeedRepo
     }
 }
 
-/// Seed `worktree` from `repo` by copying every file matched by `patterns`.
-///
-/// - Literal paths (no glob metacharacters): direct stat + copy, no repo walk.
-/// - Glob patterns: one bounded `walkdir` over the repo (capped at
-///   `MAX_VISITED`), skipping `.git/` and `.hyprlayer/`.
-/// - Best-effort: never panics, never returns an error. Failures accumulate in
-///   `SeedReport::errors`; missing entries accumulate in `SeedReport::missing`.
+/// Seed `worktree` from `repo`, copying every file matched by `patterns`.
+/// Literals stat+copy directly; globs drive one bounded `walkdir` (capped at
+/// `MAX_VISITED`, skipping `.git/`/`.hyprlayer/`). Best-effort: never panics or
+/// errors — failures land in `SeedReport::errors`, non-matches in `missing`.
 pub fn seed_worktree(repo: &Path, worktree: &Path, patterns: &[String]) -> SeedReport {
     run(repo, Some(worktree), patterns)
 }
 
-/// Dry-run [`seed_worktree`]: resolve `patterns` against `repo` and report what
-/// WOULD be copied (`copied`), what matched nothing (`missing`), and what
-/// errored — without writing anything. Drives the project-level "copy files not
-/// found" warning so a bad copy config surfaces before any worktree is created.
+/// Dry-run [`seed_worktree`]: resolve `patterns` and report what WOULD be copied
+/// / matched nothing (`missing`) / errored, writing nothing. Drives the "copy
+/// files not found" warning so a bad copy config surfaces before any worktree.
 pub fn check_worktree_patterns(repo: &Path, patterns: &[String]) -> SeedReport {
     run(repo, None, patterns)
 }
@@ -247,7 +241,6 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
             Err(_) => continue,
         };
 
-        // Check every glob matcher against this file's repo-relative path.
         let mut already_copied = false;
         for ge in matchers.iter_mut() {
             if ge.matcher.is_match(&file_rel) {
@@ -275,7 +268,6 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
         }
     }
 
-    // Patterns that matched nothing → missing.
     for ge in &matchers {
         if !ge.hit {
             report.missing.push(ge.pattern.clone());

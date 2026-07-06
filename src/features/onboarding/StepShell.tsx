@@ -1,16 +1,14 @@
-/** Shared chrome for every onboarding step: logo, "Setup N of M", title,
- *  content, and an optional footer. In its own module so steps can share it
- *  without a circular import. */
+/** Shared chrome for every onboarding step. Separate module so steps can share
+ *  it without a circular import. */
 import type { ReactNode } from "react";
 
-import { HyprlayerLogo } from "../../components/Logo";
+import { HyprlayerLogo } from "@/components/Logo";
 
 export type StepProps = {
   number: number;
   total: number;
   title: string;
   children: ReactNode;
-  /** Footer actions (Next / Set up / etc.) */
   footer?: ReactNode;
 };
 

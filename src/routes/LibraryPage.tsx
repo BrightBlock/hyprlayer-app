@@ -1,19 +1,19 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
-import { EmptyState } from "../components/ui";
-import { CreateDocDialog } from "../features/library/CreateDocDialog";
-import { docQueryFromSearch } from "../features/library/DocFilters";
-import { DocDetail } from "../features/library/DocDetail";
-import { LibrarySidebar } from "../features/library/LibrarySidebar";
-import { resolveSyncProjectPath } from "../features/library/thoughtsSync";
-import { useThoughtsSync } from "../features/library/useThoughtsSync";
-import { useBootstrap, useDocs } from "../lib/queries";
-import { useLibraryScope } from "../lib/libraryScope";
-import { LIBRARY_SIDEBAR_MAX, LIBRARY_SIDEBAR_MIN, useUiStore } from "../lib/uiStore";
-import { startEdgeDrag } from "../lib/resize";
-import { useCommand } from "../lib/keybindings/registry";
-import type { LibrarySearch } from "../router";
+import { EmptyState } from "@/components/ui";
+import { CreateDocDialog } from "@/features/library/CreateDocDialog";
+import { docQueryFromSearch } from "@/features/library/DocFilters";
+import { DocDetail } from "@/features/library/DocDetail";
+import { LibrarySidebar } from "@/features/library/LibrarySidebar";
+import { resolveSyncProjectPath } from "@/features/library/thoughtsSync";
+import { useThoughtsSync } from "@/features/library/useThoughtsSync";
+import { useBootstrap, useDocs } from "@/lib/queries";
+import { useLibraryScope } from "@/features/library/libraryScope";
+import { LIBRARY_SIDEBAR_MAX, LIBRARY_SIDEBAR_MIN, useUiStore } from "@/lib/uiStore";
+import { startEdgeDrag } from "@/lib/resize";
+import { useCommand } from "@/lib/keybindings/registry";
+import type { LibrarySearch } from "@/features/library/librarySearch";
 
 /**
  * The Library: one master–detail view consolidating the old global browser,

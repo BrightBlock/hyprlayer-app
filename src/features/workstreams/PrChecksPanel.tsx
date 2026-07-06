@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import type { ChecksState, WorkstreamView } from "../../lib/bindings";
-import { useWorkstreamPr } from "../../lib/queries";
-import { Spinner } from "../../components/ui";
-import { ChevronDownIcon, ChevronRightIcon } from "../../components/icons";
+import type { ChecksState, WorkstreamView } from "@/lib/bindings";
+import { useWorkstreamPr } from "@/lib/queries";
+import { Spinner } from "@/components/ui";
+import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
 
 /** Overall-status dot for the CI Checks header: green passing, red failing,
  *  amber (pulsing) pending, dim when there are no checks. */

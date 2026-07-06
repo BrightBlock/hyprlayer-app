@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { ArchiveIcon, CheckIcon, PlayIcon, TerminalIcon, WrenchIcon } from "../../components/icons";
-import { Badge, Card, CardTitle, ErrorNote, Spinner } from "../../components/ui";
-import type { BadgeTone } from "../../components/ui";
-import type { ScriptSettings } from "../../lib/bindings";
-import { useScripts, useSetScripts } from "../../lib/queries";
+import { ArchiveIcon, CheckIcon, PlayIcon, TerminalIcon, WrenchIcon } from "@/components/icons";
+import { Badge, Card, CardTitle, ErrorNote, Spinner } from "@/components/ui";
+import type { BadgeTone } from "@/components/ui";
+import type { ScriptSettings } from "@/lib/bindings";
+import { useScripts, useSetScripts } from "@/lib/queries";
 import { ScriptEditor } from "./ScriptEditor";
 
 type ScriptKey = keyof ScriptSettings; // "setup" | "run" | "archive"
@@ -49,11 +49,9 @@ const ROWS: RowMeta[] = [
 ];
 
 /**
- * Project Settings → "Scripts": edits the three lifecycle command blocks
- * (Setup / Run / Archive). Autosaves to `.hyprlayer/settings.toml` (debounced),
- * with a Saved indicator. The pills here describe each script's trigger — live
- * per-workstream last-run status (Ran 3m ago ✓) shows in the dock, which is
- * workstream-scoped.
+ * Project Settings → "Scripts": edits the three lifecycle blocks (Setup / Run /
+ * Archive), autosaving to `.hyprlayer/settings.toml` (debounced). Pills describe
+ * each script's trigger; live per-workstream last-run status shows in the dock.
  */
 export function ScriptsCard({ projectPath }: { projectPath: string }) {
   const scripts = useScripts(projectPath);

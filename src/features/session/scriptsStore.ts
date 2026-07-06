@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { events } from "@/lib/bindings";
+import type { EventBridge } from "@/lib/events";
+
 /** Which dock tab is selected: one of the three pinned lifecycle scripts, or an
  *  ad-hoc terminal addressed by its (dock-local) shell id. */
 export type DockTab = "setup" | "run" | "archive" | { term: number };
@@ -233,3 +236,15 @@ export function hydrateRunning(ids: string[]): void {
     return { running };
   });
 }
+
+/** This feature's slice of the backend event stream: keep the live-Run set in
+ *  step with script lifecycle events. Registered from main.tsx via
+ *  `registerEventBridge` so lib/events never imports feature stores. */
+export const scriptRunBridge: EventBridge = () => [
+  events.scriptRunChanged.listen((event) => {
+    const { workstreamId, kind, phase, port } = event.payload;
+    if (kind !== "run") return;
+    if (phase === "running") setRunning(workstreamId, { port: port ?? null });
+    else setRunning(workstreamId, null); // passed | failed → no longer alive
+  }),
+];

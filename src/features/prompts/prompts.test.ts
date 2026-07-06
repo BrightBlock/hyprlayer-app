@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AppSettings, CustomPrompt, PromptContext, PromptDefaults } from "../../lib/bindings";
+import type { AppSettings, CustomPrompt, PromptContext, PromptDefaults } from "@/lib/bindings";
 import {
   bodyHasVars,
   effectiveBuiltinBody,

@@ -8,11 +8,15 @@
 
 use crate::claude::PermissionMode;
 
-/// The pipeline stages. Parsed tolerantly from the workstream's stored stage
-/// string; an unknown value falls back to [`Stage::General`] (plain chat).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The pipeline stages — the canonical wire enum for a workstream/session's
+/// pipeline position. sqlite still stores its `as_str` TEXT; rows read back
+/// through the tolerant [`Stage::parse`]. Wire deserialization is strict — the
+/// generated bindings union makes an unknown value a TS type error, and specta
+/// cannot render `#[serde(other)]` on string enums.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
 pub enum Stage {
-    General,
     Research,
     Plan,
     Implement,
@@ -20,6 +24,7 @@ pub enum Stage {
     Commit,
     Ship,
     Revise,
+    General,
 }
 
 impl Stage {

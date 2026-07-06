@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { DocMeta } from "../../lib/bindings";
+import type { DocMeta } from "@/lib/bindings";
 import { groupDocsByType } from "./docGroups";
 
 function doc(id: string, type: string | null, mtimeMs: number | null): DocMeta {

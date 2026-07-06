@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
 import { PromptLibrary } from "./PromptLibrary";
-import type { AppSettings } from "../../lib/bindings";
+import type { AppSettings } from "@/lib/bindings";
 
 /** Selection is URL-owned in the app (PromptsPage); the harness stands in with
  *  plain state so list clicks drive the editor the same way. */

@@ -3,27 +3,25 @@ import { markdown } from "@codemirror/lang-markdown";
 import { EditorView } from "@codemirror/view";
 import { useMemo, useState } from "react";
 
-import { Badge, ErrorNote, PageError, PageSpinner, Spinner } from "../../components/ui";
-import { FolderIcon, PencilIcon, SearchIcon } from "../../components/icons";
-import type { DocContent } from "../../lib/bindings";
+import { Badge, ErrorNote, PageError, PageSpinner, Spinner } from "@/components/ui";
+import { FolderIcon, PencilIcon, SearchIcon } from "@/components/icons";
+import type { DocContent } from "@/lib/bindings";
 import {
   useDoc,
   usePatchDocFrontmatter,
   useRevealDoc,
   useSaveDoc,
-} from "../../lib/queries";
-import { IS_MACOS } from "../../lib/platform";
-import { useUiStore } from "../../lib/uiStore";
-import { codeBase } from "../workstreams/codeView";
+} from "@/lib/queries";
+import { IS_MACOS } from "@/lib/platform";
+import { useUiStore } from "@/lib/uiStore";
+import { codeBase } from "@/features/workstreams/codeView";
 import { FrontmatterPanel } from "./FrontmatterPanel";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { docTitle, splitFrontmatter } from "./text";
 
-// Editor chrome + syntax colors bound to the app's theme tokens (shared with the
-// diff/file viewers via `codeBase`), so the editor recolors with the active
-// theme instead of being stuck on a fixed dark palette. `lineWrapping` wraps
-// long lines at the editor's width (it tracks the column/window) instead of
-// scrolling horizontally; the markdown grammar rides on top for highlighting.
+// Theme-bound editor chrome + syntax colors (shared with the diff/file viewers
+// via `codeBase`) so the editor recolors with the active theme; `lineWrapping`
+// wraps long lines instead of scrolling horizontally, markdown grammar on top.
 const editorExtensions = [...codeBase, EditorView.lineWrapping, markdown()];
 
 type Props = {

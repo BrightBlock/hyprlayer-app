@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { DocIcon, PencilIcon } from "../../components/icons";
-import { PATCH_LINE_CLASSES } from "../workstreams/diff";
+import { DocIcon, PencilIcon } from "@/components/icons";
+import { PATCH_LINE_CLASSES } from "@/features/workstreams/diff";
 import { baseName, type EditDiff } from "./toolDisplay";
 
 /** Roughly how tall the hover popover can get; used to pick above vs. below. */

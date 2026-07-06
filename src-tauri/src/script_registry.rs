@@ -1,10 +1,6 @@
-//! In-memory registry for workstream lifecycle scripts.
-//!
-//! Tracks, per workstream: the live **Run** PTY (so ▶ can stop a prior one and
-//! the rail can show a green "alive" dot), the `$HL_PORT` allocated once for it,
-//! and each script's **last-run status** (timestamp + pass/fail) surfaced as the
-//! settings/dock status pills. All session-scoped — nothing is persisted across
-//! an app restart (by design; see the plan).
+//! In-memory registry for workstream lifecycle scripts: per workstream, the live
+//! Run PTY (so ▶ can stop a prior one), its once-allocated `$HL_PORT`, and each
+//! script's last-run status (the dock/settings pills). Session-scoped by design.
 
 use std::collections::HashMap;
 use std::sync::Arc;

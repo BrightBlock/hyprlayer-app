@@ -1,13 +1,13 @@
-import type { AppSettings, CatalogProvider } from "../../lib/bindings";
+import type { AppSettings, CatalogProvider, Harness, PermissionMode } from "@/lib/bindings";
 import { effectiveEffort, modelOption } from "./models";
 import { permissionModeOption } from "./permissions";
 
 /**
- * The agent harnesses a session can run on. `key` is what the backend's
- * `start_stage_session` expects in `opts.harness` and what the session row
- * stores. Mirrors the small option-list shape of `models.ts`.
+ * The agent harnesses a session can run on. `key` is typed by the bindings'
+ * [`Harness`] union (generated from core's enum) — what `start_stage_session`
+ * expects in `opts.harness` and what the session row stores.
  */
-export type HarnessOption = { key: string; label: string };
+export type HarnessOption = { key: Harness; label: string };
 
 export const HARNESSES: HarnessOption[] = [
   { key: "claude", label: "Claude Code" },
@@ -20,7 +20,9 @@ export const DEFAULT_HARNESS_KEY = "claude";
  *  [`HARNESSES`], this lists Ollama as its own choice even though it runs on the
  *  OpenCode harness (mapped by [`effectiveHarnessKey`]) — so users pick it the way
  *  they think of it. */
-export const DEFAULT_HARNESS_OPTIONS: HarnessOption[] = [
+/** Settings-page choices are a UI vocabulary, not the wire enum: Ollama is
+ *  listed as its own option even though it RUNS on the OpenCode harness. */
+export const DEFAULT_HARNESS_OPTIONS: { key: string; label: string }[] = [
   { key: "claude", label: "Claude Code" },
   { key: "opencode", label: "OpenCode" },
   { key: "ollama", label: "Ollama" },
@@ -34,7 +36,7 @@ export function harnessOption(key: string | undefined | null): HarnessOption {
  *  while OpenCode *and* Ollama both run on the OpenCode harness (Ollama's models
  *  are `ollama/<id>` OpenCode ids). Null/unknown ⇒ Claude. Use this to turn the
  *  three-way `providers.defaultHarness` setting into a real [`HarnessOption`] key. */
-export function effectiveHarnessKey(defaultHarness: string | null | undefined): string {
+export function effectiveHarnessKey(defaultHarness: string | null | undefined): Harness {
   return defaultHarness === "opencode" || defaultHarness === "ollama" ? "opencode" : "claude";
 }
 
@@ -44,7 +46,7 @@ export function effectiveHarnessKey(defaultHarness: string | null | undefined): 
  *  "let the harness pick its own default". `effort` is a Claude effort key, or
  *  `null` for OpenCode (which has no `--effort`). */
 export type ActionAgentDefaults = {
-  harness: string;
+  harness: Harness;
   model: string | null;
   effort: string | null;
 };
@@ -86,7 +88,7 @@ export function actionAgentDefaults(
  *  coincide; `"opus"` → the null default; a custom id → itself); OpenCode passes
  *  the `provider/model` id through and carries no effort. */
 export function actionLaunchArgs(d: ActionAgentDefaults): {
-  harness: string;
+  harness: Harness;
   model: string | null;
   effort: string | null;
 } {
@@ -121,10 +123,10 @@ export function newChatLaunchArgs(
   settings: AppSettings | null | undefined,
   shell: ShellLaunchPicks | null | undefined,
 ): {
-  harness: string;
+  harness: Harness;
   model: string | null;
   effort: string | null;
-  permissionMode: string | null;
+  permissionMode: PermissionMode | null;
 } {
   const providers = settings?.providers;
   const claude = providers?.claude;

@@ -5,9 +5,9 @@ import { closeSearch, useSearchStore } from "./searchStore";
 import { groupResults, flattenGroups, type SearchResult, type SearchGroup } from "./search";
 import { useSearchSources } from "./useSearchSources";
 import { selectAgentTab } from "./selectAgentTab";
-import { openDocPreviewTab } from "../session/workstreamTabs";
-import { BookIcon, FolderIcon, TerminalIcon } from "../../components/icons";
-import type { WorkstreamActivity } from "../session/sessionStore";
+import { openDocPreviewTab } from "@/features/session/workstreamTabs";
+import { BookIcon, FolderIcon, TerminalIcon } from "@/components/icons";
+import type { WorkstreamActivity } from "@/features/session/sessionStore";
 
 // ── Activity badge ─────────────────────────────────────────────────────────
 

@@ -1,8 +1,7 @@
 //! In-memory index of every markdown document across the thoughts roots.
-//!
-//! PUBLIC API IS FROZEN — the Tauri shell builds against it. All scan and
-//! query methods are synchronous; async callers wrap them in
-//! `spawn_blocking`. Designed for personal-corpus scale (see `search.rs`).
+//! PUBLIC API IS FROZEN — the Tauri shell builds against it. Scan/query methods
+//! are synchronous; async callers wrap them in `spawn_blocking`. Personal-corpus
+//! scale (see `search.rs`).
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};

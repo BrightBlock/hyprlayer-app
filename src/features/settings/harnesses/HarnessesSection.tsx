@@ -1,15 +1,17 @@
 import { useState } from "react";
 
-import type { AppSettings, BinaryStatus } from "../../../lib/bindings";
-import { Badge, Card, CardTitle } from "../../../components/ui";
+import type { AppSettings, BinaryStatus } from "@/lib/bindings";
+import { Badge, Card, CardTitle } from "@/components/ui";
 import { ClaudeHarnessTab } from "./ClaudeHarnessTab";
 import { OpenCodeHarnessTab } from "./OpenCodeHarnessTab";
 import { OllamaHarnessTab } from "./OllamaHarnessTab";
 
-type HarnessId = "claude" | "codex" | "opencode" | "ollama";
+// Settings-tab ids — deliberately wider than the wire `Harness` union
+// (codex/ollama are configured here but run through other harnesses/the multiplexer).
+type HarnessTabId = "claude" | "codex" | "opencode" | "ollama";
 
 type TabDef = {
-  id: HarnessId;
+  id: HarnessTabId;
   label: string;
   /** `true` once the harness is real; the others render a "coming soon" panel. */
   ready: boolean;
@@ -23,8 +25,7 @@ const TABS: TabDef[] = [
   { id: "ollama", label: "Ollama", ready: true, badge: "NEW" },
 ];
 
-/** Settings → Harnesses: per-harness configuration behind a horizontal tab
- *  strip. Claude Code and OpenCode are wired up; Codex/Cursor are placeholders. */
+/** Settings → Harnesses: per-harness configuration behind a horizontal tab strip. */
 export function HarnessesSection({
   settings,
   binaries,
@@ -32,7 +33,7 @@ export function HarnessesSection({
   settings: AppSettings;
   binaries: BinaryStatus[];
 }) {
-  const [active, setActive] = useState<HarnessId>("claude");
+  const [active, setActive] = useState<HarnessTabId>("claude");
   const opencode = binaries.find((b) => b.kind === "opencode");
   const claude = binaries.find((b) => b.kind === "claude");
   const ollama = binaries.find((b) => b.kind === "ollama");

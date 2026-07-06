@@ -1,5 +1,5 @@
-import { DocIcon, ModeIcon, XIcon } from "../../components/icons";
-import type { AttachedDoc } from "../../routes/ProjectPage";
+import { DocIcon, ModeIcon, XIcon } from "@/components/icons";
+import type { AttachedDoc } from "@/features/session/workstreamTabs";
 
 /** "2026-06-12-AUTH-1-auth-research.md" -> "AUTH-1-auth-research" */
 export function chipLabel(docPath: string): string {

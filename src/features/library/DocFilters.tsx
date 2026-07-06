@@ -1,5 +1,5 @@
-import type { ThoughtQuery } from "../../lib/bindings";
-import type { LibrarySearch } from "../../router";
+import type { ThoughtQuery } from "@/lib/bindings";
+import type { LibrarySearch } from "./librarySearch";
 import { DOC_PAGE_SIZE } from "./constants";
 
 export function splitParam(value: string | undefined): string[] {

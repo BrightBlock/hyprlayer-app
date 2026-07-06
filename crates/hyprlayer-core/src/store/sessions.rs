@@ -5,7 +5,10 @@ use rusqlite::{params, Row};
 use serde::{Deserialize, Serialize};
 
 use super::{now_ms, Db};
+use crate::agent::Harness;
+use crate::claude::SessionState;
 use crate::error::Result;
+use crate::pipeline::Stage;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -13,16 +16,14 @@ use crate::error::Result;
 pub struct Session {
     pub id: String,
     pub workstream_id: String,
-    pub stage: String,
-    /// Which harness backs the session: `"claude"` | `"opencode"`.
-    pub harness: String,
+    pub stage: Stage,
+    /// Which harness backs the session.
+    pub harness: Harness,
     /// The harness's own session id (set on init; drives resume). claude's
     /// session id for Claude Code, the opencode session id for OpenCode.
     pub claude_session_id: Option<String>,
     pub cwd: String,
-    /// starting | running | awaiting_permission | awaiting_question | completed |
-    /// interrupted | crashed | killed | spawn_failed
-    pub state: String,
+    pub state: SessionState,
     pub model: Option<String>,
     /// Cumulative cost reported by the latest `result` event.
     pub cost_usd: Option<f64>,
@@ -47,8 +48,8 @@ pub struct StoredEvent {
 pub struct NewSession {
     pub id: String,
     pub workstream_id: String,
-    pub stage: String,
-    pub harness: String,
+    pub stage: Stage,
+    pub harness: Harness,
     pub cwd: String,
 }
 
@@ -59,11 +60,11 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
     Ok(Session {
         id: row.get("id")?,
         workstream_id: row.get("workstream_id")?,
-        stage: row.get("stage")?,
-        harness: row.get("harness")?,
+        stage: Stage::parse(&row.get::<_, String>("stage")?),
+        harness: Harness::parse(&row.get::<_, String>("harness")?),
         claude_session_id: row.get("claude_session_id")?,
         cwd: row.get("cwd")?,
-        state: row.get("state")?,
+        state: SessionState::parse(&row.get::<_, String>("state")?),
         model: row.get("model")?,
         cost_usd: row.get("cost_usd")?,
         started_at: row.get("started_at")?,
@@ -81,7 +82,7 @@ impl Db {
             harness: new.harness,
             claude_session_id: None,
             cwd: new.cwd,
-            state: "starting".into(),
+            state: SessionState::Starting,
             model: None,
             cost_usd: None,
             started_at: now_ms(),
@@ -96,11 +97,11 @@ impl Db {
                 params![
                     session.id,
                     session.workstream_id,
-                    session.stage,
-                    session.harness,
+                    session.stage.as_str(),
+                    session.harness.as_str(),
                     session.claude_session_id,
                     session.cwd,
-                    session.state,
+                    session.state.as_str(),
                     session.model,
                     session.cost_usd,
                     session.started_at,
@@ -155,11 +156,11 @@ impl Db {
         })
     }
 
-    pub fn set_session_state(&self, id: &str, state: &str) -> Result<()> {
+    pub fn set_session_state(&self, id: &str, state: SessionState) -> Result<()> {
         self.with(|conn| {
             conn.execute(
                 "UPDATE sessions SET state = ?2 WHERE id = ?1",
-                params![id, state],
+                params![id, state.as_str()],
             )?;
             Ok(())
         })
@@ -176,11 +177,11 @@ impl Db {
     }
 
     /// Terminal update: state + ended_at + a short exit summary.
-    pub fn finish_session(&self, id: &str, state: &str, exit_summary: Option<&str>) -> Result<()> {
+    pub fn finish_session(&self, id: &str, state: SessionState, exit_summary: Option<&str>) -> Result<()> {
         self.with(|conn| {
             conn.execute(
                 "UPDATE sessions SET state = ?2, ended_at = ?3, exit_summary = ?4 WHERE id = ?1",
-                params![id, state, now_ms(), exit_summary],
+                params![id, state.as_str(), now_ms(), exit_summary],
             )?;
             Ok(())
         })
@@ -385,6 +386,7 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::workstreams::WorktreeMode;
 
     #[test]
     fn session_lifecycle_persists_and_replays() {
@@ -397,7 +399,7 @@ mod tests {
             branch: "hyprlayer/t-1".into(),
             worktree_path: "/wt".into(),
             base_branch: "main".into(),
-            worktree_mode: "isolated".into(),
+            worktree_mode: WorktreeMode::Isolated,
         })
         .unwrap();
         let ws = db.list_active_workstreams().unwrap().pop().unwrap();
@@ -406,12 +408,12 @@ mod tests {
             .insert_session(NewSession {
                 id: "s1".into(),
                 workstream_id: ws.id.clone(),
-                stage: "research".into(),
-                harness: "claude".into(),
+                stage: Stage::Research,
+                harness: Harness::Claude,
                 cwd: "/wt".into(),
             })
             .unwrap();
-        assert_eq!(session.state, "starting");
+        assert_eq!(session.state, SessionState::Starting);
 
         db.mark_session_init("s1", "claude-abc", Some("claude-opus-4-8"))
             .unwrap();
@@ -425,11 +427,11 @@ mod tests {
         )
         .unwrap();
         db.set_session_cost("s1", 0.05).unwrap();
-        db.finish_session("s1", "completed", Some("done")).unwrap();
+        db.finish_session("s1", SessionState::Completed, Some("done")).unwrap();
 
         let reloaded = db.get_session("s1").unwrap().unwrap();
         assert_eq!(reloaded.claude_session_id.as_deref(), Some("claude-abc"));
-        assert_eq!(reloaded.state, "completed");
+        assert_eq!(reloaded.state, SessionState::Completed);
         assert_eq!(reloaded.cost_usd, Some(0.05));
         assert!(reloaded.ended_at.is_some());
 
@@ -451,15 +453,15 @@ mod tests {
             branch: format!("hyprlayer/t-{session_id}"),
             worktree_path: "/wt".into(),
             base_branch: "main".into(),
-            worktree_mode: "isolated".into(),
+            worktree_mode: WorktreeMode::Isolated,
         })
         .unwrap();
         let ws = db.list_active_workstreams().unwrap().pop().unwrap();
         db.insert_session(NewSession {
             id: session_id.into(),
             workstream_id: ws.id,
-            stage: "general".into(),
-            harness: "claude".into(),
+            stage: Stage::General,
+            harness: Harness::Claude,
             cwd: "/wt".into(),
         })
         .unwrap();

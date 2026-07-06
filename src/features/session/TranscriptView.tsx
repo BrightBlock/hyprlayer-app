@@ -9,9 +9,9 @@ import {
   type WheelEvent,
 } from "react";
 
-import { Button, Spinner } from "../../components/ui";
-import { useCopyFeedback } from "../../lib/clipboard";
-import { HyprlayerMark } from "../../components/Logo";
+import { Button, Spinner } from "@/components/ui";
+import { useCopyFeedback } from "@/lib/clipboard";
+import { HyprlayerMark } from "@/components/Logo";
 import {
   ChevronRightIcon,
   ClipboardIcon,
@@ -19,18 +19,17 @@ import {
   RewindIcon,
   ShieldIcon,
   WrenchIcon,
-} from "../../components/icons";
-import { MarkdownPreview } from "../library/MarkdownPreview";
-import { stageLabel } from "./stages";
+} from "@/components/icons";
+import { MarkdownPreview } from "@/features/library/MarkdownPreview";
+import { stageLabel } from "@/lib/domain/stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
 import { AttachmentCards } from "./AttachmentCard";
 import { FileCard } from "./FileCard";
 import type { Attachment } from "./attachments";
+import { formatElapsed, formatRelativeTime } from "@/lib/format";
 import {
   baseName,
   editDiffFromTool,
-  formatElapsed,
-  formatRelativeTime,
   formatTokens,
   prettyToolInput,
   resultPreview,
@@ -44,12 +43,9 @@ export type PermissionHandlers = {
   onDeny: (requestId: string) => void;
 };
 
-/** Actions reachable from the per-user-message toolbar (copy/rewind).
- *  Plumbed alongside `PermissionHandlers` so the rendering stays prop-driven
- *  (no zustand access from the view) and tests can drive the buttons. Rewind
- *  carries the bubble's text so the host can repopulate the composer with it
- *  (Claude-Desktop-style: rewinding lands you back on that prompt to edit and
- *  re-send). */
+/** Toolbar actions for a user turn, plumbed as props so the view stays
+ *  zustand-free and tests can drive the buttons. Rewind carries the bubble's
+ *  text so the host repopulates the composer to edit and re-send. */
 export type PromptHandlers = {
   onRewind: (itemId: string, text: string) => void;
 };
@@ -57,17 +53,15 @@ export type PromptHandlers = {
 /* -------------------------------- pieces --------------------------------- */
 
 /**
- * Re-render a relative-time label on a schedule that matches its precision:
- * every 10s under a minute, every 30s under an hour, every 5m thereafter.
- * Avoids waking the React tree on a 1s tick when the label says "2w ago".
+ * Re-render a relative-time label on a widening cadence (10s→30s→5m as it ages)
+ * instead of a 1s tick — avoids waking the React tree for a "2w ago" label.
  */
 function useTickingNow(epochMs: number | null): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (epochMs === null) return;
-    // A self-rescheduling timeout: each run picks the next delay from the
-    // message's current age, so the cadence widens as it ages past each
-    // boundary (a fresh "5s ago" runs at 10s, a "2w ago" at 5m).
+    // Self-rescheduling: each run picks the next delay from the message's current
+    // age, so the cadence widens as it ages past each boundary.
     let id: number;
     const schedule = () => {
       const ageMs = Date.now() - epochMs;
@@ -83,8 +77,8 @@ function useTickingNow(epochMs: number | null): number {
   return now;
 }
 
-/** Hover-revealed actions for a user turn — copy text, rewind to here, fork,
- *  and a relative timestamp — mirroring Claude Desktop's prompt toolbar. */
+/** Hover-revealed toolbar for a user turn (copy, rewind, timestamp), mirroring
+ *  Claude Desktop's prompt toolbar. */
 function UserMessageToolbar({
   itemId,
   text,
@@ -165,10 +159,9 @@ const UserMessage = memo(function UserMessage({
 });
 
 /**
- * Smoothly reveal text as it streams in. claude sends `partialText` in bursts;
- * this drains the backlog at a steady per-frame rate (ease-out, so it catches
- * up when far behind) so the user sees fluid typing instead of chunks popping
- * in. Snaps to the full text the moment the block finishes streaming.
+ * Smoothly reveal streaming text: claude sends `partialText` in bursts, so drain
+ * the backlog at a steady per-frame rate (ease-out to catch up when far behind)
+ * for fluid typing instead of popping chunks. Snaps to full when streaming ends.
  */
 function useSmoothText(text: string, streaming: boolean): string {
   const [revealed, setRevealed] = useState(() => (streaming ? 0 : text.length));
@@ -180,10 +173,9 @@ function useSmoothText(text: string, streaming: boolean): string {
       setRevealed(targetLen.current);
       return;
     }
-    // Throttle the reveal (and thus the markdown re-parse it drives) to ~30fps:
-    // the rAF still ticks each frame, but we only advance the revealed length
-    // every ~33ms. The CSS-animated cursor keeps motion fluid between steps, so
-    // the cost of re-parsing the growing block during a live turn roughly halves.
+    // Throttle the reveal (and the markdown re-parse it drives) to ~30fps: the rAF
+    // ticks each frame but we advance every ~33ms, halving re-parse cost on a live
+    // turn; the CSS-animated cursor keeps motion fluid between steps.
     let last = 0;
     let frame = requestAnimationFrame(function tick(ts) {
       if (ts - last >= 33) {
@@ -215,9 +207,8 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const shown = useSmoothText(text, streaming);
 
-  // Render markdown live as the text streams in (react-markdown handles
-  // partial/unterminated structures gracefully), so the user sees formatted
-  // output instead of raw markdown until the turn completes.
+  // Render markdown live while streaming — react-markdown handles partial/
+  // unterminated structures gracefully, so the user sees formatting, not raw md.
   if (streaming) {
     return (
       <div className="selectable">
@@ -238,8 +229,7 @@ const AssistantMessage = memo(function AssistantMessage({
   );
 });
 
-/** The shared button shell for a transcript working-step row (thinking, tool,
- *  tool group, subagent) — a tight, full-bleed hover target. */
+/** Shared button shell for a working-step row (thinking, tool, group, subagent). */
 const STEP_ROW =
   "group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-panel-2";
 

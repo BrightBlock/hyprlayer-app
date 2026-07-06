@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 
-import { Badge, Button, ErrorNote, Select, Spinner, TextInput } from "../../components/ui";
-import { DOC_TYPES, STATUS_TONE } from "../library/constants";
-import { docTitle } from "../library/text";
-import type { DocMeta, ThoughtQuery } from "../../lib/bindings";
-import { useDocs } from "../../lib/queries";
+import { Badge, Button, ErrorNote, Select, Spinner, TextInput } from "@/components/ui";
+import { DOC_TYPES, STATUS_TONE } from "@/features/library/constants";
+import { docTitle } from "@/features/library/text";
+import type { DocMeta, ThoughtQuery } from "@/lib/bindings";
+import { useDocs } from "@/lib/queries";
 
 /** Attachment role derived from the doc's type. */
 export function roleForDoc(doc: DocMeta): string {

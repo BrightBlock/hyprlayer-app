@@ -1,9 +1,8 @@
 import { create } from "zustand";
 
-/** The project (by repo path) whose settings dialog is open, or null. Held in a
- *  module store so it can be opened from anywhere — the project right-click menu
- *  AND the in-workstream scripts dock's "Edit scripts ↗" — while Root owns the
- *  single dialog instance. */
+/** Repo path whose settings dialog is open, or null. A module store so it can be
+ *  opened from anywhere (project right-click menu, in-workstream scripts dock)
+ *  while Root owns the single dialog instance. */
 type ProjectSettingsState = { path: string | null };
 
 export const useProjectSettingsStore = create<ProjectSettingsState>(() => ({ path: null }));

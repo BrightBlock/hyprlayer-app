@@ -24,14 +24,23 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import { useShallow } from "zustand/shallow";
 
-import { commands, type Bootstrap, type Session, type SessionEvent } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { queryClient } from "../../lib/queryClient";
-import { invalidateWorktreeGit } from "../../lib/queries";
-import { findWorkstreamForNotify, notifyNeedsAttention } from "../../lib/notifications";
-import { useToast } from "../../lib/toast";
-import { router } from "../../router";
-import { docFromTool, docTitle, type DocKind } from "./toolDisplay";
+import {
+  commands,
+  type Bootstrap,
+  type Harness,
+  type PermissionMode,
+  type Stage,
+  type Session,
+  type SessionEvent,
+} from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { queryClient } from "@/lib/queryClient";
+import { invalidateWorktreeGit } from "@/lib/queries";
+import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notifications";
+import { useToast } from "@/lib/toast";
+import { currentAppLocation } from "@/lib/appNav";
+import type { DocKind } from "@/lib/domain/docs";
+import { docFromTool, docTitle } from "./toolDisplay";
 import {
   backgroundTasksFromItems,
   type BackgroundTask,
@@ -39,18 +48,18 @@ import {
 } from "./backgroundTask";
 import { planTasksFromItems, type PlanTask, type PlanTaskStatus } from "./planTasks";
 import { type Attachment } from "./attachments";
-import { permissionModeOption } from "./permissions";
+import { permissionModeOption } from "@/lib/domain/permissions";
 import {
   bodyHasVars,
   effectiveBuiltinBody,
   substitutePromptVars,
-} from "../prompts/prompts";
+} from "@/features/prompts/prompts";
 import {
   actionAgentDefaults,
   actionLaunchArgs,
   newChatLaunchArgs,
   type ActionAgentDefaults,
-} from "./harnessing";
+} from "@/lib/domain/harnessing";
 import {
   bindSessionToShell,
   openCommitTab,
@@ -87,7 +96,7 @@ export type SessionEntry = SessionView & {
   /** The `--permission-mode` this session launched with (null = stage default).
    *  Remembered so a resume re-applies it — a running session can't switch into
    *  `bypassPermissions`, so changing the mode restarts (kill + resume) with it. */
-  permissionMode: string | null;
+  permissionMode: PermissionMode | null;
   /** True only during a permission-mode restart: the kill→resume swap. Lets the
    *  kill's `exited` event be swallowed so the transcript doesn't flash "ended". */
   reloading?: boolean;
@@ -317,8 +326,8 @@ async function maybeNotifyTransition(
 
 async function isSessionVisible(sessionId: string, workstreamId: string): Promise<boolean> {
   if (!(await getCurrentWindow().isFocused())) return false;
-  const loc = router.state.location;
-  if (!loc.pathname.startsWith("/projects/")) return false;
+  const loc = currentAppLocation();
+  if (!loc || !loc.pathname.startsWith("/projects/")) return false;
   const search = loc.search as { item?: string };
   if (search.item !== workstreamId) return false;
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
@@ -336,19 +345,19 @@ async function isSessionVisible(sessionId: string, workstreamId: string): Promis
  */
 export async function startSession(args: {
   workstreamId: string;
-  stage: string;
+  stage: Stage;
   input: string;
   /** Files/library docs attached to the first turn. Their paths go to the
    *  backend prompt; they render as pin cards in the echo so no raw path shows. */
   attachments?: Attachment[];
-  /** Which harness to run: "claude" (default) or "opencode". */
-  harness?: string | null;
+  /** Which harness to run (default claude). */
+  harness?: Harness | null;
   /** Claude: a `--model` value. OpenCode: a `provider/model` id. Null = default. */
   model?: string | null;
   /** `--effort` level, or null/undefined for claude's default. */
   effort?: string | null;
   /** `--permission-mode` override, or null/undefined to use the stage default. */
-  permissionMode?: string | null;
+  permissionMode?: PermissionMode | null;
 }): Promise<Session> {
   const { channel, activate } = bufferedChannel();
   const attachments = args.attachments ?? [];
@@ -458,7 +467,7 @@ export async function resumeSession(sessionId: string): Promise<void> {
  */
 async function restartSession(
   sessionId: string,
-  mode: string | null,
+  mode: PermissionMode | null,
   model: string | null = null,
   effort: string | null = null,
 ): Promise<void> {
@@ -622,7 +631,7 @@ function truncateAtUserOrdinal(view: SessionView, ordinal: number): SessionView 
  */
 export async function applyPermissionMode(
   sessionId: string,
-  mode: string | null,
+  mode: PermissionMode | null,
 ): Promise<void> {
   const current = entryOf(sessionId);
   if (!current || current.permissionMode === mode) return;
@@ -648,7 +657,7 @@ export async function applyModel(
   sessionId: string,
   modelFlag: string,
   effort: string | null,
-  mode: string | null,
+  mode: PermissionMode | null,
 ): Promise<void> {
   const current = entryOf(sessionId);
   if (!current || !channels.has(sessionId)) return;
@@ -1120,7 +1129,7 @@ export async function restoreSessionIfNeeded(
   /** The tab's persisted `--permission-mode` flag (null = stage default), so a
    *  resume after an app restart re-applies the user's choice rather than
    *  silently dropping back to the stage default. */
-  permissionMode: string | null = null,
+  permissionMode: PermissionMode | null = null,
 ): Promise<void> {
   if (entryOf(sessionId) || channels.has(sessionId) || restoring.has(sessionId)) return;
   restoring.add(sessionId);

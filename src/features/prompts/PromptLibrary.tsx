@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { confirm, open, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 
-import { commands } from "../../lib/bindings";
-import type { AppSettings, CustomPrompt, PromptSettings } from "../../lib/bindings";
-import { useBootstrap, useSetAppSettings } from "../../lib/queries";
-import { IS_MACOS } from "../../lib/platform";
-import { useToast } from "../../lib/toast";
-import { startEdgeDrag } from "../../lib/resize";
-import { PROMPTS_SIDEBAR_MAX, PROMPTS_SIDEBAR_MIN, useUiStore } from "../../lib/uiStore";
-import { Badge, Button, Card, ChordHint, ErrorNote, TextInput, Toggle } from "../../components/ui";
+import { commands } from "@/lib/bindings";
+import type { AppSettings, CustomPrompt, PromptSettings } from "@/lib/bindings";
+import { useBootstrap, useSetAppSettings } from "@/lib/queries";
+import { IS_MACOS } from "@/lib/platform";
+import { useToast } from "@/lib/toast";
+import { startEdgeDrag } from "@/lib/resize";
+import { PROMPTS_SIDEBAR_MAX, PROMPTS_SIDEBAR_MIN, useUiStore } from "@/lib/uiStore";
+import { Badge, Button, Card, ChordHint, ErrorNote, TextInput, Toggle } from "@/components/ui";
 import {
   BracesIcon,
   ExportIcon,
@@ -17,16 +17,16 @@ import {
   ImportIcon,
   PlusIcon,
   ZapIcon,
-} from "../../components/icons";
+} from "@/components/icons";
 import {
   eventToChord,
   formatChord,
   normalizeChord,
   type Chord,
-} from "../../lib/keybindings/chord";
-import { commandById } from "../../lib/keybindings/commands";
-import { conflictsFor, effectiveChord, type Overrides } from "../../lib/keybindings/resolve";
-import { isReserved } from "../../lib/keybindings/reserved";
+} from "@/lib/keybindings/chord";
+import { commandById } from "@/lib/keybindings/commands";
+import { conflictsFor, effectiveChord, type Overrides } from "@/lib/keybindings/resolve";
+import { isReserved } from "@/lib/keybindings/reserved";
 import {
   BUILTIN_PROMPTS,
   PROMPT_VARS,
@@ -63,8 +63,8 @@ function sanitizedForSave(prompts: PromptSettings): PromptSettings {
   return { ...prompts, builtinBodies: bodies };
 }
 
-/** How long the recorder pattern below matches KeyboardSettings: capture-phase
- *  listener beats the global dispatcher; Escape cancels, Enter commits. */
+/** Chord recorder, mirroring KeyboardSettings: a capture-phase listener beats
+ *  the global dispatcher; Escape cancels, Enter commits. */
 function useChordRecorder(
   recording: boolean,
   onCommit: (chord: Chord) => void,
@@ -119,13 +119,11 @@ function newPromptId(): string {
 }
 
 /**
- * The Prompt library — its own top-level view, opened from the nav rail's ⚡
- * entry (route `/prompts`, see `PromptsPage`). A "Prompts" master panel lists
- * built-in (Commit, Ship) and custom prompts; the selected prompt's editor
- * fills the content area — body text with `{{variable}}` insertion,
- * per-project overrides (custom only), keyboard shortcut, and pin-to-composer.
- * Selection lives in the URL (the page owns it); edits persist debounced
- * through the whole-settings mutation.
+ * The Prompt library view (route `/prompts`, see `PromptsPage`): a master panel
+ * of built-in (Commit/Ship) and custom prompts beside an editor for the selected
+ * one — body, `{{variable}}` insertion, per-project overrides (custom only),
+ * shortcut, pin-to-composer. Selection is URL-owned; edits persist debounced via
+ * the whole-settings mutation.
  */
 export function PromptLibrary({
   settings,
@@ -465,10 +463,9 @@ export function PromptLibrary({
     return [...builtins, ...customs];
   }, [asSettings, defaults, kbOverrides, custom]);
 
-  // The export dialog omits stock built-ins — an unmodified Commit/Ship is
-  // identical to what every recipient already has, so it's just noise. Custom
-  // prompts always list; a built-in only earns a row once it's been edited.
-  // (The editor's own Export button still exports whatever prompt is open.)
+  // The export dialog omits stock built-ins — identical to what every recipient
+  // already has, so just noise; a built-in earns a row only once edited. (The
+  // editor's own Export button still exports whatever prompt is open.)
   const exportListEntries = useMemo(
     () =>
       exportEntries.filter(
@@ -707,7 +704,6 @@ export function PromptLibrary({
         </div>
       </aside>
 
-      {/* Drag separator between the master panel and the editor. */}
       <div
         role="separator"
         aria-orientation="vertical"
@@ -776,7 +772,6 @@ export function PromptLibrary({
             </div>
           </div>
 
-          {/* Scope */}
           <div className="mt-4 space-y-1.5">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
               Scope

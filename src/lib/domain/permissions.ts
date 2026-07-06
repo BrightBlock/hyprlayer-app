@@ -9,14 +9,17 @@
  * the posture to the stage's own policy (the default behavior).
  */
 
-/** A selectable permission mode. `flag` is the `--permission-mode` value, or
+import type { PermissionMode } from "@/lib/bindings";
+
+/** A selectable permission mode. `flag` is the `--permission-mode` value
+ *  (typed by the bindings union, generated from core's `PermissionMode`), or
  *  null for "auto" — let the backend stage policy choose. */
 export type PermissionModeOption = {
   key: string;
   label: string;
   /** A short qualifier shown after the label. */
   hint?: string;
-  flag: string | null;
+  flag: PermissionMode | null;
   /** Flags the most permissive mode so the composer can warn on it. */
   danger?: boolean;
 };

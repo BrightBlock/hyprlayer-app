@@ -16,7 +16,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import type { WorkstreamView } from "./bindings";
+import type { WorkstreamView } from "@/lib/bindings";
 
 type PinStore = {
   /** Pinned workstream ids, in the order they were pinned (oldest first). */

@@ -3,6 +3,8 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 
 import { Root } from "./routes/Root";
 import { Dashboard } from "./routes/Dashboard";
+import type { LibrarySearch } from "./features/library/librarySearch";
+import { registerAppNav } from "./lib/appNav";
 import { useLastRoute } from "./lib/lastRoute";
 
 // The shell (Root) and the landing dashboard load eagerly; everything else is
@@ -27,29 +29,6 @@ const PromptsPage = lazy(() =>
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
-
-/**
- * The Library is a single master–detail view: filters, the selected document,
- * and its body mode all live in the URL so a view is shareable/restorable.
- * `type`/`status`/`scope` hold comma-separated multi-selections; `project` is
- * the scope selector (a thoughts-project key); `doc` is the selected doc's
- * absolute-path id and `mode` its body editing mode.
- */
-export type LibrarySearch = {
-  type?: string;
-  status?: string;
-  scope?: string;
-  project?: string;
-  author?: string;
-  tag?: string;
-  q?: string;
-  doc?: string;
-  mode?: "edit" | "preview";
-  /** Repo path of the project the user opened the Library from, when they came
-   *  via a project's "Docs" affordance — powers the header's back-to-project
-   *  button. Absent when the Library is opened standalone (the nav rail). */
-  from?: string;
-};
 
 const rootRoute = createRootRoute({ component: Root });
 
@@ -160,6 +139,22 @@ if (lastHref && lastHref !== "/" && window.location.pathname === "/") {
 }
 
 export const router = createRouter({ routeTree });
+
+// Wire the lower layers' navigation seam to the real router (lib and feature
+// modules must not import the router singleton directly).
+registerAppNav({
+  currentLocation: () => {
+    const loc = router.state.location;
+    return { pathname: loc.pathname, search: loc.search as Record<string, unknown> };
+  },
+  goToWorkstream: ({ projectPath, workstreamId }) => {
+    void router.navigate({
+      to: "/projects/$projectPath",
+      params: { projectPath },
+      search: { item: workstreamId },
+    });
+  },
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

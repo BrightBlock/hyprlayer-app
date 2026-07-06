@@ -16,34 +16,34 @@ import {
   PageError,
   PageSpinner,
   TextInput,
-} from "../components/ui";
+} from "@/components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { ArchiveIcon, DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "../components/icons";
-import { ScrollableTabStrip } from "../components/ScrollableTabs";
-import { commands, type WorkstreamView } from "../lib/bindings";
-import { CreateWorkstreamDialog } from "../features/workstreams/CreateWorkstreamDialog";
-import { ChangesPanel } from "../features/workstreams/ChangesPanel";
-import { GitPanel } from "../features/workstreams/GitPanel";
-import { PrChecksPanel } from "../features/workstreams/PrChecksPanel";
-import { DiffTab } from "../features/workstreams/DiffTab";
-import { FileViewerTab } from "../features/workstreams/FileViewerTab";
-import { SessionChat, SessionTabDot, SessionTabIcon } from "../features/session/SessionChat";
-import { ArchivedAgentsView } from "../features/session/ArchivedAgentsView";
-import { DocPreviewTab } from "../features/session/DocPreviewTab";
-import { TabTitle } from "../features/session/TabTitle";
-import { TerminalTab } from "../features/session/TerminalTab";
-import { SidebarTasksPanel } from "../features/session/PlanTasksView";
-import { AgentPtyTab } from "../features/multiplexer/AgentPtyTab";
-import { EngineGlyph, PtyTabDot } from "../features/multiplexer/agentStateUi";
+import { ArchiveIcon, DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "@/components/icons";
+import { ScrollableTabStrip } from "@/components/ScrollableTabs";
+import { commands, type WorkstreamView } from "@/lib/bindings";
+import { CreateWorkstreamDialog } from "@/features/workstreams/CreateWorkstreamDialog";
+import { ChangesPanel } from "@/features/workstreams/ChangesPanel";
+import { GitPanel } from "@/features/workstreams/GitPanel";
+import { PrChecksPanel } from "@/features/workstreams/PrChecksPanel";
+import { DiffTab } from "@/features/workstreams/DiffTab";
+import { FileViewerTab } from "@/features/workstreams/FileViewerTab";
+import { SessionChat, SessionTabDot, SessionTabIcon } from "@/features/session/SessionChat";
+import { ArchivedAgentsView } from "@/features/session/ArchivedAgentsView";
+import { DocPreviewTab } from "@/features/session/DocPreviewTab";
+import { TabTitle } from "@/features/session/TabTitle";
+import { TerminalTab } from "@/features/session/TerminalTab";
+import { SidebarTasksPanel } from "@/features/session/PlanTasksView";
+import { AgentPtyTab } from "@/features/multiplexer/AgentPtyTab";
+import { EngineGlyph, PtyTabDot } from "@/features/multiplexer/agentStateUi";
 import {
   closeAgent,
   ensureAgent,
   resolveResume,
   setAllNotifyOnBlocked,
-} from "../features/multiplexer/agentRuntime";
-import type { AgentState } from "../features/multiplexer/engineState";
-import { agentKey, useMultiplexerStore } from "../features/multiplexer/multiplexerStore";
+} from "@/features/multiplexer/agentRuntime";
+import type { AgentState } from "@/features/multiplexer/engineState";
+import { agentKey, useMultiplexerStore } from "@/features/multiplexer/multiplexerStore";
 import {
   defaultEngine,
   enabledEngines,
@@ -53,26 +53,26 @@ import {
   relaunchArgs,
   useMultiplexer,
   type ResolvedEngine,
-} from "../features/multiplexer/engines";
-import { ScriptDock } from "../features/session/ScriptDock";
-import { requestRun, setActiveWorkstream, useScriptsStore } from "../features/session/scriptsStore";
-import { openProjectSettings } from "../features/projects/projectSettingsStore";
-import { useTabDrag, type TabDragHandlers } from "../features/session/useTabDrag";
+} from "@/features/multiplexer/engines";
+import { ScriptDock } from "@/features/session/ScriptDock";
+import { requestRun, setActiveWorkstream, useScriptsStore } from "@/features/session/scriptsStore";
+import { openProjectSettings } from "@/features/projects/projectSettingsStore";
+import { useTabDrag, type TabDragHandlers } from "@/features/session/useTabDrag";
 import {
   killSession,
   stopSession,
   transcriptToText,
   useSession,
   useSessionStore,
-} from "../features/session/sessionStore";
-import { isBusy, isTerminal, type SessionState } from "../features/session/transcript";
-import { useCommand } from "../lib/keybindings/registry";
+} from "@/features/session/sessionStore";
+import { isBusy, isTerminal, type SessionState } from "@/features/session/transcript";
+import { useCommand } from "@/lib/keybindings/registry";
 import {
   importDroppedPaths,
   IMAGE_EXTENSIONS,
   type Attachment,
-} from "../features/session/attachments";
-import { nextModeStage, stageLabel, type StageKey } from "../features/session/stages";
+} from "@/features/session/attachments";
+import { nextModeStage, stageLabel, type StageKey } from "@/lib/domain/stages";
 import {
   archiveShellState,
   clearArchiveOnRefocus,
@@ -85,104 +85,16 @@ import {
   updateWorkstreamTabs,
   useWorkstreamTabsStore,
   type ArchivedStatus,
+  type ShellTab,
   type WsTabState,
-} from "../features/session/workstreamTabs";
-import { WorkstreamDocsPanel } from "../features/workstreams/WorkstreamDocsPanel";
-import { ProjectBoard } from "../features/board/ProjectBoard";
-import { AttachPrDialog } from "../features/workstreams/AttachPrDialog";
-import { useBootstrap, useDetachPr, useSetWorkstreamStage, useWorkstreams } from "../lib/queries";
-import { basename } from "../lib/path";
-import { clamp, startEdgeDrag } from "../lib/resize";
-import { DIFF_SIDEBAR_MAX, DIFF_SIDEBAR_MIN, useUiStore } from "../lib/uiStore";
-
-/** A doc attached as context to ONE agent tab. */
-export type AttachedDoc = {
-  path: string;
-  role: string;
-  /** Auto-suggested by the pane's mode (not user-attached). */
-  suggested?: boolean;
-};
-
-/** A chat tab inside ONE workstream. Each workstream owns its own set.
- *  Context docs are PER TAB — each agent carries its own context. Once an
- *  agent session is started from this tab, `sessionId` binds the tab to that
- *  live (or terminal) session; its transcript lives in the session store, so
- *  it survives tab/workstream switches and re-attaches on demand. */
-export type ShellTab = {
-  id: number;
-  title: string;
-  /** Set once the title is "claimed" — either auto-generated from the first
-   *  prompt or manually renamed — so auto-titling never overwrites it (the
-   *  "one-time only" policy). Undefined on a fresh `Agent N` tab. */
-  titleLocked?: boolean;
-  mode: StageKey;
-  draft: string;
-  docs: AttachedDoc[];
-  /** Paths of suggested docs the user explicitly dismissed in this pane; never
-   *  re-suggested for the lifetime of the tab even if the mode switches back.
-   *  Also covers auto-captured handoff docs: once detached, that path stays
-   *  detached so the in-session re-write doesn't keep re-attaching it. */
-  dismissedSuggestions?: string[];
-  /** The user dismissed the "context is filling up — create a handoff?" banner
-   *  for this tab. Only suppresses the suggestion banner; an actual handoff doc
-   *  (auto-captured into [`docs`]) still surfaces the ready-to-resume banner. */
-  handoffNudgeDismissed?: boolean;
-  /** Files/screenshots staged in this tab's composer (dropped, pasted, or picked
-   *  from the file dialog). Volatile sources are copied into the worktree's
-   *  `.hyprlayer/attachments/` first; sent with the next turn, then cleared. */
-  attachments: Attachment[];
-  /** Model + reasoning-effort keys chosen for the NEXT session this tab starts
-   *  (see models.ts); fixed at spawn. Undefined → the defaults. */
-  model?: string;
-  effort?: string;
-  /** Permission-mode key chosen for the NEXT session (see permissions.ts);
-   *  fixed at spawn. Undefined → "auto" (the stage's default posture). */
-  permissionMode?: string;
-  /** Which harness the NEXT session runs on ("claude" | "opencode"); fixed at
-   *  spawn, persisted so switching tabs doesn't reset it. Undefined → "claude". */
-  harness?: string;
-  /** OpenCode `provider/model` id for the NEXT session when `harness` is
-   *  "opencode" (Claude's model lives in `model`). Undefined → the OpenCode default. */
-  opencodeModel?: string;
-  sessionId?: string;
-  /** When set, this tab is a read-only markdown preview of a doc (its path),
-   *  not an agent chat — opened from the diff sidebar, closed when done. */
-  docPreviewPath?: string;
-  /** When set, this tab is a rich diff of a worktree file (its path), against
-   *  either its staged or working version. Opened from the Changes panel. */
-  diffView?: { path: string; staged: boolean };
-  /** When set, this tab is a read-only view of a worktree file (its path).
-   *  Opened from the Files tree. */
-  filePath?: string;
-  /** When set, this tab is an interactive terminal (PTY) for the worktree.
-   *  `terminalId` binds it to a live backend PTY once opened; absent until then. */
-  terminalView?: { terminalId?: string };
-  /** When set, this tab is a Multiplexer agent: an engine CLI running in a PTY
-   *  instead of the native chat (presence ⇒ kind "pty"; absence ⇒ "native").
-   *  `engineId` selects the engine; `terminalId` binds it to a live backend PTY
-   *  once spawned (persisted so the agent reattaches on reload). `bypass` records
-   *  whether the run is in bypass-permissions mode, so a cold-start relaunch
-   *  resumes it that way (the red shield). The live working/blocked/done/idle
-   *  state lives in the multiplexer store, not here.
-   *  Only ever set when `multiplexer.enabled`. */
-  ptyAgent?: {
-    engineId: string;
-    terminalId?: string;
-    bypass?: boolean;
-    /** This tab's own conversation id, so it resumes ITS conversation rather than
-     *  the most-recent in the worktree (two agents in one workstream no longer
-     *  collide). Minted at creation for "assign" engines (Claude, Gemini); learned
-     *  from disk after launch for "capture" engines (Codex, Antigravity). */
-    sessionId?: string;
-    /** Whether a conversation has begun (first keystroke). Persisted so a
-     *  cold-start relaunch resumes by sessionId only when there's something to
-     *  resume — and an untouched tab relaunches fresh. */
-    started?: boolean;
-  };
-  /** Which pane this shell lives in. Absent/"main" → the main pane; "right" →
-   *  the side-by-side right split. */
-  panel?: "main" | "right";
-};
+} from "@/features/session/workstreamTabs";
+import { WorkstreamDocsPanel } from "@/features/workstreams/WorkstreamDocsPanel";
+import { ProjectBoard } from "@/features/board/ProjectBoard";
+import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
+import { useBootstrap, useDetachPr, useSetWorkstreamStage, useWorkstreams } from "@/lib/queries";
+import { basename } from "@/lib/path";
+import { clamp, startEdgeDrag } from "@/lib/resize";
+import { DIFF_SIDEBAR_MAX, DIFF_SIDEBAR_MIN, useUiStore } from "@/lib/uiStore";
 
 type ShellMenu = {
   shellId: number;

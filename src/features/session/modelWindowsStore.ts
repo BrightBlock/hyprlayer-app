@@ -15,7 +15,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 
-import { commands } from "../../lib/bindings";
+import { commands } from "@/lib/bindings";
 
 type ModelWindowsState = {
   /** Canonical (bare, no `[1m]`) model id → context window in tokens. */

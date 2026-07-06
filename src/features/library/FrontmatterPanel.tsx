@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 
-import type { DocMeta, FmPatchDto } from "../../lib/bindings";
-import { Select, TextInput } from "../../components/ui";
+import type { DocMeta, FmPatchDto } from "@/lib/bindings";
+import { Select, TextInput } from "@/components/ui";
 import { DOC_STATUSES, DOC_TYPES } from "./constants";
 
 /** Keep a non-canonical current value selectable instead of silently dropping it. */
@@ -30,11 +30,9 @@ type Props = {
 };
 
 /**
- * The mock's inline frontmatter card: type/status selects, author/date text, and
- * tag chips, each applied the moment it changes via a one-field [`FmPatchDto`].
- * Patching writes the file (mtime-guarded), so the whole card is disabled while
- * the body buffer is dirty — the parent remounts it (via `key`) after each
- * successful patch so its seeded values + base mtime stay fresh.
+ * Inline frontmatter card; each field applied on change as a one-field FmPatchDto.
+ * Patching writes the file (mtime-guarded), so the card is disabled while the body
+ * buffer is dirty — parent remounts it (`key`) to reseed values + base mtime.
  */
 export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
   const fm = meta.fm;

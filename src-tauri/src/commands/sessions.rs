@@ -1,16 +1,15 @@
-//! Agent-session IPC: start a stage session, drive it (turns, permissions,
-//! interrupt, kill), and attach/replay its transcript.
+//! Agent-session IPC: start a session, drive it (turns, permissions, interrupt,
+//! kill), and attach/replay its transcript.
 //!
-//! Each live session has one **forwarder task** that owns the broadcast
-//! subscription: it persists every event to `session_events`, advances the
-//! `sessions` row state, and pushes events onto the per-session Tauri Channel.
-//! Re-attaching a UI replays the persisted log then tails the live stream.
+//! Each live session has one forwarder task owning the broadcast subscription: it
+//! persists events to `session_events`, advances the `sessions` row, and pushes onto
+//! the per-session Channel. Re-attach replays the log then tails the live stream.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use hyprlayer_core::agent::AgentDriver;
-use hyprlayer_core::claude::{ClaudeDriver, PermissionMode, SessionEvent, SpawnConfig};
+use hyprlayer_core::agent::{AgentDriver, Harness};
+use hyprlayer_core::claude::{ClaudeDriver, PermissionMode, SessionEvent, SessionState, SpawnConfig};
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent, Workstream};
@@ -88,14 +87,13 @@ async fn load_workstream(state: &AppState, id: &str) -> CmdResult<Workstream> {
 #[derive(Debug, Default, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct StartOpts {
-    /// Which harness to run: `"claude"` (default) or `"opencode"`.
-    pub harness: Option<String>,
+    /// Which harness to run; `None` defaults to Claude.
+    pub harness: Option<Harness>,
     /// For Claude: a model key/flag. For OpenCode: a `"provider/model"` id.
     pub model: Option<String>,
     pub effort: Option<String>,
-    /// `--permission-mode` override (`default` | `acceptEdits` | `plan` |
-    /// `bypassPermissions`); `None`/unrecognized keeps the stage's default.
-    pub permission_mode: Option<String>,
+    /// `--permission-mode` override; `None` keeps the stage's default posture.
+    pub permission_mode: Option<PermissionMode>,
 }
 
 /// Everything `launch_session` needs that isn't shared. `resume` toggles
@@ -136,7 +134,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
     // real no-change resume. `None` for OpenCode (no permission modes).
     let mut launched_mode: Option<PermissionMode> = None;
     let (driver, rx): (Arc<dyn AgentDriver>, broadcast::Receiver<SessionEvent>) =
-        if session.harness == "opencode" {
+        if session.harness == Harness::Opencode {
             // OpenCode: drive a session on the shared `opencode serve`. Tools and
             // permissions are OpenCode's own concern, so the stage policy /
             // permission-mode / add-dirs don't apply here; `model` is a
@@ -175,7 +173,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             // skills can write research/plan docs through the symlinks.
             let effective = effective_for(state, &project_path).await?;
             let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
-            let policy = pipeline::policy_for(Stage::parse(&session.stage));
+            let policy = pipeline::policy_for(session.stage);
             // The stage sets a default permission posture; an explicit user choice
             // in the composer (e.g. "Bypass permissions") overrides just the mode,
             // keeping the stage's allow/deny tool lists as guardrails.
@@ -349,7 +347,7 @@ pub async fn start_stage_session(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     workstream_id: String,
-    stage: String,
+    stage: Stage,
     input: String,
     attached_docs: Vec<String>,
     opts: StartOpts,
@@ -371,7 +369,7 @@ pub async fn start_stage_session(
         remedy: None,
     })?;
 
-    let stage_kind = Stage::parse(&stage);
+    let stage_kind = stage;
     // Ship names the workstream's target branch in its directive; other stages
     // ignore it. So a re-targeted workstream opens its PR against e.g. `develop`.
     // Commit/Ship bodies honor the user's Settings → Prompts overrides.
@@ -387,11 +385,8 @@ pub async fn start_stage_session(
         let new = NewSession {
             id: uuid::Uuid::new_v4().to_string(),
             workstream_id: ws.id.clone(),
-            stage: stage_kind.as_str().to_string(),
-            harness: match harness.as_deref() {
-                Some("opencode") => "opencode".to_string(),
-                _ => "claude".to_string(),
-            },
+            stage: stage_kind,
+            harness: harness.unwrap_or_default(),
             cwd: ws.worktree_path.clone(),
         };
         db_task(state.db.clone(), move |db| db.insert_session(new)).await?
@@ -405,9 +400,7 @@ pub async fn start_stage_session(
             project_path: ws.project_path,
             model,
             effort,
-            permission_mode: permission_mode
-                .as_deref()
-                .and_then(PermissionMode::from_flag),
+            permission_mode,
             resume: false,
             start_seq: 0,
             channel: on_event,
@@ -417,7 +410,7 @@ pub async fn start_stage_session(
 
     // Kick off the first turn (the composed skill prompt + attached docs).
     driver
-        .send_user_turn(&wire_prompt, Some(&session.stage))
+        .send_user_turn(&wire_prompt, Some(session.stage.as_str()))
         .map_err(AppError::from)?;
 
     Ok(StartedSession { session, prompt })
@@ -439,7 +432,7 @@ pub async fn resume_session(
     // Optional `--permission-mode` override for the resumed launch. Unlike a live
     // session (which can't switch into `bypassPermissions`), a resume is a fresh
     // process, so any mode applies. `None`/unrecognized keeps the stage default.
-    permission_mode: Option<String>,
+    permission_mode: Option<PermissionMode>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
     let session = {
@@ -465,7 +458,7 @@ pub async fn resume_session(
     // relaunch path below (kill + `--resume` into the new mode, conversation
     // preserved). Otherwise just re-wire.
     if let Some(driver) = state.sessions.get(&session_id).await {
-        let requested = permission_mode.as_deref().and_then(PermissionMode::from_flag);
+        let requested = permission_mode;
         let running = state.sessions.permission_mode(&session_id).await;
         if requested.is_none() || requested == running {
             tail_live(driver, on_event);
@@ -496,7 +489,7 @@ pub async fn resume_session(
     {
         let id = session.id.clone();
         let _ = db_task(state.db.clone(), move |db| {
-            db.set_session_state(&id, "running")
+            db.set_session_state(&id, SessionState::Running)
         })
         .await;
     }
@@ -513,9 +506,7 @@ pub async fn resume_session(
             // this is how the UI restarts a live session into a new mode (e.g.
             // bypass, which a running session can't switch into). `None` keeps
             // the stage default.
-            permission_mode: permission_mode
-                .as_deref()
-                .and_then(PermissionMode::from_flag),
+            permission_mode,
             resume: true,
             start_seq,
             channel: on_event,
@@ -547,7 +538,7 @@ pub async fn restart_session(
     session_id: String,
     model: Option<String>,
     effort: Option<String>,
-    permission_mode: Option<String>,
+    permission_mode: Option<PermissionMode>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
     let session = {
@@ -578,7 +569,7 @@ pub async fn restart_session(
     {
         let id = session.id.clone();
         let _ = db_task(state.db.clone(), move |db| {
-            db.set_session_state(&id, "running")
+            db.set_session_state(&id, SessionState::Running)
         })
         .await;
     }
@@ -591,9 +582,7 @@ pub async fn restart_session(
             project_path: ws.project_path,
             model,
             effort,
-            permission_mode: permission_mode
-                .as_deref()
-                .and_then(PermissionMode::from_flag),
+            permission_mode,
             resume: true,
             start_seq,
             channel: on_event,
@@ -643,7 +632,7 @@ pub async fn rewind_session(
     state: State<'_, AppState>,
     session_id: String,
     user_turn: u32,
-    permission_mode: Option<String>,
+    permission_mode: Option<PermissionMode>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<RewindResult> {
     let session = load_session(&state, &session_id).await?;
@@ -719,7 +708,7 @@ pub async fn rewind_session(
     {
         let id = session.id.clone();
         let _ = db_task(state.db.clone(), move |db| {
-            db.set_session_state(&id, "running")
+            db.set_session_state(&id, SessionState::Running)
         })
         .await;
     }
@@ -741,9 +730,7 @@ pub async fn rewind_session(
             // Preserve the session's current posture across the rewind relaunch —
             // otherwise `None` resolves to the stage default and a bypass session
             // starts prompting again (see the command doc).
-            permission_mode: permission_mode
-                .as_deref()
-                .and_then(PermissionMode::from_flag),
+            permission_mode,
             resume: true,
             start_seq,
             channel: on_event,
@@ -756,7 +743,7 @@ pub async fn rewind_session(
         let id = session.id.clone();
         let _ = db_task(state.db.clone(), move |db| {
             db.restore_session_events(&id, &removed)?;
-            db.set_session_state(&id, "idle")
+            db.set_session_state(&id, SessionState::Idle)
         })
         .await;
         return Err(e);
@@ -811,7 +798,7 @@ async fn live_rewind_handoff(
     }
     {
         let id = session.id.clone();
-        let _ = db_task(state.db.clone(), move |db| db.set_session_state(&id, "running")).await;
+        let _ = db_task(state.db.clone(), move |db| db.set_session_state(&id, SessionState::Running)).await;
     }
 
     // Continue above whatever survives the cut — robust to any last event the old
@@ -1062,12 +1049,12 @@ enum RowWrite {
         claude_session_id: String,
         model: Option<String>,
     },
-    State(&'static str),
+    State(SessionState),
     TurnDone {
         cost: Option<f64>,
     },
     Exited {
-        state: &'static str,
+        state: SessionState,
         summary: Option<String>,
     },
 }
@@ -1158,17 +1145,17 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                         claude_session_id: claude_session_id.clone(),
                         model: model.clone(),
                     },
-                    Some("running"),
+                    Some(SessionState::Running),
                     false,
                 ),
                 SessionEvent::PermissionAsk { .. } => (
-                    RowWrite::State("awaiting_permission"),
-                    Some("awaiting_permission"),
+                    RowWrite::State(SessionState::AwaitingPermission),
+                    Some(SessionState::AwaitingPermission),
                     false,
                 ),
                 SessionEvent::QuestionAsk { .. } => (
-                    RowWrite::State("awaiting_question"),
-                    Some("awaiting_question"),
+                    RowWrite::State(SessionState::AwaitingQuestion),
+                    Some(SessionState::AwaitingQuestion),
                     false,
                 ),
                 SessionEvent::TurnDone { cost_usd, .. } => {
@@ -1223,7 +1210,7 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                             if let Some(cost) = cost {
                                 let _ = db.set_session_cost(&sid, cost);
                             }
-                            let _ = db.set_session_state(&sid, "running");
+                            let _ = db.set_session_state(&sid, SessionState::Running);
                         }
                         RowWrite::Exited { state, summary } => {
                             let _ = db.finish_session(&sid, state, summary.as_deref());
@@ -1257,11 +1244,16 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
     ForwarderHandle { join, shutdown }
 }
 
-fn emit_lifecycle(app: &tauri::AppHandle, session_id: &str, workstream_id: &str, state: &str) {
+fn emit_lifecycle(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    workstream_id: &str,
+    state: SessionState,
+) {
     let _ = SessionLifecycle {
         session_id: session_id.to_string(),
         workstream_id: workstream_id.to_string(),
-        state: state.to_string(),
+        state,
     }
     .emit(app);
 }

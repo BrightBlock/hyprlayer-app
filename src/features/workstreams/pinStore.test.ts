@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorkstreamView } from "./bindings";
+import type { WorkstreamView } from "@/lib/bindings";
 import { selectPinnedViews, togglePinId } from "./pinStore";
 
 function makeView(id: string, projectPath = "/project"): WorkstreamView {

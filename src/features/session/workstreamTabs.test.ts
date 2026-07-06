@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import type { ShellTab } from "../../routes/ProjectPage";
 import {
   archiveShellState,
   clearArchiveOnRefocus,
@@ -11,6 +10,7 @@ import {
   unarchiveShellState,
   useComposerFocusStore,
   type ArchivedShell,
+  type ShellTab,
   type WsTabState,
 } from "./workstreamTabs";
 

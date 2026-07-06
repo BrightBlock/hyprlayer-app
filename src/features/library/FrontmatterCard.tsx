@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 
-import type { DocMeta } from "../../lib/bindings";
-import { Badge, Card } from "../../components/ui";
+import type { DocMeta } from "@/lib/bindings";
+import { Badge, Card } from "@/components/ui";
 import { STATUS_TONE } from "./constants";
 
 /** Read-only frontmatter summary shown above the rendered preview. */

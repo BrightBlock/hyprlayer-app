@@ -1,4 +1,4 @@
-import type { WorkstreamActivity } from "../session/sessionStore";
+import type { WorkstreamActivity } from "@/features/session/sessionStore";
 
 export type SearchResultKind = "workstream" | "agent" | "doc" | "file";
 

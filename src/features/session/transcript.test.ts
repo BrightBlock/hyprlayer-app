@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionEvent } from "../../lib/bindings";
+import type { SessionEvent } from "@/lib/bindings";
 import {
   addUserMessage,
   buildQuestionAnswers,
@@ -227,11 +227,9 @@ describe("thinking", () => {
 
 describe("OpenCode: late final text coalesces (no duplicate around tools)", () => {
   it("does not duplicate the intro when its text part ends after the tool starts", () => {
-    // Captured from a live `opencode serve` trace: the model streams an intro,
-    // calls a tool, and the intro text part only gets its `time.end` *after* the
-    // tool — so `toolUse` closes the streamed block and the authoritative
-    // `assistantText` lands with nothing open. It must reunite with the streamed
-    // block, not append a verbatim second copy.
+    // From a live `opencode serve` trace: the intro's text part gets its `time.end`
+    // only *after* the tool, so `toolUse` closes the streamed block and the final
+    // `assistantText` lands with nothing open — it must reunite, not duplicate it.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "partialText", text: "I'm going to run the echo command.", parentId: null });
     view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: '{"command":"echo hi"}', parentId: null });

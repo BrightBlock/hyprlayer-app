@@ -1,9 +1,9 @@
 import { open } from "@tauri-apps/plugin-dialog";
 
-import type { BinaryStatus } from "../../lib/bindings";
-import { errorMessage } from "../../lib/ipc";
-import { useSetBinaryOverride } from "../../lib/queries";
-import { Badge, Button } from "../../components/ui";
+import type { BinaryStatus } from "@/lib/bindings";
+import { errorMessage } from "@/lib/ipc";
+import { useSetBinaryOverride } from "@/lib/queries";
+import { Badge, Button } from "@/components/ui";
 
 const DESCRIPTIONS: Record<BinaryStatus["kind"], string> = {
   hyprlayer: "Manages thoughts storage, agent skills, and project mappings.",

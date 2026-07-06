@@ -1,17 +1,96 @@
 /**
- * Per-workstream agent-tab strips, held module-side (not in ProjectPage's
- * component state) so a tab's binding to its session — plus its draft and
- * attached context docs — survives navigating away from the project page and
- * back. Persisted to localStorage so it also survives an app restart: the tab
- * keeps its `sessionId`, and on reopen the transcript is rebuilt from the
- * session's SQLite event log (see `restoreSessionIfNeeded` in [`sessionStore`]).
+ * Per-workstream agent-tab strips, held module-side (not in ProjectPage state) so a
+ * tab's session binding + draft + context docs survive navigation and app restart.
+ * Persisted to localStorage; on reopen the transcript rebuilds from the session's
+ * SQLite event log (see `restoreSessionIfNeeded` in [`sessionStore`]).
  */
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import type { ShellTab } from "../../routes/ProjectPage";
-import type { ActionAgentDefaults } from "./harnessing";
+import type { Attachment } from "./attachments";
+import type { ActionAgentDefaults } from "@/lib/domain/harnessing";
+import type { StageKey } from "@/lib/domain/stages";
+
+/** A doc attached as context to ONE agent tab. */
+export type AttachedDoc = {
+  path: string;
+  role: string;
+  /** Auto-suggested by the pane's mode (not user-attached). */
+  suggested?: boolean;
+};
+
+/** A chat tab inside ONE workstream (each owns its own set). Context docs are
+ *  PER TAB. Once a session starts here, `sessionId` binds the tab to that live (or
+ *  terminal) session; its transcript lives in the session store, surviving switches
+ *  and re-attaching on demand. */
+export type ShellTab = {
+  id: number;
+  title: string;
+  /** Set once the title is "claimed" (auto-generated from the first prompt or
+   *  manually renamed) so auto-titling never overwrites it. Undefined on a fresh tab. */
+  titleLocked?: boolean;
+  mode: StageKey;
+  draft: string;
+  docs: AttachedDoc[];
+  /** Paths of suggested docs the user dismissed; never re-suggested for the tab's
+   *  lifetime, even if the mode switches back. Also covers auto-captured handoff docs,
+   *  so a detached one isn't re-attached by the in-session re-write. */
+  dismissedSuggestions?: string[];
+  /** User dismissed the "context is filling up — create a handoff?" nudge for this
+   *  tab. Suppresses only that suggestion; an auto-captured handoff doc (into [`docs`])
+   *  still surfaces the ready-to-resume banner. */
+  handoffNudgeDismissed?: boolean;
+  /** Files/screenshots staged in this tab's composer. Volatile sources are copied into
+   *  the worktree's `.hyprlayer/attachments/` first; sent with the next turn, then cleared. */
+  attachments: Attachment[];
+  /** Model + reasoning-effort keys chosen for the NEXT session this tab starts
+   *  (see models.ts); fixed at spawn. Undefined → the defaults. */
+  model?: string;
+  effort?: string;
+  /** Permission-mode key chosen for the NEXT session (see permissions.ts);
+   *  fixed at spawn. Undefined → "auto" (the stage's default posture). */
+  permissionMode?: string;
+  /** Which harness the NEXT session runs on ("claude" | "opencode"); fixed at
+   *  spawn, persisted so switching tabs doesn't reset it. Undefined → "claude". */
+  harness?: string;
+  /** OpenCode `provider/model` id for the NEXT session when `harness` is
+   *  "opencode" (Claude's model lives in `model`). Undefined → the OpenCode default. */
+  opencodeModel?: string;
+  sessionId?: string;
+  /** When set, this tab is a read-only markdown preview of a doc (its path),
+   *  not an agent chat — opened from the diff sidebar, closed when done. */
+  docPreviewPath?: string;
+  /** When set, this tab is a rich diff of a worktree file (its path), against
+   *  either its staged or working version. Opened from the Changes panel. */
+  diffView?: { path: string; staged: boolean };
+  /** When set, this tab is a read-only view of a worktree file (its path).
+   *  Opened from the Files tree. */
+  filePath?: string;
+  /** When set, this tab is an interactive terminal (PTY) for the worktree.
+   *  `terminalId` binds it to a live backend PTY once opened; absent until then. */
+  terminalView?: { terminalId?: string };
+  /** When set, this tab is a Multiplexer agent: an engine CLI in a PTY instead of the
+   *  native chat (presence ⇒ kind "pty", else "native"; only when `multiplexer.enabled`).
+   *  `engineId` selects the engine; `terminalId` binds a live backend PTY once spawned
+   *  (persisted, so it reattaches on reload); `bypass` = bypass-permissions mode, so a
+   *  cold-start relaunch resumes that way. Live working/blocked/done/idle state lives in
+   *  the multiplexer store, not here. */
+  ptyAgent?: {
+    engineId: string;
+    terminalId?: string;
+    bypass?: boolean;
+    /** This tab's own conversation id, so it resumes ITS conversation, not the most-recent
+     *  in the worktree (two agents in one workstream no longer collide). Minted at creation
+     *  for "assign" engines (Claude, Gemini); learned from disk for "capture" (Codex, Antigravity). */
+    sessionId?: string;
+    /** Whether a conversation has begun (first keystroke). Persisted so a cold-start relaunch
+     *  resumes by sessionId only when there's something to resume — else an untouched tab is fresh. */
+    started?: boolean;
+  };
+  /** Which pane this shell lives in. Absent/"main" → main pane; "right" → the right split. */
+  panel?: "main" | "right";
+};
 
 /** One workstream's whole tab strip, updated atomically.
  *

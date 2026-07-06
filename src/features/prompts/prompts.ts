@@ -1,13 +1,10 @@
 /**
- * The prompt library's pure core: built-in prompt descriptors, effective-body
- * resolution (global body vs per-project override vs stock default), and
- * `{{variable}}` substitution for custom prompts.
- *
- * Built-in Commit/Ship bodies are substituted BACKEND-side at launch
- * (`start_stage_session` reads the same settings); the frontend substitutes
- * only what it sends itself — custom prompts and the live-commit-tab re-run.
- * The stock built-in texts come from the bootstrap's `promptDefaults`, never
- * from a frontend literal, so the two sides can't drift.
+ * Prompt library pure core: built-in descriptors, effective-body resolution
+ * (global vs per-project override vs stock default), and `{{variable}}`
+ * substitution. Built-in Commit/Ship bodies are substituted BACKEND-side at
+ * launch (`start_stage_session`); the frontend substitutes only what it sends
+ * itself (custom prompts, the live-commit re-run). Stock texts come from the
+ * bootstrap's `promptDefaults`, never a frontend literal, so the two can't drift.
  */
 
 import type {
@@ -15,7 +12,7 @@ import type {
   CustomPrompt,
   PromptContext,
   PromptDefaults,
-} from "../../lib/bindings";
+} from "@/lib/bindings";
 
 /** The overridable built-in action prompts. `commandId` is the keyboard-catalog
  *  command that runs them — a built-in's "shortcut" IS that command's binding,

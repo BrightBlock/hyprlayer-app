@@ -1,11 +1,5 @@
 //! PTY terminal IPC commands: open, attach, write, resize, close.
-//!
-//! Mirrors the session-command pattern from `sessions.rs`:
-//! - `terminal_open` spawns a PTY and starts a forwarder task.
-//! - `terminal_attach` replays the in-memory scrollback then tails live output.
-//! - `terminal_write` forwards keyboard input (base64-encoded for binary safety).
-//! - `terminal_resize` notifies the PTY of a size change.
-//! - `terminal_close` kills the shell and drops the registry entry.
+//! Mirrors the session-command pattern from `sessions.rs`.
 
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -29,10 +23,8 @@ const B64: base64::engine::general_purpose::GeneralPurpose =
 /// considered (clock granularity / a file written a beat before the watermark).
 const CAPTURE_SKEW_MS: f64 = 2000.0;
 
-/// Open a new PTY for the given workstream, spawn the user's shell in the
-/// worktree directory, and start forwarding output to `on_event`.
-///
-/// Returns the `terminal_id` used for subsequent write/resize/close calls.
+/// Open a new PTY for the workstream (user's shell in the worktree), forwarding
+/// output to `on_event`. Returns the `terminal_id` for write/resize/close.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_open(
@@ -57,9 +49,8 @@ pub async fn terminal_open(
 
     let session = PtySession::spawn(SpawnTerminal {
         shell: default_shell(),
-        // Spawn as a login shell, the way Terminal.app / iTerm do — it sources the
-        // user's full profile chain (`~/.zprofile`/`~/.zlogin` as well as
-        // `~/.zshrc`), so the terminal matches the shell the user gets elsewhere.
+        // Login shell (like Terminal.app/iTerm): sources the full profile chain
+        // (`~/.zprofile`/`~/.zlogin`/`~/.zshrc`) so it matches the user's shell.
         args: vec!["-l".to_string()],
         cwd: PathBuf::from(&ws.worktree_path),
         cols,
@@ -83,10 +74,8 @@ pub async fn terminal_open(
     Ok(terminal_id)
 }
 
-/// Attach to an existing PTY: replay its scrollback then tail live output.
-///
-/// Returns `false` if the PTY is gone (e.g. after an app restart), in which
-/// case the frontend should call `terminal_open` to start a fresh one.
+/// Attach to an existing PTY: replay scrollback then tail live output. Returns
+/// `false` if the PTY is gone (e.g. after restart) — caller opens a fresh one.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_attach(
@@ -95,7 +84,7 @@ pub async fn terminal_attach(
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<bool> {
     let Some(session) = state.terminals.get(&terminal_id).await else {
-        return Ok(false); // dead (e.g. after restart) — caller opens a fresh one
+        return Ok(false);
     };
     attach_stream(&session, on_event, state.terminals.clone(), terminal_id);
     Ok(true)
@@ -144,12 +133,9 @@ pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> 
     Ok(())
 }
 
-/// Open a new PTY running `hyprlayer <args>` (no workstream context needed).
-///
-/// Used by the onboarding wizard to embed `hyprlayer ai configure` or similar
-/// interactive CLI commands inside the app without leaving to a terminal.
-/// Reuses the same id-based write/resize/close/attach commands as a workstream
-/// PTY — the only difference is how it is opened (binary + args vs. shell in cwd).
+/// Open a new PTY running `hyprlayer <args>` (no workstream context). Used by
+/// onboarding to embed interactive CLI flows (`hyprlayer ai configure`). Reuses
+/// the id-based write/resize/close/attach commands.
 #[tauri::command]
 #[specta::specta]
 pub async fn spawn_cli_terminal(
@@ -192,11 +178,9 @@ pub async fn spawn_cli_terminal(
     Ok(terminal_id)
 }
 
-/// Open a PTY running a single command line through the user's login shell, in
-/// the home directory. Used by the Harnesses settings page to run interactive
-/// flows that aren't the hyprlayer CLI — e.g. `claude auth login` or the
-/// OpenCode installer (`curl -fsSL https://opencode.ai/install | bash`). The
-/// command is run exactly as if the user typed it into their own shell.
+/// Open a PTY running a single command line through the user's login shell in
+/// the home dir. Used by Harnesses settings for interactive non-CLI flows (e.g.
+/// `claude auth login`, the OpenCode installer) — run as if the user typed it.
 #[tauri::command]
 #[specta::specta]
 pub async fn spawn_shell_terminal(
@@ -238,14 +222,10 @@ pub async fn spawn_shell_terminal(
 }
 
 /// Open a PTY running a Multiplexer engine CLI (Claude Code / Codex / Gemini /
-/// a custom command) in the workstream's worktree.
-///
-/// The command runs through the user's login shell so it resolves on the same
-/// PATH and profile the user gets in their own terminal; on unix it's `exec`'d
-/// so the CLI takes over the shell's PID and SIGINT/exit stay clean. Shares the
-/// id-based write/resize/close/attach lifecycle with [`terminal_open`] — only
-/// the spawned program differs, so the frontend reuses `terminal_write` (e.g. a
-/// `\x03` to Stop), `terminal_resize`, `terminal_attach`, and `terminal_close`.
+/// custom) in the workstream's worktree. Runs through the login shell; on unix
+/// it's `exec`'d so the CLI takes over the shell's PID and SIGINT/exit stay
+/// clean. Shares the id-based write/resize/close/attach lifecycle with
+/// [`terminal_open`] (e.g. frontend sends `\x03` via `terminal_write` to Stop).
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_open(
@@ -299,13 +279,11 @@ pub async fn agent_open(
     Ok(terminal_id)
 }
 
-/// Resize an agent PTY and then "nudge" it so a TUI child (Claude Code / Codex /
-/// Gemini) actually repaints at the new size. A single SIGWINCH while the CLI is
-/// idle sometimes doesn't trigger a redraw — the composer stays pinned where the
-/// old bottom was, stranded mid-pane after the pane grows (e.g. hiding the
-/// scripts dock). Resizing off-by-one, pausing, then back to the real size forces
-/// the redraw (mirrors herdr's `nudge_child_redraw`). Used for discrete resizes
-/// (dock toggle, (re)attach); continuous drags use the plain [`terminal_resize`].
+/// Resize an agent PTY, then "nudge" it so an idle TUI child (Claude/Codex/
+/// Gemini) actually repaints: a lone SIGWINCH while idle often doesn't trigger a
+/// redraw, stranding the composer at the old bottom. Resizing off-by-one, pausing,
+/// then back to the real size forces it (mirrors herdr's `nudge_child_redraw`).
+/// For discrete resizes (dock toggle, (re)attach); drags use [`terminal_resize`].
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_resize(
@@ -326,19 +304,16 @@ pub async fn agent_resize(
     Ok(())
 }
 
-/// Read back the conversation id a "capture-mode" CLI assigned itself, by scanning
-/// its on-disk session store. Codex and Antigravity auto-generate their id (unlike
-/// Claude/Gemini, which take one we mint), so we launch them fresh, then call this
-/// to learn the id and resume that exact conversation later.
+/// Read back the conversation id a "capture-mode" CLI (Codex/Antigravity, which
+/// auto-generate ids unlike Claude/Gemini) assigned itself, by scanning its
+/// on-disk store — launched fresh, then resumed by this id.
 ///
-/// Returns the most recent session created after `after_ms` (epoch ms — the tab's
-/// launch time) that isn't already claimed by another tab (`exclude`). For Codex,
-/// which records its cwd, we also require it to match this workstream's worktree,
-/// so a session from another worktree can't be mis-attributed. Returns `None`
-/// until the session materialises on disk (written on the first message), so the
-/// frontend polls until it resolves. Best-effort: two capture-mode tabs started in
-/// the same worktree at nearly the same instant may swap ids (no per-process key
-/// exists to disambiguate); the `exclude` list still keeps the ids distinct.
+/// Returns the newest session created after `after_ms` (epoch ms, the tab's
+/// launch) not already claimed (`exclude`); for Codex it must also match this
+/// worktree's cwd, so another worktree's session can't be mis-attributed. `None`
+/// until the session hits disk (first message), so the frontend polls. Best-
+/// effort: two tabs opened in the same worktree at once may swap ids (no per-
+/// process key); `exclude` still keeps them distinct.
 #[tauri::command]
 #[specta::specta]
 pub async fn capture_agent_session(
@@ -364,13 +339,11 @@ pub async fn capture_agent_session(
 }
 
 /// Mint a Codex conversation id *deterministically*, sidestepping the disk-scan
-/// attribution race: run `codex exec --json` (which emits
-/// `{"type":"thread.started","thread_id":…}` as its very first event), take that
-/// id, wait for its rollout to hit disk so a later `resume <id>` can find it, then
-/// kill the probe — ignoring the rest of its output. Because we read the id from
-/// the process we spawned, it can't be confused with a sibling tab's session. The
-/// interactive tab then launches `codex resume <id>`. Returns None if Codex can't
-/// run or never announces a thread (caller falls back to disk capture).
+/// attribution race: run `codex exec --json` (first event is
+/// `{"type":"thread.started","thread_id":…}`), take that id, wait for its rollout
+/// to hit disk (so `resume <id>` finds it), then kill the probe. Reading the id
+/// from our own process can't confuse it with a sibling tab's. `None` if Codex
+/// can't run or never announces a thread (caller falls back to disk capture).
 #[tauri::command]
 #[specta::specta]
 pub async fn mint_codex_session(
@@ -390,9 +363,9 @@ pub async fn mint_codex_session(
     let path = state.binaries.augmented_path().await;
     let worktree = PathBuf::from(&ws.worktree_path);
     let path = path.to_string_lossy().into_owned();
-    // Bound the probe: the seed turn is normally a few seconds, but a hung CLI
-    // (auth/network) must not block the tab forever — time out to None and let the
-    // caller fall back. The orphaned probe exits on its own once its turn ends.
+    // Bound the probe: a hung CLI (auth/network) must not block the tab forever —
+    // time out to None and let the caller fall back. The orphaned probe exits on
+    // its own once its turn ends.
     let id = tokio::time::timeout(
         std::time::Duration::from_secs(90),
         tokio::task::spawn_blocking(move || mint_codex_blocking(&command, &worktree, &path)),
@@ -404,12 +377,10 @@ pub async fn mint_codex_session(
     Ok(id)
 }
 
-/// Whether `session_id`'s conversation is actually persisted in `engine_id`'s
-/// on-disk store — the authoritative resume gate. A pinned-but-never-used id (a
-/// fresh tab whose startup terminal-query replies look like "input", or a message
-/// typed but not yet sent) has no file yet, so resuming it would exit "No
-/// conversation found"; this lets the caller launch fresh instead. Unknown engines
-/// (Gemini, custom) return false — the caller falls back to its own heuristic.
+/// Whether `session_id` is actually persisted in `engine_id`'s on-disk store —
+/// the authoritative resume gate. A pinned-but-never-used id has no file yet, so
+/// resuming would exit "No conversation found"; this lets the caller launch fresh.
+/// Unknown engines (Gemini, custom) return false — caller uses its own heuristic.
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_session_exists(

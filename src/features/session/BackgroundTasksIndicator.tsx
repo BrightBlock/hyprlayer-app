@@ -11,9 +11,9 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Spinner } from "../../components/ui";
-import { TerminalIcon } from "../../components/icons";
-import { formatElapsed } from "./toolDisplay";
+import { Spinner } from "@/components/ui";
+import { TerminalIcon } from "@/components/icons";
+import { formatElapsed } from "@/lib/format";
 import type { LiveBackgroundTask } from "./sessionStore";
 
 export function BackgroundTasksIndicator({

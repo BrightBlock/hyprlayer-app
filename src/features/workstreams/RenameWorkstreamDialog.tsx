@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
-import type { WorkstreamView } from "../../lib/bindings";
-import { Button, Dialog, ErrorNote, TextInput } from "../../components/ui";
-import { useRenameWorkstream } from "../../lib/queries";
+import type { WorkstreamView } from "@/lib/bindings";
+import { Button, Dialog, ErrorNote, TextInput } from "@/components/ui";
+import { useRenameWorkstream } from "@/lib/queries";
 
 type Props = {
   /** The workstream being renamed; null keeps the dialog closed. */

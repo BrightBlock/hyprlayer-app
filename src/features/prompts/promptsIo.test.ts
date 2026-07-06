@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { CustomPrompt } from "../../lib/bindings";
+import type { CustomPrompt } from "@/lib/bindings";
 import {
   applyImport,
   buildPromptsFile,

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { DocIcon, ImageIcon, XIcon } from "../../components/icons";
+import { DocIcon, ImageIcon, XIcon } from "@/components/icons";
 import { attachmentSrc, type Attachment } from "./attachments";
 
 /**

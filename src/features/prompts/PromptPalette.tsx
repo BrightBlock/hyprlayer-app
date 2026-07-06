@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import type { CustomPrompt, WorkstreamView } from "../../lib/bindings";
-import { useBootstrap } from "../../lib/queries";
-import { IS_MACOS } from "../../lib/platform";
-import { ChordHint } from "../../components/ui";
-import { effectiveChord, type Overrides } from "../../lib/keybindings/resolve";
-import { GitCommitIcon, GitPullRequestIcon, PencilIcon, ZapIcon } from "../../components/icons";
-import { useWorkstreamGitActions } from "../workstreams/useGitActions";
+import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
+import { useBootstrap } from "@/lib/queries";
+import { IS_MACOS } from "@/lib/platform";
+import { ChordHint } from "@/components/ui";
+import { effectiveChord, type Overrides } from "@/lib/keybindings/resolve";
+import { GitCommitIcon, GitPullRequestIcon, PencilIcon, ZapIcon } from "@/components/icons";
+import { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
 import { closePromptPalette, usePromptPaletteStore } from "./promptsStore";
 import {
   BUILTIN_PROMPTS,

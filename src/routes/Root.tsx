@@ -29,25 +29,25 @@ import {
   useEditorTargets,
   useWorkstreamPr,
   useWorktreeFilesCheck,
-} from "../lib/queries";
-import { docTitle } from "../features/library/text";
-import { WorkstreamActivityDot } from "../features/session/WorkstreamActivity";
-import { startEdgeDrag } from "../lib/resize";
-import { IS_MACOS } from "../lib/platform";
-import { useIsFullscreen } from "../lib/useFullscreen";
-import { useUiStore } from "../lib/uiStore";
-import { selectPinnedViews, usePinStore } from "../lib/pinStore";
-import { useLibraryScope } from "../lib/libraryScope";
+} from "@/lib/queries";
+import { docTitle } from "@/features/library/text";
+import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
+import { startEdgeDrag } from "@/lib/resize";
+import { IS_MACOS } from "@/lib/platform";
+import { useIsFullscreen } from "@/lib/useFullscreen";
+import { useUiStore } from "@/lib/uiStore";
+import { selectPinnedViews, usePinStore } from "@/features/workstreams/pinStore";
+import { useLibraryScope } from "@/features/library/libraryScope";
 import { onboardingDismissed } from "./onboardingState";
-import { useCommand, useEscape } from "../lib/keybindings/registry";
-import { useKeybindings } from "../lib/keybindings/useKeybindings";
-import type { Overrides } from "../lib/keybindings/resolve";
-import { effectiveChord } from "../lib/keybindings/resolve";
-import { formatChord } from "../lib/keybindings/chord";
-import { ContextMenu, ContextMenuItem, Spinner } from "../components/ui";
-import { RepoAvatar } from "../components/RepoAvatar";
-import { HyprlayerMark } from "../components/Logo";
-import { WindowControls } from "../components/WindowControls";
+import { useCommand, useEscape } from "@/lib/keybindings/registry";
+import { useKeybindings } from "@/lib/keybindings/useKeybindings";
+import type { Overrides } from "@/lib/keybindings/resolve";
+import { effectiveChord } from "@/lib/keybindings/resolve";
+import { formatChord } from "@/lib/keybindings/chord";
+import { ContextMenu, ContextMenuItem, Spinner } from "@/components/ui";
+import { RepoAvatar } from "@/components/RepoAvatar";
+import { HyprlayerMark } from "@/components/Logo";
+import { WindowControls } from "@/components/WindowControls";
 import {
   BookIcon,
   ChevronDownIcon,
@@ -63,38 +63,38 @@ import {
   TerminalIcon,
   WarningTriangleIcon,
   ZapIcon,
-} from "../components/icons";
-import { useMultiplexer } from "../features/multiplexer/engines";
-import type { EditorTarget } from "../lib/bindings";
-import { SearchPalette } from "../features/search/SearchPalette";
-import { toggleSearch } from "../features/search/searchStore";
-import { PromptPalette } from "../features/prompts/PromptPalette";
-import { togglePromptPalette } from "../features/prompts/promptsStore";
-import { usePromptHotkeys } from "../features/prompts/usePromptHotkeys";
+} from "@/components/icons";
+import { useMultiplexer } from "@/features/multiplexer/engines";
+import type { EditorTarget } from "@/lib/bindings";
+import { SearchPalette } from "@/features/search/SearchPalette";
+import { toggleSearch } from "@/features/search/searchStore";
+import { PromptPalette } from "@/features/prompts/PromptPalette";
+import { togglePromptPalette } from "@/features/prompts/promptsStore";
+import { usePromptHotkeys } from "@/features/prompts/usePromptHotkeys";
 import {
   toggleDock as toggleScriptDock,
   toggleDockMaximized,
   useScriptsStore,
-} from "../features/session/scriptsStore";
-import { ArchiveWorkstreamDialog } from "../features/workstreams/ArchiveWorkstreamDialog";
-import { WorkstreamGitChip } from "../features/workstreams/WorkstreamGitChip";
-import { useWorkstreamGitActions } from "../features/workstreams/useGitActions";
-import { AheadBehind } from "../features/workstreams/AheadBehind";
-import { RenameWorkstreamDialog } from "../features/workstreams/RenameWorkstreamDialog";
-import { AttachPrDialog } from "../features/workstreams/AttachPrDialog";
-import { AddProjectDialog } from "../features/projects/AddProjectDialog";
-import { ProjectSettingsDialog } from "../features/projects/ProjectSettingsDialog";
+} from "@/features/session/scriptsStore";
+import { ArchiveWorkstreamDialog } from "@/features/workstreams/ArchiveWorkstreamDialog";
+import { WorkstreamGitChip } from "@/features/workstreams/WorkstreamGitChip";
+import { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
+import { AheadBehind } from "@/features/workstreams/AheadBehind";
+import { RenameWorkstreamDialog } from "@/features/workstreams/RenameWorkstreamDialog";
+import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
+import { AddProjectDialog } from "@/features/projects/AddProjectDialog";
+import { ProjectSettingsDialog } from "@/features/projects/ProjectSettingsDialog";
 import {
   closeProjectSettings,
   openProjectSettings,
   useProjectSettingsStore,
-} from "../features/projects/projectSettingsStore";
-import { RemoveProjectDialog } from "../features/projects/RemoveProjectDialog";
-import { useUpdate, showUpdateToast } from "../lib/updater";
-import { useToast } from "../lib/toast";
-import { Toast } from "../components/Toast";
-import type { Project, WorkstreamView } from "../lib/bindings";
-import { useLastRoute } from "../lib/lastRoute";
+} from "@/features/projects/projectSettingsStore";
+import { RemoveProjectDialog } from "@/features/projects/RemoveProjectDialog";
+import { useUpdate, showUpdateToast } from "@/lib/updater";
+import { useToast } from "@/lib/toast";
+import { Toast } from "@/components/Toast";
+import type { Project, WorkstreamView } from "@/lib/bindings";
+import { useLastRoute } from "@/lib/lastRoute";
 
 // Stable identity for "no overrides yet" so the dispatcher's memo/effect doesn't
 // churn on every Root render before settings have loaded a keybindings section.

@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { Button, PageError } from "../components/ui";
-import { PlusIcon } from "../components/icons";
-import { useAllWorkstreams, useArchivedWorkstreams, useBootstrap, useDocs } from "../lib/queries";
-import type { Project, WorkstreamView } from "../lib/bindings";
-import { AddProjectDialog } from "../features/projects/AddProjectDialog";
-import { DiscoverDialog } from "../features/dashboard/DiscoverDialog";
-import { buildGraph } from "../features/dashboard/graph";
-import { useFleet } from "../features/dashboard/fleet";
-import { KnowledgeGraph } from "../features/dashboard/KnowledgeGraph";
+import { Button, PageError } from "@/components/ui";
+import { PlusIcon } from "@/components/icons";
+import { useAllWorkstreams, useArchivedWorkstreams, useBootstrap, useDocs } from "@/lib/queries";
+import type { Project, WorkstreamView } from "@/lib/bindings";
+import { AddProjectDialog } from "@/features/projects/AddProjectDialog";
+import { DiscoverDialog } from "@/features/dashboard/DiscoverDialog";
+import { buildGraph } from "@/features/dashboard/graph";
+import { useFleet } from "@/features/dashboard/fleet";
+import { KnowledgeGraph } from "@/features/dashboard/KnowledgeGraph";
 import {
   ActivityPanel,
   FirstNodeField,
@@ -24,9 +24,9 @@ import {
   stageDot,
   type GraphPin,
   type RecentRow,
-} from "../features/dashboard/Observatory";
-import { stageLabel, stageOf } from "../features/session/stages";
-import { selectAgentTab } from "../features/search/selectAgentTab";
+} from "@/features/dashboard/Observatory";
+import { stageLabel, stageOf } from "@/lib/domain/stages";
+import { selectAgentTab } from "@/features/search/selectAgentTab";
 
 /** How many most-recent docs feed the graph. Caps the O(n²) layout cost; the
  *  corpus may be larger (the stat pills reflect the full index). */

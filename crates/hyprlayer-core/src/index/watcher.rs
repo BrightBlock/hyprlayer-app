@@ -1,9 +1,7 @@
-//! Filesystem watching that keeps a [`ThoughtsIndex`] fresh.
-//!
-//! One debounced watcher (300 ms) covers every existing root recursively.
-//! Debounced batches are translated into index mutations on the watcher
-//! thread (the index is synchronous), and the resulting ids are reported as
-//! one [`IndexEvent`] per kind per flush.
+//! Filesystem watching that keeps a [`ThoughtsIndex`] fresh. One debounced
+//! watcher (300 ms) recursively covers every existing root; batches mutate the
+//! synchronous index on the watcher thread, reporting one [`IndexEvent`] per
+//! kind per flush.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

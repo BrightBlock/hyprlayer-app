@@ -2,12 +2,12 @@ import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { commands, type TerminalEvent } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { b64ToBytes, strToB64 } from "./terminalCodec";
-import { useTerminalThemeSync, useTerminalZoom } from "./terminalChrome";
-import { createTerminalEngine, type TerminalEngine } from "./terminalEngine";
-import { xtermThemeFromCss } from "./terminalTheme";
+import { commands, type TerminalEvent } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
+import { useTerminalThemeSync, useTerminalZoom } from "@/lib/terminal/terminalChrome";
+import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
+import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 
 export function TerminalTab({
   workstreamId,

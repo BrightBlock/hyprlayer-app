@@ -12,8 +12,8 @@
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 
-import { commands } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
+import { commands } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
 import { baseName } from "./toolDisplay";
 
 export type AttachmentKind = "image" | "file";

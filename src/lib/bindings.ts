@@ -10,11 +10,9 @@ export const commands = {
 	getBootstrap: () => typedError<Bootstrap, AppError>(__TAURI_INVOKE("get_bootstrap")),
 	getProject: (path: string) => typedError<ProjectDetail, AppError>(__TAURI_INVOKE("get_project", { path })),
 	/**
-	 *  Import a project from a local git repo on disk: register it *in place* and
-	 *  link it in the project view. We deliberately do not re-clone or copy it —
-	 *  duplicating the repo under `~/hyprlayer/repos` only wastes disk and diverges
-	 *  from the working copy the user already maintains. Worktrees are cut directly
-	 *  from this repo via `git worktree add`, which keeps them in sync with it.
+	 *  Import a local on-disk git repo as a project, registered *in place* — never
+	 *  re-cloned or copied (that wastes disk and diverges from the user's working
+	 *  copy). Worktrees are cut directly from it via `git worktree add`.
 	 */
 	addProject: (path: string, directoryName: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("add_project", { path, directoryName, bootstrapUser })),
 	/**
@@ -23,10 +21,10 @@ export const commands = {
 	 */
 	cloneProject: (url: string, location: string | null, name: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, location, name, bootstrapUser })),
 	/**
-	 *  Remove a project from the registry. With `delete_files`, also delete the
-	 *  directory from disk — for both app-owned clones and in-place imports (the
-	 *  user opts in per removal). Refused while the project has active workstreams:
-	 *  they own live worktrees cut from this repo, so removal would orphan them.
+	 *  Remove a project from the registry; with `delete_files`, also delete its
+	 *  directory (clones and in-place imports alike — user opts in per removal).
+	 *  Refused while active workstreams exist: they own live worktrees cut from this
+	 *  repo, so removal would orphan them.
 	 */
 	removeProject: (path: string, deleteFiles: boolean) => typedError<null, AppError>(__TAURI_INVOKE("remove_project", { path, deleteFiles })),
 	/**
@@ -40,11 +38,10 @@ export const commands = {
 	getWorktreeFiles: (path: string) => typedError<string[], AppError>(__TAURI_INVOKE("get_worktree_files", { path })),
 	setWorktreeFiles: (path: string, patterns: string[]) => typedError<string[], AppError>(__TAURI_INVOKE("set_worktree_files", { path, patterns })),
 	/**
-	 *  Dry-run the project's configured worktree-copy patterns against its checkout
-	 *  so the UI can flag a project whose copy files are missing (e.g. a `.env` that
-	 *  doesn't exist on disk) BEFORE a workstream is created. Mirrors
-	 *  `create_workstream`'s seed step exactly, minus the copy. Never errors — an
-	 *  unreadable settings file yields an empty (clean) report.
+	 *  Dry-run the project's worktree-copy patterns against its checkout so the UI
+	 *  can flag missing copy files (e.g. a `.env` absent on disk) BEFORE a workstream
+	 *  is created. Mirrors `create_workstream`'s seed step, minus the copy. Never
+	 *  errors — an unreadable settings file yields an empty (clean) report.
 	 */
 	checkWorktreeFiles: (path: string) => typedError<SeedReport, AppError>(__TAURI_INVOKE("check_worktree_files", { path })),
 	queryDocs: (query: ThoughtQuery) => typedError<QueryResult, AppError>(__TAURI_INVOKE("query_docs", { query })),
@@ -54,11 +51,10 @@ export const commands = {
 	createDoc: (input: CreateDocInput) => typedError<DocMeta, AppError>(__TAURI_INVOKE("create_doc", { input })),
 	revealDoc: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_doc", { id })),
 	/**
-	 *  Best-effort "View on GitHub" target for a library doc: the doc's own git
-	 *  repo (the thoughts repo, not the project's) mapped to its `origin` web host
-	 *  at the current branch. `None` (link hidden) when the id is unknown, the file
-	 *  isn't in a git repo, there's no GitHub-shaped origin, or HEAD is detached —
-	 *  so this never errors, mirroring `list_recent_repos`'s degrade-to-empty policy.
+	 *  Best-effort "View on GitHub" URL for a library doc, from its own git repo (the
+	 *  thoughts repo, not the project's) at the current branch. `None` (link hidden) on
+	 *  any miss — unknown id, not a git repo, no GitHub origin, detached HEAD — so it
+	 *  never errors.
 	 */
 	docWebUrl: (id: string) => typedError<string | null, AppError>(__TAURI_INVOKE("doc_web_url", { id })),
 	getThoughtsGitStatus: (projectPath: string) => typedError<ThoughtsRepoStatus, AppError>(__TAURI_INVOKE("get_thoughts_git_status", { projectPath })),
@@ -66,13 +62,12 @@ export const commands = {
 	/**  Active workstreams across every project — feeds the sidebar tree. */
 	listAllWorkstreams: () => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_all_workstreams")),
 	/**
-	 *  Branches the user can base a new workstream on, with the auto-detected
-	 *  default. Best-effort: the default falls back to empty (the dialog then
-	 *  pre-selects nothing and the backend re-detects on create) so a repo with no
-	 *  resolvable main/master still lists its branches.
+	 *  Branches the user can base a new workstream on, plus the auto-detected default.
+	 *  Best-effort: the default falls back to empty (dialog pre-selects nothing, backend
+	 *  re-detects on create) so a repo with no resolvable main/master still lists branches.
 	 */
 	listWorkstreamBases: (projectPath: string) => typedError<WorkstreamBases, AppError>(__TAURI_INVOKE("list_workstream_bases", { projectPath })),
-	createWorkstream: (projectPath: string, title: string, base: string | null, mode: string, branch: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base, mode, branch })),
+	createWorkstream: (projectPath: string, title: string, base: string | null, mode: WorktreeMode, branch: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base, mode, branch })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
 	/**
 	 *  Change a workstream's target (base) branch. Re-targets the live PR via
@@ -94,7 +89,7 @@ export const commands = {
 	 *  workstream status + PR afterward.
 	 */
 	fetchWorkstreamRemote: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("fetch_workstream_remote", { id })),
-	setWorkstreamStage: (id: string, stage: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
+	setWorkstreamStage: (id: string, stage: Stage) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
 	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
 	detachWorkstreamDoc: (id: string, docPath: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("detach_workstream_doc", { id, docPath })),
 	listWorkstreamDocs: (id: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("list_workstream_docs", { id })),
@@ -176,12 +171,9 @@ export const commands = {
 	 */
 	worktreeSearchFiles: (id: string, query: string, limit: number) => typedError<string[], AppError>(__TAURI_INVOKE("worktree_search_files", { id, query, limit })),
 	/**
-	 *  Point the live worktree watcher at this workstream's worktree, so external
-	 *  edits push a `WorktreeChanged` event and the Changes panel + git status
-	 *  refresh without waiting for window focus (the way the agent and terminal
-	 *  panes already stream live). Single-slot: switching workstreams replaces the
-	 *  previous watcher; calling it again for the same id is a no-op. The frontend
-	 *  calls this whenever the viewed workstream changes.
+	 *  Point the live worktree watcher at this workstream, so external edits emit
+	 *  `WorktreeChanged` and refresh the Changes panel + git status without a focus
+	 *  event. Single-slot: switching replaces the previous watcher; same id is a no-op.
 	 */
 	watchWorktree: (workstreamId: string) => typedError<null, AppError>(__TAURI_INVOKE("watch_worktree", { workstreamId })),
 	/**
@@ -282,14 +274,14 @@ export const commands = {
 	 *  spawns the driver, and streams events back over `on_event`. Returns the
 	 *  persisted [`Session`] row plus the composed prompt (for the transcript echo).
 	 */
-	startStageSession: (workstreamId: string, stage: string, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionEvent>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
+	startStageSession: (workstreamId: string, stage: Stage, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionEvent>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
 	/**
 	 *  Resume a previously-started session that's no longer live (e.g. after an app
 	 *  restart) by re-spawning claude with `--resume`, so the conversation continues
 	 *  instead of forcing a new session. The event log appends after its existing
 	 *  tail. Returns the (existing) [`Session`] row.
 	 */
-	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, onEvent })),
+	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, onEvent })),
 	/**
 	 *  Restart a *live* session into a new permission mode and/or model. Claude
 	 *  binds both its permission mode and its model at launch (a running session
@@ -304,8 +296,8 @@ export const commands = {
 	 *  mid-conversation. Conversation is preserved; the event log appends after its
 	 *  tail.
 	 */
-	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
-	rewindSession: (sessionId: string, userTurn: number, permissionMode: string | null, onEvent: Channel<SessionEvent>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
+	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
+	rewindSession: (sessionId: string, userTurn: number, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionEvent>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
 	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	/**
@@ -466,75 +458,58 @@ export const commands = {
 	 */
 	suggestTabTitle: (text: string) => typedError<string, AppError>(__TAURI_INVOKE("suggest_tab_title", { text })),
 	/**
-	 *  Open a new PTY for the given workstream, spawn the user's shell in the
-	 *  worktree directory, and start forwarding output to `on_event`.
-	 * 
-	 *  Returns the `terminal_id` used for subsequent write/resize/close calls.
+	 *  Open a new PTY for the workstream (user's shell in the worktree), forwarding
+	 *  output to `on_event`. Returns the `terminal_id` for write/resize/close.
 	 */
 	terminalOpen: (workstreamId: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("terminal_open", { workstreamId, cols, rows, onEvent })),
 	/**
 	 *  Open a PTY running a Multiplexer engine CLI (Claude Code / Codex / Gemini /
-	 *  a custom command) in the workstream's worktree.
-	 * 
-	 *  The command runs through the user's login shell so it resolves on the same
-	 *  PATH and profile the user gets in their own terminal; on unix it's `exec`'d
-	 *  so the CLI takes over the shell's PID and SIGINT/exit stay clean. Shares the
-	 *  id-based write/resize/close/attach lifecycle with [`terminal_open`] — only
-	 *  the spawned program differs, so the frontend reuses `terminal_write` (e.g. a
-	 *  `\x03` to Stop), `terminal_resize`, `terminal_attach`, and `terminal_close`.
+	 *  custom) in the workstream's worktree. Runs through the login shell; on unix
+	 *  it's `exec`'d so the CLI takes over the shell's PID and SIGINT/exit stay
+	 *  clean. Shares the id-based write/resize/close/attach lifecycle with
+	 *  [`terminal_open`] (e.g. frontend sends `\x03` via `terminal_write` to Stop).
 	 */
 	agentOpen: (workstreamId: string, command: string, args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("agent_open", { workstreamId, command, args, cols, rows, onEvent })),
 	/**
-	 *  Resize an agent PTY and then "nudge" it so a TUI child (Claude Code / Codex /
-	 *  Gemini) actually repaints at the new size. A single SIGWINCH while the CLI is
-	 *  idle sometimes doesn't trigger a redraw — the composer stays pinned where the
-	 *  old bottom was, stranded mid-pane after the pane grows (e.g. hiding the
-	 *  scripts dock). Resizing off-by-one, pausing, then back to the real size forces
-	 *  the redraw (mirrors herdr's `nudge_child_redraw`). Used for discrete resizes
-	 *  (dock toggle, (re)attach); continuous drags use the plain [`terminal_resize`].
+	 *  Resize an agent PTY, then "nudge" it so an idle TUI child (Claude/Codex/
+	 *  Gemini) actually repaints: a lone SIGWINCH while idle often doesn't trigger a
+	 *  redraw, stranding the composer at the old bottom. Resizing off-by-one, pausing,
+	 *  then back to the real size forces it (mirrors herdr's `nudge_child_redraw`).
+	 *  For discrete resizes (dock toggle, (re)attach); drags use [`terminal_resize`].
 	 */
 	agentResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("agent_resize", { terminalId, cols, rows })),
 	/**
-	 *  Read back the conversation id a "capture-mode" CLI assigned itself, by scanning
-	 *  its on-disk session store. Codex and Antigravity auto-generate their id (unlike
-	 *  Claude/Gemini, which take one we mint), so we launch them fresh, then call this
-	 *  to learn the id and resume that exact conversation later.
+	 *  Read back the conversation id a "capture-mode" CLI (Codex/Antigravity, which
+	 *  auto-generate ids unlike Claude/Gemini) assigned itself, by scanning its
+	 *  on-disk store — launched fresh, then resumed by this id.
 	 * 
-	 *  Returns the most recent session created after `after_ms` (epoch ms — the tab's
-	 *  launch time) that isn't already claimed by another tab (`exclude`). For Codex,
-	 *  which records its cwd, we also require it to match this workstream's worktree,
-	 *  so a session from another worktree can't be mis-attributed. Returns `None`
-	 *  until the session materialises on disk (written on the first message), so the
-	 *  frontend polls until it resolves. Best-effort: two capture-mode tabs started in
-	 *  the same worktree at nearly the same instant may swap ids (no per-process key
-	 *  exists to disambiguate); the `exclude` list still keeps the ids distinct.
+	 *  Returns the newest session created after `after_ms` (epoch ms, the tab's
+	 *  launch) not already claimed (`exclude`); for Codex it must also match this
+	 *  worktree's cwd, so another worktree's session can't be mis-attributed. `None`
+	 *  until the session hits disk (first message), so the frontend polls. Best-
+	 *  effort: two tabs opened in the same worktree at once may swap ids (no per-
+	 *  process key); `exclude` still keeps them distinct.
 	 */
 	captureAgentSession: (workstreamId: string, engineId: string, afterMs: number | null, exclude: string[]) => typedError<string | null, AppError>(__TAURI_INVOKE("capture_agent_session", { workstreamId, engineId, afterMs, exclude })),
 	/**
 	 *  Mint a Codex conversation id *deterministically*, sidestepping the disk-scan
-	 *  attribution race: run `codex exec --json` (which emits
-	 *  `{"type":"thread.started","thread_id":…}` as its very first event), take that
-	 *  id, wait for its rollout to hit disk so a later `resume <id>` can find it, then
-	 *  kill the probe — ignoring the rest of its output. Because we read the id from
-	 *  the process we spawned, it can't be confused with a sibling tab's session. The
-	 *  interactive tab then launches `codex resume <id>`. Returns None if Codex can't
-	 *  run or never announces a thread (caller falls back to disk capture).
+	 *  attribution race: run `codex exec --json` (first event is
+	 *  `{"type":"thread.started","thread_id":…}`), take that id, wait for its rollout
+	 *  to hit disk (so `resume <id>` finds it), then kill the probe. Reading the id
+	 *  from our own process can't confuse it with a sibling tab's. `None` if Codex
+	 *  can't run or never announces a thread (caller falls back to disk capture).
 	 */
 	mintCodexSession: (workstreamId: string, command: string) => typedError<string | null, AppError>(__TAURI_INVOKE("mint_codex_session", { workstreamId, command })),
 	/**
-	 *  Whether `session_id`'s conversation is actually persisted in `engine_id`'s
-	 *  on-disk store — the authoritative resume gate. A pinned-but-never-used id (a
-	 *  fresh tab whose startup terminal-query replies look like "input", or a message
-	 *  typed but not yet sent) has no file yet, so resuming it would exit "No
-	 *  conversation found"; this lets the caller launch fresh instead. Unknown engines
-	 *  (Gemini, custom) return false — the caller falls back to its own heuristic.
+	 *  Whether `session_id` is actually persisted in `engine_id`'s on-disk store —
+	 *  the authoritative resume gate. A pinned-but-never-used id has no file yet, so
+	 *  resuming would exit "No conversation found"; this lets the caller launch fresh.
+	 *  Unknown engines (Gemini, custom) return false — caller uses its own heuristic.
 	 */
 	agentSessionExists: (workstreamId: string, engineId: string, sessionId: string) => typedError<boolean, AppError>(__TAURI_INVOKE("agent_session_exists", { workstreamId, engineId, sessionId })),
 	/**
-	 *  Attach to an existing PTY: replay its scrollback then tail live output.
-	 * 
-	 *  Returns `false` if the PTY is gone (e.g. after an app restart), in which
-	 *  case the frontend should call `terminal_open` to start a fresh one.
+	 *  Attach to an existing PTY: replay scrollback then tail live output. Returns
+	 *  `false` if the PTY is gone (e.g. after restart) — caller opens a fresh one.
 	 */
 	terminalAttach: (terminalId: string, onEvent: Channel<TerminalEvent>) => typedError<boolean, AppError>(__TAURI_INVOKE("terminal_attach", { terminalId, onEvent })),
 	/**  Forward base64-encoded keyboard input to the PTY. */
@@ -544,20 +519,15 @@ export const commands = {
 	/**  Kill the shell process and remove the terminal from the registry. */
 	terminalClose: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_close", { terminalId })),
 	/**
-	 *  Open a new PTY running `hyprlayer <args>` (no workstream context needed).
-	 * 
-	 *  Used by the onboarding wizard to embed `hyprlayer ai configure` or similar
-	 *  interactive CLI commands inside the app without leaving to a terminal.
-	 *  Reuses the same id-based write/resize/close/attach commands as a workstream
-	 *  PTY — the only difference is how it is opened (binary + args vs. shell in cwd).
+	 *  Open a new PTY running `hyprlayer <args>` (no workstream context). Used by
+	 *  onboarding to embed interactive CLI flows (`hyprlayer ai configure`). Reuses
+	 *  the id-based write/resize/close/attach commands.
 	 */
 	spawnCliTerminal: (args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_cli_terminal", { args, cols, rows, onEvent })),
 	/**
-	 *  Open a PTY running a single command line through the user's login shell, in
-	 *  the home directory. Used by the Harnesses settings page to run interactive
-	 *  flows that aren't the hyprlayer CLI — e.g. `claude auth login` or the
-	 *  OpenCode installer (`curl -fsSL https://opencode.ai/install | bash`). The
-	 *  command is run exactly as if the user typed it into their own shell.
+	 *  Open a PTY running a single command line through the user's login shell in
+	 *  the home dir. Used by Harnesses settings for interactive non-CLI flows (e.g.
+	 *  `claude auth login`, the OpenCode installer) — run as if the user typed it.
 	 */
 	spawnShellTerminal: (command: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_shell_terminal", { command, cols, rows, onEvent })),
 	/**
@@ -1135,6 +1105,14 @@ export type GithubRepo = {
 	url: string,
 };
 
+/**
+ *  Which harness backs a session — the vocabulary the store persists
+ *  (`sessions.harness`), the IPC surface selects on, and the shell dispatches
+ *  drivers by. sqlite stores `as_str` TEXT; read back via the tolerant
+ *  [`Harness::parse`].
+ */
+export type Harness = "claude" | "opencode";
+
 export type HealthCheck = {
 	id: string,
 	label: string,
@@ -1347,6 +1325,13 @@ export type OpencodeCatalog = {
 	source: string,
 };
 
+/**
+ *  Per-stage permission posture (maps to claude's `--permission-mode`). Also
+ *  the wire type for a user-chosen override (serialized as the CLI's own
+ *  camelCase flag strings, which the frontend already speaks).
+ */
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
+
 /**  One CI check on the PR's head commit, for the per-check breakdown popover. */
 export type PrCheck = {
 	name: string,
@@ -1421,10 +1406,9 @@ export type Project = {
 	/**  Human-facing project name (the app registry name, e.g. `brightblock.ai`). */
 	mappedName: string,
 	/**
-	 *  The thoughts `repoMappings` key this repo resolves to — the identifier
-	 *  docs are indexed (and worktrees created) under. The CLI sanitizes it, so
-	 *  it can differ from `mapped_name` (e.g. `brightblock.ai` → `brightblock_ai`).
-	 *  Filter docs by project using THIS, not the display name.
+	 *  The thoughts `repoMappings` key this repo resolves to — what docs are
+	 *  indexed and worktrees created under. CLI-sanitized, so it can differ from
+	 *  `mapped_name` (`brightblock.ai` → `brightblock_ai`). Filter docs by THIS.
 	 */
 	thoughtsProject: string,
 	profile: string | null,
@@ -1646,31 +1630,27 @@ export type SeedError = {
 };
 
 export type SeedReport = {
-	/**  Repo-relative file paths actually written into the new worktree. */
+	/**  Repo-relative paths actually written into the worktree. */
 	copied: string[],
 	/**  Entries (literal or glob) that matched nothing in the repo. */
 	missing: string[],
-	/**  Per-entry copy/compile errors that did not prevent other entries from being copied. */
+	/**  Per-entry errors that didn't prevent other entries from copying. */
 	errors: SeedError[],
 };
 
 export type Session = {
 	id: string,
 	workstreamId: string,
-	stage: string,
-	/**  Which harness backs the session: `"claude"` | `"opencode"`. */
-	harness: string,
+	stage: Stage,
+	/**  Which harness backs the session. */
+	harness: Harness,
 	/**
 	 *  The harness's own session id (set on init; drives resume). claude's
 	 *  session id for Claude Code, the opencode session id for OpenCode.
 	 */
 	claudeSessionId: string | null,
 	cwd: string,
-	/**
-	 *  starting | running | awaiting_permission | awaiting_question | completed |
-	 *  interrupted | crashed | killed | spawn_failed
-	 */
-	state: string,
+	state: SessionState,
 	model: string | null,
 	/**  Cumulative cost reported by the latest `result` event. */
 	costUsd: number | null,
@@ -1796,8 +1776,18 @@ export type SessionLifecycle = {
 	sessionId: string,
 	workstreamId: string,
 	/**  Matches the `sessions.state` column. */
-	state: string,
+	state: SessionState,
 };
+
+/**
+ *  A session's full lifecycle state — persisted in `sessions.state` and carried
+ *  by the `session-lifecycle` event. The five terminal variants mirror
+ *  [`ExitOutcome`]; `Idle` is a live-but-between-turns session. sqlite stores
+ *  `as_str` TEXT; rows read back through the tolerant [`SessionState::parse`]
+ *  (unknown ⇒ `Crashed`: terminal and conservative, so the UI never treats a
+ *  state it doesn't understand as a live session to re-attach).
+ */
+export type SessionState = "idle" | "starting" | "running" | "awaiting_permission" | "awaiting_question" | "completed" | "interrupted" | "killed" | "spawn_failed" | "crashed";
 
 /**  One slash command offered in the composer's `/` autocomplete. */
 export type SlashCommand = {
@@ -1814,20 +1804,26 @@ export type SortKey =
 "relevance" | "date" | "mtime" | "title";
 
 /**
+ *  The pipeline stages — the canonical wire enum for a workstream/session's
+ *  pipeline position. sqlite still stores its `as_str` TEXT; rows read back
+ *  through the tolerant [`Stage::parse`]. Wire deserialization is strict — the
+ *  generated bindings union makes an unknown value a TS type error, and specta
+ *  cannot render `#[serde(other)]` on string enums.
+ */
+export type Stage = "research" | "plan" | "implement" | "validate" | "commit" | "ship" | "revise" | "general";
+
+/**
  *  Composer choices for a new session, bundled so the command stays within
  *  specta's argument-count limit.
  */
 export type StartOpts = {
-	/**  Which harness to run: `"claude"` (default) or `"opencode"`. */
-	harness?: string | null,
+	/**  Which harness to run; `None` defaults to Claude. */
+	harness?: Harness | null,
 	/**  For Claude: a model key/flag. For OpenCode: a `"provider/model"` id. */
 	model?: string | null,
 	effort?: string | null,
-	/**
-	 *  `--permission-mode` override (`default` | `acceptEdits` | `plan` |
-	 *  `bypassPermissions`); `None`/unrecognized keeps the stage's default.
-	 */
-	permissionMode?: string | null,
+	/**  `--permission-mode` override; `None` keeps the stage's default posture. */
+	permissionMode?: PermissionMode | null,
 };
 
 /**
@@ -1997,17 +1993,9 @@ export type Workstream = {
 	branch: string,
 	worktreePath: string,
 	baseBranch: string,
-	/**
-	 *  How the workstream is backed: `isolated` (app-created branch + dedicated
-	 *  worktree), `existing` (user's local branch in a dedicated worktree), or
-	 *  `inplace` (no worktree — the project's own checkout). Governs whether the
-	 *  branch + directory are app-owned and safe to drop on archive/delete.
-	 */
-	worktreeMode: string,
-	/**  general | research | plan | implement | validate | ship */
-	stage: string,
-	/**  active | archived */
-	status: string,
+	worktreeMode: WorktreeMode,
+	stage: Stage,
+	status: WorkstreamStatus,
 	prNumber: number | null,
 	createdAt: number | null,
 	updatedAt: number | null,
@@ -2015,11 +2003,9 @@ export type Workstream = {
 };
 
 /**
- *  Branch choices for the "new workstream" dialog, covering all three modes.
- *  `branches` (local + remote) feeds the *isolated* base picker; `local_branches`
- *  feeds the *existing*\/*in-place* pickers (a remote ref would detach HEAD);
- *  `current_branch` pre-selects the in-place default (whatever the checkout is
- *  already on).
+ *  Branch choices for the "new workstream" dialog. `branches` (local + remote)
+ *  feeds the isolated base picker; `local_branches` feeds the existing/in-place
+ *  pickers (a remote ref would detach HEAD); `current_branch` is the in-place default.
  */
 export type WorkstreamBases = {
 	branches: string[],
@@ -2035,13 +2021,17 @@ export type WorkstreamDoc = {
 	role: string,
 };
 
+/**
+ *  Whether a workstream is live or archived. Unknown stored values read as
+ *  `Active` via [`WorkstreamStatus::parse`] (they can only come from a newer
+ *  schema; showing the row beats hiding it).
+ */
+export type WorkstreamStatus = "active" | "archived";
+
 export type WorkstreamView = {
 	item: Workstream,
 	git: WorktreeStatus,
-	/**
-	 *  Populated only by `create_workstream`: result of copying configured
-	 *  untracked files into the new worktree. `null` on every other path.
-	 */
+	/**  Set only by `create_workstream`: report of copied untracked files; `null` elsewhere. */
 	seed: SeedReport | null,
 };
 
@@ -2066,6 +2056,18 @@ export type WorktreeGitStatus = {
 	staged: GitFileEntry[],
 	unstaged: GitFileEntry[],
 };
+
+/**
+ *  How a workstream is backed: `isolated` (app-created branch + dedicated
+ *  worktree), `existing` (user's local branch in a dedicated worktree), or
+ *  `inplace` (no worktree — the project's own checkout). Governs whether the
+ *  branch + directory are app-owned and safe to drop on archive/delete.
+ * 
+ *  Tolerance: an unrecognized stored value reads (via [`WorktreeMode::parse`])
+ *  as `Inplace` — the touch-nothing mode — so a mangled row can never make
+ *  archive/cleanup delete a branch or checkout the app doesn't own.
+ */
+export type WorktreeMode = "isolated" | "existing" | "inplace";
 
 export type WorktreeStatus = {
 	exists: boolean,

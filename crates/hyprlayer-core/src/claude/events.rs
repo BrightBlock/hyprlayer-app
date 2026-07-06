@@ -22,16 +22,77 @@ pub enum ExitOutcome {
 }
 
 impl ExitOutcome {
-    /// The persisted `sessions.state` string for a terminal outcome. Lives next
-    /// to the enum so storage can't drift from the variants.
-    pub fn state(self) -> &'static str {
+    /// The [`SessionState`] a terminal outcome persists as. Lives next to the
+    /// enum so storage can't drift from the variants.
+    pub fn state(self) -> SessionState {
         match self {
-            ExitOutcome::Completed => "completed",
-            ExitOutcome::Interrupted => "interrupted",
-            ExitOutcome::Crashed => "crashed",
-            ExitOutcome::Killed => "killed",
-            ExitOutcome::SpawnFailed => "spawn_failed",
+            ExitOutcome::Completed => SessionState::Completed,
+            ExitOutcome::Interrupted => SessionState::Interrupted,
+            ExitOutcome::Crashed => SessionState::Crashed,
+            ExitOutcome::Killed => SessionState::Killed,
+            ExitOutcome::SpawnFailed => SessionState::SpawnFailed,
         }
+    }
+}
+
+/// A session's full lifecycle state — persisted in `sessions.state` and carried
+/// by the `session-lifecycle` event. The five terminal variants mirror
+/// [`ExitOutcome`]; `Idle` is a live-but-between-turns session. sqlite stores
+/// `as_str` TEXT; rows read back through the tolerant [`SessionState::parse`]
+/// (unknown ⇒ `Crashed`: terminal and conservative, so the UI never treats a
+/// state it doesn't understand as a live session to re-attach).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum SessionState {
+    Idle,
+    Starting,
+    Running,
+    AwaitingPermission,
+    AwaitingQuestion,
+    Completed,
+    Interrupted,
+    Killed,
+    SpawnFailed,
+    Crashed,
+}
+
+impl SessionState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SessionState::Idle => "idle",
+            SessionState::Starting => "starting",
+            SessionState::Running => "running",
+            SessionState::AwaitingPermission => "awaiting_permission",
+            SessionState::AwaitingQuestion => "awaiting_question",
+            SessionState::Completed => "completed",
+            SessionState::Interrupted => "interrupted",
+            SessionState::Crashed => "crashed",
+            SessionState::Killed => "killed",
+            SessionState::SpawnFailed => "spawn_failed",
+        }
+    }
+
+    /// Tolerant row-read: unknown ⇒ `Crashed` (see the enum docs).
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "idle" => SessionState::Idle,
+            "starting" => SessionState::Starting,
+            "running" => SessionState::Running,
+            "awaiting_permission" => SessionState::AwaitingPermission,
+            "awaiting_question" => SessionState::AwaitingQuestion,
+            "completed" => SessionState::Completed,
+            "interrupted" => SessionState::Interrupted,
+            "killed" => SessionState::Killed,
+            "spawn_failed" => SessionState::SpawnFailed,
+            _ => SessionState::Crashed,
+        }
+    }
+}
+
+impl From<ExitOutcome> for SessionState {
+    fn from(outcome: ExitOutcome) -> Self {
+        outcome.state()
     }
 }
 

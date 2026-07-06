@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "../../components/ui";
-import { useBootstrap, useCreateDoc } from "../../lib/queries";
+import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "@/components/ui";
+import { useBootstrap, useCreateDoc } from "@/lib/queries";
 import { DOC_SCOPES, DOC_TYPES } from "./constants";
 import { parseTagsInput } from "./text";
 

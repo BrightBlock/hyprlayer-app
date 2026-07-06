@@ -7,9 +7,9 @@
  * and the backend applies their overrides at launch.
  */
 
-import { commands, type CustomPrompt, type WorkstreamView } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { runPromptTextInWorkstream } from "../session/sessionStore";
+import { commands, type CustomPrompt, type WorkstreamView } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { runPromptTextInWorkstream } from "@/features/session/sessionStore";
 import { bodyHasVars, effectiveCustomBody, substitutePromptVars } from "./prompts";
 
 export async function runCustomPrompt(

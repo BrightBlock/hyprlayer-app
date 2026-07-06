@@ -1,7 +1,7 @@
 import { useState } from "react";
 
-import { useUpdate } from "../../lib/updater";
-import { Badge, Button, Card, CardTitle } from "../../components/ui";
+import { useUpdate } from "@/lib/updater";
+import { Badge, Button, Card, CardTitle } from "@/components/ui";
 
 /**
  * Settings → Updates card: current version, a manual "Check now", and — when an

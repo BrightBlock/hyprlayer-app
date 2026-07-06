@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorkstreamView } from "../../lib/bindings";
+import type { Stage, WorkstreamView } from "@/lib/bindings";
 import { columnOf, groupByColumn } from "./board";
 
 function makeView(
   over: Partial<{
     id: string;
-    stage: string;
+    stage: Stage;
     prNumber: number | null;
     updatedAt: number | null;
   }> = {},
@@ -78,7 +78,9 @@ describe("columnOf", () => {
   });
 
   it("maps an unknown stage to backlog", () => {
-    expect(columnOf(makeView({ stage: "unknown_future_stage" }))).toBe("backlog");
+    // Simulates a NEWER backend: the wire union can't produce this today, but
+    // columnOf must still fall back to backlog rather than crash.
+    expect(columnOf(makeView({ stage: "unknown_future_stage" as Stage }))).toBe("backlog");
   });
 
   it("prNumber overrides stage — non-ship stage lands in ship", () => {

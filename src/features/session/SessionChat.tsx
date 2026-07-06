@@ -12,7 +12,7 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
-import { Badge, Button, ErrorNote, Spinner } from "../../components/ui";
+import { Badge, Button, ErrorNote, Spinner } from "@/components/ui";
 import {
   BookIcon,
   ChevronDownIcon,
@@ -33,22 +33,22 @@ import {
   StopIcon,
   TerminalIcon,
   XIcon,
-} from "../../components/icons";
-import { errorMessage } from "../../lib/ipc";
-import { eventToChord, hasPrimaryModifier } from "../../lib/keybindings/chord";
-import { effectiveChord } from "../../lib/keybindings/resolve";
-import { basename } from "../../lib/path";
-import { IS_MACOS } from "../../lib/platform";
-import { useBootstrap, useOpencodeCatalog } from "../../lib/queries";
-import type { WorkstreamView } from "../../lib/bindings";
-import { chipLabel, WorkstreamDocChips } from "../workstreams/WorkstreamDocChips";
-import { PromptChips, usePinnedPrompts } from "../prompts/PromptChips";
+} from "@/components/icons";
+import { errorMessage } from "@/lib/ipc";
+import { eventToChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
+import { effectiveChord } from "@/lib/keybindings/resolve";
+import { basename } from "@/lib/path";
+import { IS_MACOS } from "@/lib/platform";
+import { useBootstrap, useOpencodeCatalog } from "@/lib/queries";
+import type { WorkstreamView } from "@/lib/bindings";
+import { chipLabel, WorkstreamDocChips } from "@/features/workstreams/WorkstreamDocChips";
+import { PromptChips, usePinnedPrompts } from "@/features/prompts/PromptChips";
 import { AttachmentCards } from "./AttachmentCard";
 import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
 import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
 import { generateTabTitle } from "./tabTitles";
-import type { ShellTab } from "../../routes/ProjectPage";
-import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "./stages";
+import type { ShellTab } from "./workstreamTabs";
+import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "@/lib/domain/stages";
 import {
   EFFORTS,
   apiContextWindow,
@@ -57,7 +57,7 @@ import {
   modelSupportsUltracode,
   resumeModelFlag,
   visibleModels,
-} from "./models";
+} from "@/lib/domain/models";
 import { useModelWindowMap } from "./modelWindowsStore";
 import {
   effectiveHarnessKey,
@@ -66,8 +66,8 @@ import {
   modelProvider,
   opencodeModelLabel,
   opencodeModelNames,
-} from "./harnessing";
-import { PERMISSION_MODES, permissionModeOption } from "./permissions";
+} from "@/lib/domain/harnessing";
+import { PERMISSION_MODES, permissionModeOption } from "@/lib/domain/permissions";
 import { docFromTool, formatTokens } from "./toolDisplay";
 import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
 import {
@@ -103,8 +103,8 @@ import {
   HighlightBackdrop,
   useComposerAutocomplete,
 } from "./ComposerAutocomplete";
-import { useCommand } from "../../lib/keybindings/registry";
-import { useUiStore } from "../../lib/uiStore";
+import { useCommand } from "@/lib/keybindings/registry";
+import { useUiStore } from "@/lib/uiStore";
 import { PromptHistoryStack } from "./PromptHistoryStack";
 import {
   IDLE_NAV,
@@ -144,8 +144,7 @@ const DOT_COLOR: Record<ReturnType<typeof describeState>["tone"], string> = {
 };
 
 /** A tiny status dot for an agent tab encoding the session's tone (none until a
- *  session is started). Motion lives on the tab icon's glow, so this stays
- *  steady — it carries the color, not the "live" signal. */
+ *  session starts). Carries the color only — the tab icon's glow signals "live". */
 export function SessionTabDot({ sessionId }: { sessionId?: string }) {
   const session = useSession(sessionId);
   if (!session) return null;
@@ -158,11 +157,9 @@ export function SessionTabDot({ sessionId }: { sessionId?: string }) {
   );
 }
 
-/** The mode badge that leads an agent tab. Glows while the session is actively
- *  working (same `isWorking` signal as the elapsed counter) and goes quiet when
- *  the turn completes OR pauses for the user — a session awaiting a permission
- *  shows the warn-toned dot, not a "working" pulse. Subscribes per-session so
- *  only this tab re-renders on deltas. */
+/** The mode badge leading an agent tab. Glows while the session is working (same
+ *  `isWorking` signal as the elapsed counter) — a session paused for a permission
+ *  shows the warn dot, not a pulse. Subscribes per-session. */
 export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?: string }) {
   const session = useSession(sessionId);
   const working = session ? isWorking(session) : false;
@@ -180,18 +177,15 @@ type MenuItem = {
   icon?: ReactNode;
   /** Render in red (e.g. "Bypass permissions") to flag a risky choice. */
   danger?: boolean;
-  /** Greyed and non-selectable — used by the model picker to lock a started
-   *  session to its provider (see `lockedProvider` in SessionChat). Like a group's
-   *  `disabled`, but per-row (no badge; the greyed-out row is signal enough). */
+  /** Greyed and non-selectable — the model picker locks a started session to its
+   *  provider (see `lockedProvider` in SessionChat). Per-row, unlike a group's `disabled`. */
   disabled?: boolean;
-  /** Tint this row in the accent color, and — when it's the active selection —
-   *  the trigger too, so a distinct choice (e.g. Ultracode) is easy to spot. */
+  /** Accent-tint this row (and the trigger when active) so a distinct choice like Ultracode stands out. */
   accent?: boolean;
 };
 
 /** A labelled section in a grouped menu (the model picker groups models by
- *  harness). A `disabled` group is shown greyed with non-selectable rows — used
- *  for "coming soon" harnesses like Codex. */
+ *  harness). A `disabled` group is greyed/non-selectable — for "soon" harnesses like Codex. */
 type MenuGroup = {
   key: string;
   label: string;
@@ -219,28 +213,24 @@ function ComposerMenu({
   label: string;
   hint?: string;
   items?: MenuItem[];
-  /** When set, render a grouped menu (section headers + per-group rows) instead
-   *  of the flat `items` list. The model picker uses this to group models by
-   *  harness. `items`/`custom` are ignored in grouped mode. */
+  /** When set, render a grouped menu instead of the flat `items` list (the model
+   *  picker groups models by harness). `items`/`custom` are ignored in grouped mode. */
   groups?: MenuGroup[];
   /** An action row pinned to the bottom of the menu (e.g. "Harnesses →"). */
   footer?: { label: string; icon?: ReactNode; onClick: () => void };
   activeKey: string;
   onSelect: (key: string) => void;
   title: string;
-  /** When set, appends a free-text row so the user can enter a value that isn't
-   *  one of `items` — used by the model picker to accept ANY `--model` the CLI
-   *  takes (an alias or a full id). Submitting calls `onSelect` with the text. */
+  /** Appends a free-text row for a value not in `items` — the model picker uses it
+   *  to accept ANY `--model` the CLI takes. Submitting calls `onSelect` with the text. */
   custom?: { label: string; placeholder?: string };
-  /** Icon-only trigger (label/hint/chevron hidden) when the composer is too
-   *  narrow to fit them — the dropdown contents are unchanged. */
+  /** Icon-only trigger (label/hint/chevron hidden) when the composer is too narrow. */
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
-  // Every selectable row across flat items and any groups (a `disabled` group or
-  // row is not selectable).
+  // Every selectable row across flat items and groups (disabled group/row excluded).
   const allItems = groups
     ? groups.flatMap((g) => (g.disabled ? [] : g.items.filter((it) => !it.disabled)))
     : items;
@@ -248,8 +238,7 @@ function ComposerMenu({
   const customActive = custom != null && !allItems.some((it) => it.key === activeKey);
   // A risky active choice (e.g. "Bypass permissions") tints the whole trigger red.
   const activeDanger = allItems.some((it) => it.key === activeKey && it.danger);
-  // An accent active choice (e.g. "Ultracode") tints the whole trigger in the
-  // accent color, so it's obvious at a glance which mode is selected.
+  // An accent active choice (e.g. "Ultracode") tints the whole trigger accent.
   const activeAccent = allItems.some((it) => it.key === activeKey && it.accent);
 
   const close = () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { DocMeta } from "../../lib/bindings";
+import type { DocMeta } from "@/lib/bindings";
 import { buildGraph, simulate } from "./graph";
 
 function doc(over: Partial<DocMeta> & { id: string }): DocMeta {

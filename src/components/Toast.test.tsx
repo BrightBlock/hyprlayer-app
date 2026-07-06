@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Toast } from "./Toast";
-import { useToast } from "../lib/toast";
+import { useToast } from "@/lib/toast";
 
 // The exit animation (EXIT_MS) and auto-dismiss (DURATION_MS) live on timers, so
 // drive time deterministically rather than waiting on the wall clock.

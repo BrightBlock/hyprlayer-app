@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
-import { Badge, Button } from "../../components/ui";
-import { ExportIcon } from "../../components/icons";
+import { Badge, Button } from "@/components/ui";
+import { ExportIcon } from "@/components/icons";
 import { PromptRowIcon, ShareCheck, ShareModal } from "./promptShareUi";
 import type { ExportEntry, ExportOptions } from "./promptsIo";
 import { PROMPTS_FILE_EXT } from "./promptsIo";

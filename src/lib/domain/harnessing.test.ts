@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AppSettings } from "../../lib/bindings";
+import type { AppSettings } from "@/lib/bindings";
 import {
   actionAgentDefaults,
   actionLaunchArgs,

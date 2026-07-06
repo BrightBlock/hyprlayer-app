@@ -43,12 +43,10 @@ type Props = {
 };
 
 /**
- * A small multi-line command editor: monospace `<textarea>` with a line-number
- * gutter and a synced syntax-highlight overlay. Auto-grows (no inner vertical
- * scroll) so the gutter, overlay, and textarea stay aligned without scroll math;
- * long lines scroll horizontally, with the overlay kept in sync. No external
- * dependencies — the app's CodeMirror is read-only/heavier and not wired for
- * editing here.
+ * Small multi-line command editor: monospace `<textarea>` with a line-number
+ * gutter and a synced highlight overlay. Auto-grows so gutter/overlay/textarea
+ * stay aligned without scroll math; long lines scroll horizontally in sync.
+ * No deps — the app's CodeMirror is read-only/heavier, not wired for editing.
  */
 export function ScriptEditor({
   value,

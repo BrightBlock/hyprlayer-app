@@ -34,6 +34,23 @@ if [[ "$BRANCH" != "main" ]]; then
   exit 1
 fi
 
+# ─── verification gate ──────────────────────────────────────────────
+# With no CI (releases are local-only by design), this is the enforcement
+# point ADR-0001 names: cargo test regenerates src/lib/bindings.ts, so a
+# drifted contract fails the dirty-tree check below; lint carries the
+# ADR-0003 import-boundary rules. Skip only with RELEASE_SKIP_CHECKS=1.
+if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
+  echo "→ Verification gate (cargo test, typecheck, lint, vitest)…"
+  cargo test --workspace --quiet
+  pnpm typecheck && pnpm lint && pnpm test
+  if [[ -n "$(git status --porcelain -- src/lib/bindings.ts)" ]]; then
+    echo "✗ src/lib/bindings.ts drifted — cargo test regenerated it. Commit the diff first."
+    exit 1
+  fi
+else
+  echo "⚠ RELEASE_SKIP_CHECKS=1 — skipping the verification gate"
+fi
+
 # ─── compute new version ────────────────────────────────────────────
 CUR="$(node -p 'require("./package.json").version')"
 case "$BUMP" in
@@ -97,7 +114,7 @@ set_json_version src-tauri/tauri.conf.json
 sed -i.bak -E "s/^version = \".*\"/version = \"$NEW\"/" Cargo.toml
 rm Cargo.toml.bak
 
-# Keep Cargo.lock's package entries in sync so they don't drift in CI.
+# Keep Cargo.lock's package entries in sync with the bumped versions.
 cargo update -p hyprlayer-app -p hyprlayer-core >/dev/null 2>&1 || true
 
 # ─── commit + tag ──────────────────────────────────────────────────

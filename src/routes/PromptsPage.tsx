@@ -1,8 +1,8 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 
-import { PageError, PageSpinner } from "../components/ui";
-import { PromptLibrary } from "../features/prompts/PromptLibrary";
-import { useBootstrap } from "../lib/queries";
+import { PageError, PageSpinner } from "@/components/ui";
+import { PromptLibrary } from "@/features/prompts/PromptLibrary";
+import { useBootstrap } from "@/lib/queries";
 
 /**
  * The Prompt library route (`/prompts`), opened from the nav rail's ⚡ entry —

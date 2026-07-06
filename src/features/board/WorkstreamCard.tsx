@@ -1,7 +1,7 @@
-import type { WorkstreamView } from "../../lib/bindings";
-import { WorkstreamActivityDot } from "../session/WorkstreamActivity";
-import { WorkstreamGitChip } from "../workstreams/WorkstreamGitChip";
-import { Badge } from "../../components/ui";
+import type { WorkstreamView } from "@/lib/bindings";
+import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
+import { WorkstreamGitChip } from "@/features/workstreams/WorkstreamGitChip";
+import { Badge } from "@/components/ui";
 
 /** A clickable kanban card representing one active workstream. Clicking (or
  *  pressing Enter / Space) calls `onOpen` with the workstream's id; right-click

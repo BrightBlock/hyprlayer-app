@@ -1,31 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { Button, Card, CardTitle, ErrorNote } from "../../components/ui";
-import { useSetAppSettings } from "../../lib/queries";
-import { IS_MACOS } from "../../lib/platform";
-import type { AppSettings } from "../../lib/bindings";
+import { Button, Card, CardTitle, ErrorNote } from "@/components/ui";
+import { useSetAppSettings } from "@/lib/queries";
+import { IS_MACOS } from "@/lib/platform";
+import type { AppSettings } from "@/lib/bindings";
 import {
   eventToChord,
   formatChord,
   normalizeChord,
   type Chord,
-} from "../../lib/keybindings/chord";
+} from "@/lib/keybindings/chord";
 import {
   COMMANDS_BY_CATEGORY,
   commandById,
   type CommandDef,
   type CommandWhen,
-} from "../../lib/keybindings/commands";
+} from "@/lib/keybindings/commands";
 import {
   conflictsFor,
   effectiveChords,
   hasOverride,
   type Overrides,
-} from "../../lib/keybindings/resolve";
-import { isReserved } from "../../lib/keybindings/reserved";
+} from "@/lib/keybindings/resolve";
+import { isReserved } from "@/lib/keybindings/reserved";
 
-/** Stable identity for "no overrides", so deriving from it doesn't churn the
- *  effective-chords memo every render before any binding is customized. */
+/** Stable identity for "no overrides" so the effective-chords memo doesn't churn every render. */
 const EMPTY_OVERRIDES: Overrides = {};
 
 /** Short context hint shown beside each command. */
@@ -42,15 +41,12 @@ function ChordPill({ chord }: { chord: Chord | null }) {
     return <span className="text-xs italic text-ink-dim">Unbound</span>;
   }
   return (
-    // Sized to match the Edit/Reset/Unbind buttons (text-sm, py-1.5, rounded-md)
-    // so the row reads as one set of equal controls. No `font-mono`: the system
-    // font renders ⌘/⇧ at native proportions instead of the heavy, oversized
-    // monospace glyphs.
+    // Sized to match the Edit/Reset/Unbind buttons so the row reads as one set of
+    // equal controls. No `font-mono`: the system font renders ⌘/⇧ at native size.
     <kbd
       className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm font-medium text-ink"
       // macOS concatenates modifier glyphs (⌘⇧B) with no separators — track them
-      // apart so each symbol stays legible. The +-joined Windows/Linux form
-      // already has separators, so it needs none.
+      // apart so each stays legible; the +-joined Windows/Linux form needs none.
       style={IS_MACOS ? { letterSpacing: "0.1em", paddingRight: "calc(0.625rem - 0.1em)" } : undefined}
     >
       {formatChord(chord, IS_MACOS)}
@@ -81,9 +77,8 @@ function CommandRow({
 }) {
   const [candidate, setCandidate] = useState<Chord | null>(null);
 
-  // While recording, capture the next chord on the capture phase so it beats the
-  // global dispatcher (which listens on the bubble phase) and never triggers a
-  // shortcut mid-record. Escape cancels; Enter confirms a captured candidate.
+  // Capture the chord on the capture phase so it beats the global dispatcher
+  // (bubble phase) and never fires a shortcut mid-record. Esc cancels, Enter confirms.
   useEffect(() => {
     if (!recording) {
       setCandidate(null);

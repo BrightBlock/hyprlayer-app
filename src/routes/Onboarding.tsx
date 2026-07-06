@@ -21,20 +21,20 @@ import {
   Field,
   Spinner,
   TextInput,
-} from "../components/ui";
+} from "@/components/ui";
 import {
   useAiStatus,
   useBootstrap,
   useDefaultUsername,
   useInitThoughtsRepo,
   useProbeDefaultThoughts,
-} from "../lib/queries";
-import { CliInstallStep } from "../features/onboarding/CliInstallStep";
-import { SetupTerminal } from "../features/onboarding/SetupTerminal";
-import { Step } from "../features/onboarding/StepShell";
-import { RepoSourcePicker, type RepoSource } from "../features/projects/RepoSourcePicker";
-import type { ThoughtsSource } from "../lib/bindings";
-import { useEscape } from "../lib/keybindings/registry";
+} from "@/lib/queries";
+import { CliInstallStep } from "@/features/onboarding/CliInstallStep";
+import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
+import { Step } from "@/features/onboarding/StepShell";
+import { RepoSourcePicker, type RepoSource } from "@/features/projects/RepoSourcePicker";
+import type { ThoughtsSource } from "@/lib/bindings";
+import { useEscape } from "@/lib/keybindings/registry";
 import { dismissOnboarding } from "./onboardingState";
 
 /** Total wizard steps — bump when adding/removing a step. */

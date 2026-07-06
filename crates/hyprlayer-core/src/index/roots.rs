@@ -1,9 +1,6 @@
-//! Resolve the filesystem thoughts roots to index from the hyprlayer config.
-//!
-//! Only filesystem backends (git, obsidian) have an indexable tree; flat-list
-//! backends (notion, anytype) are skipped. The default backend plus every
-//! profile's backend contribute one root each, deduplicated by root path
-//! (first wins: the default backend, then profiles in name order).
+//! Resolve the indexable filesystem thoughts roots from the hyprlayer config.
+//! Only git/obsidian have a tree (notion/anytype are skipped); default backend
+//! then profiles by name, deduplicated by root path (first wins).
 
 use std::path::PathBuf;
 

@@ -6,9 +6,9 @@
 
 import { useEffect, type RefObject } from "react";
 
-import { commands } from "../../lib/bindings";
-import { useCommand } from "../../lib/keybindings/registry";
-import { useThemeStore } from "../../lib/theme";
+import { commands } from "@/lib/bindings";
+import { useCommand } from "@/lib/keybindings/registry";
+import { useThemeStore } from "@/lib/theme";
 import type { TerminalEngine } from "./terminalEngine";
 import { useTerminalFontSize } from "./terminalFontSize";
 import { xtermThemeFromCss } from "./terminalTheme";

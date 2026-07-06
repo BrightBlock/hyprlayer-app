@@ -1,17 +1,14 @@
 /**
- * Pure presentation helpers for agent tool calls. No React, no IPC — just
- * turning the compact-JSON `input` string that rides on a `toolUse` /
- * `permissionAsk` event into something a human can read, the way Claude Code
- * renders a tool call: the tool name, then a concise one-line argument summary
- * (the bash command, the file path, the search pattern, …).
+ * Pure presentation helpers for agent tool calls (no React/IPC): turn the
+ * compact-JSON `input` string from a `toolUse`/`permissionAsk` event into a
+ * Claude-Code-style tool name + one-line argument summary.
  */
 
-import { diffStrings, type PatchLine } from "../workstreams/diff";
+import type { DocKind } from "@/lib/domain/docs";
+import { diffStrings, type PatchLine } from "@/features/workstreams/diff";
 
-// A tool's `input` is re-parsed many times per render — transcript grouping
-// inspects every tool's input on each pass, and several display helpers parse
-// the same string. Cache by input string (bounded so a long session can't grow
-// it without limit); the same string always parses to the same value.
+// A tool's `input` is re-parsed many times per render; cache by input string
+// (bounded so a long session can't grow it without limit).
 const parsedInputCache = new Map<string, Record<string, unknown> | null>();
 const PARSED_CACHE_MAX = 1000;
 
@@ -53,9 +50,8 @@ function firstLine(value: string): string {
 }
 
 /**
- * A concise, single-line argument summary for a tool call header — chosen per
- * tool to surface the argument that matters (Claude-Code style). Unknown tools
- * fall back to their first string-valued argument.
+ * Concise one-line argument summary for a tool call header, chosen per tool
+ * (Claude-Code style). Unknown tools fall back to their first string arg.
  */
 export function toolSummary(name: string, input: string): string {
   const obj = parseToolInput(input);
@@ -81,9 +77,8 @@ export function toolSummary(name: string, input: string): string {
     case "Task":
       return str(obj.description) || str(obj.subagent_type);
     case "Skill": {
-      // Input is `{skill, args?}`, but Claude Code emits the keys in `args`-first
-      // order — so the generic "first string arg" fallback would surface the args
-      // (often a bare number like a PR id) instead of the skill being invoked.
+      // Claude Code emits `{skill, args?}` args-first, so the generic first-string
+      // fallback would surface args (often a bare PR id) instead of the skill.
       const skill = str(obj.skill);
       const skillArgs = firstLine(str(obj.args));
       return skillArgs ? `${skill}  ${skillArgs}` : skill;
@@ -109,15 +104,10 @@ export function toolSummary(name: string, input: string): string {
   }
 }
 
-/** Tools whose summary is a single filesystem path the transcript can show as
- *  a compact basename chip instead of the full absolute path. */
+/** Tools whose summary is a single path — shown as a compact basename chip. */
 const FILE_PATH_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
-/**
- * For a file-targeting tool, the absolute path it acts on (else null). Lets the
- * transcript render a compact filename chip while keeping the full path on hover
- * and in the expanded view.
- */
+/** For a file-targeting tool, the absolute path it acts on (else null). */
 export function toolFilePath(name: string, input: string): string | null {
   if (!FILE_PATH_TOOLS.has(name)) return null;
   const obj = parseToolInput(input);
@@ -128,10 +118,9 @@ export function toolFilePath(name: string, input: string): string | null {
 export type EditDiff = { lines: PatchLine[]; additions: number; deletions: number };
 
 /**
- * The line-level diff an Edit / MultiEdit tool call applies, derived from its
- * `old_string` / `new_string` payload — lets the transcript preview the change on
- * hover instead of just naming the file. MultiEdit's edits are stacked, separated
- * by a hunk marker. Returns null for other tools or an unparseable / empty input.
+ * Line-level diff an Edit/MultiEdit applies, from its `old_string`/`new_string`
+ * payload. MultiEdit's edits are stacked, separated by a hunk marker. Returns
+ * null for other tools or unparseable/empty input.
  */
 export function editDiffFromTool(name: string, input: string): EditDiff | null {
   if (name !== "Edit" && name !== "MultiEdit") return null;
@@ -176,9 +165,9 @@ export function baseName(path: string): string {
 }
 
 /**
- * A concise one-line preview of a tool's result, for the dimmed `⎿` line shown
- * under a collapsed tool row. Strips the `N⇥` line-number prefix Read adds and
- * skips blank leading lines so the preview is the first line that says something.
+ * Concise one-line preview of a tool's result (the dimmed `⎿` line under a
+ * collapsed row). Strips Read's `N⇥` line-number prefix and skips blank leading
+ * lines so the preview is the first meaningful line.
  */
 export function resultPreview(content: string, isError: boolean): string {
   const firstMeaningful = content.split("\n").find((line) => line.trim() !== "");
@@ -188,10 +177,8 @@ export function resultPreview(content: string, isError: boolean): string {
   return cleaned || (isError ? "(error)" : "(no output)");
 }
 
-/**
- * The expanded view of a tool's input: pretty-printed JSON when it parses,
- * otherwise the raw string (so even a malformed payload is still inspectable).
- */
+/** Expanded view of a tool's input: pretty JSON, else the raw string (so a
+ *  malformed payload is still inspectable). */
 export function prettyToolInput(input: string): string {
   if (!input) return "";
   try {
@@ -201,13 +188,11 @@ export function prettyToolInput(input: string): string {
   }
 }
 
-export type DocKind = "research" | "plan" | "handoff";
 
 /**
- * If a tool call wrote/edited a research, plan, or handoff doc (a `.md` under a
- * `…/research/…`, `…/plans/…`, or `…/handoffs/…` path), return its path + kind —
- * used to surface agent-created docs in the diff sidebar. Other writes (code in
- * the worktree) return null.
+ * If a tool wrote/edited a research/plan/handoff `.md` (under `…/research/…`,
+ * `…/plans/…`, or `…/handoffs/…`), return its path + kind — to surface
+ * agent-created docs in the diff sidebar. Other writes return null.
  */
 export function docFromTool(name: string, input: string): { path: string; kind: DocKind } | null {
   if (name !== "Write" && name !== "Edit" && name !== "MultiEdit") return null;
@@ -246,44 +231,4 @@ export function formatCost(usd: number | null | undefined): string | null {
   return `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
 }
 
-/**
- * A live "time working" label for the elapsed counter (Conductor-style): tenths
- * of a second under a minute (19.3s), then minutes + zero-padded seconds
- * (1m 23s), then hours + minutes for a rare long run (1h 04m). Negative inputs
- * clamp to zero.
- */
-export function formatElapsed(ms: number): string {
-  const totalSec = Math.max(0, ms) / 1000;
-  if (totalSec < 60) return `${totalSec.toFixed(1)}s`;
-  const totalMin = Math.floor(totalSec / 60);
-  if (totalMin < 60) {
-    return `${totalMin}m ${String(Math.floor(totalSec % 60)).padStart(2, "0")}s`;
-  }
-  return `${Math.floor(totalMin / 60)}h ${String(totalMin % 60).padStart(2, "0")}m`;
-}
 
-/**
- * A short relative-time label for a past instant, Claude-Code-style:
- * `just now`, `15s ago`, `4m ago`, `2h ago`, `3d ago`, `2w ago`, `5mo ago`,
- * `1y ago`. `from` defaults to a fresh `Date.now()` reading; pass it explicitly
- * in tests for determinism. Falls back to `just now` for the future or for
- * invalid values (a backfilled-from-null timestamp).
- */
-export function formatRelativeTime(epochMs: number | null, from: number = Date.now()): string {
-  if (epochMs === null || !Number.isFinite(epochMs)) return "just now";
-  const seconds = Math.max(0, Math.floor((from - epochMs) / 1000));
-  if (seconds < 10) return "just now";
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  const years = Math.floor(days / 365);
-  return `${years}y ago`;
-}

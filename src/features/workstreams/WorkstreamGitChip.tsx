@@ -3,7 +3,7 @@
  *  the working tree is clean but commits are unpushed. Used by the sidebar row
  *  and the kanban card so the numbers are visually identical in both places. */
 
-import type { WorkstreamView } from "../../lib/bindings";
+import type { WorkstreamView } from "@/lib/bindings";
 
 export function WorkstreamGitChip({ view }: { view: WorkstreamView }) {
   const { additions, deletions, dirty, ahead } = view.git;

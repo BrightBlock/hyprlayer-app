@@ -1,12 +1,10 @@
-import { CheckIcon, SyncIcon } from "../../components/icons";
-import { Spinner } from "../../components/ui";
+import { CheckIcon, SyncIcon } from "@/components/icons";
+import { Spinner } from "@/components/ui";
 import type { ThoughtsSyncState } from "./useThoughtsSync";
 
-/** Library-header mirror of `hyprlayer thoughts sync`: one glance for the
- *  thoughts repo's state, one click to sync it. The Library already syncs on
- *  open/re-scope; this surfaces that and covers the in-between. After each
- *  attempt the icon briefly takes the verdict tone (ok check / bad tint) —
- *  a quiet success is otherwise invisible. */
+/** Library-header mirror of `hyprlayer thoughts sync`; surfaces repo state and
+ *  covers the gap between the Library's auto open/re-scope syncs. The icon flashes
+ *  the verdict tone after each attempt — a quiet success is otherwise invisible. */
 export function ThoughtsSyncButton({ sync }: { sync: ThoughtsSyncState }) {
   if (sync.hidden) return null;
 

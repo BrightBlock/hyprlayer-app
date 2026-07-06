@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { IS_MACOS } from "../lib/platform";
+import { IS_MACOS } from "@/lib/platform";
 
 /**
  * VSCode-style caption buttons (minimize / maximize-restore / close) drawn into

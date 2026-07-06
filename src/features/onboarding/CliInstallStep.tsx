@@ -5,17 +5,17 @@
  */
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { Badge, Button, Card, Spinner } from "../../components/ui";
-import { useCopyFeedback } from "../../lib/clipboard";
-import { errorMessage } from "../../lib/ipc";
+import { Badge, Button, Card, Spinner } from "@/components/ui";
+import { useCopyFeedback } from "@/lib/clipboard";
+import { errorMessage } from "@/lib/ipc";
 import {
   useBootstrap,
   useCliInstallMethods,
   useInstallHyprlayerCli,
   useRedetectBinaries,
   useSetBinaryOverride,
-} from "../../lib/queries";
-import type { CliInstallMethod } from "../../lib/bindings";
+} from "@/lib/queries";
+import type { CliInstallMethod } from "@/lib/bindings";
 import { Step } from "./StepShell";
 
 const STEP_NUMBER = 2;
@@ -73,9 +73,8 @@ export function CliInstallStep({ onNext }: { onNext: () => void }) {
   );
 }
 
-/** Shown when the CLI is missing: install buttons for the package managers the
- *  user has, plus a manual copy/locate fallback. Owns its own queries — the
- *  parent renders it only in the not-installed branch. */
+/** Shown when the CLI is missing. Owns its own queries — the parent renders it
+ *  only in the not-installed branch. */
 function InstallPicker() {
   const bootstrap = useBootstrap();
   const methods = useCliInstallMethods();
@@ -108,7 +107,6 @@ function InstallPicker() {
         </p>
       </Card>
 
-      {/* Installed, but not yet detected. */}
       {installedButMissing && (
         <Card className="space-y-2 border-warn/40">
           <p className="text-sm text-ink">
@@ -159,7 +157,6 @@ function InstallPicker() {
         )}
       </Card>
 
-      {/* Manual fallback: copyable commands + locate. */}
       <Card className="space-y-3">
         <p className="text-sm font-medium text-ink">Or set it up yourself</p>
         {all.length > 0 && (

@@ -29,8 +29,12 @@ use super::events::{ExitOutcome, SessionEvent};
 use super::protocol::{self, Block, ParsedLine};
 use crate::error::{CoreError, Result};
 
-/// Per-stage permission posture (maps to claude's `--permission-mode`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Per-stage permission posture (maps to claude's `--permission-mode`). Also
+/// the wire type for a user-chosen override (serialized as the CLI's own
+/// camelCase flag strings, which the frontend already speaks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
 pub enum PermissionMode {
     Default,
     AcceptEdits,

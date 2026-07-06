@@ -1,5 +1,5 @@
-import type { DocMeta } from "../../lib/bindings";
-import { docTitle } from "../library/text";
+import type { DocMeta } from "@/lib/bindings";
+import { docTitle } from "@/features/library/text";
 
 /** A document, as one node in the knowledge graph. */
 export type GraphNode = {

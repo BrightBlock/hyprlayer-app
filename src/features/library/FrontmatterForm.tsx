@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 
-import type { DocMeta, FmPatchDto, FmSetEntry } from "../../lib/bindings";
-import { Button, Field, Select, TextInput } from "../../components/ui";
+import type { DocMeta, FmPatchDto, FmSetEntry } from "@/lib/bindings";
+import { Button, Field, Select, TextInput } from "@/components/ui";
 import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES } from "./constants";
 import { parseTagsInput } from "./text";
 

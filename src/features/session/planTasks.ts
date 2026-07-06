@@ -1,9 +1,8 @@
 /**
  * Pure derivation of the agent's live plan/to-do list from a session's
- * transcript items — the checklist Claude Code renders during a turn. Newer
- * builds use the `TaskCreate`/`TaskUpdate`/`TaskList` tool family; older builds
- * (or `CLAUDE_CODE_ENABLE_TASKS=0`) use the legacy `TodoWrite`. Both arrive as
- * ordinary `tool` items, so this is derived with no backend change.
+ * transcript items. Newer builds use the `TaskCreate`/`TaskUpdate`/`TaskList`
+ * tool family; older builds (or `CLAUDE_CODE_ENABLE_TASKS=0`) use legacy
+ * `TodoWrite`. Both arrive as ordinary `tool` items, so no backend change.
  *
  * Wire shapes (Claude Code 2.1.195 stream-json):
  *   TaskCreate  input:  {"subject":"Build parser","description":"parse stream"}

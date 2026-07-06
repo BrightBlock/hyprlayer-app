@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { useToast, type ToastTone } from "../lib/toast";
+import { useToast, type ToastTone } from "@/lib/toast";
 import { XIcon } from "./icons";
 
 const DURATION_MS = 5000;

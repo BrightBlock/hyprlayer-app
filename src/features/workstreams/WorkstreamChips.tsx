@@ -1,6 +1,6 @@
-import type { WorkstreamView } from "../../lib/bindings";
-import { Spinner } from "../../components/ui";
-import { useReprovisionWorkstream } from "../../lib/queries";
+import type { WorkstreamView } from "@/lib/bindings";
+import { Spinner } from "@/components/ui";
+import { useReprovisionWorkstream } from "@/lib/queries";
 
 /**
  * Compact git status for the active workstream: branch name, change counters

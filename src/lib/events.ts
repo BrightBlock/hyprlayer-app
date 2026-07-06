@@ -1,7 +1,20 @@
 import { events } from "./bindings";
 import { queryClient } from "./queryClient";
 import { invalidateScriptOutput, invalidateScriptRuntime, invalidateWorktreeGit } from "./queries";
-import { setRunning } from "../features/session/scriptsStore";
+
+/**
+ * A feature-owned set of event subscriptions, attached/detached together with
+ * the lib bridge below. Features register theirs from main.tsx (the wiring
+ * layer), so this module never imports from src/features and the import
+ * direction stays routes → features → lib (docs/adr/0003-frontend-layering.md).
+ */
+export type EventBridge = () => Array<Promise<() => void>>;
+
+const featureBridges: EventBridge[] = [];
+
+export function registerEventBridge(bridge: EventBridge): void {
+  featureBridges.push(bridge);
+}
 
 /**
  * Bridge backend push events into query invalidation. Call once at startup;
@@ -9,6 +22,7 @@ import { setRunning } from "../features/session/scriptsStore";
  */
 export function attachEventListeners(): () => void {
   const unlisteners: Promise<() => void>[] = [
+    ...featureBridges.flatMap((bridge) => bridge()),
     // The hyprlayer CLI rewrote its config: projects/backends may differ.
     events.configChanged.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
@@ -41,16 +55,13 @@ export function attachEventListeners(): () => void {
       void queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
     }),
     // A lifecycle script (Setup/Run/Archive) started, detected its port, or
-    // finished. Refresh that workstream's runtime (dock pills + Open :PORT), and
-    // track the live-Run set so the rail's green indicator stays accurate.
+    // finished. Refresh that workstream's runtime (dock pills + Open :PORT).
+    // The rail's live-Run tracking rides the same event via the scripts
+    // feature's registered bridge (see scriptsStore.scriptRunBridge).
     events.scriptRunChanged.listen((event) => {
-      const { workstreamId, kind, phase, port } = event.payload;
+      const { workstreamId, kind } = event.payload;
       invalidateScriptRuntime(workstreamId);
       invalidateScriptOutput(workstreamId, kind);
-      if (kind === "run") {
-        if (phase === "running") setRunning(workstreamId, { port: port ?? null });
-        else setRunning(workstreamId, null); // passed | failed → no longer alive
-      }
     }),
     // The thoughts index changed: docs were (re)indexed, removed, or the tree
     // was rescanned. Refresh every list and the touched documents (all of

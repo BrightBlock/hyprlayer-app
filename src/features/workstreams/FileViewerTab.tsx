@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 
 import { EditorView } from "@codemirror/view";
 
-import { ErrorNote, Spinner } from "../../components/ui";
-import { useWorktreeFile } from "../../lib/queries";
+import { ErrorNote, Spinner } from "@/components/ui";
+import { useWorktreeFile } from "@/lib/queries";
 import { readOnlyExtensions, useLangForPath } from "./codeView";
 
 /** Read-only CodeMirror view of an arbitrary worktree file, opened from the

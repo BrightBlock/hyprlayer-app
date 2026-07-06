@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { ModeIcon } from "../../components/icons";
-import { MODE_STYLES, type StageKey } from "../session/stages";
+import { ModeIcon } from "@/components/icons";
+import { MODE_STYLES, type StageKey } from "@/lib/domain/stages";
 
 /** One stage tile in the project kanban board, styled like the home dashboard's
  *  Add / Discover / Settings tiles — a rounded, bordered panel with an icon chip

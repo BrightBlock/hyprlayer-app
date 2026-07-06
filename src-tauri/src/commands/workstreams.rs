@@ -3,11 +3,12 @@ use std::sync::Arc;
 
 use hyprlayer_core::gitops::{DirEntry, FileSides, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
+use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::pr::{self, MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::scripts::ScriptKind;
 use hyprlayer_core::skills::SlashCommand;
-use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc};
+use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{
     self, archive_dir_for, CreateMode, CreateSpec, PullOutcome, RemovePolicy, WorktreeStatus,
@@ -27,16 +28,13 @@ use crate::state::AppState;
 pub struct WorkstreamView {
     pub item: Workstream,
     pub git: WorktreeStatus,
-    /// Populated only by `create_workstream`: result of copying configured
-    /// untracked files into the new worktree. `null` on every other path.
+    /// Set only by `create_workstream`: report of copied untracked files; `null` elsewhere.
     pub seed: Option<hyprlayer_core::worktree::seed::SeedReport>,
 }
 
-/// Branch choices for the "new workstream" dialog, covering all three modes.
-/// `branches` (local + remote) feeds the *isolated* base picker; `local_branches`
-/// feeds the *existing*/*in-place* pickers (a remote ref would detach HEAD);
-/// `current_branch` pre-selects the in-place default (whatever the checkout is
-/// already on).
+/// Branch choices for the "new workstream" dialog. `branches` (local + remote)
+/// feeds the isolated base picker; `local_branches` feeds the existing/in-place
+/// pickers (a remote ref would detach HEAD); `current_branch` is the in-place default.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkstreamBases {
@@ -61,10 +59,9 @@ async fn load_item(state: &AppState, id: &str) -> CmdResult<Workstream> {
         .ok_or_else(|| item_not_found(id))
 }
 
-/// The directory to run `gh` PR commands in for an item: its worktree when on
-/// disk, else the main repo. Both share the same remote, so PR number/branch
-/// resolution is identical; the fallback keeps PR ops working for a workstream
-/// whose worktree was removed (e.g. just archived).
+/// Directory to run `gh` PR commands in: the worktree when on disk, else the main
+/// repo. Both share the remote (identical PR resolution); the fallback keeps PR ops
+/// working after the worktree is removed (e.g. just archived).
 fn pr_dir(item: &Workstream) -> &Path {
     let worktree = Path::new(&item.worktree_path);
     if worktree.is_dir() {
@@ -84,12 +81,10 @@ fn item_view(item: Workstream, link: Option<LinkStatus>) -> WorkstreamView {
     }
 }
 
-/// Compute each workstream's git+link status concurrently on the blocking pool
-/// (one task per item), preserving input order. Status is filesystem-bound
-/// (two git2 tree walks per repo), so a serial sweep made sidebar latency scale
-/// with the *number* of active workstreams; fanning out makes it the slowest
-/// single repo instead. `link_for` runs inside each task (it's also blocking fs
-/// work), so a shared piece of context (the effective config) is passed by Arc.
+/// Each workstream's git+link status, computed concurrently on the blocking pool
+/// (one task per item, input order preserved). Status is filesystem-bound, so a
+/// serial sweep made sidebar latency scale with workstream count; fanning out caps
+/// it at the slowest single repo. `link_for` runs per-task, so its config is Arc'd.
 async fn status_batch<F>(items: Vec<Workstream>, link_for: F) -> CmdResult<Vec<WorkstreamView>>
 where
     F: Fn(&Workstream) -> Option<LinkStatus> + Send + Sync + 'static,
@@ -128,8 +123,7 @@ pub async fn list_workstreams(
     })
     .await?;
 
-    // All items in one project share a thoughts config; resolve it once, then
-    // each task checks its own worktree's links against it.
+    // All items in one project share a thoughts config; resolve it once.
     let effective = if let Some(first) = items.first() {
         Some(effective_for(&state, &first.project_path).await?)
     } else {
@@ -151,12 +145,9 @@ pub async fn list_all_workstreams(state: State<'_, AppState>) -> CmdResult<Vec<W
     status_batch(items, |_| None).await
 }
 
-/// Point the live worktree watcher at this workstream's worktree, so external
-/// edits push a `WorktreeChanged` event and the Changes panel + git status
-/// refresh without waiting for window focus (the way the agent and terminal
-/// panes already stream live). Single-slot: switching workstreams replaces the
-/// previous watcher; calling it again for the same id is a no-op. The frontend
-/// calls this whenever the viewed workstream changes.
+/// Point the live worktree watcher at this workstream, so external edits emit
+/// `WorktreeChanged` and refresh the Changes panel + git status without a focus
+/// event. Single-slot: switching replaces the previous watcher; same id is a no-op.
 #[tauri::command]
 #[specta::specta]
 pub async fn watch_worktree(
@@ -166,7 +157,7 @@ pub async fn watch_worktree(
 ) -> CmdResult<()> {
     let mut guard = state.worktree_watch.lock().await;
     if guard.as_ref().is_some_and(|(id, _)| id == &workstream_id) {
-        return Ok(()); // already watching this worktree
+        return Ok(());
     }
     // Drop the previous watcher before resolving the new one (so a missing
     // worktree, e.g. just-archived, simply leaves nothing watched).
@@ -198,10 +189,9 @@ pub async fn watch_worktree(
     Ok(())
 }
 
-/// Branches the user can base a new workstream on, with the auto-detected
-/// default. Best-effort: the default falls back to empty (the dialog then
-/// pre-selects nothing and the backend re-detects on create) so a repo with no
-/// resolvable main/master still lists its branches.
+/// Branches the user can base a new workstream on, plus the auto-detected default.
+/// Best-effort: the default falls back to empty (dialog pre-selects nothing, backend
+/// re-detects on create) so a repo with no resolvable main/master still lists branches.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workstream_bases(
@@ -241,9 +231,8 @@ pub async fn create_workstream(
     project_path: String,
     title: String,
     base: Option<String>,
-    // `mode`: "isolated" (default) | "existing" | "inplace" — see `WorkstreamBases`.
     // `branch`: the local branch to adopt for existing/inplace; unused for isolated.
-    mode: String,
+    mode: WorktreeMode,
     branch: Option<String>,
 ) -> CmdResult<WorkstreamView> {
     let title = title.trim().to_string();
@@ -265,29 +254,16 @@ pub async fn create_workstream(
             remedy: None,
         })
     };
-    let (create_mode, mode_str): (CreateMode, &str) = match mode.as_str() {
-        "isolated" => (CreateMode::Isolated, "isolated"),
-        "existing" => (
-            CreateMode::Existing {
-                branch: needs_branch("existing-branch")?,
-            },
-            "existing",
-        ),
-        "inplace" => (
-            CreateMode::InPlace {
-                branch: needs_branch("in-place")?,
-            },
-            "inplace",
-        ),
-        other => {
-            return Err(AppError {
-                code: "invalid_mode".into(),
-                message: format!("Unknown workstream mode: {other}"),
-                remedy: None,
-            })
-        }
+    let create_mode = match mode {
+        WorktreeMode::Isolated => CreateMode::Isolated,
+        WorktreeMode::Existing => CreateMode::Existing {
+            branch: needs_branch("existing-branch")?,
+        },
+        WorktreeMode::Inplace => CreateMode::InPlace {
+            branch: needs_branch("in-place")?,
+        },
     };
-    let inplace = mode_str == "inplace";
+    let inplace = mode == WorktreeMode::Inplace;
 
     // Existing/in-place adopt a branch the user already has, and both check it
     // out somewhere (a worktree, or the main checkout) — a remote-tracking ref or
@@ -406,7 +382,7 @@ pub async fn create_workstream(
                         &created.branch,
                         &created.base_branch,
                         RemovePolicy::ForceDiscard,
-                        mode_str == "isolated",
+                        mode == WorktreeMode::Isolated,
                     )
                     .await;
                 return Err(AppError::from(e));
@@ -452,7 +428,7 @@ pub async fn create_workstream(
         branch: created.branch.clone(),
         worktree_path: created.path.clone(),
         base_branch: created.base_branch.clone(),
-        worktree_mode: mode_str.to_string(),
+        worktree_mode: mode,
     };
     let item = db_task(state.db.clone(), move |db| db.insert_workstream(new_item)).await?;
 
@@ -573,18 +549,13 @@ pub async fn fetch_workstream_remote(state: State<'_, AppState>, id: String) -> 
 pub async fn set_workstream_stage(
     state: State<'_, AppState>,
     id: String,
-    stage: String,
+    stage: Stage,
 ) -> CmdResult<()> {
-    if hyprlayer_core::pipeline::Stage::try_parse(&stage).is_none() {
-        return Err(AppError {
-            code: "invalid_stage".into(),
-            message: format!("Unknown stage: {stage}"),
-            remedy: None,
-        });
-    }
+    // `Stage` deserializes tolerantly (unknown ⇒ General), so no invalid-stage
+    // error path remains: the bindings union makes a bad value a TS type error.
     load_item(&state, &id).await?;
     db_task(state.db.clone(), move |db| {
-        db.update_workstream_stage(&id, &stage)
+        db.update_workstream_stage(&id, stage)
     })
     .await
 }
@@ -827,7 +798,7 @@ pub async fn restore_workstream(
     id: String,
 ) -> CmdResult<WorkstreamView> {
     let item = load_item(&state, &id).await?;
-    if item.status != "archived" {
+    if item.status != WorkstreamStatus::Archived {
         return Err(AppError {
             code: "not_archived".into(),
             message: format!("{} is not archived.", item.title),
@@ -927,7 +898,7 @@ pub async fn restore_workstream(
 #[specta::specta]
 pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let item = load_item(&state, &id).await?;
-    if item.status != "archived" {
+    if item.status != WorkstreamStatus::Archived {
         return Err(AppError {
             code: "not_archived".into(),
             message: format!("{} is not archived.", item.title),

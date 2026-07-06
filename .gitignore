@@ -8,6 +8,9 @@ pnpm-debug.log*
 
 # Dependencies / build output
 node_modules
+# pnpm is the package manager of record (see package.json packageManager);
+# an npm run would regenerate this orphan.
+package-lock.json
 dist
 dist-ssr
 *.local

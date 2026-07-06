@@ -10,12 +10,12 @@
 
 import { useEffect, useMemo } from "react";
 
-import type { WorkstreamView } from "../../lib/bindings";
-import { useBootstrap } from "../../lib/queries";
-import { IS_MACOS } from "../../lib/platform";
-import { eventToChord, hasPrimaryModifier, normalizeChord } from "../../lib/keybindings/chord";
-import { chordToCommand, type Overrides } from "../../lib/keybindings/resolve";
-import { isEditableTarget } from "../../lib/keybindings/useKeybindings";
+import type { WorkstreamView } from "@/lib/bindings";
+import { useBootstrap } from "@/lib/queries";
+import { IS_MACOS } from "@/lib/platform";
+import { eventToChord, hasPrimaryModifier, normalizeChord } from "@/lib/keybindings/chord";
+import { chordToCommand, type Overrides } from "@/lib/keybindings/resolve";
+import { isEditableTarget } from "@/lib/keybindings/useKeybindings";
 import { customPrompts } from "./prompts";
 import { runCustomPrompt } from "./runPrompt";
 

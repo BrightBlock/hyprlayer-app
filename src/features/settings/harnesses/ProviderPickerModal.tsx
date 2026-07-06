@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 
-import type { CatalogProvider } from "../../../lib/bindings";
-import { isFreeOpencodeModel } from "../../session/harnessing";
-import { useSetOpencodeProviderKey } from "../../../lib/queries";
-import { Button, Dialog, ErrorNote, TextInput } from "../../../components/ui";
-import { SearchIcon } from "../../../components/icons";
+import type { CatalogProvider } from "@/lib/bindings";
+import { isFreeOpencodeModel } from "@/lib/domain/harnessing";
+import { useSetOpencodeProviderKey } from "@/lib/queries";
+import { Button, Dialog, ErrorNote, TextInput } from "@/components/ui";
+import { SearchIcon } from "@/components/icons";
 
 const FEATURED = 7;
 

@@ -3,6 +3,70 @@ use serde::{Deserialize, Serialize};
 
 use super::{now_ms, Db};
 use crate::error::Result;
+use crate::pipeline::Stage;
+
+/// How a workstream is backed: `isolated` (app-created branch + dedicated
+/// worktree), `existing` (user's local branch in a dedicated worktree), or
+/// `inplace` (no worktree — the project's own checkout). Governs whether the
+/// branch + directory are app-owned and safe to drop on archive/delete.
+///
+/// Tolerance: an unrecognized stored value reads (via [`WorktreeMode::parse`])
+/// as `Inplace` — the touch-nothing mode — so a mangled row can never make
+/// archive/cleanup delete a branch or checkout the app doesn't own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "lowercase")]
+pub enum WorktreeMode {
+    Isolated,
+    Existing,
+    Inplace,
+}
+
+impl WorktreeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorktreeMode::Isolated => "isolated",
+            WorktreeMode::Existing => "existing",
+            WorktreeMode::Inplace => "inplace",
+        }
+    }
+
+    /// Tolerant row-read: see the enum docs for why unknown ⇒ `Inplace`.
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "isolated" => WorktreeMode::Isolated,
+            "existing" => WorktreeMode::Existing,
+            _ => WorktreeMode::Inplace,
+        }
+    }
+}
+
+/// Whether a workstream is live or archived. Unknown stored values read as
+/// `Active` via [`WorkstreamStatus::parse`] (they can only come from a newer
+/// schema; showing the row beats hiding it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "lowercase")]
+pub enum WorkstreamStatus {
+    Active,
+    Archived,
+}
+
+impl WorkstreamStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkstreamStatus::Active => "active",
+            WorkstreamStatus::Archived => "archived",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "archived" => WorkstreamStatus::Archived,
+            _ => WorkstreamStatus::Active,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -15,15 +79,9 @@ pub struct Workstream {
     pub branch: String,
     pub worktree_path: String,
     pub base_branch: String,
-    /// How the workstream is backed: `isolated` (app-created branch + dedicated
-    /// worktree), `existing` (user's local branch in a dedicated worktree), or
-    /// `inplace` (no worktree — the project's own checkout). Governs whether the
-    /// branch + directory are app-owned and safe to drop on archive/delete.
-    pub worktree_mode: String,
-    /// general | research | plan | implement | validate | ship
-    pub stage: String,
-    /// active | archived
-    pub status: String,
+    pub worktree_mode: WorktreeMode,
+    pub stage: Stage,
+    pub status: WorkstreamStatus,
     pub pr_number: Option<u32>,
     pub created_at: f64,
     pub updated_at: f64,
@@ -45,14 +103,14 @@ impl Workstream {
     /// project's main checkout. The archive/restore/delete paths special-case
     /// these so they never move, remove, or re-link the user's repo.
     pub fn is_inplace(&self) -> bool {
-        self.worktree_mode == "inplace"
+        self.worktree_mode == WorktreeMode::Inplace
     }
 
     /// True only when the app created the branch (`isolated`). `existing` and
     /// `inplace` workstreams adopt a branch the user already had, so the app must
     /// never delete it on archive/cleanup.
     pub fn app_owns_branch(&self) -> bool {
-        self.worktree_mode == "isolated"
+        self.worktree_mode == WorktreeMode::Isolated
     }
 }
 
@@ -73,11 +131,15 @@ pub struct NewWorkstream {
     pub branch: String,
     pub worktree_path: String,
     pub base_branch: String,
-    /// isolated | existing | inplace — see [`Workstream::worktree_mode`].
-    pub worktree_mode: String,
+    pub worktree_mode: WorktreeMode,
 }
 
 fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
+    // The enum columns stay TEXT in sqlite; parse tolerantly so rows written by
+    // any past (or future) schema keep loading.
+    let worktree_mode: String = row.get("worktree_mode")?;
+    let stage: String = row.get("stage")?;
+    let status: String = row.get("status")?;
     Ok(Workstream {
         id: row.get("id")?,
         project_path: row.get("project_path")?,
@@ -86,9 +148,9 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
         branch: row.get("branch")?,
         worktree_path: row.get("worktree_path")?,
         base_branch: row.get("base_branch")?,
-        worktree_mode: row.get("worktree_mode")?,
-        stage: row.get("stage")?,
-        status: row.get("status")?,
+        worktree_mode: WorktreeMode::parse(&worktree_mode),
+        stage: Stage::parse(&stage),
+        status: WorkstreamStatus::parse(&status),
         pr_number: row.get("pr_number")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -111,8 +173,8 @@ impl Db {
             worktree_path: new.worktree_path,
             base_branch: new.base_branch,
             worktree_mode: new.worktree_mode,
-            stage: "general".into(),
-            status: "active".into(),
+            stage: Stage::General,
+            status: WorkstreamStatus::Active,
             pr_number: None,
             created_at: now,
             updated_at: now,
@@ -132,9 +194,9 @@ impl Db {
                     item.branch,
                     item.worktree_path,
                     item.base_branch,
-                    item.worktree_mode,
-                    item.stage,
-                    item.status,
+                    item.worktree_mode.as_str(),
+                    item.stage.as_str(),
+                    item.status.as_str(),
                     item.pr_number,
                     item.created_at,
                     item.updated_at,
@@ -217,8 +279,8 @@ impl Db {
         })
     }
 
-    pub fn update_workstream_stage(&self, id: &str, stage: &str) -> Result<()> {
-        self.touch(id, "stage", stage)
+    pub fn update_workstream_stage(&self, id: &str, stage: Stage) -> Result<()> {
+        self.touch(id, "stage", stage.as_str())
     }
 
     pub fn update_workstream_title(&self, id: &str, title: &str) -> Result<()> {
@@ -341,7 +403,7 @@ mod tests {
             branch: format!("hyprlayer/{title}-abcd"),
             worktree_path: format!("/wt/{title}"),
             base_branch: "origin/main".into(),
-            worktree_mode: "isolated".into(),
+            worktree_mode: WorktreeMode::Isolated,
         })
         .unwrap()
     }
@@ -355,17 +417,17 @@ mod tests {
         let listed = db.list_workstreams("/repo", false).unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, a.id);
-        assert_eq!(listed[0].stage, "general");
+        assert_eq!(listed[0].stage, Stage::General);
         // The fixture creates isolated workstreams: app owns the branch, has a
         // dedicated worktree.
-        assert_eq!(listed[0].worktree_mode, "isolated");
+        assert_eq!(listed[0].worktree_mode, WorktreeMode::Isolated);
         assert!(listed[0].app_owns_branch());
         assert!(!listed[0].is_inplace());
 
-        db.update_workstream_stage(&a.id, "research").unwrap();
+        db.update_workstream_stage(&a.id, Stage::Research).unwrap();
         db.update_workstream_title(&a.id, "Auth revamp").unwrap();
         let got = db.get_workstream(&a.id).unwrap().unwrap();
-        assert_eq!(got.stage, "research");
+        assert_eq!(got.stage, Stage::Research);
         assert_eq!(got.title, "Auth revamp");
         assert!(got.updated_at >= got.created_at);
 
@@ -409,16 +471,16 @@ mod tests {
         let archived = db.list_archived_workstreams().unwrap();
         assert_eq!(archived.len(), 1);
         assert_eq!(archived[0].id, a.id);
-        assert_eq!(archived[0].status, "archived");
+        assert_eq!(archived[0].status, WorkstreamStatus::Archived);
         assert!(archived[0].archived_at.is_some());
 
         db.unarchive_workstream(&a.id).unwrap();
         let got = db.get_workstream(&a.id).unwrap().unwrap();
-        assert_eq!(got.status, "active");
+        assert_eq!(got.status, WorkstreamStatus::Active);
         assert!(got.archived_at.is_none());
         assert!(db.list_archived_workstreams().unwrap().is_empty());
         // Untouched siblings stay untouched.
-        assert_eq!(db.get_workstream(&b.id).unwrap().unwrap().status, "active");
+        assert_eq!(db.get_workstream(&b.id).unwrap().unwrap().status, WorkstreamStatus::Active);
     }
 
     #[test]

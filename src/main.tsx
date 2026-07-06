@@ -5,9 +5,11 @@ import { RouterProvider } from "@tanstack/react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands } from "./lib/bindings";
-import { attachEventListeners } from "./lib/events";
-import { hydrateRunning } from "./features/session/scriptsStore";
+import { attachEventListeners, registerEventBridge } from "./lib/events";
+import { hydrateRunning, scriptRunBridge } from "./features/session/scriptsStore";
+import { removeSessionsForWorkstream } from "./features/session/sessionStore";
 import { unwrap } from "./lib/ipc";
+import { onWorkstreamArchived } from "./lib/queries";
 import { queryClient } from "./lib/queryClient";
 import { setupQueryFocus } from "./lib/queryFocus";
 import { router } from "./router";
@@ -19,6 +21,10 @@ import "./index.css";
 // Apply the persisted color theme before the first paint to avoid a flash of
 // the default palette.
 initTheme();
+// Feature-side event/mutation hooks register before the bridge attaches, so
+// lib/{events,queries} stay feature-independent (ADR-0003 import direction).
+registerEventBridge(scriptRunBridge);
+onWorkstreamArchived(removeSessionsForWorkstream);
 attachEventListeners();
 // Seed the rail's green "Run alive" indicator from any runs the backend still
 // holds (survives a frontend reload; empty after a full app restart).

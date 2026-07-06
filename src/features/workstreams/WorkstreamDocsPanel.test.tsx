@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 import { WorkstreamDocsPanel, roleForDoc } from "./WorkstreamDocsPanel";
-import { commands, type DocMeta } from "../../lib/bindings";
+import { commands, type DocMeta } from "@/lib/bindings";
 
 vi.mock("../../lib/bindings", () => ({
   commands: {

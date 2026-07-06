@@ -1,11 +1,11 @@
 import { useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import type { MergeMethod, WorkstreamView } from "../../lib/bindings";
-import { useBootstrap, useMergePr, useWorkstreamPr } from "../../lib/queries";
-import { addressPrFeedback } from "../session/sessionStore";
-import { ContextMenuItem, Spinner } from "../../components/ui";
-import { GitPullRequestIcon } from "../../components/icons";
+import type { MergeMethod, WorkstreamView } from "@/lib/bindings";
+import { useBootstrap, useMergePr, useWorkstreamPr } from "@/lib/queries";
+import { addressPrFeedback } from "@/features/session/sessionStore";
+import { ContextMenuItem, Spinner } from "@/components/ui";
+import { GitPullRequestIcon } from "@/components/icons";
 
 // Pill matching the header "Ship" action's height/treatment (border + tint), so
 // the PR controls sit cleanly alongside it on the top row.

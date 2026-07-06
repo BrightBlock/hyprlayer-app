@@ -2,12 +2,12 @@ import { useState } from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import type { AppSettings, BinaryStatus, ClaudeSettings } from "../../../lib/bindings";
+import type { AppSettings, BinaryStatus, ClaudeSettings } from "@/lib/bindings";
 import {
   useClaudeAuthStatus,
   useEditorTargets,
   useSetAppSettings,
-} from "../../../lib/queries";
+} from "@/lib/queries";
 import {
   ALL_MODEL_KEYS,
   ALL_MODEL_KEY_SET,
@@ -17,7 +17,7 @@ import {
   MODELS,
   modelOption,
   normalizeVisibleModelKeys,
-} from "../../session/models";
+} from "@/lib/domain/models";
 import {
   Badge,
   Button,
@@ -29,11 +29,11 @@ import {
   Spinner,
   TextInput,
   Toggle,
-} from "../../../components/ui";
-import { ChevronDownIcon, ChevronRightIcon } from "../../../components/icons";
-import { BinaryCard } from "../../system/BinaryCard";
-import { SetupTerminal } from "../../onboarding/SetupTerminal";
-import { SettingRow } from "../parts";
+} from "@/components/ui";
+import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
+import { BinaryCard } from "@/features/system/BinaryCard";
+import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
+import { SettingRow } from "@/features/settings/parts";
 
 const CLAUDE_SETTINGS_REL = ".claude/settings.json";
 const CHROME_DOCS = "https://code.claude.com/docs/en/chrome";
@@ -215,8 +215,7 @@ export function ClaudeHarnessTab({
   );
 }
 
-/** Collapsible Advanced section — the executable-path override and a link to
- *  the user's Claude settings file, tucked away like the OpenCode tab's. */
+/** Collapsible Advanced section: executable-path override + link to the user's Claude settings file. */
 function ClaudeAdvancedCard({ status }: { status?: BinaryStatus }) {
   const [open, setOpen] = useState(false);
   return (
@@ -497,9 +496,8 @@ function DocLink({ href, children }: { href: string; children: React.ReactNode }
   );
 }
 
-/** The "Models visible in composer" picker for Claude. `visibleModels: null`
- *  means "not customised → show every preset". (Moved here from the old
- *  Settings → Models section.) */
+/** "Models visible in composer" picker for Claude. `visibleModels: null` means
+ *  "not customised → show every preset". */
 function VisibleModelsPanel({
   claude,
   patchClaude,

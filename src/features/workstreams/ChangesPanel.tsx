@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
 
-import type { GitFileEntry } from "../../lib/bindings";
+import type { GitFileEntry } from "@/lib/bindings";
 import {
   Badge,
   Button,
@@ -10,19 +10,19 @@ import {
   ErrorNote,
   IconButton,
   Spinner,
-} from "../../components/ui";
-import { ChevronDownIcon, ChevronRightIcon, DocIcon, FolderIcon } from "../../components/icons";
-import { FileTypeIcon } from "../../components/fileIcon";
-import { basename } from "../../lib/path";
+} from "@/components/ui";
+import { ChevronDownIcon, ChevronRightIcon, DocIcon, FolderIcon } from "@/components/icons";
+import { FileTypeIcon } from "@/components/fileIcon";
+import { basename } from "@/lib/path";
 import {
   useDiscardFiles,
   useStageFiles,
   useUnstageFiles,
   useWorktreeDir,
   useWorktreeGitStatus,
-} from "../../lib/queries";
-import { useWorkstreamDocs } from "../session/sessionStore";
-import type { DocKind } from "../session/toolDisplay";
+} from "@/lib/queries";
+import { useWorkstreamDocs } from "@/features/session/sessionStore";
+import type { DocKind } from "@/lib/domain/docs";
 
 function RefreshIcon() {
   return (

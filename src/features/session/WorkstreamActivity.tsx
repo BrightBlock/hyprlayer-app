@@ -5,8 +5,8 @@
  * and wants review. Nothing renders when there's no activity to flag, so a quiet
  * workstream stays visually quiet. See `useWorkstreamActivity` for the fold.
  */
-import type { AgentState } from "../multiplexer/engineState";
-import { useWorkstreamAgentRollup } from "../multiplexer/multiplexerStore";
+import type { AgentState } from "@/features/multiplexer/engineState";
+import { useWorkstreamAgentRollup } from "@/features/multiplexer/multiplexerStore";
 import { useWorkstreamActivity, type WorkstreamActivity } from "./sessionStore";
 
 type DotAnim = "ping" | "work" | "none";

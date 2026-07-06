@@ -1,13 +1,9 @@
-//! The OpenCode harness driver.
+//! The OpenCode harness driver. `opencode serve` runs as one long-lived local
+//! server shared by every session ([`OpenCodeManager`]); each session's
+//! [`OpenCodeDriver`] filters the global SSE stream by session id and translates
+//! OpenCode events into harness-agnostic [`SessionEvent`]s.
 //!
-//! OpenCode runs as a long-lived local server (`opencode serve`) that the app
-//! talks to over HTTP, with a single global Server-Sent-Events stream for output.
-//! One server is shared by every OpenCode session ([`OpenCodeManager`]); each
-//! session gets an [`OpenCodeDriver`] that filters the global event stream by its
-//! session id and translates OpenCode events into the harness-agnostic
-//! [`SessionEvent`]s the rest of the app already renders.
-//!
-//! Confirmed against the `opencode serve` OpenAPI (v1.17):
+//! Wire reference, confirmed against `opencode serve` OpenAPI (v1.17):
 //!   - `GET  /global/health`            → `{ healthy, version }`
 //!   - `GET  /global/event`             → SSE of `{ directory, project, payload:{ id, type, properties } }`
 //!     (the unscoped, all-directories stream — `/event` alone is scoped to the

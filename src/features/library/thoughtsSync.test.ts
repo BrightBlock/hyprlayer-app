@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Project } from "../../lib/bindings";
+import type { Project } from "@/lib/bindings";
 import {
   AUTO_SYNC_COOLDOWN_MS,
   resolveSyncProjectPath,

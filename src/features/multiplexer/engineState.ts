@@ -1,27 +1,20 @@
-//! Maps a PTY engine's recent output to a semantic agent state.
-//!
-//! Multiplexer agents are opaque CLIs — we only see their terminal bytes — so
-//! state is inferred heuristically from the tail of (ANSI-stripped) output plus
-//! a "has it gone quiet?" signal the caller derives from a debounce timer.
-//!
-//!   working — output actively flowing / a spinner is up.
-//!   blocked — a permission gate or question is on screen, waiting on the user.
+//! Maps a PTY engine's recent output to a semantic agent state. Multiplexer
+//! agents are opaque CLIs (we see only terminal bytes), so state is inferred from
+//! the (ANSI-stripped) output tail plus a caller-supplied "gone quiet?" signal:
+//!   working — output flowing / a spinner is up.
+//!   blocked — a permission gate or question on screen, waiting on the user.
 //!   done    — was working/blocked, then went quiet (turn finished).
 //!   idle    — spawned with no task yet (a REPL/shell at rest).
-//!
-//! `blocked` is the one that badges the tab + workstream and fires a
-//! notification, so its patterns are engine-specific (with a generic fallback)
-//! to keep false positives low.
+//! `blocked` badges the tab + workstream and fires a notification, so its patterns
+//! are engine-specific (+ a generic fallback) to keep false positives low.
 
 export type AgentState = "working" | "blocked" | "done" | "idle";
 
-// ANSI / VT control sequences a CLI emits (CSI, OSC, etc.), matched so the
-// heuristics run against readable text. Hex escapes only — no raw control bytes
-// in source (keeps the linter + the file's encoding clean).
+// ANSI/VT control sequences (CSI, OSC, …), stripped so heuristics run on
+// readable text. Hex escapes only — no raw control bytes in source.
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /[\x1b\x9b][[\]()#;?]*(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\x07|(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~])/g;
-// Stray C0 controls, excluding tab (\x09), newline (\x0a) and carriage return
-// (\x0d) which are handled separately below.
+// Stray C0 controls, minus tab/newline/CR (\x09/\x0a/\x0d), handled separately below.
 // eslint-disable-next-line no-control-regex
 const OTHER_CTRL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 

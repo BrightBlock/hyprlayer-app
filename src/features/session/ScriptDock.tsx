@@ -15,13 +15,13 @@ import {
   WrenchIcon,
   WarningTriangleIcon,
   XIcon,
-} from "../../components/icons";
-import { commands, type ScriptKind, type ScriptStatus } from "../../lib/bindings";
-import { useBootstrap, useScriptOutput, useScriptRuntime, useScripts, useShellName } from "../../lib/queries";
-import { formatChord } from "../../lib/keybindings/chord";
-import { effectiveChord } from "../../lib/keybindings/resolve";
-import { IS_MACOS } from "../../lib/platform";
-import { formatRelativeTime } from "./toolDisplay";
+} from "@/components/icons";
+import { commands, type ScriptKind, type ScriptStatus } from "@/lib/bindings";
+import { useBootstrap, useScriptOutput, useScriptRuntime, useScripts, useShellName } from "@/lib/queries";
+import { formatChord } from "@/lib/keybindings/chord";
+import { effectiveChord } from "@/lib/keybindings/resolve";
+import { IS_MACOS } from "@/lib/platform";
+import { formatRelativeTime } from "@/lib/format";
 import { ScriptOutputView } from "./ScriptOutputView";
 import { ScriptRunView } from "./ScriptRunView";
 import { TerminalTab } from "./TerminalTab";
@@ -39,8 +39,8 @@ import {
   toggleDockPosition,
   useScriptsStore,
 } from "./scriptsStore";
-import { startEdgeDrag } from "../../lib/resize";
-import { ScrollableTabStrip } from "../../components/ScrollableTabs";
+import { startEdgeDrag } from "@/lib/resize";
+import { ScrollableTabStrip } from "@/components/ScrollableTabs";
 
 const cx = (...parts: Array<string | false | null | undefined>): string =>
   parts.filter(Boolean).join(" ");

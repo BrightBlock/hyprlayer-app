@@ -14,8 +14,8 @@ import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { Fragment, memo, useEffect, useMemo, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 
-import { ClipboardIcon } from "../../components/icons";
-import { useCopyFeedback } from "../../lib/clipboard";
+import { ClipboardIcon } from "@/components/icons";
+import { useCopyFeedback } from "@/lib/clipboard";
 import { highlightToHast, resolveLang } from "./shikiHighlight";
 
 // 150ms is long enough that streaming never triggers a highlight mid-token

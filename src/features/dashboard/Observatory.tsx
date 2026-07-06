@@ -7,16 +7,16 @@
  * built from theme tokens (glass = panel/edge at opacity, stage hues from
  * stages.ts) so all six themes render native.
  */
-import { Button } from "../../components/ui";
-import { ChevronRightIcon, SearchIcon } from "../../components/icons";
-import type { ArchivedWorkstreamView, WorkstreamView } from "../../lib/bindings";
-import { effectiveChord } from "../../lib/keybindings/resolve";
-import { formatChord } from "../../lib/keybindings/chord";
-import { IS_MACOS } from "../../lib/platform";
-import { useBootstrap } from "../../lib/queries";
-import { MODE_STYLES, stageLabel, stageOf, type StageKey } from "../session/stages";
-import { formatElapsed, formatRelativeTime } from "../session/toolDisplay";
-import { openSearch } from "../search/searchStore";
+import { Button } from "@/components/ui";
+import { ChevronRightIcon, SearchIcon } from "@/components/icons";
+import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
+import { effectiveChord } from "@/lib/keybindings/resolve";
+import { formatChord } from "@/lib/keybindings/chord";
+import { IS_MACOS } from "@/lib/platform";
+import { useBootstrap } from "@/lib/queries";
+import { MODE_STYLES, stageLabel, stageOf, type StageKey } from "@/lib/domain/stages";
+import { formatElapsed, formatRelativeTime } from "@/lib/format";
+import { openSearch } from "@/features/search/searchStore";
 import type { FleetActivity, FleetItem } from "./fleet";
 
 /** Coarse elapsed for agent cards ("7m", "1h 04m") — minute-level so the rows

@@ -22,10 +22,9 @@ pub struct Project {
     pub path: String,
     /// Human-facing project name (the app registry name, e.g. `brightblock.ai`).
     pub mapped_name: String,
-    /// The thoughts `repoMappings` key this repo resolves to — the identifier
-    /// docs are indexed (and worktrees created) under. The CLI sanitizes it, so
-    /// it can differ from `mapped_name` (e.g. `brightblock.ai` → `brightblock_ai`).
-    /// Filter docs by project using THIS, not the display name.
+    /// The thoughts `repoMappings` key this repo resolves to — what docs are
+    /// indexed and worktrees created under. CLI-sanitized, so it can differ from
+    /// `mapped_name` (`brightblock.ai` → `brightblock_ai`). Filter docs by THIS.
     pub thoughts_project: String,
     pub profile: Option<String>,
     pub backend_kind: String,
@@ -138,10 +137,9 @@ pub struct SyncReport {
     pub output: String,
 }
 
-/// The project list: the app's explicit registry — NOT the thoughts config's
-/// `repoMappings`, which also carry every worktree's `thoughts init` entry.
-/// Each row is enriched with its backend/profile from the effective config,
-/// best-effort (a missing/locked config just yields the git default).
+/// The app's explicit project registry — NOT the thoughts config's `repoMappings`
+/// (those also carry every worktree's `thoughts init` entry). Each row is enriched
+/// best-effort with backend/profile; a missing/locked config yields the git default.
 pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
     let records = match db_task(state.db.clone(), |db| db.list_projects()).await {
         Ok(records) => records,
@@ -161,12 +159,9 @@ pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
                 .as_ref()
                 .map(|e| e.backend.kind().as_str().to_string())
                 .unwrap_or_else(|| "git".to_string());
-            // Docs are indexed — and worktrees created — under the thoughts
-            // `repoMappings` key, which the CLI sanitizes (e.g. a repo named
-            // `brightblock.ai` maps to `brightblock_ai`). Expose it separately so
-            // doc queries can filter on it while the UI keeps showing the
-            // friendlier registry name. Fall back to the registry name when the
-            // project isn't mapped into thoughts yet.
+            // The CLI-sanitized `repoMappings` key, separate from the display
+            // name so doc queries can filter on it. Falls back to the registry
+            // name when the project isn't mapped into thoughts yet.
             let thoughts_project = eff
                 .as_ref()
                 .and_then(|e| e.mapped_name.clone())
@@ -322,22 +317,19 @@ fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> St
         })
 }
 
-/// Recursively delete a directory tree on the blocking pool. A repo clone can
-/// hold `node_modules`/`.git`/`target`, so a synchronous `remove_dir_all` would
-/// stall a tokio worker for seconds; this keeps it off the async runtime.
-/// Best-effort — the caller decides what (if anything) a failure means.
+/// Recursively delete a directory tree on the blocking pool — a repo clone's
+/// `node_modules`/`.git`/`target` would stall a tokio worker for seconds if
+/// deleted synchronously. Best-effort; the caller decides what a failure means.
 async fn remove_dir_all_bg(path: &Path) {
     let path = path.to_path_buf();
     let _ = blocking("remove_dir", move || std::fs::remove_dir_all(path)).await;
 }
 
 /// Provision thoughts inside `repo`, register it as a project, and surface it.
-///
-/// `owned` says whether the app created `repo` (a fresh clone) or merely
-/// references it (an in-place disk import). On failure we roll back so a
-/// half-set-up project never lingers: an owned clone is deleted outright; an
-/// in-place repo is *never* deleted — that's the user's working copy — so we
-/// only undo the thoughts provisioning.
+/// `owned` = a fresh clone the app created vs. an in-place disk import. On
+/// failure we roll back so no half-set-up project lingers: an owned clone is
+/// deleted outright; an in-place repo (the user's working copy) is never
+/// deleted — only its thoughts provisioning is undone.
 async fn register_repo(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -414,11 +406,9 @@ async fn provision_project(
     register_repo(app, state, &git, &dest, name, kind, true).await
 }
 
-/// Import a project from a local git repo on disk: register it *in place* and
-/// link it in the project view. We deliberately do not re-clone or copy it —
-/// duplicating the repo under `~/hyprlayer/repos` only wastes disk and diverges
-/// from the working copy the user already maintains. Worktrees are cut directly
-/// from this repo via `git worktree add`, which keeps them in sync with it.
+/// Import a local on-disk git repo as a project, registered *in place* — never
+/// re-cloned or copied (that wastes disk and diverges from the user's working
+/// copy). Worktrees are cut directly from it via `git worktree add`.
 #[tauri::command]
 #[specta::specta]
 pub async fn add_project(
@@ -452,11 +442,10 @@ pub async fn add_project(
         .await
         .map_err(AppError::from)?;
 
-    // Canonicalize so the registered path is stable (no trailing slash, symlinks
-    // resolved), which keeps later lookups and removals matching exactly. `dunce`
-    // strips the Windows `\\?\` verbatim prefix that `std::fs::canonicalize` adds
-    // — that prefix leaks into project URLs and trips git/tools that can't parse
-    // verbatim paths.
+    // Canonicalize for a stable registered path (no trailing slash, symlinks
+    // resolved) so later lookups/removals match exactly. `dunce` strips the
+    // Windows `\\?\` verbatim prefix `std::fs::canonicalize` adds — it leaks
+    // into project URLs and trips git/tools.
     let repo = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let name = project_name(directory_name, &repo.to_string_lossy(), &repo);
     register_repo(&app, &state, &git, &repo, &name, "disk", false).await
@@ -498,10 +487,10 @@ pub async fn clone_project(
     provision_project(&app, &state, &url, &name, "clone", location.as_deref()).await
 }
 
-/// Remove a project from the registry. With `delete_files`, also delete the
-/// directory from disk — for both app-owned clones and in-place imports (the
-/// user opts in per removal). Refused while the project has active workstreams:
-/// they own live worktrees cut from this repo, so removal would orphan them.
+/// Remove a project from the registry; with `delete_files`, also delete its
+/// directory (clones and in-place imports alike — user opts in per removal).
+/// Refused while active workstreams exist: they own live worktrees cut from this
+/// repo, so removal would orphan them.
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_project(
@@ -512,9 +501,8 @@ pub async fn remove_project(
 ) -> CmdResult<()> {
     let repo = PathBuf::from(&path);
 
-    // A project's active workstreams own live worktrees cut from this repo.
-    // Removing the project would orphan them (and deleting the repo would
-    // strand them outright), so refuse until they're archived.
+    // Active workstreams own live worktrees cut from this repo; removal would
+    // orphan them, so refuse until they're archived.
     let path_for_count = path.clone();
     let active = db_task(state.db.clone(), move |db| {
         db.list_workstreams(&path_for_count, false)
@@ -540,8 +528,7 @@ pub async fn remove_project(
     let path_for_db = path.clone();
     db_task(state.db.clone(), move |db| db.delete_project(&path_for_db)).await?;
 
-    // No active workstreams (guarded above), so deleting the clone or the
-    // in-place import is safe when the user opted in.
+    // Guarded above (no active workstreams), so deleting on opt-in is safe.
     if delete_files && repo.is_dir() {
         remove_dir_all_bg(&repo).await;
     }
@@ -788,11 +775,10 @@ pub async fn set_worktree_files(
     Ok(saved)
 }
 
-/// Dry-run the project's configured worktree-copy patterns against its checkout
-/// so the UI can flag a project whose copy files are missing (e.g. a `.env` that
-/// doesn't exist on disk) BEFORE a workstream is created. Mirrors
-/// `create_workstream`'s seed step exactly, minus the copy. Never errors — an
-/// unreadable settings file yields an empty (clean) report.
+/// Dry-run the project's worktree-copy patterns against its checkout so the UI
+/// can flag missing copy files (e.g. a `.env` absent on disk) BEFORE a workstream
+/// is created. Mirrors `create_workstream`'s seed step, minus the copy. Never
+/// errors — an unreadable settings file yields an empty (clean) report.
 #[tauri::command]
 #[specta::specta]
 pub async fn check_worktree_files(

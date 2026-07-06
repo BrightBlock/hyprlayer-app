@@ -29,7 +29,7 @@ import { commands, type AppSettings, type WorkstreamView } from "./bindings";
 import { unwrap } from "./ipc";
 import { IS_MACOS } from "./platform";
 import { queryClient } from "./queryClient";
-import { router } from "../router";
+import { goToWorkstream } from "./appNav";
 
 type NotifyArgs = {
   workstreamId: string;
@@ -109,10 +109,9 @@ export function setupNotificationActions(): void {
       return;
     }
     lastIntent = null;
-    void router.navigate({
-      to: "/projects/$projectPath",
-      params: { projectPath: intent.projectPath },
-      search: { item: intent.workstreamId },
+    goToWorkstream({
+      projectPath: intent.projectPath,
+      workstreamId: intent.workstreamId,
     });
   });
 }

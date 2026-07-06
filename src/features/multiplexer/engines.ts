@@ -7,8 +7,8 @@
 
 import { useMemo } from "react";
 
-import type { AppSettings, Engine, MultiplexerSettings } from "../../lib/bindings";
-import { useBootstrap } from "../../lib/queries";
+import type { AppSettings, Engine, MultiplexerSettings } from "@/lib/bindings";
+import { useBootstrap } from "@/lib/queries";
 
 export type ResolvedEngine = {
   id: string;

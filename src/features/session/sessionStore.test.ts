@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionEvent } from "../../lib/bindings";
+import type { SessionEvent } from "@/lib/bindings";
 
 // Hoisted so the (hoisted) vi.mock factories below can reference these safely.
 // A `FakeChannel` stands in for the Tauri `Channel`: `onmessage` is just a

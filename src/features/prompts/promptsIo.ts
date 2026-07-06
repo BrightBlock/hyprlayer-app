@@ -1,24 +1,15 @@
 /**
- * Import/export for the prompt library — the pure core behind the `.hlprompts`
- * file format and the merge that folds an imported bundle into settings.
- *
- * A `.hlprompts` file is a small versioned JSON bundle of prompt entries (name,
- * body, optional keyboard chord, optional per-project overrides). Built-in
- * prompts (Commit/Ship) export with their *effective* body; on import every
- * entry becomes a **custom** prompt unless its name matches one already in the
- * library, in which case the user resolves the collision (keep both / replace /
- * skip). Project overrides travel keyed by project **name**, not path — they
- * only re-attach if the importer has a project of the same name, and are
- * otherwise dropped (surfaced as a note in the review dialog).
- *
- * File I/O for the chosen path lives in Rust (`read_prompts_file` /
- * `write_prompts_file`); everything here is pure and unit-tested. Chord strings
- * are the frontend's canonical form (e.g. `"mod+shift+t"`), matching
- * `CustomPrompt.chord` and the keybinding overrides.
+ * Pure core behind the `.hlprompts` file format (a versioned JSON bundle of
+ * prompt entries) and the merge that folds an import into settings. On import
+ * every entry becomes a custom prompt unless its name collides, which the user
+ * resolves (keep-both/replace/skip). Overrides travel keyed by project NAME,
+ * not path — they only re-attach where a same-named project exists, else drop.
+ * File I/O lives in Rust (`read_prompts_file`/`write_prompts_file`); this is
+ * pure and unit-tested. Chords are the frontend's canonical form.
  */
 
-import type { CustomPrompt, PromptSettings } from "../../lib/bindings";
-import { normalizeChord } from "../../lib/keybindings/chord";
+import type { CustomPrompt, PromptSettings } from "@/lib/bindings";
+import { normalizeChord } from "@/lib/keybindings/chord";
 import type { BuiltinPromptId } from "./prompts";
 
 /** Current on-disk format version. Bump when the shape changes incompatibly. */
@@ -184,7 +175,6 @@ export interface ImportCandidate {
 /** Everything {@link planImport}/{@link applyImport} need to know about the
  *  current library, gathered by the caller (which owns keybinding resolution). */
 export interface LibrarySnapshot {
-  /** Built-in prompt names paired with their id. */
   builtins: { id: BuiltinPromptId; name: string }[];
   /** Current custom prompts (the merge base). */
   custom: CustomPrompt[];

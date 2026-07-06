@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionEvent } from "../../lib/bindings";
+import type { SessionEvent } from "@/lib/bindings";
 import {
   backgroundTasksFromItems,
   isBackgroundSpawn,

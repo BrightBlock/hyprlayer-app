@@ -8,9 +8,9 @@ import {
   type RefObject,
 } from "react";
 
-import { commands as ipc, type SlashCommand } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { basename } from "../../lib/path";
+import { commands as ipc, type SlashCommand } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { basename } from "@/lib/path";
 
 /** A live autocomplete trigger detected at the caret: a `/command` or `@file`
  *  token, either of which can open any whitespace-delimited token in the draft.

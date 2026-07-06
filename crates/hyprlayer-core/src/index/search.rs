@@ -1,10 +1,8 @@
 //! Matching, scoring, and ordering helpers behind [`ThoughtsIndex::query`].
-//!
-//! Deliberately trait-free and linear: a personal thoughts corpus is a few
-//! dozen to a few thousand documents (assume <= 5k), so every query scans all
-//! records, lowercases title/tags per candidate, and runs `memchr::memmem`
-//! over a pre-lowercased, size-capped body. No inverted index, no caching —
-//! at this scale a full pass is well under a millisecond per thousand docs.
+//! Trait-free and linear by design: for a small personal corpus (<= 5k docs)
+//! every query full-scans (lowercase title/tags per candidate, `memchr::memmem`
+//! over a pre-lowercased, size-capped body), with no inverted index or caching
+//! (< 1 ms per 1000 docs).
 
 use std::cmp::Ordering;
 

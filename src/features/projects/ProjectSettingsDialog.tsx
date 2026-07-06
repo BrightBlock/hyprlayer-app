@@ -6,7 +6,7 @@ import {
   useSetWorktreeFiles,
   useSyncThoughts,
   useWorktreeFiles,
-} from "../../lib/queries";
+} from "@/lib/queries";
 import {
   Badge,
   Button,
@@ -18,8 +18,8 @@ import {
   PageSpinner,
   Spinner,
   TextInput,
-} from "../../components/ui";
-import type { CheckStatus, HealthCheck } from "../../lib/bindings";
+} from "@/components/ui";
+import type { CheckStatus, HealthCheck } from "@/lib/bindings";
 import { ScriptsCard } from "./ScriptsCard";
 
 const CHECK_TONE: Record<CheckStatus, "ok" | "warn" | "bad"> = {
@@ -48,9 +48,8 @@ function HealthRow({ check }: { check: HealthCheck }) {
 }
 
 /**
- * Editor card for the "Files copied into new worktrees" list.
- * Uses a whole-list replace on every add/remove, matching the `patchClaude`/
- * `visibleModels` pattern from Settings.tsx.
+ * Editor for the "Files copied into new worktrees" list. Whole-list replace on
+ * every add/remove, matching the `patchClaude`/`visibleModels` pattern.
  */
 function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
   const [newPattern, setNewPattern] = useState("");

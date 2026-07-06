@@ -1,4 +1,4 @@
-import { updateWorkstreamTabs } from "../session/workstreamTabs";
+import { updateWorkstreamTabs } from "@/features/session/workstreamTabs";
 
 /**
  * After navigating to a workstream, best-effort select the tab bound to

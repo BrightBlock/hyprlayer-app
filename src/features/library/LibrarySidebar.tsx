@@ -1,11 +1,11 @@
 import { useState } from "react";
 
-import { Badge, ErrorNote, Field, Select, Spinner, TextInput } from "../../components/ui";
-import { ChevronDownIcon, ChevronRightIcon, FolderIcon, PlusIcon } from "../../components/icons";
-import { RepoAvatar } from "../../components/RepoAvatar";
-import type { Project, QueryResult } from "../../lib/bindings";
-import type { LibrarySearch } from "../../router";
-import { formatRelativeTime } from "../session/toolDisplay";
+import { Badge, ErrorNote, Field, Select, Spinner, TextInput } from "@/components/ui";
+import { ChevronDownIcon, ChevronRightIcon, FolderIcon, PlusIcon } from "@/components/icons";
+import { RepoAvatar } from "@/components/RepoAvatar";
+import type { Project, QueryResult } from "@/lib/bindings";
+import type { LibrarySearch } from "./librarySearch";
+import { formatRelativeTime } from "@/lib/format";
 import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES, STATUS_TONE } from "./constants";
 import { groupDocsByType } from "./docGroups";
 import { docTitle } from "./text";

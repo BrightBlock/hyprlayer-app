@@ -1,40 +1,14 @@
 /**
- * Pure detection of live background shell tasks from a session's transcript
- * items. No React, no IPC, no clock — fully deterministic and unit-testable,
- * exactly like transcript.ts / toolDisplay.ts.
+ * Pure detection of live background shell tasks from a session's transcript.
+ * No React/IPC/clock — deterministic and unit-testable, like transcript.ts.
  *
- * Background tasks are spawned by Bash{run_in_background:true} calls. Their
- * lifecycle: spawn → (optional polls/reads) → it ends one of four ways:
- *   - the agent READS the task's output file (`<taskId>.output`) — the spawn
- *     result itself directs it there ("To check interim output, use Read on
- *     that file path"), and the moment claude sees that output consumed it
- *     STOPS emitting the async completion notification below, so the read is the
- *     only signal we'll ever get. This is by far the most common terminus in
- *     practice: agents background a build/test and grep the log rather than poll
- *     (in the observed corpus this path outnumbered the notification ~34:1);
- *   - a `taskUpdate` marker with a terminal status — claude's ASYNCHRONOUS
- *     "you will be notified when it completes" notification. It fires ONLY for a
- *     true fire-and-forget task the agent never reads or polls (e.g.
- *     `sleep 999 &`); reading the output (above) suppresses it;
- *   - a TaskOutput/BashOutput poll that returns <status>completed</status>;
- *   - TaskStop/KillBash.
- * Session exit is handled a layer up, not here: this pure walk still reports an
- * un-read, un-stopped, un-notified spawn as live, so callers are responsible for
- * dropping tasks once the session is terminal (`useSessionBackgroundTasks`
- * guards on `isTerminal`; SessionChat hides the bar behind its terminal gate).
- *
- * Wire shapes (confirmed from real Claude Code 2.1.x sessions):
- *   Spawn result:
- *     "Command running in background with ID: {task_id}. Output is being
- *      written to: …"
- *   TaskOutput result — timeout/still-running:
- *     "<retrieval_status>timeout</retrieval_status>…<status>running</status>"
- *   TaskOutput result — success/completed:
- *     "<retrieval_status>success</retrieval_status>…<status>completed</status>
- *      …<output>…</output>"
- *   TaskStop result:
- *     JSON string: {"message":"Successfully stopped task: {id} ({cmd})",
- *                   "task_id":"{id}","task_type":"local_bash","command":"…"}
+ * A task is spawned by Bash{run_in_background:true} and ends when: the agent
+ * reads its `<taskId>.output` file (the common terminus — the spawn result
+ * steers it there, and reading suppresses the async completion signal); a
+ * terminal `taskUpdate` notification arrives (the never-read fire-and-forget
+ * case); a TaskOutput poll returns <status>completed</status>; or TaskStop.
+ * Session exit is handled by the caller — this walk still reports an un-ended
+ * spawn as live, so callers drop tasks once the session is terminal.
  */
 
 import type { TranscriptItem } from "./transcript";
@@ -43,12 +17,10 @@ import { parseToolInput } from "./toolDisplay";
 export type BackgroundTaskStatus = "running" | "awaiting";
 
 export type BackgroundTask = {
-  /** The Claude task/shell id (parsed from the spawn's result), or null until
-   *  the spawn result arrives. */
+  /** Claude task/shell id, or null until the spawn result arrives. */
   taskId: string | null;
-  /** The spawning tool item's id — a stable key + the jump-to-transcript target. */
+  /** Spawning tool item's id — stable key + jump-to-transcript target. */
   toolUseId: string;
-  /** Human label: the Bash `description`, else the first line of `command`. */
   label: string;
   command: string;
   status: BackgroundTaskStatus;
@@ -82,34 +54,17 @@ export function isBackgroundSpawn(item: TranscriptItem): boolean {
 }
 
 /**
- * Live background tasks for a transcript, in spawn order. Walks items:
- *  - Bash{run_in_background:true} opens a task (taskId filled from its result);
- *  - any later tool whose INPUT reads the task's `<taskId>.output` file ends it
- *    — the agent consumed the output directly, so it's no longer the unattended
- *    fire-and-forget the indicator surfaces, and claude won't notify us once the
- *    output is read (the dominant real-world terminus);
- *  - a `taskUpdate` marker with a terminal status (anything but "running") ends
- *    it — claude's async completion notification, the never-read path;
- *  - TaskStop / KillBash for a known id ends it;
- *  - a TaskOutput/BashOutput result with <status>completed</status> ends it;
- *  - an in-flight TaskOutput/BashOutput (result === null) flips its target to
- *    `awaiting` — the agent is blocked waiting on it;
- *  - a timed-out TaskOutput (<status>running</status> in content) resets to
- *    `running`.
- * Returns only live (non-ended) tasks. Pure; ended tasks are dropped so the
- * caller never has to filter.
+ * Live (non-ended) background tasks for a transcript, in spawn order. Pure — the
+ * per-branch rules for opening, ending, and `awaiting` a task are inline below.
  */
 export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTask[] {
   const tasks = new Map<string, BackgroundTask>(); // keyed by toolUseId
   const taskIdToToolUseId = new Map<string, string>(); // task_id → toolUseId
 
   for (const item of items) {
-    // ── 0. Background-task completion notification (a non-tool control marker) ─
-    // claude's async "you will be notified when it completes" signal, surfaced
-    // by the backend as a `backgroundTaskUpdate` event. A terminal status ends
-    // the task even though the agent never polled it — the fire-and-forget case
-    // the TaskOutput/TaskStop paths below miss. Match by `toolUseId` (carried by
-    // the notification) first, falling back to the spawn-result `task_id` map.
+    // ── 0. taskUpdate: claude's async completion notification ────────────────
+    // Ends a task the agent never polled (the fire-and-forget case the paths
+    // below miss). Match by carried `toolUseId`, else the spawn-result task_id.
     if (item.kind === "taskUpdate") {
       if (item.status === "running") continue; // still live — nothing to drop
       const toolUseId = item.toolUseId ?? taskIdToToolUseId.get(item.taskId);
@@ -120,12 +75,9 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
       continue;
     }
 
-    // The owning process is gone — a `relaunched` boundary (new process took
-    // over) or an `exit`. Its background shells are dead and can never
-    // complete-notify, so drop everything tracked so far; spawns after the
-    // boundary survive. (Per-turn `init` does NOT land here — process is alive.
-    // Nor does a `rewound` boundary: a live rewind keeps the SAME process, so its
-    // background shells are still running and must not be dropped.)
+    // Owning process gone (`relaunched`/`exit`): its shells are dead and can't
+    // complete-notify, so drop everything tracked so far; later spawns survive.
+    // Not per-turn `init` (process alive) nor `rewound` (same process, shells live).
     if (item.kind === "relaunched" || item.kind === "exit") {
       tasks.clear();
       taskIdToToolUseId.clear();
@@ -205,20 +157,12 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
       continue;
     }
 
-    // ── 4. Direct read of a task's output file → end its live tracking ───────
-    // Any other tool whose INPUT references a tracked task's `<taskId>.output`
-    // file: the agent is consuming the task's output directly — a `Read` on the
-    // path, or a `cat`/`grep`/`tail` over it — instead of polling via TaskOutput.
-    // The spawn result steers it here ("To check interim output, use Read on
-    // that file path"), and, crucially, once claude sees the output consumed it
-    // SUPPRESSES the async completion notification, so this read is the only
-    // signal we'll ever get; without acting on it the task lingers as a phantom
-    // "running" forever. Drop it: a checked task is no longer the unattended
-    // fire-and-forget the indicator exists to surface. Match on the
-    // `<taskId>.output` basename (task ids are unique random tokens, so it can't
-    // collide); the spawn and lifecycle tools above all `continue`, so only
-    // these consuming reads reach here. Snapshot the map — we delete while
-    // iterating.
+    // ── 4. Direct read of a task's `<taskId>.output` file → end tracking ─────
+    // Any tool whose INPUT references the file (Read/cat/grep/tail): the agent
+    // consumed the output directly, which suppresses the async notification, so
+    // this read is the only end-signal we'll get — without it the task lingers
+    // as a phantom forever. Ids are unique tokens, so the basename can't collide.
+    // Snapshot the map — we delete while iterating.
     for (const [taskId, toolUseId] of [...taskIdToToolUseId]) {
       if (item.input.includes(`${taskId}.output`)) {
         tasks.delete(toolUseId);

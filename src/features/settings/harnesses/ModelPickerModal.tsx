@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 
-import type { CatalogProvider } from "../../../lib/bindings";
-import { isFreeOpencodeModel } from "../../session/harnessing";
-import { Button, Dialog, TextInput } from "../../../components/ui";
-import { SearchIcon } from "../../../components/icons";
+import type { CatalogProvider } from "@/lib/bindings";
+import { isFreeOpencodeModel } from "@/lib/domain/harnessing";
+import { Button, Dialog, TextInput } from "@/components/ui";
+import { SearchIcon } from "@/components/icons";
 
 /** Grouped, multi-select model picker. Models are keyed `provider/model`. The
  *  caller persists the chosen ids (Settings → providers.opencode.selectedModels). */
@@ -45,9 +45,8 @@ export function ModelPickerModal({
         return { provider: p, configured, models };
       })
       .filter((g) => g.models.length > 0)
-      // Providers the user deliberately added (with a key) stay on top; the
-      // keyless free-only providers sink to the bottom so they don't clutter
-      // the list. Sort is stable, so each tier keeps its alphabetical order.
+      // Configured (keyed) providers stay on top; keyless free-only ones sink
+      // below. Sort is stable, so each tier keeps its alphabetical order.
       .sort((a, b) => Number(b.configured) - Number(a.configured));
   }, [providers, query, onlyConfigured]);
 

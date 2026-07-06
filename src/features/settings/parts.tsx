@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 
-/** One labelled settings row: title + description on the left, a control on the
- *  right. Shared across the Settings sections (Git, Notifications) and the
- *  Harnesses tabs so every row reads identically. */
+/** One labelled settings row (title + description left, control right), shared
+ *  across Settings sections and the Harnesses tabs. */
 export function SettingRow({
   title,
   children,

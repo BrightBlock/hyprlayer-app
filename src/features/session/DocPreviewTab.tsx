@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { commands } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { ErrorNote, Spinner } from "../../components/ui";
-import { DocIcon } from "../../components/icons";
-import { FrontmatterCard } from "../library/FrontmatterCard";
-import { MarkdownPreview } from "../library/MarkdownPreview";
-import { splitFrontmatter } from "../library/text";
+import { commands } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { ErrorNote, Spinner } from "@/components/ui";
+import { DocIcon } from "@/components/icons";
+import { FrontmatterCard } from "@/features/library/FrontmatterCard";
+import { MarkdownPreview } from "@/features/library/MarkdownPreview";
+import { splitFrontmatter } from "@/features/library/text";
 
 /**
  * Read-only preview of an agent-created research/plan doc, shown in its own

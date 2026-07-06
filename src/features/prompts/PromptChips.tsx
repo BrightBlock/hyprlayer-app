@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 
-import type { CustomPrompt, WorkstreamView } from "../../lib/bindings";
-import { useBootstrap } from "../../lib/queries";
-import { ChordHint } from "../../components/ui";
-import { ZapIcon } from "../../components/icons";
+import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
+import { useBootstrap } from "@/lib/queries";
+import { ChordHint } from "@/components/ui";
+import { ZapIcon } from "@/components/icons";
 import { customPrompts, effectiveCustomBody } from "./prompts";
 import { runCustomPrompt } from "./runPrompt";
 

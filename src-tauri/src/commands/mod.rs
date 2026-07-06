@@ -33,11 +33,9 @@ where
         .map_err(AppError::from)
 }
 
-/// Environment variables that carry Claude API-key-mode auth/routing into a
-/// spawned `claude` process. Empty for CLI-login auth (the child inherits the
-/// user's `~/.claude` session). Shared by the session driver spawn
-/// ([`crate::commands::sessions`]) and the one-shot tab-title generator
-/// ([`crate::commands::titles`]) so the two never drift.
+/// Env vars carrying Claude API-key-mode auth/routing into a spawned `claude`.
+/// Empty for CLI-login auth (the child inherits the user's `~/.claude`). Shared
+/// by the session driver and the tab-title generator so the two never drift.
 pub(crate) fn claude_auth_env(cfg: &crate::settings::ClaudeSettings) -> Vec<(String, String)> {
     let mut env = Vec::new();
     if cfg.auth_mode.as_deref() != Some("apiKey") {

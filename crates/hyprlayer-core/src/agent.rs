@@ -15,6 +15,44 @@ use tokio::sync::broadcast;
 use crate::claude::{ClaudeDriver, SessionEvent};
 use crate::error::{CoreError, Result};
 
+/// Which harness backs a session — the vocabulary the store persists
+/// (`sessions.harness`), the IPC surface selects on, and the shell dispatches
+/// drivers by. sqlite stores `as_str` TEXT; read back via the tolerant
+/// [`Harness::parse`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "lowercase")]
+pub enum Harness {
+    // Last-variant #[serde(other)] isn't needed here — Claude is first so a
+    // struct-level default covers it; unknown wire values are a caller bug we
+    // want surfaced, while row reads go through `parse`.
+    Claude,
+    Opencode,
+}
+
+impl Harness {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Harness::Claude => "claude",
+            Harness::Opencode => "opencode",
+        }
+    }
+
+    /// Tolerant row-read: unknown ⇒ `Claude` (the default harness).
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "opencode" => Harness::Opencode,
+            _ => Harness::Claude,
+        }
+    }
+}
+
+impl Default for Harness {
+    fn default() -> Self {
+        Harness::Claude
+    }
+}
+
 /// What the app drives a live agent session through, independent of harness.
 pub trait AgentDriver: Send + Sync {
     /// Subscribe to the event stream. Late subscribers miss earlier events;

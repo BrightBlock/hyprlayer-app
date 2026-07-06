@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { WorkstreamView } from "../../lib/bindings";
+import type { WorkstreamView } from "@/lib/bindings";
 import { WorkstreamCard } from "./WorkstreamCard";
 
 // No vitest globals -> RTL can't register its own auto-cleanup; without this,

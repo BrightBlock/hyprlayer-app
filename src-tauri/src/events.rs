@@ -1,3 +1,4 @@
+use hyprlayer_core::claude::SessionState;
 use serde::{Deserialize, Serialize};
 
 /// The hyprlayer CLI config file changed on disk (the CLI rewrote it, or the
@@ -50,7 +51,7 @@ pub struct SessionLifecycle {
     pub session_id: String,
     pub workstream_id: String,
     /// Matches the `sessions.state` column.
-    pub state: String,
+    pub state: SessionState,
 }
 
 /// A lifecycle script (Setup/Run/Archive) changed state for a workstream: it

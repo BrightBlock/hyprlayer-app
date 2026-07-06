@@ -21,7 +21,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import type { LibrarySearch } from "../router";
+import type { LibrarySearch } from "./librarySearch";
 
 type LibraryScopeStore = {
   /** Thoughts-project key of the most recently selected project, or null. */

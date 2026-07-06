@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorkstreamView } from "../../lib/bindings";
-import type { SessionEntry } from "../session/sessionStore";
-import { initialSessionView, type TranscriptItem } from "../session/transcript";
+import type { WorkstreamView } from "@/lib/bindings";
+import type { SessionEntry } from "@/features/session/sessionStore";
+import { initialSessionView, type TranscriptItem } from "@/features/session/transcript";
 import { foldFleetItem, selectFleetKeys, workingLine, type Picked } from "./fleet";
 
 function entry(over: Partial<SessionEntry> & { workstreamId: string }): SessionEntry {

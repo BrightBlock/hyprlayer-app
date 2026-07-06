@@ -8,24 +8,24 @@ import {
   useOpencodeCatalog,
   useRedetectBinaries,
   useSetAppSettings,
-} from "../lib/queries";
+} from "@/lib/queries";
 import type {
   AppSettings,
   GitSettings,
   MultiplexerSettings,
   NotificationSettings,
   TabTitleSettings,
-} from "../lib/bindings";
+} from "@/lib/bindings";
 import {
   DEFAULT_ENGINE_ID,
   enabledEngines,
   resolveMultiplexer,
   type ResolvedEngine,
-} from "../features/multiplexer/engines";
-import { EngineGlyph } from "../features/multiplexer/agentStateUi";
-import { MODELS } from "../features/session/models";
-import { DEFAULT_HARNESS_OPTIONS } from "../features/session/harnessing";
-import { invalidateNotificationSettingsCache, sendTestNotification } from "../lib/notifications";
+} from "@/features/multiplexer/engines";
+import { EngineGlyph } from "@/features/multiplexer/agentStateUi";
+import { MODELS } from "@/lib/domain/models";
+import { DEFAULT_HARNESS_OPTIONS } from "@/lib/domain/harnessing";
+import { invalidateNotificationSettingsCache, sendTestNotification } from "@/lib/notifications";
 import {
   Badge,
   Button,
@@ -39,16 +39,16 @@ import {
   Select,
   TextInput,
   Toggle,
-} from "../components/ui";
-import { SetupTerminal } from "../features/onboarding/SetupTerminal";
-import { BinaryCard } from "../features/system/BinaryCard";
-import { UpdatesCard } from "../features/system/updates";
-import { KeyboardSettings } from "../features/settings/KeyboardSettings";
-import { HarnessesSection } from "../features/settings/harnesses/HarnessesSection";
-import { SettingRow } from "../features/settings/parts";
-import { THEMES, useThemeStore } from "../lib/theme";
-import { IS_WINDOWS } from "../lib/platform";
-import { AnytypeIcon, CheckIcon, ClaudeMarkIcon, ClipboardIcon, GitBranchIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, OllamaMarkIcon, OpenCodeMarkIcon, PersonIcon, PlusIcon, XIcon } from "../components/icons";
+} from "@/components/ui";
+import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
+import { BinaryCard } from "@/features/system/BinaryCard";
+import { UpdatesCard } from "@/features/system/updates";
+import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
+import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection";
+import { SettingRow } from "@/features/settings/parts";
+import { THEMES, useThemeStore } from "@/lib/theme";
+import { IS_WINDOWS } from "@/lib/platform";
+import { AnytypeIcon, CheckIcon, ClaudeMarkIcon, ClipboardIcon, GitBranchIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, OllamaMarkIcon, OpenCodeMarkIcon, PersonIcon, PlusIcon, XIcon } from "@/components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
   switch (kind) {

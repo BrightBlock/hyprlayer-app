@@ -1,14 +1,18 @@
 /**
- * The pipeline stages and their per-stage visual treatment, shared by the
- * project board composer (ProjectPage) and the live chat (SessionChat) so the
- * stage colours never drift between the two surfaces.
+ * Per-stage labels and visual treatment, shared by the project board composer
+ * (ProjectPage) and the live chat (SessionChat) so the stage colours never
+ * drift between the two surfaces.
  *
- * The backend `stage` is a plain string ("general | research | … | ship");
- * anything it doesn't recognise renders as general chat.
+ * The stage VOCABULARY is the backend's: [`Stage`] is generated from
+ * `pipeline::Stage` via specta, so a variant added in Rust is a compile error
+ * here until it gets a label ([`STAGES`]) and a style ([`MODE_STYLES`], a
+ * `Record<StageKey, …>`). Only presentation lives in this file.
  */
 
-import type { WorkstreamView } from "../../lib/bindings";
-import type { DocKind } from "./toolDisplay";
+import type { Stage, WorkstreamView } from "@/lib/bindings";
+import type { DocKind } from "./docs";
+
+export type StageKey = Stage;
 
 export const STAGES = [
   { key: "general", label: "General" },
@@ -19,9 +23,7 @@ export const STAGES = [
   { key: "commit", label: "Commit" },
   { key: "ship", label: "Ship" },
   { key: "revise", label: "Revise" },
-] as const;
-
-export type StageKey = (typeof STAGES)[number]["key"];
+] as const satisfies readonly { key: StageKey; label: string }[];
 
 /** Stages a user can pick as an agent mode. Commit, Ship and Revise are excluded
  *  on purpose — all are driven by header/PR actions (the "Commit" and "Ship"
@@ -33,12 +35,14 @@ export const MODE_STAGES = STAGES.filter(
 
 const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
 
-/** Backend stage is a plain string; anything unknown renders as general. */
+/** The workstream's stage — already typed by the bindings union. */
 export function stageOf(view: WorkstreamView): StageKey {
-  return (STAGE_KEYS.has(view.item.stage) ? view.item.stage : "general") as StageKey;
+  return view.item.stage;
 }
 
-/** Normalise an arbitrary stage string to a known key (default general). */
+/** Normalise an arbitrary stage string to a known key (default general).
+ *  Still needed for values that DON'T come off the typed wire: localStorage-
+ *  persisted tab modes from older app versions. */
 export function asStageKey(stage: string): StageKey {
   return (STAGE_KEYS.has(stage) ? stage : "general") as StageKey;
 }

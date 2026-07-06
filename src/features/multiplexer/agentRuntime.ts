@@ -12,10 +12,10 @@
 
 import { Channel } from "@tauri-apps/api/core";
 
-import { commands, type TerminalEvent } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { notifyNeedsAttention } from "../../lib/notifications";
-import { b64ToBytes } from "../session/terminalCodec";
+import { commands, type TerminalEvent } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { notifyNeedsAttention } from "@/lib/notifications";
+import { b64ToBytes } from "@/lib/terminal/terminalCodec";
 import { StateCoalescer } from "./coalesce";
 import { detectState, stripAnsi, type AgentState } from "./engineState";
 import { engineChecksSessionOnDisk, type ResolvedEngine } from "./engines";

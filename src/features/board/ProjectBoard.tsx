@@ -1,6 +1,6 @@
-import type { WorkstreamView } from "../../lib/bindings";
-import { Button } from "../../components/ui";
-import { PlusIcon } from "../../components/icons";
+import type { WorkstreamView } from "@/lib/bindings";
+import { Button } from "@/components/ui";
+import { PlusIcon } from "@/components/icons";
 import { BOARD_COLUMNS, groupByColumn } from "./board";
 import { BoardColumn } from "./BoardColumn";
 import { WorkstreamCard } from "./WorkstreamCard";

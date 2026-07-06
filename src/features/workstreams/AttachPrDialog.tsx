@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-import type { WorkstreamView } from "../../lib/bindings";
-import { Dialog, ErrorNote, Spinner, TextInput } from "../../components/ui";
-import { GitPullRequestIcon } from "../../components/icons";
-import { useAttachPr, useWorkstreamOpenPrs, useWorkstreamPrPreview } from "../../lib/queries";
+import type { WorkstreamView } from "@/lib/bindings";
+import { Dialog, ErrorNote, Spinner, TextInput } from "@/components/ui";
+import { GitPullRequestIcon } from "@/components/icons";
+import { useAttachPr, useWorkstreamOpenPrs, useWorkstreamPrPreview } from "@/lib/queries";
 
 type Props = {
   /** The workstream to attach a PR to; null keeps the dialog closed. */

@@ -1,8 +1,5 @@
 //! Local-only git operations via git2 (no network — push/pull/fetch go
 //! through the system git binary so credential helpers keep working).
-//!
-//! Phase 1 needs just enough to replace the missing
-//! `hyprlayer thoughts status --json`: status of the thoughts repo.
 
 use std::path::{Path, PathBuf};
 
@@ -10,8 +7,8 @@ use serde::Serialize;
 
 use crate::error::{CoreError, Result};
 
-/// Cap for files served to the read-only viewer / diff sides — beyond this we
-/// refuse rather than stream megabytes of (likely binary) content into the UI.
+/// Cap on files served to the viewer/diff sides — refuse rather than stream
+/// megabytes of (likely binary) content into the UI.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,8 +31,7 @@ pub(crate) fn open_repo(path: &Path) -> Result<git2::Repository> {
     })
 }
 
-/// Status options every status surface uses: untracked files as single
-/// entries, submodules excluded.
+/// Status options every status surface shares: untracked as single entries, submodules excluded.
 pub(crate) fn status_options() -> git2::StatusOptions {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
@@ -52,10 +48,8 @@ pub(crate) fn upstream_oid(repo: &git2::Repository, head: &git2::Reference) -> O
         .and_then(|u| u.get().target())
 }
 
-/// Local + remote branch shorthands for the base-branch picker, deduped and
-/// sorted (e.g. `main`, `origin/main`, `origin/release`). The symbolic
-/// `origin/HEAD` pointer is skipped — it's an alias, not a pickable base.
-/// Cheap (git2, no fork); callers run it on the blocking pool.
+/// Local + remote branch shorthands for the base-branch picker, deduped + sorted.
+/// Skips the symbolic `origin/HEAD` alias (not a pickable base). Cheap git2; run on the blocking pool.
 pub fn list_branches(repo_path: &Path) -> Result<Vec<String>> {
     let repo = open_repo(repo_path)?;
     let branches = repo.branches(None).map_err(|e| CoreError::OutputParse {
@@ -77,11 +71,9 @@ pub fn list_branches(repo_path: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-/// Local branch names only (e.g. `main`, `feature/foo`), sorted + deduped.
-/// Used by the "existing branch" / "in-place" workstream modes, which check a
-/// branch out into a worktree (or the main checkout) — picking a remote-tracking
-/// ref like `origin/main` there would detach HEAD, so those modes must offer
-/// local branches exclusively. Cheap (git2, no fork); run on the blocking pool.
+/// Local branch names only, sorted + deduped. The "existing branch"/"in-place" modes
+/// check a branch out, so a remote ref like `origin/main` would detach HEAD — they must
+/// offer locals only. Cheap git2; run on the blocking pool.
 pub fn list_local_branches(repo_path: &Path) -> Result<Vec<String>> {
     let repo = open_repo(repo_path)?;
     let branches = repo
@@ -101,10 +93,8 @@ pub fn list_local_branches(repo_path: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-/// Shorthand of the repo's current branch (HEAD), or `None` when detached or on
-/// an unborn branch. The "in-place" workstream mode pre-selects this so the
-/// common case (attach a workstream to whatever the main checkout is already on)
-/// needs no branch switch.
+/// Shorthand of the repo's current branch (HEAD); `None` when detached or unborn.
+/// The "in-place" mode pre-selects it so attaching to the current branch needs no switch.
 pub fn current_branch(repo_path: &Path) -> Option<String> {
     let repo = open_repo(repo_path).ok()?;
     let head = repo.head().ok()?;
@@ -114,13 +104,10 @@ pub fn current_branch(repo_path: &Path) -> Option<String> {
     head.shorthand().map(|s| s.to_string())
 }
 
-/// Map a git remote URL to its https web base, e.g.
-/// `git@github.com:acme/repo.git` → `https://github.com/acme/repo`,
-/// `https://github.com/acme/repo.git` → `https://github.com/acme/repo`. Handles
-/// the `scheme://[user@]host[:port]/path` and scp-like `[user@]host:path` shapes;
-/// returns `None` for anything we can't confidently map to a web host (local
-/// paths, `file://`, hosts without a dot). Best-effort — only used to build the
-/// library's "View on GitHub" link.
+/// Map a git remote URL to its https web base (e.g. `git@github.com:acme/repo.git`
+/// → `https://github.com/acme/repo`). Handles `scheme://[user@]host[:port]/path` and
+/// scp-like `[user@]host:path`; `None` for non-web remotes (local paths, `file://`,
+/// dotless hosts). Best-effort — only builds the "View on GitHub" link.
 fn remote_to_web_url(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let (host, path) = if let Some(rest) = raw
@@ -135,8 +122,8 @@ fn remote_to_web_url(raw: &str) -> Option<String> {
         let host = host.split(':').next().unwrap_or(host);
         (host.to_string(), path.to_string())
     } else if let Some((authority, path)) = raw.split_once(':') {
-        // scp-like: [user@]host:owner/repo. A Windows path (`C:\…`) has a
-        // backslash in the "path" half — reject it so it can't masquerade as one.
+        // scp-like: [user@]host:owner/repo. Reject a Windows path (`C:\…`): its
+        // backslash in the "path" half must not masquerade as scp-like.
         if path.contains('\\') {
             return None;
         }
@@ -146,8 +133,7 @@ fn remote_to_web_url(raw: &str) -> Option<String> {
         return None;
     };
 
-    // A real web host has a dot (github.com, gitlab.example.com); this drops
-    // `file`, `localhost`, and other non-web remotes.
+    // A real web host has a dot; drops `file`, `localhost`, other non-web remotes.
     if !host.contains('.') {
         return None;
     }
@@ -159,17 +145,23 @@ fn remote_to_web_url(raw: &str) -> Option<String> {
     Some(format!("https://{host}/{path}"))
 }
 
-/// Best-effort web URL for a file tracked in a git repo: its `origin` remote
-/// mapped to an https host, at the repo's current branch — e.g.
-/// `https://github.com/acme/thoughts/blob/main/repos/app/research/x.md`. Returns
-/// `None` when the file isn't inside a git repo, there's no `origin`, HEAD is
-/// detached, or the remote can't be mapped to a web host. Drives the library's
-/// "View on GitHub" link, so a `None` simply hides the link.
+/// Best-effort `origin` web URL for a tracked file at the current branch (e.g.
+/// `https://github.com/acme/thoughts/blob/main/repos/app/research/x.md`). `None`
+/// when not in a repo, no `origin`, detached HEAD, or unmappable remote — which
+/// just hides the "View on GitHub" link.
 pub fn file_web_url(file_abs: &Path) -> Option<String> {
-    let start = file_abs.parent().unwrap_or(file_abs);
+    // Canonicalize both sides before strip_prefix: the caller's path may run through a
+    // symlink (thoughts trees are symlinked in; macOS /var/folders → /private/var) while
+    // git2 reports workdir canonically — a raw strip would miss and hide the link.
+    let file_abs = file_abs.canonicalize().ok()?;
+    let start = file_abs.parent().unwrap_or(&file_abs);
     let repo = git2::Repository::discover(start).ok()?;
-    let workdir = repo.workdir()?;
-    let rel = file_abs.strip_prefix(workdir).ok()?.to_str()?.replace('\\', "/");
+    let workdir = repo.workdir()?.canonicalize().ok()?;
+    let rel = file_abs
+        .strip_prefix(&workdir)
+        .ok()?
+        .to_str()?
+        .replace('\\', "/");
     if rel.is_empty() {
         return None;
     }
@@ -229,16 +221,14 @@ pub struct FileDiff {
     pub patch: String,
 }
 
-/// The working-tree-vs-HEAD diff that every "what changed" surface is built
-/// from (the diff panel and the sidebar line counters), so they share one
-/// App-managed scratch inside a worktree (`.hyprlayer/`, e.g. prompt
-/// attachments). Self-ignored from git, but filtered from the diff too so a
-/// dropped screenshot never reads as a working-tree change.
+/// App-managed scratch inside a worktree (`.hyprlayer/`, e.g. prompt attachments).
+/// Self-ignored from git, but filtered from the diff too so a dropped screenshot
+/// never reads as a working-tree change.
 fn is_hyprlayer_internal(path: &str) -> bool {
     path == ".hyprlayer" || path.starts_with(".hyprlayer/")
 }
 
-/// definition: untracked content included; `thoughts/` filtered by callers.
+/// Raw working-tree-vs-HEAD diff: untracked content included; `thoughts/` filtered by callers.
 fn worktree_diff_raw(repo: &git2::Repository) -> Result<git2::Diff<'_>> {
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let mut opts = git2::DiffOptions::new();
@@ -252,19 +242,16 @@ fn worktree_diff_raw(repo: &git2::Repository) -> Result<git2::Diff<'_>> {
         })
 }
 
-/// Total added/deleted line counts for the working-tree diff vs HEAD,
-/// excluding `thoughts/`. Summed from the same per-file patches the diff panel
-/// renders, so the sidebar counter and the panel can never disagree.
+/// Added/deleted line counts for the working-tree diff vs HEAD, excluding `thoughts/`.
+/// Summed from the same patches the diff panel renders, so counter and panel can't disagree.
 pub fn worktree_diff_line_counts(repo: &git2::Repository) -> (u32, u32) {
     let Ok(diff) = worktree_diff_raw(repo) else {
         return (0, 0);
     };
     let (mut additions, mut deletions) = (0u32, 0u32);
-    // Stream the diff line-by-line instead of materializing a `Patch` (and its
-    // patch-text buffer) per file: we only need the +/- totals. The `thoughts/`
-    // + `.hyprlayer/` filter is applied in the line callback with the exact same
-    // predicates `worktree_diff` uses, so the sidebar counter can't drift from
-    // the panel.
+    // Stream line-by-line instead of materializing a `Patch` per file — we only need
+    // +/- totals. The thoughts/ + .hyprlayer/ filter uses the same predicates as
+    // `worktree_diff`, so the counter can't drift from the panel.
     let _ = diff.foreach(
         &mut |_delta, _progress| true,
         None,
@@ -329,9 +316,8 @@ pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
     Ok(files)
 }
 
-/// Character cap for the `{{diff}}` prompt variable — beyond this the diff is
-/// cut (at a patch boundary where possible) with a truncation note, so a huge
-/// working tree can't balloon a prompt.
+/// Char cap for the `{{diff}}` prompt variable — cut (at a patch boundary where
+/// possible) with a truncation note so a huge working tree can't balloon a prompt.
 const MAX_PROMPT_DIFF_CHARS: usize = 12_000;
 
 /// Git-derived values for prompt `{{variables}}`. Best-effort: any git failure
@@ -347,10 +333,8 @@ pub struct PromptGitVars {
     pub last_commit: String,
 }
 
-/// Resolve the git-derived prompt variables for a worktree. Each field is only
-/// computed when requested — the diff materializes every patch, so callers scan
-/// the prompt body for tokens first. Runs blocking git2 work; call on the
-/// blocking pool.
+/// Resolve git-derived prompt variables for a worktree. Each field is computed only
+/// when requested (the diff materializes every patch). Blocking git2; call on the blocking pool.
 pub fn prompt_git_vars(
     worktree: &Path,
     want_changed: bool,

@@ -112,9 +112,8 @@ fn file_mtime_ms(path: &Path) -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Optimistic-concurrency guard for doc writes: fail if the file changed on disk
-/// since the caller read it (mtime drifted more than rounding noise). Shared by
-/// every mutating doc command so the conflict policy lives in one place.
+/// Optimistic-concurrency guard: fail if the file's mtime drifted (beyond rounding
+/// noise) since the caller read it. Centralizes the conflict policy for doc writes.
 fn ensure_not_stale(abs: &Path, base_mtime_ms: f64) -> CmdResult<()> {
     if (file_mtime_ms(abs) - base_mtime_ms).abs() > 0.5 {
         return Err(doc_conflict());
@@ -196,12 +195,11 @@ pub async fn get_doc(state: State<'_, AppState>, id: String) -> CmdResult<DocCon
         }
     }
 
-    // Fallback: an agent-created doc that lives outside every configured
-    // thoughts root — e.g. a plan Claude wrote under `~/.claude/plans/`. These
-    // surface in a workstream's Changes panel but are never indexed, so render
-    // them read-only straight from disk with a best-effort meta instead of
-    // failing. Gated to `.md` so this can't be turned into an arbitrary-file
-    // reader; a missing file falls through to the "deleted or moved" message.
+    // Fallback: an agent-created doc outside every configured thoughts root (e.g. a
+    // plan under `~/.claude/plans/`). Surfaces in a workstream's Changes panel but is
+    // never indexed, so render it read-only from disk with best-effort meta. Gated to
+    // `.md` so this can't become an arbitrary-file reader; a missing file falls through
+    // to the "deleted or moved" message.
     let abs = PathBuf::from(&id);
     if !abs
         .extension()
@@ -378,11 +376,10 @@ pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()>
         .map_err(|e| AppError::internal(format!("reveal: {e}")))
 }
 
-/// Best-effort "View on GitHub" target for a library doc: the doc's own git
-/// repo (the thoughts repo, not the project's) mapped to its `origin` web host
-/// at the current branch. `None` (link hidden) when the id is unknown, the file
-/// isn't in a git repo, there's no GitHub-shaped origin, or HEAD is detached —
-/// so this never errors, mirroring `list_recent_repos`'s degrade-to-empty policy.
+/// Best-effort "View on GitHub" URL for a library doc, from its own git repo (the
+/// thoughts repo, not the project's) at the current branch. `None` (link hidden) on
+/// any miss — unknown id, not a git repo, no GitHub origin, detached HEAD — so it
+/// never errors.
 #[tauri::command]
 #[specta::specta]
 pub async fn doc_web_url(state: State<'_, AppState>, id: String) -> CmdResult<Option<String>> {

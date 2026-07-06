@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 
-import { commands, type ScriptKind, type TerminalEvent } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { b64ToBytes, strToB64 } from "./terminalCodec";
-import { createTerminalEngine } from "./terminalEngine";
-import { useTerminalFontSize } from "./terminalFontSize";
-import { xtermThemeFromCss } from "./terminalTheme";
+import { commands, type ScriptKind, type TerminalEvent } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
+import { createTerminalEngine } from "@/lib/terminal/terminalEngine";
+import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
+import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 
 type Props = {
   workstreamId: string;

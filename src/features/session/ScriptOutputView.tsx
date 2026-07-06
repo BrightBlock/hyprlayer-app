@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 
-import { createTerminalEngine } from "./terminalEngine";
-import { useTerminalFontSize } from "./terminalFontSize";
-import { xtermThemeFromCss } from "./terminalTheme";
+import { createTerminalEngine } from "@/lib/terminal/terminalEngine";
+import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
+import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 
 /**
  * Read-only render of a script's captured last-run output (terminal text incl.

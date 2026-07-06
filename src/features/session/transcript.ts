@@ -15,16 +15,13 @@
  *    (a frontend action, no backend event) is applied via `resolvePermission`.
  */
 
-import type { ExitOutcome, SessionEvent } from "../../lib/bindings";
+import type { ExitOutcome, SessionEvent, SessionState } from "@/lib/bindings";
 import type { Attachment } from "./attachments";
 
-export type SessionState =
-  | "idle"
-  | "starting"
-  | "running"
-  | "awaiting_permission"
-  | "awaiting_question"
-  | ExitOutcome;
+// The session lifecycle union is generated from core's `SessionState` enum —
+// re-exported here so the whole session feature keeps importing it from the
+// transcript module (its long-standing home).
+export type { SessionState };
 
 export type PermissionDecision = "allow" | "deny";
 
@@ -81,12 +78,10 @@ export function parseQuestions(json: string): Question[] {
 }
 
 /**
- * Build the `answers` map sent back for an `AskUserQuestion` from the user's
- * option picks plus any "Other" free-text. For each question the selected option
- * labels and a trimmed custom answer are merged (custom appended last) and
- * comma-joined — the shape the driver feeds to claude. Questions with neither a
- * pick nor custom text are omitted; an all-empty result is the "dismissed"
- * signal (the agent then re-asks in prose).
+ * Build the `answers` map for an `AskUserQuestion` from the user's picks plus any
+ * "Other" free-text: per question, selected labels + trimmed custom (appended
+ * last) comma-joined. Questions with no pick and no text are omitted; an all-empty
+ * result is the "dismissed" signal (the agent re-asks in prose).
  */
 export function buildQuestionAnswers(
   questions: Question[],
@@ -147,21 +142,13 @@ export function isCompactSummary(text: string): boolean {
 const THINK_TAG = /<\/?think(?:ing)?>/gi;
 
 /**
- * Split a completed assistant block into its reasoning and the visible answer.
- *
- * Some OpenCode models emit chain-of-thought inline in the *text* channel rather
- * than as a structured reasoning part — wrapped in `<think>…</think>`, or with
- * an orphaned leading `</think>` when the opening tag was stripped upstream (the
- * AI-SDK reasoning extraction is provider-dependent and the long tail of free
- * models leaks). Left alone it renders as prose with a raw tag, like the
- * `…Let's list src. </think>` blocks in a real OpenCode transcript.
- *
- * Returns `reasoning: null` when there's no think marker (the overwhelmingly
- * common path — Claude, and OpenCode models whose reasoning arrives as its own
- * part — so it's a cheap regex test then passthrough). Otherwise `reasoning` is
- * the joined thought(s) and `answer` is the cleaned prose. Tolerates: a normal
- * `<think>R</think>A` pair; an orphan `R</think>A` (no opener → the prefix is
- * reasoning); and an unclosed `<think>R` (the remainder is reasoning).
+ * Split a completed assistant block into reasoning and the visible answer.
+ * Some OpenCode models emit chain-of-thought inline in the text channel wrapped
+ * in `<think>…</think>` (or an orphan `</think>` when the opener was stripped
+ * upstream) instead of as a structured reasoning part; left alone a raw tag leaks
+ * into prose. Returns `reasoning: null` on the common no-marker path (a cheap
+ * regex test then passthrough). Tolerates a normal pair, an orphan close (the
+ * prefix is reasoning), and an unclosed open (the remainder is reasoning).
  */
 export function splitInlineThinking(text: string): { reasoning: string | null; answer: string } {
   THINK_TAG.lastIndex = 0;
@@ -208,20 +195,17 @@ export type TranscriptItem =
       id: string;
       text: string;
       stage: string | null;
-      /** Files/screenshots attached to this turn — rendered as pin cards, while
-       *  the path the agent actually received stays out of the bubble. */
+      /** Files/screenshots attached to this turn — rendered as pin cards. */
       attachments: Attachment[];
-      /** Epoch ms the user sent this turn — stamped optimistically by
-       *  `addUserMessage`, or backfilled from the persisted event's `createdAt`
-       *  on replay. `null` only for legacy rows logged before this field
-       *  existed; the UI falls back to the session's start time in that case. */
+      /** Epoch ms the user sent this turn; optimistic via `addUserMessage`, else
+       *  backfilled from the event on replay. `null` for legacy rows (UI falls
+       *  back to the session start time). */
       createdAt: number | null;
     }
   | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
   | ({ kind: "thinking"; id: string; text: string } & Parented)
-  /** A launched skill's injected SKILL.md body — Claude Code delivers it as an
-   *  assistant block; we keep it as its own collapsed chip instead of dumping the
-   *  whole instruction text inline in the thread. */
+  /** A launched skill's injected SKILL.md body (Claude delivers it as an assistant
+   *  block) — kept as its own collapsed chip, not dumped inline. */
   | ({ kind: "skill"; id: string; name: string; body: string } & Parented)
   | ({
       kind: "tool";
@@ -230,8 +214,7 @@ export type TranscriptItem =
       name: string;
       input: string;
       result: { content: string; isError: boolean } | null;
-      /** For a `Skill` call: the launched skill's injected SKILL.md body, folded
-       *  into this row (expand to read it) instead of dumped as its own block. */
+      /** For a `Skill` call: the injected SKILL.md body, folded into this row. */
       skillBody?: string;
     } & Parented)
   | {
@@ -243,12 +226,10 @@ export type TranscriptItem =
       decision: PermissionDecision | null;
     }
   | { kind: "error"; id: string; detail: string; raw: string }
-  /** A compact-boundary marker — claude auto- or manually compacted the
-   *  conversation. Rendered as a thin divider so a silent stretch during compact
-   *  is legible. `trigger` is "auto" or "manual"; `preTokens` is the context
-   *  fill just before the compact, when reported. `summary` is claude's
-   *  post-compact summary — the large block injected right after the boundary,
-   *  folded in here so it expands from the divider instead of dumping inline. */
+  /** A compact-boundary marker (claude auto/manually compacted). Rendered as a
+   *  thin divider. `trigger` is "auto"/"manual"; `preTokens` is the context fill
+   *  just before, when reported; `summary` is claude's post-compact summary,
+   *  folded in so it expands from the divider instead of dumping inline. */
   | {
       kind: "compact";
       id: string;
@@ -257,13 +238,10 @@ export type TranscriptItem =
       summary?: string;
     }
   /** A background shell task (`Bash{run_in_background}`) changed state — claude's
-   *  asynchronous "you will be notified when it completes" signal, surfaced so the
-   *  live background-tasks indicator drops a finished task even when the agent
-   *  never polled it. A non-rendering control marker (it produces no UI in the
-   *  transcript, like a `compact` divider with no body); consumed only by
-   *  `backgroundTasksFromItems`. `status` is "completed"/"failed" at terminal —
-   *  anything but "running" ends the task. `toolUseId` is the spawning `Bash`
-   *  call when known (the direct key), else null and matched via `taskId`. */
+   *  async completion signal. Non-rendering; consumed only by
+   *  `backgroundTasksFromItems` to drop a finished task the agent never polled.
+   *  `status` anything but "running" ends the task. `toolUseId` is the spawning
+   *  `Bash` call when known, else null and matched via `taskId`. */
   | {
       kind: "taskUpdate";
       id: string;
@@ -278,10 +256,9 @@ export type TranscriptItem =
       kind: "relaunched";
       id: string;
     }
-  /** Non-rendering marker for the backend's `rewound` event — a live rewind
-   *  truncated the conversation IN PLACE (same process). Like `relaunched` it's an
-   *  inert transcript boundary, but `backgroundTasksFromItems` must NOT drop tasks
-   *  at it: the process is unchanged, so its background shells are still alive. */
+  /** Non-rendering marker for the backend's `rewound` event — a live in-place
+   *  rewind (same process). Inert like `relaunched`, but `backgroundTasksFromItems`
+   *  must NOT drop tasks here: the process is unchanged, its shells still alive. */
   | {
       kind: "rewound";
       id: string;
@@ -368,13 +345,11 @@ export function isBusy(view: SessionView): boolean {
 }
 
 /**
- * Whether claude is actively *computing* — drives the "time working" elapsed
- * counter and the tab's breathing glow. Deliberately narrower than [`isBusy`]: a
- * session parked on a permission or question is busy (you can't take a new turn)
- * but it is NOT working — it's blocked on you. Treating "waiting on the user" as
- * "working" is what made a restored, permission-held session look like a running
- * turn after an app restart; it also means the counter/glow now correctly pause
- * while a *live* session waits for your approval and resume once you answer.
+ * Whether claude is actively *computing* — drives the "time working" counter and
+ * the tab's breathing glow. Narrower than [`isBusy`]: a session parked on a
+ * permission/question is busy (no new turn) but NOT working — it's blocked on you.
+ * Counting "waiting on the user" as working is what made a restored permission-held
+ * session look like a running turn after an app restart.
  */
 export function isWorking(view: SessionView): boolean {
   if (isTerminal(view.state)) return false;
@@ -394,20 +369,13 @@ export function parkedState(view: SessionView): SessionState {
 }
 
 /**
- * Finalize a view rebuilt by replaying a session's persisted log after an app
- * restart. The claude child doesn't outlive the app (`kill_on_drop`), so a
- * replayed session is never live — settle it into a consistent resting state:
- *
- *  - already terminal (completed / crashed / killed / …) → leave it;
- *  - parked on a permission or question → keep it HELD (state stays
- *    `awaiting_*`, the card and pending prompt stay) so the conversation pauses
- *    for the user instead of looking like a running turn — answering it resumes
- *    the process (claude re-issues the ask);
- *  - otherwise it was cut off mid-turn → settle to `idle`.
- *
- * `streaming` is always cleared: nothing is actively streaming after a restart.
- * Crucially this never leaves the buggy "idle but an unresolved permission card
- * is still open" shape, which read as busy/working forever.
+ * Finalize a view rebuilt by replaying a persisted log after an app restart. The
+ * claude child doesn't outlive the app (`kill_on_drop`), so a replayed session is
+ * never live: terminal states are left as-is; a session parked on a permission/
+ * question stays HELD in `awaiting_*` (answering resumes the process) instead of
+ * looking like a running turn; anything else was cut off mid-turn → `idle`.
+ * `streaming` is always cleared, and this never leaves the buggy "idle but a
+ * permission card still open" shape that read as busy forever.
  */
 export function restoredView(view: SessionView): SessionView {
   if (isTerminal(view.state)) return { ...view, streaming: false };
@@ -424,22 +392,13 @@ export function restoredView(view: SessionView): SessionView {
 }
 
 /**
- * Settle the prompt that a just-completed main-thread tool was gating. A
- * permission decision and an `AskUserQuestion` answer are both frontend-only
- * actions — neither emits an event of its own — so the tool's *result* is the
- * only thing persisted to the log that proves the user already answered. Without
- * this, replaying the log after a restart re-surfaces an answered card and locks
- * the composer on a stale prompt (the conversation looks paused when it isn't).
- *
- *  - `AskUserQuestion` finishing → the questions were answered → drop the
- *    pending question;
- *  - any other tool finishing → mark its still-open permission card resolved
- *    (matched by tool name — within a turn a tool either always gates or never
- *    does, and answered tools' results land before any later ask, so this can't
- *    clear a genuinely-pending card).
- *
- * Idempotent with the live resolvers, which already cleared the prompt before
- * the result arrives; on replay this is the mechanism that clears it.
+ * Settle the prompt a just-completed main-thread tool was gating. A permission
+ * decision and an `AskUserQuestion` answer are frontend-only — neither emits an
+ * event — so the tool's persisted *result* is the only proof the user answered;
+ * without this, replaying the log re-surfaces an answered card and locks the
+ * composer on a stale prompt. `AskUserQuestion` finishing drops the pending
+ * question; any other tool marks its still-open permission card (matched by tool
+ * name) resolved. Idempotent with the live resolvers — on replay it's the clearer.
  */
 function settleAnsweredPrompt(
   view: SessionView,
@@ -491,16 +450,13 @@ function openAssistantIndex(items: TranscriptItem[]): number {
 }
 
 /**
- * Index of the main-thread assistant block that already streamed `text`, when no
- * block is still open. OpenCode ends a text part *after* the tool it precedes, so
- * the tool's `toolUse` closes the streamed block before its authoritative
- * `assistantText` arrives — and that late final, finding nothing open, would
- * append a verbatim duplicate (every intro line doubling around its tool batch).
- * Scanning back over only quiet steps (tool/thinking) finds the block it streamed
- * so the final coalesces into it. Prefix-matches (not just equals) so a stream
- * cut off mid-part still reunites with its completed final. -1 when the nearest
- * assistant block isn't a prefix of the final (genuinely new prose) or a
- * non-quiet item (a user turn, a permission card) intervenes.
+ * Index of the main-thread assistant block that already streamed `text`, when
+ * none is still open. OpenCode ends a text part *after* the tool it precedes, so
+ * the `toolUse` closes the streamed block before its authoritative final arrives;
+ * that final, finding nothing open, would append a verbatim duplicate. Scan back
+ * over quiet steps (tool/thinking) to find it. Prefix-matches so a stream cut off
+ * mid-part still reunites. -1 if the nearest block isn't a prefix (new prose) or a
+ * non-quiet item (user turn, permission card) intervenes.
  */
 function streamedAssistantIndex(items: TranscriptItem[], text: string): number {
   if (!text.length) return -1;

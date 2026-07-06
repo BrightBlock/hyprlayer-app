@@ -1,7 +1,7 @@
-import type { WorkstreamView } from "../../lib/bindings";
-import { Button, Dialog, ErrorNote } from "../../components/ui";
-import { isAppError } from "../../lib/ipc";
-import { useArchiveWorkstream } from "../../lib/queries";
+import type { WorkstreamView } from "@/lib/bindings";
+import { Button, Dialog, ErrorNote } from "@/components/ui";
+import { isAppError } from "@/lib/ipc";
+import { useArchiveWorkstream } from "@/lib/queries";
 
 type Props = {
   /** The item being archived; null keeps the dialog closed. */

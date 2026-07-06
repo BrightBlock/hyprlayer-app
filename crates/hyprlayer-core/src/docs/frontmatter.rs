@@ -1,10 +1,6 @@
-//! Tolerant frontmatter parsing and (eventually) line-surgical patching.
-//!
-//! PUBLIC API IS FROZEN — the indexer and the Tauri shell build against it.
-//! Parsing never fails: real thoughts corpora contain docs with no
-//! frontmatter, malformed YAML, scalar-vs-list field confusion, etc. Every
-//! anomaly degrades to a warning, and filename/directory fallbacks fill the
-//! most important gaps.
+//! Tolerant frontmatter parsing and line-surgical patching. Parsing never fails —
+//! anomalies (no/malformed YAML, scalar-vs-list confusion) degrade to warnings with
+//! filename/directory fallbacks. Public API is frozen: indexer + Tauri shell build on it.
 
 use std::collections::BTreeMap;
 use std::path::Path;

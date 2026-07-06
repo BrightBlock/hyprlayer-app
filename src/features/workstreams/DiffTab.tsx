@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { EditorView } from "@codemirror/view";
 
-import { ErrorNote, Spinner } from "../../components/ui";
-import { useFileSides } from "../../lib/queries";
+import { ErrorNote, Spinner } from "@/components/ui";
+import { useFileSides } from "@/lib/queries";
 import { readOnlyExtensions, useLangForPath } from "./codeView";
 
 type DiffMode = "unified" | "split";

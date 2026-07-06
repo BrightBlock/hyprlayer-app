@@ -1,5 +1,5 @@
-import type { WorkstreamView } from "../../lib/bindings";
-import type { StageKey } from "../session/stages";
+import type { WorkstreamView } from "@/lib/bindings";
+import type { StageKey } from "@/lib/domain/stages";
 
 export type ColumnKey = "backlog" | "research" | "plan" | "implement" | "validate" | "ship";
 

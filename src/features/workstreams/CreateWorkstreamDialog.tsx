@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import type { WorkstreamView } from "../../lib/bindings";
-import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "../../components/ui";
-import { PlusIcon, SplitIcon } from "../../components/icons";
-import { useCreateWorkstream, useWorkstreamBases, type WorkstreamMode } from "../../lib/queries";
+import type { WorkstreamView } from "@/lib/bindings";
+import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "@/components/ui";
+import { PlusIcon, SplitIcon } from "@/components/icons";
+import type { WorktreeMode } from "@/lib/bindings";
+import { useCreateWorkstream, useWorkstreamBases } from "@/lib/queries";
 
 type Props = {
   projectPath: string;
@@ -101,7 +102,7 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
   };
 
   // Resolve the combobox state into the backend's (mode, base, branch) shape.
-  const resolved = (): { mode: WorkstreamMode; base: string | null; branch: string | null } => {
+  const resolved = (): { mode: WorktreeMode; base: string | null; branch: string | null } => {
     if (isNew) return { mode: "isolated", base: base || null, branch: null };
     if (place === "here") return { mode: "inplace", base: null, branch: selectedBranch };
     return { mode: "existing", base: null, branch: selectedBranch };

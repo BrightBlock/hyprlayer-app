@@ -12,17 +12,17 @@ import {
   PageSpinner,
   Spinner,
   TextInput,
-} from "../components/ui";
-import { RepoAvatar } from "../components/RepoAvatar";
+} from "@/components/ui";
+import { RepoAvatar } from "@/components/RepoAvatar";
 import {
   useArchivedWorkstreams,
   useBootstrap,
   useCleanupArchivedWorkstreams,
   useDeleteArchivedWorkstream,
   useRestoreWorkstream,
-} from "../lib/queries";
-import { isAppError } from "../lib/ipc";
-import type { ArchivedWorkstreamView, Project } from "../lib/bindings";
+} from "@/lib/queries";
+import { isAppError } from "@/lib/ipc";
+import type { ArchivedWorkstreamView, Project } from "@/lib/bindings";
 
 const MS_PER_DAY = 86_400_000;
 

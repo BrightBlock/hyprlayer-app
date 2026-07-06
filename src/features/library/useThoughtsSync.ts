@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ThoughtsRepoStatus } from "../../lib/bindings";
-import { errorMessage, isAppError } from "../../lib/ipc";
-import { useSyncThoughts, useThoughtsGitStatus } from "../../lib/queries";
-import { queryClient } from "../../lib/queryClient";
+import type { ThoughtsRepoStatus } from "@/lib/bindings";
+import { errorMessage, isAppError } from "@/lib/ipc";
+import { useSyncThoughts, useThoughtsGitStatus } from "@/lib/queries";
+import { queryClient } from "@/lib/queryClient";
 import { shouldAutoSync } from "./thoughtsSync";
 
 export type ThoughtsSyncState = {

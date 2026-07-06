@@ -1,4 +1,4 @@
-import type { BadgeTone } from "../../components/ui";
+import type { BadgeTone } from "@/components/ui";
 
 /** Page size for a single library query — the list shows the first N matches and
  *  prompts to narrow the filters past it. */

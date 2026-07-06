@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { KeyboardSettings } from "./KeyboardSettings";
-import type { AppSettings } from "../../lib/bindings";
+import type { AppSettings } from "@/lib/bindings";
 
 const mutate = vi.fn();
 

@@ -7,9 +7,9 @@
  * tracks the sidebar's focused session and renders nothing until it has a plan.
  */
 
-import { Spinner } from "../../components/ui";
-import { ChecklistIcon, ChevronDownIcon, ChevronRightIcon } from "../../components/icons";
-import { useUiStore } from "../../lib/uiStore";
+import { Spinner } from "@/components/ui";
+import { ChecklistIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
+import { useUiStore } from "@/lib/uiStore";
 import { useSession, useSessionPlanTasks } from "./sessionStore";
 import { isWorking } from "./transcript";
 import type { PlanTask } from "./planTasks";

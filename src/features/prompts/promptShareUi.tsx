@@ -7,8 +7,8 @@
 
 import type { ReactNode } from "react";
 
-import { CheckIcon, GitCommitIcon, GitPullRequestIcon, XIcon, ZapIcon } from "../../components/icons";
-import { useEscape } from "../../lib/keybindings/registry";
+import { CheckIcon, GitCommitIcon, GitPullRequestIcon, XIcon, ZapIcon } from "@/components/icons";
+import { useEscape } from "@/lib/keybindings/registry";
 
 /** Full-screen modal shell matching the app's `Dialog` overlay, but with a
  *  flex column so callers can lay out their own header/scroll-body/footer

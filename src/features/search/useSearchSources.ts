@@ -1,12 +1,12 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAllWorkstreams, useActiveSessions, useDocs } from "../../lib/queries";
-import { commands } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
+import { useAllWorkstreams, useActiveSessions, useDocs } from "@/lib/queries";
+import { commands } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
 import { useDebounced } from "./useDebounced";
 import { fuzzyScore, type SearchResult } from "./search";
-import type { WorkstreamActivity } from "../session/sessionStore";
-import { basename } from "../../lib/path";
+import type { WorkstreamActivity } from "@/features/session/sessionStore";
+import { basename } from "@/lib/path";
 
 /** Map a backend session.state string to a WorkstreamActivity badge. */
 function sessionStateToActivity(state: string): WorkstreamActivity {

@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { formatElapsed, formatRelativeTime } from "@/lib/format";
 import {
   baseName,
   docFromTool,
   docTitle,
   editDiffFromTool,
   formatCost,
-  formatElapsed,
-  formatRelativeTime,
   formatTokens,
   parseToolInput,
   prettyToolInput,

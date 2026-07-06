@@ -1,10 +1,10 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect } from "react";
 
-import type { GithubRepo } from "../../lib/bindings";
-import { Button, Field, Spinner, TextInput } from "../../components/ui";
-import { RepoAvatar } from "../../components/RepoAvatar";
-import { useRecentRepos } from "../../lib/queries";
+import type { GithubRepo } from "@/lib/bindings";
+import { Button, Field, Spinner, TextInput } from "@/components/ui";
+import { RepoAvatar } from "@/components/RepoAvatar";
+import { useRecentRepos } from "@/lib/queries";
 
 export type RepoSource =
   | { mode: "clone"; url: string; location: string }
@@ -33,10 +33,7 @@ const MODE_LABELS: Record<RepoSource["mode"], string> = {
 
 /**
  * Shared repo-source picker: clone URL + recents, disk browse, or create new.
- *
- * Used in AddProjectDialog (clone + disk) and OnboardingWizard (clone + disk + create).
- * Extracted from AddProjectDialog so both surfaces share the same picker logic
- * without duplication.
+ * Used by AddProjectDialog (clone + disk) and OnboardingWizard (+ create).
  */
 export function RepoSourcePicker({
   value,

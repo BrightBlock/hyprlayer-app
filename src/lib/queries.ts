@@ -12,13 +12,24 @@ import {
   type MergeMethod,
   type ScriptKind,
   type ScriptSettings,
+  type Stage,
+  type WorktreeMode,
   type ThoughtQuery,
   type ThoughtsSource,
   type WorkstreamView,
 } from "./bindings";
 import { unwrap } from "./ipc";
 import { queryClient } from "./queryClient";
-import { removeSessionsForWorkstream } from "../features/session/sessionStore";
+
+/** Feature-side cleanups to run after a workstream archives (e.g. the session
+ *  feature releases its in-memory transcripts). Registered from main.tsx so
+ *  this module never imports feature stores (the import direction is
+ *  routes → features → lib; see docs/adr/0003-frontend-layering.md). */
+const workstreamArchiveCleanups: Array<(id: string) => void> = [];
+
+export function onWorkstreamArchived(cleanup: (id: string) => void): void {
+  workstreamArchiveCleanups.push(cleanup);
+}
 
 export function useBootstrap() {
   return useQuery({
@@ -359,7 +370,6 @@ export function useWorkstreamBases(projectPath: string, enabled = true) {
 /** How a new workstream is backed. `isolated` creates a fresh branch + worktree;
  * `existing` checks a chosen local branch out into a worktree; `inplace` runs in
  * the project's own checkout with no worktree. */
-export type WorkstreamMode = "isolated" | "existing" | "inplace";
 
 export function useCreateWorkstream(projectPath: string) {
   return useMutation({
@@ -371,7 +381,7 @@ export function useCreateWorkstream(projectPath: string) {
     }: {
       title: string;
       base: string | null;
-      mode: WorkstreamMode;
+      mode: WorktreeMode;
       branch: string | null;
     }) => unwrap(commands.createWorkstream(projectPath, title, base, mode, branch)),
     onSuccess: () => {
@@ -390,7 +400,7 @@ export function useRenameWorkstream() {
 
 export function useSetWorkstreamStage(projectPath: string) {
   return useMutation({
-    mutationFn: ({ id, stage }: { id: string; stage: string }) =>
+    mutationFn: ({ id, stage }: { id: string; stage: Stage }) =>
       unwrap(commands.setWorkstreamStage(id, stage)),
     // Optimistic: the stage drives the composer styling, so flip it instantly.
     onMutate: async ({ id, stage }) => {
@@ -428,9 +438,9 @@ export function useArchiveWorkstream() {
     mutationFn: ({ id, skipScripts = false }: { id: string; skipScripts?: boolean }) =>
       unwrap(commands.archiveWorkstream(id, skipScripts)),
     onSuccess: (_data, { id }) => {
-      // Archiving kills the workstream's live sessions on the backend; release
-      // their in-memory transcripts here so they don't linger for the session.
-      removeSessionsForWorkstream(id);
+      // Archiving kills the workstream's live sessions on the backend; the
+      // session feature's registered cleanup releases its in-memory transcripts.
+      for (const cleanup of workstreamArchiveCleanups) cleanup(id);
       invalidateWorkstream(id);
     },
   });

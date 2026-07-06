@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 
-import type { AppSettings, BinaryStatus, OllamaSettings } from "../../../lib/bindings";
+import type { AppSettings, BinaryStatus, OllamaSettings } from "@/lib/bindings";
 import {
   useOllamaStatus,
   useSetAppSettings,
   useSetOllamaDefaultModel,
   useSetOllamaEndpoint,
   useSetOllamaModels,
-} from "../../../lib/queries";
+} from "@/lib/queries";
 import {
   Badge,
   Button,
@@ -19,9 +19,9 @@ import {
   Spinner,
   TextInput,
   Toggle,
-} from "../../../components/ui";
-import { BinaryCard } from "../../system/BinaryCard";
-import { SettingRow } from "../parts";
+} from "@/components/ui";
+import { BinaryCard } from "@/features/system/BinaryCard";
+import { SettingRow } from "@/features/settings/parts";
 
 const DOCS_URL = "https://ollama.com";
 const DEFAULT_ENDPOINT = "http://localhost:11434";

@@ -1,4 +1,4 @@
-import type { DocMeta } from "../../lib/bindings";
+import type { DocMeta } from "@/lib/bindings";
 
 export type DocGroup = {
   /** Lowercase `fm.type`, or "" for untyped docs. */
@@ -11,11 +11,9 @@ export type DocGroup = {
 };
 
 /**
- * Bucket library docs by frontmatter type for the grouped list. Groups appear in
- * the order their type is first seen — i.e. they follow whatever sort the query
- * already applied (date- or relevance-ordered), so the freshest type leads.
- * Docs keep their incoming order within a group. Untyped docs fall into a
- * trailing-by-appearance "UNTYPED" group.
+ * Bucket library docs by frontmatter type for the grouped list. Groups follow
+ * first-seen order — i.e. the query's existing sort (date/relevance), so the
+ * freshest type leads; docs keep their incoming order within a group.
  */
 export function groupDocsByType(docs: DocMeta[]): DocGroup[] {
   const byType = new Map<string, DocMeta[]>();

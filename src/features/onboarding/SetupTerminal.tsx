@@ -1,25 +1,18 @@
 /**
- * SetupTerminal — an embedded xterm panel that runs a specific `hyprlayer`
- * subcommand (e.g. `["ai", "configure"]`) in a real PTY.
- *
- * Modelled on TerminalTab.tsx but opened via `spawnCliTerminal` instead of
- * the workstream-coupled `terminalOpen`. Reuses the same engine/theme/write/
- * resize/close commands so the terminal is fully interactive (arrow keys,
- * ANSI color, etc.).
- *
- * `onExit(code)` fires once when the child process exits. The AI-configure
- * step uses it to auto-advance on exit code 0.
+ * Embedded xterm panel that runs a `hyprlayer` subcommand (e.g. `["ai",
+ * "configure"]`) in a real PTY. Modelled on TerminalTab.tsx but spawned via
+ * `spawnCliTerminal` instead of the workstream-coupled `terminalOpen`.
  */
 import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 
-import { commands, type TerminalEvent } from "../../lib/bindings";
-import { unwrap } from "../../lib/ipc";
-import { useThemeStore } from "../../lib/theme";
-import { b64ToBytes, strToB64 } from "../session/terminalCodec";
-import { createTerminalEngine, type TerminalEngine } from "../session/terminalEngine";
-import { useTerminalFontSize } from "../session/terminalFontSize";
-import { xtermThemeFromCss } from "../session/terminalTheme";
+import { commands, type TerminalEvent } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { useThemeStore } from "@/lib/theme";
+import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
+import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
+import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
+import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 
 type Props = {
   /** Arguments passed to `hyprlayer`, e.g. ["ai", "configure"]. Ignored when
@@ -30,7 +23,6 @@ type Props = {
   shellCommand?: string;
   /** Called once when the process exits. `code` is null on SIGKILL. */
   onExit?: (code: number | null) => void;
-  /** Extra CSS classes on the outer wrapper. */
   className?: string;
 };
 
@@ -61,11 +53,10 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
         engine.write(b64ToBytes(ev.data));
       } else if (ev.kind === "exited") {
         engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
-        // Only surface a GENUINE process exit. An exit fired because we tore the
-        // terminal down — our cleanup's `terminalClose`, or a StrictMode
-        // mount→unmount→mount throwaway whose in-flight PTY we kill — must not
-        // call back, or the parent would react to a phantom completion (e.g.
-        // bounce out of the configure step the instant it mounts).
+        // Only surface a GENUINE exit. Teardown (our cleanup's `terminalClose`,
+        // or a StrictMode mount→unmount→mount whose in-flight PTY we kill) also
+        // fires `exited`; calling back then would bounce the parent out of the
+        // configure step on a phantom completion.
         if (!disposed) onExit?.(ev.code ?? null);
       }
     };
