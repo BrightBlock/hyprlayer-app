@@ -1,6 +1,6 @@
 import { fileURLToPath, URL } from "node:url";
 
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -47,6 +47,7 @@ export default defineConfig(async () => ({
 
   // Vitest — run with `pnpm test`
   test: {
+    exclude: [...configDefaults.exclude, "archived-contexts/**"],
     setupFiles: ["./src/test-setup.ts"],
   },
 }));
