@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.4.15",
+      "date": "2026-07-06",
+      "summary": "PR review gate on Merge, smarter watcher, and context-attach fix.",
+      "notes": [
+        "The Merge button is now gated on a typed review decision — approved reviews are required before merging.",
+        "The file watcher now detects git changes in worktrees that fall outside the tracked directory tree.",
+        "Context attachment is unified into the composer for all turns, not just the first."
+      ]
+    },
+    {
       "version": "0.4.14",
       "date": "2026-07-06",
       "summary": "Run-script output persists after the script exits.",
