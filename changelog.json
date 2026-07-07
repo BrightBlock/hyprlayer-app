@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.4.17",
+      "date": "2026-07-07",
+      "summary": "Drag-to-reorder projects and reliable rewind across resumes.",
+      "notes": [
+        "Projects in the sidebar can now be reordered by dragging.",
+        "Fixed session rewind when using --resume: UUIDs are now read directly from Claude's on-disk transcript so rewind works correctly across resumed sessions."
+      ]
+    },
+    {
       "version": "0.4.16",
       "date": "2026-07-06",
       "summary": "Nested untracked files now list individually in the changes panel.",
