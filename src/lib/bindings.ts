@@ -28,6 +28,12 @@ export const commands = {
 	 */
 	removeProject: (path: string, deleteFiles: boolean) => typedError<null, AppError>(__TAURI_INVOKE("remove_project", { path, deleteFiles })),
 	/**
+	 *  Persist the user's drag-to-reorder of the project sidebar. `paths` is the full
+	 *  project list in its new top-to-bottom order; each project's stored `position`
+	 *  is set to its index, so the next `get_bootstrap` returns them in this order.
+	 */
+	reorderProjects: (paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("reorder_projects", { paths })),
+	/**
 	 *  The user's GitHub repos for the clone dialog's "Recent repos" list. Returns
 	 *  an empty list (never an error) when gh is missing or unauthenticated — the
 	 *  URL field still works, so recents are purely a convenience.

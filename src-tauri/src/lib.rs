@@ -33,6 +33,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::projects::add_project,
             commands::projects::clone_project,
             commands::projects::remove_project,
+            commands::projects::reorder_projects,
             commands::projects::list_recent_repos,
             commands::projects::sync_thoughts,
             commands::projects::run_backend_health,

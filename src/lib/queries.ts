@@ -10,6 +10,7 @@ import {
   type CreateDocInput,
   type FmPatchDto,
   type MergeMethod,
+  type Project,
   type ScriptKind,
   type ScriptSettings,
   type Stage,
@@ -203,6 +204,41 @@ export function useRemoveProject() {
     mutationFn: (args: { path: string; deleteFiles: boolean }) =>
       unwrap(commands.removeProject(args.path, args.deleteFiles)),
     onSettled: invalidateProjects,
+  });
+}
+
+/** Persist a drag-to-reorder of the project sidebar. `paths` is the full project
+ *  list in its new top-to-bottom order. Optimistic: the reordered list stays on
+ *  screen (the drag already moved it locally), reverting only if the write fails. */
+export function useReorderProjects() {
+  return useMutation({
+    // Serialize concurrent reorders so a slow earlier write can't land after a
+    // fast later one and revert it (same rationale as useSetAppSettings).
+    scope: { id: "reorder-projects" },
+    mutationFn: (paths: string[]) => unwrap(commands.reorderProjects(paths)),
+    onMutate: async (paths) => {
+      // Cancel in-flight bootstrap refetches so they can't clobber our order.
+      await queryClient.cancelQueries({ queryKey: ["bootstrap"] });
+      const previous = queryClient.getQueryData<Bootstrap>(["bootstrap"]);
+      queryClient.setQueryData<Bootstrap>(["bootstrap"], (prev) => {
+        if (!prev) return prev;
+        const byPath = new Map(prev.projects.map((p) => [p.path, p]));
+        const ordered = paths
+          .map((path) => byPath.get(path))
+          .filter((p): p is Project => p !== undefined);
+        // Never drop a row: keep any project not named in `paths` (e.g. one added
+        // out-of-band mid-drag) at the end.
+        for (const p of prev.projects) if (!paths.includes(p.path)) ordered.push(p);
+        return { ...prev, projects: ordered };
+      });
+      return { previous };
+    },
+    onError: (_error, _paths, context) => {
+      if (context?.previous) queryClient.setQueryData(["bootstrap"], context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    },
   });
 }
 

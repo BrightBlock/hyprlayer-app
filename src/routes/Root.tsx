@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -27,6 +28,7 @@ import {
   useDoc,
   useDocWebUrl,
   useEditorTargets,
+  useReorderProjects,
   useWorkstreamPr,
   useWorktreeFilesCheck,
 } from "@/lib/queries";
@@ -90,6 +92,11 @@ import {
   useProjectSettingsStore,
 } from "@/features/projects/projectSettingsStore";
 import { RemoveProjectDialog } from "@/features/projects/RemoveProjectDialog";
+import {
+  useProjectDrag,
+  type ProjectDragHandlers,
+  type ProjectDragState,
+} from "@/features/projects/useProjectDrag";
 import { useUpdate, showUpdateToast } from "@/lib/updater";
 import { useToast } from "@/lib/toast";
 import { Toast } from "@/components/Toast";
@@ -492,6 +499,26 @@ function OpenInMenu({ dir }: { dir: string }) {
  *  disk). Hovering lists the offending patterns. Renders nothing when the copy
  *  config is clean or the project has none. The check runs on app start and
  *  refreshes when the copy list changes (see `useWorktreeFilesCheck`). */
+/** Per-block transform for the drag-to-reorder gesture: the grabbed block follows
+ *  the cursor (no transition); every other block slides by the grabbed block's
+ *  height to open the landing gap (CSS transition makes it smooth). */
+function projectDragStyle(
+  drag: ProjectDragState,
+  path: string,
+  index: number,
+): CSSProperties | undefined {
+  if (!drag) return undefined;
+  if (drag.path === path) return { transform: `translateY(${drag.dy}px)` };
+  const { srcIndex, targetIndex, height } = drag;
+  let shift = 0;
+  if (srcIndex < targetIndex && index > srcIndex && index <= targetIndex) shift = -height;
+  else if (srcIndex > targetIndex && index >= targetIndex && index < srcIndex) shift = height;
+  return {
+    transform: shift ? `translateY(${shift}px)` : undefined,
+    transition: "transform 180ms ease",
+  };
+}
+
 function ProjectCopyWarning({ projectPath }: { projectPath: string }) {
   const check = useWorktreeFilesCheck(projectPath);
   const report = check.data;
@@ -529,7 +556,7 @@ export function Root() {
   // so the panel tracks the cursor instead of trailing it by the animation.
   const [resizingSidebar, setResizingSidebar] = useState(false);
 
-  const projects = bootstrap.data?.projects ?? [];
+  const projects = useMemo(() => bootstrap.data?.projects ?? [], [bootstrap.data?.projects]);
   const configReady = bootstrap.data?.config.state === "ready";
   const currentProjectPath = routeProjectPath(pathname);
   const currentProject = currentProjectPath
@@ -580,6 +607,50 @@ export function Root() {
     group.push(view);
     itemsByProject.set(view.item.projectPath, group);
   }
+
+  // ── Drag-to-reorder the project list ──────────────────────────────────────
+  // A project block (header + its nested workstreams) drags as a unit: the
+  // grabbed block lifts and follows the cursor while the others slide to open its
+  // landing gap (see `projectDragStyle` / `useProjectDrag`). Nothing reorders in
+  // the DOM until the drop. On drop `dragOrder` holds the new order (rendered via
+  // `orderedProjects`) until the persisted bootstrap catches up, so the block
+  // never flashes back to its old slot.
+  const reorderProjects = useReorderProjects();
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const projectDragRef = useRef<ProjectDragHandlers>({ commit: () => {} });
+  const {
+    drag: projectDrag,
+    suppressClickRef: projectDragSuppress,
+    startDrag: startProjectDrag,
+  } = useProjectDrag(projectDragRef);
+
+  const orderedProjects = useMemo(() => {
+    if (!dragOrder) return projects;
+    const byPath = new Map(projects.map((p) => [p.path, p]));
+    const out = dragOrder
+      .map((path) => byPath.get(path))
+      .filter((p): p is Project => p !== undefined);
+    // Never drop a project the drag order doesn't know about (e.g. one added
+    // out-of-band mid-drag) — append it.
+    for (const p of projects) if (!dragOrder.includes(p.path)) out.push(p);
+    return out;
+  }, [projects, dragOrder]);
+
+  // Repoint the drag handler at the latest project list + mutation each render
+  // (the long-lived pointer listeners read it through the ref).
+  projectDragRef.current = {
+    commit: (from, to) => {
+      const paths = projects.map((p) => p.path);
+      const next = [...paths];
+      const [moved] = next.splice(from, 1);
+      next.splice(Math.max(0, Math.min(to, next.length)), 0, moved);
+      if (next.every((p, i) => p === paths[i])) return; // unchanged — nothing to persist
+      // Show the new order immediately, then persist; clear the override once the
+      // write settles (success → the refetch matches; error → the mutation rolls back).
+      setDragOrder(next);
+      reorderProjects.mutate(next, { onSettled: () => setDragOrder(null) });
+    },
+  };
   // Pinned worktrees — a user-curated shortcut list rendered above the project
   // tree (see `pinStore`). Resolved against the live active list so a pin whose
   // workstream was archived/deleted simply drops out; `projectByPath` gives each
@@ -1367,22 +1438,31 @@ export function Root() {
               </div>
             )}
 
-            {projects.map((p) => {
+            {orderedProjects.map((p, i) => {
               const children = itemsByProject.get(p.path) ?? [];
               const isCurrent = currentProjectPath === p.path;
               const projectHighlight = isCurrent && !activeWorkstreamId;
+              const isDragging = projectDrag?.path === p.path;
 
               return (
-                <div key={p.path} className="mb-0.5">
+                <div
+                  key={p.path}
+                  data-project-path={p.path}
+                  style={projectDragStyle(projectDrag, p.path, i)}
+                  className={`relative mb-0.5 ${
+                    isDragging ? "z-30 rounded-lg bg-panel-2 shadow-2xl ring-1 ring-accent/40" : ""
+                  }`}
+                >
                   <div
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setItemMenu(null);
                       setProjectMenu({ x: e.clientX, y: e.clientY, project: p });
                     }}
-                    className={`group relative flex items-center overflow-hidden rounded-lg pr-1 ${
+                    onPointerDown={(e) => startProjectDrag(e, { path: p.path })}
+                    className={`group relative flex select-none items-center overflow-hidden rounded-lg pr-1 ${
                       projectHighlight ? "bg-accent/15" : "hover:bg-edge/50"
-                    }`}
+                    } ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
                   >
                     {/* The selected project wears the redesign's accent spine. */}
                     {projectHighlight && (
@@ -1394,6 +1474,11 @@ export function Root() {
                     <Link
                       to="/projects/$projectPath"
                       params={{ projectPath: p.path }}
+                      draggable={false}
+                      onClick={(e) => {
+                        // A drag that ends on the header shouldn't also navigate.
+                        if (projectDragSuppress.current) e.preventDefault();
+                      }}
                       className={`flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-sm text-ink ${
                         projectHighlight ? "font-semibold" : "font-medium"
                       }`}
@@ -1413,7 +1498,9 @@ export function Root() {
                         />
                       )}
                     </Link>
-                    <ProjectCopyWarning projectPath={p.path} />
+                    <span data-no-drag className="contents">
+                      <ProjectCopyWarning projectPath={p.path} />
+                    </span>
                     {/* Workstream count at rest; the add affordance takes its
                         place on hover (the mockup shows the count). */}
                     {children.length > 0 && (
@@ -1425,6 +1512,7 @@ export function Root() {
                       to="/projects/$projectPath"
                       params={{ projectPath: p.path }}
                       search={{ create: true }}
+                      data-no-drag
                       className="hidden h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim group-hover:flex hover:bg-edge/60 hover:text-ink"
                       title={`New workstream in ${p.mappedName}`}
                       aria-label={`New workstream in ${p.mappedName}`}

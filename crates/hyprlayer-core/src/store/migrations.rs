@@ -99,6 +99,14 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE sessions ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude';
     ",
+    // v6: user-defined project ordering for the sidebar. `position` is the
+    // drag-to-reorder rank; `list_projects` sorts by (position, name). Existing
+    // rows default to 0 and so keep tiebreaking by name — upgrades preserve
+    // today's alphabetical order until the first manual reorder. New projects
+    // append at the bottom (position = MAX+1; see `insert_project`).
+    "
+    ALTER TABLE projects ADD COLUMN position REAL NOT NULL DEFAULT 0;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
