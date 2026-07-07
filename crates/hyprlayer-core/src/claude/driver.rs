@@ -83,12 +83,6 @@ pub struct SpawnConfig {
     pub add_dirs: Vec<PathBuf>,
     /// `--resume <claude_session_id>` to continue; cwd must match the original.
     pub resume: Option<String>,
-    /// How many human turns already precede this generation in the persisted log
-    /// (0 for a fresh session; the resumed turn count otherwise). Only turns from
-    /// THIS generation echo their uuid back to us, so [`ClaudeDriver::rewind_to_ordinal`]
-    /// subtracts this to map a GLOBAL turn ordinal onto the uuids we captured —
-    /// without it a resumed session peels the wrong turn (or none).
-    pub user_turn_base: usize,
     /// Branch a resumed session instead of continuing it.
     pub fork: bool,
     /// Cost circuit-breaker.
@@ -133,14 +127,6 @@ pub struct ClaudeDriver {
     /// Tool inputs from open `can_use_tool` requests, keyed by request id —
     /// echoed back as `updatedInput` when allowing (claude's schema requires it).
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
-    /// claude message uuids of the human turns in this generation, in order
-    /// (captured from `--replay-user-messages` echoes). `rewind_to_ordinal` maps
-    /// the 1-based turn ordinal onto these to target a `rewind_conversation`.
-    user_uuids: Arc<StdMutex<Vec<String>>>,
-    /// Human turns that precede this generation (see [`SpawnConfig::user_turn_base`]).
-    /// `user_uuids[0]` is turn `user_turn_base + 1`, so a global ordinal maps to
-    /// `ordinal - user_turn_base - 1`.
-    user_turn_base: usize,
     /// Control requests awaiting a `control_response`, keyed by request id (just
     /// `rewind_conversation` today). The reader resolves the oneshot on reply.
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
@@ -161,11 +147,6 @@ impl ClaudeDriver {
             .args(["--input-format", "stream-json"])
             .arg("--verbose")
             .arg("--include-partial-messages")
-            // Echo each user turn back on stdout (tagged `isReplay`) so we can
-            // capture claude's own message uuid for it — the target a
-            // `rewind_conversation` control request needs. The reader suppresses
-            // the echo itself (it's not new content).
-            .arg("--replay-user-messages")
             .args(["--permission-prompt-tool", "stdio"])
             .args(["--permission-mode", config.permission_mode.as_flag()]);
 
@@ -259,7 +240,6 @@ impl ClaudeDriver {
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
         let killed = Arc::new(AtomicBool::new(false));
         let pending_permissions = Arc::new(StdMutex::new(HashMap::<String, Value>::new()));
-        let user_uuids = Arc::new(StdMutex::new(Vec::<String>::new()));
         let pending_controls =
             Arc::new(StdMutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
 
@@ -277,7 +257,6 @@ impl ClaudeDriver {
             stderr_ring.clone(),
             killed.clone(),
             pending_permissions.clone(),
-            user_uuids.clone(),
             pending_controls.clone(),
         ));
 
@@ -290,8 +269,6 @@ impl ClaudeDriver {
                 stderr_ring,
                 killed,
                 pending_permissions,
-                user_uuids,
-                user_turn_base: config.user_turn_base,
                 pending_controls,
                 killer: Killer { pid },
             },
@@ -382,35 +359,31 @@ impl ClaudeDriver {
         ))
     }
 
-    /// Rewind claude's OWN conversation to the 1-based `ordinal` human turn,
-    /// truncating history — and its on-disk transcript — so that turn and
-    /// everything after it leave the model's memory (a `--resume` then reloads the
-    /// shortened conversation). claude's `rewind_conversation` only accepts the
-    /// *latest* human turn as a target, so we peel from the tail down to the
-    /// target; each step is the current last turn, so none is "stale".
+    /// Rewind claude's OWN conversation to the 1-based `ordinal` human turn so that
+    /// turn and everything after it leave the model's memory. claude's
+    /// `rewind_conversation` only accepts the *latest* human turn as a target, so we
+    /// peel from the tail down to the target; each step is the current last turn, so
+    /// none is "stale".
     ///
-    /// `ordinal` is GLOBAL (the N-th human turn across the whole conversation), but
-    /// we only hold uuids for the turns sent in THIS generation — those after the
-    /// base — so it maps to local index `ordinal - user_turn_base - 1`. A target at
-    /// or before the base predates our captured uuids (e.g. a pre-resume turn), and
-    /// the first turn has no preceding assistant to land on; both — like a running
-    /// turn that won't interrupt or a claude refusal — leave the conversation
-    /// untouched and let the caller fall back to a log-only rewind.
+    /// The target uuids come from claude's own on-disk transcript — the SAME record
+    /// it reloads on `--resume` — so `ordinal` maps directly onto index `ordinal - 1`
+    /// and works across resumes (an app restart, model/permission switch, or a prior
+    /// log-only rewind), not just the current generation. Any miss — the transcript
+    /// isn't found/readable, the first turn (no preceding assistant to land on), a
+    /// running turn that won't interrupt, or a claude refusal — leaves the
+    /// conversation untouched and lets the caller fall back to a log-only rewind.
     pub async fn rewind_to_ordinal(&self, ordinal: usize) -> Result<()> {
-        let uuids = self
-            .user_uuids
-            .lock()
-            .map(|u| u.clone())
-            .unwrap_or_default();
-        // Resolve which captured uuid to peel down to (pure; unit-tested). Any
-        // unreachable target leaves the conversation untouched and drops the caller
-        // to a log-only rewind.
-        let local_idx = rewind_local_start(ordinal, self.user_turn_base, uuids.len())
-            .map_err(|detail| CoreError::OutputParse {
+        let uuids = self.transcript_user_uuids().await;
+        // Resolve which uuid to peel down to (pure; unit-tested). An unreachable
+        // target leaves the conversation untouched and drops the caller to a
+        // log-only rewind.
+        let start = rewind_local_start(ordinal, uuids.len()).map_err(|detail| {
+            CoreError::OutputParse {
                 program: "claude".into(),
                 detail,
-            })?;
-        for uuid in uuids[local_idx..].iter().rev() {
+            }
+        })?;
+        for uuid in uuids[start..].iter().rev() {
             let outcome = self.rewind_conversation(uuid, true).await?;
             if !outcome.rewound {
                 return Err(CoreError::OutputParse {
@@ -422,11 +395,23 @@ impl ClaudeDriver {
                 });
             }
         }
-        // Drop the peeled turns so a follow-up rewind maps ordinals correctly.
-        if let Ok(mut u) = self.user_uuids.lock() {
-            u.truncate(local_idx);
-        }
         Ok(())
+    }
+
+    /// This session's human-turn uuids, in order, read from claude's transcript
+    /// (`~/.claude/projects/*/<session_id>.jsonl`). Runs the blocking file read off
+    /// the async runtime. Empty on any miss (not found, unreadable, unparseable), so
+    /// [`Self::rewind_to_ordinal`] falls back to a log-only rewind rather than error.
+    async fn transcript_user_uuids(&self) -> Vec<String> {
+        let session_id = self.session_id.clone();
+        tokio::task::spawn_blocking(move || {
+            transcript_path(&session_id)
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .map(|c| parse_transcript_user_uuids(&c))
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// Send one `rewind_conversation` control request and await its reply. The
@@ -553,7 +538,6 @@ async fn read_and_wait(
     stderr_ring: Arc<StdMutex<Vec<String>>>,
     killed: Arc<AtomicBool>,
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
-    user_uuids: Arc<StdMutex<Vec<String>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
 ) {
     let mut saw_result = false;
@@ -577,21 +561,13 @@ async fn read_and_wait(
                             map.insert(request_id.clone(), input.clone());
                         }
                     }
-                    // A `--replay-user-messages` echo: record the turn's uuid (for
-                    // rewind) and suppress it — it's a re-emission of a prompt we
-                    // sent, not new content, and would otherwise render as text.
+                    // Defensive: suppress any replayed user echo (we no longer run
+                    // with `--replay-user-messages`, but a stray echo is a
+                    // re-emission of a prompt we sent, not new content — never render
+                    // it as text).
                     ParsedLine::User {
-                        is_replay: true,
-                        uuid,
-                        ..
-                    } => {
-                        if let Some(u) = uuid {
-                            if let Ok(mut list) = user_uuids.lock() {
-                                list.push(u.clone());
-                            }
-                        }
-                        continue;
-                    }
+                        is_replay: true, ..
+                    } => continue,
                     // A reply to one of our control requests: hand it to the waiter
                     // keyed by request id (if any), then drop it — not a transcript
                     // event. Unmatched acks (e.g. interrupt) simply have no waiter.
@@ -767,31 +743,90 @@ fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<SessionEvent>
     }
 }
 
-/// Map a GLOBAL 1-based human-turn `ordinal` onto the local start index in this
-/// generation's captured uuids (`len` of them, preceded by `base` earlier turns)
-/// to begin peeling from. Pure so the ordinal arithmetic — the part that silently
-/// corrupted a resumed session — is exhaustively unit-tested without a live claude.
+/// Map a 1-based human-turn `ordinal` onto the index in the transcript's `len`
+/// human-turn uuids to begin peeling from (`ordinal - 1`). Pure so the ordinal
+/// arithmetic — the part that silently corrupted a resumed session — is
+/// exhaustively unit-tested without a live claude.
 ///
 /// `Err` (target unreachable) is not fatal: the caller falls back to a log-only
-/// rewind. Unreachable when the target is the first turn (no preceding assistant
-/// to land on), predates this generation (`<= base`, so never echoed to us), or
-/// hasn't been captured yet (`>= base + len`).
-fn rewind_local_start(ordinal: usize, base: usize, len: usize) -> std::result::Result<usize, String> {
+/// rewind. Unreachable when the target is the first turn (no preceding assistant to
+/// land on) or past the turns the transcript holds (`>= len`).
+fn rewind_local_start(ordinal: usize, len: usize) -> std::result::Result<usize, String> {
     if ordinal < 2 {
         return Err("rewind_conversation cannot target the first user turn".into());
     }
-    if ordinal <= base {
+    let idx = ordinal - 1;
+    if idx >= len {
         return Err(format!(
-            "user turn {ordinal} predates this live generation (base {base})"
+            "no uuid for user turn {ordinal} (transcript has {len} turns)"
         ));
     }
-    let local_idx = ordinal - base - 1;
-    if local_idx >= len {
-        return Err(format!(
-            "no captured uuid for user turn {ordinal} (have {len} turns this generation, base {base})"
-        ));
+    Ok(idx)
+}
+
+/// claude's config root — `$CLAUDE_CONFIG_DIR` when set (claude honors it), else
+/// `~/.claude`. Session transcripts live under `<root>/projects/`.
+fn claude_config_dir() -> Option<PathBuf> {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+}
+
+/// Locate `<config>/projects/*/<session_id>.jsonl` — claude keys each project's
+/// transcript dir off a (lossy) escaping of the cwd, so rather than replicate that
+/// we scan the project dirs for the file named by the (unique) session id.
+fn transcript_path(session_id: &str) -> Option<PathBuf> {
+    let projects = claude_config_dir()?.join("projects");
+    let filename = format!("{session_id}.jsonl");
+    for entry in std::fs::read_dir(&projects).ok()?.flatten() {
+        let candidate = entry.path().join(&filename);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
     }
-    Ok(local_idx)
+    None
+}
+
+/// The uuids of the genuine human turns in a session transcript (`jsonl`), in
+/// order — the same turns claude's own rewind targets. Mirrors claude's filter:
+/// a `type:"user"` line that isn't a tool-result echo, meta / injected / compaction
+/// line, subagent sidechain, or non-human origin. Pure + unit-tested.
+fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
+    jsonl
+        .lines()
+        .filter_map(|line| {
+            let v: Value = serde_json::from_str(line.trim()).ok()?;
+            if v.get("type").and_then(Value::as_str) != Some("user") {
+                return None;
+            }
+            let flag = |k| v.get(k).and_then(Value::as_bool).unwrap_or(false);
+            if flag("isMeta")
+                || flag("isCompactSummary")
+                || flag("isVisibleInTranscriptOnly")
+                || flag("isSidechain")
+            {
+                return None;
+            }
+            // A user line whose content is a tool_result array is a tool return.
+            let content = v.get("message").and_then(|m| m.get("content"));
+            let is_tool_result = content
+                .and_then(Value::as_array)
+                .and_then(|a| a.first())
+                .and_then(|b| b.get("type"))
+                .and_then(Value::as_str)
+                == Some("tool_result");
+            if is_tool_result {
+                return None;
+            }
+            // `origin.kind`, when present, must be human.
+            if let Some(kind) = v.get("origin").and_then(|o| o.get("kind")).and_then(Value::as_str) {
+                if kind != "human" {
+                    return None;
+                }
+            }
+            v.get("uuid").and_then(Value::as_str).map(str::to_string)
+        })
+        .collect()
 }
 
 /// Best-effort process-tree killer. On Unix we signal the process group we put
@@ -829,45 +864,56 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// Fresh session (base 0): the local index is `ordinal - 1`, so peeling from
-    /// it keeps turns `1..ordinal` and drops `ordinal..` (the smoke-test case).
+    /// The index is `ordinal - 1`, so peeling from it keeps turns `1..ordinal` and
+    /// drops `ordinal..`. Because the uuids come from the transcript (all turns,
+    /// every generation), a turn from before a resume maps directly — the fix for
+    /// the "predates this live generation" fall-through.
     #[test]
-    fn rewind_maps_ordinals_with_no_base() {
-        assert_eq!(rewind_local_start(2, 0, 5), Ok(1));
-        assert_eq!(rewind_local_start(5, 0, 5), Ok(4));
+    fn rewind_maps_ordinal_to_index() {
+        assert_eq!(rewind_local_start(2, 5), Ok(1));
+        assert_eq!(rewind_local_start(5, 5), Ok(4));
+        // A pre-resume turn is now reachable (transcript holds every turn's uuid).
+        assert_eq!(rewind_local_start(3, 7), Ok(2));
         // The first turn has no preceding assistant — unreachable.
-        assert!(rewind_local_start(1, 0, 5).is_err());
-        // Beyond what we've captured — unreachable.
-        assert!(rewind_local_start(6, 0, 5).is_err());
+        assert!(rewind_local_start(1, 5).is_err());
+        // Beyond what the transcript holds — unreachable.
+        assert!(rewind_local_start(6, 5).is_err());
     }
 
-    /// After a resume that carried 5 prior turns (base 5) with 2 new turns
-    /// captured this generation: turn 6 → local 0, turn 7 → local 1. This is the
-    /// regression the bug hit — the old code used `ordinal - 1` (→ index 5/6) and
-    /// either peeled the wrong turn or fell out of range.
+    /// An empty transcript (not found / unreadable) reaches no turn — every ordinal
+    /// falls back to a log-only rewind.
     #[test]
-    fn rewind_maps_ordinals_past_a_resume_base() {
-        assert_eq!(rewind_local_start(6, 5, 2), Ok(0));
-        assert_eq!(rewind_local_start(7, 5, 2), Ok(1));
-        // Turns 2..=5 predate this generation — never echoed, so unreachable
-        // (fall back to a log-only rewind), NOT silently mapped onto a live uuid.
-        for ordinal in 2..=5 {
-            assert!(
-                rewind_local_start(ordinal, 5, 2).is_err(),
-                "turn {ordinal} predates base 5 and must be unreachable"
-            );
-        }
-        // Turn 8 hasn't been sent yet this generation.
-        assert!(rewind_local_start(8, 5, 2).is_err());
-    }
-
-    /// A base with nothing captured yet (just resumed, no new turns) reaches no
-    /// live turn — every ordinal falls back.
-    #[test]
-    fn rewind_empty_generation_reaches_nothing() {
+    fn rewind_empty_transcript_reaches_nothing() {
         for ordinal in 1..=8 {
-            assert!(rewind_local_start(ordinal, 5, 0).is_err());
+            assert!(rewind_local_start(ordinal, 0).is_err());
         }
+    }
+
+    /// The transcript parser keeps genuine human turns in order and drops the rest:
+    /// tool-result echoes, meta / compaction / injected lines, subagent sidechains,
+    /// and non-human origins — mirroring what claude's own rewind will accept.
+    #[test]
+    fn parse_transcript_keeps_only_human_turns() {
+        let jsonl = [
+            r#"{"type":"system","subtype":"init","uuid":"sys"}"#,
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"first turn"}}"#,
+            r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"hi"}]}}"#,
+            r#"{"type":"user","uuid":"tr","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":"ok"}]}}"#,
+            r#"{"type":"user","uuid":"u2","message":{"role":"user","content":"second turn"}}"#,
+            r#"{"type":"user","uuid":"meta","isMeta":true,"message":{"content":"injected"}}"#,
+            r#"{"type":"user","uuid":"side","isSidechain":true,"message":{"content":"subagent"}}"#,
+            r#"{"type":"user","uuid":"nonhuman","origin":{"kind":"agent"},"message":{"content":"x"}}"#,
+            r#"{"type":"user","uuid":"u3","message":{"role":"user","content":"third turn"}}"#,
+        ]
+        .join("\n");
+        assert_eq!(parse_transcript_user_uuids(&jsonl), vec!["u1", "u2", "u3"]);
+    }
+
+    /// Blank/garbage lines are skipped, not fatal (tolerant parse).
+    #[test]
+    fn parse_transcript_tolerates_junk_lines() {
+        let jsonl = "\nnot json\n{}\n{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}\n";
+        assert_eq!(parse_transcript_user_uuids(jsonl), vec!["u1"]);
     }
 
     /// AskUserQuestion is surfaced as an interactive `QuestionAsk` (carrying the

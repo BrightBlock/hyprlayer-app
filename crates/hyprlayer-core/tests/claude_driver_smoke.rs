@@ -24,7 +24,6 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         disallowed_tools: vec![],
         add_dirs: vec![],
         resume: None,
-        user_turn_base: 0,
         fork: false,
         max_budget_usd: Some(1.0),
         model: None,
@@ -120,8 +119,8 @@ async fn run_turn(
 
 /// End-to-end: three turns, then `rewind_to_ordinal(2)` must drive claude's own
 /// `rewind_conversation` so the model genuinely forgets turns 2–3 while keeping
-/// turn 1. Exercises the whole integration: `--replay-user-messages` uuid capture,
-/// control-response routing, and tail-to-target peeling.
+/// turn 1. Exercises the whole integration: reading the turn uuids from claude's
+/// on-disk transcript, control-response routing, and tail-to-target peeling.
 #[tokio::test]
 #[ignore = "requires a logged-in claude; makes real API calls"]
 async fn rewind_to_ordinal_truncates_model_memory() {
@@ -135,7 +134,6 @@ async fn rewind_to_ordinal_truncates_model_memory() {
         disallowed_tools: vec![],
         add_dirs: vec![],
         resume: None,
-        user_turn_base: 0,
         fork: false,
         max_budget_usd: Some(1.0),
         model: Some("haiku".into()),
@@ -178,6 +176,105 @@ async fn rewind_to_ordinal_truncates_model_memory() {
     assert!(
         color.to_lowercase().contains("blue"),
         "model should STILL remember blue (turn 1 was kept), got: {color:?}"
+    );
+
+    driver.kill();
+}
+
+/// Spawn a haiku session (fresh or `--resume`) in `cwd` under `session_id`.
+fn spawn_haiku(
+    cwd: &std::path::Path,
+    session_id: &str,
+    resume: bool,
+) -> (ClaudeDriver, tokio::sync::broadcast::Receiver<SessionEvent>) {
+    let claude = which::which("claude").expect("claude on PATH");
+    ClaudeDriver::spawn(SpawnConfig {
+        claude_bin: claude,
+        cwd: cwd.to_path_buf(),
+        session_id: session_id.to_string(),
+        permission_mode: PermissionMode::BypassPermissions,
+        allowed_tools: vec![],
+        disallowed_tools: vec![],
+        add_dirs: vec![],
+        resume: resume.then(|| session_id.to_string()),
+        fork: false,
+        max_budget_usd: Some(1.0),
+        model: Some("haiku".into()),
+        effort: None,
+        chrome: false,
+        env: std::env::vars().collect(),
+    })
+    .expect("spawn claude")
+}
+
+/// THE REGRESSION (issue #1011): rewinding to a turn from BEFORE a `--resume`
+/// boundary. The driver reads the target uuids from claude's on-disk transcript,
+/// not the live process's replay echoes, so a resumed session can still
+/// truly-rewind its earlier turns. Every app restart resumes sessions, so before
+/// this fix a rewind of any pre-restart turn silently fell back to a log-only prune
+/// ("the agent still remembers the removed turns") — now the model actually forgets.
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes real API calls"]
+async fn rewind_across_resume_truncates_pre_resume_turns() {
+    let cwd = std::env::temp_dir();
+    let session_id = uuid::Uuid::new_v4().to_string();
+
+    // Generation 1: three turns, then kill the process — i.e. an app restart.
+    {
+        let (driver, mut events) = spawn_haiku(&cwd, &session_id, false);
+        run_turn(&driver, &mut events, "Remember: my favorite color is blue. Reply OK.").await;
+        run_turn(&driver, &mut events, "Remember: my favorite number is seven. Reply OK.").await;
+        run_turn(&driver, &mut events, "Remember: my favorite animal is the otter. Reply OK.").await;
+        driver.kill();
+        // Let it exit so the resume can't race the still-dying process.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(SessionEvent::Exited { .. }) = events.recv().await {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("generation 1 should exit after kill");
+    }
+
+    // Generation 2: `--resume` the SAME session id. One neutral turn first, exactly
+    // as the app does — a resumed session is re-attached and interacted with (so
+    // claude has fully loaded `z`) well before the user clicks rewind. (Rewinding in
+    // the very first millisecond after `--resume`, mid-load, is racy on claude's
+    // side and never happens in the human-driven UI.)
+    let (driver, mut events) = spawn_haiku(&cwd, &session_id, true);
+    run_turn(&driver, &mut events, "Reply READY.").await;
+
+    // Rewind to turn 2 — turns 2 and 3 are from the PREVIOUS generation, whose uuids
+    // this process never saw echoed; the driver reads them from claude's transcript.
+    driver
+        .rewind_to_ordinal(2)
+        .await
+        .expect("rewind across a resume should truncate claude's conversation");
+
+    let animal = run_turn(
+        &driver,
+        &mut events,
+        "What is my favorite animal? If I never told you in this conversation, reply exactly: UNKNOWN.",
+    )
+    .await;
+    println!("post-resume-rewind animal answer: {animal:?}");
+    assert!(
+        !animal.to_lowercase().contains("otter"),
+        "model should have FORGOTTEN the otter (a pre-resume turn was rewound), got: {animal:?}"
+    );
+
+    let color = run_turn(
+        &driver,
+        &mut events,
+        "What is my favorite color? If I never told you, reply UNKNOWN.",
+    )
+    .await;
+    println!("post-resume-rewind color answer: {color:?}");
+    assert!(
+        color.to_lowercase().contains("blue"),
+        "model should STILL remember blue (turn 1 was kept across the resume), got: {color:?}"
     );
 
     driver.kill();

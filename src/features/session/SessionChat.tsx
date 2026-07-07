@@ -76,6 +76,7 @@ import {
   applyModel,
   applyPermissionMode,
   cancelQueuedMessage,
+  isFirstUserTurn,
   killSession,
   respondPermission,
   restoreSessionIfNeeded,
@@ -1737,10 +1738,19 @@ export function SessionChat({
         // can edit and re-send, while the backend truncates the conversation in
         // parallel.
         onDraftChange(text);
-        void rewindToMessage(sid, itemId);
+        // The first turn has nothing before it for claude to rewind to, so an
+        // in-place truncation is impossible — a log-only prune there would leave
+        // the model remembering everything. Rewinding it means "start over", so
+        // reset the tab to a fresh session: the next send begins a brand-new
+        // conversation the model has no memory of.
+        if (isFirstUserTurn(sid, itemId)) {
+          onResetSession();
+        } else {
+          void rewindToMessage(sid, itemId);
+        }
       },
     }),
-    [sid, onDraftChange],
+    [sid, onDraftChange, onResetSession],
   );
 
   return (

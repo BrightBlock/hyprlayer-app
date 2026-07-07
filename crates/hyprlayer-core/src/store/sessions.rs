@@ -240,22 +240,6 @@ impl Db {
         })
     }
 
-    /// How many `userMessage` events are persisted for this session — the count of
-    /// human turns so far. A (re)launch passes this as the driver's `user_turn_base`
-    /// so a live rewind can map a GLOBAL turn ordinal onto the uuids the process
-    /// captures this generation (turns after the base). 0 for a fresh session.
-    pub fn count_user_messages(&self, session_id: &str) -> Result<usize> {
-        self.with(|conn| {
-            let n: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM session_events
-                 WHERE session_id = ?1 AND kind = 'userMessage'",
-                params![session_id],
-                |row| row.get(0),
-            )?;
-            Ok(n as usize)
-        })
-    }
-
     /// The seq of the `n`-th (1-based) `userMessage` event in this session,
     /// or `None` if there are fewer than `n` user turns. Shared by rewind/fork:
     /// the UI knows which user bubble was clicked (ordinal among user items),
@@ -487,17 +471,6 @@ mod tests {
         assert_eq!(db.nth_user_message_seq("s1", 2).unwrap(), Some(3));
         assert_eq!(db.nth_user_message_seq("s1", 3).unwrap(), Some(5));
         assert_eq!(db.nth_user_message_seq("s1", 4).unwrap(), None);
-    }
-
-    #[test]
-    fn count_user_messages_counts_human_turns() {
-        let db = Db::open_in_memory().unwrap();
-        seed_dialog(&db, "s1"); // 3 userMessage events among 7 rows
-        assert_eq!(db.count_user_messages("s1").unwrap(), 3);
-        // A cut to user turn #2 (seq 3) leaves one human turn behind — the base a
-        // resumed/rewound generation would carry.
-        db.cut_session_events_from("s1", 3).unwrap();
-        assert_eq!(db.count_user_messages("s1").unwrap(), 1);
     }
 
     #[test]

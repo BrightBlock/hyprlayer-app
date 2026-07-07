@@ -549,6 +549,15 @@ function userTurnOrdinal(items: SessionEntry["items"], itemId: string): number {
   return 0;
 }
 
+/** Whether `itemId` is the FIRST user turn of `sessionId`. That turn is the one
+ *  case a live rewind can't truncate — claude has no turn before it to land on —
+ *  so the UI routes a first-turn rewind to a fresh session (Clear Context) instead
+ *  of a misleading log-only prune that leaves the model remembering everything. */
+export function isFirstUserTurn(sessionId: string, itemId: string): boolean {
+  const entry = entryOf(sessionId);
+  return entry ? userTurnOrdinal(entry.items, itemId) === 1 : false;
+}
+
 /**
  * Rewind a session to the user turn identified by `itemId`, dropping that turn
  * and everything after it — Claude-Desktop-style "rewind to here". Drives the

@@ -38,9 +38,9 @@ pub enum ParsedLine {
         /// The message's own `uuid`, when present. Maps a human turn to claude's
         /// internal id, which `rewind_conversation` targets.
         uuid: Option<String>,
-        /// `isReplay:true` — a `--replay-user-messages` echo of a prompt we sent
-        /// on stdin. Not new transcript content: the reader captures its `uuid`
-        /// (for rewind) and suppresses it, so it never renders as assistant text.
+        /// `isReplay:true` — a replay echo of a prompt we sent on stdin (emitted
+        /// under `--replay-user-messages`). Not new transcript content, so the reader
+        /// suppresses it; it never renders as assistant text.
         is_replay: bool,
     },
     /// A partial-message chunk (`type:"stream_event"`); only text deltas are

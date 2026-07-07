@@ -189,14 +189,6 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             let claude_cfg = state.settings.get().await.providers.claude;
             env.extend(super::claude_auth_env(&claude_cfg));
 
-            // Human turns already in the log precede this generation; the driver
-            // subtracts this base to map a global rewind ordinal onto the uuids it
-            // captures now (0 for a fresh session).
-            let user_turn_base = {
-                let id = session.id.clone();
-                db_task(state.db.clone(), move |db| db.count_user_messages(&id)).await?
-            };
-
             let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
                 claude_bin: claude,
                 cwd: PathBuf::from(&session.cwd),
@@ -208,7 +200,6 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
                 // claude persisted the conversation under the id we passed as
                 // `--session-id`, so resume by that same id.
                 resume: resume.then(|| session.id.clone()),
-                user_turn_base,
                 fork: false,
                 max_budget_usd: None,
                 model,
