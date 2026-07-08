@@ -1180,18 +1180,67 @@ pub async fn worktree_list_dir(
     .await
 }
 
-/// Read a worktree file as text for the read-only viewer.
+/// A worktree file's text + mtime (the save concurrency token).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeFile {
+    pub content: String,
+    pub mtime_ms: f64,
+}
+
+/// A save was refused because the file changed on disk since it was opened.
+fn file_conflict() -> AppError {
+    AppError {
+        code: "file_conflict".into(),
+        message: "The file changed on disk since you opened it.".into(),
+        remedy: Some(
+            "Reload the file to pick up the external changes, then re-apply your edits.".into(),
+        ),
+    }
+}
+
+/// Read a worktree file as text + mtime for the editor.
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_read_file(
     state: State<'_, AppState>,
     id: String,
     path: String,
-) -> CmdResult<String> {
+) -> CmdResult<WorktreeFile> {
     with_worktree(&state, &id, "worktree_read_file", move |p| {
-        hyprlayer_core::gitops::read_text_file(p, &path)
+        let content = hyprlayer_core::gitops::read_text_file(p, &path)?;
+        let mtime_ms = hyprlayer_core::gitops::file_mtime_ms(p, &path)?;
+        Ok(WorktreeFile { content, mtime_ms })
     })
     .await
+}
+
+/// Save a worktree file, refusing (with `file_conflict`) if its mtime drifted since
+/// the editor read it. `base_mtime_ms` of `0` skips the guard. Returns the new mtime.
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_write_file(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    content: String,
+    base_mtime_ms: f64,
+) -> CmdResult<f64> {
+    let item = load_item(&state, &id).await?;
+    let worktree = PathBuf::from(&item.worktree_path);
+    blocking("worktree_write_file", move || -> CmdResult<f64> {
+        // Refuse if the file changed on disk since the editor read it (mirrors save_doc).
+        if base_mtime_ms > 0.0 {
+            if let Ok(current) = hyprlayer_core::gitops::file_mtime_ms(&worktree, &path) {
+                if (current - base_mtime_ms).abs() > 0.5 {
+                    return Err(file_conflict());
+                }
+            }
+        }
+        hyprlayer_core::gitops::write_text_file(&worktree, &path, &content)?;
+        Ok(hyprlayer_core::gitops::file_mtime_ms(&worktree, &path)?)
+    })
+    .await?
 }
 
 /// Slash commands available in this worktree (project + user `.claude`), for the

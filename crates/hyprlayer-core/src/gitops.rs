@@ -845,6 +845,34 @@ pub fn read_text_file(worktree: &Path, rel: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
+/// Worktree file mtime in ms since the Unix epoch — the editor's save concurrency
+/// token. Path-checked; `0.0` when unavailable.
+pub fn file_mtime_ms(worktree: &Path, rel: &str) -> Result<f64> {
+    let abs = safe_join(worktree, rel)?;
+    let modified = std::fs::metadata(&abs)?.modified()?;
+    Ok(modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as f64)
+        .unwrap_or(0.0))
+}
+
+/// Write `content` to a worktree file via a temp-file + rename so a reader never
+/// sees a half-written file. Path-checked; creates or overwrites.
+pub fn write_text_file(worktree: &Path, rel: &str, content: &str) -> Result<()> {
+    let abs = safe_join(worktree, rel)?;
+    // Same-directory temp so the rename is atomic; hidden + .hyprtmp so it's ignored.
+    let name = abs
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| CoreError::InvalidPath {
+            path: rel.to_string(),
+        })?;
+    let tmp = abs.with_file_name(format!(".{name}.hyprtmp"));
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(&tmp, &abs)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1133,6 +1161,34 @@ mod tests {
         assert_eq!(read_text_file(dir.path(), "a.md").unwrap(), "one\n");
         assert!(matches!(
             read_text_file(dir.path(), "../escape"),
+            Err(CoreError::InvalidPath { .. })
+        ));
+    }
+
+    #[test]
+    fn write_text_file_round_trips_bumps_mtime_and_is_path_safe() {
+        let dir = repo_with_commit();
+        let before = file_mtime_ms(dir.path(), "a.md").unwrap();
+        assert!(before > 0.0);
+
+        write_text_file(dir.path(), "a.md", "two\n").unwrap();
+        assert_eq!(read_text_file(dir.path(), "a.md").unwrap(), "two\n");
+        // The write renames its temp away, leaving no stray file behind.
+        assert!(!dir.path().join(".a.md.hyprtmp").exists());
+        // mtime moves forward, so a stale save can be detected.
+        assert!(file_mtime_ms(dir.path(), "a.md").unwrap() >= before);
+
+        // A brand-new file is created.
+        write_text_file(dir.path(), "fresh.txt", "hi").unwrap();
+        assert_eq!(read_text_file(dir.path(), "fresh.txt").unwrap(), "hi");
+
+        // Path traversal is refused on both the writer and the mtime probe.
+        assert!(matches!(
+            write_text_file(dir.path(), "../escape", "x"),
+            Err(CoreError::InvalidPath { .. })
+        ));
+        assert!(matches!(
+            file_mtime_ms(dir.path(), "../escape"),
             Err(CoreError::InvalidPath { .. })
         ));
     }

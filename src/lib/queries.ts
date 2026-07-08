@@ -18,6 +18,7 @@ import {
   type ThoughtQuery,
   type ThoughtsSource,
   type WorkstreamView,
+  type WorktreeFile,
 } from "./bindings";
 import { unwrap } from "./ipc";
 import { queryClient } from "./queryClient";
@@ -686,12 +687,28 @@ export function useWorktreeDir(id: string, relPath: string, enabled = true) {
   });
 }
 
-/** Contents of a worktree file for the read-only viewer tab. */
+/** Contents + mtime of a worktree file; the mtime is the save concurrency token. */
 export function useWorktreeFile(id: string, path: string) {
   return useQuery({
     queryKey: ["workstream", id, "file", path],
     queryFn: () => unwrap(commands.worktreeReadFile(id, path)),
     enabled: id.length > 0 && path.length > 0,
+  });
+}
+
+/** Save a worktree file; on success refresh the file cache in place and invalidate
+ *  git status. Stale writes reject with a `file_conflict` AppError. */
+export function useSaveWorktreeFile(id: string, path: string) {
+  return useMutation({
+    mutationFn: ({ content, baseMtimeMs }: { content: string; baseMtimeMs: number }) =>
+      unwrap(commands.worktreeWriteFile(id, path, content, baseMtimeMs)),
+    onSuccess: (mtimeMs, { content }) => {
+      queryClient.setQueryData<WorktreeFile>(["workstream", id, "file", path], {
+        content,
+        mtimeMs,
+      });
+      invalidateWorktreeGit(id);
+    },
   });
 }
 

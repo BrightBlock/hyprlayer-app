@@ -164,8 +164,18 @@ export const commands = {
 	worktreeFileSides: (id: string, path: string, staged: boolean) => typedError<FileSides, AppError>(__TAURI_INVOKE("worktree_file_sides", { id, path, staged })),
 	/**  Immediate children of a directory in the worktree (lazy "All Files" tree). */
 	worktreeListDir: (id: string, path: string) => typedError<DirEntry[], AppError>(__TAURI_INVOKE("worktree_list_dir", { id, path })),
-	/**  Read a worktree file as text for the read-only viewer. */
-	worktreeReadFile: (id: string, path: string) => typedError<string, AppError>(__TAURI_INVOKE("worktree_read_file", { id, path })),
+	/**
+	 *  Read a worktree file as text for the editor, with the mtime the caller passes
+	 *  back on save so a concurrent external edit can be detected.
+	 */
+	worktreeReadFile: (id: string, path: string) => typedError<WorktreeFile, AppError>(__TAURI_INVOKE("worktree_read_file", { id, path })),
+	/**
+	 *  Save edits to a worktree file, refusing the write (with `file_conflict`) if
+	 *  the file's mtime drifted since the editor read it — e.g. an agent rewrote it —
+	 *  rather than silently clobbering those changes. A `base_mtime_ms` of `0` skips
+	 *  the guard (new/unknown file). Returns the file's new mtime.
+	 */
+	worktreeWriteFile: (id: string, path: string, content: string, baseMtimeMs: number | null) => typedError<number | null, AppError>(__TAURI_INVOKE("worktree_write_file", { id, path, content, baseMtimeMs })),
 	/**
 	 *  Slash commands available in this worktree (project + user `.claude`), for the
 	 *  composer's `/skill` autocomplete and highlight.
@@ -2066,6 +2076,15 @@ export type WorkstreamView = {
  */
 export type WorktreeChanged = {
 	workstreamId: string,
+};
+
+/**
+ *  A worktree file's text plus its on-disk mtime, the concurrency token the
+ *  editor hands back on save (see `worktree_write_file`).
+ */
+export type WorktreeFile = {
+	content: string,
+	mtimeMs: number | null,
 };
 
 /**

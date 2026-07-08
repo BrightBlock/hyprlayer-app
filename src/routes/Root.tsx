@@ -32,6 +32,7 @@ import {
   useWorkstreamPr,
   useWorktreeFilesCheck,
 } from "@/lib/queries";
+import { triggerActiveFileSave } from "@/lib/fileSave";
 import { docTitle } from "@/features/library/text";
 import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
 import { startEdgeDrag } from "@/lib/resize";
@@ -1105,11 +1106,13 @@ export function Root() {
       listen("menu:open-settings", () => {
         void navigate({ to: "/settings" });
       }),
+      listen("menu:save-file", () => {
+        triggerActiveFileSave();
+      }),
     ]);
     return () => {
-      void unlisten.then(([a, b]) => {
-        a();
-        b();
+      void unlisten.then((unlisteners) => {
+        for (const off of unlisteners) off();
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

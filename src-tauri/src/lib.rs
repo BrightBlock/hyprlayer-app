@@ -74,6 +74,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::worktree_file_sides,
             commands::workstreams::worktree_list_dir,
             commands::workstreams::worktree_read_file,
+            commands::workstreams::worktree_write_file,
             commands::workstreams::list_slash_commands,
             commands::workstreams::worktree_search_files,
             commands::workstreams::watch_worktree,
@@ -372,6 +373,7 @@ pub fn run() {
                 match event.id().as_ref() {
                     "check-updates" => { let _ = app.emit("menu:check-for-updates", ()); }
                     "open-settings" => { let _ = app.emit("menu:open-settings", ()); }
+                    "save-file" => { let _ = app.emit("menu:save-file", ()); }
                     _ => {}
                 }
             });
@@ -395,8 +397,8 @@ pub fn run() {
 /// (Edit), Quit (⌘Q), Hide, fullscreen, minimize all unchanged — but with the
 /// "Close Window" item dropped so ⌘W is inert (see the call site for why). The
 /// default binds Close Window in both a File submenu and the Window submenu, so
-/// both go: the File submenu held nothing else and is omitted, and the Window
-/// submenu keeps only Minimize/Zoom.
+/// both drop it: the File submenu keeps only Save (⌘S), and the Window submenu
+/// keeps only Minimize/Zoom.
 #[cfg(target_os = "macos")]
 fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
@@ -416,6 +418,10 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         tauri::menu::MenuItem::with_id(handle, "check-updates", "Check for Updates…", true, None::<&str>)?;
     let open_settings =
         tauri::menu::MenuItem::with_id(handle, "open-settings", "Settings", true, Some("CmdOrCtrl+,"))?;
+    // File ▸ Save (⌘S), relayed to the frontend as `menu:save-file`. On the menu
+    // so ⌘S fires app-wide, even when the editor isn't focused (e.g. md preview).
+    let save_file =
+        tauri::menu::MenuItem::with_id(handle, "save-file", "Save", true, Some("CmdOrCtrl+S"))?;
 
     let app_menu = SubmenuBuilder::new(handle, &pkg.name)
         .about(Some(about))
@@ -430,6 +436,9 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         .separator()
         .quit()
         .build()?;
+
+    // No Close Window here — keeping ⌘W inert is why this menu is custom (see call site).
+    let file_menu = SubmenuBuilder::new(handle, "File").item(&save_file).build()?;
 
     let edit_menu = SubmenuBuilder::new(handle, "Edit")
         .undo()
@@ -453,7 +462,7 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
     let help_menu = SubmenuBuilder::new(handle, "Help").build()?;
 
     MenuBuilder::new(handle)
-        .items(&[&app_menu, &edit_menu, &view_menu, &window_menu, &help_menu])
+        .items(&[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu, &help_menu])
         .build()
 }
 
