@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.18",
+      "date": "2026-07-08",
+      "summary": "Squared-off panel toggle icons and aligned OpenIn button.",
+      "notes": [
+        "Redrew the panel toggle icons as a symmetric square to match the editor icon's weight, and fixed the OpenIn button to align with its sibling header icons."
+      ]
+    },
+    {
       "version": "0.4.17",
       "date": "2026-07-07",
       "summary": "Drag-to-reorder projects and reliable rewind across resumes.",
