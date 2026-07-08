@@ -5,7 +5,7 @@ import { EditorView } from "@codemirror/view";
 
 import { ErrorNote, Spinner } from "@/components/ui";
 import { useFileSides } from "@/lib/queries";
-import { readOnlyExtensions, useLangForPath } from "./codeView";
+import { diffWordHighlight, readOnlyExtensions, useLangForPath } from "./codeView";
 
 type DiffMode = "unified" | "split";
 
@@ -35,7 +35,10 @@ export function DiffTab({ id, path, staged }: { id: string; path: string; staged
     const host = hostRef.current;
     if (!host || !data) return;
 
-    const readOnly = readOnlyExtensions(lang);
+    // `diffWordHighlight` replaces @codemirror/merge's `highlightChanges` (kept
+    // off) so only genuinely changed words inside a modified line are tinted —
+    // wholly-new/removed lines get the line background alone, GitHub-style.
+    const readOnly = [readOnlyExtensions(lang), diffWordHighlight];
     const collapseUnchanged = { margin: 3, minSize: 6 };
 
     let view: EditorView | MergeView;
@@ -44,7 +47,7 @@ export function DiffTab({ id, path, staged }: { id: string; path: string; staged
         parent: host,
         a: { doc: data.original, extensions: readOnly },
         b: { doc: data.modified, extensions: readOnly },
-        highlightChanges: true,
+        highlightChanges: false,
         gutter: true,
         collapseUnchanged,
       });
@@ -56,7 +59,7 @@ export function DiffTab({ id, path, staged }: { id: string; path: string; staged
           readOnly,
           unifiedMergeView({
             original: data.original,
-            highlightChanges: true,
+            highlightChanges: false,
             gutter: true,
             mergeControls: false,
             collapseUnchanged,

@@ -9,6 +9,7 @@ import { ErrorNote, Spinner } from "@/components/ui";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { splitFrontmatter } from "@/features/library/text";
 import { clearActiveFileSave, setActiveFileSave } from "@/lib/fileSave";
+import { useCommand } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
 import { useSaveWorktreeFile, useWorktreeFile } from "@/lib/queries";
 import { codeBase, useLangForPath } from "./codeView";
@@ -98,6 +99,8 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
   const dirty = content !== savedContent;
   const isMarkdown = MARKDOWN_RE.test(path);
   const editable = useMemo(() => !initialContent.includes(NUL), [initialContent]);
+
+  useCommand("view.toggleMarkdownPreview", isMarkdown ? () => setPreview((p) => !p) : null);
 
   // Transient "Saved" flash.
   const savedTimer = useRef<number | null>(null);

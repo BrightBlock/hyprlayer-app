@@ -108,6 +108,15 @@ export const COMMANDS: CommandDef[] = [
     when: "workstream",
     defaults: { mac: "mod+shift+a", other: "mod+shift+a" },
   },
+  {
+    id: "view.toggleMarkdownPreview",
+    label: "Toggle Markdown Preview",
+    category: "View",
+    when: "workstream",
+    // Only registered while a markdown file is open in the file viewer (see
+    // FileViewerTab) — inert everywhere else via the registry's context gate.
+    defaults: { mac: "mod+shift+v", other: "mod+shift+v" },
+  },
   // Workspace
   {
     id: "tab.new",

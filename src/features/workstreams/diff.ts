@@ -118,3 +118,30 @@ export function diffStrings(oldText: string, newText: string): PatchLine[] {
   while (j < m) out.push({ kind: "add", text: `+${b[j++]}` });
   return out;
 }
+
+/**
+ * Given a document `text` and a changed span `[from, to)` (character offsets),
+ * return the sub-ranges that cover only *part* of a line — dropping any segment
+ * that spans a whole line. This is how GitHub decides what to word-highlight in a
+ * diff: it tints the characters that changed *within* a modified line, but leaves
+ * a wholly-new or wholly-removed line to its line-level background alone. The
+ * merge view feeds us change spans that (for pure insertions/deletions) cover
+ * entire lines; this strips those so only genuine intra-line edits get the
+ * stronger tint. Returned ranges are ascending and non-overlapping.
+ */
+export function intraLineRanges(text: string, from: number, to: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (let pos = from; pos < to; ) {
+    const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+    const nl = text.indexOf("\n", pos);
+    const lineEnd = nl === -1 ? text.length : nl;
+    const segFrom = Math.max(pos, lineStart);
+    const segTo = Math.min(to, lineEnd);
+    // Keep the segment only if it's a *slice* of the line, not the whole line.
+    if (segFrom < segTo && !(segFrom === lineStart && segTo === lineEnd)) {
+      out.push([segFrom, segTo]);
+    }
+    pos = lineEnd + 1;
+  }
+  return out;
+}
