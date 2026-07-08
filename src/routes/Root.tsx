@@ -38,7 +38,10 @@ import { startEdgeDrag } from "@/lib/resize";
 import { IS_MACOS } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
 import { useUiStore } from "@/lib/uiStore";
-import { selectPinnedViews, usePinStore } from "@/features/workstreams/pinStore";
+import {
+  selectPinnedViews,
+  usePinStore,
+} from "@/features/workstreams/pinStore";
 import { useLibraryScope } from "@/features/library/libraryScope";
 import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "@/lib/keybindings/registry";
@@ -130,31 +133,56 @@ const LEFT_CLUSTER_CLEARANCE = 12; // breathing room between the cluster and the
 
 // Cross-platform vector icons (Lucide family / native-style), currentColor so
 // they theme with the bar and stay pixel-crisp at every DPI on macOS + Windows.
+// A near-square panel glyph — symmetric padding, rect fills 18/24 of the box —
+// rendered at 18 like the editor icon beside it, so both show a ~15px visible
+// square and read as an equal pair. The sidebar is marked by a light divider
+// line offset to its side (right here), not a filled pane — a quieter glyph
+// that still reads as a panel toggle. The button is a fixed h-7 w-7, glyph-only.
 function PanelRightIcon() {
   return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M18.5 4.5H15v15h3.5A2.5 2.5 0 0 0 21 17V7a2.5 2.5 0 0 0-2.5-2.5Z"
-        fill="currentColor"
-        opacity="0.9"
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <rect
+        x="3"
+        y="3"
+        width="18"
+        height="18"
+        rx="2.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
       />
+      <path d="M15 3v18" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
 
-/** Mirror of `PanelRightIcon` with the filled pane on the left — the header's
+/** Mirror of `PanelRightIcon` with the divider line on the left — the header's
  *  explicit toggle for the left project panel (the diff sidebar's right-panel
  *  toggle uses the un-mirrored one). */
 function PanelLeftIcon() {
   return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="4.5" width="18" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M5.5 4.5H9v15H5.5A2.5 2.5 0 0 1 3 17V7a2.5 2.5 0 0 1 2.5-2.5Z"
-        fill="currentColor"
-        opacity="0.9"
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <rect
+        x="3"
+        y="3"
+        width="18"
+        height="18"
+        rx="2.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
       />
+      <path d="M9 3v18" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
@@ -255,8 +283,22 @@ function SettingsIcon({ size = 18 }: { size?: number }) {
  *  mock: a bold, generously rounded outline that fills ~40% of the button. */
 function SquareIcon({ size = 18 }: { size?: number }) {
   return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="currentColor" strokeWidth="2.5" />
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <rect
+        x="2.5"
+        y="2.5"
+        width="19"
+        height="19"
+        rx="5.5"
+        stroke="currentColor"
+        strokeWidth="2.5"
+      />
     </svg>
   );
 }
@@ -354,14 +396,18 @@ const railNavClass = (active: boolean): string =>
       : "text-ink-dim hover:bg-accent/10 hover:text-ink"
   }`;
 
-
 /** A row/trigger icon for a detected app: its real rendered icon when the
  *  backend could rasterize one, otherwise a glyph standing in for its kind.
  *  Rasterized macOS app icons sit inside a full-bleed squircle with built-in
  *  padding, so at the bar's nominal 18px the visible glyph reads ~14px — too
  *  light next to the stroke icons. Render the squircle at 22px so the glyph
  *  inside lands at the same optical weight as the bar's stroke icons (e.g.
- *  PanelRightIcon). */
+ *  PanelRightIcon).
+ *
+ *  These are the apps' real icons, so each carries its own baked-in background
+ *  (VS Code's white square, Terminal's black one); they don't recolor with the
+ *  theme — there's no dark VS Code icon to swap to. We keep the real icons for
+ *  brand recognition rather than dropping to monochrome glyphs. */
 function appIcon(app: EditorTarget, size = 22): ReactNode {
   if (app.iconDataUrl) {
     return (
@@ -396,12 +442,17 @@ function OpenInMenu({ dir }: { dir: string }) {
   // editor, instead of whichever app the backend happened to list first.
   const defaultApp = useMemo(() => {
     const apps = targets.data ?? [];
-    return apps.find((a) => a.kind === "editor") ?? apps.find((a) => a.id !== "files");
+    return (
+      apps.find((a) => a.kind === "editor") ??
+      apps.find((a) => a.id !== "files")
+    );
   }, [targets.data]);
 
   const items = useMemo(() => {
     const apps = targets.data ?? [];
-    const ordered = defaultApp ? [defaultApp, ...apps.filter((a) => a.id !== defaultApp.id)] : apps;
+    const ordered = defaultApp
+      ? [defaultApp, ...apps.filter((a) => a.id !== defaultApp.id)]
+      : apps;
     return [
       ...ordered.map((app) => ({
         key: app.id,
@@ -448,7 +499,11 @@ function OpenInMenu({ dir }: { dir: string }) {
   // The trigger wears the default editor's icon (computed above), Conductor-
   // style, so it reads as "open in editor".
   return (
-    <div className="relative">
+    // `flex items-center` (not a bare block) so the inline-flex button is a
+    // flex item — cleanly cross-axis-centered like its sibling icon buttons in
+    // the header row. As a plain block wrapper it aligned to the line-box text
+    // baseline instead, which pushed the icon a few px high vs. its neighbours.
+    <div className="relative flex items-center">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -468,7 +523,11 @@ function OpenInMenu({ dir }: { dir: string }) {
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div
+            className="fixed inset-0 z-20"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
           <div className="absolute right-0 top-full z-30 mt-1.5 min-w-[220px] overflow-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
             {items.map((it, i) => (
               <button
@@ -483,7 +542,9 @@ function OpenInMenu({ dir }: { dir: string }) {
                 <span className="shrink-0">{it.icon}</span>
                 <span className="flex-1 font-medium">{it.label}</span>
                 {i < 9 && (
-                  <span className="shrink-0 font-mono text-[10px] text-ink-dim/60">{i + 1}</span>
+                  <span className="shrink-0 font-mono text-[10px] text-ink-dim/60">
+                    {i + 1}
+                  </span>
                 )}
               </button>
             ))}
@@ -511,8 +572,10 @@ function projectDragStyle(
   if (drag.path === path) return { transform: `translateY(${drag.dy}px)` };
   const { srcIndex, targetIndex, height } = drag;
   let shift = 0;
-  if (srcIndex < targetIndex && index > srcIndex && index <= targetIndex) shift = -height;
-  else if (srcIndex > targetIndex && index >= targetIndex && index < srcIndex) shift = height;
+  if (srcIndex < targetIndex && index > srcIndex && index <= targetIndex)
+    shift = -height;
+  else if (srcIndex > targetIndex && index >= targetIndex && index < srcIndex)
+    shift = height;
   return {
     transform: shift ? `translateY(${shift}px)` : undefined,
     transition: "transform 180ms ease",
@@ -522,7 +585,9 @@ function projectDragStyle(
 function ProjectCopyWarning({ projectPath }: { projectPath: string }) {
   const check = useWorktreeFilesCheck(projectPath);
   const report = check.data;
-  const problems = report ? [...report.missing, ...report.errors.map((e) => e.entry)] : [];
+  const problems = report
+    ? [...report.missing, ...report.errors.map((e) => e.entry)]
+    : [];
   if (problems.length === 0) return null;
   return (
     <span
@@ -539,7 +604,9 @@ export function Root() {
   const bootstrap = useBootstrap();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const routeHref = useRouterState({ select: (s) => s.location.href });
-  const locationSearch = useRouterState({ select: (s) => s.location.search }) as {
+  const locationSearch = useRouterState({
+    select: (s) => s.location.search,
+  }) as {
     item?: string;
     doc?: string;
     from?: string;
@@ -547,8 +614,12 @@ export function Root() {
   // Left project-sidebar collapse lives in the persisted uiStore (alongside the
   // right diff sidebar's `diffHidden`) so the app reopens with the same layout.
   const collapsed = useUiStore((state) => state.projectSidebarCollapsed);
-  const setProjectSidebarCollapsed = useUiStore((state) => state.setProjectSidebarCollapsed);
-  const toggleProjectSidebar = useUiStore((state) => state.toggleProjectSidebar);
+  const setProjectSidebarCollapsed = useUiStore(
+    (state) => state.setProjectSidebarCollapsed,
+  );
+  const toggleProjectSidebar = useUiStore(
+    (state) => state.toggleProjectSidebar,
+  );
   // Default to the widest we allow; the user can drag it narrower if desired.
   const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
   // True only while the resize handle is being dragged. The panel's width
@@ -556,7 +627,10 @@ export function Root() {
   // so the panel tracks the cursor instead of trailing it by the animation.
   const [resizingSidebar, setResizingSidebar] = useState(false);
 
-  const projects = useMemo(() => bootstrap.data?.projects ?? [], [bootstrap.data?.projects]);
+  const projects = useMemo(
+    () => bootstrap.data?.projects ?? [],
+    [bootstrap.data?.projects],
+  );
   const configReady = bootstrap.data?.config.state === "ready";
   const currentProjectPath = routeProjectPath(pathname);
   const currentProject = currentProjectPath
@@ -660,10 +734,16 @@ export function Root() {
   const togglePin = usePinStore((state) => state.togglePin);
   const togglePinnedSection = usePinStore((state) => state.toggleCollapsed);
   const pinnedViews = selectPinnedViews(pinnedIds, allWorkstreams.data ?? []);
-  const projectByPath = new Map(projects.map((project) => [project.path, project]));
-  const activeWorkstreamId = currentProjectPath ? locationSearch.item : undefined;
+  const projectByPath = new Map(
+    projects.map((project) => [project.path, project]),
+  );
+  const activeWorkstreamId = currentProjectPath
+    ? locationSearch.item
+    : undefined;
   const activeWorkstream = activeWorkstreamId
-    ? (allWorkstreams.data ?? []).find((view) => view.item.id === activeWorkstreamId)
+    ? (allWorkstreams.data ?? []).find(
+        (view) => view.item.id === activeWorkstreamId,
+      )
     : undefined;
   // True when we're on a project route with no workstream selected — the board
   // view. Used to suppress the diff-sidebar chrome that only applies to a chat.
@@ -700,7 +780,7 @@ export function Root() {
     ) {
       void navigate({ to: "/onboarding" });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrap.data?.config.state, pathname]);
 
   // Toggling a "global destination" icon (Library / Settings / project docs)
@@ -711,7 +791,9 @@ export function Root() {
     if (canGoBack) router.history.back();
     else fallback();
   };
-  const toggleNav = (target: "/library" | "/settings" | "/archive" | "/prompts") => {
+  const toggleNav = (
+    target: "/library" | "/settings" | "/archive" | "/prompts",
+  ) => {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
     } else if (target === "/library") {
@@ -724,7 +806,8 @@ export function Root() {
       void navigate({
         to: "/library",
         search:
-          lastSearch ?? (defaultLibraryProject ? { project: defaultLibraryProject } : {}),
+          lastSearch ??
+          (defaultLibraryProject ? { project: defaultLibraryProject } : {}),
       });
     } else {
       void navigate({ to: target });
@@ -737,10 +820,15 @@ export function Root() {
   // It also resumes where the user last left this project's docs — the doc +
   // filters read while scoped to it — re-stamping `from`; a bare scope first time.
   const openProjectDocs = (project: Project) => {
-    const saved = useLibraryScope.getState().lastSearchByProject[project.thoughtsProject];
+    const saved =
+      useLibraryScope.getState().lastSearchByProject[project.thoughtsProject];
     void navigate({
       to: "/library",
-      search: { ...saved, project: project.thoughtsProject, from: project.path },
+      search: {
+        ...saved,
+        project: project.thoughtsProject,
+        from: project.path,
+      },
     });
   };
 
@@ -757,7 +845,11 @@ export function Root() {
   const dismissToProject = useCallback(
     (projectPath: string, id: string) => {
       if (currentProjectPath === projectPath && activeWorkstreamId === id) {
-        void navigate({ to: "/projects/$projectPath", params: { projectPath }, search: {} });
+        void navigate({
+          to: "/projects/$projectPath",
+          params: { projectPath },
+          search: {},
+        });
       }
     },
     [currentProjectPath, activeWorkstreamId, navigate],
@@ -772,7 +864,10 @@ export function Root() {
   const autoArchivedRef = useRef<Set<string>>(new Set());
   // Observe the active workstream's PR for archive-on-merge. Shares the query
   // cache with the GIT panel's PR controls, so it adds no extra `gh` calls.
-  const activePr = useWorkstreamPr(activeWorkstreamId ?? "", Boolean(activeWorkstream));
+  const activePr = useWorkstreamPr(
+    activeWorkstreamId ?? "",
+    Boolean(activeWorkstream),
+  );
   useEffect(() => {
     if (!archiveOnMerge || !activeWorkstream) return;
     if (activePr.data?.state !== "merged") return;
@@ -784,23 +879,35 @@ export function Root() {
       { id },
       { onSuccess: () => dismissToProject(projectPath, id) },
     );
-  }, [archiveOnMerge, activeWorkstream, activePr.data?.state, autoArchive, dismissToProject]);
+  }, [
+    archiveOnMerge,
+    activeWorkstream,
+    activePr.data?.state,
+    autoArchive,
+    dismissToProject,
+  ]);
 
   const [itemMenu, setItemMenu] = useState<{
     x: number;
     y: number;
     view: WorkstreamView;
   } | null>(null);
-  const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(
+    null,
+  );
   const [renameTarget, setRenameTarget] = useState<WorkstreamView | null>(null);
-  const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(null);
+  const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(
+    null,
+  );
   // Detach acts on whichever item's menu is open; the id is passed at mutate time
   // (the menu closes on click, so a hook-arg id would churn before it resolves).
   const detachPr = useDetachPr();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
-  const [projectMenu, setProjectMenu] = useState<{ x: number; y: number; project: Project } | null>(
-    null,
-  );
+  const [projectMenu, setProjectMenu] = useState<{
+    x: number;
+    y: number;
+    project: Project;
+  } | null>(null);
   const settingsPath = useProjectSettingsStore((s) => s.path);
   // Left-rail scripts/terminal dock: which ws it toggles, whether that dock is
   // open, and whether ANY Run is alive (turns the rail icon green).
@@ -808,7 +915,9 @@ export function Root() {
   const scriptsDockOpen = useScriptsStore((s) =>
     s.activeWorkstream ? !!s.dock[s.activeWorkstream]?.open : false,
   );
-  const scriptsRunning = useScriptsStore((s) => Object.keys(s.running).length > 0);
+  const scriptsRunning = useScriptsStore(
+    (s) => Object.keys(s.running).length > 0,
+  );
   const scriptsPosition = useScriptsStore((s) => s.dockPosition);
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
@@ -843,7 +952,11 @@ export function Root() {
   // shown/hidden state for its label). The Prompt library's panel is fixed
   // (always shown), so the toggle is inert there rather than silently flipping
   // the hidden project tree.
-  const sidebarShown = onLibrary ? !libraryCollapsed : onPrompts ? true : !collapsed;
+  const sidebarShown = onLibrary
+    ? !libraryCollapsed
+    : onPrompts
+      ? true
+      : !collapsed;
   const toggleSidebar = () => {
     if (onPrompts) return;
     if (onLibrary) toggleLibrary();
@@ -856,7 +969,9 @@ export function Root() {
   // and the breadcrumb floor (`minContentOffset`) derived from it.
   const isFullscreen = useIsFullscreen();
   const macTrafficLights = IS_MACOS && !isFullscreen;
-  const leftClusterLeft = macTrafficLights ? LEFT_CLUSTER_WITH_LIGHTS : LEFT_CLUSTER_NO_LIGHTS;
+  const leftClusterLeft = macTrafficLights
+    ? LEFT_CLUSTER_WITH_LIGHTS
+    : LEFT_CLUSTER_NO_LIGHTS;
   // Floor for the header inset: clear the absolutely-positioned left cluster so
   // the breadcrumb never collides with it when the sidebar is collapsed. The
   // cluster carries the sidebar toggle (every route has a collapsible left
@@ -868,7 +983,8 @@ export function Root() {
     leftClusterLeft +
     leftClusterIcons * LEFT_CLUSTER_ICON +
     (leftClusterIcons - 1) * LEFT_CLUSTER_GAP;
-  const minContentOffset = leftClusterRight + LEFT_CLUSTER_CLEARANCE - HEADER_CONTENT_PAD;
+  const minContentOffset =
+    leftClusterRight + LEFT_CLUSTER_CLEARANCE - HEADER_CONTENT_PAD;
   // The breadcrumb clears the whole left region — the nav rail plus the project
   // panel (fully hidden when collapsed) — so it sits above the main content,
   // not floating over the panel.
@@ -877,9 +993,13 @@ export function Root() {
   // It still floors at `minContentOffset` so it clears the macOS traffic lights —
   // the 56px rail alone is narrower than their inset, so the bare rail width
   // would slide the breadcrumb under the close/minimize/zoom buttons.
-  const contentOffset = onLibrary || onPrompts
-    ? Math.max(NAV_RAIL_WIDTH, minContentOffset)
-    : Math.max(NAV_RAIL_WIDTH + (collapsed ? 0 : sidebarWidth), minContentOffset);
+  const contentOffset =
+    onLibrary || onPrompts
+      ? Math.max(NAV_RAIL_WIDTH, minContentOffset)
+      : Math.max(
+          NAV_RAIL_WIDTH + (collapsed ? 0 : sidebarWidth),
+          minContentOffset,
+        );
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (collapsed) return;
     startEdgeDrag(event, {
@@ -904,7 +1024,9 @@ export function Root() {
   // bootstrap; each command below registers its handler only while it's usable
   // in the current context (a null handler = "not available now"), so the chord
   // is simply inert elsewhere. Tab/session commands register from ProjectPage.
-  useKeybindings(bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES);
+  useKeybindings(
+    bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES,
+  );
   // Effective ⌘K chord for the prompt-library button's tooltip.
   const promptPaletteChord = effectiveChord(
     bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES,
@@ -923,7 +1045,10 @@ export function Root() {
   // ⌘`: toggle the terminal & scripts dock — the same action as the rail's dock
   // button. Inert without an active workstream (the dock is per-workstream).
   useCommand("terminal.open", scriptsActiveWs ? toggleScriptsDock : null);
-  useCommand("terminal.toggleFullscreen", scriptsActiveWs ? maximizeScriptsDock : null);
+  useCommand(
+    "terminal.toggleFullscreen",
+    scriptsActiveWs ? maximizeScriptsDock : null,
+  );
   useCommand(
     "view.toggleChangesSidebar",
     currentSection === "Agent" ? () => toggleDiff() : null,
@@ -932,7 +1057,10 @@ export function Root() {
     "ws.commit",
     gitActions.canCommit && !gitActions.committing ? gitActions.doCommit : null,
   );
-  useCommand("ws.ship", gitActions.canShip && !gitActions.shipping ? gitActions.doShip : null);
+  useCommand(
+    "ws.ship",
+    gitActions.canShip && !gitActions.shipping ? gitActions.doShip : null,
+  );
   useCommand("search.open", () => toggleSearch());
   useCommand("prompts.palette", () => togglePromptPalette());
   // Custom prompt shortcuts (built-ins ride ws.commit / ws.ship above).
@@ -964,9 +1092,13 @@ export function Root() {
               { tone: "ok" },
             );
           } else {
-            showToast("Couldn't check for updates", "Check your connection and try again.", {
-              tone: "bad",
-            });
+            showToast(
+              "Couldn't check for updates",
+              "Check your connection and try again.",
+              {
+                tone: "bad",
+              },
+            );
           }
         });
       }),
@@ -974,8 +1106,13 @@ export function Root() {
         void navigate({ to: "/settings" });
       }),
     ]);
-    return () => { void unlisten.then(([a, b]) => { a(); b(); }); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      void unlisten.then(([a, b]) => {
+        a();
+        b();
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -1049,7 +1186,10 @@ export function Root() {
           style={{ marginLeft: contentOffset }}
           data-tauri-drag-region
         >
-          <div className="flex min-w-0 items-center gap-2 text-sm" data-tauri-drag-region>
+          <div
+            className="flex min-w-0 items-center gap-2 text-sm"
+            data-tauri-drag-region
+          >
             {currentProject ? (
               <>
                 <Link
@@ -1085,7 +1225,9 @@ export function Root() {
                       aria-label={`Back to ${backProject.mappedName}`}
                     >
                       <ChevronLeftIcon size={14} />
-                      <span className="max-w-40 truncate">{backProject.mappedName}</span>
+                      <span className="max-w-40 truncate">
+                        {backProject.mappedName}
+                      </span>
                     </button>
                     <span className="text-ink-dim">
                       <ChevronRightIcon />
@@ -1099,7 +1241,11 @@ export function Root() {
                   onClick={() =>
                     void navigate({
                       to: "/library",
-                      search: (prev) => ({ ...prev, doc: undefined, mode: undefined }),
+                      search: (prev) => ({
+                        ...prev,
+                        doc: undefined,
+                        mode: undefined,
+                      }),
                     })
                   }
                   className="shrink-0 font-medium text-ink hover:text-ink"
@@ -1116,7 +1262,9 @@ export function Root() {
                 )}
               </>
             ) : (
-              <span className="truncate font-medium text-ink">{currentSection}</span>
+              <span className="truncate font-medium text-ink">
+                {currentSection}
+              </span>
             )}
           </div>
 
@@ -1144,7 +1292,8 @@ export function Root() {
                     stays out of the way when there's nothing to report. */}
                 {diffHidden &&
                   activeWorkstream &&
-                  (activeWorkstream.git.ahead > 0 || activeWorkstream.git.behind > 0) && (
+                  (activeWorkstream.git.ahead > 0 ||
+                    activeWorkstream.git.behind > 0) && (
                     <AheadBehind
                       ahead={activeWorkstream.git.ahead}
                       behind={activeWorkstream.git.behind}
@@ -1178,20 +1327,34 @@ export function Root() {
                   onClick={() => togglePromptPalette()}
                   className={topIconClass}
                   title={`Prompt library${
-                    promptPaletteChord ? ` (${formatChord(promptPaletteChord, IS_MACOS)})` : ""
+                    promptPaletteChord
+                      ? ` (${formatChord(promptPaletteChord, IS_MACOS)})`
+                      : ""
                   }`}
                   aria-label="Prompt library"
                 >
                   <ZapIcon size={16} className="text-accent" />
                 </button>
-                <OpenInMenu dir={activeWorkstream?.item.worktreePath ?? currentProject.path} />
+                <OpenInMenu
+                  dir={
+                    activeWorkstream?.item.worktreePath ?? currentProject.path
+                  }
+                />
                 {currentSection === "Agent" && !onBoard && (
                   <button
                     type="button"
                     onClick={toggleDiff}
                     className={topIconClass}
-                    title={diffHidden ? "Show changes sidebar" : "Hide changes sidebar"}
-                    aria-label={diffHidden ? "Show changes sidebar" : "Hide changes sidebar"}
+                    title={
+                      diffHidden
+                        ? "Show changes sidebar"
+                        : "Hide changes sidebar"
+                    }
+                    aria-label={
+                      diffHidden
+                        ? "Show changes sidebar"
+                        : "Hide changes sidebar"
+                    }
                   >
                     <PanelRightIcon />
                   </button>
@@ -1226,10 +1389,18 @@ export function Root() {
             <Link
               to="/"
               className={railHomeClass}
-              title={mux.enabled ? "Home — Multiplexer mode on (Settings → Advanced)" : "Home"}
+              title={
+                mux.enabled
+                  ? "Home — Multiplexer mode on (Settings → Advanced)"
+                  : "Home"
+              }
               aria-label={mux.enabled ? "Home (Multiplexer mode on)" : "Home"}
             >
-              {mux.enabled ? <MultiplexerIcon size={18} strokeWidth={2} /> : <SquareIcon />}
+              {mux.enabled ? (
+                <MultiplexerIcon size={18} strokeWidth={2} />
+              ) : (
+                <SquareIcon />
+              )}
             </Link>
             <button
               type="button"
@@ -1303,7 +1474,9 @@ export function Root() {
                   : `${railNavClass(scriptsDockOpen)} relative`
               } ${!scriptsActiveWs ? "opacity-50" : ""}`}
               title={
-                scriptsRunning ? "Scripts — a Run is active" : "Terminal & scripts dock"
+                scriptsRunning
+                  ? "Scripts — a Run is active"
+                  : "Terminal & scripts dock"
               }
               aria-label="Terminal and scripts dock"
             >
@@ -1312,7 +1485,10 @@ export function Root() {
                 <span
                   aria-hidden
                   className="absolute right-1 top-1 h-2 w-2 rounded-full bg-ship"
-                  style={{ boxShadow: "0 0 0 2px var(--color-surface), 0 0 6px var(--color-ship)" }}
+                  style={{
+                    boxShadow:
+                      "0 0 0 2px var(--color-surface), 0 0 6px var(--color-ship)",
+                  }}
                 />
               )}
             </button>
@@ -1336,251 +1512,290 @@ export function Root() {
             width transition is not reduced-motion-gated — Windows maps that to the
             often-off "Animation effects" toggle, which would otherwise snap it. */}
         {!onLibrary && !onPrompts && (
-        <aside
-          className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
-            resizingSidebar
-              ? ""
-              : "transition-[width] duration-200 ease-out"
-          }`}
-          style={{ width: collapsed ? 0 : sidebarWidth }}
-          inert={collapsed}
-        >
-          <div className="absolute inset-y-0 left-0 flex flex-col" style={{ width: sidebarWidth }}>
-          {/* Header band, height-matched to the agent bar (h-9) so the
+          <aside
+            className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
+              resizingSidebar ? "" : "transition-[width] duration-200 ease-out"
+            }`}
+            style={{ width: collapsed ? 0 : sidebarWidth }}
+            inert={collapsed}
+          >
+            <div
+              className="absolute inset-y-0 left-0 flex flex-col"
+              style={{ width: sidebarWidth }}
+            >
+              {/* Header band, height-matched to the agent bar (h-9) so the
               "Projects" label + add button sit vertically centered alongside
               it — and the bottom border lines up across the sidebar/pane seam. */}
-          <div className="flex h-9 shrink-0 items-center justify-between border-b border-edge pl-4 pr-3">
-            <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Projects</p>
-            <button
-              type="button"
-              onClick={() => setAddProjectOpen(true)}
-              className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-              title="Add project"
-              aria-label="Add project"
-            >
-              <PlusIcon size={14} />
-            </button>
-          </div>
-          <nav className="flex-1 overflow-y-auto px-2 pt-2">
-            {bootstrap.isLoading && (
-              <div className="flex justify-center py-4">
-                <Spinner />
+              <div className="flex h-9 shrink-0 items-center justify-between border-b border-edge pl-4 pr-3">
+                <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">
+                  Projects
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAddProjectOpen(true)}
+                  className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+                  title="Add project"
+                  aria-label="Add project"
+                >
+                  <PlusIcon size={14} />
+                </button>
               </div>
-            )}
-            {!bootstrap.isLoading && projects.length === 0 && (
-              <p className="px-2 py-1 text-sm text-ink-dim">
-                {configReady ? (
-                  "No projects mapped yet."
-                ) : (
-                  <Link to="/onboarding" className="underline hover:text-ink">
-                    Setup required.
-                  </Link>
+              <nav className="flex-1 overflow-y-auto px-2 pt-2">
+                {bootstrap.isLoading && (
+                  <div className="flex justify-center py-4">
+                    <Spinner />
+                  </div>
                 )}
-              </p>
-            )}
+                {!bootstrap.isLoading && projects.length === 0 && (
+                  <p className="px-2 py-1 text-sm text-ink-dim">
+                    {configReady ? (
+                      "No projects mapped yet."
+                    ) : (
+                      <Link
+                        to="/onboarding"
+                        className="underline hover:text-ink"
+                      >
+                        Setup required.
+                      </Link>
+                    )}
+                  </p>
+                )}
 
-            {/* Pinned worktrees: a quick-access list above the project tree.
+                {/* Pinned worktrees: a quick-access list above the project tree.
                 Hidden when nothing is pinned, so the header never takes space
                 until the user pins something. Pin/unpin lives on the worktree
                 row's right-click menu. */}
-            {pinnedViews.length > 0 && (
-              <div className="mb-1 border-b border-edge/60 pb-1.5">
-                <button
-                  type="button"
-                  onClick={togglePinnedSection}
-                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium uppercase tracking-wider text-ink-dim hover:text-ink"
-                  aria-expanded={!pinnedSectionCollapsed}
-                  title={pinnedSectionCollapsed ? "Expand pinned" : "Collapse pinned"}
-                >
-                  <ChevronDownIcon
-                    size={12}
-                    className={`shrink-0 transition-transform ${
-                      pinnedSectionCollapsed ? "-rotate-90" : ""
-                    }`}
-                  />
-                  <PinIcon size={12} className="shrink-0" />
-                  <span>Pinned</span>
-                </button>
-                {!pinnedSectionCollapsed &&
-                  pinnedViews.map((view) => {
-                    const project = projectByPath.get(view.item.projectPath);
-                    const projectName = project?.mappedName ?? "";
-                    const isActiveItem =
-                      currentProjectPath === view.item.projectPath &&
-                      activeWorkstreamId === view.item.id;
-                    return (
-                      <Link
-                        key={`pin-${view.item.id}`}
-                        to="/projects/$projectPath"
-                        params={{ projectPath: view.item.projectPath }}
-                        search={{ item: view.item.id }}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          setProjectMenu(null);
-                          setItemMenu({ x: e.clientX, y: e.clientY, view });
-                        }}
-                        className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-edge/50 hover:text-ink ${
-                          isActiveItem ? "bg-accent/15 text-ink" : "text-ink-dim"
+                {pinnedViews.length > 0 && (
+                  <div className="mb-1 border-b border-edge/60 pb-1.5">
+                    <button
+                      type="button"
+                      onClick={togglePinnedSection}
+                      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium uppercase tracking-wider text-ink-dim hover:text-ink"
+                      aria-expanded={!pinnedSectionCollapsed}
+                      title={
+                        pinnedSectionCollapsed
+                          ? "Expand pinned"
+                          : "Collapse pinned"
+                      }
+                    >
+                      <ChevronDownIcon
+                        size={12}
+                        className={`shrink-0 transition-transform ${
+                          pinnedSectionCollapsed ? "-rotate-90" : ""
                         }`}
-                        title={`${projectName} · ${view.item.title} · ${view.item.branch}`}
-                      >
-                        <WorkstreamActivityDot workstreamId={view.item.id} />
-                        <RepoAvatar source={project?.originUrl} name={projectName} size={16} />
-                        <span className="min-w-0 flex-1 truncate">
-                          <span className="text-ink-dim/70">{projectName}</span>
-                          <span className="px-1 text-ink-dim/40">›</span>
-                          {view.item.title}
-                        </span>
-                        <WorkstreamGitChip view={view} />
-                      </Link>
-                    );
-                  })}
-              </div>
-            )}
-
-            {orderedProjects.map((p, i) => {
-              const children = itemsByProject.get(p.path) ?? [];
-              const isCurrent = currentProjectPath === p.path;
-              const projectHighlight = isCurrent && !activeWorkstreamId;
-              const isDragging = projectDrag?.path === p.path;
-
-              return (
-                <div
-                  key={p.path}
-                  data-project-path={p.path}
-                  style={projectDragStyle(projectDrag, p.path, i)}
-                  className={`relative mb-0.5 ${
-                    isDragging ? "z-30 rounded-lg bg-panel-2 shadow-2xl ring-1 ring-accent/40" : ""
-                  }`}
-                >
-                  <div
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setItemMenu(null);
-                      setProjectMenu({ x: e.clientX, y: e.clientY, project: p });
-                    }}
-                    onPointerDown={(e) => startProjectDrag(e, { path: p.path })}
-                    className={`group relative flex select-none items-center overflow-hidden rounded-lg pr-1 ${
-                      projectHighlight ? "bg-accent/15" : "hover:bg-edge/50"
-                    } ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
-                  >
-                    {/* The selected project wears the redesign's accent spine. */}
-                    {projectHighlight && (
-                      <span
-                        className="absolute inset-y-0 left-0 w-[3px] bg-accent"
-                        aria-hidden="true"
                       />
-                    )}
-                    <Link
-                      to="/projects/$projectPath"
-                      params={{ projectPath: p.path }}
-                      draggable={false}
-                      onClick={(e) => {
-                        // A drag that ends on the header shouldn't also navigate.
-                        if (projectDragSuppress.current) e.preventDefault();
-                      }}
-                      className={`flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-sm text-ink ${
-                        projectHighlight ? "font-semibold" : "font-medium"
-                      }`}
-                      title={`${p.mappedName} · ${p.backendKind}${p.profile ? ` · ${p.profile}` : ""}`}
-                    >
-                      <RepoAvatar
-                        source={p.originUrl}
-                        name={p.mappedName}
-                        size={22}
-                        className="rounded-md"
-                      />
-                      <span className="truncate">{p.mappedName}</span>
-                      {!p.existsOnDisk && (
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"
-                          title="Repository folder is missing on disk"
-                        />
-                      )}
-                    </Link>
-                    <span data-no-drag className="contents">
-                      <ProjectCopyWarning projectPath={p.path} />
-                    </span>
-                    {/* Workstream count at rest; the add affordance takes its
-                        place on hover (the mockup shows the count). */}
-                    {children.length > 0 && (
-                      <span className="shrink-0 px-1.5 text-xs tabular-nums text-ink-dim/60 group-hover:hidden">
-                        {children.length}
-                      </span>
-                    )}
-                    <Link
-                      to="/projects/$projectPath"
-                      params={{ projectPath: p.path }}
-                      search={{ create: true }}
-                      data-no-drag
-                      className="hidden h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim group-hover:flex hover:bg-edge/60 hover:text-ink"
-                      title={`New workstream in ${p.mappedName}`}
-                      aria-label={`New workstream in ${p.mappedName}`}
-                    >
-                      <PlusIcon size={14} />
-                    </Link>
+                      <PinIcon size={12} className="shrink-0" />
+                      <span>Pinned</span>
+                    </button>
+                    {!pinnedSectionCollapsed &&
+                      pinnedViews.map((view) => {
+                        const project = projectByPath.get(
+                          view.item.projectPath,
+                        );
+                        const projectName = project?.mappedName ?? "";
+                        const isActiveItem =
+                          currentProjectPath === view.item.projectPath &&
+                          activeWorkstreamId === view.item.id;
+                        return (
+                          <Link
+                            key={`pin-${view.item.id}`}
+                            to="/projects/$projectPath"
+                            params={{ projectPath: view.item.projectPath }}
+                            search={{ item: view.item.id }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              setProjectMenu(null);
+                              setItemMenu({ x: e.clientX, y: e.clientY, view });
+                            }}
+                            className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-edge/50 hover:text-ink ${
+                              isActiveItem
+                                ? "bg-accent/15 text-ink"
+                                : "text-ink-dim"
+                            }`}
+                            title={`${projectName} · ${view.item.title} · ${view.item.branch}`}
+                          >
+                            <WorkstreamActivityDot
+                              workstreamId={view.item.id}
+                            />
+                            <RepoAvatar
+                              source={project?.originUrl}
+                              name={projectName}
+                              size={16}
+                            />
+                            <span className="min-w-0 flex-1 truncate">
+                              <span className="text-ink-dim/70">
+                                {projectName}
+                              </span>
+                              <span className="px-1 text-ink-dim/40">›</span>
+                              {view.item.title}
+                            </span>
+                            <WorkstreamGitChip view={view} />
+                          </Link>
+                        );
+                      })}
                   </div>
+                )}
 
-                  {children.map((view) => {
-                    const isActiveItem = isCurrent && activeWorkstreamId === view.item.id;
-                    // In-place workstreams run in the project's own checkout (no
-                    // dedicated worktree). The row reads as a clean status-dot +
-                    // title to match the design, so the distinction lives in the
-                    // tooltip rather than a leading glyph.
-                    const inplace = view.item.worktreeMode === "inplace";
-                    return (
-                      <Link
-                        key={view.item.id}
-                        to="/projects/$projectPath"
-                        params={{ projectPath: p.path }}
-                        search={{ item: view.item.id }}
+                {orderedProjects.map((p, i) => {
+                  const children = itemsByProject.get(p.path) ?? [];
+                  const isCurrent = currentProjectPath === p.path;
+                  const projectHighlight = isCurrent && !activeWorkstreamId;
+                  const isDragging = projectDrag?.path === p.path;
+
+                  return (
+                    <div
+                      key={p.path}
+                      data-project-path={p.path}
+                      style={projectDragStyle(projectDrag, p.path, i)}
+                      className={`relative mb-0.5 ${
+                        isDragging
+                          ? "z-30 rounded-lg bg-panel-2 shadow-2xl ring-1 ring-accent/40"
+                          : ""
+                      }`}
+                    >
+                      <div
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          setProjectMenu(null);
-                          setItemMenu({ x: e.clientX, y: e.clientY, view });
+                          setItemMenu(null);
+                          setProjectMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            project: p,
+                          });
                         }}
-                        className={`relative flex items-center gap-2.5 overflow-hidden rounded-lg py-2 pl-6 pr-2 text-sm ${
-                          isActiveItem
-                            ? "bg-accent/15 text-ink"
-                            : "text-ink-dim hover:bg-edge/50 hover:text-ink"
-                        }`}
-                        title={`${view.item.title} · ${view.item.branch}${
-                          inplace ? " · main checkout (no worktree)" : ""
-                        }`}
+                        onPointerDown={(e) =>
+                          startProjectDrag(e, { path: p.path })
+                        }
+                        className={`group relative flex select-none items-center overflow-hidden rounded-lg pr-1 ${
+                          projectHighlight ? "bg-accent/15" : "hover:bg-edge/50"
+                        } ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
                       >
-                        {isActiveItem && (
+                        {/* The selected project wears the redesign's accent spine. */}
+                        {projectHighlight && (
                           <span
                             className="absolute inset-y-0 left-0 w-[3px] bg-accent"
                             aria-hidden="true"
                           />
                         )}
-                        <WorkstreamActivityDot workstreamId={view.item.id} idle="dot" />
-                        <span className="min-w-0 flex-1 truncate">{view.item.title}</span>
-                        {/* Worktree-mode indicator: branch-fork for a dedicated
+                        <Link
+                          to="/projects/$projectPath"
+                          params={{ projectPath: p.path }}
+                          draggable={false}
+                          onClick={(e) => {
+                            // A drag that ends on the header shouldn't also navigate.
+                            if (projectDragSuppress.current) e.preventDefault();
+                          }}
+                          className={`flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-sm text-ink ${
+                            projectHighlight ? "font-semibold" : "font-medium"
+                          }`}
+                          title={`${p.mappedName} · ${p.backendKind}${p.profile ? ` · ${p.profile}` : ""}`}
+                        >
+                          <RepoAvatar
+                            source={p.originUrl}
+                            name={p.mappedName}
+                            size={22}
+                            className="rounded-md"
+                          />
+                          <span className="truncate">{p.mappedName}</span>
+                          {!p.existsOnDisk && (
+                            <span
+                              className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"
+                              title="Repository folder is missing on disk"
+                            />
+                          )}
+                        </Link>
+                        <span data-no-drag className="contents">
+                          <ProjectCopyWarning projectPath={p.path} />
+                        </span>
+                        {/* Workstream count at rest; the add affordance takes its
+                        place on hover (the mockup shows the count). */}
+                        {children.length > 0 && (
+                          <span className="shrink-0 px-1.5 text-xs tabular-nums text-ink-dim/60 group-hover:hidden">
+                            {children.length}
+                          </span>
+                        )}
+                        <Link
+                          to="/projects/$projectPath"
+                          params={{ projectPath: p.path }}
+                          search={{ create: true }}
+                          data-no-drag
+                          className="hidden h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim group-hover:flex hover:bg-edge/60 hover:text-ink"
+                          title={`New workstream in ${p.mappedName}`}
+                          aria-label={`New workstream in ${p.mappedName}`}
+                        >
+                          <PlusIcon size={14} />
+                        </Link>
+                      </div>
+
+                      {children.map((view) => {
+                        const isActiveItem =
+                          isCurrent && activeWorkstreamId === view.item.id;
+                        // In-place workstreams run in the project's own checkout (no
+                        // dedicated worktree). The row reads as a clean status-dot +
+                        // title to match the design, so the distinction lives in the
+                        // tooltip rather than a leading glyph.
+                        const inplace = view.item.worktreeMode === "inplace";
+                        return (
+                          <Link
+                            key={view.item.id}
+                            to="/projects/$projectPath"
+                            params={{ projectPath: p.path }}
+                            search={{ item: view.item.id }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              setProjectMenu(null);
+                              setItemMenu({ x: e.clientX, y: e.clientY, view });
+                            }}
+                            className={`relative flex items-center gap-2.5 overflow-hidden rounded-lg py-2 pl-6 pr-2 text-sm ${
+                              isActiveItem
+                                ? "bg-accent/15 text-ink"
+                                : "text-ink-dim hover:bg-edge/50 hover:text-ink"
+                            }`}
+                            title={`${view.item.title} · ${view.item.branch}${
+                              inplace ? " · main checkout (no worktree)" : ""
+                            }`}
+                          >
+                            {isActiveItem && (
+                              <span
+                                className="absolute inset-y-0 left-0 w-[3px] bg-accent"
+                                aria-hidden="true"
+                              />
+                            )}
+                            <WorkstreamActivityDot
+                              workstreamId={view.item.id}
+                              idle="dot"
+                            />
+                            <span className="min-w-0 flex-1 truncate">
+                              {view.item.title}
+                            </span>
+                            {/* Worktree-mode indicator: branch-fork for a dedicated
                             worktree, house for an in-place (main-checkout) run.
                             Kept on the trailing edge with the git chip so the
                             leading status dot stays clean (the mock's look). */}
-                        <span
-                          className="flex shrink-0 items-center text-ink-dim/70"
-                          title={
-                            inplace
-                              ? "Runs in the main checkout (no worktree)"
-                              : "Runs in a dedicated worktree"
-                          }
-                        >
-                          {inplace ? <MainCheckoutIcon /> : <GitBranchIcon />}
-                        </span>
-                        <WorkstreamGitChip view={view} />
-                      </Link>
-                    );
-                  })}
-                </div>
-              );
-            })}
-
-          </nav>
-          </div>
-        </aside>
+                            <span
+                              className="flex shrink-0 items-center text-ink-dim/70"
+                              title={
+                                inplace
+                                  ? "Runs in the main checkout (no worktree)"
+                                  : "Runs in a dedicated worktree"
+                              }
+                            >
+                              {inplace ? (
+                                <MainCheckoutIcon />
+                              ) : (
+                                <GitBranchIcon />
+                              )}
+                            </span>
+                            <WorkstreamGitChip view={view} />
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </nav>
+            </div>
+          </aside>
         )}
 
         {!collapsed && !onLibrary && (
@@ -1629,7 +1844,9 @@ export function Root() {
               setItemMenu(null);
             }}
           >
-            {pinnedIds.includes(itemMenu.view.item.id) ? "Unpin workstream" : "Pin workstream"}
+            {pinnedIds.includes(itemMenu.view.item.id)
+              ? "Unpin workstream"
+              : "Pin workstream"}
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => {
@@ -1670,7 +1887,10 @@ export function Root() {
       )}
 
       {projectMenu && (
-        <ContextMenu position={projectMenu} onClose={() => setProjectMenu(null)}>
+        <ContextMenu
+          position={projectMenu}
+          onClose={() => setProjectMenu(null)}
+        >
           <ContextMenuItem
             onClick={() => {
               void navigate({
@@ -1728,19 +1948,29 @@ export function Root() {
       />
 
       {settingsPath && (
-        <ProjectSettingsDialog projectPath={settingsPath} onClose={closeProjectSettings} />
+        <ProjectSettingsDialog
+          projectPath={settingsPath}
+          onClose={closeProjectSettings}
+        />
       )}
 
-      <RenameWorkstreamDialog target={renameTarget} onClose={() => setRenameTarget(null)} />
+      <RenameWorkstreamDialog
+        target={renameTarget}
+        onClose={() => setRenameTarget(null)}
+      />
 
-      <AttachPrDialog target={attachPrTarget} onClose={() => setAttachPrTarget(null)} />
+      <AttachPrDialog
+        target={attachPrTarget}
+        onClose={() => setAttachPrTarget(null)}
+      />
 
       <ArchiveWorkstreamDialog
         target={archiveTarget}
         onClose={() => setArchiveTarget(null)}
         onArchived={(id) => {
           // If the archived item was the one selected, drop back to its project.
-          if (archiveTarget) dismissToProject(archiveTarget.item.projectPath, id);
+          if (archiveTarget)
+            dismissToProject(archiveTarget.item.projectPath, id);
           setArchiveTarget(null);
         }}
       />
