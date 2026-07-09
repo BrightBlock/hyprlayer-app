@@ -178,11 +178,28 @@ function invalidateProjects() {
   void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
 }
 
-/** Import a project from a local git repo on disk (cloned into the repos root). */
-export function useAddProject() {
+/** Classify a browsed disk path for the Add-project dialog's offer (import,
+ *  init, or refuse). Never cached (staleTime 0) — the answer can change the
+ *  moment the user runs `git init` on disk. */
+export function useRepoPathInfo(path: string, enabled = true) {
+  return useQuery({
+    queryKey: ["repo-path-info", path],
+    queryFn: () => unwrap(commands.inspectRepoPath(path)),
+    enabled: enabled && path.trim().length > 0,
+    staleTime: 0,
+  });
+}
+
+/** Import a local on-disk folder as a project (registered in place), handling
+ *  any git setup the path needs (init, birth a commit, adopt, or refuse). */
+export function useImportProject() {
   return useMutation({
-    mutationFn: (args: { path: string; directoryName: string | null; bootstrapUser: string | null }) =>
-      unwrap(commands.addProject(args.path, args.directoryName, args.bootstrapUser)),
+    mutationFn: (args: {
+      path: string;
+      branch: string | null;
+      directoryName: string | null;
+      bootstrapUser: string | null;
+    }) => unwrap(commands.importProject(args.path, args.branch, args.directoryName, args.bootstrapUser)),
     onSettled: invalidateProjects,
   });
 }
@@ -394,13 +411,15 @@ export function useActiveSessions(enabled = true) {
 }
 
 /** Base-branch choices for the new-workstream dialog (local + remote + the
- * detected default). Fetched lazily — only while the dialog is open. */
+ * detected default). Fetched lazily — only while the dialog is open. Never
+ * cached (staleTime 0) so a branch created on disk while the app is open
+ * shows up the next time the picker opens. */
 export function useWorkstreamBases(projectPath: string, enabled = true) {
   return useQuery({
     queryKey: ["workstream-bases", projectPath],
     queryFn: () => unwrap(commands.listWorkstreamBases(projectPath)),
     enabled,
-    staleTime: 30_000,
+    staleTime: 0,
   });
 }
 

@@ -48,6 +48,8 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
   // null = the pinned "New branch" row; otherwise the chosen existing branch.
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [base, setBase] = useState("");
+  // Whether the user has explicitly chosen a base, vs. it being auto-defaulted.
+  const [userPickedBase, setUserPickedBase] = useState(false);
   const [place, setPlace] = useState<Place>("worktree");
   const create = useCreateWorkstream(projectPath);
   const bases = useWorkstreamBases(projectPath, open);
@@ -76,21 +78,28 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
     if (currentSelected && place === "worktree") setPlace("here");
   }, [currentSelected, place]);
 
-  // Pre-select the new-branch base once the branch list loads (unless the user
-  // already chose one): the detected default, else the first branch — so the
-  // controlled <select> always matches a real option. Keyed on `open` so
-  // reopening re-defaults.
+  // Re-scan local branches on open, since the dialog stays mounted across
+  // opens and react-query's normal refetch-on-mount never fires again.
   useEffect(() => {
-    if (!open || base) return;
+    if (open) void bases.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Pre-select the new-branch base: the detected default, else the first
+  // branch. Follows a late-arriving default until the user picks one
+  // themselves. Keyed on `open` so reopening re-defaults.
+  useEffect(() => {
+    if (!open || userPickedBase) return;
     const initial = defaultBase || branches[0];
-    if (initial) setBase(initial);
-  }, [open, base, defaultBase, branches]);
+    if (initial && initial !== base) setBase(initial);
+  }, [open, userPickedBase, defaultBase, branches, base]);
 
   const reset = () => {
     setTitle("");
     setQuery("");
     setSelectedBranch(null);
     setBase("");
+    setUserPickedBase(false);
     setPlace("worktree");
     create.reset();
   };
@@ -202,7 +211,10 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
           <Field label="Branched from">
             <Select
               value={base}
-              onChange={(e) => setBase(e.target.value)}
+              onChange={(e) => {
+                setBase(e.target.value);
+                setUserPickedBase(true);
+              }}
               disabled={create.isPending || bases.isLoading}
             >
               {bases.isLoading && <option value="">Loading branches…</option>}

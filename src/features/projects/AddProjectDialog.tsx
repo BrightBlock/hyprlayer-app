@@ -4,11 +4,13 @@ import { homeDir, join } from "@tauri-apps/api/path";
 import type { Project } from "@/lib/bindings";
 import { Button, Dialog, ErrorNote, Field, TextInput } from "@/components/ui";
 import {
-  useAddProject,
   useBootstrap,
   useCloneProject,
   useDefaultUsername,
+  useImportProject,
+  useRepoPathInfo,
 } from "@/lib/queries";
+import { useDebounced } from "@/lib/useDebounced";
 import { RepoSourcePicker, type RepoSource } from "./RepoSourcePicker";
 
 type Props = {
@@ -32,11 +34,21 @@ export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
   const [user, setUser] = useState("");
 
   const clone = useCloneProject();
-  const add = useAddProject();
+  const importProject = useImportProject();
   const defaultUser = useDefaultUsername();
 
-  const pending = clone.isPending || add.isPending;
-  const error = clone.error ?? add.error;
+  // Probe the browsed disk path (debounced) to tailor the offer before submit;
+  // advisory only, since `importProject` re-classifies on the backend anyway.
+  const [initBranch, setInitBranch] = useState("main");
+  const diskPath = source.mode === "disk" ? source.path.trim() : "";
+  const debouncedPath = useDebounced(diskPath, 300);
+  const pathInfo = useRepoPathInfo(debouncedPath, source.mode === "disk");
+  const status = source.mode === "disk" ? pathInfo.data : undefined;
+  const needsInit = status === "nonGit";
+  const isBare = status === "bare";
+
+  const pending = clone.isPending || importProject.isPending;
+  const error = clone.error ?? importProject.error;
 
   // On a first-run open, prefill "Your name" with the shell username ($USER) —
   // matching the CLI default. Keyed on open/data so it re-seeds each time the
@@ -78,8 +90,9 @@ export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
   const reset = () => {
     setSource({ mode: "clone", url: "", location: "" });
     setUser("");
+    setInitBranch("main");
     clone.reset();
-    add.reset();
+    importProject.reset();
   };
 
   const close = () => {
@@ -103,7 +116,11 @@ export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
         ? source.path.trim()
         : "";
   const canSubmit =
-    Boolean(primaryInput) && (!configMissing || Boolean(user.trim())) && !pending;
+    Boolean(primaryInput) &&
+    (!configMissing || Boolean(user.trim())) &&
+    (!needsInit || Boolean(initBranch.trim())) &&
+    !isBare &&
+    !pending;
 
   const submit = () => {
     if (!canSubmit) return;
@@ -118,8 +135,15 @@ export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
         { onSuccess: succeed },
       );
     } else if (source.mode === "disk") {
-      add.mutate(
-        { path: primaryInput, directoryName: null, bootstrapUser },
+      // `branch` only matters when we're creating the repo; the backend
+      // re-classifies anyway, so this stays correct even if `needsInit` is stale.
+      importProject.mutate(
+        {
+          path: primaryInput,
+          branch: needsInit ? initBranch.trim() || "main" : null,
+          directoryName: null,
+          bootstrapUser,
+        },
         { onSuccess: succeed },
       );
     }
@@ -139,7 +163,30 @@ export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
           onChange={setSource}
           modes={["clone", "disk"]}
           disabled={pending}
+          diskFooter={
+            needsInit ? (
+              <p className="mt-1 text-xs text-ink-dim">
+                Not a git repository — hyprlayer can set one up for you.
+              </p>
+            ) : isBare ? (
+              <p className="mt-1 text-xs text-bad">
+                This is a bare repository — choose a normal working copy instead.
+              </p>
+            ) : undefined
+          }
         />
+
+        {needsInit && (
+          <Field label="Initial branch">
+            <TextInput
+              value={initBranch}
+              onChange={(e) => setInitBranch(e.target.value)}
+              placeholder="main"
+              disabled={pending}
+              className="font-mono text-xs"
+            />
+          </Field>
+        )}
 
         {configMissing && (
           <Field label="Your name">
@@ -165,10 +212,14 @@ export function AddProjectDialog({ open: isOpen, onClose, onAdded }: Props) {
             {pending
               ? source.mode === "clone"
                 ? "Cloning…"
-                : "Importing…"
+                : needsInit
+                  ? "Initializing…"
+                  : "Importing…"
               : source.mode === "clone"
                 ? "Clone repo"
-                : "Add project"}
+                : needsInit
+                  ? "Initialize & add"
+                  : "Add project"}
           </Button>
         </div>
       </form>

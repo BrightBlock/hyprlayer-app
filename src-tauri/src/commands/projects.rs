@@ -406,32 +406,57 @@ async fn provision_project(
     register_repo(app, state, &git, &dest, name, kind, true).await
 }
 
-/// Import a local on-disk git repo as a project, registered *in place* — never
-/// re-cloned or copied (that wastes disk and diverges from the user's working
-/// copy). Worktrees are cut directly from it via `git worktree add`.
+/// Classify a disk path for the Add-project dialog: import in place, offer
+/// `git init` for a non-git folder, or refuse a bare repo. See
+/// [`repos::RepoPathStatus`].
 #[tauri::command]
 #[specta::specta]
-pub async fn add_project(
+pub fn inspect_repo_path(path: String) -> CmdResult<repos::RepoPathStatus> {
+    Ok(repos::classify_repo_path(Path::new(&path)))
+}
+
+/// Import a local on-disk folder as a project, registered *in place* — never
+/// re-cloned or copied. Worktrees are cut directly from it via `git worktree
+/// add`. Classifies the path and does whatever git setup it needs first:
+///
+/// - **non-git folder** → `git init -b <branch>` (default `main`) + an empty
+///   initial commit.
+/// - **unborn repo** (has `.git`, no commits) → just the initial commit, on its
+///   existing branch.
+/// - **ready repo** → adopted as-is (`branch` ignored).
+/// - **bare repo** → refused, since worktrees can't be cut from it.
+#[tauri::command]
+#[specta::specta]
+pub async fn import_project(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     path: String,
+    branch: Option<String>,
     directory_name: Option<String>,
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
     let repo = Path::new(&path);
-    if !repo.is_dir() {
-        return Err(AppError {
-            code: "invalid_path".into(),
-            message: format!("{path} is not a directory"),
-            remedy: None,
-        });
-    }
-    if !repo.join(".git").exists() {
-        return Err(AppError {
-            code: "not_a_git_repo".into(),
-            message: format!("{path} is not a git repository"),
-            remedy: Some("hyprlayer projects must be git repositories (`git init` first).".into()),
-        });
+    let status = repos::classify_repo_path(repo);
+
+    match status {
+        repos::RepoPathStatus::Missing => {
+            return Err(AppError {
+                code: "invalid_path".into(),
+                message: format!("{path} is not a directory"),
+                remedy: None,
+            });
+        }
+        repos::RepoPathStatus::Bare => {
+            return Err(AppError {
+                code: "bare_repo".into(),
+                message: format!("{path} is a bare git repository"),
+                remedy: Some(
+                    "Choose a normal working copy instead — worktrees can't be created from a bare repo."
+                        .into(),
+                ),
+            });
+        }
+        _ => {}
     }
 
     ensure_config(&state, bootstrap_user).await?;
@@ -442,13 +467,58 @@ pub async fn add_project(
         .await
         .map_err(AppError::from)?;
 
+    // Only a non-git folder gets its `.git` created here; never delete an
+    // unborn repo's pre-existing `.git`.
+    let created = matches!(status, repos::RepoPathStatus::NonGit);
+
+    let setup: Result<(), AppError> = match status {
+        repos::RepoPathStatus::NonGit => {
+            let branch = branch
+                .as_deref()
+                .map(str::trim)
+                .filter(|b| !b.is_empty())
+                .unwrap_or("main");
+            repos::init_repo_with_commit(&git, repo, branch)
+                .await
+                .map_err(AppError::from)
+        }
+        repos::RepoPathStatus::Unborn => {
+            repos::commit_empty_initial(&git, repo).await.map_err(AppError::from)
+        }
+        _ => Ok(()),
+    };
+
+    let result = match setup {
+        Ok(()) => register_disk_project(&app, &state, &git, repo, directory_name).await,
+        Err(e) => Err(e),
+    };
+
+    // Roll back a `.git` we created if setup or registration failed afterward,
+    // so the folder is left as we found it. An unborn repo's commit is left in
+    // place either way — it's harmless and makes the repo usable.
+    if result.is_err() && created {
+        remove_dir_all_bg(&repo.join(".git")).await;
+    }
+
+    result
+}
+
+/// Canonicalize an on-disk repo path, derive its project name, and register it —
+/// the disk-import tail of `import_project`, after any needed git setup.
+async fn register_disk_project(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    git: &Path,
+    repo: &Path,
+    directory_name: Option<String>,
+) -> CmdResult<Project> {
     // Canonicalize for a stable registered path (no trailing slash, symlinks
     // resolved) so later lookups/removals match exactly. `dunce` strips the
     // Windows `\\?\` verbatim prefix `std::fs::canonicalize` adds — it leaks
     // into project URLs and trips git/tools.
     let repo = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let name = project_name(directory_name, &repo.to_string_lossy(), &repo);
-    register_repo(&app, &state, &git, &repo, &name, "disk", false).await
+    register_repo(app, state, git, &repo, &name, "disk", false).await
 }
 
 /// Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
@@ -808,7 +878,7 @@ pub async fn check_worktree_files(
 
 #[cfg(test)]
 mod tests {
-    /// `add_project` canonicalizes the repo path for stable identity. On Windows
+    /// `import_project` canonicalizes the repo path for stable identity. On Windows
     /// `std::fs::canonicalize` returns a `\\?\` verbatim path, which leaks into
     /// project URLs and trips git/tools; `dunce::canonicalize` must strip it.
     #[test]

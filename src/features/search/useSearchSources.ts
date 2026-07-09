@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAllWorkstreams, useActiveSessions, useDocs } from "@/lib/queries";
 import { commands } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
-import { useDebounced } from "./useDebounced";
+import { useDebounced } from "@/lib/useDebounced";
 import { fuzzyScore, type SearchResult } from "./search";
 import type { WorkstreamActivity } from "@/features/session/sessionStore";
 import { basename } from "@/lib/path";

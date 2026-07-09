@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import type { GithubRepo } from "@/lib/bindings";
 import { Button, Field, Spinner, TextInput } from "@/components/ui";
@@ -23,6 +23,9 @@ type Props = {
   disabled?: boolean;
   /** Whether to show the GitHub recent repos list (clone mode only). */
   showRecents?: boolean;
+  /** Extra content rendered under the disk path field — e.g. a hint that the
+   *  folder isn't a git repo. Disk mode only. */
+  diskFooter?: ReactNode;
 };
 
 const MODE_LABELS: Record<RepoSource["mode"], string> = {
@@ -43,6 +46,7 @@ export function RepoSourcePicker({
   defaultLocation = "",
   disabled = false,
   showRecents = true,
+  diskFooter,
 }: Props) {
   const recents = useRecentRepos(showRecents && value.mode === "clone");
 
@@ -151,9 +155,7 @@ export function RepoSourcePicker({
               Browse
             </Button>
           </div>
-          <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-            Referenced in place — hyprlayer reads this directory directly.
-          </p>
+          {diskFooter}
         </Field>
       )}
 

@@ -10,11 +10,24 @@ export const commands = {
 	getBootstrap: () => typedError<Bootstrap, AppError>(__TAURI_INVOKE("get_bootstrap")),
 	getProject: (path: string) => typedError<ProjectDetail, AppError>(__TAURI_INVOKE("get_project", { path })),
 	/**
-	 *  Import a local on-disk git repo as a project, registered *in place* — never
-	 *  re-cloned or copied (that wastes disk and diverges from the user's working
-	 *  copy). Worktrees are cut directly from it via `git worktree add`.
+	 *  Classify a disk path for the Add-project dialog: import in place, offer
+	 *  `git init` for a non-git folder, or refuse a bare repo. See
+	 *  [`repos::RepoPathStatus`].
 	 */
-	addProject: (path: string, directoryName: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("add_project", { path, directoryName, bootstrapUser })),
+	inspectRepoPath: (path: string) => typedError<RepoPathStatus, AppError>(__TAURI_INVOKE("inspect_repo_path", { path })),
+	/**
+	 *  Import a local on-disk folder as a project, registered *in place* — never
+	 *  re-cloned or copied. Worktrees are cut directly from it via `git worktree
+	 *  add`. Classifies the path and does whatever git setup it needs first:
+	 * 
+	 *  - **non-git folder** → `git init -b <branch>` (default `main`) + an empty
+	 *    initial commit.
+	 *  - **unborn repo** (has `.git`, no commits) → just the initial commit, on its
+	 *    existing branch.
+	 *  - **ready repo** → adopted as-is (`branch` ignored).
+	 *  - **bare repo** → refused, since worktrees can't be cut from it.
+	 */
+	importProject: (path: string, branch: string | null, directoryName: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("import_project", { path, branch, directoryName, bootstrapUser })),
 	/**
 	 *  Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
 	 *  register it as a project.
@@ -1530,6 +1543,22 @@ export type QueryResult = {
 	total: number,
 	items: DocMeta[],
 };
+
+/**
+ *  How a browsed disk path looks as a candidate project, for the Add-project
+ *  disk flow.
+ */
+export type RepoPathStatus = 
+/**  The path doesn't exist or isn't a directory. */
+"missing" | 
+/**  Exists, but isn't a git repo — offer to `git init` it. */
+"nonGit" | 
+/**  A bare repository — no working tree to cut a worktree from. */
+"bare" | 
+/**  A git repo whose HEAD is unborn (no commits yet). */
+"unborn" | 
+/**  A ready git repo (working tree with at least one commit). */
+"ready";
 
 /**
  *  GitHub's aggregate review verdict for the PR, from `gh`'s `reviewDecision`
