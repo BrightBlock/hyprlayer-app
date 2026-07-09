@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.4.20",
+      "date": "2026-07-09",
+      "summary": "Simpler project import, dashboard and theme fixes.",
+      "notes": [
+        "Adding a project now offers to git-init a plain folder on the spot instead of failing with a bare error, and correctly handles bare/unborn repos.",
+        "The dashboard's knowledge graph now shows up as soon as thoughts setup is finished, even before you've added a repo.",
+        "New users now default to the system theme instead of the Claude palette."
+      ]
+    },
+    {
       "version": "0.4.19",
       "date": "2026-07-08",
       "summary": "Editable file viewer with save, and cleaner word-level diffs.",
