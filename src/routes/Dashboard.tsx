@@ -218,17 +218,20 @@ export function Dashboard() {
 
   if (bootstrap.error) return <PageError error={bootstrap.error} />;
 
-  const configMissing = bootstrap.data?.config.state === "missing";
   const config = bootstrap.data?.config;
   const userName =
     config?.state === "ready" && config.user
       ? config.user.charAt(0).toUpperCase() + config.user.slice(1)
       : null;
 
-  // First-run (design 4b): before setup finishes or while no repo is
-  // connected, the hero shows the lone first node instead of the fleet.
-  // Gated on bootstrap.data so the loading frame doesn't flash it.
-  const firstRun = bootstrap.data !== undefined && (configMissing || projects.length === 0);
+  // First-run hero (design 4b): the lone first node + "Get set up" pill, shown
+  // until the thoughts repo is configured — NOT gated on having a project, so a
+  // configured user with no repos yet still gets the real knowledge graph (a
+  // cloned thoughts corpus lights it up on its own). Gated on bootstrap.data so
+  // the loading frame doesn't flash it.
+  const thoughtsConfigured = config?.state === "ready" && config.configured;
+  const firstRun = bootstrap.data !== undefined && !thoughtsConfigured;
+  const hasProjects = projects.length > 0;
   const openWizard = () => void navigate({ to: "/onboarding" });
 
   const date = new Date(now);
@@ -245,8 +248,8 @@ export function Dashboard() {
   // running" at rest, live agents shown when working) — hasProjects is
   // forced there so the quiet copy matches instead of the add-a-repo nag.
   const status = heroStatus(fleet.counts, {
-    hasProjects: firstRun || projects.length > 0,
-    loading: projects.length > 0 && workstreams.isLoading,
+    hasProjects: firstRun || hasProjects,
+    loading: hasProjects && workstreams.isLoading,
     runningStages,
   });
 
@@ -286,12 +289,15 @@ export function Dashboard() {
             <KnowledgeGraph graph={graph} />
           </div>
 
-          {/* Bottom scrim — the band the docked glass panels sit on,
-              deepening what the vignette already faded. */}
-          <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-[300px]"
-            style={{ background: PANEL_SCRIM }}
-          />
+          {/* Bottom scrim — the band the docked glass panels sit on, deepening
+              what the vignette already faded. Hidden until a repo is added,
+              since the panels it carries are too. */}
+          {hasProjects && (
+            <div
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-[300px]"
+              style={{ background: PANEL_SCRIM }}
+            />
+          )}
 
           <GraphPins pins={pins} />
         </>
@@ -358,7 +364,9 @@ export function Dashboard() {
 
         <div className="min-h-6 flex-[1.5]" />
 
-        {!firstRun && (
+        {/* Live now + Latest activity dock only once a repo exists — with no
+            projects there are no workstreams to surface. */}
+        {!firstRun && hasProjects && (
           <div
             className={`pointer-events-auto grid grid-cols-1 gap-4 ${
               fleet.live.length > 0 ? "lg:grid-cols-[3fr_2fr]" : "lg:grid-cols-[2fr_3fr]"
