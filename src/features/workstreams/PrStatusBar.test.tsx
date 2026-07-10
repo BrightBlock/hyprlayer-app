@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PrStatusBar } from "./PrStatusBar";
@@ -88,5 +88,25 @@ describe("PrStatusBar merge gate", () => {
     // Stays a plain, disabled Merge — no Auto-merge affordance.
     expect(screen.queryByRole("button", { name: "Auto-merge" })).toBeNull();
     expect(mergeBtn().disabled).toBe(true);
+  });
+});
+
+describe("PrStatusBar merge menu", () => {
+  it("floats fixed and right-aligned to the Merge button", () => {
+    renderBar(makePr());
+    const btn = mergeBtn();
+    // jsdom reports a zero rect; stand in for a button inside the right sidebar.
+    btn.getBoundingClientRect = () => ({ bottom: 120, right: 900 }) as DOMRect;
+    Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+
+    fireEvent.click(btn);
+    const menu = screen.getByText("Squash and merge").closest("div");
+
+    // Must be `fixed`, not `absolute`: the diff sidebar is `overflow-hidden`
+    // (for its width animation) and clips the menu at its left edge.
+    expect(menu?.className).toContain("fixed");
+    expect(menu?.className).not.toContain("absolute");
+    expect(menu?.style.top).toBe("124px");
+    expect(menu?.style.right).toBe("100px");
   });
 });
