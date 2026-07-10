@@ -1142,6 +1142,9 @@ export type GithubRepo = {
 	nameWithOwner: string,
 	description?: string | null,
 	url: string,
+	/**  Last push, ISO-8601 as GitHub returns it. None on repos with no commits. */
+	pushedAt: string | null,
+	private: boolean,
 };
 
 /**

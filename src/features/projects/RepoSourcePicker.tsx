@@ -2,7 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, type ReactNode } from "react";
 
 import type { GithubRepo } from "@/lib/bindings";
-import { Button, Field, Spinner, TextInput } from "@/components/ui";
+import { Button, Field, RefreshButton, Spinner, TextInput } from "@/components/ui";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { useRecentRepos } from "@/lib/queries";
 
@@ -203,28 +203,42 @@ function RecentRepos({
     );
   }
   const repos = query.data ?? [];
-  if (repos.length === 0) return null;
   return (
     <div>
-      <p className="mb-1 text-xs font-medium text-ink-dim">Recent repos</p>
-      <div className="max-h-44 overflow-y-auto rounded-md border border-edge bg-panel-2">
-        {repos.map((repo) => (
-          <button
-            key={repo.nameWithOwner}
-            type="button"
-            onClick={() => onPick(repo)}
-            className="flex w-full items-center gap-2.5 border-b border-edge/50 px-3 py-2 text-left last:border-0 hover:bg-edge/40"
-          >
-            <RepoAvatar source={repo.nameWithOwner} name={repo.nameWithOwner} size={22} />
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate text-sm text-ink">{repo.nameWithOwner}</span>
-              {repo.description && (
-                <span className="line-clamp-1 text-xs text-ink-dim">{repo.description}</span>
-              )}
-            </span>
-          </button>
-        ))}
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-ink-dim">Recent repos</p>
+        <RefreshButton
+          onClick={() => void query.refetch()}
+          busy={query.isFetching}
+          label="Refresh recent repos"
+        />
       </div>
+      {repos.length === 0 ? (
+        // Keep the refresh above reachable: signing in with gh is the fix, and
+        // it happens in a terminal while this dialog stays open.
+        <p className="rounded-md border border-edge bg-panel-2 px-3 py-2 text-xs text-ink-dim">
+          None found. Sign in with <span className="font-mono">gh auth login</span>, then refresh.
+        </p>
+      ) : (
+        <div className="max-h-44 overflow-y-auto rounded-md border border-edge bg-panel-2">
+          {repos.map((repo) => (
+            <button
+              key={repo.nameWithOwner}
+              type="button"
+              onClick={() => onPick(repo)}
+              className="flex w-full items-center gap-2.5 border-b border-edge/50 px-3 py-2 text-left last:border-0 hover:bg-edge/40"
+            >
+              <RepoAvatar source={repo.nameWithOwner} name={repo.nameWithOwner} size={22} />
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-sm text-ink">{repo.nameWithOwner}</span>
+                {repo.description && (
+                  <span className="line-clamp-1 text-xs text-ink-dim">{repo.description}</span>
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

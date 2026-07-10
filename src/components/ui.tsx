@@ -11,7 +11,7 @@ import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { formatChord } from "@/lib/keybindings/chord";
 import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
-import { XIcon } from "./icons";
+import { RestartIcon, XIcon } from "./icons";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -189,10 +189,25 @@ type DialogProps = {
   title?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Names the dialog when the layout carries its own heading instead of `title`. */
+  ariaLabel?: string;
+  /** Drop the panel's inset so content can run edge-to-edge. */
+  padded?: boolean;
+  /** Let the panel scroll. Off when the content owns its own scroll regions. */
+  scroll?: boolean;
 };
 
 /** Dependency-free modal: fixed overlay + panel; Escape or a backdrop click closes. */
-export function Dialog({ open, onClose, title, children, className }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  className,
+  ariaLabel,
+  padded = true,
+  scroll = true,
+}: DialogProps) {
   useEscape(open ? onClose : null);
 
   if (!open) return null;
@@ -206,8 +221,11 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
       <div
         role="dialog"
         aria-modal="true"
+        aria-label={ariaLabel}
         className={cx(
-          "max-h-full w-full max-w-md overflow-y-auto rounded-lg border border-edge bg-panel p-4 shadow-2xl",
+          "max-h-full w-full max-w-md rounded-lg border border-edge bg-panel shadow-2xl",
+          scroll ? "overflow-y-auto" : "overflow-hidden",
+          padded && "p-4",
           className,
         )}
       >
@@ -286,6 +304,47 @@ export function IconButton({ active, className, ...rest }: IconButtonProps) {
       )}
       {...rest}
     />
+  );
+}
+
+type RefreshButtonProps = {
+  onClick: () => void;
+  /** Swaps the icon for a spinner and blocks re-entry while a refetch is in flight. */
+  busy?: boolean;
+  /** Accessible name — say what gets refreshed. Wins over any visible `children`. */
+  label: string;
+  title?: string;
+  className?: string;
+  /** Visible text beside the icon, e.g. a sync-status line. Icon-only when omitted. */
+  children?: ReactNode;
+};
+
+/** Borderless refresh control: an icon-only square, or icon + status text. */
+export function RefreshButton({
+  onClick,
+  busy = false,
+  label,
+  title,
+  className,
+  children,
+}: RefreshButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      className={cx(
+        "flex shrink-0 items-center gap-1.5 rounded text-ink-dim",
+        "enabled:hover:text-ink disabled:cursor-default",
+        children ? "px-1.5 py-1" : "h-6 w-6 justify-center enabled:hover:bg-edge/60",
+        className,
+      )}
+      title={title ?? label}
+      aria-label={label}
+    >
+      {busy ? <Spinner size={12} /> : <RestartIcon size={13} />}
+      {children}
+    </button>
   );
 }
 

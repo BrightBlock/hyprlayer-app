@@ -211,9 +211,12 @@ pub struct GithubRepo {
     #[serde(default)]
     pub description: Option<String>,
     pub url: String,
+    /// Last push, ISO-8601 as GitHub returns it. None on repos with no commits.
+    pub pushed_at: Option<String>,
+    pub private: bool,
 }
 
-/// The user's GitHub repos — personal AND org-member — most-recently-updated
+/// The user's GitHub repos — personal AND org-member — most-recently-pushed
 /// first, for the clone dialog's "Recent repos" list. Uses `gh api /user/repos`
 /// rather than `gh repo list`: the latter only returns the user's *personal*
 /// repos, so org repos (e.g. an employer's) never appear. Errors if gh is
@@ -222,7 +225,9 @@ pub struct GithubRepo {
 pub async fn github_repos(gh: &Path, limit: u32) -> Result<Vec<GithubRepo>> {
     // `/user/repos` defaults to affiliation=owner,collaborator,organization_member,
     // so it spans every repo the user can reach, across personal and orgs.
-    let endpoint = format!("user/repos?per_page={}&sort=updated", limit.min(100));
+    // Sort on `pushed`, the same clock the UI renders as each row's age — with
+    // `updated` a description edit floats a long-stale repo to the top.
+    let endpoint = format!("user/repos?per_page={}&sort=pushed", limit.min(100));
     let out = Exec::new(gh)
         .args(["api", &endpoint])
         .timeout(Duration::from_secs(30))
@@ -236,6 +241,10 @@ pub async fn github_repos(gh: &Path, limit: u32) -> Result<Vec<GithubRepo>> {
         #[serde(default)]
         description: Option<String>,
         html_url: String,
+        #[serde(default)]
+        pushed_at: Option<String>,
+        #[serde(default)]
+        private: bool,
     }
     let raw: Vec<ApiRepo> =
         serde_json::from_str(&out.stdout).map_err(|e| CoreError::OutputParse {
@@ -248,6 +257,8 @@ pub async fn github_repos(gh: &Path, limit: u32) -> Result<Vec<GithubRepo>> {
             name_with_owner: r.full_name,
             description: r.description,
             url: r.html_url,
+            pushed_at: r.pushed_at,
+            private: r.private,
         })
         .collect())
 }

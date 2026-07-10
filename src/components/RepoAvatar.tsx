@@ -1,22 +1,6 @@
 import { useState } from "react";
 
-/**
- * Extract the GitHub owner (user or org) from a clone source — a URL
- * (`https://github.com/acme/repo.git`, `git@github.com:acme/repo.git`,
- * `ssh://git@github.com/acme/repo`) or a bare `owner/repo`. Returns null for
- * non-GitHub or unparseable sources, so the caller falls back to a letter tile.
- */
-export function githubOwner(source: string | null | undefined): string | null {
-  if (!source) return null;
-  const s = source.trim();
-  // URL or scp-style: capture the segment after the github.com host.
-  const host = s.match(/github\.com[/:]([A-Za-z0-9._-]+)\/[^/\s]+/i);
-  if (host) return host[1];
-  // Bare `owner/repo` (a nameWithOwner) — treat as GitHub.
-  const bare = s.match(/^([A-Za-z0-9._-]+)\/[A-Za-z0-9._-]+$/);
-  if (bare) return bare[1];
-  return null;
-}
+import { githubOwner } from "@/lib/github";
 
 function initial(name: string): string {
   return name.trim().slice(0, 1).toUpperCase() || "?";

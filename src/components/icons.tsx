@@ -600,7 +600,26 @@ export function StopIcon({ size = 14 }: IconProps) {
   );
 }
 
-/** Circular arrow — restart / relaunch an agent. */
+/** Padlock — a private repository. */
+export function LockIcon({ size = 12, strokeWidth = 2, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      className={className}
+    >
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
+/** Circular arrow — restart / relaunch an agent, or refresh a list. */
 export function RestartIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
