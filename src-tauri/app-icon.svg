@@ -5,12 +5,6 @@
       <stop offset="0" stop-color="#1a1d24" />
       <stop offset="1" stop-color="#0a0b0d" />
     </linearGradient>
-    <!-- Brand gradient shared by every layer, matching the in-app logo. -->
-    <linearGradient id="mark" x1="260" y1="300" x2="764" y2="722" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7dd3fc" />
-      <stop offset="0.55" stop-color="#60a5fa" />
-      <stop offset="1" stop-color="#a78bfa" />
-    </linearGradient>
   </defs>
 
   <!-- Inset to Apple's macOS icon grid: an 824×824 rounded square centered in
@@ -18,11 +12,16 @@
        size as other apps in the Dock / app switcher rather than oversized. -->
   <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bg)" />
 
-  <!-- The isometric stack, centered: translate(176,176) scale(21) over the
-       32×32 mark space (content spans y 6–26, centered at 16,16). -->
-  <g transform="translate(176 176) scale(21)">
-    <path d="M16 26 4 20l12-6 12 6-12 6Z" fill="url(#mark)" opacity="0.45" />
-    <path d="M16 22 4 16l12-6 12 6-12 6Z" fill="url(#mark)" opacity="0.7" />
-    <path d="M16 18 4 12l12-6 12 6-12 6Z" fill="url(#mark)" />
+  <!-- The isometric stack, centered on the tile: translate(48,48) scale(29)
+       over the 32-unit mark space (content spans x 4-28, y 6-26, centered at
+       16,16). The mark fills ~84% wide x ~70% tall of the 824 tile, the same
+       proportion app-icon-windows.svg gives its frame, leaving 64px of side
+       clearance. Flat brand terracotta, matching the accent token the in-app
+       mark fills (Logo.tsx). Layer opacities run hotter than the app's
+       0.35/0.6 so the lower slabs still separate from the tile at 32px. -->
+  <g transform="translate(48 48) scale(29)" fill="#d97757">
+    <path d="M16 26 4 20l12-6 12 6-12 6Z" opacity="0.45" />
+    <path d="M16 22 4 16l12-6 12 6-12 6Z" opacity="0.7" />
+    <path d="M16 18 4 12l12-6 12 6-12 6Z" />
   </g>
 </svg>
