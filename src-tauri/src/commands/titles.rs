@@ -180,7 +180,7 @@ async fn generate_with_opencode(
             .await
             .map_err(AppError::internal)?;
 
-    driver.send_user_turn(prompt, None).map_err(AppError::from)?;
+    driver.send_user_turn(prompt, None, None).map_err(AppError::from)?;
     let collected = drain_opencode_title(&mut rx).await;
     driver.kill();
     // Throwaway session: delete the record so one-shot titling doesn't pollute

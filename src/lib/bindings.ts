@@ -324,7 +324,12 @@ export const commands = {
 	 */
 	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
 	rewindSession: (sessionId: string, userTurn: number, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionEvent>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
-	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs })),
+	/**
+	 *  Send a follow-up turn. `prompt_name` is set when the turn is a custom-prompt
+	 *  run, so the persisted event can tell a card-collapsed prompt body from a
+	 *  message the user typed.
+	 */
+	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[], promptName: string | null) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs, promptName })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	/**
 	 *  Answer an `AskUserQuestion` prompt. `answers` is a JSON object mapping each
@@ -1732,7 +1737,15 @@ export type SessionEvent =
  *  live transcript isn't double-stamped. `stage` is the stage label for the
  *  session's opening prompt, else null (a follow-up).
  */
-{ kind: "userMessage"; text: string; stage: string | null } | 
+{ kind: "userMessage"; text: string; stage: string | null; 
+/**
+ *  Name of the custom prompt this turn ran, else null for a typed turn.
+ *  `text` stays the exact body the agent received (vars substituted), so
+ *  the UI can collapse it into a card titled with this name and expand it
+ *  back to what was actually sent. Defaulted: rows persisted before this
+ *  field existed still deserialize.
+ */
+promptName?: string | null } | 
 /**
  *  Streaming text delta (live typing). Coalesced into `AssistantText` on
  *  turn completion — the UI shows partials, then replaces with the final.
@@ -1880,6 +1893,12 @@ export type StartOpts = {
 	effort?: string | null,
 	/**  `--permission-mode` override; `None` keeps the stage's default posture. */
 	permissionMode?: PermissionMode | null,
+	/**
+	 *  Name of the custom prompt that opened this session, when one did. Rides
+	 *  onto the persisted `UserMessage` so the transcript collapses the body
+	 *  into a card on replay.
+	 */
+	promptName?: string | null,
 };
 
 /**

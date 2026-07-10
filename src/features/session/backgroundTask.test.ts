@@ -144,7 +144,7 @@ describe("isBackgroundSpawn", () => {
       text: "hello",
       stage: null,
       attachments: [],
-      createdAt: null,
+      createdAt: null, promptName: null
     };
     expect(isBackgroundSpawn(userItem)).toBe(false);
   });
@@ -164,7 +164,7 @@ describe("backgroundTasksFromItems", () => {
 
   it("ignores non-tool transcript items", () => {
     const items: TranscriptItem[] = [
-      { kind: "user", id: "u1", text: "hi", stage: null, attachments: [], createdAt: null },
+      { kind: "user", id: "u1", text: "hi", stage: null, attachments: [], createdAt: null, promptName: null },
       { kind: "assistant", id: "a1", text: "hello", streaming: false },
     ];
     expect(backgroundTasksFromItems(items)).toHaveLength(0);

@@ -78,7 +78,7 @@ describe("workingLine", () => {
     expect(workingLine([])).toBe("thinking…");
     const items: TranscriptItem[] = [
       tool("Read", { file_path: "/x.ts" }),
-      { kind: "user", id: "u1", text: "go", stage: null, attachments: [], createdAt: 1 },
+      { kind: "user", id: "u1", text: "go", stage: null, attachments: [], createdAt: 1, promptName: null },
     ];
     expect(workingLine(items)).toBe("thinking…");
   });
@@ -94,7 +94,7 @@ describe("selectFleetKeys", () => {
         contextTokens: 91_700,
         model: "claude-opus-4-8",
         items: [tool("Edit", { file_path: "/a/Dashboard.tsx" })],
-        queued: [{ text: "next", attachments: [] }],
+        queued: [{ text: "next", attachments: [], promptName: null }],
       }),
       s2: entry({
         workstreamId: "ws1",

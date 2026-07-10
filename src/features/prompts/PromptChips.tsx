@@ -55,7 +55,7 @@ export function PromptChips({
           key={p.id}
           type="button"
           onClick={() => void runCustomPrompt(view, p, shellId)}
-          title="Runs immediately in this session"
+          title="Runs immediately in this session — the transcript shows a card, not the body"
           className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs text-ink hover:border-accent/50 hover:bg-accent/10"
         >
           <span className="shrink-0 text-accent">

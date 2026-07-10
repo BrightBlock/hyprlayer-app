@@ -66,7 +66,7 @@ describe("planTasksFromItems", () => {
 
   it("ignores non-tool and unrelated tool items", () => {
     const items: TranscriptItem[] = [
-      { kind: "user", id: "u1", text: "hi", stage: null, attachments: [], createdAt: null },
+      { kind: "user", id: "u1", text: "hi", stage: null, attachments: [], createdAt: null, promptName: null },
       { kind: "assistant", id: "a1", text: "ok", streaming: false },
       makeTool("Bash", JSON.stringify({ command: "ls" }), "t1", ok("done")),
     ];

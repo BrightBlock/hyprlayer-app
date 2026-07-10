@@ -25,6 +25,8 @@ import { stageLabel } from "@/lib/domain/stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
 import { AttachmentCards } from "./AttachmentCard";
 import { FileCard } from "./FileCard";
+import { PromptCard } from "./PromptCard";
+import { STEP_ROW, StepChevron } from "./stepRow";
 import type { Attachment } from "./attachments";
 import { formatElapsed, formatRelativeTime } from "@/lib/format";
 import {
@@ -126,6 +128,7 @@ const UserMessage = memo(function UserMessage({
   stage,
   attachments,
   createdAt,
+  promptName,
   prompt,
 }: {
   id: string;
@@ -133,6 +136,7 @@ const UserMessage = memo(function UserMessage({
   stage: string | null;
   attachments: Attachment[];
   createdAt: number | null;
+  promptName: string | null;
   prompt: PromptHandlers;
 }) {
   return (
@@ -143,9 +147,14 @@ const UserMessage = memo(function UserMessage({
             {stageLabel(stage)}
           </span>
         )}
-        {text && (
-          <p className="selectable whitespace-pre-wrap break-words text-sm text-ink">{text}</p>
-        )}
+        {/* A library prompt collapses to a card. `text` is still the body the
+            agent received — expanding the card reveals it. */}
+        {text &&
+          (promptName ? (
+            <PromptCard name={promptName} body={text} />
+          ) : (
+            <p className="selectable whitespace-pre-wrap break-words text-sm text-ink">{text}</p>
+          ))}
         <AttachmentCards attachments={attachments} className={text ? "mt-2" : ""} />
       </div>
       <UserMessageToolbar
@@ -229,31 +238,6 @@ const AssistantMessage = memo(function AssistantMessage({
   );
 });
 
-/** Shared button shell for a working-step row (thinking, tool, group, subagent). */
-const STEP_ROW =
-  "group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-panel-2";
-
-/** The disclosure chevron for a step row. `reveal="hover"` keeps it hidden until
- *  the row is hovered or open (thinking/tool); `"always"` shows it (group/subagent). */
-function StepChevron({
-  open,
-  reveal = "always",
-  size = 12,
-}: {
-  open: boolean;
-  reveal?: "hover" | "always";
-  size?: number;
-}) {
-  const visibility =
-    reveal === "hover"
-      ? open
-        ? "rotate-90 text-ink-dim"
-        : "text-ink-dim/0 group-hover:text-ink-dim"
-      : `${open ? "rotate-90" : ""} text-ink-dim`;
-  return (
-    <ChevronRightIcon size={size} className={`ml-auto shrink-0 transition-all ${visibility}`} />
-  );
-}
 
 /** The expanded `<pre>` for a tool/subagent result — shared so error coloring,
  *  max-height, and the empty-output fallback stay identical across both. */
@@ -781,6 +765,7 @@ function renderSingle(
           stage={item.stage}
           attachments={item.attachments}
           createdAt={item.createdAt}
+          promptName={item.promptName}
           prompt={prompt}
         />
       );

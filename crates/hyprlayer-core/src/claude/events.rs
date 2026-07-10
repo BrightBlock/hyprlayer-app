@@ -119,7 +119,17 @@ pub enum SessionEvent {
     /// UI (which already shows the message optimistically) — persist-only, so the
     /// live transcript isn't double-stamped. `stage` is the stage label for the
     /// session's opening prompt, else null (a follow-up).
-    UserMessage { text: String, stage: Option<String> },
+    UserMessage {
+        text: String,
+        stage: Option<String>,
+        /// Name of the custom prompt this turn ran, else null for a typed turn.
+        /// `text` stays the exact body the agent received (vars substituted), so
+        /// the UI can collapse it into a card titled with this name and expand it
+        /// back to what was actually sent. Defaulted: rows persisted before this
+        /// field existed still deserialize.
+        #[serde(default)]
+        prompt_name: Option<String>,
+    },
     /// Streaming text delta (live typing). Coalesced into `AssistantText` on
     /// turn completion — the UI shows partials, then replaces with the final.
     PartialText {

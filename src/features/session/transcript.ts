@@ -201,6 +201,10 @@ export type TranscriptItem =
        *  backfilled from the event on replay. `null` for legacy rows (UI falls
        *  back to the session start time). */
       createdAt: number | null;
+      /** Name of the custom prompt this turn ran, else null when the user typed
+       *  it. `text` is still the exact body the agent received, so the UI can
+       *  collapse it under this name and expand back to what was sent. */
+      promptName: string | null;
     }
   | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
   | ({ kind: "thinking"; id: string; text: string } & Parented)
@@ -575,6 +579,8 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
             stage: event.stage,
             attachments: [],
             createdAt: null,
+            // Optional on the wire: turns persisted before prompt cards existed.
+            promptName: event.promptName ?? null,
           }),
           true,
         ),
@@ -954,12 +960,13 @@ export function addUserMessage(
   stage: string | null,
   attachments: Attachment[] = [],
   createdAt: number | null = null,
+  promptName: string | null = null,
 ): SessionView {
   return {
     ...view,
     ...appended(
       view,
-      (id) => ({ kind: "user", id, text, stage, attachments, createdAt }),
+      (id) => ({ kind: "user", id, text, stage, attachments, createdAt, promptName }),
       true,
     ),
     streaming: true,
@@ -1074,7 +1081,10 @@ export function viewToText(view: SessionView): string {
     switch (item.kind) {
       case "user": {
         const heading = `## You${item.stage && item.stage !== "general" ? ` (${item.stage})` : ""}`;
-        lines.push(heading, item.text);
+        lines.push(heading);
+        // The card collapses the body in the UI; the export keeps it in full.
+        if (item.promptName) lines.push(`*Prompt: ${item.promptName}*`);
+        lines.push(item.text);
         for (const att of item.attachments ?? []) lines.push(`📎 ${att.name}`);
         lines.push("");
         break;

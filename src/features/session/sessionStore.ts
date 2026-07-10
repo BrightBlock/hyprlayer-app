@@ -120,8 +120,14 @@ export type SessionEntry = SessionView & {
   taskStartedAt: Record<string, number>;
 };
 
-/** A follow-up turn the user sent mid-turn, held until the current turn ends. */
-export type QueuedMessage = { text: string; attachments: Attachment[] };
+/** A follow-up turn the user sent mid-turn, held until the current turn ends.
+ *  `promptName` survives the wait so a queued custom-prompt run still lands as a
+ *  card rather than its raw body. */
+export type QueuedMessage = {
+  text: string;
+  attachments: Attachment[];
+  promptName: string | null;
+};
 
 type State = { sessions: Record<string, SessionEntry> };
 
@@ -380,6 +386,9 @@ export async function startSession(args: {
   effort?: string | null;
   /** `--permission-mode` override, or null/undefined to use the stage default. */
   permissionMode?: PermissionMode | null;
+  /** Set when a custom prompt opened this session, so the echoed first turn
+   *  renders as a card instead of the composed body. */
+  promptName?: string | null;
 }): Promise<Session> {
   const { channel, activate } = bufferedChannel();
   const attachments = args.attachments ?? [];
@@ -395,6 +404,7 @@ export async function startSession(args: {
         model: args.model ?? null,
         effort: args.effort ?? null,
         permissionMode: args.permissionMode ?? null,
+        promptName: args.promptName ?? null,
       },
       channel,
     ),
@@ -409,7 +419,7 @@ export async function startSession(args: {
   // including any Settings → Prompts override) — but NOT the doc/path list the
   // backend appends; those render as pin cards instead, so the agent's raw
   // paths never appear in the user bubble.
-  view = addUserMessage(view, prompt, args.stage, attachments, Date.now());
+  view = addUserMessage(view, prompt, args.stage, attachments, Date.now(), args.promptName ?? null);
   setEntry(session.id, {
     ...view,
     workstreamId: args.workstreamId,
@@ -706,14 +716,19 @@ export async function sendMessage(
   sessionId: string,
   text: string,
   attachments: Attachment[] = [],
+  /** Set when `text` is a custom prompt's body, so the bubble renders a card. */
+  promptName: string | null = null,
 ): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
   if (channels.has(sessionId) && isBusy(current)) {
-    setEntry(sessionId, { ...current, queued: [...current.queued, { text, attachments }] });
+    setEntry(sessionId, {
+      ...current,
+      queued: [...current.queued, { text, attachments, promptName }],
+    });
     return;
   }
-  await deliverMessage(sessionId, text, attachments);
+  await deliverMessage(sessionId, text, attachments, promptName);
 }
 
 /** Actually send a turn: optimistic user bubble (text + attachment cards),
@@ -725,15 +740,23 @@ async function deliverMessage(
   sessionId: string,
   text: string,
   attachments: Attachment[] = [],
+  promptName: string | null = null,
 ): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
-  const withUser = addUserMessage(current, text, null, attachments, Date.now());
+  const withUser = addUserMessage(current, text, null, attachments, Date.now(), promptName);
   const optimisticId = withUser.items[withUser.items.length - 1].id;
   setEntry(sessionId, { ...current, ...withUser });
   if (!channels.has(sessionId)) await resumeSession(sessionId);
   try {
-    await unwrap(commands.sendUserMessage(sessionId, text, attachments.map((a) => a.path)));
+    await unwrap(
+      commands.sendUserMessage(
+        sessionId,
+        text,
+        attachments.map((a) => a.path),
+        promptName,
+      ),
+    );
   } catch (e) {
     // The turn never reached the driver, so no `userMessage` event will be
     // persisted. Drop the optimistic bubble so the visible transcript stays in
@@ -758,7 +781,7 @@ function flushQueuedMessage(sessionId: string): void {
   if (!entry || entry.queued.length === 0 || isBusy(entry)) return;
   const [next, ...rest] = entry.queued;
   setEntry(sessionId, { ...entry, queued: rest });
-  void deliverMessage(sessionId, next.text, next.attachments);
+  void deliverMessage(sessionId, next.text, next.attachments, next.promptName);
 }
 
 /** Drop a still-queued message before it's delivered (the user changed course). */
@@ -977,6 +1000,8 @@ const promptStartsInFlight = new Set<string>();
 export async function runPromptTextInWorkstream(
   workstreamId: string,
   text: string,
+  /** The prompt's name. Titles a freshly-opened tab, and titles the transcript
+   *  card that stands in for `text` so a long body doesn't flood the chat. */
   title: string,
   /** Deliver into this shell instead of the focused one — the composer chips
    *  pass their own tab so a chip in a split pane can't cross-fire. */
@@ -1002,7 +1027,7 @@ export async function runPromptTextInWorkstream(
     }
     const entry = entryOf(active.sessionId);
     if (entry && !isTerminal(entry.state)) {
-      await sendMessage(active.sessionId, text);
+      await sendMessage(active.sessionId, text, [], title);
       return;
     }
   }
@@ -1030,6 +1055,7 @@ export async function runPromptTextInWorkstream(
       // Launch on what pressing Enter in that tab would use: the reused tab's
       // own composer picks, else the configured new-chat defaults.
       ...newChatLaunchArgs(settings, reuseShell ? active : null),
+      promptName: title,
     });
     if (reuseShell) {
       bindSessionToShell(workstreamId, active.id, session.id);

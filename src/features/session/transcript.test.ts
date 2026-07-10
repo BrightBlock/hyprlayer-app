@@ -926,6 +926,37 @@ describe("restoredView (rebuild after an app restart)", () => {
     expect(restored.items[2]).toMatchObject({ kind: "user", text: "now go deeper", stage: null });
     expect(restored.state).toBe("idle");
   });
+
+  it("replays a prompt run as a named card, keeping the body the agent got", () => {
+    // The card is reconstructed from the persisted event, not from live state —
+    // otherwise a restart would dump the whole prompt body back into the chat.
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, {
+      kind: "userMessage",
+      text: "Refactor this module.\nStep 1…\nStep 2…",
+      stage: null,
+      promptName: "Refactor for testability",
+    });
+
+    expect(restoredView(view).items[0]).toMatchObject({
+      kind: "user",
+      text: "Refactor this module.\nStep 1…\nStep 2…",
+      promptName: "Refactor for testability",
+    });
+  });
+
+  it("replays a turn persisted before prompt cards existed", () => {
+    // `promptName` is absent from those rows; it must read as a typed message,
+    // not crash or render an untitled card.
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "userMessage", text: "hello", stage: null });
+
+    expect(restoredView(view).items[0]).toMatchObject({
+      kind: "user",
+      text: "hello",
+      promptName: null,
+    });
+  });
 });
 
 describe("display + actions", () => {

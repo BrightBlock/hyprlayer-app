@@ -17,7 +17,7 @@ import type { TranscriptItem } from "./transcript";
 // ---------------------------------------------------------------------------
 
 function userItem(text: string, id = text): Extract<TranscriptItem, { kind: "user" }> {
-  return { kind: "user", id, text, stage: null, attachments: [], createdAt: null };
+  return { kind: "user", id, text, stage: null, attachments: [], createdAt: null, promptName: null };
 }
 
 function assistantItem(text: string, id = text): Extract<TranscriptItem, { kind: "assistant" }> {

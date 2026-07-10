@@ -539,11 +539,17 @@ impl AgentDriver for OpenCodeDriver {
         self.events.subscribe()
     }
 
-    fn send_user_turn(&self, text: &str, stage: Option<&str>) -> CoreResult<()> {
+    fn send_user_turn(
+        &self,
+        text: &str,
+        stage: Option<&str>,
+        prompt_name: Option<&str>,
+    ) -> CoreResult<()> {
         // Persist/replay the human turn the same way the Claude driver does.
         let _ = self.events.send(SessionEvent::UserMessage {
             text: text.to_string(),
             stage: stage.map(str::to_string),
+            prompt_name: prompt_name.map(str::to_string),
         });
         let mut body = json!({ "parts": [{ "type": "text", "text": text }] });
         // Read the (possibly live-switched) model under the lock.

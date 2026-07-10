@@ -60,8 +60,14 @@ pub trait AgentDriver: Send + Sync {
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent>;
 
     /// Send a user turn — the opening prompt (with a `stage` label) or a
-    /// follow-up (`stage = None`).
-    fn send_user_turn(&self, text: &str, stage: Option<&str>) -> Result<()>;
+    /// follow-up (`stage = None`). `prompt_name` names the custom prompt the
+    /// turn was run from, else `None` for a turn the user typed.
+    fn send_user_turn(
+        &self,
+        text: &str,
+        stage: Option<&str>,
+        prompt_name: Option<&str>,
+    ) -> Result<()>;
 
     /// Switch the model used for subsequent turns, if the harness supports
     /// changing it mid-session. OpenCode sends the model with every prompt, so it
@@ -112,8 +118,13 @@ impl AgentDriver for ClaudeDriver {
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
         self.subscribe()
     }
-    fn send_user_turn(&self, text: &str, stage: Option<&str>) -> Result<()> {
-        self.send_user_turn(text, stage)
+    fn send_user_turn(
+        &self,
+        text: &str,
+        stage: Option<&str>,
+        prompt_name: Option<&str>,
+    ) -> Result<()> {
+        self.send_user_turn(text, stage, prompt_name)
     }
     fn respond_permission(
         &self,

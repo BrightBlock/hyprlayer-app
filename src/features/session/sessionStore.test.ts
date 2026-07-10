@@ -159,12 +159,12 @@ describe("conversation steering (mid-turn message queue)", () => {
     emit(INIT);
     emit(TURN_DONE); // first turn done → flush "A"
     await Promise.resolve();
-    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A", []);
+    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A", [], null);
     expect(queued(id)).toEqual(["B"]);
 
     emit(TURN_DONE); // "A"'s turn done → flush "B"
     await Promise.resolve();
-    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B", []);
+    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B", [], null);
     expect(queued(id)).toEqual([]);
   });
 
@@ -405,7 +405,7 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     await Promise.resolve();
 
     // The restart freed the turn, so the queue flushes under the new mode.
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", []);
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", [], null);
     expect(queued(id)).toEqual([]);
   });
 
@@ -499,7 +499,7 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     // The resumed process is idle, so the queued turn is released rather than
     // sitting forever behind a turn that will never arrive.
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", []);
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null);
     expect(queued(id)).toEqual([]);
   });
 

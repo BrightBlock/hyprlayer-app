@@ -94,6 +94,10 @@ pub struct StartOpts {
     pub effort: Option<String>,
     /// `--permission-mode` override; `None` keeps the stage's default posture.
     pub permission_mode: Option<PermissionMode>,
+    /// Name of the custom prompt that opened this session, when one did. Rides
+    /// onto the persisted `UserMessage` so the transcript collapses the body
+    /// into a card on replay.
+    pub prompt_name: Option<String>,
 }
 
 /// Everything `launch_session` needs that isn't shared. `resume` toggles
@@ -349,6 +353,7 @@ pub async fn start_stage_session(
         model,
         effort,
         permission_mode,
+        prompt_name,
     } = opts;
     let ws = {
         let id = workstream_id.clone();
@@ -401,7 +406,11 @@ pub async fn start_stage_session(
 
     // Kick off the first turn (the composed skill prompt + attached docs).
     driver
-        .send_user_turn(&wire_prompt, Some(session.stage.as_str()))
+        .send_user_turn(
+            &wire_prompt,
+            Some(session.stage.as_str()),
+            prompt_name.as_deref(),
+        )
         .map_err(AppError::from)?;
 
     Ok(StartedSession { session, prompt })
@@ -820,6 +829,9 @@ async fn live_rewind_handoff(
     Ok(session)
 }
 
+/// Send a follow-up turn. `prompt_name` is set when the turn is a custom-prompt
+/// run, so the persisted event can tell a card-collapsed prompt body from a
+/// message the user typed.
 #[tauri::command]
 #[specta::specta]
 pub async fn send_user_message(
@@ -827,6 +839,7 @@ pub async fn send_user_message(
     session_id: String,
     text: String,
     attached_docs: Vec<String>,
+    prompt_name: Option<String>,
 ) -> CmdResult<()> {
     // Serialize against an in-flight rewind on this session (same op lock): a send
     // must land entirely before or after a peel, never interleaved between its
@@ -840,7 +853,7 @@ pub async fn send_user_message(
     let prompt = pipeline::append_docs(text, &attached_docs);
     live_driver(&state, &session_id)
         .await?
-        .send_user_turn(&prompt, None)
+        .send_user_turn(&prompt, None, prompt_name.as_deref())
         .map_err(AppError::from)
 }
 
