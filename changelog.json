@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.4.21",
+      "date": "2026-07-10",
+      "summary": "Collapsible prompt cards, script Clear button, wider diff sidebar.",
+      "notes": [
+        "Turns started from a library prompt now collapse into a compact, expandable card in the transcript instead of showing the full prompt body.",
+        "Added a Clear button to the script dock that wipes captured output, including live scrollback.",
+        "Widened the right diff sidebar's default and minimum width for more room.",
+        "Fixed the app icon mark to match the in-app brand color and proportions.",
+        "Fixed script spawn errors showing \"[object Object]\" instead of the actual error message."
+      ]
+    },
+    {
       "version": "0.4.20",
       "date": "2026-07-09",
       "summary": "Simpler project import, dashboard and theme fixes.",
