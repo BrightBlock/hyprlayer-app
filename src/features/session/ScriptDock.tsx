@@ -7,6 +7,7 @@ import {
   ChevronRightIcon,
   DockBottomIcon,
   DockRightIcon,
+  EraserIcon,
   GlobeIcon,
   PlayIcon,
   PlusIcon,
@@ -17,7 +18,14 @@ import {
   XIcon,
 } from "@/components/icons";
 import { commands, type ScriptKind, type ScriptStatus } from "@/lib/bindings";
-import { useBootstrap, useScriptOutput, useScriptRuntime, useScripts, useShellName } from "@/lib/queries";
+import {
+  forgetScriptOutput,
+  useBootstrap,
+  useScriptOutput,
+  useScriptRuntime,
+  useScripts,
+  useShellName,
+} from "@/lib/queries";
 import { formatChord } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { IS_MACOS } from "@/lib/platform";
@@ -53,7 +61,9 @@ const SCRIPTS: { kind: Exclude<ScriptKind, never>; name: string; trigger: string
   { kind: "run", name: "Run", trigger: "Runs each time you press ▶. The previous process is stopped first.", icon: <PlayIcon size={12} /> },
 ];
 
-type View = { kind: ScriptKind; gen: number; attachId: string | null };
+/** A mounted run view. `exited` marks the Run whose process is gone but whose
+ *  output we keep on screen — a frozen log, not a live terminal. */
+type View = { kind: ScriptKind; gen: number; attachId: string | null; exited: boolean };
 
 export function ScriptDock({
   workstreamId,
@@ -96,35 +106,57 @@ export function ScriptDock({
 
   const [view, setView] = useState<View | null>(null);
   const genRef = useRef(0);
+  // Bumped by Clear; ScriptRunView wipes its screen when this changes.
+  const [clearNonce, setClearNonce] = useState(0);
 
   const cmdsFor = (kind: ScriptKind): string => scripts.data?.[kind] ?? "";
   const statusFor = (kind: ScriptKind) => runtime.data?.statuses.find((s) => s.kind === kind);
 
-  // Start a fresh run of `kind` in the body (▶ / Run X).
+  // Start a fresh run of `kind` in the body (▶ / Run X). No-op when that script
+  // is unconfigured: ⌘R arrives here without the ▶ button's `canRun` guard, and
+  // spawning would only bounce off the backend's "no script configured" error.
+  // The dock still lands on the tab, whose empty state explains the nothing.
   const start = (kind: ScriptKind): void => {
-    setView({ kind, gen: ++genRef.current, attachId: null });
+    if (!cmdsFor(kind).trim()) return;
+    setView({ kind, gen: ++genRef.current, attachId: null, exited: false });
     selectDockTab(workstreamId, kind);
   };
 
-  // ⌘R / rail elsewhere asked to start the Run — consume the one-shot flag.
+  // ⌘R / rail elsewhere asked to start the Run — consume the one-shot flag. Wait
+  // for the project's scripts to load first: deciding against an unresolved query
+  // reads every project as unconfigured and would swallow a legitimate ⌘R.
   useEffect(() => {
-    if (pending) {
+    if (pending && !scripts.isPending) {
       start("run");
       consumeRun(workstreamId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending, workstreamId]);
+  }, [pending, workstreamId, scripts.isPending, scripts.data]);
 
   // Opened the dock while a Run was already alive → attach to it.
   const liveRunId = runtime.data?.runTerminalId ?? null;
   useEffect(() => {
     if (liveRunId && !view) {
-      setView({ kind: "run", gen: ++genRef.current, attachId: liveRunId });
+      setView({ kind: "run", gen: ++genRef.current, attachId: liveRunId, exited: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveRunId]);
 
   const stop = (): void => void commands.scriptStop(workstreamId);
+
+  // Clear this script's output. A live run keeps streaming into a wiped screen;
+  // a finished one has nothing left but its log, so drop the view and fall back
+  // to the idle prompt. The command forgets the captured last-run snapshot and
+  // the live PTY's retained scrollback, so neither a re-attach nor the run's exit
+  // can bring back what was cleared.
+  const clearOutput = (kind: ScriptKind): void => {
+    const shown = view?.kind === kind ? view : null;
+    const liveId = shown && !shown.exited ? shown.attachId : null;
+    forgetScriptOutput(workstreamId, kind);
+    if (shown?.exited) setView(null);
+    else if (shown) setClearNonce((n) => n + 1);
+    void commands.scriptClearOutput(workstreamId, kind, liveId);
+  };
   const openPort = (): void => {
     if (port) void openUrl(`http://localhost:${port}`);
   };
@@ -137,6 +169,10 @@ export function ScriptDock({
   // The split button's primary action targets the active script (Setup tab →
   // Setup), defaulting to Run from a terminal tab.
   const mainKind: ScriptKind = activeKind === "setup" ? "setup" : "run";
+  // Clear only shows on the script tabs (a shell clears itself), and only bites
+  // when the body holds something: a mounted run view, or a captured last run.
+  const activeOutput = activeKind === "setup" ? setupOutput.data : runOutput.data;
+  const canClear = view?.kind === activeKind || activeOutput != null;
   // In the sidebar, blend with the panel tone; at the bottom, use the surface
   // tone (same token the xterm bg resolves to) so chrome and bodies theme with
   // the app instead of staying dark in light mode.
@@ -268,6 +304,18 @@ export function ScriptDock({
               <span className="font-mono text-brand">:{port}</span>
             </button>
           )}
+          {activeKind && (
+            <button
+              type="button"
+              onClick={() => clearOutput(activeKind)}
+              disabled={!canClear}
+              title="Clear output"
+              aria-label="Clear output"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-dim hover:bg-panel-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+            >
+              <EraserIcon size={13} />
+            </button>
+          )}
           <RunSplit
             running={isRunning}
             label={mainKind === "run" ? "Run" : "Run setup"}
@@ -299,10 +347,12 @@ export function ScriptDock({
           kind={tab}
           attachId={view.attachId}
           gen={view.gen}
+          clearNonce={clearNonce}
           onStarted={(id) => setView((v) => (v ? { ...v, attachId: id } : v))}
           // A finished Run stays on screen (its output is the point) until the
           // next ▶ remounts it; Setup hands off to its status+output body below.
-          onExit={() => setView((v) => (v?.kind === "setup" ? null : v))}
+          // Flagged `exited` so Clear knows the log is frozen, not streaming.
+          onExit={() => setView((v) => (!v || v.kind === "setup" ? null : { ...v, exited: true }))}
           // Remounted onto an exited Run (tab switch / collapse): drop the view so
           // the captured output shows, instead of the empty terminal spawning anew.
           onDead={() => setView(null)}

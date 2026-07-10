@@ -597,6 +597,14 @@ export const commands = {
 	 */
 	getScriptOutput: (workstreamId: string, kind: ScriptKind) => typedError<string | null, AppError>(__TAURI_INVOKE("get_script_output", { workstreamId, kind })),
 	/**
+	 *  Clear a script's output (the dock's Clear button). Drops the captured last-run
+	 *  snapshot, and — when the run is still live, `terminal_id` naming its PTY —
+	 *  wipes that PTY's retained scrollback too. Without the second half a re-attach
+	 *  (tab switch, dock collapse) or the exit snapshot would replay the very text
+	 *  that was just cleared. The process itself keeps running; only the log is gone.
+	 */
+	scriptClearOutput: (workstreamId: string, kind: ScriptKind, terminalId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("script_clear_output", { workstreamId, kind, terminalId })),
+	/**
 	 *  Read the AI tool install state without running `ai configure`.
 	 *  Gates the AI step: if already installed, the step shows "configured" with
 	 *  a "Reconfigure" option; if not, it prompts the user to run `ai configure`

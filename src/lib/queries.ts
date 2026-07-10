@@ -871,6 +871,13 @@ export function invalidateScriptOutput(workstreamId: string, kind: ScriptKind) {
   void queryClient.invalidateQueries({ queryKey: ["script-output", workstreamId, kind] });
 }
 
+/** Drop a workstream/kind's captured output from the cache (the dock's Clear).
+ *  Writes the emptied value straight in rather than invalidating: the backend has
+ *  forgotten it too, and a refetch would flash the stale log on the way out. */
+export function forgetScriptOutput(workstreamId: string, kind: ScriptKind) {
+  queryClient.setQueryData(["script-output", workstreamId, kind], null);
+}
+
 // ── Harnesses (Claude Code + OpenCode) ─────────────────────────────────────
 
 /** The models.dev provider/model catalog backing the OpenCode pickers. Cached

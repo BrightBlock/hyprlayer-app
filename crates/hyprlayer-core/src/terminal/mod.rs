@@ -264,6 +264,13 @@ impl PtySession {
         self.scrollback.lock().unwrap().iter().copied().collect()
     }
 
+    /// Drop the retained scrollback, keeping the process alive. Live output keeps
+    /// appending to the now-empty ring, so a later re-attach — and the exit
+    /// snapshot behind [`scrollback_bytes`] — replay only what came after.
+    pub fn clear_scrollback(&self) {
+        self.scrollback.lock().unwrap().clear();
+    }
+
     /// Write raw bytes (keyboard input) to the PTY master.
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
         let mut w = self.writer.lock().unwrap();
@@ -413,6 +420,69 @@ mod tests {
             }
         }
         assert!(seen.contains("MARKER_OK"), "got: {seen:?}");
+        s.kill();
+    }
+
+    /// Clear drops the ring without touching the process: output from before it
+    /// can't return via a re-attach (`subscribe_with_scrollback`, the path
+    /// `attach_stream` takes) nor via the exit snapshot (`scrollback_bytes`),
+    /// while output after it still lands. This is what lets the dock's Clear
+    /// survive a tab switch or dock collapse.
+    #[tokio::test]
+    async fn clear_scrollback_drops_prior_output_but_keeps_streaming() {
+        /// Poll the ring until `needle` shows up (it arrives asynchronously).
+        async fn wait_for(s: &PtySession, needle: &str) {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+            while tokio::time::Instant::now() < deadline {
+                let seen = String::from_utf8_lossy(&s.scrollback_bytes()).into_owned();
+                if seen.contains(needle) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            panic!("timed out waiting for {needle:?} in scrollback");
+        }
+
+        let s = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            args: vec![],
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "test-clear".into(),
+        })
+        .expect("spawn pty");
+
+        // The markers are split across printf's format + arg, so the tty's echo of
+        // the command line can never spell them — only printf's *output* does.
+        // Otherwise we could clear on the echo and race printf's output into the
+        // freshly-emptied ring.
+        s.write_input(b"printf 'BEFORE%s\\n' _CLEAR\n").unwrap();
+        wait_for(&s, "BEFORE_CLEAR").await;
+
+        s.clear_scrollback();
+
+        s.write_input(b"printf 'AFTER%s\\n' _CLEAR\n").unwrap();
+        wait_for(&s, "AFTER_CLEAR").await;
+
+        let snapshot = String::from_utf8_lossy(&s.scrollback_bytes()).into_owned();
+        assert!(
+            !snapshot.contains("BEFORE_CLEAR"),
+            "exit snapshot resurrected cleared output: {snapshot:?}"
+        );
+
+        let (_rx, replay) = s.subscribe_with_scrollback();
+        let replay = String::from_utf8_lossy(&B64.decode(replay).unwrap()).into_owned();
+        assert!(
+            !replay.contains("BEFORE_CLEAR"),
+            "re-attach replayed cleared output: {replay:?}"
+        );
+        assert!(
+            replay.contains("AFTER_CLEAR"),
+            "post-clear output must still stream: {replay:?}"
+        );
+
         s.kill();
     }
 

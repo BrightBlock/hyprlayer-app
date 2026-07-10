@@ -144,6 +144,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::scripts::get_script_runtime,
             commands::scripts::list_running_scripts,
             commands::scripts::get_script_output,
+            commands::scripts::script_clear_output,
             commands::onboarding::get_ai_status,
             commands::onboarding::probe_default_thoughts,
             commands::onboarding::init_thoughts_repo,

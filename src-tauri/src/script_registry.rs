@@ -118,6 +118,12 @@ impl ScriptRegistry {
         self.outputs.lock().await.get(&(ws.to_string(), kind)).cloned()
     }
 
+    /// Forget one script's captured output (the dock's Clear). Leaves its status
+    /// pill alone — the run still happened, it's only the log that's dismissed.
+    pub async fn clear_output(&self, ws: &str, kind: ScriptKind) {
+        self.outputs.lock().await.remove(&(ws.to_string(), kind));
+    }
+
     /// Mark a workstream's Run process as live (called when ▶ spawns one).
     pub async fn register_run(&self, ws: &str, terminal_id: String, session: Arc<PtySession>) {
         self.runs.lock().await.insert(
@@ -239,5 +245,24 @@ mod tests {
         let cleared = reg.get_runtime("ws1").await;
         assert!(cleared.statuses.is_empty());
         assert!(reg.ports.lock().await.get("ws1").is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_output_drops_only_that_script() {
+        let reg = ScriptRegistry::new();
+        reg.set_output("ws1", ScriptKind::Run, "run log".into()).await;
+        reg.set_output("ws1", ScriptKind::Setup, "setup log".into()).await;
+        reg.set_status("ws1", ScriptKind::Run, RunPhase::Passed, Some(0))
+            .await;
+
+        reg.clear_output("ws1", ScriptKind::Run).await;
+
+        assert_eq!(reg.get_output("ws1", ScriptKind::Run).await, None);
+        // Sibling script's log and the cleared script's status pill both survive.
+        assert_eq!(
+            reg.get_output("ws1", ScriptKind::Setup).await.as_deref(),
+            Some("setup log")
+        );
+        assert_eq!(reg.get_runtime("ws1").await.statuses.len(), 1);
     }
 }

@@ -2,9 +2,9 @@ import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type ScriptKind, type TerminalEvent } from "@/lib/bindings";
-import { unwrap } from "@/lib/ipc";
+import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
-import { createTerminalEngine } from "@/lib/terminal/terminalEngine";
+import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 
@@ -15,6 +15,9 @@ type Props = {
   attachId: string | null;
   /** Bump to force a fresh run (▶ / restart). The effect keys on this. */
   gen: number;
+  /** Bump to wipe the screen without touching the process (the dock's Clear).
+   *  The backend drops its retained scrollback in the same breath. */
+  clearNonce: number;
   /** Fired with the new terminal id once a fresh run spawns. */
   onStarted?: (terminalId: string) => void;
   /** Fired when the process exits (finished or stopped). */
@@ -32,9 +35,19 @@ type Props = {
  * dock keeps a Run alive (the rail's green dot is the signal); teardown is the
  * backend's job (Stop, archive, or app exit).
  */
-export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, onExit, onDead }: Props) {
+export function ScriptRunView({
+  workstreamId,
+  kind,
+  attachId,
+  gen,
+  clearNonce,
+  onStarted,
+  onExit,
+  onDead,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const fontSize = useTerminalFontSize((s) => s.fontSize);
+  const engineRef = useRef<TerminalEngine | null>(null);
   const attachRef = useRef(attachId);
   attachRef.current = attachId;
   const onStartedRef = useRef(onStarted);
@@ -49,6 +62,7 @@ export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, on
     if (!host) return;
 
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
+    engineRef.current = engine;
     engine.mount(host);
     let lastGrid = engine.fit();
     engine.focus();
@@ -104,7 +118,16 @@ export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, on
           id = opened;
           onStartedRef.current?.(opened);
         } catch (e) {
-          engine.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n\x1b[?25l`);
+          // `unwrap` throws the AppError envelope — a plain object, so a bare
+          // String(e) renders "[object Object]". Read it through the helpers,
+          // and surface the backend's remedy when it supplied one.
+          const remedy = errorRemedy(e);
+          const crlf = (s: string): string => s.replace(/\r?\n/g, "\r\n");
+          engine.write(
+            `\r\n\x1b[31m${crlf(errorMessage(e))}\x1b[0m\r\n` +
+              (remedy ? `\x1b[2m${crlf(remedy)}\x1b[0m\r\n` : "") +
+              "\x1b[?25l",
+          );
           onExitRef.current?.();
           return;
         }
@@ -138,12 +161,23 @@ export function ScriptRunView({ workstreamId, kind, attachId, gen, onStarted, on
       if (raf) cancelAnimationFrame(raf);
       unsubInput();
       ro.disconnect();
+      engineRef.current = null;
       engine.dispose();
     };
     // Re-mount on a real identity change or an explicit restart (`gen`). attachId
     // is read once at mount via the ref so a post-start id change can't remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, gen]);
+
+  // Clear: wipe screen + scrollback, leaving the PTY (and its stream) untouched.
+  // Seeded from the current nonce so neither mount nor a `gen` remount — which
+  // already starts from a blank engine — counts as a clear.
+  const appliedClear = useRef(clearNonce);
+  useEffect(() => {
+    if (clearNonce === appliedClear.current) return;
+    appliedClear.current = clearNonce;
+    engineRef.current?.reset();
+  }, [clearNonce]);
 
   return (
     <div className="relative min-h-0 min-w-0 flex-1 bg-surface">

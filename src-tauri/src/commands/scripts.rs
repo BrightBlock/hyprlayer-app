@@ -138,6 +138,28 @@ pub async fn get_script_output(
     Ok(state.scripts.get_output(&workstream_id, kind).await)
 }
 
+/// Clear a script's output (the dock's Clear button). Drops the captured last-run
+/// snapshot, and — when the run is still live, `terminal_id` naming its PTY —
+/// wipes that PTY's retained scrollback too. Without the second half a re-attach
+/// (tab switch, dock collapse) or the exit snapshot would replay the very text
+/// that was just cleared. The process itself keeps running; only the log is gone.
+#[tauri::command]
+#[specta::specta]
+pub async fn script_clear_output(
+    state: State<'_, AppState>,
+    workstream_id: String,
+    kind: ScriptKind,
+    terminal_id: Option<String>,
+) -> CmdResult<()> {
+    state.scripts.clear_output(&workstream_id, kind).await;
+    if let Some(id) = terminal_id {
+        if let Some(session) = state.terminals.get(&id).await {
+            session.clear_scrollback();
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Streaming run (the dock)
 // ---------------------------------------------------------------------------
