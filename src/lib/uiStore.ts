@@ -1,15 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-/**
- * Default width (px) of the right-hand diff sidebar. Matched to the left
- * project sidebar's default width so the two flank the workspace symmetrically.
- */
-export const DIFF_SIDEBAR_WIDTH = 360;
+/** Default width (px) of the right-hand diff sidebar. */
+export const DIFF_SIDEBAR_WIDTH = 420;
 
 /** Drag-resize bounds (px) for the right-hand diff sidebar. */
-export const DIFF_SIDEBAR_MIN = 280;
-export const DIFF_SIDEBAR_MAX = 640;
+export const DIFF_SIDEBAR_MIN = 400;
+export const DIFF_SIDEBAR_MAX = 700;
 
 /** Default + drag-resize bounds (px) for the Library's list panel. Default is
  *  the mock's w-72; the bounds keep the switcher/tabs readable at the low end
