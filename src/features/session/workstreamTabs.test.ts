@@ -6,7 +6,10 @@ import {
   consumeComposerFocus,
   cycleActiveTab,
   nextShellId,
+  removeShellState,
   requestComposerFocus,
+  selectLastTab,
+  selectTabAt,
   unarchiveShellState,
   useComposerFocusStore,
   type ArchivedShell,
@@ -114,6 +117,110 @@ describe("nextShellId", () => {
   });
 });
 
+describe("removeShellState", () => {
+  // Safari's rule. A three-tab strip can't separate "the tab to the right" from
+  // "the last tab" when you close the middle one, so these use four.
+  it("selects the tab to the right of the closed one", () => {
+    expect(removeShellState(mainState(2, 1, 2, 3, 4), 2).activeId).toBe(3);
+    expect(removeShellState(mainState(1, 1, 2, 3, 4), 1).activeId).toBe(2);
+  });
+
+  it("falls back to the new rightmost tab when the closed one was last", () => {
+    expect(removeShellState(mainState(4, 1, 2, 3, 4), 4).activeId).toBe(3);
+  });
+
+  it("leaves the selection alone when the closed tab was not active", () => {
+    expect(removeShellState(mainState(4, 1, 2, 3, 4), 2).activeId).toBe(4);
+    expect(removeShellState(mainState(1, 1, 2, 3, 4), 3).activeId).toBe(1);
+  });
+
+  it("respects on-screen order, not id order, after a drag-reorder", () => {
+    const state: WsTabState = {
+      shells: [shell(3), shell(1), shell(2)],
+      activeId: 3,
+      activePane: "main",
+    };
+    // 1 sits to the right of 3 on screen, even though 3 is the highest id.
+    expect(removeShellState(state, 3).activeId).toBe(1);
+  });
+
+  it("refuses to remove the main pane's last tab", () => {
+    const state = mainState(1, 1);
+    expect(removeShellState(state, 1)).toBe(state);
+  });
+
+  it("is a no-op for an unknown shell", () => {
+    const state = mainState(1, 1, 2);
+    expect(removeShellState(state, 99)).toBe(state);
+  });
+
+  const splitState = (rightActiveId: number): WsTabState => ({
+    shells: [shell(1, "main"), shell(2, "right"), shell(3, "right"), shell(4, "right")],
+    activeId: 1,
+    rightSplit: true,
+    rightActiveId,
+    activePane: "right",
+  });
+
+  it("applies the same right-hand rule inside the right pane", () => {
+    expect(removeShellState(splitState(2), 2).rightActiveId).toBe(3);
+    expect(removeShellState(splitState(4), 4).rightActiveId).toBe(3);
+    // The main pane's selection is untouched by a right-pane close.
+    expect(removeShellState(splitState(2), 2).activeId).toBe(1);
+  });
+
+  it("collapses the split when the right pane's last tab goes", () => {
+    const state: WsTabState = {
+      shells: [shell(1, "main"), shell(2, "right")],
+      activeId: 1,
+      rightSplit: true,
+      rightActiveId: 2,
+      activePane: "right",
+    };
+    const next = removeShellState(state, 2);
+    expect(next.rightActiveId).toBeUndefined();
+    expect(next.rightSplit).toBe(false);
+    expect(next.activePane).toBe("main");
+  });
+});
+
+describe("selectTabAt", () => {
+  it("selects the n-th tab of the focused pane, 0-based", () => {
+    expect(selectTabAt(mainState(1, 1, 2, 3), 0).activeId).toBe(1);
+    expect(selectTabAt(mainState(1, 1, 2, 3), 2).activeId).toBe(3);
+  });
+
+  it("is a no-op when the pane has no such tab", () => {
+    const state = mainState(1, 1, 2, 3);
+    expect(selectTabAt(state, 3)).toBe(state);
+  });
+
+  it("selects within the focused pane and focuses it", () => {
+    const state: WsTabState = {
+      shells: [shell(1, "main"), shell(2, "right"), shell(3, "right")],
+      activeId: 1,
+      rightSplit: true,
+      rightActiveId: 3,
+      activePane: "right",
+    };
+    const next = selectTabAt(state, 0);
+    expect(next.rightActiveId).toBe(2);
+    expect(next.activePane).toBe("right");
+    expect(next.activeId).toBe(1); // main pane untouched
+  });
+});
+
+describe("selectLastTab", () => {
+  it("selects the rightmost tab, however many there are", () => {
+    expect(selectLastTab(mainState(1, 1, 2)).activeId).toBe(2);
+    expect(selectLastTab(mainState(1, 1, 2, 3, 4, 5)).activeId).toBe(5);
+  });
+
+  it("is a no-op when it is already the last tab", () => {
+    expect(selectLastTab(mainState(3, 1, 2, 3)).activeId).toBe(3);
+  });
+});
+
 describe("archiveShellState", () => {
   it("moves the shell into archived (newest first) and keeps it whole", () => {
     const next = archiveShellState(mainState(1, 1, 2, 3), 2, "stopped", 1234);
@@ -129,9 +236,9 @@ describe("archiveShellState", () => {
     expect(state.archived?.map((a) => a.shell.id)).toEqual([3, 2]);
   });
 
-  it("picks a neighbour when the archived shell was active", () => {
+  it("picks the right-hand neighbour when the archived shell was active", () => {
     const next = archiveShellState(mainState(2, 1, 2, 3), 2, "idle", 0);
-    expect(next.activeId).toBe(3); // falls to the last remaining main tab
+    expect(next.activeId).toBe(3);
   });
 
   it("refuses to archive the main pane's last tab", () => {

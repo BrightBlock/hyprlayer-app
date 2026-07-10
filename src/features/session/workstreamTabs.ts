@@ -143,6 +143,22 @@ export const defaultTabState = (): WsTabState => ({
 export const nextShellId = (shells: ShellTab[], archived: ArchivedShell[] = []): number =>
   Math.max(0, ...shells.map((s) => s.id), ...archived.map((a) => a.shell.id)) + 1;
 
+/** Which pane a tab lives in — `panel` is optional, and absent means "main". */
+const paneOf = (s: ShellTab): "main" | "right" => (s.panel === "right" ? "right" : "main");
+
+/** The focused pane and its tabs, in on-screen order (so drag-reordering counts). */
+function focusedPane(state: WsTabState): { pane: "main" | "right"; members: ShellTab[] } {
+  const pane = state.activePane ?? "main";
+  return { pane, members: state.shells.filter((s) => paneOf(s) === pane) };
+}
+
+/** Focus `id` in `pane`, making that pane the focused one. */
+function focusShell(state: WsTabState, pane: "main" | "right", id: number): WsTabState {
+  return pane === "right"
+    ? { ...state, rightActiveId: id, activePane: "right" }
+    : { ...state, activeId: id, activePane: "main" };
+}
+
 /**
  * Cycle the active tab within the *focused* pane by `dir` (+1 next, -1 previous),
  * wrapping around the ends. The split's two panes each have their own strip, so
@@ -152,19 +168,33 @@ export const nextShellId = (shells: ShellTab[], archived: ArchivedShell[] = []):
  * cycle). Tabs cycle in their on-screen order, so drag-reordering is respected.
  */
 export function cycleActiveTab(state: WsTabState, dir: 1 | -1): WsTabState {
-  const pane = state.activePane ?? "main";
-  const inPane = (s: ShellTab) =>
-    pane === "right" ? s.panel === "right" : (s.panel ?? "main") !== "right";
-  const members = state.shells.filter(inPane);
+  const { pane, members } = focusedPane(state);
   if (members.length < 2) return state;
   const activeId = pane === "right" ? state.rightActiveId : state.activeId;
   // An unresolved active id reads as the pane's first tab (the same fallback the
   // project page renders), so step relative to index 0.
   const from = Math.max(0, members.findIndex((s) => s.id === activeId));
-  const nextId = members[(from + dir + members.length) % members.length].id;
-  return pane === "right"
-    ? { ...state, rightActiveId: nextId, activePane: "right" }
-    : { ...state, activeId: nextId, activePane: "main" };
+  return focusShell(state, pane, members[(from + dir + members.length) % members.length].id);
+}
+
+/**
+ * Select the `index`-th tab (0-based) of the focused pane — Safari's ⌘1–⌘8. A
+ * no-op when the pane has no such tab, as ⌘5 does with four tabs open. Pure.
+ */
+export function selectTabAt(state: WsTabState, index: number): WsTabState {
+  const { pane, members } = focusedPane(state);
+  const target = members[index];
+  return target ? focusShell(state, pane, target.id) : state;
+}
+
+/**
+ * Select the focused pane's last tab — Safari's ⌘9, which means the rightmost
+ * tab, never the ninth. Pure; a no-op on an empty pane.
+ */
+export function selectLastTab(state: WsTabState): WsTabState {
+  const { pane, members } = focusedPane(state);
+  const target = members[members.length - 1];
+  return target ? focusShell(state, pane, target.id) : state;
 }
 
 /**
@@ -173,29 +203,40 @@ export function cycleActiveTab(state: WsTabState, dir: 1 | -1): WsTabState {
  * shared core of closing and archiving — neither ends the session here, that's
  * the caller's job. Pure: returns the input unchanged when the shell is missing
  * or is the main pane's last tab (the main pane always keeps one agent).
+ *
+ * Closing an *inactive* tab leaves the selection alone. Closing the active one
+ * selects the tab to its right, or the new rightmost tab when the closed one was
+ * last: Safari's rule.
  */
 export function removeShellState(state: WsTabState, shellId: number): WsTabState {
   const shell = state.shells.find((s) => s.id === shellId);
   if (!shell) return state;
-  const onRight = shell.panel === "right";
-  const isMain = (s: ShellTab) => (s.panel ?? "main") !== "right";
-  if (!onRight && state.shells.filter(isMain).length <= 1) return state;
+  const pane = paneOf(shell);
+  const onRight = pane === "right";
+  if (!onRight && state.shells.filter((s) => paneOf(s) === "main").length <= 1) return state;
+
+  const before = state.shells.filter((s) => paneOf(s) === pane);
+  const closedIndex = before.findIndex((s) => s.id === shellId);
+  const after = before.filter((s) => s.id !== shellId);
+  // The tab that was to the right now sits at the closed tab's index; past the
+  // end (the closed tab was last) that clamps back onto the new final tab.
+  const successor = after[Math.min(closedIndex, after.length - 1)]?.id;
+
   const remaining = state.shells.filter((s) => s.id !== shellId);
   if (onRight) {
-    const rights = remaining.filter((s) => s.panel === "right");
     return {
       ...state,
       shells: remaining,
-      rightActiveId:
-        state.rightActiveId === shellId ? rights[rights.length - 1]?.id : state.rightActiveId,
-      rightSplit: rights.length > 0 ? state.rightSplit : false,
-      activePane: rights.length > 0 ? state.activePane : "main",
+      rightActiveId: state.rightActiveId === shellId ? successor : state.rightActiveId,
+      rightSplit: after.length > 0 ? state.rightSplit : false,
+      activePane: after.length > 0 ? state.activePane : "main",
     };
   }
-  const mains = remaining.filter(isMain);
-  const activeId =
-    state.activeId === shellId ? (mains[mains.length - 1]?.id ?? state.activeId) : state.activeId;
-  return { ...state, shells: remaining, activeId };
+  return {
+    ...state,
+    shells: remaining,
+    activeId: state.activeId === shellId ? (successor ?? state.activeId) : state.activeId,
+  };
 }
 
 /**

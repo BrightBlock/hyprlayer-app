@@ -45,6 +45,33 @@ describe("eventToChord", () => {
       "mod+shift+enter",
     );
   });
+
+  it("folds a shifted character back onto its unshifted key token", () => {
+    // The browser reports ⌘⇧] as key "}". Without folding, a chord spelled
+    // `mod+shift+bracketright` could never match, and Safari's next/previous-tab
+    // alternates need it to.
+    expect(eventToChord(key({ key: "}", metaKey: true, shiftKey: true }), true)).toBe(
+      "mod+shift+bracketright",
+    );
+    expect(eventToChord(key({ key: "{", metaKey: true, shiftKey: true }), true)).toBe(
+      "mod+shift+bracketleft",
+    );
+    expect(eventToChord(key({ key: "~", metaKey: true, shiftKey: true }), true)).toBe(
+      "mod+shift+backquote",
+    );
+    // Digits too, so `mod+shift+3` means what reserved.ts says it means.
+    expect(eventToChord(key({ key: "#", metaKey: true, shiftKey: true }), true)).toBe(
+      "mod+shift+3",
+    );
+  });
+
+  it("keeps the unshifted chord distinct from its shifted twin", () => {
+    expect(eventToChord(key({ key: "]", metaKey: true }), true)).toBe("mod+bracketright");
+    expect(eventToChord(key({ key: "=", metaKey: true }), true)).toBe("mod+equal");
+    expect(eventToChord(key({ key: "+", metaKey: true, shiftKey: true }), true)).toBe(
+      "mod+shift+equal",
+    );
+  });
 });
 
 describe("normalizeChord", () => {

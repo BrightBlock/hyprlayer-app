@@ -47,6 +47,35 @@ const PUNCT_TOKENS: Record<string, string> = {
   " ": "space",
 };
 
+/** Shifted `e.key` characters → the token of the *unshifted* key that produced
+ *  them, so Shift stays a modifier instead of becoming part of the key. Without
+ *  this, ⌘⇧] arrives as `mod+shift+}` and no `mod+shift+bracketright` binding
+ *  could ever match. Assumes a US layout, like PUNCT_TOKENS: on other layouts a
+ *  shifted symbol may resolve to the wrong base token. */
+const SHIFTED_TOKENS: Record<string, string> = {
+  "{": "bracketleft",
+  "}": "bracketright",
+  ":": "semicolon",
+  '"': "quote",
+  "~": "backquote",
+  _: "minus",
+  "+": "equal",
+  "|": "backslash",
+  "<": "comma",
+  ">": "period",
+  "?": "slash",
+  "!": "1",
+  "@": "2",
+  "#": "3",
+  $: "4",
+  "%": "5",
+  "^": "6",
+  "&": "7",
+  "*": "8",
+  "(": "9",
+  ")": "0",
+};
+
 /** Named multi-character `e.key` values → stable lowercase tokens. (Space is a
  *  single char, so it lives in PUNCT_TOKENS, not here.) */
 const NAMED_TOKENS: Record<string, string> = {
@@ -68,6 +97,7 @@ function keyToken(key: string): string | null {
   if (!key) return null;
   if (NAMED_TOKENS[key]) return NAMED_TOKENS[key];
   if (key.length === 1) {
+    if (SHIFTED_TOKENS[key]) return SHIFTED_TOKENS[key];
     if (PUNCT_TOKENS[key]) return PUNCT_TOKENS[key];
     // Letters lowercase (so Shift is carried as a modifier, not the case);
     // digits and any other single char pass through lowercased.

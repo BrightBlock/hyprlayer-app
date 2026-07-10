@@ -18,6 +18,7 @@ import {
 } from "@/lib/keybindings/commands";
 import {
   conflictsFor,
+  effectiveAlternates,
   effectiveChords,
   hasOverride,
   type Overrides,
@@ -111,6 +112,7 @@ function CommandRow({
 
   const conflicts = candidate ? conflictsFor(candidate, cmd.id, overrides, IS_MACOS) : [];
   const reserved = candidate ? isReserved(candidate, IS_MACOS) : false;
+  const alternates = effectiveAlternates(overrides, cmd.id, IS_MACOS);
 
   return (
     <div className="flex items-start justify-between gap-4 py-3">
@@ -151,6 +153,14 @@ function CommandRow({
           </>
         ) : (
           <div className="flex items-center gap-2">
+            {/* Alternates fire the same command and have no row of their own.
+                Shown here so this row lists every key that works. */}
+            {alternates.map((alt) => (
+              <span key={alt} className="flex items-center gap-2 text-xs text-ink-dim">
+                <ChordPill chord={alt} />
+                or
+              </span>
+            ))}
             <ChordPill chord={effective} />
             <Button onClick={onStartRecord}>Edit</Button>
             <Button onClick={onReset} disabled={!hasOverride(overrides, cmd.id)}>

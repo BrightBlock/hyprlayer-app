@@ -31,9 +31,22 @@ export type CommandDef = {
   category: CommandCategory;
   /** Default chord per OS; null = no default binding. */
   defaults: { mac: Chord | null; other: Chord | null };
+  /** Extra chords that also fire this command, for actions the platform spells
+   *  two ways (Safari cycles tabs with both ⌃⇥ and ⌘⇧]). Not rebindable on their
+   *  own. They belong to the default binding, so an override drops them: Settings
+   *  has no row to show them on. A primary binding beats an alternate on
+   *  collision. */
+  alternates?: { mac: Chord[]; other: Chord[] };
   /** Where the command is available (informational + drives UI grouping). */
   when: CommandWhen;
 };
+
+/** How many tabs `tab.select1`…`tab.selectN` address directly. Safari stops at
+ *  eight and gives the ninth chord to "last tab", however many tabs there are. */
+export const TAB_SELECT_COUNT = 8;
+
+/** Command id selecting the `index`-th tab (0-based) of the focused pane. */
+export const tabSelectId = (index: number): string => `tab.select${index + 1}`;
 
 export const COMMANDS: CommandDef[] = [
   // Navigation
@@ -56,14 +69,19 @@ export const COMMANDS: CommandDef[] = [
     label: "Go to Dashboard",
     category: "Navigation",
     when: "always",
-    defaults: { mac: "mod+1", other: "mod+1" },
+    // ⌘1–⌘3 belong to the tabs (Safari's jump-to-tab), so app navigation sits a
+    // modifier over. On macOS that's the *literal* Control key; elsewhere physical
+    // Ctrl maps to `mod`, which the tabs use, so those platforms take Alt. ⌃1–⌃3
+    // also switch Spaces on macOS when several desktops exist: the OS wins, and
+    // the user can rebind.
+    defaults: { mac: "ctrl+1", other: "alt+1" },
   },
   {
     id: "nav.library",
     label: "Go to Library",
     category: "Navigation",
     when: "always",
-    defaults: { mac: "mod+2", other: "mod+2" },
+    defaults: { mac: "ctrl+2", other: "alt+2" },
   },
   {
     id: "nav.settings",
@@ -77,7 +95,7 @@ export const COMMANDS: CommandDef[] = [
     label: "Toggle Project Docs",
     category: "Navigation",
     when: "project",
-    defaults: { mac: "mod+3", other: "mod+3" },
+    defaults: { mac: "ctrl+3", other: "alt+3" },
   },
   {
     id: "nav.back",
@@ -126,11 +144,34 @@ export const COMMANDS: CommandDef[] = [
     defaults: { mac: "mod+t", other: "mod+t" },
   },
   {
-    id: "tab.close",
+    id: "tab.archive",
     label: "Close Agent Tab",
     category: "Workspace",
     when: "project",
+    // ⌘W, as in Safari, and the same action as the tab's × button: an agent is
+    // archived (conversation, branch and worktree intact, restorable with ⌘⇧T),
+    // a terminal or viewer closes. The destructive close is one modifier away on
+    // `tab.close`. ⌘W is free only because the macOS menu omits Close Window
+    // (see src-tauri/src/lib.rs).
+    defaults: { mac: "mod+w", other: "mod+w" },
+  },
+  {
+    id: "tab.close",
+    label: "Close Agent Tab & End Session",
+    category: "Workspace",
+    when: "project",
+    // Irreversible: kills the session and drops the transcript.
     defaults: { mac: "mod+shift+w", other: "mod+shift+w" },
+  },
+  {
+    id: "tab.reopen",
+    label: "Reopen Last Closed Agent Tab",
+    category: "Workspace",
+    when: "project",
+    // Safari's ⌘⇧T. Restores the most recently archived agent, so it undoes a ⌘W
+    // (or an × click) but not a ⌘⇧W, which ended the session for good. Inert with
+    // an empty archive — no handler is registered, so the keystroke passes through.
+    defaults: { mac: "mod+shift+t", other: "mod+shift+t" },
   },
   {
     id: "tab.toggleSplit",
@@ -150,6 +191,9 @@ export const COMMANDS: CommandDef[] = [
     // would be `mod+tab` — also reserved — so the non-mac default uses the other
     // standard tab-cycle chord, Ctrl+PageDown.
     defaults: { mac: "ctrl+tab", other: "mod+pagedown" },
+    // Safari's second spelling. Only matchable because `keyToken` folds the
+    // shifted `}` back onto `bracketright`.
+    alternates: { mac: ["mod+shift+bracketright"], other: ["mod+shift+bracketright"] },
   },
   {
     id: "tab.prev",
@@ -157,6 +201,24 @@ export const COMMANDS: CommandDef[] = [
     category: "Workspace",
     when: "project",
     defaults: { mac: "ctrl+shift+tab", other: "mod+pageup" },
+    alternates: { mac: ["mod+shift+bracketleft"], other: ["mod+shift+bracketleft"] },
+  },
+  ...Array.from({ length: TAB_SELECT_COUNT }, (_, i): CommandDef => ({
+    id: tabSelectId(i),
+    label: `Select Agent Tab ${i + 1}`,
+    category: "Workspace",
+    when: "project",
+    // Safari's ⌘1–⌘8: the n-th tab of the focused pane, a no-op when there is no
+    // n-th tab. App navigation lives on ⌃1–⌃3.
+    defaults: { mac: `mod+${i + 1}`, other: `mod+${i + 1}` },
+  })),
+  {
+    id: "tab.selectLast",
+    label: "Select Last Agent Tab",
+    category: "Workspace",
+    when: "project",
+    // Safari's ⌘9 always means "rightmost", never "the ninth".
+    defaults: { mac: "mod+9", other: "mod+9" },
   },
   {
     id: "ws.new",
@@ -258,7 +320,9 @@ export const COMMANDS: CommandDef[] = [
     label: "Show / Hide Tasks",
     category: "Session",
     when: "session",
-    defaults: { mac: "mod+shift+t", other: "mod+shift+t" },
+    // ⌘⇧T belongs to Reopen Last Closed Agent Tab, per Safari. ⌘⇧J sits beside
+    // the other session command, Clear Context (⌘⇧K).
+    defaults: { mac: "mod+shift+j", other: "mod+shift+j" },
   },
   {
     id: "session.historyPrev",
@@ -312,6 +376,12 @@ export const COMMANDS_BY_CATEGORY: ReadonlyArray<{
 export function defaultChord(cmd: CommandDef, isMac: boolean): Chord | null {
   const raw = isMac ? cmd.defaults.mac : cmd.defaults.other;
   return raw ? normalizeChord(raw) : null;
+}
+
+/** The command's alternate chords on this OS, normalized (empty when it has none). */
+export function alternateChords(cmd: CommandDef, isMac: boolean): Chord[] {
+  const raw = (isMac ? cmd.alternates?.mac : cmd.alternates?.other) ?? [];
+  return raw.map(normalizeChord);
 }
 
 /** Lookup a command definition by id. */

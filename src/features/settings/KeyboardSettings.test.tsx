@@ -28,8 +28,17 @@ describe("KeyboardSettings", () => {
     render(<KeyboardSettings settings={SETTINGS} />);
     expect(screen.getByText("Navigation")).toBeTruthy();
     expect(screen.getByText("Go to Dashboard")).toBeTruthy();
-    // jsdom is the non-mac branch, so chords render with Ctrl labels.
-    expect(screen.getAllByText("Ctrl+1").length).toBeGreaterThan(0);
+    // jsdom is the non-mac branch. Ctrl+1–8 belong to the tabs, so navigation
+    // renders with Alt labels there.
+    expect(screen.getAllByText("Alt+1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Ctrl+1").length).toBeGreaterThan(0); // Select Agent Tab 1
+  });
+
+  it("shows a command's alternate chords beside its primary", () => {
+    render(<KeyboardSettings settings={SETTINGS} />);
+    const row = rowFor("Previous Agent Tab");
+    expect(within(row).getByText("Ctrl+PgUp")).toBeTruthy();
+    expect(within(row).getByText("Ctrl+Shift+[")).toBeTruthy();
   });
 
   it("records a new chord and persists it on Save", () => {
@@ -38,14 +47,14 @@ describe("KeyboardSettings", () => {
 
     fireEvent.click(within(row).getByText("Edit"));
     // Capture-phase listener is on window; non-mac maps Ctrl → mod.
-    fireEvent.keyDown(window, { key: "9", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "F9", ctrlKey: true });
     // The candidate is shown before committing.
-    expect(within(row).getByText("Ctrl+9")).toBeTruthy();
+    expect(within(row).getByText("Ctrl+F9")).toBeTruthy();
 
     fireEvent.click(within(row).getByText("Save"));
     expect(mutate).toHaveBeenCalledTimes(1);
     expect(mutate).toHaveBeenCalledWith({
-      keybindings: { overrides: { "nav.dashboard": "mod+9" } },
+      keybindings: { overrides: { "nav.dashboard": "mod+f9" } },
     });
   });
 
@@ -54,9 +63,19 @@ describe("KeyboardSettings", () => {
     const row = rowFor("Go to Library");
 
     fireEvent.click(within(row).getByText("Edit"));
-    // Ctrl+1 is Go to Dashboard's default — recording it here conflicts.
-    fireEvent.keyDown(window, { key: "1", ctrlKey: true });
+    // Alt+1 is Go to Dashboard's non-mac default — recording it here conflicts.
+    fireEvent.keyDown(window, { key: "1", altKey: true });
     expect(within(row).getByText(/Already used by Go to Dashboard/)).toBeTruthy();
+  });
+
+  it("warns when a recorded chord conflicts with another command's alternate", () => {
+    render(<KeyboardSettings settings={SETTINGS} />);
+    const row = rowFor("Go to Library");
+
+    fireEvent.click(within(row).getByText("Edit"));
+    // Ctrl+Shift+] is Next Agent Tab's alternate, not its primary.
+    fireEvent.keyDown(window, { key: "}", ctrlKey: true, shiftKey: true });
+    expect(within(row).getByText(/Already used by Next Agent Tab/)).toBeTruthy();
   });
 
   it("unbinds a command (null override) via Unbind", () => {
@@ -70,7 +89,7 @@ describe("KeyboardSettings", () => {
 
   it("resets a command by dropping its override key", () => {
     const withOverride: AppSettings = {
-      keybindings: { overrides: { "nav.dashboard": "mod+9" } },
+      keybindings: { overrides: { "nav.dashboard": "mod+f9" } },
     };
     render(<KeyboardSettings settings={withOverride} />);
     const row = rowFor("Go to Dashboard");

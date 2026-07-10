@@ -68,6 +68,7 @@ import {
 } from "@/features/session/sessionStore";
 import { isBusy, isTerminal, type SessionState } from "@/features/session/transcript";
 import { useCommand } from "@/lib/keybindings/registry";
+import { TAB_SELECT_COUNT, tabSelectId } from "@/lib/keybindings/commands";
 import {
   importDroppedPaths,
   IMAGE_EXTENSIONS,
@@ -82,6 +83,8 @@ import {
   nextShellId,
   removeShellState,
   requestComposerFocus,
+  selectLastTab,
+  selectTabAt,
   unarchiveShellState,
   updateWorkstreamTabs,
   useWorkstreamTabsStore,
@@ -218,10 +221,25 @@ function detachDoc(shell: ShellTab, path: string): ShellTab {
  * returns above where these closures are defined. Mounted only when a workstream
  * is open, so the commands are naturally unregistered (inert) otherwise.
  */
+/** One `tab.selectN` registration. A component per index because `useCommand` is
+ *  a hook and the count, while constant, can't be looped over inline. */
+function TabSelectCommand({ index, onSelect }: { index: number; onSelect: (i: number) => void }) {
+  useCommand(tabSelectId(index), () => onSelect(index));
+  return null;
+}
+
 function ProjectCommands(props: {
   sessionId: string | undefined;
   onNewTab: () => void;
+  /** ⌘W: archive the focused agent (or close a terminal/viewer) — the × button's
+   *  action. Null when nothing is focused. */
+  onArchiveTab: (() => void) | null;
   onCloseTab: (() => void) | null;
+  /** ⌘⇧T: restore the most recently archived agent. Null when the archive is
+   *  empty, so the keystroke passes through instead of being swallowed. */
+  onReopenTab: (() => void) | null;
+  onSelectTab: (index: number) => void;
+  onSelectLastTab: () => void;
   onToggleSplit: () => void;
   onNextTab: () => void;
   onPrevTab: () => void;
@@ -241,7 +259,10 @@ function ProjectCommands(props: {
   const running = Boolean(props.sessionId && session && isBusy(session));
   const sid = props.sessionId;
   useCommand("tab.new", props.onNewTab);
+  useCommand("tab.archive", props.onArchiveTab);
   useCommand("tab.close", props.onCloseTab);
+  useCommand("tab.reopen", props.onReopenTab);
+  useCommand("tab.selectLast", props.onSelectLastTab);
   useCommand("tab.toggleSplit", props.onToggleSplit);
   useCommand("tab.next", props.onNextTab);
   useCommand("tab.prev", props.onPrevTab);
@@ -251,7 +272,13 @@ function ProjectCommands(props: {
   useCommand("view.toggleArchivedAgents", props.onToggleArchived);
   useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
   useCommand("session.clear", sid ? () => void killSession(sid) : null);
-  return null;
+  return (
+    <>
+      {Array.from({ length: TAB_SELECT_COUNT }, (_, i) => (
+        <TabSelectCommand key={i} index={i} onSelect={props.onSelectTab} />
+      ))}
+    </>
+  );
 }
 
 export function ProjectPage() {
@@ -869,6 +896,29 @@ export function ProjectPage() {
     updateTabs((current) => unarchiveShellState(current, shellId));
     requestComposerFocus(shellId);
   };
+  // ⌘W does what the tab's × button does, so the keyboard and the mouse can't
+  // disagree about which gesture is destructive: an agent archives (see
+  // archiveShell), a terminal or viewer closes. Refuses mid-turn for a native
+  // agent, as TabCloseControl disables itself.
+  const archiveOrCloseShell = (shellId: number) => {
+    const shell = shells.find((s) => s.id === shellId);
+    if (!shell) return;
+    if (!isArchivable(shell)) {
+      closeShell(shellId);
+      return;
+    }
+    const session = isAgentShell(shell) && shell.sessionId
+      ? useSessionStore.getState().sessions[shell.sessionId]
+      : undefined;
+    if (session && isBusy(session)) return;
+    archiveShell(shellId);
+  };
+  // ⌘⇧T. `archived` is newest-first (archiveShellState prepends), so the head is
+  // the last agent you closed with ⌘W or the × button.
+  const reopenLastClosedShell = () => {
+    const newest = tabs?.archived?.[0];
+    if (newest) unarchiveShell(newest.shell.id);
+  };
   // Drop an archived entry for good. The branch/worktree/transcript live on the
   // backend and are untouched — only the resumable tab handle is forgotten.
   const removeArchivedShell = (shellId: number) => {
@@ -1297,7 +1347,11 @@ export function ProjectPage() {
       <ProjectCommands
         sessionId={focusedShell?.sessionId}
         onNewTab={onNewTabDefault}
+        onArchiveTab={focusedShell ? () => archiveOrCloseShell(focusedShell.id) : null}
         onCloseTab={focusedShell ? () => closeShell(focusedShell.id) : null}
+        onReopenTab={tabs?.archived?.length ? reopenLastClosedShell : null}
+        onSelectTab={(index) => updateTabs((current) => selectTabAt(current, index))}
+        onSelectLastTab={() => updateTabs(selectLastTab)}
         onToggleSplit={toggleRightSplit}
         onNextTab={() => cycleTab(1)}
         onPrevTab={() => cycleTab(-1)}

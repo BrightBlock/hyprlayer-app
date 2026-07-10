@@ -222,10 +222,12 @@ pub fn run() {
     let tauri_builder = tauri_builder.plugin(tauri_plugin_mcp_bridge::init());
 
     // macOS only: replace the system default menu with one that omits "Close
-    // Window". The default binds ⌘W to it — one key from ⌘⇧W (Close Agent Tab) —
-    // so a slipped tab-close shuts the lone window out from under every running
-    // session. ⌘Q (Quit) and the red traffic-light button remain the deliberate
-    // ways out. See `macos_menu`. (Other OSes get no default menu, so no ⌘W.)
+    // Window", whose default binding is ⌘W. The frontend needs that chord for
+    // Close Agent Tab (Safari's binding). A menu item would swallow the keystroke
+    // before the webview saw it, and close the lone window along with every
+    // running session. ⌘Q (Quit) and the red traffic-light button remain the
+    // deliberate ways out. See `macos_menu`. (Other OSes get no default menu, so
+    // ⌘W/Ctrl+W reach the webview already.)
     #[cfg(target_os = "macos")]
     let tauri_builder = tauri_builder.menu(macos_menu);
 
@@ -439,7 +441,8 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         .quit()
         .build()?;
 
-    // No Close Window here — keeping ⌘W inert is why this menu is custom (see call site).
+    // No Close Window here — leaving ⌘W to the frontend is why this menu is custom
+    // (see call site).
     let file_menu = SubmenuBuilder::new(handle, "File").item(&save_file).build()?;
 
     let edit_menu = SubmenuBuilder::new(handle, "Edit")

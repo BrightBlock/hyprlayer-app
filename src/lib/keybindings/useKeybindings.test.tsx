@@ -25,24 +25,41 @@ function EscapeHost({ handler }: { handler: (() => void) | null }) {
 }
 
 describe("useKeybindings dispatcher", () => {
+  // `nav.settings` is ⌘,/Ctrl+, on both platforms: a stable stand-in for "some
+  // mod chord" that the tab bindings don't use.
   it("routes a chord to the registered command handler", () => {
     const fn = vi.fn();
     render(
       <>
         <Dispatcher />
-        <CommandHost id="nav.dashboard" handler={fn} />
+        <CommandHost id="nav.settings" handler={fn} />
       </>,
     );
-    fireEvent.keyDown(window, { key: "1", ctrlKey: true });
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
     expect(fn).toHaveBeenCalledOnce();
   });
 
   it("does nothing when no handler is registered (wrong context)", () => {
     render(<Dispatcher />);
     // No throw, and the default isn't prevented since nothing ran.
-    const evt = new KeyboardEvent("keydown", { key: "1", ctrlKey: true, cancelable: true });
+    const evt = new KeyboardEvent("keydown", { key: ",", ctrlKey: true, cancelable: true });
     window.dispatchEvent(evt);
     expect(evt.defaultPrevented).toBe(false);
+  });
+
+  it("routes a command's alternate chord to the same handler", () => {
+    const fn = vi.fn();
+    render(
+      <>
+        <Dispatcher />
+        <CommandHost id="tab.prev" handler={fn} />
+      </>,
+    );
+    // Ctrl+Shift+[ arrives as key "{"; the primary here is Ctrl+PageUp.
+    fireEvent.keyDown(window, { key: "{", ctrlKey: true, shiftKey: true });
+    expect(fn).toHaveBeenCalledOnce();
+    fireEvent.keyDown(window, { key: "PageUp", ctrlKey: true });
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 
   it("ignores a bare-key chord while typing in an input but still fires mod chords", () => {
@@ -52,7 +69,7 @@ describe("useKeybindings dispatcher", () => {
       <>
         <Dispatcher overrides={{ "tab.new": "n" }} />
         <CommandHost id="tab.new" handler={bare} />
-        <CommandHost id="nav.dashboard" handler={modded} />
+        <CommandHost id="nav.settings" handler={modded} />
         <input data-testid="field" />
       </>,
     );
@@ -64,7 +81,7 @@ describe("useKeybindings dispatcher", () => {
     expect(bare).not.toHaveBeenCalled();
 
     // A primary-modifier chord still works mid-typing.
-    fireEvent.keyDown(input, { key: "1", ctrlKey: true });
+    fireEvent.keyDown(input, { key: ",", ctrlKey: true });
     expect(modded).toHaveBeenCalledOnce();
   });
 

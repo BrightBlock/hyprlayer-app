@@ -6,14 +6,15 @@
  *
  * Deliberately conservative: a combo the OS *always* swallows (Cmd+Q) belongs
  * here; one apps routinely rebind (Cmd+T) does not. `mod+comma` is explicitly
- * NOT reserved — it's the conventional Preferences/Settings shortcut.
+ * NOT reserved — it's the conventional Preferences/Settings shortcut. Nor is
+ * `mod+w`: the macOS menu omits Close Window on purpose, so ⌘W reaches the
+ * webview and belongs to Close Agent Tab (see src-tauri/src/lib.rs).
  */
 
 import { normalizeChord, type Chord } from "./chord";
 
 const MAC_RESERVED = [
   "mod+q", // Quit
-  "mod+w", // Close window
   "mod+h", // Hide app
   "mod+m", // Minimize
   "mod+space", // Spotlight
@@ -24,7 +25,6 @@ const MAC_RESERVED = [
 ];
 
 const OTHER_RESERVED = [
-  "mod+w", // Close tab/window
   "mod+tab", // (often) tab switch
   "alt+f4", // Close window
   "alt+tab", // Window switcher
