@@ -50,6 +50,16 @@ export function useShellName() {
   });
 }
 
+/** Whether the app holds macOS Full Disk Access. The grant only takes effect on
+ *  relaunch, so it cannot change mid-session — fetched once. */
+export function useFullDiskAccess() {
+  return useQuery({
+    queryKey: ["full-disk-access"],
+    queryFn: () => commands.fullDiskAccessStatus(),
+    staleTime: Infinity,
+  });
+}
+
 /** Installed editors/terminals for the "Open in…" menu. Apps rarely come and
  *  go mid-session, so this is fetched once and kept until the app reloads. */
 export function useEditorTargets() {

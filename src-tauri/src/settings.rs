@@ -87,6 +87,10 @@ pub struct AppSettings {
     /// (a stub like [`CodexSettings`], so the row can render and gain behaviour
     /// later without a settings migration).
     pub dev_tools: bool,
+    /// The user dismissed the Full Disk Access explainer. macOS can't prompt for
+    /// that grant, so the notice is the only way to surface it — but once waved
+    /// off it stays off.
+    pub full_disk_access_notice_dismissed: bool,
 }
 
 /// Auto-generated agent-tab titles. When enabled, a new agent tab summarizes the

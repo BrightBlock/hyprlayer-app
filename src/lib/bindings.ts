@@ -417,6 +417,22 @@ export const commands = {
 	 */
 	playSound: () => typedError<null, AppError>(__TAURI_INVOKE("play_sound")),
 	/**
+	 *  Whether the app holds Full Disk Access.
+	 * 
+	 *  macOS never prompts for this grant, so its absence is silent: gated reads
+	 *  just fail. Meanwhile any CLI the app hosts that reaches another app's
+	 *  container (`op`, most visibly) trips the *promptable* "access data from
+	 *  other apps" dialog, which names Hyprlayer — macOS attributes a child's
+	 *  access to its responsible process. Holding Full Disk Access supersedes that
+	 *  check, so the dialog never fires.
+	 */
+	fullDiskAccessStatus: () => __TAURI_INVOKE<FullDiskAccess>("full_disk_access_status"),
+	/**
+	 *  Open the Full Disk Access pane. The grant can only be added by hand, and it
+	 *  takes effect only after the app restarts.
+	 */
+	openFullDiskAccessSettings: () => typedError<null, AppError>(__TAURI_INVOKE("open_full_disk_access_settings")),
+	/**
 	 *  The models.dev catalog. Fresh in-memory-of-disk cache first (unless `force`),
 	 *  then a live fetch (cached on success), then any stale cache, then the bundled
 	 *  snapshot. `source` tells the UI which tier answered.
@@ -720,6 +736,12 @@ export type AppSettings = {
 	 *  later without a settings migration).
 	 */
 	devTools?: boolean,
+	/**
+	 *  The user dismissed the Full Disk Access explainer. macOS can't prompt for
+	 *  that grant, so the notice is the only way to surface it — but once waved
+	 *  off it stays off.
+	 */
+	fullDiskAccessNoticeDismissed?: boolean,
 };
 
 /**
@@ -1099,6 +1121,18 @@ export type Frontmatter = {
 	 */
 	extra?: { [key in string]: string },
 };
+
+/**  Whether this process can read files macOS gates behind Full Disk Access. */
+export type FullDiskAccess = "granted" | 
+/**
+ *  The probe returned EPERM. Either the grant was never added, or it was
+ *  recorded against a code signature this build no longer matches — in
+ *  which case System Settings still shows the toggle on while every gated
+ *  read fails.
+ */
+"denied" | 
+/**  Not a macOS gate, or the probe file is missing. Never nag on this. */
+"unknown";
 
 /**
  *  One changed file within a worktree, as it appears in the staged or unstaged

@@ -128,7 +128,7 @@ export function Toast() {
         <XIcon size={9} />
         {!sticky && <span className="text-[10px] tabular-nums leading-none">{remaining}s</span>}
       </button>
-      <div className="flex min-w-72 items-start gap-3 rounded-xl border border-edge bg-panel px-4 py-3.5 shadow-2xl">
+      <div className="flex min-w-72 max-w-sm items-start gap-3 rounded-xl border border-edge bg-panel px-4 py-3.5 shadow-2xl">
         <ToastIcon tone={tone} />
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink">{title}</p>

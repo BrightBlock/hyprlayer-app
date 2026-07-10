@@ -20,6 +20,7 @@ pub mod repos;
 pub mod scripts;
 pub mod skills;
 pub mod store;
+pub mod system;
 pub mod terminal;
 pub mod worktree;
 

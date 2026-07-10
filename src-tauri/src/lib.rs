@@ -111,6 +111,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::github_username,
             commands::system::default_username,
             commands::system::play_sound,
+            commands::system::full_disk_access_status,
+            commands::system::open_full_disk_access_settings,
             commands::harnesses::opencode_catalog,
             commands::harnesses::opencode_auth_list,
             commands::harnesses::opencode_set_provider_key,

@@ -74,6 +74,7 @@ import { useMultiplexer } from "@/features/multiplexer/engines";
 import type { EditorTarget } from "@/lib/bindings";
 import { SearchPalette } from "@/features/search/SearchPalette";
 import { toggleSearch } from "@/features/search/searchStore";
+import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
 import { PromptPalette } from "@/features/prompts/PromptPalette";
 import { togglePromptPalette } from "@/features/prompts/promptsStore";
 import { usePromptHotkeys } from "@/features/prompts/usePromptHotkeys";
@@ -1991,6 +1992,7 @@ export function Root() {
       <SearchPalette />
       <PromptPalette activeWorkstream={activeWorkstream ?? null} />
       <Toast />
+      <FullDiskAccessNotice />
     </div>
   );
 }

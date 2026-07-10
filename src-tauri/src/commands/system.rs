@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::process::Exec;
+use hyprlayer_core::system::FullDiskAccess;
 use tauri::State;
 use tauri_specta::Event;
 
@@ -68,6 +69,33 @@ pub fn play_sound() -> CmdResult<()> {
             .spawn()
             .map_err(|e| AppError::internal(format!("afplay: {e}")))?;
     }
+    Ok(())
+}
+
+/// Whether the app holds Full Disk Access.
+///
+/// macOS never prompts for this grant, so its absence is silent: gated reads
+/// just fail. Meanwhile any CLI the app hosts that reaches another app's
+/// container (`op`, most visibly) trips the *promptable* "access data from
+/// other apps" dialog, which names Hyprlayer — macOS attributes a child's
+/// access to its responsible process. Holding Full Disk Access supersedes that
+/// check, so the dialog never fires.
+#[tauri::command]
+#[specta::specta]
+pub fn full_disk_access_status() -> FullDiskAccess {
+    hyprlayer_core::system::full_disk_access()
+}
+
+/// Open the Full Disk Access pane. The grant can only be added by hand, and it
+/// takes effect only after the app restarts.
+#[tauri::command]
+#[specta::specta]
+pub fn open_full_disk_access_settings() -> CmdResult<()> {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .spawn()
+        .map_err(|e| AppError::internal(format!("open: {e}")))?;
     Ok(())
 }
 
