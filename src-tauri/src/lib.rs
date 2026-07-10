@@ -567,7 +567,7 @@ pub(crate) async fn migrate_config_if_needed(
 #[cfg(test)]
 mod tests {
     /// Regenerates `src/lib/bindings.ts` (same output as the dev-server
-    /// export); CI runs tests then asserts the file is committed unchanged.
+    /// export); drift shows up as an uncommitted diff after `cargo test`.
     #[test]
     fn typescript_bindings_export() {
         std::fs::create_dir_all("../src/lib").expect("frontend src/lib exists");

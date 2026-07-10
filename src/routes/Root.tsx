@@ -1088,7 +1088,7 @@ export function Root() {
           } else if (result === "uptodate") {
             const v = useUpdate.getState().currentVersion;
             showToast(
-              "You're up to date!",
+              "You're up to date",
               `You're running the latest version of Hyprlayer${v ? ` (v${v})` : ""}.`,
               { tone: "ok" },
             );

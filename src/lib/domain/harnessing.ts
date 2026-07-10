@@ -20,8 +20,6 @@ export const DEFAULT_HARNESS_KEY = "claude";
  *  [`HARNESSES`], this lists Ollama as its own choice even though it runs on the
  *  OpenCode harness (mapped by [`effectiveHarnessKey`]) — so users pick it the way
  *  they think of it. */
-/** Settings-page choices are a UI vocabulary, not the wire enum: Ollama is
- *  listed as its own option even though it RUNS on the OpenCode harness. */
 export const DEFAULT_HARNESS_OPTIONS: { key: string; label: string }[] = [
   { key: "claude", label: "Claude Code" },
   { key: "opencode", label: "OpenCode" },

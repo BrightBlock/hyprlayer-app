@@ -63,7 +63,7 @@ export function CliInstallStep({ onNext }: { onNext: () => void }) {
                 at <span className="break-all font-mono text-xs">{hl.path}</span>
               </>
             ) : null}
-            . You're ready to continue.
+            .
           </p>
         </Card>
       ) : (

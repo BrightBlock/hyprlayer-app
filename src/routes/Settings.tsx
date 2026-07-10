@@ -650,7 +650,7 @@ function HyprlayerConfigCard({ config }: { config: ReturnType<typeof useBootstra
               <button
                 type="button"
                 onClick={() => copyPath(data.config.path)}
-                title={pathCopied ? "Copied!" : "Copy path"}
+                title={pathCopied ? "Copied" : "Copy path"}
                 className="group flex min-w-0 items-center gap-1.5 text-left"
               >
                 <span className="truncate font-mono text-xs text-ink-dim group-hover:text-ink">

@@ -434,11 +434,6 @@ export function openDocPreviewTab(workstreamId: string, path: string, title: str
   });
 }
 
-/**
- * Open (creating if absent) the dedicated Ship tab for a workstream, bind it to
- * `sessionId`, and select it. Shipping reuses one tab per workstream rather than
- * being a chosen chat mode (see `shipWorkstream` in [`sessionStore`]).
- */
 /** The shell fields that make an action tab's composer show the harness/model/
  *  effort its session launched with: Claude carries a model + effort key,
  *  OpenCode a `provider/model` id. Cross-harness fields are cleared so a switch
@@ -462,6 +457,11 @@ function shellSeedFromDefaults(d?: ActionAgentDefaults): Partial<ShellTab> {
   };
 }
 
+/**
+ * Open (creating if absent) the dedicated Ship tab for a workstream, bind it to
+ * `sessionId`, and select it. Shipping reuses one tab per workstream rather than
+ * being a chosen chat mode (see `shipWorkstream` in [`sessionStore`]).
+ */
 export function openShipTab(
   workstreamId: string,
   sessionId: string,

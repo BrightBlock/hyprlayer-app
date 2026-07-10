@@ -5,9 +5,6 @@
  * clicking opens an upward popover (mirroring `ContextMeter`) that lists each
  * task — spinner, label, elapsed timer, and a running/waiting hint — where a row
  * click jumps the transcript to the spawning `Bash` call.
- *
- * Replaces the old docked-above-the-composer bar: same information, but it stays
- * out of the way until you ask for it.
  */
 
 import { useEffect, useRef, useState } from "react";

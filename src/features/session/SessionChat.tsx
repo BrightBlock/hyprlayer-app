@@ -640,17 +640,6 @@ function HandoffBanner({
   );
 }
 
-/**
- * The interactive answer panel for an `AskUserQuestion`, pinned just above the
- * composer. Questions are asked one at a time (a stepper): each question shows
- * its options (single- or multi-select) plus an always-present "Other" field for
- * a custom free-text answer when none of the options fit (parity with Claude
- * Code's question UI). "Next" advances, and the last question's "Submit" sends
- * every collected answer back to the agent in one go. Selections and custom text
- * accumulate across steps (keyed by question text) and "Back" revisits them.
- * "Skip" sends no answer, which the agent handles by asking again in prose.
- * Remounted per prompt (keyed on requestId) so state never leaks between asks.
- */
 /** Messages typed while a turn was running, shown above the composer until the
  *  turn finishes and they're delivered. Each can be cancelled before it sends. */
 function QueuedMessages({
@@ -692,6 +681,17 @@ function QueuedMessages({
   );
 }
 
+/**
+ * The interactive answer panel for an `AskUserQuestion`, pinned just above the
+ * composer. Questions are asked one at a time (a stepper): each question shows
+ * its options (single- or multi-select) plus an always-present "Other" field for
+ * a custom free-text answer when none of the options fit (parity with Claude
+ * Code's question UI). "Next" advances, and the last question's "Submit" sends
+ * every collected answer back to the agent in one go. Selections and custom text
+ * accumulate across steps (keyed by question text) and "Back" revisits them.
+ * "Skip" sends no answer, which the agent handles by asking again in prose.
+ * Remounted per prompt (keyed on requestId) so state never leaks between asks.
+ */
 function QuestionPrompt({
   pending,
   onSubmit,

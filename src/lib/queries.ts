@@ -776,9 +776,6 @@ export function useProbeDefaultThoughts() {
   });
 }
 
-/** Set up the user's thoughts repo (clone/disk/create) and write config.json.
- *  Invalidates the full bootstrap/projects/docs/workstreams set on success so
- *  the rest of the app reflects the new ready state immediately. */
 // ── Repo worktree file list ───────────────────────────────────────────────────
 
 /** Files/globs configured to be copied from a repo into each new worktree. */
@@ -988,6 +985,9 @@ export function useClaudeAuthStatus(enabled = true) {
   });
 }
 
+/** Set up the user's thoughts repo (clone/disk/create) and write config.json.
+ *  Invalidates the full bootstrap/projects/docs/workstreams set on success so
+ *  the rest of the app reflects the new ready state immediately. */
 export function useInitThoughtsRepo() {
   return useMutation({
     mutationFn: (args: { user: string; source: ThoughtsSource }) =>

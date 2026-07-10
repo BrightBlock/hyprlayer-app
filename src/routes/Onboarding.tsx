@@ -68,7 +68,7 @@ function Step1({
     >
       <Card className="space-y-4">
         <p className="text-sm text-ink-dim">
-          Let's get you set up. This takes about two minutes. You'll end up with:
+          This takes about two minutes. You'll end up with:
         </p>
         <ul className="space-y-1 text-sm text-ink-dim">
           <li>✦ An AI coding assistant configured and ready to use</li>
@@ -208,7 +208,7 @@ function Step2({ onNext }: { onNext: () => void }) {
             <p className="text-sm font-medium text-ink">{agentTool} is configured</p>
           </div>
           <p className="text-sm text-ink-dim">
-            Your AI coding assistant is installed and ready. You can proceed to the next step.
+            Your AI coding assistant is installed and ready.
           </p>
           <Button type="button" onClick={() => start(true)} className="text-sm">
             Reconfigure

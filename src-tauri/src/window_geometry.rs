@@ -143,8 +143,8 @@ fn try_restore(app: &AppHandle) -> tauri::Result<()> {
     let saved = load_saved(app);
     let plan = decide(saved, &monitors, current, min_w, min_h, def_w, def_h);
 
-    log::info!(
-        "window_geometry DIAG: saved={saved:?} current={current:?} monitors={monitors:?} plan={plan:?}"
+    log::debug!(
+        "window geometry restore: saved={saved:?} current={current:?} monitors={monitors:?} plan={plan:?}"
     );
 
     // Position (absolute physical) moves the window onto the target monitor; the
