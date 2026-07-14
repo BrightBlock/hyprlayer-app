@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.25",
+      "date": "2026-07-14",
+      "summary": "Clearer transcript markers for queued commands and wakeups.",
+      "notes": [
+        "Queued slash commands and scheduled wakeups now render a clear seam marking a new turn, instead of looking like the agent spontaneously resumed or showing raw \"unrecognized stream-json line\" error cards."
+      ]
+    },
+    {
       "version": "0.4.24",
       "date": "2026-07-14",
       "summary": "Map new projects into named thoughts profiles.",
