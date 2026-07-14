@@ -16,6 +16,7 @@ import {
   type Stage,
   type WorktreeMode,
   type ThoughtQuery,
+  type ThoughtsProfile,
   type ThoughtsSource,
   type WorkstreamView,
   type WorktreeFile,
@@ -201,15 +202,29 @@ export function useRepoPathInfo(path: string, enabled = true) {
 }
 
 /** Import a local on-disk folder as a project (registered in place), handling
- *  any git setup the path needs (init, birth a commit, adopt, or refuse). */
+ *  any git setup the path needs (init, birth a commit, adopt, or refuse).
+ *  `thoughtsDir`/`profile` pick the thoughts folder + profile the repo maps
+ *  into (null = named after the repo / the default backend). */
 export function useImportProject() {
   return useMutation({
     mutationFn: (args: {
       path: string;
       branch: string | null;
       directoryName: string | null;
+      thoughtsDir: string | null;
+      profile: string | null;
       bootstrapUser: string | null;
-    }) => unwrap(commands.importProject(args.path, args.branch, args.directoryName, args.bootstrapUser)),
+    }) =>
+      unwrap(
+        commands.importProject(
+          args.path,
+          args.branch,
+          args.directoryName,
+          args.thoughtsDir,
+          args.profile,
+          args.bootstrapUser,
+        ),
+      ),
     onSettled: invalidateProjects,
   });
 }
@@ -221,9 +236,52 @@ export function useCloneProject() {
       url: string;
       location: string | null;
       name: string | null;
+      thoughtsDir: string | null;
+      profile: string | null;
       bootstrapUser: string | null;
-    }) => unwrap(commands.cloneProject(args.url, args.location, args.name, args.bootstrapUser)),
+    }) =>
+      unwrap(
+        commands.cloneProject(
+          args.url,
+          args.location,
+          args.name,
+          args.thoughtsDir,
+          args.profile,
+          args.bootstrapUser,
+        ),
+      ),
     onSettled: invalidateProjects,
+  });
+}
+
+/** The thoughts destinations for the Add-project dialog's Thoughts step: the
+ *  default backend + named profiles, each with its existing repo folders. */
+export function useThoughtsProfiles(enabled = true) {
+  return useQuery({
+    queryKey: ["thoughts-profiles"],
+    queryFn: () => unwrap(commands.listThoughtsProfiles()),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/** Create a named thoughts profile (git backend, standard dirs) — the
+ *  Add-project dialog's inline "New profile…" form. */
+export function useCreateThoughtsProfile() {
+  return useMutation({
+    mutationFn: (args: { name: string; thoughtsRepo: string | null }) =>
+      unwrap(commands.createThoughtsProfile(args.name, args.thoughtsRepo)),
+    // Seed the cache so the new profile is selectable before the refetch lands
+    // (the dialog selects it by name the moment the mutation succeeds).
+    onSuccess: (created) => {
+      queryClient.setQueryData<ThoughtsProfile[]>(["thoughts-profiles"], (prev) =>
+        prev ? [...prev, created] : prev,
+      );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["thoughts-profiles"] });
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    },
   });
 }
 

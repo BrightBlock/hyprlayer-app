@@ -27,12 +27,12 @@ export const commands = {
 	 *  - **ready repo** → adopted as-is (`branch` ignored).
 	 *  - **bare repo** → refused, since worktrees can't be cut from it.
 	 */
-	importProject: (path: string, branch: string | null, directoryName: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("import_project", { path, branch, directoryName, bootstrapUser })),
+	importProject: (path: string, branch: string | null, directoryName: string | null, thoughtsDir: string | null, profile: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("import_project", { path, branch, directoryName, thoughtsDir, profile, bootstrapUser })),
 	/**
 	 *  Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
 	 *  register it as a project.
 	 */
-	cloneProject: (url: string, location: string | null, name: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, location, name, bootstrapUser })),
+	cloneProject: (url: string, location: string | null, name: string | null, thoughtsDir: string | null, profile: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, location, name, thoughtsDir, profile, bootstrapUser })),
 	/**
 	 *  Remove a project from the registry; with `delete_files`, also delete its
 	 *  directory (clones and in-place imports alike — user opts in per removal).
@@ -52,6 +52,23 @@ export const commands = {
 	 *  URL field still works, so recents are purely a convenience.
 	 */
 	listRecentRepos: () => typedError<GithubRepo[], AppError>(__TAURI_INVOKE("list_recent_repos")),
+	/**
+	 *  The thoughts destinations for the Add-project dialog's Thoughts step: the
+	 *  default backend plus every named profile, each with its existing repo
+	 *  folders. A missing config (true first run) or a config without a
+	 *  `thoughts` section yields the entry bootstrap will create, so the step
+	 *  stays truthful before any config exists.
+	 */
+	listThoughtsProfiles: () => typedError<ThoughtsProfile[], AppError>(__TAURI_INVOKE("list_thoughts_profiles")),
+	/**
+	 *  Create a named thoughts profile — the dialog's "New profile…". The write
+	 *  goes through the CLI (`thoughts profile create`, ADR-0002's single-writer
+	 *  rule), so the app can never drift from the CLI's config structure. App-side
+	 *  name rules run first (structured codes for what the CLI would accept or
+	 *  silently sanitize), and the returned entry is read back from the config the
+	 *  CLI wrote. An empty `thoughts_repo` defaults to `~/<name>-thoughts`.
+	 */
+	createThoughtsProfile: (name: string, thoughtsRepo: string | null) => typedError<ThoughtsProfile, AppError>(__TAURI_INVOKE("create_thoughts_profile", { name, thoughtsRepo })),
 	syncThoughts: (path: string, message: string | null) => typedError<SyncReport, AppError>(__TAURI_INVOKE("sync_thoughts", { path, message })),
 	runBackendHealth: (path: string) => typedError<HealthReport, AppError>(__TAURI_INVOKE("run_backend_health", { path })),
 	getWorktreeFiles: (path: string) => typedError<string[], AppError>(__TAURI_INVOKE("get_worktree_files", { path })),
@@ -2072,6 +2089,34 @@ export type ThoughtsProbe = {
 	exists: boolean,
 	/**  Whether it's already a git repository. */
 	isGitRepo: boolean,
+};
+
+/**
+ *  One selectable thoughts destination: the default backend (`name: None`) or
+ *  a named profile.
+ */
+export type ThoughtsProfile = {
+	/**  Profile name; `None` is the default backend (mapped without `--profile`). */
+	name: string | null,
+	backendKind: string,
+	/**
+	 *  Thoughts root as written in config (tilde kept, e.g. `~/thoughts`), for
+	 *  display; None for backends without a filesystem tree (notion, anytype).
+	 */
+	thoughtsRepo: string | null,
+	reposDir: string | null,
+	globalDir: string | null,
+	/**
+	 *  Existing folder names under `<root>/<reposDir>` — the "existing folder"
+	 *  choices for the dialog's folder select.
+	 */
+	folders: string[],
+	/**
+	 *  Why `folders` couldn't be read (e.g. permission denied), when the tree
+	 *  exists but is inaccessible. An unreadable tree must not masquerade as
+	 *  an empty one — the dialog surfaces this next to the folder select.
+	 */
+	foldersError: string | null,
 };
 
 export type ThoughtsRepoStatus = {

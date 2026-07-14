@@ -6,7 +6,6 @@ import { DiscoverDialog } from "./DiscoverDialog";
 
 const q = vi.hoisted(() => ({
   useBootstrap: vi.fn(),
-  useCloneProject: vi.fn(),
   useRecentRepos: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
@@ -26,11 +25,11 @@ const MULTI_ORG = [repo("jane/thoughts"), repo("acme/api"), repo("acme/web")];
 
 function setup(recents: Record<string, unknown>, projects: Array<{ originUrl: string | null }> = []) {
   const refetch = vi.fn();
-  const mutate = vi.fn();
+  const onPick = vi.fn();
+  const onClose = vi.fn();
   q.useBootstrap.mockReturnValue({
     data: { config: { state: "ok" }, settings: { reposRoot: "/repos" }, projects },
   });
-  q.useCloneProject.mockReturnValue({ mutate, reset: vi.fn(), isPending: false, error: null });
   const stub = (over: Record<string, unknown>) =>
     q.useRecentRepos.mockReturnValue({
       isLoading: false,
@@ -42,7 +41,7 @@ function setup(recents: Record<string, unknown>, projects: Array<{ originUrl: st
 
   stub(recents);
   // A fresh element each render: React bails out on an identical element ref.
-  const dialog = () => <DiscoverDialog open onClose={vi.fn()} onAdded={vi.fn()} />;
+  const dialog = () => <DiscoverDialog open onClose={onClose} onPick={onPick} />;
   const { rerender } = render(dialog());
 
   /** Swap what the query returns, as a refetch would, and re-render in place. */
@@ -50,7 +49,7 @@ function setup(recents: Record<string, unknown>, projects: Array<{ originUrl: st
     stub(over);
     rerender(dialog());
   };
-  return { refetch, mutate, rerenderWith };
+  return { refetch, onPick, onClose, rerenderWith };
 }
 
 const org = (name: RegExp) => screen.getByRole("button", { name });
@@ -140,25 +139,27 @@ describe("DiscoverDialog footer and row metadata", () => {
     expect(screen.getByText("Private")).toBeDefined();
   });
 
-  it("clones the repo when its row is clicked", () => {
-    const { mutate } = setup({ data: [repo("acme/api")] });
+  it("hands a picked repo to the Add-project wizard and closes", () => {
+    // Discover never clones directly — the pick routes into the wizard so the
+    // clone reviews the same location + thoughts steps as a pasted URL.
+    const { onPick, onClose } = setup({ data: [repo("acme/api")] });
     fireEvent.click(screen.getByRole("button", { name: /acme\/api/ }));
-    expect(mutate).toHaveBeenCalledWith(
+    expect(onPick).toHaveBeenCalledWith(
       expect.objectContaining({ url: "https://github.com/acme/api.git" }),
-      expect.anything(),
     );
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("marks an already-cloned repo and refuses to clone it twice", () => {
+  it("marks an already-cloned repo and refuses to pick it twice", () => {
     // Re-cloning would land on the existing directory and fail with repo_exists.
-    const { mutate } = setup({ data: [repo("acme/api")] }, [
+    const { onPick } = setup({ data: [repo("acme/api")] }, [
       { originUrl: "https://github.com/acme/api.git" },
     ]);
     expect(screen.getByText("Cloned")).toBeDefined();
     const row = screen.getByRole("button", { name: /acme\/api/ });
     expect(row).toHaveProperty("disabled", true);
     fireEvent.click(row);
-    expect(mutate).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
   });
 
   it("ignores a non-GitHub origin that merely contains the github.com substring", () => {

@@ -4,8 +4,10 @@
 //! re-reads on mtime change (pull-based; callers re-query after any CLI
 //! invocation and on window focus).
 
+mod profiles;
 mod types;
 
+pub use profiles::*;
 pub use types::*;
 
 use std::path::{Path, PathBuf};
@@ -73,7 +75,7 @@ pub struct LoadedConfig {
 /// [`ensure_thoughts_config`] for the existing `AddProjectDialog` first-run path.
 /// Delete once upstream `thoughts init` gains a `--user` flag.
 pub fn write_bootstrap_config(path: &Path, user: &str) -> Result<()> {
-    ensure_thoughts_config(path, user, "~/thoughts")
+    ensure_thoughts_config(path, user, DEFAULT_THOUGHTS_REPO)
 }
 
 /// Merge-tolerant thoughts-config writer used by the onboarding wizard.
@@ -102,8 +104,8 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
     let git_backend = serde_json::json!({
         "kind": "git",
         "thoughtsRepo": thoughts_repo,
-        "reposDir": "repos",
-        "globalDir": "global"
+        "reposDir": DEFAULT_REPOS_DIR,
+        "globalDir": DEFAULT_GLOBAL_DIR
     });
 
     if let Some(parent) = path.parent() {
@@ -144,7 +146,10 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
                 // half-written section comes out fully configured.
                 let b = &mut t["backend"];
                 b["thoughtsRepo"] = thoughts_repo.into();
-                for (key, default) in [("reposDir", "repos"), ("globalDir", "global")] {
+                for (key, default) in [
+                    ("reposDir", DEFAULT_REPOS_DIR),
+                    ("globalDir", DEFAULT_GLOBAL_DIR),
+                ] {
                     if b[key].as_str().is_none_or(str::is_empty) {
                         b[key] = default.into();
                     }
@@ -183,13 +188,64 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
         })
     };
 
+    write_config_atomic(path, &value)
+}
+
+/// Atomically replace `path` with pretty-printed `value` (tmp + rename) —
+/// ADR-0002's write discipline, in one place.
+fn write_config_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(
-        &tmp,
-        serde_json::to_string_pretty(&value).expect("static json"),
-    )?;
+    std::fs::write(&tmp, serde_json::to_string_pretty(value).expect("json value"))?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// Shared scaffold for the app's surgical config edits (the ADR-0002
+/// exceptions): read → parse → version guards → `edit` → atomic tmp+rename.
+/// Never rewrites a schema the app doesn't own — a missing file is
+/// `config_missing`, newer/older schemas error instead of being clobbered.
+pub(crate) fn edit_config(
+    path: &Path,
+    edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> Result<()>,
+) -> Result<()> {
+    let raw = std::fs::read_to_string(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CoreError::ConfigMissing {
+                path: path.to_path_buf(),
+            }
+        } else {
+            CoreError::Io(e)
+        }
+    })?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|source| CoreError::ConfigParse {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    let version = value.get("version").and_then(|v| v.as_u64()).unwrap_or(0);
+    if version > MAX_SUPPORTED_CONFIG_VERSION {
+        return Err(CoreError::ConfigVersionTooNew {
+            found: version,
+            max: MAX_SUPPORTED_CONFIG_VERSION,
+        });
+    }
+    if version < MAX_SUPPORTED_CONFIG_VERSION {
+        return Err(CoreError::ConfigNeedsMigration {
+            found: version,
+            required: MAX_SUPPORTED_CONFIG_VERSION,
+        });
+    }
+
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| CoreError::OutputParse {
+            program: "config edit".into(),
+            detail: "config root is not an object".into(),
+        })?;
+    edit(root)?;
+
+    write_config_atomic(path, &value)
 }
 
 /// Cached config reader. `load()` is cheap to call repeatedly: it re-reads
@@ -483,5 +539,21 @@ mod tests {
         let cfg = parse_config(raw, Path::new("test.json")).unwrap();
         assert!(cfg.thoughts.is_none());
         assert!(cfg.ai.is_none());
+    }
+
+    #[test]
+    fn tolerates_cli_emitted_nulls_for_empty_maps() {
+        // Observed live: `thoughts profile delete` serializes an emptied
+        // profiles map as `null` (not `{}`). The mirror must read it back.
+        let raw = r#"{"version": 4, "thoughts": {
+            "user": "jt",
+            "backend": {"kind": "git", "thoughtsRepo": "~/thoughts", "reposDir": "repos", "globalDir": "global"},
+            "repoMappings": null,
+            "profiles": null}}"#;
+        let cfg = parse_config(raw, Path::new("test.json")).unwrap();
+        let thoughts = cfg.thoughts.unwrap();
+        assert!(thoughts.profiles.is_empty());
+        assert!(thoughts.repo_mappings.is_empty());
+        assert!(thoughts.is_configured());
     }
 }

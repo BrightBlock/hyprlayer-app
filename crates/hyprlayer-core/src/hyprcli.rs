@@ -158,6 +158,37 @@ impl<'a> HyprCli<'a> {
             .await
     }
 
+    /// `hyprlayer thoughts profile create <name> --repo … --repos-dir … --global-dir …`.
+    /// Every flag is always passed: an omitted one makes the CLI prompt, and
+    /// with no terminal attached dialoguer errors out instead. Not repo-scoped
+    /// (the config is global) — any existing `cwd` works.
+    pub async fn thoughts_profile_create(
+        &self,
+        cwd: &Path,
+        name: &str,
+        repo: &str,
+        repos_dir: &str,
+        global_dir: &str,
+    ) -> Result<String> {
+        self.exec(
+            cwd,
+            &[
+                "thoughts",
+                "profile",
+                "create",
+                name,
+                "--repo",
+                repo,
+                "--repos-dir",
+                repos_dir,
+                "--global-dir",
+                global_dir,
+            ],
+            Duration::from_secs(30),
+        )
+        .await
+    }
+
     /// `hyprlayer ai status --json` — typed; only the three fields the
     /// onboarding step needs; extra CLI fields are silently ignored.
     pub async fn ai_status(&self, cwd: &Path) -> Result<AiStatus> {

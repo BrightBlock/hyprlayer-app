@@ -59,6 +59,12 @@ pub enum CoreError {
     #[error("failed to parse {path}: {message}")]
     RepoSettingsParse { path: PathBuf, message: String },
 
+    #[error("{detail}")]
+    ProfileInvalid { detail: String },
+
+    #[error("profile \"{name}\" already exists")]
+    ProfileExists { name: String },
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -106,6 +112,9 @@ impl CoreError {
             CoreError::RepoSettingsParse { .. } => {
                 Some("Fix the TOML syntax in .hyprlayer/settings.toml.".into())
             }
+            CoreError::ProfileExists { .. } => {
+                Some("Pick a different name, or select the existing profile.".into())
+            }
             _ => None,
         }
     }
@@ -127,6 +136,8 @@ impl CoreError {
             CoreError::WorktreeUnpushed { .. } => "worktree_unpushed",
             CoreError::InvalidPath { .. } => "invalid_path",
             CoreError::RepoSettingsParse { .. } => "repo_settings_parse",
+            CoreError::ProfileInvalid { .. } => "invalid_profile_name",
+            CoreError::ProfileExists { .. } => "profile_exists",
             CoreError::Io(_) => "io",
         }
     }

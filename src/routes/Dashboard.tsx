@@ -100,7 +100,10 @@ export function Dashboard() {
   const docs = useMemo(() => docsQuery.data?.items ?? [], [docsQuery.data]);
   const graph = useMemo(() => buildGraph(docs), [docs]);
 
-  const [addOpen, setAddOpen] = useState(false);
+  // One owner for the Add-project wizard: null = closed; `url` set = seeded by
+  // a Discover pick, so every clone reviews the same location + thoughts steps.
+  // Closing drops the seed with it — a later plain "Add repo" starts blank.
+  const [addProject, setAddProject] = useState<{ url: string | null } | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
 
   const projectNames = useMemo(
@@ -327,7 +330,7 @@ export function Dashboard() {
             </Button>
             <Button
               variant="primary"
-              onClick={() => setAddOpen(true)}
+              onClick={() => setAddProject({ url: null })}
               className="gap-1.5 text-[12.5px]"
             >
               <PlusIcon size={12} />
@@ -394,11 +397,17 @@ export function Dashboard() {
 
       {firstRun && <SetupPill onClick={openWizard} />}
 
-      <AddProjectDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={openProject} />
+      <AddProjectDialog
+        open={addProject !== null}
+        initialUrl={addProject?.url ?? null}
+        onClose={() => setAddProject(null)}
+        onAdded={openProject}
+      />
       <DiscoverDialog
         open={discoverOpen}
         onClose={() => setDiscoverOpen(false)}
-        onAdded={openProject}
+        // The dialog closes itself after a pick (onPick → its close → onClose).
+        onPick={(repo) => setAddProject({ url: repo.url })}
       />
     </div>
   );

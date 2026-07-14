@@ -36,6 +36,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::projects::remove_project,
             commands::projects::reorder_projects,
             commands::projects::list_recent_repos,
+            commands::projects::list_thoughts_profiles,
+            commands::projects::create_thoughts_profile,
             commands::projects::sync_thoughts,
             commands::projects::run_backend_health,
             commands::projects::get_worktree_files,

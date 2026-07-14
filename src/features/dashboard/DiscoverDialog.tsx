@@ -1,26 +1,20 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import type { GithubRepo, Project } from "@/lib/bindings";
-import {
-  Dialog,
-  ErrorNote,
-  Field,
-  IconButton,
-  RefreshButton,
-  Spinner,
-  TextInput,
-} from "@/components/ui";
+import type { GithubRepo } from "@/lib/bindings";
+import { Dialog, IconButton, RefreshButton, Spinner, TextInput } from "@/components/ui";
 import { DownloadIcon, GlobeIcon, LockIcon, SearchIcon, XIcon } from "@/components/icons";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { formatCompactAge, formatRelativeTime } from "@/lib/format";
 import { githubRepoRef } from "@/lib/github";
-import { useBootstrap, useCloneProject, useRecentRepos } from "@/lib/queries";
+import { useBootstrap, useRecentRepos } from "@/lib/queries";
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** The freshly cloned project, so the caller can navigate to it. */
-  onAdded: (project: Project) => void;
+  /** The repo the user chose to clone. The caller routes it into the Add-project
+   *  wizard (URL pre-filled), so every clone goes through the same location +
+   *  thoughts-mapping steps — Discover never clones directly. */
+  onPick: (repo: GithubRepo) => void;
 };
 
 /** "Don't filter by owner". Null, not "", so a malformed owner can't collide. */
@@ -48,25 +42,15 @@ type Owner = {
  * "Discover" — a browse-first counterpart to Add. Organizations are the modal's
  * structure (a left rail), repos a single dense column: name is the only bright
  * thing, owner/description/age step back, and Clone surfaces on row hover.
- * Cloning lands an app-owned copy under the repos root, same as the Add dialog —
- * which is also where you go to paste a URL or open a repo from disk.
+ * Picking a repo hands it to the Add-project wizard with the URL pre-filled, so
+ * a Discover clone reviews the same location + thoughts mapping as a pasted one.
  */
-export function DiscoverDialog({ open, onClose, onAdded }: Props) {
+export function DiscoverDialog({ open, onClose, onPick }: Props) {
   const bootstrap = useBootstrap();
   const recents = useRecentRepos(open);
-  const clone = useCloneProject();
 
   const [filter, setFilter] = useState("");
   const [owner, setOwner] = useState<string | null>(ALL_OWNERS);
-  const [user, setUser] = useState("");
-  const [pendingTarget, setPendingTarget] = useState<string | null>(null);
-
-  const reposRoot = bootstrap.data?.settings.reposRoot ?? null;
-  // First run: no config yet, so the backend needs a username to bootstrap one
-  // before the clone can be registered (same requirement as the Add dialog).
-  const configMissing = bootstrap.data?.config.state === "missing";
-  const bootstrapUser = configMissing ? user.trim() || null : null;
-  const needsUser = configMissing && !bootstrapUser;
 
   const all = useMemo(() => recents.data ?? [], [recents.data]);
 
@@ -126,28 +110,14 @@ export function DiscoverDialog({ open, onClose, onAdded }: Props) {
   );
 
   const close = () => {
-    if (clone.isPending) return;
     setFilter("");
     setOwner(ALL_OWNERS);
-    setUser("");
-    setPendingTarget(null);
-    clone.reset();
     onClose();
   };
 
-  const startClone = (cloneUrl: string) => {
-    if (clone.isPending || needsUser) return;
-    setPendingTarget(cloneUrl);
-    clone.mutate(
-      { url: cloneUrl, location: reposRoot, name: null, bootstrapUser },
-      {
-        onSuccess: (project) => {
-          close();
-          onAdded(project);
-        },
-        onSettled: () => setPendingTarget(null),
-      },
-    );
+  const pick = (repo: GithubRepo) => {
+    onPick(repo);
+    close();
   };
 
   return (
@@ -214,7 +184,7 @@ export function DiscoverDialog({ open, onClose, onAdded }: Props) {
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder={`Filter ${scoped.length} ${scoped.length === 1 ? "repository" : "repositories"}…`}
-                autoFocus={!configMissing}
+                autoFocus
                 aria-label="Filter repositories"
                 className="pl-8"
               />
@@ -223,24 +193,6 @@ export function DiscoverDialog({ open, onClose, onAdded }: Props) {
               <XIcon size={14} />
             </IconButton>
           </div>
-
-          {configMissing && (
-            <div className="border-b border-edge px-5 py-4">
-              <Field label="Your name">
-                <TextInput
-                  value={user}
-                  onChange={(e) => setUser(e.target.value)}
-                  placeholder="e.g. jane"
-                  autoFocus
-                  disabled={clone.isPending}
-                />
-                <p className="mt-1 text-xs text-ink-dim">
-                  First-run setup: attributes your thought documents. Required before the first
-                  clone.
-                </p>
-              </Field>
-            </div>
-          )}
 
           <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-2">
             {recents.isLoading ? (
@@ -261,10 +213,8 @@ export function DiscoverDialog({ open, onClose, onAdded }: Props) {
                 <RepoRow
                   key={repo.nameWithOwner}
                   repo={repo}
-                  busy={clone.isPending && pendingTarget === repo.url}
-                  disabled={clone.isPending || needsUser}
                   cloned={isCloned(repo)}
-                  onClone={() => startClone(repo.url)}
+                  onPick={() => pick(repo)}
                 />
               ))
             )}
@@ -276,12 +226,6 @@ export function DiscoverDialog({ open, onClose, onAdded }: Props) {
             </span>
             {clonedCount > 0 && <span>{clonedCount} already cloned</span>}
           </div>
-
-          {clone.error != null && (
-            <div className="border-t border-edge px-5 py-4">
-              <ErrorNote error={clone.error} />
-            </div>
-          )}
         </div>
       </div>
     </Dialog>
@@ -315,32 +259,28 @@ function OrgRow({
 }
 
 /**
- * One dense repo row. The age gives way to a Clone affordance on hover — but
- * only when the row can actually be cloned, so a dead row never offers one.
+ * One dense repo row. The age gives way to a Clone… affordance on hover — the
+ * ellipsis because picking opens the Add-project wizard (location + thoughts)
+ * rather than cloning on the spot. Rows already cloned stay inert.
  */
 function RepoRow({
   repo,
-  busy,
-  disabled,
   cloned,
-  onClone,
+  onPick,
 }: {
   repo: GithubRepo;
-  busy: boolean;
-  disabled: boolean;
   /** Already a project. Cloning again would fail on the existing directory. */
   cloned: boolean;
-  onClone: () => void;
+  onPick: () => void;
 }) {
   const [owner, name] = splitRef(repo.nameWithOwner);
   const age = formatCompactAge(repo.pushedAt ? Date.parse(repo.pushedAt) : null);
-  const inert = disabled || cloned;
 
   return (
     <button
       type="button"
-      onClick={onClone}
-      disabled={inert}
+      onClick={onPick}
+      disabled={cloned}
       className="group flex h-10 w-full flex-none items-center gap-3 rounded-md px-3 text-left enabled:hover:bg-panel-2 disabled:cursor-not-allowed disabled:opacity-60"
     >
       <RepoAvatar source={repo.nameWithOwner} name={owner} size={22} />
@@ -359,20 +299,14 @@ function RepoRow({
           <span className="sr-only">Private</span>
         </span>
       )}
-      {busy ? (
-        <span className="flex flex-none items-center gap-1.5 text-xs text-accent">
-          <Spinner size={13} /> Cloning…
-        </span>
-      ) : cloned ? (
+      {cloned ? (
         <span className="flex-none text-[11px] text-ink-dim">Cloned</span>
-      ) : inert ? (
-        <span className="flex-none text-[11px] text-ink-dim">{age}</span>
       ) : (
         <>
           <span className="flex-none text-[11px] text-ink-dim group-hover:hidden">{age}</span>
           <span className="hidden flex-none items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-accent-ink group-hover:flex">
             <DownloadIcon size={12} strokeWidth={2} />
-            Clone
+            Clone…
           </span>
         </>
       )}

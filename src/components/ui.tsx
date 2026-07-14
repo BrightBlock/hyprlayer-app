@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   ButtonHTMLAttributes,
   HTMLAttributes,
@@ -11,7 +12,7 @@ import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { formatChord } from "@/lib/keybindings/chord";
 import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
-import { RestartIcon, XIcon } from "./icons";
+import { ChevronDownIcon, RestartIcon, XIcon } from "./icons";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -139,6 +140,141 @@ export function Select({ className, ...rest }: SelectHTMLAttributes<HTMLSelectEl
   );
 }
 
+type DropdownSelectProps = {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  className?: string;
+};
+
+/**
+ * In-app replacement for a native `<select>`: the open menu is part of the UI
+ * (panel tone, anchored under the trigger at trigger width) instead of an OS
+ * popup. The menu is positioned `fixed` off the trigger's rect so overflow
+ * containers (dialog panels, sidebars) can't clip it, capped to the viewport
+ * and scrollable, flipping upward when there's more room above. Inside a
+ * `Field` the wrapping label names the trigger, and Escape closes only the
+ * menu (the handler stacks above a dialog's).
+ *
+ * The open menu + backdrop render in a portal on `document.body`, NOT inline:
+ * inline they'd be descendants of `Field`'s `<label>`, and WebKit forwards any
+ * click on a label descendant to the labeled control — every option/backdrop
+ * click would re-toggle the trigger and the menu never closes. The portal also
+ * escapes the dialog overlay's `backdrop-blur`, which turns `position: fixed`
+ * coordinates relative in WebKit.
+ */
+export function DropdownSelect({ value, options, onChange, disabled, className }: DropdownSelectProps) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  }>({ left: 0, width: 0, maxHeight: 0 });
+
+  const close = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+  useEscape(open ? close : null);
+
+  // Bring the current choice into view when a long list opens — once, not on
+  // every re-render, which would fight the user's own scrolling.
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
+  }, [open]);
+
+  // Measure on open (before paint, so the menu never flashes at 0,0).
+  useLayoutEffect(() => {
+    const el = triggerRef.current;
+    if (!open || !el) return;
+    const r = el.getBoundingClientRect();
+    const gap = 4;
+    const margin = 8;
+    const below = window.innerHeight - r.bottom - gap - margin;
+    const above = r.top - gap - margin;
+    const openUp = below < 160 && above > below;
+    setPos({
+      left: r.left,
+      width: r.width,
+      maxHeight: Math.min(288, Math.max(120, openUp ? above : below)),
+      ...(openUp ? { bottom: window.innerHeight - r.top + gap } : { top: r.bottom + gap }),
+    });
+  }, [open]);
+
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}
+        className={cx(
+          "flex w-full items-center justify-between gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-left text-sm text-ink",
+          "focus:border-ink-dim/70 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+          className,
+        )}
+      >
+        <span className="min-w-0 truncate">{selected?.label ?? value}</span>
+        <ChevronDownIcon size={12} className="shrink-0 text-ink-dim" />
+      </button>
+      {open &&
+        createPortal(
+          <>
+            {/* Backdrop closes the menu on any outside click. */}
+            <div className="fixed inset-0 z-50" onClick={close} aria-hidden="true" />
+            <div
+              ref={listRef}
+              role="listbox"
+              className="fixed z-50 overflow-y-auto rounded-md border border-edge bg-panel p-1 shadow-2xl"
+              style={{
+                top: pos.top,
+                bottom: pos.bottom,
+                left: pos.left,
+                width: pos.width,
+                maxHeight: pos.maxHeight,
+              }}
+            >
+              {options.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="option"
+                  aria-selected={o.value === value}
+                  onClick={() => {
+                    onChange(o.value);
+                    close();
+                  }}
+                  className={cx(
+                    "flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm hover:bg-panel-2",
+                    o.value === value ? "text-ink" : "text-ink-dim hover:text-ink",
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                  {o.value === value && <span className="shrink-0 text-[11px]">✓</span>}
+                </button>
+              ))}
+            </div>
+          </>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/** Labeled form row. NOTE: children render inside a `<label>`, and WebKit
+ *  forwards clicks on any label descendant to the first labelable child —
+ *  overlays/menus opened from inside a Field must portal out (see
+ *  DropdownSelect) or every click on them re-triggers the control. */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block text-sm">

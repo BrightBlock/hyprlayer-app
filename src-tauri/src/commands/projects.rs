@@ -1,5 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use hyprlayer_core::config::{
+    bootstrap_default_profile, get_profile, list_profiles, validate_profile_name, ThoughtsProfile,
+    DEFAULT_GLOBAL_DIR, DEFAULT_REPOS_DIR,
+};
 use hyprlayer_core::hyprcli::{HyprCli, StorageInfo};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryState, BinaryStatus};
 use hyprlayer_core::repos;
@@ -325,6 +329,15 @@ async fn remove_dir_all_bg(path: &Path) {
     let _ = blocking("remove_dir", move || std::fs::remove_dir_all(path)).await;
 }
 
+/// Where a new project maps into thoughts — the dialog's Thoughts step.
+/// `dir` overrides the folder (default: the project name); `profile` picks a
+/// named profile (default: the default backend).
+#[derive(Clone, Copy, Default)]
+struct ThoughtsTarget<'a> {
+    dir: Option<&'a str>,
+    profile: Option<&'a str>,
+}
+
 /// Provision thoughts inside `repo`, register it as a project, and surface it.
 /// `owned` = a fresh clone the app created vs. an in-place disk import. On
 /// failure we roll back so no half-set-up project lingers: an owned clone is
@@ -336,11 +349,12 @@ async fn register_repo(
     git: &Path,
     repo: &Path,
     name: &str,
+    thoughts: ThoughtsTarget<'_>,
     kind: &str,
     owned: bool,
 ) -> CmdResult<Project> {
     if let Err(e) = HyprCli::new(&state.binaries)
-        .thoughts_init(repo, name, None)
+        .thoughts_init(repo, thoughts.dir.unwrap_or(name), thoughts.profile)
         .await
     {
         if owned {
@@ -381,6 +395,7 @@ async fn provision_project(
     state: &AppState,
     source: &str,
     name: &str,
+    thoughts: ThoughtsTarget<'_>,
     kind: &str,
     location: Option<&str>,
 ) -> CmdResult<Project> {
@@ -403,7 +418,7 @@ async fn provision_project(
         .await
         .map_err(AppError::from)?;
 
-    register_repo(app, state, &git, &dest, name, kind, true).await
+    register_repo(app, state, &git, &dest, name, thoughts, kind, true).await
 }
 
 /// Classify a disk path for the Add-project dialog: import in place, offer
@@ -433,6 +448,8 @@ pub async fn import_project(
     path: String,
     branch: Option<String>,
     directory_name: Option<String>,
+    thoughts_dir: Option<String>,
+    profile: Option<String>,
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
     let repo = Path::new(&path);
@@ -488,8 +505,12 @@ pub async fn import_project(
         _ => Ok(()),
     };
 
+    let thoughts = ThoughtsTarget {
+        dir: thoughts_dir.as_deref(),
+        profile: profile.as_deref(),
+    };
     let result = match setup {
-        Ok(()) => register_disk_project(&app, &state, &git, repo, directory_name).await,
+        Ok(()) => register_disk_project(&app, &state, &git, repo, directory_name, thoughts).await,
         Err(e) => Err(e),
     };
 
@@ -511,6 +532,7 @@ async fn register_disk_project(
     git: &Path,
     repo: &Path,
     directory_name: Option<String>,
+    thoughts: ThoughtsTarget<'_>,
 ) -> CmdResult<Project> {
     // Canonicalize for a stable registered path (no trailing slash, symlinks
     // resolved) so later lookups/removals match exactly. `dunce` strips the
@@ -518,7 +540,7 @@ async fn register_disk_project(
     // into project URLs and trips git/tools.
     let repo = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let name = project_name(directory_name, &repo.to_string_lossy(), &repo);
-    register_repo(app, state, git, &repo, &name, "disk", false).await
+    register_repo(app, state, git, &repo, &name, thoughts, "disk", false).await
 }
 
 /// Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
@@ -531,6 +553,8 @@ pub async fn clone_project(
     url: String,
     location: Option<String>,
     name: Option<String>,
+    thoughts_dir: Option<String>,
+    profile: Option<String>,
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
     let url = url.trim().to_string();
@@ -554,7 +578,11 @@ pub async fn clone_project(
             remedy: Some("Add an explicit name, or check the URL.".into()),
         })?;
 
-    provision_project(&app, &state, &url, &name, "clone", location.as_deref()).await
+    let thoughts = ThoughtsTarget {
+        dir: thoughts_dir.as_deref(),
+        profile: profile.as_deref(),
+    };
+    provision_project(&app, &state, &url, &name, thoughts, "clone", location.as_deref()).await
 }
 
 /// Remove a project from the registry; with `delete_files`, also delete its
@@ -635,6 +663,99 @@ pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repo
             Ok(Vec::new())
         }
     }
+}
+
+/// The thoughts destinations for the Add-project dialog's Thoughts step: the
+/// default backend plus every named profile, each with its existing repo
+/// folders. A missing config (true first run) or a config without a
+/// `thoughts` section yields the entry bootstrap will create, so the step
+/// stays truthful before any config exists.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_thoughts_profiles(
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<ThoughtsProfile>> {
+    let thoughts = match state.config.load().await {
+        Ok(loaded) => loaded.config.thoughts.clone(),
+        Err(CoreError::ConfigMissing { .. }) => None,
+        Err(e) => return Err(AppError::from(e)),
+    };
+    // Folder resolution walks the thoughts tree on disk.
+    blocking("list_thoughts_profiles", move || match thoughts {
+        Some(t) => list_profiles(&t),
+        None => vec![bootstrap_default_profile()],
+    })
+    .await
+}
+
+/// Create a named thoughts profile — the dialog's "New profile…". The write
+/// goes through the CLI (`thoughts profile create`, ADR-0002's single-writer
+/// rule), so the app can never drift from the CLI's config structure. App-side
+/// name rules run first (structured codes for what the CLI would accept or
+/// silently sanitize), and the returned entry is read back from the config the
+/// CLI wrote. An empty `thoughts_repo` defaults to `~/<name>-thoughts`.
+#[tauri::command]
+#[specta::specta]
+pub async fn create_thoughts_profile(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    thoughts_repo: Option<String>,
+) -> CmdResult<ThoughtsProfile> {
+    let name = name.trim().to_string();
+    validate_profile_name(&name).map_err(AppError::from)?;
+
+    // Pre-check for the structured `profile_exists` code; a racing writer
+    // still gets caught by the CLI's own duplicate error.
+    let loaded = state.config.load().await.map_err(AppError::from)?;
+    if loaded
+        .config
+        .thoughts
+        .as_ref()
+        .is_some_and(|t| t.profiles.contains_key(&name))
+    {
+        return Err(AppError::from(CoreError::ProfileExists { name }));
+    }
+
+    let repo = thoughts_repo
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| format!("~/{name}-thoughts"));
+
+    // Not repo-scoped (the config is global); the config's own directory is a
+    // cwd that's guaranteed to exist here.
+    let cwd = state
+        .config
+        .path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(std::env::temp_dir);
+    HyprCli::new(&state.binaries)
+        .thoughts_profile_create(&cwd, &name, &repo, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
+        .await
+        .map_err(AppError::from)?;
+
+    state.config.invalidate().await;
+    // Emit now so the UI refreshes without waiting on the 2s config poller;
+    // the poller's own pass covers the thoughts-index rebuild, and the new
+    // profile's root has nothing to scan yet anyway.
+    let _ = crate::events::ConfigChanged.emit(&app);
+
+    // Read back through the config the CLI just wrote — the returned entry
+    // reflects what actually landed, not what we asked for.
+    let loaded = state.config.load().await.map_err(AppError::from)?;
+    let thoughts = loaded
+        .config
+        .thoughts
+        .clone()
+        .ok_or_else(AppError::thoughts_not_configured)?;
+    blocking("create_thoughts_profile", move || {
+        get_profile(&thoughts, &name)
+    })
+    .await?
+    .ok_or_else(|| AppError::internal("profile missing from config after CLI create"))
 }
 
 #[tauri::command]

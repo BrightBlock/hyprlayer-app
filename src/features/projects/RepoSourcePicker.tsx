@@ -84,15 +84,17 @@ export function RepoSourcePicker({
     <div className="space-y-3">
       {/* Mode toggle — only shown when there are ≥2 modes */}
       {modes.length > 1 && (
-        <div className="flex gap-1 rounded-lg border border-edge bg-panel-2 p-0.5 text-sm">
+        <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 text-sm">
           {modes.map((m) => (
             <button
               key={m}
               type="button"
               onClick={() => setMode(m)}
               disabled={disabled}
-              className={`flex-1 rounded-md px-3 py-1.5 font-medium transition-colors ${
-                value.mode === m ? "bg-edge text-ink" : "text-ink-dim hover:text-ink"
+              className={`flex-1 rounded-md border px-3 py-2 font-medium transition-colors ${
+                value.mode === m
+                  ? "border-edge bg-panel-2 text-ink"
+                  : "border-transparent text-ink-dim hover:text-ink"
               }`}
             >
               {labels?.[m] ?? MODE_LABELS[m]}
@@ -113,7 +115,13 @@ export function RepoSourcePicker({
             />
           </Field>
 
-          {showRecents && <RecentRepos query={recents} onPick={(r) => onChange({ ...value, url: r.url })} />}
+          {showRecents && (
+            <RecentRepos
+              query={recents}
+              selectedUrl={value.url}
+              onPick={(r) => onChange({ ...value, url: r.url })}
+            />
+          )}
 
           <Field label="Location">
             <div className="flex gap-2">
@@ -190,9 +198,12 @@ export function RepoSourcePicker({
 /** GitHub recent repos picker (clone mode only). */
 function RecentRepos({
   query,
+  selectedUrl,
   onPick,
 }: {
   query: ReturnType<typeof useRecentRepos>;
+  /** The current URL-field value, so the picked row stays highlighted. */
+  selectedUrl: string;
   onPick: (repo: GithubRepo) => void;
 }) {
   if (query.isLoading) {
@@ -220,19 +231,21 @@ function RecentRepos({
           None found. Sign in with <span className="font-mono">gh auth login</span>, then refresh.
         </p>
       ) : (
-        <div className="max-h-44 overflow-y-auto rounded-md border border-edge bg-panel-2">
+        <div className="max-h-44 divide-y divide-edge/60 overflow-y-auto rounded-md border border-edge">
           {repos.map((repo) => (
             <button
               key={repo.nameWithOwner}
               type="button"
               onClick={() => onPick(repo)}
-              className="flex w-full items-center gap-2.5 border-b border-edge/50 px-3 py-2 text-left last:border-0 hover:bg-edge/40"
+              className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+                selectedUrl.trim() === repo.url ? "bg-panel-2" : "hover:bg-panel-2/60"
+              }`}
             >
-              <RepoAvatar source={repo.nameWithOwner} name={repo.nameWithOwner} size={22} />
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate text-sm text-ink">{repo.nameWithOwner}</span>
+              <RepoAvatar source={repo.nameWithOwner} name={repo.nameWithOwner} size={24} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-ink">{repo.nameWithOwner}</span>
                 {repo.description && (
-                  <span className="line-clamp-1 text-xs text-ink-dim">{repo.description}</span>
+                  <span className="block truncate text-xs text-ink-dim">{repo.description}</span>
                 )}
               </span>
             </button>

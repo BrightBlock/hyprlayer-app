@@ -248,29 +248,18 @@ fn edit_mappings(
     config_path: &Path,
     edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
 ) -> Result<()> {
-    let raw = std::fs::read_to_string(config_path)?;
-    let mut value: serde_json::Value =
-        serde_json::from_str(&raw).map_err(|source| CoreError::ConfigParse {
-            path: config_path.to_path_buf(),
-            source,
-        })?;
-
-    let mappings = value
-        .pointer_mut("/thoughts/repoMappings")
-        .and_then(|v| v.as_object_mut())
-        .ok_or_else(|| CoreError::OutputParse {
-            program: "config edit".into(),
-            detail: "config has no thoughts.repoMappings object".into(),
-        })?;
-    edit(mappings);
-
-    let tmp = config_path.with_extension("json.tmp");
-    std::fs::write(
-        &tmp,
-        serde_json::to_string_pretty(&value).expect("json value"),
-    )?;
-    std::fs::rename(&tmp, config_path)?;
-    Ok(())
+    crate::config::edit_config(config_path, |root| {
+        let mappings = root
+            .get_mut("thoughts")
+            .and_then(|t| t.get_mut("repoMappings"))
+            .and_then(|v| v.as_object_mut())
+            .ok_or_else(|| CoreError::OutputParse {
+                program: "config edit".into(),
+                detail: "config has no thoughts.repoMappings object".into(),
+            })?;
+        edit(mappings);
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -419,5 +408,19 @@ mod tests {
         assert!(value["thoughts"]["repoMappings"]["/wt/auth-ab12"].is_null());
         // Removing a non-existent mapping is fine.
         remove_worktree_mapping(&config_path, Path::new("/never/was")).unwrap();
+    }
+
+    #[test]
+    fn mapping_edits_never_rewrite_foreign_schema_versions() {
+        // Shared `edit_config` guard: a v5 (or pre-v4) file that happens to
+        // carry repoMappings must error, not be rewritten.
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let raw = r#"{"version":5,"thoughts":{"repoMappings":{}}}"#;
+        std::fs::write(&config_path, raw).unwrap();
+
+        let err = add_worktree_mapping(&config_path, Path::new("/wt/x"), "x", None).unwrap_err();
+        assert_eq!(err.code(), "config_version_too_new");
+        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), raw);
     }
 }

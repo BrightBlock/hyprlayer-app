@@ -23,10 +23,11 @@ export function registerEventBridge(bridge: EventBridge): void {
 export function attachEventListeners(): () => void {
   const unlisteners: Promise<() => void>[] = [
     ...featureBridges.flatMap((bridge) => bridge()),
-    // The hyprlayer CLI rewrote its config: projects/backends may differ.
+    // The hyprlayer CLI rewrote its config: projects/backends/profiles may differ.
     events.configChanged.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["project"] });
+      void queryClient.invalidateQueries({ queryKey: ["thoughts-profiles"] });
     }),
     // Binary probes changed (PATH enrichment, overrides, redetect). Project
     // detail depends on binaries too — it shells out to `hyprlayer`.
