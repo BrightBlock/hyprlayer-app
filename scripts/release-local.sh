@@ -49,7 +49,7 @@ cd "$(dirname "$0")/.."
 # ─── config (publish targets — formerly release.yml's env) ──────────
 RELEASES_REPO="BrightBlock/hyprlayer-releases"
 TAP_REPO="BrightBlock/homebrew-tap"
-WEBSITE_REPO="jtsiros/brightblock.ai"
+WEBSITE_REPO="jtsiros/hyprlayer.dev"
 WEBSITE_MANIFEST_PATH="public/updates/latest.json"
 WEBSITE_CHANGELOG_PATH="public/updates/changelog.json"
 CASK_PATH="Casks/hyprlayer-desktop.rb"
