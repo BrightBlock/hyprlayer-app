@@ -17,6 +17,7 @@
 
 import type { ExitOutcome, SessionEvent, SessionState } from "@/lib/bindings";
 import type { Attachment } from "./attachments";
+import { parseToolInput } from "./toolDisplay";
 
 // The session lifecycle union is generated from core's `SessionState` enum —
 // re-exported here so the whole session feature keeps importing it from the
@@ -240,6 +241,19 @@ export type TranscriptItem =
       trigger: string;
       preTokens: number | null;
       summary?: string;
+    }
+  /** The seam where a command queued into a running session took over — a scheduled
+   *  wakeup firing, or a slash command queued behind a busy turn. claude never echoes
+   *  the injected prompt to us, so without this row the turn just appears, reading as
+   *  the agent spontaneously resuming. Appended on `started` only; the close adds
+   *  nothing the turn's own content doesn't show. `detail` is the scheduling call's
+   *  own `reason` — what the wakeup was waiting for — when there is one. */
+  | {
+      kind: "queuedCommand";
+      id: string;
+      commandUuid: string;
+      label: string;
+      detail: string | null;
     }
   /** A background shell task (`Bash{run_in_background}`) changed state — claude's
    *  async completion signal. Non-rendering; consumed only by
@@ -503,6 +517,28 @@ function firstCompactAwaitingSummary(items: TranscriptItem[]): number {
     if (it.kind === "compact" && it.summary === undefined) return i;
   }
   return -1;
+}
+
+/** How to label a queued-command seam. claude's `command_lifecycle` line carries no
+ *  origin, so the only available signal is what preceded it: when the newest tool call
+ *  is a `ScheduleWakeup`, the command now starting is that wakeup firing, and that
+ *  call's `reason` already says what it was waiting for — so the seam reuses it rather
+ *  than inventing copy. Everything else — a slash command queued behind a busy turn —
+ *  stays generic. */
+function queuedCommandSeam(items: TranscriptItem[]): { label: string; detail: string | null } {
+  const generic = { label: "Queued command", detail: null };
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind !== "tool") continue;
+    if (it.name !== "ScheduleWakeup") return generic;
+    const input = parseToolInput(it.input);
+    const reason = input?.reason ?? input?.prompt;
+    return {
+      label: "Scheduled wakeup",
+      detail: typeof reason === "string" && reason.trim() ? reason.trim() : null,
+    };
+  }
+  return generic;
 }
 
 /** Mark the open streaming assistant block (if any) as finished. */
@@ -891,6 +927,26 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
         ...appended(view, (id) => ({ kind: "error", id, detail: event.detail, raw: event.raw })),
       };
 
+    case "commandLifecycle":
+      // A command queued into the running session took over. Only the opening
+      // bracket is a seam worth drawing — `completed`/`cancelled` close the pair and
+      // add nothing the turn's own content doesn't already show. Close any open prose
+      // block so the divider doesn't land mid-stream (as `compactBoundary` does).
+      if (event.state !== "started") return view;
+      return {
+        ...view,
+        ...appended(
+          view,
+          (id) => ({
+            kind: "queuedCommand",
+            id,
+            commandUuid: event.commandUuid,
+            ...queuedCommandSeam(view.items),
+          }),
+          true,
+        ),
+      };
+
     case "compactBoundary":
       // claude paused to summarize the conversation. The next assistant turn
       // resumes on the post-compact summary; close any open prose block so the
@@ -1121,6 +1177,9 @@ export function viewToText(view: SessionView): string {
         // Mark the boundary; the summary itself stays out of the copy (it's the
         // bulky injected block the divider keeps collapsed), like skill bodies.
         lines.push("--- Conversation compacted ---", "");
+        break;
+      case "queuedCommand":
+        lines.push(`--- ${item.label} ---`, "");
         break;
       case "exit":
         lines.push(`--- ${exitLabel(item.outcome)} ---`, "");

@@ -16,6 +16,7 @@ import {
   ChevronRightIcon,
   ClipboardIcon,
   PuzzleIcon,
+  RestartIcon,
   RewindIcon,
   ShieldIcon,
   WrenchIcon,
@@ -26,7 +27,7 @@ import { exitLabel, type TranscriptItem } from "./transcript";
 import { AttachmentCards } from "./AttachmentCard";
 import { FileCard } from "./FileCard";
 import { PromptCard } from "./PromptCard";
-import { STEP_ROW, StepChevron } from "./stepRow";
+import { STEP_ROW, STEP_ROW_STATIC, StepChevron } from "./stepRow";
 import type { Attachment } from "./attachments";
 import { formatElapsed, formatRelativeTime } from "@/lib/format";
 import {
@@ -597,6 +598,36 @@ const CompactDivider = memo(function CompactDivider({
   );
 });
 
+/** Where a command queued into the running session took over — a scheduled wakeup
+ *  firing, or a slash command queued behind a busy turn. claude never echoes the
+ *  injected prompt to us, so without this row the next turn simply appears and reads as
+ *  the agent spontaneously picking work back up.
+ *
+ *  Shaped like the tool row that scheduled it (dot · icon · name · arg) because it is
+ *  that call's other half: `ScheduleWakeup` says "I'll be back", this row is the coming
+ *  back. It reports rather than discloses, so it takes the static row — a hover tint
+ *  would promise a click that does nothing. */
+const QueuedCommandRow = memo(function QueuedCommandRow({
+  item,
+}: {
+  item: Extract<TranscriptItem, { kind: "queuedCommand" }>;
+}) {
+  return (
+    <div className="text-xs">
+      <div className={STEP_ROW_STATIC}>
+        <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+        <RestartIcon size={13} className="shrink-0 text-ink-dim" />
+        <span className="shrink-0 font-mono font-medium text-ink">{item.label}</span>
+        {item.detail && (
+          <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={item.detail}>
+            {item.detail}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const ExitNotice = memo(function ExitNotice({
   item,
 }: {
@@ -783,6 +814,8 @@ function renderSingle(
       return <ProtocolErrorBlock detail={item.detail} raw={item.raw} />;
     case "compact":
       return <CompactDivider item={item} />;
+    case "queuedCommand":
+      return <QueuedCommandRow item={item} />;
     case "exit":
       return <ExitNotice item={item} />;
     default:

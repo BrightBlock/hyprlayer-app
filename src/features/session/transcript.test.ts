@@ -621,6 +621,78 @@ describe("turn + exit lifecycle", () => {
     expect(view.state).toBe("running");
   });
 
+  it("commandLifecycle draws a seam on started, naming the wakeup and reusing its reason", () => {
+    let view = initialSessionView("running");
+    // The agent schedules a wakeup, then ends its turn.
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "t1",
+      name: "ScheduleWakeup",
+      input: '{"delaySeconds":75,"prompt":"Check the deploy","reason":"waiting for Vercel"}',
+      parentId: null,
+    });
+    view = reduceEvent(view, { kind: "partialText", text: "waiting…", parentId: null });
+    // …the wakeup fires: claude injects the queued prompt and a new turn begins.
+    view = reduceEvent(view, {
+      kind: "commandLifecycle",
+      commandUuid: "cd3eda46",
+      state: "started",
+    });
+    // The seam says what the wakeup was for, rather than inventing copy — the detail
+    // is the scheduling call's own `reason`.
+    expect(view.items[view.items.length - 1]).toMatchObject({
+      kind: "queuedCommand",
+      label: "Scheduled wakeup",
+      detail: "waiting for Vercel",
+    });
+    // The open prose block is closed so the seam doesn't land mid-stream.
+    expect(view.items.find((i) => i.kind === "assistant")).toMatchObject({ streaming: false });
+  });
+
+  it("commandLifecycle falls back to the wakeup's prompt when it carries no reason", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "t1",
+      name: "ScheduleWakeup",
+      input: '{"delaySeconds":60,"prompt":"Re-check the build"}',
+      parentId: null,
+    });
+    view = reduceEvent(view, { kind: "commandLifecycle", commandUuid: "c1", state: "started" });
+    expect(view.items[view.items.length - 1]).toMatchObject({
+      label: "Scheduled wakeup",
+      detail: "Re-check the build",
+    });
+  });
+
+  it("commandLifecycle labels a plain queued command generically, with no detail", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "t1",
+      name: "Bash",
+      input: '{"command":"ls"}',
+      parentId: null,
+    });
+    view = reduceEvent(view, { kind: "commandLifecycle", commandUuid: "c1", state: "started" });
+    expect(view.items[view.items.length - 1]).toMatchObject({
+      kind: "queuedCommand",
+      label: "Queued command",
+      detail: null,
+    });
+  });
+
+  it("commandLifecycle close brackets render nothing — only the opening seam is drawn", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "commandLifecycle", commandUuid: "c1", state: "started" });
+    const afterStart = view.items.length;
+    for (const state of ["completed", "cancelled"]) {
+      view = reduceEvent(view, { kind: "commandLifecycle", commandUuid: "c1", state });
+    }
+    expect(view.items.length).toBe(afterStart);
+    expect(view.items.filter((i) => i.kind === "queuedCommand")).toHaveLength(1);
+  });
+
   it("compactBoundary appends a divider, closes the open assistant, and keeps the turn streaming", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "partialText", text: "thinking…", parentId: null });

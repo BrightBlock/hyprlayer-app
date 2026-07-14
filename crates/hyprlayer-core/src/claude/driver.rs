@@ -715,6 +715,13 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             tool_use_id,
             status,
         }],
+        ParsedLine::CommandLifecycle {
+            command_uuid,
+            state,
+        } => vec![SessionEvent::CommandLifecycle {
+            command_uuid,
+            state,
+        }],
         ParsedLine::Unknown { raw } => vec![SessionEvent::ProtocolError {
             detail: "unrecognized stream-json line".into(),
             raw,

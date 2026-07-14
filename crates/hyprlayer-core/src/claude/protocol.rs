@@ -95,6 +95,23 @@ pub enum ParsedLine {
         tool_use_id: Option<String>,
         status: String,
     },
+    /// A queued command's lifecycle bracket. claude emits `started` when a command
+    /// queued into a running session — a scheduled-wakeup prompt, a slash command
+    /// queued behind a busy turn — is dequeued and begins, then `completed` when the
+    /// turn it ran in ends (or `cancelled`, if that turn was interrupted). Both lines
+    /// share one `command_uuid`.
+    ///
+    /// This is bookkeeping, not content: the command's own user/assistant lines carry
+    /// what it said. It matters because claude never echoes the injected prompt to us
+    /// (we don't run with `--replay-user-messages`), so without this the UI has no
+    /// signal that a new turn began at all — a wakeup-driven turn reads as the agent
+    /// spontaneously picking work back up.
+    CommandLifecycle {
+        command_uuid: String,
+        /// "started" | "completed" | "cancelled". Unrecognized values pass through
+        /// verbatim (same tolerance as [`Self::CompactBoundary`]'s `trigger`).
+        state: String,
+    },
     /// A reply to one of our own control requests (`interrupt`,
     /// `rewind_conversation`, …). We act only on the ones we're awaiting (keyed by
     /// `request_id`); the rest — e.g. interrupt acks — are dropped. `payload` is
@@ -218,6 +235,19 @@ pub fn parse_line(line: &str) -> ParsedLine {
         // Known-but-ignored informational lines (don't surface as errors).
         Some("rate_limit_event") => ParsedLine::System {
             subtype: "rate_limit".into(),
+        },
+        // The queued-command bracket (see `CommandLifecycle`). We key on
+        // `command_uuid`; without one the pair can't be correlated, so — like a
+        // task_notification missing its task_id — it degrades to an inert `System`
+        // line rather than an unpairable seam.
+        Some("command_lifecycle") => match str_field(&v, "command_uuid") {
+            Some(command_uuid) => ParsedLine::CommandLifecycle {
+                command_uuid,
+                state: str_field(&v, "state").unwrap_or_default(),
+            },
+            None => ParsedLine::System {
+                subtype: "command_lifecycle".into(),
+            },
         },
         // Any genuinely unrecognized kind: keep raw for the log.
         _ => ParsedLine::Unknown {
@@ -584,6 +614,52 @@ mod tests {
         assert!(matches!(
             parse_line(line),
             ParsedLine::System { subtype } if subtype == "queue-operation"
+        ));
+    }
+
+    /// A queued command (here: a scheduled-wakeup prompt injected into a running
+    /// session) is bracketed by a started/completed pair sharing one `command_uuid`,
+    /// which is what lets the UI pair them. Left unmodelled these hit the `Unknown`
+    /// catch-all and each rendered an "unrecognized stream-json line" error card
+    /// mid-transcript. Lines verbatim from a real session (claude 2.1.206).
+    #[test]
+    fn command_lifecycle_pair_parses_and_shares_a_command_uuid() {
+        let started = r#"{"type":"command_lifecycle","command_uuid":"cd3eda46-298e-48ba-881f-e90649d1f690","state":"started","uuid":"05a09b7c-a67c-4abf-b43e-35e5a50ea970","session_id":"a762f910-ec07-4eec-b25f-2197e96b4cd6"}"#;
+        let completed = r#"{"type":"command_lifecycle","command_uuid":"cd3eda46-298e-48ba-881f-e90649d1f690","state":"completed","uuid":"815094ae-9e6b-45e6-9be8-a4e663cc7d94","session_id":"a762f910-ec07-4eec-b25f-2197e96b4cd6"}"#;
+        let parsed: Vec<(String, String)> = [started, completed]
+            .iter()
+            .map(|line| match parse_line(line) {
+                ParsedLine::CommandLifecycle {
+                    command_uuid,
+                    state,
+                } => (command_uuid, state),
+                other => panic!("expected CommandLifecycle, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(parsed[0].0, "cd3eda46-298e-48ba-881f-e90649d1f690");
+        assert_eq!(parsed[0].0, parsed[1].0, "the pair shares one command_uuid");
+        assert_eq!(parsed[0].1, "started");
+        assert_eq!(parsed[1].1, "completed");
+    }
+
+    /// An interrupted turn closes its queued commands with `cancelled` rather than
+    /// `completed` — passed through verbatim, not normalized.
+    #[test]
+    fn command_lifecycle_cancelled_passes_through() {
+        let line = r#"{"type":"command_lifecycle","command_uuid":"c1","state":"cancelled","uuid":"u1"}"#;
+        assert!(
+            matches!(parse_line(line), ParsedLine::CommandLifecycle { state, .. } if state == "cancelled")
+        );
+    }
+
+    /// Defensive: without a `command_uuid` the pair can't be correlated, so it
+    /// degrades to an inert `System` line rather than an unpairable seam.
+    #[test]
+    fn command_lifecycle_without_command_uuid_falls_back_to_system() {
+        let line = r#"{"type":"command_lifecycle","state":"started","uuid":"u1"}"#;
+        assert!(matches!(
+            parse_line(line),
+            ParsedLine::System { subtype } if subtype == "command_lifecycle"
         ));
     }
 

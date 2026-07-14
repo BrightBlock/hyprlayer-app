@@ -15,6 +15,11 @@ export const STEP_ROW = `${STEP_ROW_BASE} hover:bg-panel-2`;
  *  hover tint would be the surface color and so read as no hover at all. */
 export const STEP_ROW_ON_PANEL = `${STEP_ROW_BASE} hover:bg-edge/40`;
 
+/** The row shape with no hover tint, for a row that only reports something and has
+ *  nothing to disclose — a hover affordance on it would promise a click that does
+ *  nothing. */
+export const STEP_ROW_STATIC = STEP_ROW_BASE;
+
 /** The disclosure chevron for a step row. `reveal="hover"` keeps it hidden until
  *  the row is hovered or open (thinking/tool); `"always"` shows it (group/subagent). */
 export function StepChevron({

@@ -1867,6 +1867,16 @@ promptName?: string | null } |
  */
 { kind: "compactBoundary"; trigger: string; preTokens: number | null } | 
 /**
+ *  A command queued into a running session — a scheduled-wakeup prompt, a slash
+ *  command queued behind a busy turn — started or finished. The transcript renders
+ *  a seam on `started`, because claude never echoes the injected prompt to us: the
+ *  turn simply begins, and without this marker it reads as the agent spontaneously
+ *  resuming. `completed`/`cancelled` close the bracket and render nothing (the
+ *  turn's own content already shows how it ended). Both carry the same
+ *  `command_uuid`.
+ */
+{ kind: "commandLifecycle"; commandUuid: string; state: string } | 
+/**
  *  A background shell task (spawned by `Bash{run_in_background:true}`) reached
  *  a terminal state. claude emits the underlying `task_notification`
  *  asynchronously the moment the shell finishes — even if the agent never
