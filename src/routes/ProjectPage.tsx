@@ -22,6 +22,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ArchiveIcon, DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "@/components/icons";
 import { ScrollableTabStrip } from "@/components/ScrollableTabs";
 import { commands, type WorkstreamView } from "@/lib/bindings";
+import { GLASS_BAND } from "@/lib/glass";
 import { CreateWorkstreamDialog } from "@/features/workstreams/CreateWorkstreamDialog";
 import { ChangesPanel } from "@/features/workstreams/ChangesPanel";
 import { GitPanel } from "@/features/workstreams/GitPanel";
@@ -1379,7 +1380,13 @@ export function ProjectPage() {
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
           <main className="flex min-w-0 flex-1 flex-col">
-            <div className="flex h-9 items-stretch border-b border-edge bg-panel">
+            {/* Glass, matching the sidebar's Projects band: the transcript below
+                extends up behind this strip (-mt-9 in TranscriptView) and scrolls
+                under it, so the blur samples real content. */}
+            <div
+              data-glass
+              className={`relative z-10 flex h-9 items-stretch border-b border-edge ${GLASS_BAND}`}
+            >
               {/* Main-pane tab strip + the split / docs controls. */}
               <div
                 data-pane="main"

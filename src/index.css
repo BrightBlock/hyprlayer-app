@@ -242,6 +242,20 @@ html.solarized {
   --color-nebula-5: #d33682;
 }
 
+/* Accessibility → Display → Reduce Transparency / Increase Contrast. Apple
+   requires Liquid Glass surfaces to answer both, and ours are CSS rather than a
+   system material, so nothing does it for us: hand every glass band back a solid
+   fill and drop the blur. Marked with `data-glass` at the call site rather than
+   matched structurally, so a new glass surface opts in by saying so. `!important`
+   beats the single-class utilities it overrides (bg-panel/70, backdrop-blur-xl),
+   which would otherwise tie on specificity and win on source order. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  [data-glass] {
+    background-color: var(--color-panel) !important;
+    backdrop-filter: none !important;
+  }
+}
+
 html,
 body,
 #root {

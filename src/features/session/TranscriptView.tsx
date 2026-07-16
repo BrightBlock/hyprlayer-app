@@ -1168,7 +1168,16 @@ export const TranscriptView = memo(
         // `overflow-anchor:none`: this component owns bottom-pinning; engine
         // scroll anchoring would counter-adjust scrollTop when rows above
         // reflow, which reads as a phantom scroll-up and drops the pin.
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 [overflow-anchor:none]"
+        // `-mt-9` lifts this scroller up behind the pane's h-9 tab strip so rows
+        // slide under it and its backdrop-blur has content to sample (see
+        // lib/glass.ts); `pt-14` (h-9 + the p-5 this overrides on top) keeps the
+        // first row where it was at rest. Bottom padding is untouched, so the
+        // bottom-pin math below — which compares scrollTop against
+        // scrollHeight - clientHeight — is unaffected: both grow by the same 36px.
+        // Unconditional, unlike the band's glass: against a solid tab strip
+        // (Windows/Linux) rows just scroll under an opaque bar, which is exactly
+        // what they did before.
+        className="-mt-9 min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pt-14 [overflow-anchor:none]"
       >
         <div className="mx-auto w-[90%]">
           <ItemList

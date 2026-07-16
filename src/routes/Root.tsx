@@ -36,6 +36,7 @@ import { triggerActiveFileSave } from "@/lib/fileSave";
 import { docTitle } from "@/features/library/text";
 import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
 import { startEdgeDrag } from "@/lib/resize";
+import { GLASS_BAND } from "@/lib/glass";
 import { IS_MACOS } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
 import { useUiStore } from "@/lib/uiStore";
@@ -43,6 +44,7 @@ import {
   selectPinnedViews,
   usePinStore,
 } from "@/features/workstreams/pinStore";
+import { useProjectTreeStore } from "@/features/projects/projectTreeStore";
 import { useLibraryScope } from "@/features/library/libraryScope";
 import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "@/lib/keybindings/registry";
@@ -734,6 +736,9 @@ export function Root() {
   const pinnedIds = usePinStore((state) => state.pinnedIds);
   const pinnedSectionCollapsed = usePinStore((state) => state.collapsed);
   const togglePin = usePinStore((state) => state.togglePin);
+  // Per-project disclosure in the tree below (VSCode-style folder folding).
+  const collapsedProjectPaths = useProjectTreeStore((state) => state.collapsedPaths);
+  const toggleProjectCollapsed = useProjectTreeStore((state) => state.toggleCollapsed);
   const togglePinnedSection = usePinStore((state) => state.toggleCollapsed);
   const pinnedViews = selectPinnedViews(pinnedIds, allWorkstreams.data ?? []);
   const projectByPath = new Map(
@@ -987,21 +992,14 @@ export function Root() {
     (leftClusterIcons - 1) * LEFT_CLUSTER_GAP;
   const minContentOffset =
     leftClusterRight + LEFT_CLUSTER_CLEARANCE - HEADER_CONTENT_PAD;
-  // The breadcrumb clears the whole left region — the nav rail plus the project
-  // panel (fully hidden when collapsed) — so it sits above the main content,
-  // not floating over the panel.
-  // On the Library route the project panel is hidden and the route renders its
-  // own list panel, so the breadcrumb sits just after the rail (over the panel).
-  // It still floors at `minContentOffset` so it clears the macOS traffic lights —
-  // the 56px rail alone is narrower than their inset, so the bare rail width
-  // would slide the breadcrumb under the close/minimize/zoom buttons.
-  const contentOffset =
-    onLibrary || onPrompts
-      ? Math.max(NAV_RAIL_WIDTH, minContentOffset)
-      : Math.max(
-          NAV_RAIL_WIDTH + (collapsed ? 0 : sidebarWidth),
-          minContentOffset,
-        );
+  // The breadcrumb hugs the left, sitting just past the header's own controls
+  // rather than tracking the panels below it. It used to be inset by the rail +
+  // project panel so it started where the main content did — which put it over
+  // the workstream pane, and made it slide sideways whenever the sidebar was
+  // resized or collapsed. `minContentOffset` is the only real constraint: clear
+  // the absolutely-positioned left cluster (and, with it, the macOS traffic
+  // lights) so the title never collides with the controls.
+  const contentOffset = minContentOffset;
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (collapsed) return;
     startEdgeDrag(event, {
@@ -1126,6 +1124,11 @@ export function Root() {
           are pushed down to this bar's center via trafficLightPosition
           (tauri.conf.json y ≈ header height / 2) so they line up with the
           centered content. */}
+      {/* Stays opaque: nothing scrolls under it. The window bar sits above the
+          h-9 Projects band and the agent tab strip, both of which are solid — so
+          a backdrop-blur here would sample flat colour and render nothing. The
+          glass lives on those two bands instead, which do have scrollers
+          directly beneath them. */}
       <header
         className="relative flex h-11 shrink-0 items-center border-b border-edge bg-panel"
         data-tauri-drag-region
@@ -1183,10 +1186,13 @@ export function Root() {
 
         {/* marginLeft tracks the sidebar width; not reduced-motion-gated so it
             stays in lockstep with the (also un-gated) sidebar slide on Windows. */}
+        {/* No margin transition: the inset no longer follows the sidebar (see
+            `contentOffset`), so it only moves when the left cluster itself
+            changes — entering fullscreen, or a route that adds the docs button.
+            Those are instant elsewhere in the bar, and animating just this row
+            would drift it out of step with them. */}
         <div
-          className={`flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3 ${
-            resizingSidebar ? "" : "transition-[margin] duration-200 ease-out"
-          }`}
+          className="flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3"
           style={{ marginLeft: contentOffset }}
           data-tauri-drag-region
         >
@@ -1528,9 +1534,15 @@ export function Root() {
               style={{ width: sidebarWidth }}
             >
               {/* Header band, height-matched to the agent bar (h-9) so the
-              "Projects" label + add button sit vertically centered alongside
-              it — and the bottom border lines up across the sidebar/pane seam. */}
-              <div className="flex h-9 shrink-0 items-center justify-between border-b border-edge pl-4 pr-3">
+              "Projects" label + add button sit vertically centered alongside it.
+              No bottom rule, VSCode-style: the tree reads as one column, and the
+              band's glass already separates it from the list scrolling beneath.
+              The agent bar across the seam keeps its border — it divides two
+              different panes, where this only titles the one below it. */}
+              <div
+                data-glass
+                className={`relative z-10 flex h-9 shrink-0 items-center justify-between pl-4 pr-3 ${GLASS_BAND}`}
+              >
                 <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">
                   Projects
                 </p>
@@ -1544,7 +1556,12 @@ export function Root() {
                   <PlusIcon size={14} />
                 </button>
               </div>
-              <nav className="flex-1 overflow-y-auto px-2 pt-2">
+              {/* -mt-9 lifts this scroller up behind the Projects band above, so
+                  the list slides under it and the band's backdrop-blur has real
+                  content to sample (Tahoe's in-window glass). pt-11 restores the
+                  original pt-2 gap on top of the band's h-9, keeping the first
+                  row exactly where it was at rest. */}
+              <nav className="-mt-9 flex-1 overflow-y-auto px-2 pt-11">
                 {bootstrap.isLoading && (
                   <div className="flex justify-center py-4">
                     <Spinner />
@@ -1644,6 +1661,7 @@ export function Root() {
                   const children = itemsByProject.get(p.path) ?? [];
                   const isCurrent = currentProjectPath === p.path;
                   const projectHighlight = isCurrent && !activeWorkstreamId;
+                  const isProjectCollapsed = collapsedProjectPaths.includes(p.path);
                   const isDragging = projectDrag?.path === p.path;
 
                   return (
@@ -1681,6 +1699,31 @@ export function Root() {
                             aria-hidden="true"
                           />
                         )}
+                        {/* Disclosure, VSCode-style: folds this project's
+                            workstreams away. A project with none keeps the same
+                            gap so every row's avatar stays on one vertical line.
+                            data-no-drag so hitting the chevron toggles instead of
+                            starting a project reorder. */}
+                        {children.length > 0 ? (
+                          <button
+                            type="button"
+                            data-no-drag
+                            onClick={() => toggleProjectCollapsed(p.path)}
+                            aria-expanded={!isProjectCollapsed}
+                            aria-label={`${isProjectCollapsed ? "Expand" : "Collapse"} ${p.mappedName}`}
+                            title={isProjectCollapsed ? "Expand" : "Collapse"}
+                            className="ml-1 flex h-5 w-4 shrink-0 items-center justify-center rounded text-ink-dim hover:text-ink"
+                          >
+                            <ChevronDownIcon
+                              size={12}
+                              className={`shrink-0 transition-transform ${
+                                isProjectCollapsed ? "-rotate-90" : ""
+                              }`}
+                            />
+                          </button>
+                        ) : (
+                          <span className="ml-1 w-4 shrink-0" aria-hidden="true" />
+                        )}
                         <Link
                           to="/projects/$projectPath"
                           params={{ projectPath: p.path }}
@@ -1689,7 +1732,7 @@ export function Root() {
                             // A drag that ends on the header shouldn't also navigate.
                             if (projectDragSuppress.current) e.preventDefault();
                           }}
-                          className={`flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-sm text-ink ${
+                          className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-1.5 pr-2.5 text-sm text-ink ${
                             projectHighlight ? "font-semibold" : "font-medium"
                           }`}
                           title={`${p.mappedName} · ${p.backendKind}${p.profile ? ` · ${p.profile}` : ""}`}
@@ -1731,9 +1774,10 @@ export function Root() {
                         </Link>
                       </div>
 
-                      {children.map((view) => {
-                        const isActiveItem =
-                          isCurrent && activeWorkstreamId === view.item.id;
+                      {!isProjectCollapsed &&
+                        children.map((view) => {
+                          const isActiveItem =
+                            isCurrent && activeWorkstreamId === view.item.id;
                         // In-place workstreams run in the project's own checkout (no
                         // dedicated worktree). The row reads as a clean status-dot +
                         // title to match the design, so the distinction lives in the
