@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.4.26",
+      "date": "2026-07-21",
+      "summary": "Liquid glass on the sidebar and tabs, collapsible project trees.",
+      "notes": [
+        "The Projects sidebar and tab strip now use the same liquid-glass blur treatment as the rest of the window on macOS.",
+        "Each project's workstream list can now be collapsed under a disclosure chevron, VSCode-explorer style.",
+        "The header breadcrumb no longer slides sideways when the sidebar resizes or collapses."
+      ]
+    },
+    {
       "version": "0.4.25",
       "date": "2026-07-14",
       "summary": "Clearer transcript markers for queued commands and wakeups.",
