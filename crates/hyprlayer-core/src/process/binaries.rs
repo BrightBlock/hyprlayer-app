@@ -64,6 +64,16 @@ impl BinaryKind {
         }
     }
 
+    /// Whether a *resolved* binary must answer `--version` with a parseable
+    /// semver to count as present. True only for our own CLI: the version is how
+    /// we tell the real `hyprlayer` from the desktop app's `Hyprlayer.exe`, which
+    /// shares the name case-insensitively on Windows and can be resolved through
+    /// winget's portable shim (`Commands: [hyprlayer]`). The GUI prints no
+    /// version, so a versionless hit is the desktop app, not the CLI.
+    fn requires_version(self) -> bool {
+        matches!(self, BinaryKind::Hyprlayer)
+    }
+
     /// Whether the app can function without this binary.
     pub fn optional(self) -> bool {
         // The app runs fine on Claude alone; OpenCode, gh, and Ollama are extras.
@@ -238,32 +248,17 @@ impl BinaryResolver {
     async fn probe(&self, kind: BinaryKind) -> BinaryStatus {
         let overridden = self.overrides.read().await.contains_key(&kind);
         let Some(path) = self.resolve(kind).await else {
-            return BinaryStatus {
-                kind,
-                name: kind.command_name().into(),
-                path: None,
-                version: None,
-                state: BinaryState::Missing,
-                optional: kind.optional(),
-                overridden,
-            };
+            return missing_status(kind, overridden);
         };
 
         let version = probe_version(&path).await;
-        let state = match (&version, kind.min_version()) {
-            (Some(v), Some((min_str, min))) => {
-                if parse_semver(v).is_some_and(|found| found < min) {
-                    BinaryState::TooOld {
-                        min: min_str.to_string(),
-                    }
-                } else {
-                    BinaryState::Ok
-                }
-            }
-            // Resolved but --version failed: still report the path; treat as
-            // present (some shims only work in full invocations).
-            _ => BinaryState::Ok,
-        };
+        let state = state_for(kind, version.as_deref());
+        // `Missing` from a path that *did* resolve means the binary answered but
+        // isn't our CLI — the Windows `Hyprlayer.exe` desktop-exe collision. Drop
+        // the path so nothing downstream runs the GUI as if it were the CLI.
+        if state == BinaryState::Missing {
+            return missing_status(kind, overridden);
+        }
 
         BinaryStatus {
             kind,
@@ -274,6 +269,45 @@ impl BinaryResolver {
             optional: kind.optional(),
             overridden,
         }
+    }
+}
+
+/// A `BinaryStatus` for a binary we couldn't resolve to a usable path. Path and
+/// version are cleared — there is nothing to hand back or display.
+fn missing_status(kind: BinaryKind, overridden: bool) -> BinaryStatus {
+    BinaryStatus {
+        kind,
+        name: kind.command_name().into(),
+        path: None,
+        version: None,
+        state: BinaryState::Missing,
+        optional: kind.optional(),
+        overridden,
+    }
+}
+
+/// Decide a resolved binary's state from its probed `--version` output.
+///
+/// A parseable version below the kind's floor is `TooOld`; at/above it (or when
+/// the kind has no floor) it's `Ok`. When `--version` yielded nothing:
+/// - third-party binaries stay `Ok` — some shims only answer in a full
+///   invocation, so a bare resolved path is still worth handing back;
+/// - our own `hyprlayer` CLI becomes `Missing`, because a versionless hit is the
+///   desktop app's `Hyprlayer.exe` wearing the CLI's name (see
+///   [`BinaryKind::requires_version`]), not the CLI.
+fn state_for(kind: BinaryKind, version: Option<&str>) -> BinaryState {
+    match (version, kind.min_version()) {
+        (Some(v), Some((min_str, min))) => {
+            if parse_semver(v).is_some_and(|found| found < min) {
+                BinaryState::TooOld {
+                    min: min_str.to_string(),
+                }
+            } else {
+                BinaryState::Ok
+            }
+        }
+        (None, _) if kind.requires_version() => BinaryState::Missing,
+        _ => BinaryState::Ok,
     }
 }
 
@@ -421,6 +455,48 @@ mod tests {
         assert_eq!(parse_semver("2.49"), Some([2, 49, 0]));
         assert_eq!(parse_semver("1.5.6-beta+abc"), Some([1, 5, 6]));
         assert_eq!(parse_semver("version"), None);
+    }
+
+    #[test]
+    fn versionless_hyprlayer_is_missing_but_third_party_stays_present() {
+        // The crux of the Windows desktop-exe misdetection: a `hyprlayer` that
+        // resolved but printed no version is the GUI wearing the CLI's name, so
+        // it must be Missing — while gh/git and friends keep the lenient path.
+        assert_eq!(state_for(BinaryKind::Hyprlayer, None), BinaryState::Missing);
+        assert_eq!(
+            state_for(BinaryKind::Hyprlayer, Some("1.5.6")),
+            BinaryState::Ok
+        );
+        assert_eq!(state_for(BinaryKind::Git, None), BinaryState::Ok);
+        assert_eq!(state_for(BinaryKind::Gh, None), BinaryState::Ok);
+    }
+
+    #[test]
+    fn version_floor_still_flags_too_old() {
+        assert_eq!(
+            state_for(BinaryKind::Claude, Some("2.0.9")),
+            BinaryState::TooOld { min: "2.1.0".into() }
+        );
+        assert_eq!(state_for(BinaryKind::Claude, Some("2.1.0")), BinaryState::Ok);
+    }
+
+    #[tokio::test]
+    async fn resolved_hyprlayer_without_version_reports_missing() {
+        // End-to-end: an override points `hyprlayer` at a path that yields no
+        // `--version` (here, one that won't spawn, so `probe_version` is None).
+        // Detection must report Missing with no path, and `require` must error —
+        // never hand back the wrong exe as if it were the CLI.
+        let resolver = BinaryResolver::initialize(HashMap::new());
+        resolver
+            .set_override(
+                BinaryKind::Hyprlayer,
+                Some(PathBuf::from("/nonexistent/not-really-hyprlayer")),
+            )
+            .await;
+        let status = resolver.status(BinaryKind::Hyprlayer).await;
+        assert_eq!(status.state, BinaryState::Missing);
+        assert_eq!(status.path, None);
+        assert!(resolver.require(BinaryKind::Hyprlayer).await.is_err());
     }
 
     #[tokio::test]
