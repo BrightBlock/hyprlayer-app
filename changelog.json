@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.4.27",
+      "date": "2026-07-22",
+      "summary": "Fix CLI detection on Windows falsely reporting itself installed.",
+      "notes": [
+        "On Windows, the hyprlayer CLI check no longer mistakes the desktop app's own exe (answering via a winget portable shim) for a real CLI install."
+      ]
+    },
+    {
       "version": "0.4.26",
       "date": "2026-07-21",
       "summary": "Liquid glass on the sidebar and tabs, collapsible project trees.",
