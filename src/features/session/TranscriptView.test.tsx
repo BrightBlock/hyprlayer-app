@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { insideNestedScroller, releaseOnWheel, stickAfterScroll } from "./TranscriptView";
+import {
+  TranscriptView,
+  insideNestedScroller,
+  releaseOnWheel,
+  stickAfterScroll,
+} from "./TranscriptView";
 
 // stickAfterScroll(prevTop, top, gap, wasStuck) — `gap` is the distance to the
 // bottom (scrollHeight - clientHeight - scrollTop). Releases only on a genuine
@@ -117,5 +123,74 @@ describe("insideNestedScroller", () => {
     const { root, target } = chain();
     root.scrollTop = 500;
     expect(insideNestedScroller(target, root)).toBe(false);
+  });
+});
+
+// Resizing the window (or the split pane) moves the bottom without firing a
+// scroll event, so a stuck transcript used to drift off the bottom and read as
+// if the chat scrolled with the window. A ResizeObserver on the scroller and
+// its content re-pins instead.
+describe("re-pinning on resize", () => {
+  /** jsdom has no layout engine, so it never delivers a resize — capture the
+   *  observer callbacks and fire them by hand. */
+  let resizes: ResizeObserverCallback[] = [];
+
+  beforeEach(() => {
+    resizes = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: ResizeObserverCallback) {
+          resizes.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  /** Render the transcript and hand back its scroller with fake metrics: 1000px
+   *  of content in a 400px viewport, scrolled to the exact bottom. */
+  function renderStuck() {
+    const { container } = render(
+      <TranscriptView
+        items={[]}
+        busy={false}
+        connecting={false}
+        harnessLabel="Claude Code"
+        workingSince={null}
+        permission={{ onAllow: () => {}, onAllowForSession: () => {}, onDeny: () => {} }}
+        prompt={{ onRewind: () => {} }}
+      />,
+    );
+    const el = container.firstChild as HTMLDivElement;
+    let clientHeight = 400;
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => clientHeight });
+    el.scrollTop = 600;
+    return { el, shrinkViewportTo: (h: number) => (clientHeight = h) };
+  }
+
+  const resize = () => resizes.forEach((cb) => cb([], {} as ResizeObserver));
+
+  it("re-pins to the new bottom when the viewport shrinks", () => {
+    const { el, shrinkViewportTo } = renderStuck();
+    shrinkViewportTo(300); // window dragged shorter — opens a 100px gap
+    resize();
+    expect(el.scrollTop).toBe(700);
+  });
+
+  it("leaves a user who scrolled up where they are", () => {
+    const { el, shrinkViewportTo } = renderStuck();
+    fireEvent.wheel(el, { deltaY: -40 });
+    el.scrollTop = 200;
+    shrinkViewportTo(300);
+    resize();
+    expect(el.scrollTop).toBe(200);
   });
 });

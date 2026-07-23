@@ -1033,6 +1033,7 @@ export const TranscriptView = memo(
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
     const atBottom = useRef(true);
     // Previous scrollTop, to read scroll *direction*; a drop is a candidate
     // scroll-up, confirmed against the gap to the bottom in onScroll.
@@ -1136,6 +1137,24 @@ export const TranscriptView = memo(
       return () => cancelAnimationFrame(frame);
     }, [busy, pin]);
 
+    // A resize moves the bottom without ever firing a scroll event, so none of
+    // the handlers above notice: shrinking the window drops clientHeight and
+    // opens a gap under a stuck view, and changing the width re-wraps the rows
+    // into a different scrollHeight. Either way the transcript slides out of its
+    // pin and the content appears to scroll with the window. Observe both boxes
+    // — the scroller for its own size, the content for reflow and for late
+    // growth while idle (an image settling) — and re-pin. `pin` no-ops once the
+    // user has scrolled up, so a resize never yanks them back to the bottom.
+    useEffect(() => {
+      const el = scrollRef.current;
+      const content = contentRef.current;
+      if (!el || !content || typeof ResizeObserver === "undefined") return;
+      const ro = new ResizeObserver(() => pin());
+      ro.observe(el);
+      ro.observe(content);
+      return () => ro.disconnect();
+    }, [pin]);
+
     // Cancel any in-flight send-ease on unmount so it can't tick after teardown.
     useEffect(
       () => () => {
@@ -1179,7 +1198,7 @@ export const TranscriptView = memo(
         // what they did before.
         className="-mt-9 min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pt-14 [overflow-anchor:none]"
       >
-        <div className="mx-auto w-[90%]">
+        <div ref={contentRef} className="mx-auto w-[90%]">
           <ItemList
             items={topLevel}
             childrenByParent={childrenByParent}
