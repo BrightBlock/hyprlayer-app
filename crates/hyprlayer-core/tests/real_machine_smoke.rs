@@ -3,10 +3,13 @@
 //!   cargo test -p hyprlayer-core --test real_machine_smoke -- --ignored --nocapture
 
 use std::collections::HashMap;
+use std::process::Stdio;
+use std::time::Duration;
 
 use hyprlayer_core::config::ConfigService;
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryResolver, BinaryState};
+use hyprlayer_core::process::spawn_supervised;
 
 /// A resolved binary spawns directly, whatever it was installed as.
 ///
@@ -33,6 +36,99 @@ async fn a_resolved_binary_spawns_directly() {
                  .cmd shim, the app needs its own cmd.exe wrapper again");
     println!("exit={:?} out={:?}", out.status.code(), String::from_utf8_lossy(&out.stdout).trim());
     assert!(out.status.success(), "`opencode --version` should exit 0");
+}
+
+/// A supervised `opencode serve` must not survive the handle that owns it.
+///
+/// Windows is the case this exists for. npm installs OpenCode as `opencode.cmd`
+/// with no `.exe` on PATH, and `std::process::Command` runs `.cmd` through
+/// `cmd.exe` — so the pid we hold is the wrapper and the server is its child.
+/// Verified on nexus-win: `kill_on_drop` reaped the wrapper and left the server
+/// listening indefinitely, which is why the spawn goes through a job object now.
+/// On Unix the tree is one process deep and this pins the same invariant.
+///
+/// The "came up" assertion is load-bearing: without it a server that never
+/// started would make the teardown check pass for the wrong reason.
+#[tokio::test]
+#[ignore = "spawns a real `opencode serve`; run in the session the app launches from"]
+async fn opencode_serve_dies_with_its_handle() {
+    let resolver = BinaryResolver::initialize(HashMap::new());
+    resolver.enrich_with_login_shell().await;
+    let bin = resolver
+        .status(BinaryKind::OpenCode)
+        .await
+        .path
+        .expect("opencode should resolve");
+
+    let port = free_port();
+    let data_dir = tempfile::tempdir().expect("temp data home");
+
+    // The app's spawn shape (src-tauri/src/opencode.rs), against a throwaway
+    // data home so this never touches the user's OpenCode state.
+    let mut cmd = tokio::process::Command::new(&bin);
+    cmd.args([
+        "serve",
+        "--hostname",
+        "127.0.0.1",
+        "--port",
+        &port.to_string(),
+    ])
+    .env("XDG_DATA_HOME", data_dir.path())
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        // Inherent on tokio's Command; no CommandExt import needed.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let child = spawn_supervised(&mut cmd).expect("spawn opencode serve");
+    println!("port {port}, held pid {:?}", child.id());
+
+    assert!(
+        port_settles(port, true, Duration::from_secs(30)).await,
+        "`opencode serve` never listened on {port}; the teardown check below \
+         would pass vacuously"
+    );
+
+    drop(child);
+
+    assert!(
+        port_settles(port, false, Duration::from_secs(15)).await,
+        "`opencode serve` is still listening on {port} after its handle dropped \
+         — the process tree outlived us. On Windows this means the job object \
+         did not take: we killed the `cmd.exe` shim and the server underneath \
+         it is still running."
+    );
+}
+
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind ephemeral port")
+        .local_addr()
+        .expect("local addr")
+        .port()
+}
+
+/// Poll until `port` is open (`want_open`) or closed, within `budget`.
+/// Blocking connect on purpose — a loopback attempt resolves immediately either
+/// way, and `tokio`'s `net` feature is not enabled for this crate on its own.
+async fn port_settles(port: u16, want_open: bool, budget: Duration) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let open =
+            std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok();
+        if open == want_open {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 #[tokio::test]

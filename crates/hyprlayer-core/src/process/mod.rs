@@ -5,6 +5,8 @@
 //! vectors (never a shell), captured output, timeout, typed errors.
 
 pub mod binaries;
+#[cfg(windows)]
+mod job;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -220,6 +222,65 @@ impl Exec {
     fn program_display(&self) -> String {
         self.program.display().to_string()
     }
+}
+
+/// A long-lived child plus whatever the OS needs to guarantee its whole tree
+/// goes with it. Hold it for as long as the child should live; drop it to tear
+/// the child down.
+pub struct SupervisedChild {
+    child: tokio::process::Child,
+    /// Dropping this closes the job handle, which is what kills the tree.
+    #[cfg(windows)]
+    _job: Option<job::JobObject>,
+}
+
+impl SupervisedChild {
+    /// The pid we spawned. On Windows this may be a `cmd.exe` wrapper rather
+    /// than the program itself — do not kill it directly, drop `self`.
+    pub fn id(&self) -> Option<u32> {
+        self.child.id()
+    }
+}
+
+/// Spawn a long-lived child so that killing us kills everything it started.
+///
+/// Windows needs a job object: a resolved CLI is often an npm `.cmd` shim, which
+/// `std::process::Command` runs through `cmd.exe`, so the pid we hold is the
+/// wrapper and `kill_on_drop` alone leaves the real program running (see
+/// [`job`]). The job also covers the routes where destructors never run —
+/// `process::exit`, a panic, `TerminateProcess` — because the kernel closes our
+/// handle regardless.
+///
+/// Unix needs nothing extra: a script bin is exec'd in place rather than wrapped,
+/// so the pid we hold *is* the program and `kill_on_drop` reaches it.
+///
+/// A job that cannot be created or joined is logged and skipped rather than
+/// failing the spawn: degrading to the old behaviour beats refusing to start.
+pub fn spawn_supervised(cmd: &mut tokio::process::Command) -> std::io::Result<SupervisedChild> {
+    cmd.kill_on_drop(true);
+
+    #[cfg(windows)]
+    {
+        let job = match job::JobObject::kill_on_close() {
+            Ok(job) => Some(job),
+            Err(e) => {
+                tracing::warn!("job object unavailable, child tree may outlive us: {e}");
+                None
+            }
+        };
+        let child = cmd.spawn()?;
+        if let Some(j) = &job {
+            if let Err(e) = j.adopt(&child) {
+                tracing::warn!("could not join child to job, tree may outlive us: {e}");
+            }
+        }
+        Ok(SupervisedChild { child, _job: job })
+    }
+
+    #[cfg(not(windows))]
+    Ok(SupervisedChild {
+        child: cmd.spawn()?,
+    })
 }
 
 fn program_name(path: &str) -> String {

@@ -1966,6 +1966,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "which",
+ "windows-sys 0.60.2",
  "xxhash-rust",
 ]
 

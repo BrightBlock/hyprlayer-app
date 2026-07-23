@@ -96,8 +96,10 @@ pub struct OpenCodeServer {
     /// authoritative meter denominator for hosted providers — the UI can't infer
     /// it from the id. Empty if the fetch failed (the UI then falls back).
     model_context: std::collections::HashMap<String, u32>,
-    /// Kept alive for the app's lifetime; killed on drop (app exit).
-    _child: Mutex<tokio::process::Child>,
+    /// Kept alive for the app's lifetime. Supervised because on Windows this is
+    /// a `cmd.exe` shim wrapping the real server — killing the pid we hold would
+    /// leave the server listening. See `process::spawn_supervised`.
+    _child: Mutex<hyprlayer_core::process::SupervisedChild>,
 }
 
 impl OpenCodeServer {
@@ -123,8 +125,7 @@ impl OpenCodeServer {
             .env("XDG_DATA_HOME", &data_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
+            .stderr(Stdio::null());
         // Keep using the user's real provider credentials (written by the
         // OpenCode settings tab) even though the data home is app-owned. Inject
         // the auth.json *contents* (the path-based OPENCODE_AUTH_JSON is ignored).
@@ -143,8 +144,7 @@ impl OpenCodeServer {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let child = cmd
-            .spawn()
+        let child = hyprlayer_core::process::spawn_supervised(&mut cmd)
             .map_err(|e| format!("spawn `opencode serve`: {e}"))?;
 
         let client = reqwest::Client::builder()
