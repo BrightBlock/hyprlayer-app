@@ -232,9 +232,30 @@ pub fn parse_line(line: &str) -> ParsedLine {
         // reply (keyed by request_id); other acks (interrupt) route to no waiter
         // and are dropped. Not transcript content, so never a transcript event.
         Some("control_response") => parse_control_response(&v),
+        // claude withdrawing a `can_use_tool`/`AskUserQuestion` prompt it had
+        // already sent us — the user interrupted the turn the prompt was gating.
+        // Carries only the `request_id` of that ask. Nothing to do: the cancelled
+        // tool's `ToolResult` lands right behind it and settles the open card, and
+        // our own outbound control requests are timeout-bounded, so a stray cancel
+        // can't strand a waiter either way. Inert — but not an error.
+        Some("control_cancel_request") => ParsedLine::System {
+            subtype: "control_cancel_request".into(),
+        },
         // Known-but-ignored informational lines (don't surface as errors).
         Some("rate_limit_event") => ParsedLine::System {
             subtype: "rate_limit".into(),
+        },
+        // A still-running tool's liveness ping (claude 2.1.21x): every 30s a tool
+        // that hasn't returned yet emits `{"type":"tool_progress","heartbeat":true,
+        // "tool_use_id":"<parent>-heartbeat-N","elapsed_time_seconds":30,…}`. Pure
+        // liveness, never transcript content — claude's own SDK adapter drops the
+        // heartbeat/subagent-retry frames outright and renders the remaining kind
+        // as a throwaway "Tool X running for Ns…" status string. The tool's own
+        // `ToolUse`/`ToolResult` pair already bounds it for us, so every kind is
+        // inert here. (`elapsed_time_seconds` + `parent_tool_use_id` would be
+        // enough to age a long-running tool card, if that's ever wanted.)
+        Some("tool_progress") => ParsedLine::System {
+            subtype: "tool_progress".into(),
         },
         // The queued-command bracket (see `CommandLifecycle`). We key on
         // `command_uuid`; without one the pair can't be correlated, so — like a
@@ -660,6 +681,47 @@ mod tests {
         assert!(matches!(
             parse_line(line),
             ParsedLine::System { subtype } if subtype == "command_lifecycle"
+        ));
+    }
+
+    /// claude 2.1.21x pings every 30s while a tool is still running. Left
+    /// unmodelled each ping rendered an "unrecognized stream-json line" error card
+    /// mid-transcript — i.e. one every 30s under any slow Bash call. It carries no
+    /// content (the tool's own use/result pair bounds it), so it's inert `System`.
+    /// Line verbatim from a real session (claude 2.1.218).
+    #[test]
+    fn tool_progress_heartbeat_is_system() {
+        let line = r#"{"type":"tool_progress","tool_use_id":"toolu_018Z7VFXLKyjbchmrLXh2zN4-heartbeat-0","tool_name":"Bash","parent_tool_use_id":"toolu_018Z7VFXLKyjbchmrLXh2zN4","elapsed_time_seconds":30,"heartbeat":true,"session_id":"a762f910-ec07-4eec-b25f-2197e96b4cd6","uuid":"4b112374-593d-4406-aa8b-cba5534f0813"}"#;
+        assert!(matches!(
+            parse_line(line),
+            ParsedLine::System { subtype } if subtype == "tool_progress"
+        ));
+    }
+
+    /// The non-heartbeat `tool_progress` kinds (`repl_call`, `subagent_retry`) are
+    /// inert too — claude renders them only as a transient status string, never as
+    /// transcript content — so the arm must not key on `heartbeat` being present.
+    #[test]
+    fn tool_progress_without_heartbeat_flag_is_still_system() {
+        let line = r#"{"type":"tool_progress","tool_use_id":"toolu_01A","tool_name":"Bash","subagent_retry":{"attempt":1},"elapsed_time_seconds":90,"uuid":"u1"}"#;
+        assert!(matches!(
+            parse_line(line),
+            ParsedLine::System { subtype } if subtype == "tool_progress"
+        ));
+    }
+
+    /// claude withdraws a pending permission/question prompt with a
+    /// `control_cancel_request` naming that ask's `request_id` — seen when the user
+    /// interrupts a turn parked on an `AskUserQuestion`. Inert (the cancelled
+    /// tool's result settles the card), but it must not surface as a protocol
+    /// error. Line verbatim from a real session.
+    #[test]
+    fn control_cancel_request_is_system() {
+        let line =
+            r#"{"type":"control_cancel_request","request_id":"365bf5ed-5f59-4b2e-8b6b-c0a731c086b0"}"#;
+        assert!(matches!(
+            parse_line(line),
+            ParsedLine::System { subtype } if subtype == "control_cancel_request"
         ));
     }
 
