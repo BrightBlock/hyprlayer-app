@@ -328,6 +328,25 @@ export function OllamaMarkIcon({ size = 14, className }: IconProps) {
   );
 }
 
+/**
+ * The mark for a harness key, so the harness→icon mapping lives in ONE place
+ * rather than as a ternary chain per surface. Accepts the `Harness` union and the
+ * wider `providers.defaultHarness` vocabulary (which adds `ollama`); an unknown
+ * key falls back to Claude's mark, matching `harnessOption`.
+ */
+export function harnessIcon(key: string | null | undefined) {
+  switch (key) {
+    case "codex":
+      return OpenAiIcon;
+    case "opencode":
+      return OpenCodeMarkIcon;
+    case "ollama":
+      return OllamaMarkIcon;
+    default:
+      return ClaudeMarkIcon;
+  }
+}
+
 /** A terminal window: `>_` prompt — terminal emulators. */
 export function TerminalIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (

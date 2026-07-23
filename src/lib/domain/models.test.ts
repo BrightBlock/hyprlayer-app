@@ -2,11 +2,51 @@ import { describe, expect, it } from "vitest";
 
 import {
   apiContextWindow,
+  CODEX_EFFORTS,
+  codexEfforts,
+  resolveCodexEffort,
   EFFORTS,
   effectiveEffort,
   modelOption,
   modelSupportsUltracode,
 } from "./models";
+
+describe("Codex reasoning effort", () => {
+  it("offers each model's OWN tiers, not a fixed ladder", () => {
+    // Live model/list data: Sol goes to `ultra`, Luna stops at `max`. Offering a
+    // tier the chosen model rejects would fail the turn.
+    expect(codexEfforts(["low", "medium", "high", "xhigh", "max", "ultra"]).map((e) => e.key))
+      .toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    expect(codexEfforts(["low", "medium", "high", "xhigh", "max"]).map((e) => e.key))
+      .toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("falls back to the tiers every Codex model supports", () => {
+    // Before the model list loads. `ultracode` is Claude-only and must never
+    // appear; `max`/`ultra` aren't universal so they stay out of the fallback.
+    const keys = CODEX_EFFORTS.map((e) => e.key);
+    expect(keys).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(codexEfforts(undefined).map((e) => e.key)).toEqual(keys);
+    expect(codexEfforts([]).map((e) => e.key)).toEqual(keys);
+  });
+
+  it("labels a tier it hasn't seen instead of dropping it", () => {
+    // A new Codex tier should still be pickable, just unprettified.
+    expect(codexEfforts(["low", "hyperdrive"]).map((e) => e.label)).toEqual(["Low", "hyperdrive"]);
+  });
+
+  it("resolves a stored key against what the model actually supports", () => {
+    const sol = ["low", "medium", "high", "xhigh", "max", "ultra"];
+    expect(resolveCodexEffort("ultra", sol).key).toBe("ultra");
+    // Switching Sol → Luna drops `ultra`; the stale pick must not ride along.
+    expect(resolveCodexEffort("ultra", ["low", "medium", "high", "xhigh", "max"]).key)
+      .toBe("medium");
+    // Unset, or a Claude-only level carried over from another harness.
+    expect(resolveCodexEffort(undefined, sol).key).toBe("medium");
+    expect(resolveCodexEffort("ultracode", sol).key).toBe("medium");
+    expect(resolveCodexEffort(null, undefined).key).toBe("medium");
+  });
+});
 
 describe("ultracode capability guard", () => {
   it("exposes ultracode as the last effort level", () => {

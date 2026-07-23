@@ -468,6 +468,18 @@ export function useAllWorkstreams(enabled = true) {
   });
 }
 
+/** A workstream's sessions. The session row is the AUTHORITATIVE record of which
+ *  harness a chat runs on (the backend pins it at launch and resumes by it), so
+ *  this is what the composer reads for an already-started tab rather than
+ *  re-deriving the harness from the current default. */
+export function useWorkstreamSessions(workstreamId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream-sessions", workstreamId],
+    queryFn: () => unwrap(commands.listSessions(workstreamId)),
+    enabled: enabled && Boolean(workstreamId),
+  });
+}
+
 /** All agents currently live in the registry across every project. Used by the
  *  search palette's Agents section. Invalidated by SessionLifecycle events. */
 export function useActiveSessions(enabled = true) {
@@ -1052,6 +1064,42 @@ export function useClaudeAuthStatus(enabled = true) {
     staleTime: 5 * 60_000,
   });
 }
+
+/** Codex sign-in state AND the models it offers, from one `codex app-server`
+ *  spawn. Deliberately ONE query: as two, the tab fired both on mount and the
+ *  concurrent app-servers clobbered each other, so a working install rendered as
+ *  "not signed in" or "no models". Spawning a process isn't free, so it's only
+ *  fetched where the answer is shown (`enabled`) and cached for a few minutes —
+ *  `codex login` happens out of band in a terminal, hence the Refresh button. */
+export function useCodexProbe(enabled = true) {
+  return useQuery({
+    queryKey: ["codex-probe"],
+    queryFn: () => unwrap(commands.codexProbe()),
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Sign Codex in with an API key. The key is passed straight through to
+ *  `codex login --with-api-key` and never stored by us — Codex owns the
+ *  credential (`~/.codex/auth.json`). The command returns a full probe (which
+ *  models Codex offers depends on who is signed in), so the tab updates without
+ *  a second spawn. */
+export function useCodexLoginWithApiKey() {
+  return useMutation({
+    mutationFn: (apiKey: string) => unwrap(commands.codexLoginWithApiKey(apiKey)),
+    onSuccess: (probe) => queryClient.setQueryData(["codex-probe"], probe),
+  });
+}
+
+/** Sign Codex out (`codex logout`). */
+export function useCodexLogout() {
+  return useMutation({
+    mutationFn: () => unwrap(commands.codexLogout()),
+    onSuccess: (probe) => queryClient.setQueryData(["codex-probe"], probe),
+  });
+}
+
 
 /** Set up the user's thoughts repo (clone/disk/create) and write config.json.
  *  Invalidates the full bootstrap/projects/docs/workstreams set on success so

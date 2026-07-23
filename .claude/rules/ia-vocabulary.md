@@ -5,7 +5,7 @@
 | Term | Means |
 |---|---|
 | **agent** | UI umbrella term for an LLM conversation |
-| **harness** | chat runtime driven via `AgentDriver` trait (claude, opencode) |
+| **harness** | chat runtime driven via `AgentDriver` trait (claude, codex, opencode) |
 | **engine** | opaque CLI binary the multiplexer runs in a PTY |
 | **provider** | model vendor (Anthropic, OpenAI, etc.) |
 
@@ -21,7 +21,7 @@ enums or raw `string` types** — use the generated binding.
 | `SessionState` | `crates/hyprlayer-core/src/store/sessions.rs` | Binding re-exported from `lib/domain/stages.ts` |
 | `WorktreeMode` | `crates/hyprlayer-core/src/worktree/mod.rs` | Direct binding via specta |
 | `WorkstreamStatus` | `crates/hyprlayer-core/src/store/workstreams.rs` | Direct binding via specta |
-| `Harness` | `crates/hyprlayer-core/src/claude/driver.rs` | `lib/domain/harnessing.ts` |
+| `Harness` | `crates/hyprlayer-core/src/agent.rs` | `lib/domain/harnessing.ts` |
 | `PermissionMode` | `crates/hyprlayer-core/src/claude/driver.rs` | `lib/domain/permissions.ts` |
 | `DocKind` / doc taxonomy | `crates/hyprlayer-core/src/docs/frontmatter.rs` | `lib/domain/docs.ts` |
 

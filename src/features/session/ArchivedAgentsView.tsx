@@ -27,6 +27,7 @@ const STATUS: Record<ArchivedStatus, { label: string; tone: BadgeTone }> = {
 function modelLabel(shell: ShellTab): string {
   if (shell.ptyAgent) return engineLabel(shell.ptyAgent.engineId);
   if (shell.harness === "opencode") return shell.opencodeModel ?? "OpenCode";
+  if (shell.harness === "codex") return shell.codexModel ?? "Codex";
   return modelOption(shell.model).label;
 }
 

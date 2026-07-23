@@ -193,3 +193,57 @@ export function effectiveEffort(key: string | undefined, model: ModelOption): Ef
   }
   return effort;
 }
+
+// --- Codex reasoning effort -------------------------------------------------
+
+/** Display labels for Codex's reasoning-effort values. Codex reports the values
+ *  themselves per model (`codexModelList` → `supportedEfforts`) — this only names
+ *  them, so a tier we haven't seen still renders (as its raw key) instead of
+ *  vanishing from the picker. */
+const CODEX_EFFORT_LABELS: Record<string, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+  ultra: "Ultra",
+};
+
+/** The effort tiers every Codex model supports, used when the live per-model list
+ *  isn't at hand. Deliberately the common core: models differ above `xhigh`
+ *  (GPT-5.6-Sol has `ultra`, GPT-5.6-Luna stops at `max`), and offering a tier the
+ *  chosen model rejects is worse than offering a short list. Note this is NOT
+ *  Claude's ladder — Codex has no `ultracode`. */
+export const CODEX_EFFORTS: EffortOption[] = ["low", "medium", "high", "xhigh"].map(
+  codexEffortOption,
+);
+
+export const DEFAULT_CODEX_EFFORT_KEY = "medium";
+
+/** Label a raw Codex effort value. */
+export function codexEffortOption(key: string): EffortOption {
+  return { key, label: CODEX_EFFORT_LABELS[key] ?? key };
+}
+
+/** The effort choices to offer for a Codex model: exactly what that model
+ *  reports, else the common-core fallback. */
+export function codexEfforts(supported: readonly string[] | undefined): EffortOption[] {
+  return supported?.length ? supported.map(codexEffortOption) : CODEX_EFFORTS;
+}
+
+/** Resolve a stored Codex effort key against the tiers actually on offer. An
+ *  unset value — or one carried over from another harness (`ultracode`) or from a
+ *  model that supported a tier this one doesn't — falls back to `medium`, which
+ *  every Codex model has. */
+export function resolveCodexEffort(
+  key: string | undefined | null,
+  supported: readonly string[] | undefined,
+): EffortOption {
+  const options = codexEfforts(supported);
+  return (
+    options.find((e) => e.key === key) ??
+    options.find((e) => e.key === DEFAULT_CODEX_EFFORT_KEY) ??
+    options[0]
+  );
+}

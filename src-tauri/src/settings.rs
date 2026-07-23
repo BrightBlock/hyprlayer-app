@@ -97,8 +97,8 @@ pub struct AppSettings {
 
 /// Auto-generated agent-tab titles. When enabled, a new agent tab summarizes the
 /// user's first prompt into a short title via a small model. Surfaced in
-/// Settings → General. The model can be a Claude model or — so opencode-only
-/// users are covered — one of their configured OpenCode models.
+/// Settings → General. The model can be a Claude or Codex model, or — so
+/// opencode-only users are covered — one of their configured OpenCode models.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TabTitleSettings {
@@ -108,13 +108,22 @@ pub struct TabTitleSettings {
     /// Which model generates titles, as a tagged id:
     ///   `"claude:<flag>"`        → `claude -p --model <flag>` (empty flag = default)
     ///   `"opencode:<prov>/<id>"` → a one-shot OpenCode turn with that model
-    /// `None`/absent uses the built-in default ([`DEFAULT_TAB_TITLE_MODEL`],
-    /// Claude Haiku).
+    ///   `"codex:<id>"`           → a one-shot ephemeral Codex turn
+    /// `None`/absent follows the default harness — see
+    /// [`TabTitleSettings::effective_model`].
     pub model: Option<String>,
 }
 
 /// Built-in default title model: cheap, fast Claude Haiku.
 pub const DEFAULT_TAB_TITLE_MODEL: &str = "claude:haiku";
+
+/// The Codex analogue of Haiku — its smallest, cheapest model, used when Codex is
+/// the default harness and the user hasn't picked a title model. Deliberately a
+/// fixed id rather than the user's configured Codex models: titling must work
+/// before anything is configured, and `selectedModels` only gates the composer's
+/// picker (the app-server accepts any valid id). If OpenAI retires it,
+/// `generate_with_codex` still falls back to Codex's own default model.
+pub const DEFAULT_CODEX_TAB_TITLE_MODEL: &str = "codex:gpt-5.4-mini";
 
 impl Default for TabTitleSettings {
     fn default() -> Self {
@@ -126,12 +135,19 @@ impl Default for TabTitleSettings {
 }
 
 impl TabTitleSettings {
-    /// The effective model tag, falling back to the built-in default.
-    pub fn effective_model(&self) -> &str {
-        self.model
-            .as_deref()
-            .filter(|m| !m.is_empty())
-            .unwrap_or(DEFAULT_TAB_TITLE_MODEL)
+    /// The effective model tag. An explicit pick always wins; otherwise the
+    /// default follows the default harness, so a Codex-only user gets titles
+    /// without a `claude` binary (and without being silently billed on Anthropic).
+    /// OpenCode has no equivalent fallback — which model is even available depends
+    /// on which providers the user keyed — so it stays an explicit choice.
+    pub fn effective_model<'a>(&'a self, providers: &ProviderSettings) -> &'a str {
+        if let Some(explicit) = self.model.as_deref().filter(|m| !m.is_empty()) {
+            return explicit;
+        }
+        match providers.default_harness.as_deref() {
+            Some("codex") => DEFAULT_CODEX_TAB_TITLE_MODEL,
+            _ => DEFAULT_TAB_TITLE_MODEL,
+        }
     }
 }
 
@@ -175,17 +191,15 @@ impl Default for QuitSettings {
     }
 }
 
-/// Defaults for each agent provider/harness. Claude and OpenCode are wired up;
-/// Ollama runs local models *through* the OpenCode harness; Codex is stubbed so
-/// the section can render now and gain real fields later without a settings
-/// migration.
+/// Defaults for each agent provider/harness. Claude, OpenCode and Codex are all
+/// real harnesses; Ollama runs local models *through* the OpenCode harness.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderSettings {
     /// The harness new sessions default to, and the one the Commit/Ship actions
-    /// run on: `"claude"` or `"opencode"` (Ollama runs *through* OpenCode).
-    /// `None`/absent ⇒ `"claude"`. Read by the composer and the commit/ship
-    /// launch path; the picker still overrides it per tab.
+    /// run on: `"claude"`, `"opencode"` or `"codex"` (Ollama runs *through*
+    /// OpenCode). `None`/absent ⇒ `"claude"`. Read by the composer and the
+    /// commit/ship launch path; the picker still overrides it per tab.
     pub default_harness: Option<String>,
     /// Anthropic Claude (the `claude` CLI).
     pub claude: ClaudeSettings,
@@ -193,8 +207,7 @@ pub struct ProviderSettings {
     pub opencode: OpenCodeSettings,
     /// Ollama — local/remote model server, surfaced through the OpenCode harness.
     pub ollama: OllamaSettings,
-    /// OpenAI Codex — not wired up yet; reserved so the providers section is
-    /// stable as we build it out.
+    /// OpenAI Codex (the `codex` CLI, driven via its app-server).
     pub codex: CodexSettings,
 }
 
@@ -331,14 +344,29 @@ impl OllamaSettings {
     }
 }
 
-/// Codex provider defaults. Stub — Codex isn't supported yet; this exists so
-/// the providers section round-trips and can grow fields without a migration.
+/// Codex harness defaults (Settings → Harnesses → Codex). Auth is NOT stored
+/// here — `codex login` owns it in `~/.codex`, and the app only reads the status.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CodexSettings {
-    /// Default model for new Codex sessions. Unused until Codex lands.
+    /// Default model id for new Codex sessions (e.g. `"gpt-5.4-codex"`), as
+    /// returned by `model/list`. `None` keeps Codex's own configured default.
     pub default_model: Option<String>,
-    /// Personality/style for new Codex chats. Reserved — Codex isn't wired up.
+    /// Default reasoning effort for new sessions (`minimal`..`xhigh`). `None`
+    /// keeps the model's own default effort.
+    pub default_effort: Option<String>,
+    /// Model for the Commit/Ship/Revise action agents when the default harness is
+    /// Codex — these stages are mechanical git/PR plumbing, so a cheaper model
+    /// than the chat default is usually right. `None` ⇒ falls back to
+    /// `default_model`, then the first selected model.
+    pub commit_model: Option<String>,
+    /// Reasoning effort for the Commit/Ship/Revise action agents (Codex).
+    pub commit_effort: Option<String>,
+    /// The model ids the user picked to expose in the composer's model picker.
+    /// Empty = none chosen yet (the Codex tab prompts the user to add some).
+    pub selected_models: Vec<String>,
+    /// Personality/style for new Codex chats. Reserved — `thread/start` takes a
+    /// `personality`, but nothing sets it yet.
     pub personality: Option<String>,
 }
 
@@ -547,6 +575,57 @@ async fn persist(path: &std::path::Path, settings: &AppSettings) -> CmdResult<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn providers_with_default_harness(harness: Option<&str>) -> ProviderSettings {
+        ProviderSettings {
+            default_harness: harness.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    /// A Codex-only user must get Codex titles: falling back to Claude Haiku
+    /// would need a `claude` binary they may not have, and would bill Anthropic
+    /// for someone who chose OpenAI.
+    #[test]
+    fn title_model_default_follows_the_default_harness() {
+        let tab = TabTitleSettings::default();
+        assert_eq!(
+            tab.effective_model(&providers_with_default_harness(Some("codex"))),
+            DEFAULT_CODEX_TAB_TITLE_MODEL
+        );
+        // Every other harness keeps Haiku: Claude is the default, and OpenCode has
+        // no universally-available cheap model to fall back to.
+        for harness in [None, Some("claude"), Some("opencode"), Some("ollama")] {
+            assert_eq!(
+                tab.effective_model(&providers_with_default_harness(harness)),
+                DEFAULT_TAB_TITLE_MODEL,
+                "harness {harness:?} should keep the Claude default"
+            );
+        }
+    }
+
+    /// An explicit pick is never overridden by the harness default — switching the
+    /// default harness must not silently retarget a model the user chose.
+    #[test]
+    fn explicit_title_model_wins_over_the_harness_default() {
+        let tab = TabTitleSettings {
+            enabled: true,
+            model: Some("opencode:anthropic/claude-haiku-4-5".into()),
+        };
+        assert_eq!(
+            tab.effective_model(&providers_with_default_harness(Some("codex"))),
+            "opencode:anthropic/claude-haiku-4-5"
+        );
+        // A blank string reads as unset (a cleared select), not as "no model".
+        let blank = TabTitleSettings {
+            enabled: true,
+            model: Some(String::new()),
+        };
+        assert_eq!(
+            blank.effective_model(&providers_with_default_harness(Some("codex"))),
+            DEFAULT_CODEX_TAB_TITLE_MODEL
+        );
+    }
 
     #[test]
     fn git_defaults_preserve_branch_deletion() {

@@ -1,7 +1,8 @@
 //! Tauri commands backing the Harnesses settings page:
 //!   - the models.dev provider/model catalog (network → cache → bundled),
 //!   - OpenCode provider credentials (`auth.json`) and default model,
-//!   - Claude authentication status (`claude auth status --json`).
+//!   - Claude authentication status (`claude auth status --json`),
+//!   - Codex authentication + model list (one-shot `codex app-server` probes).
 
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 use tauri_specta::Event;
 
+use hyprlayer_core::codex::{self, CodexProbe};
 use hyprlayer_core::opencode::config as oc;
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::process::Exec;
@@ -359,6 +361,98 @@ pub async fn claude_auth_status(state: State<'_, AppState>) -> CmdResult<ClaudeA
         org,
         account,
     })
+}
+
+/* ------------------------------- codex --------------------------------- */
+
+/// Account + model list for the Codex settings tab, from ONE app-server session.
+///
+/// Deliberately a single command rather than one per question: these used to be
+/// two commands the tab fired concurrently, which spawned two app-servers that
+/// interfered — the loser answered with a null account or an empty model list, so
+/// a working install rendered as "not signed in" or "no models".
+///
+/// A missing CLI is still a benign empty probe (the tab renders the install
+/// hint), but a probe that RAN and failed now errors instead of masquerading as
+/// an empty result, so a transient failure can't be cached as fact.
+#[tauri::command]
+#[specta::specta]
+pub async fn codex_probe(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
+    let Some(bin) = state.binaries.resolve(BinaryKind::Codex).await else {
+        return Ok(CodexProbe::default());
+    };
+    let path = state.binaries.augmented_path().await;
+    codex::probe::probe(&bin, &path).await.map_err(Into::into)
+}
+
+/// Sign Codex in with an API key (the enterprise path, mirroring Claude's
+/// "API key" auth mode).
+///
+/// Unlike Claude — where the app stores the key in `settings.json` and injects
+/// `ANTHROPIC_API_KEY` into every spawn — Codex owns its own credential store:
+/// `codex login --with-api-key` reads the key from stdin and writes
+/// `$CODEX_HOME/auth.json`. An env-injected `OPENAI_API_KEY` is IGNORED by the
+/// app-server (verified: `account/read` still reports `account: null`), so the
+/// Claude approach wouldn't work here even if we wanted it.
+///
+/// The upside is that we never persist the secret: it goes straight to the CLI's
+/// stdin (never argv, so it can't leak into a process listing) and is dropped.
+#[tauri::command]
+#[specta::specta]
+pub async fn codex_login_with_api_key(
+    state: State<'_, AppState>,
+    api_key: String,
+) -> CmdResult<CodexProbe> {
+    let key = api_key.trim().to_string();
+    if key.is_empty() {
+        return Err(AppError {
+            code: "codex_api_key_empty".into(),
+            message: "Enter an API key first.".into(),
+            remedy: None,
+        });
+    }
+    let bin = state
+        .binaries
+        .require(BinaryKind::Codex)
+        .await
+        .map_err(AppError::from)?;
+    let path = state.binaries.augmented_path().await;
+
+    Exec::new(&bin)
+        .args(["login", "--with-api-key"])
+        .stdin(format!("{key}\n").into_bytes())
+        .env("PATH", path.clone())
+        .timeout(Duration::from_secs(30))
+        .run()
+        .await
+        .map_err(AppError::from)?;
+
+    // Full probe, not just the account: which models Codex offers depends on who
+    // is signed in, so the caller can seed both from one answer.
+    Ok(codex::probe::probe(&bin, &path).await.unwrap_or_default())
+}
+
+/// Sign Codex out (`codex logout`), clearing whichever credential is active.
+#[tauri::command]
+#[specta::specta]
+pub async fn codex_logout(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
+    let bin = state
+        .binaries
+        .require(BinaryKind::Codex)
+        .await
+        .map_err(AppError::from)?;
+    let path = state.binaries.augmented_path().await;
+    // Already-signed-out is not an error worth surfacing — the status we return
+    // is the source of truth either way.
+    let _ = Exec::new(&bin)
+        .arg("logout")
+        .env("PATH", path.clone())
+        .timeout(Duration::from_secs(15))
+        .run_unchecked()
+        .await;
+    // Full probe, not just the account: which models Codex offers depends on who
+    // is signed in, so the caller can seed both from one answer.
+    Ok(codex::probe::probe(&bin, &path).await.unwrap_or_default())
 }
 
 /* --------------------------- opencode install -------------------------- */

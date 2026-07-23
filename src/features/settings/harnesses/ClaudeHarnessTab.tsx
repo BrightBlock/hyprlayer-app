@@ -30,8 +30,10 @@ import {
   TextInput,
   Toggle,
 } from "@/components/ui";
-import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
 import { BinaryCard } from "@/features/system/BinaryCard";
+import { AuthCard, AuthDetailRows } from "./AuthCard";
+import { ModelMultiSelectDialog } from "./ModelMultiSelectDialog";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
 import { SettingRow } from "@/features/settings/parts";
 
@@ -200,15 +202,7 @@ export function ClaudeHarnessTab({
         </div>
       </Card>
 
-      <Card>
-        <CardTitle>Models visible in composer</CardTitle>
-        <p className="mt-1 text-xs text-ink-dim">
-          Choose which Claude models appear in the composer.
-        </p>
-        <div className="mt-3">
-          <VisibleModelsPanel claude={claude} patchClaude={patchClaude} />
-        </div>
-      </Card>
+      <VisibleModelsCard claude={claude} patchClaude={patchClaude} />
 
       <ClaudeAdvancedCard status={status} />
     </>
@@ -257,37 +251,6 @@ function ClaudeAdvancedCard({ status }: { status?: BinaryStatus }) {
   );
 }
 
-function AuthCard({
-  label,
-  sublabel,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  sublabel: string;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className={`relative rounded-lg border p-4 text-left transition-colors ${
-        selected ? "border-accent bg-panel-2" : "border-edge hover:bg-edge/40"
-      }`}
-    >
-      {selected && (
-        <span className="absolute right-3 top-3 text-accent" aria-hidden>
-          ✓
-        </span>
-      )}
-      <p className="text-sm font-medium text-ink">{label}</p>
-      <p className="mt-0.5 text-xs text-ink-dim">{sublabel}</p>
-    </button>
-  );
-}
-
 function CliAuthPanel() {
   const status = useClaudeAuthStatus();
   const [loginOpen, setLoginOpen] = useState(false);
@@ -321,21 +284,7 @@ function CliAuthPanel() {
         </button>
       </div>
 
-      {data?.connected && (
-        <div className="overflow-hidden rounded-md border border-edge">
-          {rows.map(([k, v], i) => (
-            <div
-              key={k}
-              className={`flex items-center justify-between px-3 py-2 text-sm ${
-                i > 0 ? "border-t border-edge/60" : ""
-              }`}
-            >
-              <span className="text-ink-dim">{k}</span>
-              <span className="selectable text-ink">{v ?? "—"}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {data?.connected && <AuthDetailRows rows={rows} />}
 
       <div className="mt-3">
         <Button onClick={() => setLoginOpen(true)}>▶ Run claude login</Button>
@@ -495,140 +444,145 @@ function DocLink({ href, children }: { href: string; children: React.ReactNode }
     </a>
   );
 }
-
-/** "Models visible in composer" picker for Claude. `visibleModels: null` means
- *  "not customised → show every preset". */
-function VisibleModelsPanel({
+/**
+ * "Models visible in composer" for Claude — the same card + row-list + "Add
+ * models" dialog every other harness tab uses (see [`ModelMultiSelectDialog`]).
+ *
+ * Claude's setting is a TRI-state, unlike OpenCode/Codex's plain list:
+ * `visibleModels: null` means "not customised → show every preset", which is the
+ * default and why a fresh install shows all models without the user picking any.
+ * Removing a model materializes the explicit list; "Reset to default" restores
+ * `null`. Claude also accepts arbitrary `--model` ids, so the dialog carries an
+ * add-custom-id field the other harnesses have no use for.
+ */
+function VisibleModelsCard({
   claude,
   patchClaude,
 }: {
   claude: ClaudeSettings;
   patchClaude: (next: Partial<ClaudeSettings>) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [newId, setNewId] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const visible = claude.visibleModels ?? null;
   const explicit = visible ?? ALL_MODEL_KEYS;
-  const visibleSet = new Set(explicit);
   const customKeys = (visible ?? []).filter((k) => !ALL_MODEL_KEY_SET.has(k));
+  const shown = explicit.map(modelOption);
 
-  const rows = [...MODELS, ...customKeys.map(modelOption)];
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? rows.filter((m) => m.label.toLowerCase().includes(q) || m.key.toLowerCase().includes(q))
-    : rows;
-
-  function toggle(key: string, on: boolean) {
-    const next = on
-      ? normalizeVisibleModelKeys([...explicit, key])
-      : explicit.filter((k) => k !== key);
-    patchClaude({ visibleModels: next });
+  function setVisible(next: string[]) {
+    patchClaude({ visibleModels: normalizeVisibleModelKeys(next) });
   }
-
-  function addCustom() {
-    const id = newId.trim();
-    if (!id) return;
-    patchClaude({ visibleModels: normalizeVisibleModelKeys([...explicit, id]) });
-    setNewId("");
-  }
-
-  const actionBtn =
-    "rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink disabled:opacity-40";
 
   return (
-    <div className="rounded-md border border-edge bg-panel-2/40 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm text-ink">Claude Code</p>
-          <p className="text-xs text-ink-dim">
-            {visibleSet.size} {visibleSet.size === 1 ? "model" : "models"} visible · Default:{" "}
-            {ALL_MODEL_KEYS.length} models
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            className={actionBtn}
-            disabled={visible === null}
-            onClick={() => patchClaude({ visibleModels: null })}
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            className={actionBtn}
-            onClick={() =>
-              patchClaude({
-                visibleModels: normalizeVisibleModelKeys([...ALL_MODEL_KEYS, ...customKeys]),
-              })
-            }
-          >
-            Show all
-          </button>
-          <button
-            type="button"
-            className={actionBtn}
-            disabled={visibleSet.size === 0}
-            onClick={() => patchClaude({ visibleModels: [] })}
-          >
-            Clear
-          </button>
+    <Card>
+      <div className="flex items-center justify-between">
+        <CardTitle className="mb-0">
+          Models visible in composer{" "}
+          <span className="ml-1 font-normal text-ink-dim">{explicit.length} selected</span>
+        </CardTitle>
+        <div className="flex items-center gap-2">
+          {visible !== null && (
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+              onClick={() => patchClaude({ visibleModels: null })}
+            >
+              Reset to default
+            </button>
+          )}
+          <Button onClick={() => setPickerOpen(true)}>
+            <PlusIcon size={14} /> Add models
+          </Button>
         </div>
       </div>
 
-      <div className="mt-2.5 flex gap-2">
-        <TextInput
-          value={query}
-          placeholder="Search Claude Code models"
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <TextInput
-          value={newId}
-          placeholder="Add model ID"
-          onChange={(e) => setNewId(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") addCustom();
-          }}
-          className="max-w-[10rem]"
-        />
-        <Button onClick={addCustom} disabled={!newId.trim()}>
-          Add
-        </Button>
-      </div>
-
-      <ul className="mt-2 max-h-64 overflow-y-auto">
-        {filtered.length === 0 && (
-          <li className="px-1 py-3 text-xs text-ink-dim">No models match “{query}”.</li>
-        )}
-        {filtered.map((m) => {
-          const custom = !ALL_MODEL_KEY_SET.has(m.key);
-          return (
-            <li key={m.key}>
-              <label className="flex cursor-pointer items-center gap-2.5 rounded px-1 py-1.5 hover:bg-edge/40">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 shrink-0 cursor-pointer accent-accent"
-                  checked={visibleSet.has(m.key)}
-                  onChange={(e) => toggle(m.key, e.target.checked)}
-                />
-                <span className="min-w-0">
-                  <span className="text-sm text-ink">
-                    {m.label}
-                    {m.hint ? ` ${m.hint}` : ""}
-                    {custom && (
-                      <span className="ml-1.5 align-middle">
-                        <Badge tone="dim">custom</Badge>
-                      </span>
-                    )}
-                  </span>
-                  <span className="block font-mono text-xs text-ink-dim">{m.flag ?? m.key}</span>
+      {shown.length === 0 ? (
+        <p className="mt-3 text-xs text-ink-dim">
+          No models selected — the composer&apos;s Claude group will be empty.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-1.5">
+          {shown.map((m) => (
+            <div
+              key={m.key}
+              className="flex items-center justify-between rounded-md border border-edge bg-panel-2 px-3 py-2"
+            >
+              <span className="min-w-0">
+                <span className="text-sm text-ink">
+                  {m.label}
+                  {m.hint ? ` ${m.hint}` : ""}
+                  {!ALL_MODEL_KEY_SET.has(m.key) && (
+                    <span className="ml-1.5 align-middle">
+                      <Badge tone="dim">custom</Badge>
+                    </span>
+                  )}
                 </span>
-              </label>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+                <span className="block font-mono text-xs text-ink-dim">{m.flag ?? m.key}</span>
+              </span>
+              <button
+                type="button"
+                aria-label={`Remove ${m.label}`}
+                onClick={() => setVisible(explicit.filter((k) => k !== m.key))}
+                className="text-ink-dim hover:text-bad"
+              >
+                <XIcon />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pickerOpen && (
+      <ModelMultiSelectDialog
+        open
+        onClose={() => setPickerOpen(false)}
+        onSave={setVisible}
+        selected={explicit}
+        searchPlaceholder="Filter Claude Code models"
+        groups={[
+          {
+            key: "presets",
+            models: MODELS.map((m) => ({
+              id: m.key,
+              name: m.hint ? `${m.label} ${m.hint}` : m.label,
+              detail: m.flag ?? m.key,
+            })),
+          },
+          ...(customKeys.length > 0
+            ? [
+                {
+                  key: "custom",
+                  label: "Custom",
+                  models: customKeys.map((k) => ({ id: k, name: k, detail: k })),
+                },
+              ]
+            : []),
+        ]}
+        // Claude's `--model` accepts any alias or dated id, so the picker doubles
+        // as the way to add one the built-in list doesn't carry.
+        addCustom={{ placeholder: "Add a model ID (e.g. claude-opus-4-7-20260115)" }}
+        // Eleven presets make all/none worth a click; the other harnesses have
+        // far longer catalogs where "select all" isn't a sensible action.
+        bulkActions={(apply) => (
+          <>
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+              onClick={() => apply([...ALL_MODEL_KEYS, ...customKeys])}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+              onClick={() => apply([])}
+            >
+              None
+            </button>
+          </>
+        )}
+      />
+      )}
+    </Card>
   );
 }

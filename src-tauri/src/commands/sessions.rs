@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use hyprlayer_core::agent::{AgentDriver, Harness};
 use hyprlayer_core::claude::{ClaudeDriver, PermissionMode, SessionEvent, SessionState, SpawnConfig};
+use hyprlayer_core::codex::{CodexDriver, SpawnConfig as CodexSpawnConfig};
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent, Workstream};
@@ -133,87 +134,156 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
         channel,
     } = params;
 
-    // The `--permission-mode` the process is actually launched with, recorded in
-    // the registry so a later `resume_session` can tell a stale re-attach from a
-    // real no-change resume. `None` for OpenCode (no permission modes).
+    // The permission mode the process is actually launched with, recorded in the
+    // registry so a later `resume_session` can tell a stale re-attach from a real
+    // no-change resume. `None` for OpenCode, which has no permission modes;
+    // Codex maps ours onto its approval-policy/sandbox pair, so it records one.
     let mut launched_mode: Option<PermissionMode> = None;
     let (driver, rx): (Arc<dyn AgentDriver>, broadcast::Receiver<SessionEvent>) =
-        if session.harness == Harness::Opencode {
-            // OpenCode: drive a session on the shared `opencode serve`. Tools and
-            // permissions are OpenCode's own concern, so the stage policy /
-            // permission-mode / add-dirs don't apply here; `model` is a
-            // `"provider/model"` id chosen in the composer.
-            let bin = state
-                .binaries
-                .require(BinaryKind::OpenCode)
+        match session.harness {
+            Harness::Opencode => {
+                // OpenCode: drive a session on the shared `opencode serve`. Tools
+                // and permissions are OpenCode's own concern, so the stage policy /
+                // permission-mode / add-dirs don't apply here; `model` is a
+                // `"provider/model"` id chosen in the composer.
+                let bin = state
+                    .binaries
+                    .require(BinaryKind::OpenCode)
+                    .await
+                    .map_err(AppError::from)?;
+                let path = state.binaries.augmented_path().await;
+                // App-owned OpenCode data home, so its session DB is ours (never
+                // the user's possibly-incompatible global ~/.local/share/opencode).
+                let data_dir = app
+                    .path()
+                    .app_data_dir()
+                    .map(|d| d.join("opencode"))
+                    .map_err(|e| AppError::internal(format!("resolve app data dir: {e}")))?;
+                let server = state
+                    .opencode
+                    .ensure(bin, path, data_dir)
+                    .await
+                    .map_err(AppError::internal)?;
+                let (driver, rx) =
+                    crate::opencode::OpenCodeDriver::spawn(server, &session.cwd, model)
+                        .await
+                        .map_err(AppError::internal)?;
+                let driver: Arc<dyn AgentDriver> = driver;
+                (driver, rx)
+            }
+            Harness::Codex => {
+                // Codex: one `codex app-server` child per session. Its approval
+                // policy + sandbox are derived from our permission mode (see
+                // `codex::protocol::approval_posture`); the stage policy's
+                // allow/deny tool lists have no Codex analog, like OpenCode.
+                let bin = state
+                    .binaries
+                    .require(BinaryKind::Codex)
+                    .await
+                    .map_err(AppError::from)?;
+
+                let effective = effective_for(state, &project_path).await?;
+                let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
+                let permission_mode =
+                    permission_mode.unwrap_or(pipeline::policy_for(session.stage).permission_mode);
+                launched_mode = Some(permission_mode);
+
+                let path = state.binaries.augmented_path().await;
+                let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+
+                // Codex resumes by the thread id IT minted (recorded on `Init`),
+                // not by our session id the way Claude does. A resume with no
+                // recorded thread id can only start a fresh one — the previous
+                // handshake never completed — but the transcript still replays
+                // from SQLite, so the UI looks continuous while the model has no
+                // memory of it. Say so in the log rather than failing silently.
+                let resume_thread = resume.then(|| session.claude_session_id.clone()).flatten();
+                if resume && resume_thread.is_none() {
+                    log::warn!(
+                        "codex session {} has no recorded thread id; starting a new thread \
+                         (the model will not have the replayed history)",
+                        session.id
+                    );
+                }
+
+                // Rewind ordinals count every user turn in the session log, so a
+                // resumed driver has to start from that count rather than 0 —
+                // otherwise `thread/rollback` drops too few turns and still
+                // reports the model forgot them. Only the resume path needs it;
+                // a fresh thread genuinely starts at zero.
+                let prior_user_turns = if resume_thread.is_some() {
+                    let sid = session.id.clone();
+                    db_task(state.db.clone(), move |db| db.count_user_messages(&sid)).await?
+                } else {
+                    0
+                };
+
+                let (driver, rx) = CodexDriver::spawn(CodexSpawnConfig {
+                    codex_bin: bin,
+                    cwd: PathBuf::from(&session.cwd),
+                    permission_mode,
+                    add_dirs,
+                    resume: resume_thread,
+                    prior_user_turns,
+                    model,
+                    effort,
+                    ephemeral: false,
+                    env,
+                })
                 .await
                 .map_err(AppError::from)?;
-            let path = state.binaries.augmented_path().await;
-            // App-owned OpenCode data home, so its session DB is ours (never the
-            // user's possibly-incompatible global ~/.local/share/opencode).
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .map(|d| d.join("opencode"))
-                .map_err(|e| AppError::internal(format!("resolve app data dir: {e}")))?;
-            let server = state
-                .opencode
-                .ensure(bin, path, data_dir)
-                .await
-                .map_err(AppError::internal)?;
-            let (driver, rx) = crate::opencode::OpenCodeDriver::spawn(server, &session.cwd, model)
-                .await
-                .map_err(AppError::internal)?;
-            let driver: Arc<dyn AgentDriver> = driver;
-            (driver, rx)
-        } else {
-            let claude = state
-                .binaries
-                .require(BinaryKind::Claude)
-                .await
+                let driver: Arc<dyn AgentDriver> = Arc::new(driver);
+                (driver, rx)
+            }
+            Harness::Claude => {
+                let claude = state
+                    .binaries
+                    .require(BinaryKind::Claude)
+                    .await
+                    .map_err(AppError::from)?;
+
+                // Grant read access to the thoughts root (outside the worktree) so
+                // skills can write research/plan docs through the symlinks.
+                let effective = effective_for(state, &project_path).await?;
+                let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
+                let policy = pipeline::policy_for(session.stage);
+                // The stage sets a default permission posture; an explicit user
+                // choice in the composer (e.g. "Bypass permissions") overrides just
+                // the mode, keeping the stage's allow/deny tool lists as guardrails.
+                let permission_mode = permission_mode.unwrap_or(policy.permission_mode);
+                launched_mode = Some(permission_mode);
+
+                // The child inherits our env; we override PATH with the resolver's
+                // augmented PATH so it finds git/gh/etc, and — for enterprise "API
+                // key" auth — inject the Anthropic credentials/routing so the
+                // spawned `claude` uses them instead of the user's logged-in session.
+                let path = state.binaries.augmented_path().await;
+                let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+                let claude_cfg = state.settings.get().await.providers.claude;
+                env.extend(super::claude_auth_env(&claude_cfg));
+
+                let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
+                    claude_bin: claude,
+                    cwd: PathBuf::from(&session.cwd),
+                    session_id: session.id.clone(),
+                    permission_mode,
+                    allowed_tools: policy.allowed_tools,
+                    disallowed_tools: policy.disallowed_tools,
+                    add_dirs,
+                    // claude persisted the conversation under the id we passed as
+                    // `--session-id`, so resume by that same id.
+                    resume: resume.then(|| session.id.clone()),
+                    fork: false,
+                    max_budget_usd: None,
+                    model,
+                    effort,
+                    chrome: claude_cfg.chrome_enabled,
+                    env,
+                })
                 .map_err(AppError::from)?;
-
-            // Grant read access to the thoughts root (outside the worktree) so
-            // skills can write research/plan docs through the symlinks.
-            let effective = effective_for(state, &project_path).await?;
-            let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
-            let policy = pipeline::policy_for(session.stage);
-            // The stage sets a default permission posture; an explicit user choice
-            // in the composer (e.g. "Bypass permissions") overrides just the mode,
-            // keeping the stage's allow/deny tool lists as guardrails.
-            let permission_mode = permission_mode.unwrap_or(policy.permission_mode);
-            launched_mode = Some(permission_mode);
-
-            // The child inherits our env; we override PATH with the resolver's
-            // augmented PATH so it finds git/gh/etc, and — for enterprise "API
-            // key" auth — inject the Anthropic credentials/routing so the spawned
-            // `claude` uses them instead of the user's logged-in session.
-            let path = state.binaries.augmented_path().await;
-            let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-            let claude_cfg = state.settings.get().await.providers.claude;
-            env.extend(super::claude_auth_env(&claude_cfg));
-
-            let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
-                claude_bin: claude,
-                cwd: PathBuf::from(&session.cwd),
-                session_id: session.id.clone(),
-                permission_mode,
-                allowed_tools: policy.allowed_tools,
-                disallowed_tools: policy.disallowed_tools,
-                add_dirs,
-                // claude persisted the conversation under the id we passed as
-                // `--session-id`, so resume by that same id.
-                resume: resume.then(|| session.id.clone()),
-                fork: false,
-                max_budget_usd: None,
-                model,
-                effort,
-                chrome: claude_cfg.chrome_enabled,
-                env,
-            })
-            .map_err(AppError::from)?;
-            let driver: Arc<dyn AgentDriver> = Arc::new(driver);
-            (driver, rx)
+                let driver: Arc<dyn AgentDriver> = Arc::new(driver);
+                (driver, rx)
+            }
         };
 
     if let Some(pid) = driver.pid() {
@@ -596,16 +666,17 @@ pub async fn restart_session(
 /// Rewind a session to the N-th (1-based) user turn, discarding that turn and
 /// everything after it. Two paths:
 ///
-/// * **Live rewind (preferred).** If the session is live, we drive claude's own
-///   `rewind_conversation` control request (see [`ClaudeDriver::rewind_to_ordinal`])
-///   to truncate the model's in-memory conversation to this turn, then keep that
-///   SAME process alive and hand its event stream to the caller's new channel
-///   (see [`live_rewind_handoff`]). The model genuinely forgets the dropped turns.
-///   We must NOT kill + `--resume` here: `rewind_conversation` does not truncate
-///   claude's on-disk transcript, so a resume would reload the un-rewound history.
+/// * **Live rewind (preferred).** If the session is live and its harness supports
+///   it, we ask the harness to truncate the model's in-memory conversation to this
+///   turn — claude's `rewind_conversation` control request
+///   (see [`ClaudeDriver::rewind_to_ordinal`]), Codex's `thread/rollback` — then
+///   keep that SAME process alive and hand its event stream to the caller's new
+///   channel (see [`live_rewind_handoff`]). The model genuinely forgets the dropped
+///   turns. We must NOT kill + resume here: claude's peel does not truncate its
+///   on-disk transcript, so a resume would reload the un-rewound history.
 /// * **Log-only fallback.** If the model rewind isn't available (session not live,
 ///   OpenCode, a turn from before the current generation, the first turn, or a
-///   claude refusal) we kill + cut + `--resume`: the UI/log truncate but the model
+///   harness refusal) we kill + cut + resume: the UI/log truncate but the model
 ///   keeps its memory. `permission_mode` re-applies the session's posture on this
 ///   re-spawn (as [`resume_session`]/[`restart_session`] do) — `None` would drop a
 ///   bypass session back to the stage default and start prompting again.
@@ -618,10 +689,10 @@ pub async fn restart_session(
 #[serde(rename_all = "camelCase")]
 pub struct RewindResult {
     pub session: Session,
-    /// True when claude's own conversation was truncated on the live process (the
-    /// model genuinely forgot the dropped turns); false when we could only prune
-    /// the app log (not live / OpenCode / a pre-generation or first turn / a claude
-    /// refusal) — the model still recalls them.
+    /// True when the harness's own conversation was truncated on the live process
+    /// (the model genuinely forgot the dropped turns); false when we could only
+    /// prune the app log (not live / OpenCode / a pre-generation or first turn / a
+    /// harness refusal) — the model still recalls them.
     pub live_rewound: bool,
 }
 
@@ -657,12 +728,13 @@ pub async fn rewind_session(
         remedy: None,
     })?;
 
-    // Preferred path: a TRUE rewind on the live process. `rewind_conversation`
-    // truncates the model's in-memory conversation to this turn; we then keep the
-    // SAME process alive (a kill + `--resume` would reload its un-truncated
-    // transcript). Only turns from the current live generation carry the uuid this
-    // needs, and the first turn can't be rewound — any miss (not live, OpenCode, a
-    // pre-resume turn, a claude refusal) is non-fatal and drops to the fallback.
+    // Preferred path: a TRUE rewind on the live process — the harness truncates
+    // the model's in-memory conversation to this turn and we keep the SAME process
+    // alive (a kill + resume would reload its un-truncated transcript). Both
+    // harnesses that support it only reach turns from the current live generation
+    // (claude needs the turn's uuid, Codex counts the turns it streamed), so any
+    // miss — not live, OpenCode, a pre-resume turn, a refusal — is non-fatal and
+    // drops to the fallback.
     let live_rewound = if let Some(driver) = state.sessions.get(&session_id).await {
         match driver.rewind_to_ordinal(user_turn as usize).await {
             Ok(()) => true,
@@ -922,6 +994,21 @@ pub async fn set_session_model(
 ) -> CmdResult<()> {
     if let Some(driver) = state.sessions.get(&session_id).await {
         driver.set_model(model);
+    }
+    Ok(())
+}
+
+/// Same for reasoning effort, which Codex also takes per turn. A no-op when the
+/// session isn't live, and for Claude/OpenCode (their drivers ignore it).
+#[tauri::command]
+#[specta::specta]
+pub async fn set_session_effort(
+    state: State<'_, AppState>,
+    session_id: String,
+    effort: Option<String>,
+) -> CmdResult<()> {
+    if let Some(driver) = state.sessions.get(&session_id).await {
+        driver.set_effort(effort);
     }
     Ok(())
 }

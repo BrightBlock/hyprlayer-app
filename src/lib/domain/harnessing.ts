@@ -1,5 +1,5 @@
 import type { AppSettings, CatalogProvider, Harness, PermissionMode } from "@/lib/bindings";
-import { effectiveEffort, modelOption } from "./models";
+import { effectiveEffort, modelOption, resolveCodexEffort } from "./models";
 import { permissionModeOption } from "./permissions";
 
 /**
@@ -11,6 +11,7 @@ export type HarnessOption = { key: Harness; label: string };
 
 export const HARNESSES: HarnessOption[] = [
   { key: "claude", label: "Claude Code" },
+  { key: "codex", label: "Codex" },
   { key: "opencode", label: "OpenCode" },
 ];
 
@@ -22,6 +23,7 @@ export const DEFAULT_HARNESS_KEY = "claude";
  *  they think of it. */
 export const DEFAULT_HARNESS_OPTIONS: { key: string; label: string }[] = [
   { key: "claude", label: "Claude Code" },
+  { key: "codex", label: "Codex" },
   { key: "opencode", label: "OpenCode" },
   { key: "ollama", label: "Ollama" },
 ];
@@ -30,19 +32,23 @@ export function harnessOption(key: string | undefined | null): HarnessOption {
   return HARNESSES.find((h) => h.key === key) ?? HARNESSES[0];
 }
 
-/** The actual harness a stored default-harness key runs on: Claude stays Claude,
- *  while OpenCode *and* Ollama both run on the OpenCode harness (Ollama's models
- *  are `ollama/<id>` OpenCode ids). Null/unknown ⇒ Claude. Use this to turn the
- *  three-way `providers.defaultHarness` setting into a real [`HarnessOption`] key. */
+/** The actual harness a stored default-harness key runs on: Claude and Codex are
+ *  their own harnesses, while OpenCode *and* Ollama both run on the OpenCode
+ *  harness (Ollama's models are `ollama/<id>` OpenCode ids). Null/unknown ⇒
+ *  Claude. Use this to turn the four-way `providers.defaultHarness` setting into
+ *  a real [`HarnessOption`] key. */
 export function effectiveHarnessKey(defaultHarness: string | null | undefined): Harness {
-  return defaultHarness === "opencode" || defaultHarness === "ollama" ? "opencode" : "claude";
+  if (defaultHarness === "opencode" || defaultHarness === "ollama") return "opencode";
+  if (defaultHarness === "codex") return "codex";
+  return "claude";
 }
 
 /** The launch config for the action-driven agents (Commit / Ship / Revise),
  *  resolved from settings. `model` is a model KEY when `harness === "claude"`
- *  (see models.ts), or a `"provider/model"` id when `"opencode"`; `null` means
- *  "let the harness pick its own default". `effort` is a Claude effort key, or
- *  `null` for OpenCode (which has no `--effort`). */
+ *  (see models.ts), a `"provider/model"` id when `"opencode"`, or a bare Codex
+ *  model id when `"codex"`; `null` means "let the harness pick its own default".
+ *  `effort` is a Claude or Codex effort key, or `null` for OpenCode (which has no
+ *  reasoning-effort control). */
 export type ActionAgentDefaults = {
   harness: Harness;
   model: string | null;
@@ -50,11 +56,12 @@ export type ActionAgentDefaults = {
 };
 
 /** Resolve the Commit/Ship/Revise agents' defaults from settings: the default
- *  harness (Claude / OpenCode / Ollama), and — within it — the cheaper model +
- *  reasoning configured on that harness's Settings tab. Each harness owns its own
- *  commit model, so switching the default never leaves an unrunnable model behind;
- *  each falls back sensibly (Sonnet/medium for Claude, the harness's default or
- *  first-selected model otherwise) so an action always names a runnable model. */
+ *  harness (Claude / Codex / OpenCode / Ollama), and — within it — the cheaper
+ *  model + reasoning configured on that harness's Settings tab. Each harness owns
+ *  its own commit model, so switching the default never leaves an unrunnable model
+ *  behind; each falls back sensibly (Sonnet/medium for Claude, the harness's
+ *  default or first-selected model otherwise) so an action always names a runnable
+ *  model. */
 export function actionAgentDefaults(
   settings: AppSettings | null | undefined,
 ): ActionAgentDefaults {
@@ -73,6 +80,13 @@ export function actionAgentDefaults(
     const model = oc?.commitModel ?? oc?.defaultModel ?? oc?.selectedModels?.[0] ?? null;
     return { harness: "opencode", model, effort: null };
   }
+  if (dh === "codex") {
+    const codex = providers?.codex;
+    const model =
+      codex?.commitModel ?? codex?.defaultModel ?? codex?.selectedModels?.[0] ?? null;
+    // Codex's effort ladder, not Claude's — `medium` is the shared middle tier.
+    return { harness: "codex", model, effort: codex?.commitEffort ?? "medium" };
+  }
   const claude = providers?.claude;
   return {
     harness: "claude",
@@ -83,8 +97,8 @@ export function actionAgentDefaults(
 
 /** The `startSession` model/effort args for resolved [`ActionAgentDefaults`]:
  *  Claude translates its model KEY to the `--model` flag (Sonnet's key and flag
- *  coincide; `"opus"` → the null default; a custom id → itself); OpenCode passes
- *  the `provider/model` id through and carries no effort. */
+ *  coincide; `"opus"` → the null default; a custom id → itself); Codex and
+ *  OpenCode pass their model id through as-is, and only OpenCode drops effort. */
 export function actionLaunchArgs(d: ActionAgentDefaults): {
   harness: Harness;
   model: string | null;
@@ -97,7 +111,7 @@ export function actionLaunchArgs(d: ActionAgentDefaults): {
       effort: d.effort,
     };
   }
-  return { harness: d.harness, model: d.model, effort: null };
+  return { harness: d.harness, model: d.model, effort: d.harness === "codex" ? d.effort : null };
 }
 
 /** A shell tab's persisted composer picks, when starting a session on its
@@ -108,6 +122,8 @@ export type ShellLaunchPicks = {
   model?: string;
   effort?: string;
   opencodeModel?: string;
+  codexModel?: string;
+  codexEffort?: string;
   permissionMode?: string;
 };
 
@@ -143,6 +159,21 @@ export function newChatLaunchArgs(
       oc?.selectedModels?.[0] ??
       (first ? `ollama/${first}` : null);
     return { harness: "opencode", model: model ?? null, effort: null, permissionMode };
+  }
+  if (harnessKey === "codex") {
+    const codex = providers?.codex;
+    const model = shell?.codexModel ?? codex?.defaultModel ?? codex?.selectedModels?.[0] ?? null;
+    // Codex maps our permission mode onto its approval-policy/sandbox pair, so
+    // the composer's picker applies here exactly as it does for Claude.
+    // The model's own supported tiers aren't known here (that needs the live
+    // model list), so this resolves against the common core — enough to reject a
+    // Claude-only level carried over from another harness.
+    return {
+      harness: "codex",
+      model,
+      effort: resolveCodexEffort(shell?.codexEffort ?? codex?.defaultEffort, undefined).key,
+      permissionMode,
+    };
   }
   const model = modelOption(shell?.model ?? claude?.defaultModel ?? undefined);
   const effort = effectiveEffort(shell?.effort ?? claude?.defaultEffort ?? undefined, model);
@@ -187,14 +218,16 @@ export function opencodeModelLabel(
  * The underlying provider behind a model pick — what the upstream API endpoint is
  * keyed on. OpenCode model ids are `provider/model…`, so the provider is the first
  * segment (`openrouter`, `opencode`, `ollama`, …); every Claude model shares the
- * single `claude` provider. Returns `null` only for an OpenCode harness with no
- * model resolved yet.
+ * single `claude` provider, and every Codex model the single `codex` one (both
+ * talk to one vendor endpoint, so model switching within them is always safe).
+ * Returns `null` only for an OpenCode harness with no model resolved yet.
  */
 export function modelProvider(
   harnessKey: string,
   opencodeModelId: string | null | undefined,
 ): string | null {
   if (harnessKey === "opencode") return opencodeModelId ? opencodeModelId.split("/")[0] || null : null;
+  if (harnessKey === "codex") return "codex";
   return "claude";
 }
 
@@ -206,9 +239,9 @@ export function modelProvider(
  * across providers mid-session replays the session's accumulated tool history to a
  * different endpoint, and a stricter provider (e.g. OpenCode Zen / DeepSeek)
  * rejects OpenCode's synthesized `functions.{tool}:{n}` ids as duplicates
- * ("Duplicate value for 'tool_call_id'…"), hard-failing the turn. Claude is immune
- * because all its models are one provider — so model switching there is seamless;
- * this keeps OpenCode to the same rule (same-provider switches only).
+ * ("Duplicate value for 'tool_call_id'…"), hard-failing the turn. Claude and Codex
+ * are immune because all their models are one provider — so model switching there
+ * is seamless; this keeps OpenCode to the same rule (same-provider switches only).
  */
 export function lockedSessionProvider(
   started: boolean,

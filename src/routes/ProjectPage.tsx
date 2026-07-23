@@ -605,6 +605,8 @@ export function ProjectPage() {
         | "permissionMode"
         | "harness"
         | "opencodeModel"
+        | "codexModel"
+        | "codexEffort"
         | "sessionId"
         | "handoffNudgeDismissed"
         | "terminalView"
@@ -1038,6 +1040,19 @@ export function ProjectPage() {
       // backend when the session isn't live — a fresh session picks up the shell
       // value at launch instead.
       if (shell.sessionId) void commands.setSessionModel(shell.sessionId, key);
+    },
+    onCodexModelChange: (key: string) => {
+      patchShell(shell.id, { codexModel: key });
+      // Codex also takes a model per turn, so — like OpenCode, and unlike Claude —
+      // a live switch retargets the next turn instead of relaunching the process.
+      if (shell.sessionId) void commands.setSessionModel(shell.sessionId, key);
+    },
+    onCodexEffortChange: (key: string) => {
+      patchShell(shell.id, { codexEffort: key });
+      // Effort rides on the same `turn/start` as the model, so it switches live
+      // too. Without this the composer would show the new tier while every turn
+      // kept running at the one bound at spawn.
+      if (shell.sessionId) void commands.setSessionEffort(shell.sessionId, key);
     },
     onOpenHarnessSettings: () => void navigate({ to: "/settings", search: { section: "harnesses" } }),
     // Strip the auto-captured handoff chip(s) once the new session has started:

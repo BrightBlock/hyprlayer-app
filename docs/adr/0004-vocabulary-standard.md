@@ -15,7 +15,7 @@ and re-exports them through `src/lib/domain/`.
 | Term | Definition |
 |---|---|
 | **agent** | UI umbrella term for an LLM conversation session |
-| **harness** | Chat runtime driven via the `AgentDriver` trait (claude, opencode) |
+| **harness** | Chat runtime driven via the `AgentDriver` trait (claude, codex, opencode) |
 | **engine** | Opaque CLI binary the multiplexer runs in a PTY |
 | **provider** | Model vendor (Anthropic, OpenAI, etc.) |
 

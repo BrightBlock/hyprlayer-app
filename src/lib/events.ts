@@ -51,9 +51,11 @@ export function attachEventListeners(): () => void {
       invalidateWorktreeGit(event.payload.workstreamId);
     }),
     // A session started, changed state, or ended. Invalidate the active-sessions
-    // list so the search palette's Agents section tracks running agents in real time.
+    // list so the search palette's Agents section tracks running agents in real time,
+    // and the per-workstream rows the composer reads a started chat's harness from.
     events.sessionLifecycle.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["workstream-sessions"] });
     }),
     // A lifecycle script (Setup/Run/Archive) started, detected its port, or
     // finished. Refresh that workstream's runtime (dock pills + Open :PORT).

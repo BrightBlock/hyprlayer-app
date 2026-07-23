@@ -1,0 +1,345 @@
+//! One-shot `codex app-server` queries for the settings UI.
+//!
+//! The interactive [`CodexDriver`](super::CodexDriver) keeps a child alive for a
+//! session's whole life; the Codex settings tab just needs two answers ("who is
+//! logged in?", "which models exist?"). Both spawn a short-lived app-server, do
+//! the `initialize` handshake, ask one thing, and let the process exit when its
+//! stdin closes.
+
+use std::ffi::OsString;
+use std::path::Path;
+use std::process::Stdio;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command;
+
+use super::protocol::{decode_line, Incoming};
+use crate::error::{CoreError, Result};
+
+/// A probe gets one round-trip; a hung app-server must not wedge the settings UI.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Who `codex` is currently authenticated as.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAuthStatus {
+    /// `"chatgpt"`, `"apiKey"`, `"amazonBedrock"`, … or `None` when signed out.
+    pub method: Option<String>,
+    /// The signed-in ChatGPT account's email, when Codex reports one.
+    pub email: Option<String>,
+    /// The ChatGPT plan (`plus`, `pro`, `team`, …), when reported.
+    pub plan: Option<String>,
+}
+
+impl CodexAuthStatus {
+    pub fn signed_in(&self) -> bool {
+        self.method.is_some()
+    }
+}
+
+/// One model Codex offers, as the composer's picker needs it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CodexModel {
+    /// The id passed back as `turn/start`'s `model`.
+    pub id: String,
+    pub display_name: String,
+    /// Reasoning-effort values this model accepts, in Codex's own order.
+    pub supported_efforts: Vec<String>,
+}
+
+/// Everything the Codex settings tab needs, read in ONE app-server session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CodexProbe {
+    pub auth: CodexAuthStatus,
+    /// Empty when Codex is signed out — it answers `model/list` with no rows
+    /// rather than failing. A probe that could not run at all is an `Err`, so
+    /// the two cases stay distinguishable.
+    pub models: Vec<CodexModel>,
+}
+
+/// Read the account AND the model list over a single app-server connection.
+///
+/// Deliberately one spawn for both questions. Two `codex app-server` processes
+/// starting concurrently interfere with each other, and the loser answers with a
+/// benign-looking default — a null account or an empty `data` array — rather than
+/// an error. Asking one server both questions removes the race by construction
+/// (and halves the startup cost).
+pub async fn probe(bin: &Path, path_env: &OsString) -> Result<CodexProbe> {
+    let replies = ask(
+        bin,
+        path_env,
+        &[("account/read", json!({})), ("model/list", json!({}))],
+    )
+    .await?;
+    Ok(CodexProbe {
+        auth: parse_auth(&replies[0]),
+        models: parse_models(&replies[1]),
+    })
+}
+
+/// Pure parse of an `account/read` reply. A signed-out CLI answers with a null
+/// account rather than failing, so "not signed in" is a normal result.
+fn parse_auth(result: &Value) -> CodexAuthStatus {
+    let account = result.get("account").filter(|a| !a.is_null());
+    let field = |k: &str| {
+        account
+            .and_then(|a| a.get(k))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    CodexAuthStatus {
+        method: field("type"),
+        email: field("email"),
+        plan: field("planType"),
+    }
+}
+
+/// Pure parse of a `model/list` reply. Split from the process work so it's
+/// testable against a captured body.
+fn parse_models(result: &Value) -> Vec<CodexModel> {
+    result
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter(|m| m.get("hidden").and_then(Value::as_bool) != Some(true))
+                .filter_map(|m| {
+                    let id = m.get("id").and_then(Value::as_str)?.to_string();
+                    Some(CodexModel {
+                        display_name: m
+                            .get("displayName")
+                            .and_then(Value::as_str)
+                            .unwrap_or(&id)
+                            .to_string(),
+                        supported_efforts: m
+                            .get("supportedReasoningEfforts")
+                            .and_then(Value::as_array)
+                            .map(|efforts| {
+                                efforts
+                                    .iter()
+                                    .filter_map(|e| {
+                                        // Rows are `{reasoningEffort, description}`;
+                                        // tolerate a bare string too.
+                                        e.get("reasoningEffort")
+                                            .and_then(Value::as_str)
+                                            .or_else(|| e.as_str())
+                                            .map(str::to_string)
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        id,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Ask one app-server several things, in order, over a single connection.
+async fn ask(bin: &Path, path_env: &OsString, calls: &[(&str, Value)]) -> Result<Vec<Value>> {
+    let label = calls.iter().map(|(m, _)| *m).collect::<Vec<_>>().join(" + ");
+    tokio::time::timeout(PROBE_TIMEOUT, ask_inner(bin, path_env, calls))
+        .await
+        .unwrap_or_else(|_| {
+            Err(CoreError::ExecTimeout {
+                program: format!("codex app-server {label}"),
+                seconds: PROBE_TIMEOUT.as_secs(),
+            })
+        })
+}
+
+async fn ask_inner(bin: &Path, path_env: &OsString, calls: &[(&str, Value)]) -> Result<Vec<Value>> {
+    // Serialize against any other app-server starting right now (a session
+    // launch, an auto-title). A probe is short, so this holds for its whole life
+    // rather than just the handshake. See `codex::startup_lock`.
+    let _startup = super::startup_lock().lock().await;
+
+    let mut cmd = Command::new(bin);
+    cmd.args(["app-server", "--stdio"])
+        .env("PATH", path_env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        // Discarded, not piped: nothing here reads stderr, and a chatty
+        // app-server (RUST_LOG=debug) would fill the pipe buffer, block on
+        // write, and never answer — the probe would only ever time out.
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CoreError::BinaryMissing {
+                name: "codex".into(),
+            }
+        } else {
+            CoreError::Io(e)
+        }
+    })?;
+    let stdin = child.stdin.take().expect("stdin piped");
+    let stdout = child.stdout.take().expect("stdout piped");
+
+    let out = exchange(stdin, stdout, calls).await;
+
+    // Reap BEFORE releasing the startup lock. `kill_on_drop` only SIGNALS the
+    // child; without waiting, the next app-server can begin while this one is
+    // still tearing down — which is the very interference the lock exists to
+    // prevent, and it still showed up ~1 in 20 under load without this.
+    let _ = child.kill().await;
+    out
+}
+
+/// The request/response half of a probe, split out so [`ask_inner`] can reap the
+/// child on every exit path while still holding the startup lock.
+async fn exchange(
+    mut stdin: tokio::process::ChildStdin,
+    stdout: tokio::process::ChildStdout,
+    calls: &[(&str, Value)],
+) -> Result<Vec<Value>> {
+
+    // Write the whole exchange up front — the app-server answers in order, so
+    // there's nothing to interleave. `stdin` is deliberately held open until the
+    // replies land: the server treats EOF as "shut down" and races us, exiting
+    // before it answers (closing it here loses the responses outright).
+    // Request ids: 1 is `initialize`, so call N gets id N+1.
+    let mut script = format!(
+        "{}\n{}\n",
+        json!({
+            "id": 1,
+            "method": "initialize",
+            "params": { "clientInfo": {
+                "name": "hyprlayer",
+                "title": "Hyprlayer",
+                "version": env!("CARGO_PKG_VERSION"),
+            } }
+        }),
+        json!({ "method": "initialized", "params": {} }),
+    );
+    for (i, (method, params)) in calls.iter().enumerate() {
+        script.push_str(&format!(
+            "{}\n",
+            json!({ "id": i + 2, "method": method, "params": params })
+        ));
+    }
+    stdin.write_all(script.as_bytes()).await?;
+    stdin.flush().await?;
+
+    let mut out: Vec<Option<Value>> = vec![None; calls.len()];
+    let mut remaining = calls.len();
+    let mut lines = BufReader::new(stdout).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        match decode_line(&line) {
+            // The handshake failing is the interesting error (bad binary,
+            // incompatible app-server) — surface it instead of timing out.
+            Some(Incoming::Response {
+                id: 1,
+                result: Err(e),
+            }) => {
+                return Err(CoreError::OutputParse {
+                    program: "codex".into(),
+                    detail: format!("initialize: {e}"),
+                });
+            }
+            Some(Incoming::Response { id, result }) if id >= 2 => {
+                let idx = (id - 2) as usize;
+                let Some(slot) = out.get_mut(idx) else {
+                    continue;
+                };
+                if slot.is_some() {
+                    continue;
+                }
+                let (method, _) = calls[idx];
+                *slot = Some(result.map_err(|e| CoreError::OutputParse {
+                    program: "codex".into(),
+                    detail: format!("{method}: {e}"),
+                })?);
+                remaining -= 1;
+                if remaining == 0 {
+                    return Ok(out.into_iter().map(Option::unwrap).collect());
+                }
+            }
+            _ => continue,
+        }
+    }
+
+    let missing = calls
+        .iter()
+        .zip(&out)
+        .filter(|(_, slot)| slot.is_none())
+        .map(|((m, _), _)| *m)
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(CoreError::OutputParse {
+        program: "codex".into(),
+        detail: format!("app-server exited without answering: {missing}"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_models_keeps_visible_rows_with_their_efforts() {
+        // Shape from `model/list` (codex-cli 0.145.0).
+        let body = json!({
+            "data": [
+                {
+                    "id": "gpt-5.4-codex",
+                    "model": "gpt-5.4-codex",
+                    "displayName": "GPT-5.4 Codex",
+                    "description": "Fast agentic coding",
+                    "hidden": false,
+                    "isDefault": true,
+                    "defaultReasoningEffort": "medium",
+                    "supportedReasoningEfforts": [
+                        { "reasoningEffort": "low", "description": "" },
+                        { "reasoningEffort": "medium", "description": "" },
+                        { "reasoningEffort": "high", "description": "" }
+                    ]
+                },
+                { "id": "internal-eval", "displayName": "Internal", "hidden": true }
+            ],
+            "nextCursor": null
+        });
+        let models = parse_models(&body);
+        // Hidden rows don't belong in a user-facing picker.
+        assert_eq!(models.len(), 1);
+        let m = &models[0];
+        assert_eq!(m.id, "gpt-5.4-codex");
+        assert_eq!(m.display_name, "GPT-5.4 Codex");
+        assert_eq!(m.supported_efforts, ["low", "medium", "high"]);
+    }
+
+    #[test]
+    fn parse_models_tolerates_a_missing_or_odd_body() {
+        assert!(parse_models(&json!({})).is_empty());
+        assert!(parse_models(&json!({ "data": [] })).is_empty());
+        // A row with no id can't be launched — drop it rather than emit a blank.
+        assert!(parse_models(&json!({ "data": [{ "displayName": "x" }] })).is_empty());
+        // A model with no displayName falls back to its id, not an empty label.
+        let m = parse_models(&json!({ "data": [{ "id": "gpt-5.4" }] }));
+        assert_eq!(m[0].display_name, "gpt-5.4");
+        assert!(m[0].supported_efforts.is_empty());
+    }
+
+    #[test]
+    fn auth_status_reports_signed_out_without_erroring() {
+        // A signed-out CLI answers with a null account — that's a state, not a
+        // failure, so the settings tab can render "Not signed in".
+        let status = CodexAuthStatus::default();
+        assert!(!status.signed_in());
+    }
+}

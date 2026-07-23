@@ -48,7 +48,7 @@ import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection
 import { SettingRow } from "@/features/settings/parts";
 import { THEMES, useThemeStore } from "@/lib/theme";
 import { IS_MACOS, IS_WINDOWS } from "@/lib/platform";
-import { AnytypeIcon, CheckIcon, ClaudeMarkIcon, ClipboardIcon, GitBranchIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, OllamaMarkIcon, OpenCodeMarkIcon, PersonIcon, PlusIcon, XIcon } from "@/components/icons";
+import { AnytypeIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PersonIcon, PlusIcon, XIcon } from "@/components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
   switch (kind) {
@@ -413,8 +413,17 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
 
 /* ------------------------------- General --------------------------------- */
 
-/** Built-in default title model (mirrors the backend's DEFAULT_TAB_TITLE_MODEL). */
+/** Built-in default title models (mirror the backend's DEFAULT_TAB_TITLE_MODEL /
+ *  DEFAULT_CODEX_TAB_TITLE_MODEL — keep in sync with `settings.rs`). */
 const DEFAULT_TAB_TITLE_MODEL = "claude:haiku";
+const DEFAULT_CODEX_TAB_TITLE_MODEL = "codex:gpt-5.4-mini";
+
+/** The title model used when the user hasn't picked one — Codex-by-default users
+ *  get Codex's small model rather than Claude Haiku, which would need a `claude`
+ *  binary they may not have. Mirrors `TabTitleSettings::effective_model`. */
+function defaultTitleModel(defaultHarness: string | null | undefined): string {
+  return defaultHarness === "codex" ? DEFAULT_CODEX_TAB_TITLE_MODEL : DEFAULT_TAB_TITLE_MODEL;
+}
 
 /** Toggle auto-generated agent-tab titles and pick the model that writes them —
  *  any Claude model, or one of the user's configured OpenCode models so
@@ -438,7 +447,7 @@ function DefaultHarnessCard({ settings }: { settings: AppSettings }) {
       <div className="flex gap-2">
         {DEFAULT_HARNESS_OPTIONS.map((h) => {
           const active = current === h.key;
-          const Icon = h.key === "opencode" ? OpenCodeMarkIcon : h.key === "ollama" ? OllamaMarkIcon : ClaudeMarkIcon;
+          const Icon = harnessIcon(h.key);
           return (
             <button
               key={h.key}
@@ -505,8 +514,19 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
     enabled: settings.tabTitles?.enabled ?? true,
     model: settings.tabTitles?.model ?? null,
   };
-  const selectedModel = tab.model && tab.model.length > 0 ? tab.model : DEFAULT_TAB_TITLE_MODEL;
+  const selectedModel =
+    tab.model && tab.model.length > 0
+      ? tab.model
+      : defaultTitleModel(settings.providers?.defaultHarness);
   const opencodeModels = settings.providers?.opencode?.selectedModels ?? [];
+  // Codex's own small model is always offered (it's the Codex default and needs
+  // no configuration); anything the user selected in the Codex tab joins it.
+  const codexModels = [
+    ...new Set([
+      DEFAULT_CODEX_TAB_TITLE_MODEL.replace(/^codex:/, ""),
+      ...(settings.providers?.codex?.selectedModels ?? []),
+    ]),
+  ];
   // Friendly name for a "provider/model" id, from the cached models.dev catalog.
   const modelName = useMemo(() => {
     const map = new Map<string, string>();
@@ -564,6 +584,13 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
                   </option>
                 ))}
               </optgroup>
+              <optgroup label="Codex">
+                {codexModels.map((id) => (
+                  <option key={id} value={`codex:${id}`}>
+                    {id}
+                  </option>
+                ))}
+              </optgroup>
               {opencodeModels.length > 0 && (
                 <optgroup label="OpenCode">
                   {opencodeModels.map((id) => (
@@ -576,7 +603,9 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
             </Select>
           }
         >
-          Defaults to Claude Haiku. Pick an OpenCode model if you don’t use Claude.
+          {settings.providers?.defaultHarness === "codex"
+            ? "Defaults to GPT-5.4-Mini, matching your default harness."
+            : "Defaults to Claude Haiku, and follows your default harness. Pick a model to pin it."}
         </SettingRow>
       </div>
     </Card>

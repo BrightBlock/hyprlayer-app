@@ -7,6 +7,7 @@ import {
   effectiveHarnessKey,
   lockedSessionProvider,
   modelProvider,
+  newChatLaunchArgs,
 } from "./harnessing";
 
 const withProviders = (providers: AppSettings["providers"]): AppSettings =>
@@ -136,6 +137,11 @@ describe("effectiveHarnessKey", () => {
     expect(effectiveHarnessKey(undefined)).toBe("claude");
     expect(effectiveHarnessKey(null)).toBe("claude");
   });
+
+  it("keeps Codex as its own harness", () => {
+    // Unlike Ollama (which rides OpenCode), Codex is a real harness of its own.
+    expect(effectiveHarnessKey("codex")).toBe("codex");
+  });
 });
 
 describe("actionLaunchArgs", () => {
@@ -159,5 +165,106 @@ describe("actionLaunchArgs", () => {
       model: "openrouter/x",
       effort: null,
     });
+  });
+
+  it("passes a Codex model id through AND keeps its effort", () => {
+    // Codex ids need no translation (unlike Claude's keys), but — unlike
+    // OpenCode — Codex does take a reasoning effort, so it must not be dropped.
+    expect(
+      actionLaunchArgs({ harness: "codex", model: "gpt-5.4-codex", effort: "low" }),
+    ).toEqual({ harness: "codex", model: "gpt-5.4-codex", effort: "low" });
+  });
+});
+
+describe("Codex defaults", () => {
+  it("locks a started Codex session to the single `codex` provider", () => {
+    // All Codex models share one endpoint, so model switching mid-session is
+    // always safe — the lock only has to keep it from jumping to another harness.
+    expect(modelProvider("codex", null)).toBe("codex");
+    expect(lockedSessionProvider(true, "codex", null)).toBe("codex");
+  });
+
+  it("runs the action agents on the configured Codex commit model + effort", () => {
+    expect(
+      actionAgentDefaults(
+        withProviders({
+          defaultHarness: "codex",
+          codex: {
+            selectedModels: ["gpt-5.4-codex", "gpt-5.4"],
+            defaultModel: "gpt-5.4-codex",
+            commitModel: "gpt-5.4",
+            commitEffort: "low",
+          },
+        } as AppSettings["providers"]),
+      ),
+    ).toEqual({ harness: "codex", model: "gpt-5.4", effort: "low" });
+  });
+
+  it("falls back through the Codex default then the first selected model", () => {
+    expect(
+      actionAgentDefaults(
+        withProviders({
+          defaultHarness: "codex",
+          codex: { selectedModels: ["a", "b"], defaultModel: "b" },
+        } as AppSettings["providers"]),
+      ),
+    ).toEqual({ harness: "codex", model: "b", effort: "medium" });
+
+    expect(
+      actionAgentDefaults(
+        withProviders({
+          defaultHarness: "codex",
+          codex: { selectedModels: ["a", "b"] },
+        } as AppSettings["providers"]),
+      ),
+    ).toEqual({ harness: "codex", model: "a", effort: "medium" });
+
+    // Nothing configured at all still names the harness — the backend then lets
+    // Codex pick its own default model.
+    expect(
+      actionAgentDefaults(
+        withProviders({ defaultHarness: "codex" } as AppSettings["providers"]),
+      ),
+    ).toEqual({ harness: "codex", model: null, effort: "medium" });
+  });
+
+  it("launches a new Codex chat on the tab's picks, then the settings defaults", () => {
+    const settings = withProviders({
+      defaultHarness: "codex",
+      codex: {
+        selectedModels: ["gpt-5.4-codex"],
+        defaultModel: "gpt-5.4-codex",
+        defaultEffort: "high",
+      },
+    } as AppSettings["providers"]);
+
+    // No tab picks → the configured defaults. Codex maps our permission mode onto
+    // its approval/sandbox pair, so the composer's choice rides along (unlike
+    // OpenCode, which has no permission modes).
+    expect(newChatLaunchArgs(settings, {})).toEqual({
+      harness: "codex",
+      model: "gpt-5.4-codex",
+      effort: "high",
+      permissionMode: null,
+    });
+
+    // The tab's own picks win over the settings defaults.
+    expect(
+      newChatLaunchArgs(settings, {
+        codexModel: "gpt-5.4",
+        codexEffort: "low",
+        permissionMode: "plan",
+      }),
+    ).toEqual({ harness: "codex", model: "gpt-5.4", effort: "low", permissionMode: "plan" });
+  });
+
+  it("falls back to Codex's middle effort tier, never a Claude-only level", () => {
+    // `max`/`ultracode` exist on Claude but not Codex — sending one would be
+    // rejected by the app-server, so an unrecognized value resolves to `medium`.
+    const settings = withProviders({
+      defaultHarness: "codex",
+      codex: { selectedModels: ["m"], defaultEffort: "ultracode" },
+    } as AppSettings["providers"]);
+    expect(newChatLaunchArgs(settings, {}).effort).toBe("medium");
   });
 });

@@ -20,7 +20,8 @@ pub struct Session {
     /// Which harness backs the session.
     pub harness: Harness,
     /// The harness's own session id (set on init; drives resume). claude's
-    /// session id for Claude Code, the opencode session id for OpenCode.
+    /// session id for Claude Code, the opencode session id for OpenCode, the
+    /// thread id for Codex.
     pub claude_session_id: Option<String>,
     pub cwd: String,
     pub state: SessionState,
@@ -261,6 +262,21 @@ impl Db {
             } else {
                 Ok(None)
             }
+        })
+    }
+
+    /// How many user turns this session has logged. A resumed harness driver
+    /// seeds its own turn counter with this: rewind ordinals are session-global,
+    /// but a fresh driver has only seen the turns it streamed itself.
+    pub fn count_user_messages(&self, session_id: &str) -> Result<usize> {
+        self.with(|conn| {
+            let n: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM session_events
+                 WHERE session_id = ?1 AND kind = 'userMessage'",
+                params![session_id],
+                |row| row.get(0),
+            )?;
+            Ok(n.max(0) as usize)
         })
     }
 

@@ -363,6 +363,11 @@ export const commands = {
 	 *  Claude, whose model is fixed at launch (its driver ignores this).
 	 */
 	setSessionModel: (sessionId: string, model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_model", { sessionId, model })),
+	/**
+	 *  Same for reasoning effort, which Codex also takes per turn. A no-op when the
+	 *  session isn't live, and for Claude/OpenCode (their drivers ignore it).
+	 */
+	setSessionEffort: (sessionId: string, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_effort", { sessionId, effort })),
 	listSessions: (workstreamId: string) => typedError<Session[], AppError>(__TAURI_INVOKE("list_sessions", { workstreamId })),
 	getSessionLog: (sessionId: string) => typedError<StoredEvent[], AppError>(__TAURI_INVOKE("get_session_log", { sessionId })),
 	/**
@@ -489,6 +494,36 @@ export const commands = {
 	 *  the UI degrades gracefully.
 	 */
 	claudeAuthStatus: () => typedError<ClaudeAuthStatus, AppError>(__TAURI_INVOKE("claude_auth_status")),
+	/**
+	 *  Account + model list for the Codex settings tab, from ONE app-server session.
+	 * 
+	 *  Deliberately a single command rather than one per question: these used to be
+	 *  two commands the tab fired concurrently, which spawned two app-servers that
+	 *  interfered — the loser answered with a null account or an empty model list, so
+	 *  a working install rendered as "not signed in" or "no models".
+	 * 
+	 *  A missing CLI is still a benign empty probe (the tab renders the install
+	 *  hint), but a probe that RAN and failed now errors instead of masquerading as
+	 *  an empty result, so a transient failure can't be cached as fact.
+	 */
+	codexProbe: () => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_probe")),
+	/**
+	 *  Sign Codex in with an API key (the enterprise path, mirroring Claude's
+	 *  "API key" auth mode).
+	 * 
+	 *  Unlike Claude — where the app stores the key in `settings.json` and injects
+	 *  `ANTHROPIC_API_KEY` into every spawn — Codex owns its own credential store:
+	 *  `codex login --with-api-key` reads the key from stdin and writes
+	 *  `$CODEX_HOME/auth.json`. An env-injected `OPENAI_API_KEY` is IGNORED by the
+	 *  app-server (verified: `account/read` still reports `account: null`), so the
+	 *  Claude approach wouldn't work here even if we wanted it.
+	 * 
+	 *  The upside is that we never persist the secret: it goes straight to the CLI's
+	 *  stdin (never argv, so it can't leak into a process listing) and is dropped.
+	 */
+	codexLoginWithApiKey: (apiKey: string) => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_login_with_api_key", { apiKey })),
+	/**  Sign Codex out (`codex logout`), clearing whichever credential is active. */
+	codexLogout: () => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_logout")),
 	/**
 	 *  Fetch authoritative per-model context windows from the Anthropic Models API,
 	 *  reusing the user's Claude auth (a configured API key, else the CLI's OAuth
@@ -804,7 +839,7 @@ export type Area =
 /**  Binary statuses were re-probed (override set, redetect requested). */
 export type BinariesChanged = null;
 
-export type BinaryKind = "hyprlayer" | "claude" | "opencode" | "gh" | "git" | "ollama";
+export type BinaryKind = "hyprlayer" | "claude" | "opencode" | "codex" | "gh" | "git" | "ollama";
 
 export type BinaryState = { state: "ok" } | { state: "missing" } | { state: "tooOld"; min: string };
 
@@ -945,14 +980,69 @@ export type CliInstallMethod = {
 /**  A package manager that can install the hyprlayer CLI. */
 export type CliInstallMethodId = "homebrew" | "winget" | "scoop";
 
+/**  Who `codex` is currently authenticated as. */
+export type CodexAuthStatus = {
+	/**  `"chatgpt"`, `"apiKey"`, `"amazonBedrock"`, … or `None` when signed out. */
+	method: string | null,
+	/**  The signed-in ChatGPT account's email, when Codex reports one. */
+	email: string | null,
+	/**  The ChatGPT plan (`plus`, `pro`, `team`, …), when reported. */
+	plan: string | null,
+};
+
+/**  One model Codex offers, as the composer's picker needs it. */
+export type CodexModel = {
+	/**  The id passed back as `turn/start`'s `model`. */
+	id: string,
+	displayName: string,
+	/**  Reasoning-effort values this model accepts, in Codex's own order. */
+	supportedEfforts: string[],
+};
+
+/**  Everything the Codex settings tab needs, read in ONE app-server session. */
+export type CodexProbe = {
+	auth: CodexAuthStatus,
+	/**
+	 *  Empty when Codex is signed out — it answers `model/list` with no rows
+	 *  rather than failing. A probe that could not run at all is an `Err`, so
+	 *  the two cases stay distinguishable.
+	 */
+	models: CodexModel[],
+};
+
 /**
- *  Codex provider defaults. Stub — Codex isn't supported yet; this exists so
- *  the providers section round-trips and can grow fields without a migration.
+ *  Codex harness defaults (Settings → Harnesses → Codex). Auth is NOT stored
+ *  here — `codex login` owns it in `~/.codex`, and the app only reads the status.
  */
 export type CodexSettings = {
-	/**  Default model for new Codex sessions. Unused until Codex lands. */
+	/**
+	 *  Default model id for new Codex sessions (e.g. `"gpt-5.4-codex"`), as
+	 *  returned by `model/list`. `None` keeps Codex's own configured default.
+	 */
 	defaultModel?: string | null,
-	/**  Personality/style for new Codex chats. Reserved — Codex isn't wired up. */
+	/**
+	 *  Default reasoning effort for new sessions (`minimal`..`xhigh`). `None`
+	 *  keeps the model's own default effort.
+	 */
+	defaultEffort?: string | null,
+	/**
+	 *  Model for the Commit/Ship/Revise action agents when the default harness is
+	 *  Codex — these stages are mechanical git/PR plumbing, so a cheaper model
+	 *  than the chat default is usually right. `None` ⇒ falls back to
+	 *  `default_model`, then the first selected model.
+	 */
+	commitModel?: string | null,
+	/**  Reasoning effort for the Commit/Ship/Revise action agents (Codex). */
+	commitEffort?: string | null,
+	/**
+	 *  The model ids the user picked to expose in the composer's model picker.
+	 *  Empty = none chosen yet (the Codex tab prompts the user to add some).
+	 */
+	selectedModels?: string[],
+	/**
+	 *  Personality/style for new Codex chats. Reserved — `thread/start` takes a
+	 *  `personality`, but nothing sets it yet.
+	 */
 	personality?: string | null,
 };
 
@@ -1214,7 +1304,7 @@ export type GithubRepo = {
  *  drivers by. sqlite stores `as_str` TEXT; read back via the tolerant
  *  [`Harness::parse`].
  */
-export type Harness = "claude" | "opencode";
+export type Harness = "claude" | "opencode" | "codex";
 
 export type HealthCheck = {
 	id: string,
@@ -1573,17 +1663,15 @@ export type PromptSettings = {
 };
 
 /**
- *  Defaults for each agent provider/harness. Claude and OpenCode are wired up;
- *  Ollama runs local models *through* the OpenCode harness; Codex is stubbed so
- *  the section can render now and gain real fields later without a settings
- *  migration.
+ *  Defaults for each agent provider/harness. Claude, OpenCode and Codex are all
+ *  real harnesses; Ollama runs local models *through* the OpenCode harness.
  */
 export type ProviderSettings = {
 	/**
 	 *  The harness new sessions default to, and the one the Commit/Ship actions
-	 *  run on: `"claude"` or `"opencode"` (Ollama runs *through* OpenCode).
-	 *  `None`/absent ⇒ `"claude"`. Read by the composer and the commit/ship
-	 *  launch path; the picker still overrides it per tab.
+	 *  run on: `"claude"`, `"opencode"` or `"codex"` (Ollama runs *through*
+	 *  OpenCode). `None`/absent ⇒ `"claude"`. Read by the composer and the
+	 *  commit/ship launch path; the picker still overrides it per tab.
 	 */
 	defaultHarness?: string | null,
 	/**  Anthropic Claude (the `claude` CLI). */
@@ -1592,10 +1680,7 @@ export type ProviderSettings = {
 	opencode?: OpenCodeSettings,
 	/**  Ollama — local/remote model server, surfaced through the OpenCode harness. */
 	ollama?: OllamaSettings,
-	/**
-	 *  OpenAI Codex — not wired up yet; reserved so the providers section is
-	 *  stable as we build it out.
-	 */
+	/**  OpenAI Codex (the `codex` CLI, driven via its app-server). */
 	codex?: CodexSettings,
 };
 
@@ -1673,16 +1758,17 @@ export type ReviewDecision =
  *  Rewind a session to the N-th (1-based) user turn, discarding that turn and
  *  everything after it. Two paths:
  * 
- *  * **Live rewind (preferred).** If the session is live, we drive claude's own
- *    `rewind_conversation` control request (see [`ClaudeDriver::rewind_to_ordinal`])
- *    to truncate the model's in-memory conversation to this turn, then keep that
- *    SAME process alive and hand its event stream to the caller's new channel
- *    (see [`live_rewind_handoff`]). The model genuinely forgets the dropped turns.
- *    We must NOT kill + `--resume` here: `rewind_conversation` does not truncate
- *    claude's on-disk transcript, so a resume would reload the un-rewound history.
+ *  * **Live rewind (preferred).** If the session is live and its harness supports
+ *    it, we ask the harness to truncate the model's in-memory conversation to this
+ *    turn — claude's `rewind_conversation` control request
+ *    (see [`ClaudeDriver::rewind_to_ordinal`]), Codex's `thread/rollback` — then
+ *    keep that SAME process alive and hand its event stream to the caller's new
+ *    channel (see [`live_rewind_handoff`]). The model genuinely forgets the dropped
+ *    turns. We must NOT kill + resume here: claude's peel does not truncate its
+ *    on-disk transcript, so a resume would reload the un-rewound history.
  *  * **Log-only fallback.** If the model rewind isn't available (session not live,
  *    OpenCode, a turn from before the current generation, the first turn, or a
- *    claude refusal) we kill + cut + `--resume`: the UI/log truncate but the model
+ *    harness refusal) we kill + cut + resume: the UI/log truncate but the model
  *    keeps its memory. `permission_mode` re-applies the session's posture on this
  *    re-spawn (as [`resume_session`]/[`restart_session`] do) — `None` would drop a
  *    bypass session back to the stage default and start prompting again.
@@ -1695,10 +1781,10 @@ export type ReviewDecision =
 export type RewindResult = {
 	session: Session,
 	/**
-	 *  True when claude's own conversation was truncated on the live process (the
-	 *  model genuinely forgot the dropped turns); false when we could only prune
-	 *  the app log (not live / OpenCode / a pre-generation or first turn / a claude
-	 *  refusal) — the model still recalls them.
+	 *  True when the harness's own conversation was truncated on the live process
+	 *  (the model genuinely forgot the dropped turns); false when we could only
+	 *  prune the app log (not live / OpenCode / a pre-generation or first turn / a
+	 *  harness refusal) — the model still recalls them.
 	 */
 	liveRewound: boolean,
 };
@@ -1798,7 +1884,8 @@ export type Session = {
 	harness: Harness,
 	/**
 	 *  The harness's own session id (set on init; drives resume). claude's
-	 *  session id for Claude Code, the opencode session id for OpenCode.
+	 *  session id for Claude Code, the opencode session id for OpenCode, the
+	 *  thread id for Codex.
 	 */
 	claudeSessionId: string | null,
 	cwd: string,
@@ -2063,8 +2150,8 @@ export type SyncReport = {
 /**
  *  Auto-generated agent-tab titles. When enabled, a new agent tab summarizes the
  *  user's first prompt into a short title via a small model. Surfaced in
- *  Settings → General. The model can be a Claude model or — so opencode-only
- *  users are covered — one of their configured OpenCode models.
+ *  Settings → General. The model can be a Claude or Codex model, or — so
+ *  opencode-only users are covered — one of their configured OpenCode models.
  */
 export type TabTitleSettings = {
 	/**
@@ -2076,8 +2163,9 @@ export type TabTitleSettings = {
 	 *  Which model generates titles, as a tagged id:
 	 *    `"claude:<flag>"`        → `claude -p --model <flag>` (empty flag = default)
 	 *    `"opencode:<prov>/<id>"` → a one-shot OpenCode turn with that model
-	 *  `None`/absent uses the built-in default ([`DEFAULT_TAB_TITLE_MODEL`],
-	 *  Claude Haiku).
+	 *    `"codex:<id>"`           → a one-shot ephemeral Codex turn
+	 *  `None`/absent follows the default harness — see
+	 *  [`TabTitleSettings::effective_model`].
 	 */
 	model?: string | null,
 };

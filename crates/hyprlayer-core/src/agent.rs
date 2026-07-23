@@ -1,7 +1,7 @@
 //! The harness-agnostic driver interface.
 //!
 //! A live session is driven the same way regardless of which harness backs it
-//! (Claude Code today, OpenCode next): send a turn, answer a permission or a
+//! (Claude Code, OpenCode, Codex): send a turn, answer a permission or a
 //! question, interrupt, kill, and subscribe to its [`SessionEvent`] stream. The
 //! session registry and command handlers hold `Arc<dyn AgentDriver>` so they
 //! never name a concrete harness.
@@ -13,6 +13,7 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use crate::claude::{ClaudeDriver, SessionEvent};
+use crate::codex::CodexDriver;
 use crate::error::{CoreError, Result};
 
 /// Which harness backs a session — the vocabulary the store persists
@@ -28,6 +29,7 @@ pub enum Harness {
     // want surfaced, while row reads go through `parse`.
     Claude,
     Opencode,
+    Codex,
 }
 
 impl Harness {
@@ -35,6 +37,7 @@ impl Harness {
         match self {
             Harness::Claude => "claude",
             Harness::Opencode => "opencode",
+            Harness::Codex => "codex",
         }
     }
 
@@ -42,6 +45,7 @@ impl Harness {
     pub fn parse(s: &str) -> Self {
         match s {
             "opencode" => Harness::Opencode,
+            "codex" => Harness::Codex,
             _ => Harness::Claude,
         }
     }
@@ -74,6 +78,11 @@ pub trait AgentDriver: Send + Sync {
     /// can switch live; Claude binds the model at launch, so this is a no-op there
     /// (its model changes by restarting the session). `None` clears any override.
     fn set_model(&self, _model: Option<String>) {}
+
+    /// Switch the reasoning effort used for subsequent turns. Codex sends effort
+    /// with every `turn/start`, so it can switch live; Claude binds it at launch
+    /// and OpenCode manages its own, so this is a no-op there.
+    fn set_effort(&self, _effort: Option<String>) {}
 
     /// Answer a `PermissionAsk` (allow/deny, with an optional message).
     fn respond_permission(&self, request_id: &str, allow: bool, message: Option<&str>)
@@ -125,6 +134,57 @@ impl AgentDriver for ClaudeDriver {
         prompt_name: Option<&str>,
     ) -> Result<()> {
         self.send_user_turn(text, stage, prompt_name)
+    }
+    fn respond_permission(
+        &self,
+        request_id: &str,
+        allow: bool,
+        message: Option<&str>,
+    ) -> Result<()> {
+        self.respond_permission(request_id, allow, message)
+    }
+    fn answer_question(&self, request_id: &str, answers: Value) -> Result<()> {
+        self.answer_question(request_id, answers)
+    }
+    fn interrupt(&self) -> Result<()> {
+        self.interrupt()
+    }
+    fn rewind_to_ordinal<'a>(
+        &'a self,
+        ordinal: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        // Inherent async fn of the same name wins resolution — no recursion.
+        Box::pin(self.rewind_to_ordinal(ordinal))
+    }
+    fn kill(&self) {
+        self.kill()
+    }
+    fn pid(&self) -> Option<u32> {
+        self.pid()
+    }
+}
+
+/// The Codex harness. Like the Claude impl, each method forwards to
+/// `CodexDriver`'s inherent method of the same name.
+impl AgentDriver for CodexDriver {
+    fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
+        self.subscribe()
+    }
+    fn send_user_turn(
+        &self,
+        text: &str,
+        stage: Option<&str>,
+        prompt_name: Option<&str>,
+    ) -> Result<()> {
+        self.send_user_turn(text, stage, prompt_name)
+    }
+    fn set_model(&self, model: Option<String>) {
+        // Codex takes a model per turn, so a mid-session switch just changes what
+        // the next `turn/start` sends — no relaunch (unlike Claude).
+        self.set_model(model)
+    }
+    fn set_effort(&self, effort: Option<String>) {
+        self.set_effort(effort)
     }
     fn respond_permission(
         &self,

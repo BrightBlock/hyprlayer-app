@@ -39,7 +39,7 @@ import { eventToChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { basename } from "@/lib/path";
 import { IS_MACOS } from "@/lib/platform";
-import { useBootstrap, useOpencodeCatalog } from "@/lib/queries";
+import { useBootstrap, useCodexProbe, useOpencodeCatalog, useWorkstreamSessions } from "@/lib/queries";
 import type { WorkstreamView } from "@/lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "@/features/workstreams/WorkstreamDocChips";
 import { PromptChips, usePinnedPrompts } from "@/features/prompts/PromptChips";
@@ -52,9 +52,11 @@ import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, sugges
 import {
   EFFORTS,
   apiContextWindow,
+  codexEfforts,
   effectiveEffort,
   modelOption,
   modelSupportsUltracode,
+  resolveCodexEffort,
   resumeModelFlag,
   visibleModels,
 } from "@/lib/domain/models";
@@ -194,6 +196,21 @@ type MenuGroup = {
   items: MenuItem[];
   disabled?: boolean;
 };
+
+/**
+ * The composer's mark for a harness, used by both the model trigger and every
+ * model-menu group so the two can't drift apart.
+ *
+ * Deliberately NOT `harnessIcon` from the design system: the composer shows
+ * OpenCode as a generic `CodeIcon` (it fronts many providers, so its own logo
+ * would misrepresent which one a model comes from), while Settings shows the
+ * OpenCode mark because there it names the harness itself.
+ */
+function composerMark(key: string, size = 13) {
+  if (key === "codex") return <OpenAiIcon size={size} />;
+  if (key === "opencode") return <CodeIcon size={size} />;
+  return <ClaudeMarkIcon size={size} />;
+}
 
 /** A compact composer-toolbar dropdown (model / effort / mode). Opens upward —
  *  the composer sits at the bottom of the pane. */
@@ -952,12 +969,16 @@ type Props = {
   onModelChange: (key: string) => void;
   onEffortChange: (key: string) => void;
   onPermissionModeChange: (key: string) => void;
-  /** Persist the chosen harness (claude|opencode) on the tab so it survives a
-   *  tab switch; fixed once the session starts. */
+  /** Persist the chosen harness (claude|codex|opencode) on the tab so it survives
+   *  a tab switch; fixed once the session starts. */
   onHarnessChange: (key: string) => void;
   /** Persist the chosen OpenCode `provider/model` id on the tab (the Claude model
    *  lives in `onModelChange`). */
   onOpencodeModelChange: (key: string) => void;
+  /** Persist the chosen Codex model id / reasoning effort on the tab. Separate
+   *  from the Claude setters because Codex's ids and effort ladder are its own. */
+  onCodexModelChange: (key: string) => void;
+  onCodexEffortChange: (key: string) => void;
   /** Open Settings → Harnesses (the model menu's "Harnesses →" footer). */
   onOpenHarnessSettings: () => void;
   onSessionStarted: (sessionId: string) => void;
@@ -1001,6 +1022,8 @@ export function SessionChat({
   onPermissionModeChange,
   onHarnessChange,
   onOpencodeModelChange,
+  onCodexModelChange,
+  onCodexEffortChange,
   onOpenHarnessSettings,
   onSessionStarted,
   onResetSession,
@@ -1096,19 +1119,30 @@ export function SessionChat({
   const modelItems = visibleModels(claudeDefaults?.visibleModels);
 
   // The harness is implied by which model you pick: the model menu groups models
-  // by harness (Claude / Codex[soon] / OpenCode), so selecting one sets BOTH the
-  // model and the harness. Both persist on the tab — like effort — so switching
-  // tabs and coming back keeps the choice. Menu keys are namespaced `harness:key`
+  // by harness (Claude / Codex / OpenCode), so selecting one sets BOTH the model
+  // and the harness. Both persist on the tab — like effort — so switching tabs
+  // and coming back keeps the choice. Menu keys are namespaced `harness:key`
   // so the select handler knows which harness a row belongs to.
   const bootstrapSettings = useBootstrap().data?.settings;
   const opencodeDefaults = bootstrapSettings?.providers?.opencode;
   const ollamaDefaults = bootstrapSettings?.providers?.ollama;
-  // A tab with no explicit pick falls back to the configured default harness
-  // (Settings → Harnesses → Defaults), then to Claude.
+  const codexDefaults = bootstrapSettings?.providers?.codex;
+  // A started chat stays on the harness it LAUNCHED on — its transcript and tool
+  // history belong to that harness's session, and changing the default harness
+  // must only affect the next one. The session row is authoritative (the backend
+  // pins it at launch and resumes by it), so it outranks both the tab's pick and
+  // the current default; that also repairs a tab whose pick already drifted.
+  // Unstarted: the tab's own pick, else the configured default, else Claude.
+  const startedHarness = useWorkstreamSessions(workstreamId, Boolean(shell.sessionId)).data?.find(
+    (s) => s.id === shell.sessionId,
+  )?.harness;
   const harness = harnessOption(
-    shell.harness ?? effectiveHarnessKey(bootstrapSettings?.providers?.defaultHarness),
+    startedHarness ??
+      shell.harness ??
+      effectiveHarnessKey(bootstrapSettings?.providers?.defaultHarness),
   );
   const usingOpencode = harness.key === "opencode";
+  const usingCodex = harness.key === "codex";
   const ocModels = opencodeDefaults?.selectedModels ?? [];
   // Ollama models run *through* the OpenCode harness as `ollama/<id>` ids, so they
   // share the opencode harness/model machinery — they're just a separate picker group.
@@ -1120,7 +1154,26 @@ export function SessionChat({
     ocModels[0] ??
     ollamaModels[0] ??
     null;
-  const startModelFlag = usingOpencode ? ocModel : model.flag;
+  const codexModels = codexDefaults?.selectedModels ?? [];
+  const codexModel = shell.codexModel ?? codexDefaults?.defaultModel ?? codexModels[0] ?? null;
+  // Codex reports its effort tiers PER MODEL (GPT-5.6-Sol has `ultra`, Luna stops
+  // at `max`), so the picker is driven by the chosen model's own list rather than
+  // a static ladder — offering a tier the model rejects would fail the turn. The
+  // query is cached for an hour and only runs when this tab is on Codex.
+  const codexCatalog = useCodexProbe(usingCodex && codexModels.length > 0);
+  const codexSupportedEfforts = useMemo(
+    () => codexCatalog.data?.models.find((m) => m.id === codexModel)?.supportedEfforts,
+    [codexCatalog.data, codexModel],
+  );
+  const codexEffortItems = codexEfforts(codexSupportedEfforts);
+  const codexEffort = resolveCodexEffort(
+    shell.codexEffort ?? codexDefaults?.defaultEffort,
+    codexSupportedEfforts,
+  );
+  const startModelFlag = usingOpencode ? ocModel : usingCodex ? codexModel : model.flag;
+  // Each harness gets its OWN effort ladder: Codex's values differ from Claude's,
+  // and OpenCode has no effort control at all (the driver ignores it).
+  const startEffort = usingCodex ? codexEffort.key : usingOpencode ? null : effort.key;
   // Friendly OpenCode model names from the models.dev catalog — the raw ids are
   // long `provider/model` paths. Only fetched when this tab has OpenCode models
   // to label; the query is cached hard and falls back to a bundled snapshot.
@@ -1134,11 +1187,11 @@ export function SessionChat({
   // replays the session's tool history to a different API endpoint, and a stricter
   // provider (e.g. OpenCode Zen / DeepSeek) rejects the synthesized tool_call_ids
   // ("Duplicate value for 'tool_call_id'…") — hard-failing the turn. Same-provider
-  // model switches are safe (and are the only kind Claude ever offers, since all
-  // its models share one provider), so we grey out cross-provider rows until the
-  // user starts a new agent. The lock keys on the *underlying* provider — the id
-  // prefix (`openrouter/…`, `opencode/…`, `ollama/…`) — not the harness, because
-  // e.g. Kimi (OpenRouter) → Big Pickle (Zen) is cross-provider within OpenCode.
+  // model switches are safe (and are the only kind Claude or Codex ever offers,
+  // since all their models share one provider), so we grey out cross-provider rows
+  // until the user starts a new agent. The lock keys on the *underlying* provider —
+  // the id prefix (`openrouter/…`, `opencode/…`, `ollama/…`) — not the harness,
+  // because e.g. Kimi (OpenRouter) → Big Pickle (Zen) is cross-provider within OpenCode.
   const lockedProvider = lockedSessionProvider(started, harness.key, ocModel);
   const lockOther = (itemProvider: string): Pick<MenuItem, "disabled"> =>
     lockedProvider !== null && itemProvider !== lockedProvider ? { disabled: true } : {};
@@ -1147,34 +1200,37 @@ export function SessionChat({
     {
       key: "claude",
       label: "Claude Code",
-      icon: <ClaudeMarkIcon size={13} />,
+      icon: composerMark("claude"),
       items: modelItems.map((m) => ({
         key: `claude:${m.key}`,
         label: m.label,
         hint: m.hint,
-        icon: <ClaudeMarkIcon size={13} />,
+        icon: composerMark("claude"),
         ...lockOther("claude"),
       })),
     },
     {
       key: "codex",
       label: "Codex",
-      icon: <OpenAiIcon size={13} />,
-      disabled: true,
-      items: [
-        { key: "codex:gpt-5.5", label: "GPT-5.5", icon: <OpenAiIcon size={13} /> },
-        { key: "codex:gpt-5.4", label: "GPT-5.4", icon: <OpenAiIcon size={13} /> },
-      ],
+      icon: composerMark("codex"),
+      // Codex model ids are already readable (`gpt-5.4-codex`), so — unlike
+      // OpenCode's long `provider/model` paths — they need no catalog lookup.
+      items: codexModels.map((id) => ({
+        key: `codex:${id}`,
+        label: id,
+        icon: composerMark("codex"),
+        ...lockOther("codex"),
+      })),
     },
     {
       key: "opencode",
       label: "OpenCode",
-      icon: <CodeIcon size={13} />,
+      icon: composerMark("opencode"),
       items: ocModels.map((id) => ({
         key: `opencode:${id}`,
         label: opencodeModelLabel(id, ocNames),
         hint: ocNames.get(id)?.provider,
-        icon: <CodeIcon size={13} />,
+        icon: composerMark("opencode"),
         ...lockOther(modelProvider("opencode", id) ?? ""),
       })),
     },
@@ -1202,16 +1258,22 @@ export function SessionChat({
     ? ocModel
       ? opencodeModelLabel(ocModel, ocNames)
       : "Select a model"
-    : model.label;
-  const composerModelHint = usingOpencode ? undefined : model.hint;
+    : usingCodex
+      ? (codexModel ?? "Select a model")
+      : model.label;
+  const composerModelHint = usingOpencode || usingCodex ? undefined : model.hint;
   const composerModelActiveKey = usingOpencode
     ? ocModel
       ? `opencode:${ocModel}`
       : ""
-    : `claude:${model.key}`;
+    : usingCodex
+      ? codexModel
+        ? `codex:${codexModel}`
+        : ""
+      : `claude:${model.key}`;
 
-  // Picking a model selects its harness too (Codex rows are disabled, so never
-  // fire here). `onHarnessChange` + the per-harness model setter both patch the tab.
+  // Picking a model selects its harness too: `onHarnessChange` + the per-harness
+  // model setter both patch the tab.
   // Claude binds its model at launch, so switching the model on a LIVE session
   // relaunches the process via --resume onto the new model (transcript preserved)
   // — the model analog of handlePermissionModeChange. Effort is re-resolved for
@@ -1250,6 +1312,11 @@ export function SessionChat({
     if (pickedHarness === "opencode") {
       onHarnessChange("opencode");
       onOpencodeModelChange(pickedModel);
+    } else if (pickedHarness === "codex") {
+      // Codex takes its model per turn, so — unlike Claude — no relaunch or
+      // interrupt confirmation is needed even mid-conversation.
+      onHarnessChange("codex");
+      onCodexModelChange(pickedModel);
     } else {
       onHarnessChange("claude");
       void applyClaudeModel(pickedModel);
@@ -1601,7 +1668,7 @@ export function SessionChat({
         attachments: atts,
         harness: harness.key,
         model: startModelFlag,
-        effort: effort.key,
+        effort: startEffort,
         permissionMode: permissionMode.flag,
       });
       onSessionStarted(created.id);
@@ -1996,7 +2063,7 @@ export function SessionChat({
                       settings where providers/models are configured. */}
                   <ComposerMenu
                     title="Model"
-                    leading={usingOpencode ? <CodeIcon size={14} /> : <ClaudeMarkIcon size={14} />}
+                    leading={composerMark(harness.key, 14)}
                     label={composerModelLabel}
                     hint={composerModelHint}
                     groups={modelGroups}
@@ -2009,9 +2076,22 @@ export function SessionChat({
                     }}
                     compact={compactComposer}
                   />
-                  {/* Effort + permission mode are Claude-only; OpenCode manages
-                      its own reasoning/permission settings. */}
-                  {!usingOpencode && (
+                  {/* Effort + permission mode apply to Claude and Codex; OpenCode
+                      manages its own reasoning/permission settings. Codex has its
+                      own effort ladder, so it gets its own picker rather than
+                      being offered a Claude-only level the app-server rejects. */}
+                  {usingCodex && (
+                    <ComposerMenu
+                      title="Reasoning effort"
+                      leading={<EffortIcon size={14} />}
+                      label={codexEffort.label}
+                      items={codexEffortItems.map((e) => ({ key: e.key, label: e.label }))}
+                      activeKey={codexEffort.key}
+                      onSelect={onCodexEffortChange}
+                      compact={compactComposer}
+                    />
+                  )}
+                  {!usingOpencode && !usingCodex && (
                     <ComposerMenu
                       title="Reasoning effort"
                       leading={<EffortIcon size={14} />}

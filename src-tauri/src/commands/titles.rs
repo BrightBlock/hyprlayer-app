@@ -9,6 +9,8 @@
 //!     [`crate::commands::harnesses::claude_auth_status`].
 //!   - `opencode:<prov>/<id>` → a throwaway [`OpenCodeDriver`] turn on the shared
 //!     `opencode serve`, draining its event stream for the assistant's reply.
+//!   - `codex:<model>`        → a throwaway *ephemeral* [`CodexDriver`] thread
+//!     (never written to `~/.codex/sessions`), drained the same way.
 
 use std::time::Duration;
 
@@ -16,7 +18,8 @@ use tauri::{Manager, State};
 use tokio::sync::broadcast;
 
 use hyprlayer_core::agent::AgentDriver;
-use hyprlayer_core::claude::SessionEvent;
+use hyprlayer_core::claude::{PermissionMode, SessionEvent};
+use hyprlayer_core::codex::{CodexDriver, SpawnConfig as CodexSpawnConfig};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::process::Exec;
 
@@ -51,7 +54,10 @@ pub async fn suggest_tab_title(
             remedy: None,
         });
     }
-    let model_tag = settings.tab_titles.effective_model().to_string();
+    let model_tag = settings
+        .tab_titles
+        .effective_model(&settings.providers)
+        .to_string();
     let prompt = build_prompt(&text);
 
     let raw = match parse_model_tag(&model_tag) {
@@ -61,6 +67,7 @@ pub async fn suggest_tab_title(
         TitleModel::OpenCode(provider_model) => {
             generate_with_opencode(&app, &state, provider_model, &prompt).await?
         }
+        TitleModel::Codex(model) => generate_with_codex(&state, model, &prompt).await?,
     };
 
     let title = sanitize_title(&raw);
@@ -90,14 +97,19 @@ enum TitleModel<'a> {
     Claude(&'a str),
     /// `provider/model` id for a one-shot OpenCode turn.
     OpenCode(&'a str),
+    /// Model id for a one-shot Codex turn (empty = Codex's own default).
+    Codex(&'a str),
 }
 
-/// Decode the stored `"claude:<flag>"` / `"opencode:<prov>/<id>"` tag. An
-/// untagged value is treated as a Claude `--model` flag (forward-compatible with
-/// a plain model id a user might hand-edit into settings.json).
+/// Decode the stored `"claude:<flag>"` / `"opencode:<prov>/<id>"` / `"codex:<id>"`
+/// tag. An untagged value is treated as a Claude `--model` flag
+/// (forward-compatible with a plain model id a user might hand-edit into
+/// settings.json).
 fn parse_model_tag(tag: &str) -> TitleModel<'_> {
     if let Some(rest) = tag.strip_prefix("opencode:") {
         TitleModel::OpenCode(rest)
+    } else if let Some(rest) = tag.strip_prefix("codex:") {
+        TitleModel::Codex(rest)
     } else {
         TitleModel::Claude(tag.strip_prefix("claude:").unwrap_or(tag))
     }
@@ -181,7 +193,7 @@ async fn generate_with_opencode(
             .map_err(AppError::internal)?;
 
     driver.send_user_turn(prompt, None, None).map_err(AppError::from)?;
-    let collected = drain_opencode_title(&mut rx).await;
+    let collected = drain_title(&mut rx).await;
     driver.kill();
     // Throwaway session: delete the record so one-shot titling doesn't pollute
     // the app-owned OpenCode store. Best-effort — failure just leaves it behind.
@@ -194,20 +206,60 @@ async fn generate_with_opencode(
     })
 }
 
-/// Collect the assistant's reply from a one-shot OpenCode turn.
+/// One-shot Codex turn: start a throwaway **ephemeral** thread (Codex then never
+/// materializes it under `~/.codex/sessions`, so titling doesn't pollute the
+/// user's history the way a normal thread would) and drain its reply. Titling
+/// needs no tools, so the thread runs read-only in a temp dir.
+async fn generate_with_codex(state: &AppState, model: &str, prompt: &str) -> CmdResult<String> {
+    let bin = state
+        .binaries
+        .require(BinaryKind::Codex)
+        .await
+        .map_err(AppError::from)?;
+    let path = state.binaries.augmented_path().await;
+
+    let (driver, mut rx) = CodexDriver::spawn(CodexSpawnConfig {
+        codex_bin: bin,
+        cwd: std::env::temp_dir(),
+        // One-shot titling thread: nothing to resume, so no prior turns.
+        prior_user_turns: 0,
+        // Read-only + never prompt: a summarization turn must not be able to
+        // touch the disk, and there is no UI here to answer an approval.
+        permission_mode: PermissionMode::Plan,
+        add_dirs: Vec::new(),
+        resume: None,
+        model: (!model.is_empty()).then(|| model.to_string()),
+        effort: None,
+        ephemeral: true,
+        env: vec![("PATH".to_string(), path.to_string_lossy().into_owned())],
+    })
+    .await
+    .map_err(AppError::from)?;
+
+    driver.send_user_turn(prompt, None, None).map_err(AppError::from)?;
+    let collected = drain_title(&mut rx).await;
+    driver.kill();
+
+    collected.ok_or_else(|| AppError {
+        code: "codex_title_failed".into(),
+        message: "Codex produced no title".into(),
+        remedy: None,
+    })
+}
+
+/// Collect the assistant's reply from a one-shot titling turn on any harness.
 ///
-/// OpenCode delivers assistant text two ways: streamed `PartialText` deltas
-/// (always) and a single finalized `AssistantText` block (only once the text
-/// part carries `time.end`, which not every provider/build emits before the turn
-/// ends). We accumulate both and prefer the finalized block, falling back to the
-/// streamed deltas — collecting only `AssistantText` would silently drop a
-/// perfectly good title whenever the turn ends without a terminal part update.
+/// Assistant text arrives two ways: streamed `PartialText` deltas (always) and a
+/// single finalized `AssistantText` block (only once the harness closes the text
+/// part, which not every provider/build does before the turn ends). We accumulate
+/// both and prefer the finalized block, falling back to the streamed deltas —
+/// collecting only `AssistantText` would silently drop a perfectly good title
+/// whenever the turn ends without a terminal part update.
 ///
-/// Stops on the first `TurnDone` seen after any text arrives (a turn emits
-/// several — one per `step-finish` plus `session.idle`), or on `Exited`/timeout.
-/// Transport (`⚠ OpenCode request failed: …`) and turn (`⚠ OpenCode error: …`)
-/// failures both surface as `AssistantText` sentinels — never title from one.
-async fn drain_opencode_title(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<String> {
+/// Stops on the first `TurnDone` seen after any text arrives (a turn can emit
+/// several), or on `Exited`/timeout. Both drivers report transport and turn
+/// failures as an `AssistantText` starting `⚠ ` — never title from one.
+async fn drain_title(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<String> {
     let deadline = tokio::time::sleep(TITLE_TIMEOUT);
     tokio::pin!(deadline);
     let mut streamed = String::new();
@@ -218,7 +270,7 @@ async fn drain_opencode_title(rx: &mut broadcast::Receiver<SessionEvent>) -> Opt
             ev = rx.recv() => match ev {
                 Ok(SessionEvent::PartialText { text: t, .. }) => streamed.push_str(&t),
                 Ok(SessionEvent::AssistantText { text: t, .. }) => {
-                    if t.starts_with("⚠ OpenCode") {
+                    if t.starts_with('⚠') {
                         return None;
                     }
                     finalized.push_str(&t);
@@ -263,7 +315,7 @@ fn sanitize_title(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{drain_opencode_title, parse_model_tag, sanitize_title, TitleModel};
+    use super::{drain_title, parse_model_tag, sanitize_title, TitleModel};
     use hyprlayer_core::claude::SessionEvent;
     use tokio::sync::broadcast;
 
@@ -297,6 +349,10 @@ mod tests {
             parse_model_tag("opencode:anthropic/claude-haiku-4-5"),
             TitleModel::OpenCode("anthropic/claude-haiku-4-5")
         ));
+        assert!(matches!(
+            parse_model_tag("codex:gpt-5.4-codex"),
+            TitleModel::Codex("gpt-5.4-codex")
+        ));
         // Untagged → treated as a Claude flag.
         assert!(matches!(parse_model_tag("sonnet"), TitleModel::Claude("sonnet")));
     }
@@ -322,7 +378,7 @@ mod tests {
         tx.send(partial("Token Refresh")).unwrap();
         tx.send(turn_done()).unwrap();
         assert_eq!(
-            drain_opencode_title(&mut rx).await.as_deref(),
+            drain_title(&mut rx).await.as_deref(),
             Some("OAuth Token Refresh"),
         );
     }
@@ -335,23 +391,25 @@ mod tests {
         tx.send(assistant("Refresh Token Flow")).unwrap();
         tx.send(turn_done()).unwrap();
         assert_eq!(
-            drain_opencode_title(&mut rx).await.as_deref(),
+            drain_title(&mut rx).await.as_deref(),
             Some("Refresh Token Flow"),
         );
     }
 
     // Both the transport-failure and the turn-error sentinels must be rejected,
-    // never persisted as a title.
+    // never persisted as a title — for whichever harness emitted them.
     #[tokio::test]
-    async fn opencode_title_rejects_error_sentinels() {
+    async fn title_rejects_error_sentinels() {
         for sentinel in [
             "⚠ OpenCode error: unknown model",
             "⚠ OpenCode request failed: connection refused",
+            "⚠ Codex error: rate limited",
+            "⚠ Codex request failed: turn/start: not signed in",
         ] {
             let (tx, mut rx) = broadcast::channel(8);
             tx.send(assistant(sentinel)).unwrap();
             assert_eq!(
-                drain_opencode_title(&mut rx).await,
+                drain_title(&mut rx).await,
                 None,
                 "sentinel must not become a title: {sentinel:?}",
             );

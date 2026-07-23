@@ -1,28 +1,27 @@
 import { useState } from "react";
 
 import type { AppSettings, BinaryStatus } from "@/lib/bindings";
-import { Badge, Card, CardTitle } from "@/components/ui";
 import { ClaudeHarnessTab } from "./ClaudeHarnessTab";
+import { CodexHarnessTab } from "./CodexHarnessTab";
 import { OpenCodeHarnessTab } from "./OpenCodeHarnessTab";
 import { OllamaHarnessTab } from "./OllamaHarnessTab";
 
 // Settings-tab ids — deliberately wider than the wire `Harness` union
-// (codex/ollama are configured here but run through other harnesses/the multiplexer).
+// (Ollama is configured here but runs through the OpenCode harness).
 type HarnessTabId = "claude" | "codex" | "opencode" | "ollama";
 
 type TabDef = {
   id: HarnessTabId;
   label: string;
-  /** `true` once the harness is real; the others render a "coming soon" panel. */
-  ready: boolean;
+  /** Set only while a harness is genuinely new; drop it once it's established. */
   badge?: string;
 };
 
 const TABS: TabDef[] = [
-  { id: "claude", label: "Claude Code", ready: true },
-  { id: "codex", label: "Codex", ready: false },
-  { id: "opencode", label: "OpenCode", ready: true, badge: "NEW" },
-  { id: "ollama", label: "Ollama", ready: true, badge: "NEW" },
+  { id: "claude", label: "Claude Code" },
+  { id: "codex", label: "Codex", badge: "NEW" },
+  { id: "opencode", label: "OpenCode" },
+  { id: "ollama", label: "Ollama" },
 ];
 
 /** Settings → Harnesses: per-harness configuration behind a horizontal tab strip. */
@@ -37,6 +36,7 @@ export function HarnessesSection({
   const opencode = binaries.find((b) => b.kind === "opencode");
   const claude = binaries.find((b) => b.kind === "claude");
   const ollama = binaries.find((b) => b.kind === "ollama");
+  const codex = binaries.find((b) => b.kind === "codex");
 
   return (
     <div className="space-y-4">
@@ -77,21 +77,7 @@ export function HarnessesSection({
           opencodeInstalled={opencode?.state.state === "ok"}
         />
       )}
-      {active === "codex" && <ComingSoon name="Codex" />}
+      {active === "codex" && <CodexHarnessTab settings={settings} status={codex} />}
     </div>
-  );
-}
-
-function ComingSoon({ name }: { name: string }) {
-  return (
-    <Card>
-      <div className="flex items-center justify-between">
-        <CardTitle className="mb-0">{name}</CardTitle>
-        <Badge tone="dim">Coming soon</Badge>
-      </div>
-      <p className="mt-1 text-xs text-ink-dim">
-        {name} support is on the way. Its configuration will appear here once it lands.
-      </p>
-    </Card>
   );
 }

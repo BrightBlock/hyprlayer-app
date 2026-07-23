@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import type { CatalogProvider } from "@/lib/bindings";
 import { isFreeOpencodeModel } from "@/lib/domain/harnessing";
-import { Button, Dialog, TextInput } from "@/components/ui";
-import { SearchIcon } from "@/components/icons";
+import { ModelMultiSelectDialog, type ModelRowGroup } from "./ModelMultiSelectDialog";
 
-/** Grouped, multi-select model picker. Models are keyed `provider/model`. The
- *  caller persists the chosen ids (Settings → providers.opencode.selectedModels). */
+/** OpenCode's model picker: groups the models.dev catalog by provider and applies
+ *  OpenCode's keyed/free-provider rules, then renders the shared multi-select
+ *  shell. Models are keyed `provider/model`; the caller persists the chosen ids
+ *  (Settings → providers.opencode.selectedModels). */
 export function ModelPickerModal({
   open,
   onClose,
@@ -24,113 +25,43 @@ export function ModelPickerModal({
    *  models; configured providers (those with a key) contribute all of theirs. */
   onlyConfigured?: Set<string>;
 }) {
-  const [query, setQuery] = useState("");
-  const [chosen, setChosen] = useState<Set<string>>(() => new Set(selected));
+  const groups: ModelRowGroup[] = useMemo(
+    () =>
+      providers
+        .map((p) => {
+          const configured = !onlyConfigured || onlyConfigured.has(p.id);
+          // An unconfigured provider still offers its free (keyless) models —
+          // OpenCode Zen's `-free` models authenticate without an API key.
+          const models = configured ? p.models : p.models.filter((m) => isFreeOpencodeModel(m.id));
+          return {
+            configured,
+            group: {
+              key: p.id,
+              label: p.name,
+              models: models.map((m) => ({ id: `${p.id}/${m.id}`, name: m.name })),
+            },
+          };
+        })
+        .filter((g) => g.group.models.length > 0)
+        // Configured (keyed) providers stay on top; keyless free-only ones sink
+        // below. Sort is stable, so each tier keeps its alphabetical order.
+        .sort((a, b) => Number(b.configured) - Number(a.configured))
+        .map((g) => g.group),
+    [providers, onlyConfigured],
+  );
 
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return providers
-      .map((p) => {
-        const configured = !onlyConfigured || onlyConfigured.has(p.id);
-        let models = p.models.filter(
-          (m) =>
-            !q ||
-            m.name.toLowerCase().includes(q) ||
-            m.id.toLowerCase().includes(q) ||
-            p.name.toLowerCase().includes(q),
-        );
-        // An unconfigured provider still offers its free (keyless) models —
-        // OpenCode Zen's `-free` models authenticate without an API key.
-        if (!configured) models = models.filter((m) => isFreeOpencodeModel(m.id));
-        return { provider: p, configured, models };
-      })
-      .filter((g) => g.models.length > 0)
-      // Configured (keyed) providers stay on top; keyless free-only ones sink
-      // below. Sort is stable, so each tier keeps its alphabetical order.
-      .sort((a, b) => Number(b.configured) - Number(a.configured));
-  }, [providers, query, onlyConfigured]);
-
-  function toggle(id: string, on: boolean) {
-    setChosen((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }
-
-  function close() {
-    setQuery("");
-    setChosen(new Set(selected));
-    onClose();
-  }
+  // Unmount while closed rather than passing `open={false}` through: the shared
+  // dialog seeds its draft selection at mount, so staying mounted would let that
+  // draft go stale against `selected`.
+  if (!open) return null;
 
   return (
-    <Dialog open={open} onClose={close} title="Add models" className="max-w-xl">
-      <div className="relative mb-3">
-        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim">
-          <SearchIcon />
-        </span>
-        <TextInput
-          autoFocus
-          className="pl-8"
-          placeholder="Filter models"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
-
-      <div className="max-h-[24rem] overflow-y-auto">
-        {groups.length === 0 && (
-          <p className="px-1 py-6 text-center text-sm text-ink-dim">
-            {query ? `No models match “${query}”.` : "No models available."}
-          </p>
-        )}
-        {groups.map(({ provider, models }) => (
-          <div key={provider.id} className="mb-3">
-            <p className="px-1 py-1 text-xs font-semibold uppercase tracking-wide text-ink-dim">
-              {provider.name}
-            </p>
-            <ul>
-              {models.map((m) => {
-                const id = `${provider.id}/${m.id}`;
-                return (
-                  <li key={id}>
-                    <label className="flex cursor-pointer items-center gap-2.5 rounded px-1 py-1.5 hover:bg-edge/40">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 shrink-0 cursor-pointer accent-accent"
-                        checked={chosen.has(id)}
-                        onChange={(e) => toggle(id, e.target.checked)}
-                      />
-                      <span className="min-w-0">
-                        <span className="text-sm text-ink">{m.name}</span>
-                        <span className="block font-mono text-xs text-ink-dim">{id}</span>
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 flex items-center justify-between">
-        <span className="text-xs text-ink-dim">{chosen.size} selected</span>
-        <div className="flex gap-2">
-          <Button onClick={close}>Cancel</Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              onSave([...chosen]);
-              close();
-            }}
-          >
-            Save
-          </Button>
-        </div>
-      </div>
-    </Dialog>
+    <ModelMultiSelectDialog
+      open
+      onClose={onClose}
+      onSave={onSave}
+      groups={groups}
+      selected={selected}
+    />
   );
 }

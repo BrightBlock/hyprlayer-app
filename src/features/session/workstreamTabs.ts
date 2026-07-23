@@ -51,12 +51,19 @@ export type ShellTab = {
   /** Permission-mode key chosen for the NEXT session (see permissions.ts);
    *  fixed at spawn. Undefined → "auto" (the stage's default posture). */
   permissionMode?: string;
-  /** Which harness the NEXT session runs on ("claude" | "opencode"); fixed at
-   *  spawn, persisted so switching tabs doesn't reset it. Undefined → "claude". */
+  /** Which harness the NEXT session runs on ("claude" | "codex" | "opencode");
+   *  fixed at spawn, persisted so switching tabs doesn't reset it.
+   *  Undefined → "claude". */
   harness?: string;
   /** OpenCode `provider/model` id for the NEXT session when `harness` is
    *  "opencode" (Claude's model lives in `model`). Undefined → the OpenCode default. */
   opencodeModel?: string;
+  /** Codex model id + reasoning effort for the NEXT session when `harness` is
+   *  "codex". Kept separate from `model`/`effort` because Codex's model ids and
+   *  effort ladder are its own (see CODEX_EFFORTS), so one tab can remember a
+   *  pick per harness. Undefined → the Codex defaults. */
+  codexModel?: string;
+  codexEffort?: string;
   sessionId?: string;
   /** When set, this tab is a read-only markdown preview of a doc (its path),
    *  not an agent chat — opened from the diff sidebar, closed when done. */
@@ -476,26 +483,36 @@ export function openDocPreviewTab(workstreamId: string, path: string, title: str
 }
 
 /** The shell fields that make an action tab's composer show the harness/model/
- *  effort its session launched with: Claude carries a model + effort key,
- *  OpenCode a `provider/model` id. Cross-harness fields are cleared so a switch
- *  (Claude ⇄ OpenCode) never leaves a stale model behind. Empty when there are
+ *  effort its session launched with: Claude carries a model + effort key, Codex a
+ *  model id + its own effort, OpenCode a `provider/model` id. Cross-harness fields
+ *  are cleared so a switch never leaves a stale model behind. Empty when there are
  *  no defaults (focusing a live tab), so nothing is overwritten. */
 function shellSeedFromDefaults(d?: ActionAgentDefaults): Partial<ShellTab> {
   if (!d) return {};
+  const cleared = {
+    model: undefined,
+    effort: undefined,
+    opencodeModel: undefined,
+    codexModel: undefined,
+    codexEffort: undefined,
+  };
   if (d.harness === "claude") {
     return {
+      ...cleared,
       harness: "claude",
       model: d.model ?? undefined,
       effort: d.effort ?? undefined,
-      opencodeModel: undefined,
     };
   }
-  return {
-    harness: d.harness,
-    opencodeModel: d.model ?? undefined,
-    model: undefined,
-    effort: undefined,
-  };
+  if (d.harness === "codex") {
+    return {
+      ...cleared,
+      harness: "codex",
+      codexModel: d.model ?? undefined,
+      codexEffort: d.effort ?? undefined,
+    };
+  }
+  return { ...cleared, harness: d.harness, opencodeModel: d.model ?? undefined };
 }
 
 /**

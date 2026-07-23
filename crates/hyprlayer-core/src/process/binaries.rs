@@ -26,16 +26,18 @@ pub enum BinaryKind {
     Hyprlayer,
     Claude,
     OpenCode,
+    Codex,
     Gh,
     Git,
     Ollama,
 }
 
 impl BinaryKind {
-    pub const ALL: [BinaryKind; 6] = [
+    pub const ALL: [BinaryKind; 7] = [
         BinaryKind::Hyprlayer,
         BinaryKind::Claude,
         BinaryKind::OpenCode,
+        BinaryKind::Codex,
         BinaryKind::Gh,
         BinaryKind::Git,
         BinaryKind::Ollama,
@@ -46,6 +48,7 @@ impl BinaryKind {
             BinaryKind::Hyprlayer => "hyprlayer",
             BinaryKind::Claude => "claude",
             BinaryKind::OpenCode => "opencode",
+            BinaryKind::Codex => "codex",
             BinaryKind::Gh => "gh",
             BinaryKind::Git => "git",
             BinaryKind::Ollama => "ollama",
@@ -60,6 +63,12 @@ impl BinaryKind {
             // Server mode (`opencode serve`) + the HTTP/SSE session API the
             // OpenCode driver speaks. A conservative floor — tune if needed.
             BinaryKind::OpenCode => Some(("1.0.0", [1, 0, 0])),
+            // `codex app-server`'s v2 thread protocol (thread/*, turn/*,
+            // item/* notifications, the server-side approval requests). The
+            // surface is flagged experimental upstream, so the floor is the
+            // build the driver was written against — bump it in step with
+            // regenerating the contract (`codex app-server generate-ts`).
+            BinaryKind::Codex => Some(("0.145.0", [0, 145, 0])),
             _ => None,
         }
     }
@@ -76,10 +85,11 @@ impl BinaryKind {
 
     /// Whether the app can function without this binary.
     pub fn optional(self) -> bool {
-        // The app runs fine on Claude alone; OpenCode, gh, and Ollama are extras.
+        // The app runs fine on Claude alone; the other harnesses, gh, and Ollama
+        // are extras.
         matches!(
             self,
-            BinaryKind::Gh | BinaryKind::OpenCode | BinaryKind::Ollama
+            BinaryKind::Gh | BinaryKind::OpenCode | BinaryKind::Codex | BinaryKind::Ollama
         )
     }
 }
@@ -213,16 +223,17 @@ impl BinaryResolver {
     /// All statuses, probed concurrently — worst case is one probe timeout,
     /// not N in a row.
     pub async fn status_all(&self) -> Vec<BinaryStatus> {
-        let [a, b, c, d, e, f] = BinaryKind::ALL;
-        let (a, b, c, d, e, f) = tokio::join!(
+        let [a, b, c, d, e, f, g] = BinaryKind::ALL;
+        let (a, b, c, d, e, f, g) = tokio::join!(
             self.status(a),
             self.status(b),
             self.status(c),
             self.status(d),
             self.status(e),
-            self.status(f)
+            self.status(f),
+            self.status(g)
         );
-        vec![a, b, c, d, e, f]
+        vec![a, b, c, d, e, f, g]
     }
 
     pub async fn set_override(&self, kind: BinaryKind, path: Option<PathBuf>) {
