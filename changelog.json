@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.5.1",
+      "date": "2026-07-23",
+      "summary": "Codex follow-up fixes: model picker, network access, faster launch.",
+      "notes": [
+        "Codex models now show up in the picker from any tab, not just once you're already on Codex, and default to offering every probed model until you curate a subset.",
+        "Fixed Codex's workspace-write sandbox blocking network access even after a command was approved.",
+        "Stage sessions now launch in the background so the UI paints immediately instead of blocking on the Codex handshake."
+      ]
+    },
+    {
       "version": "0.5.0",
       "date": "2026-07-23",
       "summary": "Native Codex harness support, and a confirm-before-quit setting.",
