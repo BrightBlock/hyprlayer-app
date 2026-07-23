@@ -1124,10 +1124,18 @@ export function SessionChat({
   // and the harness. Both persist on the tab — like effort — so switching tabs
   // and coming back keeps the choice. Menu keys are namespaced `harness:key`
   // so the select handler knows which harness a row belongs to.
-  const bootstrapSettings = useBootstrap().data?.settings;
+  const bootstrap = useBootstrap().data;
+  const bootstrapSettings = bootstrap?.settings;
   const opencodeDefaults = bootstrapSettings?.providers?.opencode;
   const ollamaDefaults = bootstrapSettings?.providers?.ollama;
   const codexDefaults = bootstrapSettings?.providers?.codex;
+  // Codex has no static preset list — its models come from a live probe. To offer
+  // them in the picker by default (like Claude's presets) we probe whenever Codex
+  // is installed, not only once a tab is already on it; otherwise you could never
+  // switch TO Codex from a Claude tab with no curated selection.
+  const codexInstalled = (bootstrap?.binaries ?? []).some(
+    (b) => b.kind === "codex" && b.state.state === "ok",
+  );
   // A started chat stays on the harness it LAUNCHED on — its transcript and tool
   // history belong to that harness's session, and changing the default harness
   // must only affect the next one. The session row is authoritative (the backend
@@ -1155,13 +1163,12 @@ export function SessionChat({
     ocModels[0] ??
     ollamaModels[0] ??
     null;
-  // Codex reports its effort tiers PER MODEL (GPT-5.6-Sol has `ultra`, Luna stops
-  // at `max`), so the picker is driven by the chosen model's own list rather than
-  // a static ladder — offering a tier the model rejects would fail the turn. The
-  // probe also enumerates the models themselves: it runs whenever this tab is on
-  // Codex so the picker can offer them even before the user has curated a
-  // selection (empty ⇒ all, like Claude's presets). Cached a few minutes.
-  const codexCatalog = useCodexProbe(usingCodex);
+  // One probe serves two needs: it enumerates the models (so the picker can offer
+  // them) AND reports each model's own effort tiers (GPT-5.6-Sol has `ultra`, Luna
+  // stops at `max` — offering a tier the model rejects would fail the turn). Gated
+  // on Codex being installed, and deduped by react-query across tabs, so it costs
+  // one app-server spawn regardless of how many composers are open.
+  const codexCatalog = useCodexProbe(codexInstalled);
   // No explicit selection ⇒ offer every model Codex reports, the same way Claude
   // shows all its presets until you narrow them.
   const codexModels = resolveCodexModelIds(
