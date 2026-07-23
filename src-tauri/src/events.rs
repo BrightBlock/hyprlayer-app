@@ -68,3 +68,10 @@ pub struct ScriptRunChanged {
     /// Set when a Run's dev-server port is detected (phase stays `running`).
     pub port: Option<u16>,
 }
+
+/// A quit was requested (⌘Q or the window's close button) while "Confirm before
+/// quitting" is on. The backend has already cancelled the close by the time this
+/// lands — the frontend raises the confirm dialog, and nothing exits unless the
+/// user confirms (`quit_app`).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+pub struct QuitRequested;

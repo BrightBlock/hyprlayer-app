@@ -450,6 +450,13 @@ export const commands = {
 	 */
 	openFullDiskAccessSettings: () => typedError<null, AppError>(__TAURI_INVOKE("open_full_disk_access_settings")),
 	/**
+	 *  Confirmed quit. The menu/window handlers only ever *ask* (see
+	 *  `crate::request_quit`), so this is the one path that actually exits once the
+	 *  prompt is up. `dont_ask_again` persists before the exit, so the choice can't
+	 *  be lost to the process going away mid-write.
+	 */
+	quitApp: (dontAskAgain: boolean) => typedError<null, AppError>(__TAURI_INVOKE("quit_app", { dontAskAgain })),
+	/**
 	 *  The models.dev catalog. Fresh in-memory-of-disk cache first (unless `force`),
 	 *  then a live fetch (cached on success), then any stale cache, then the bundled
 	 *  snapshot. `source` tells the UI which tier answered.
@@ -681,6 +688,7 @@ export const events = {
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
+	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
@@ -739,6 +747,8 @@ export type AppSettings = {
 	providers?: ProviderSettings,
 	/**  OS-toast behaviour when a session transitions to "needs you". */
 	notifications?: NotificationSettings,
+	/**  Whether quitting asks first. Settings → General. */
+	quit?: QuitSettings,
 	/**  Auto-generated agent tab titles (enable + which model). Settings → General. */
 	tabTitles?: TabTitleSettings,
 	/**
@@ -1609,6 +1619,25 @@ export type QueryResult = {
 	/**  Matches before limit/offset. */
 	total: number,
 	items: DocMeta[],
+};
+
+/**
+ *  A quit was requested (⌘Q or the window's close button) while "Confirm before
+ *  quitting" is on. The backend has already cancelled the close by the time this
+ *  lands — the frontend raises the confirm dialog, and nothing exits unless the
+ *  user confirms (`quit_app`).
+ */
+export type QuitRequested = null;
+
+/**
+ *  Quit confirmation (Settings → General). Quitting takes every running agent,
+ *  PTY, and lifecycle script down with it, so ⌘Q and the window's close button
+ *  ask first. The dialog's "Don't ask again" clears `confirm`; the Settings
+ *  toggle puts it back.
+ */
+export type QuitSettings = {
+	/**  `true` (default) prompts before quitting; `false` exits immediately. */
+	confirm?: boolean,
 };
 
 /**

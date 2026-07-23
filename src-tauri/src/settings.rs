@@ -77,6 +77,8 @@ pub struct AppSettings {
     pub providers: ProviderSettings,
     /// OS-toast behaviour when a session transitions to "needs you".
     pub notifications: NotificationSettings,
+    /// Whether quitting asks first. Settings → General.
+    pub quit: QuitSettings,
     /// Auto-generated agent tab titles (enable + which model). Settings → General.
     pub tab_titles: TabTitleSettings,
     /// Multiplexer mode — run agents as native CLIs in persistent PTYs. Off by
@@ -153,6 +155,23 @@ impl Default for NotificationSettings {
             enabled: true,
             sound: true,
         }
+    }
+}
+
+/// Quit confirmation (Settings → General). Quitting takes every running agent,
+/// PTY, and lifecycle script down with it, so ⌘Q and the window's close button
+/// ask first. The dialog's "Don't ask again" clears `confirm`; the Settings
+/// toggle puts it back.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct QuitSettings {
+    /// `true` (default) prompts before quitting; `false` exits immediately.
+    pub confirm: bool,
+}
+
+impl Default for QuitSettings {
+    fn default() -> Self {
+        Self { confirm: true }
     }
 }
 
@@ -669,6 +688,21 @@ mod tests {
         let s: AppSettings = serde_json::from_str(raw).unwrap();
         assert!(!s.notifications.enabled);
         assert!(!s.notifications.sound);
+    }
+
+    #[test]
+    fn quit_confirmation_defaults_on() {
+        // Old settings.json without the `quit` key must default to asking —
+        // the prompt is opt-out, and a silent quit kills running agents.
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(s.quit.confirm);
+    }
+
+    #[test]
+    fn quit_confirmation_round_trips() {
+        let raw = r#"{"quit":{"confirm":false}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert!(!s.quit.confirm);
     }
 
     #[test]

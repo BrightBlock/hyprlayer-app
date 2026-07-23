@@ -47,7 +47,7 @@ import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection";
 import { SettingRow } from "@/features/settings/parts";
 import { THEMES, useThemeStore } from "@/lib/theme";
-import { IS_WINDOWS } from "@/lib/platform";
+import { IS_MACOS, IS_WINDOWS } from "@/lib/platform";
 import { AnytypeIcon, CheckIcon, ClaudeMarkIcon, ClipboardIcon, GitBranchIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, OllamaMarkIcon, OpenCodeMarkIcon, PersonIcon, PlusIcon, XIcon } from "@/components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
@@ -459,6 +459,40 @@ function DefaultHarnessCard({ settings }: { settings: AppSettings }) {
             </button>
           );
         })}
+      </div>
+    </Card>
+  );
+}
+
+/** Confirm-on-quit. Off is also reachable from the quit dialog's "Don't ask
+ *  again" checkbox, which is why this row exists: it's the only way back on. */
+function QuitCard({ settings }: { settings: AppSettings }) {
+  const save = useSetAppSettings();
+  const confirm = settings.quit?.confirm ?? true;
+  return (
+    <Card>
+      <CardTitle>Quitting</CardTitle>
+
+      {save.isError && (
+        <div className="mt-3">
+          <ErrorNote error={save.error} />
+        </div>
+      )}
+
+      <div className="mt-1 divide-y divide-edge/50">
+        <SettingRow
+          title="Confirm before quitting"
+          control={
+            <Toggle
+              aria-label="Confirm before quitting"
+              checked={confirm}
+              onChange={(v) => save.mutate({ ...settings, quit: { confirm: v } })}
+            />
+          }
+        >
+          Ask before {IS_MACOS ? "⌘Q or closing the window" : "closing the window"} stops running
+          agents, terminals, and scripts.
+        </SettingRow>
       </div>
     </Card>
   );
@@ -1037,6 +1071,7 @@ export function Settings() {
             <DefaultHarnessCard settings={data.settings} />
             <HyprlayerConfigCard config={data} />
             <TabTitlesCard settings={data.settings} />
+            <QuitCard settings={data.settings} />
             <Card>
               <CardTitle>Setup wizard</CardTitle>
               <p className="mb-3 text-xs text-ink-dim">

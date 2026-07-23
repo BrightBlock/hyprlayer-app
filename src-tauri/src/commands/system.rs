@@ -99,6 +99,24 @@ pub fn open_full_disk_access_settings() -> CmdResult<()> {
     Ok(())
 }
 
+/// Confirmed quit. The menu/window handlers only ever *ask* (see
+/// `crate::request_quit`), so this is the one path that actually exits once the
+/// prompt is up. `dont_ask_again` persists before the exit, so the choice can't
+/// be lost to the process going away mid-write.
+#[tauri::command]
+#[specta::specta]
+pub async fn quit_app(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    dont_ask_again: bool,
+) -> CmdResult<()> {
+    if dont_ask_again {
+        state.settings.update(|s| s.quit.confirm = false).await?;
+    }
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn redetect_binaries(

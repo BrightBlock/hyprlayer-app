@@ -115,6 +115,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::play_sound,
             commands::system::full_disk_access_status,
             commands::system::open_full_disk_access_settings,
+            commands::system::quit_app,
             commands::harnesses::opencode_catalog,
             commands::harnesses::opencode_auth_list,
             commands::harnesses::opencode_set_provider_key,
@@ -162,7 +163,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::PrStatusChanged,
             events::WorktreeChanged,
             events::SessionLifecycle,
-            events::ScriptRunChanged
+            events::ScriptRunChanged,
+            events::QuitRequested
         ])
 }
 
@@ -301,11 +303,21 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let focused = focused.clone();
                 let focus_changed = focus_changed.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Focused(is_focused) = event {
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::Focused(is_focused) => {
                         focused.store(*is_focused, std::sync::atomic::Ordering::Relaxed);
                         focus_changed.notify_waiters();
                     }
+                    // Closing the only window IS quitting (macOS red light,
+                    // Windows ✕ / Alt+F4). Cancel it unconditionally — whether
+                    // to prompt needs an await we can't do on the UI thread —
+                    // and let `request_quit` either exit or raise the dialog.
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        request_quit(&handle);
+                    }
+                    _ => {}
                 });
             }
 
@@ -382,6 +394,7 @@ pub fn run() {
                     "check-updates" => { let _ = app.emit("menu:check-for-updates", ()); }
                     "open-settings" => { let _ = app.emit("menu:open-settings", ()); }
                     "save-file" => { let _ = app.emit("menu:save-file", ()); }
+                    "quit" => request_quit(app),
                     _ => {}
                 }
             });
@@ -401,12 +414,44 @@ pub fn run() {
         });
 }
 
+/// Route a user-initiated quit (⌘Q, the window's close button) through the
+/// confirm-on-quit setting: exit straight away when it's off, otherwise raise
+/// the frontend dialog and wait for `quit_app`.
+///
+/// Async because reading settings takes a lock. Every caller has already
+/// cancelled the exit it was handed, so a quit is only ever *scheduled* here.
+fn request_quit(handle: &tauri::AppHandle) {
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let confirm = match handle.try_state::<AppState>() {
+            Some(state) => state.settings.get().await.quit.confirm,
+            // Setup hasn't finished — there's nothing running to lose yet.
+            None => false,
+        };
+        // Nothing to ask, or nobody to ask it: exit straight away. (A missing
+        // window would strand the process behind a prompt no one can answer.)
+        let Some(window) = handle.get_webview_window("main").filter(|_| confirm) else {
+            handle.exit(0);
+            return;
+        };
+        // The prompt lives in the webview, so surface the window first: ⌘Q also
+        // fires while the app is hidden (⌘H) or minimized.
+        #[cfg(target_os = "macos")]
+        let _ = handle.show();
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = events::QuitRequested.emit(&handle);
+    });
+}
+
 /// The macOS application menu: tauri's standard default, faithfully — clipboard
-/// (Edit), Quit (⌘Q), Hide, fullscreen, minimize all unchanged — but with the
-/// "Close Window" item dropped so ⌘W is inert (see the call site for why). The
-/// default binds Close Window in both a File submenu and the Window submenu, so
-/// both drop it: the File submenu keeps only Save (⌘S), and the Window submenu
-/// keeps only Minimize/Zoom.
+/// (Edit), Hide, fullscreen, minimize all unchanged — but with the "Close
+/// Window" item dropped so ⌘W is inert (see the call site for why). The default
+/// binds Close Window in both a File submenu and the Window submenu, so both
+/// drop it: the File submenu keeps only Save (⌘S), and the Window submenu keeps
+/// only Minimize/Zoom. Quit (⌘Q) keeps its usual place but is a custom item so
+/// it can be confirmed — see `quit` below.
 #[cfg(target_os = "macos")]
 fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
@@ -430,6 +475,17 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
     // so ⌘S fires app-wide, even when the editor isn't focused (e.g. md preview).
     let save_file =
         tauri::menu::MenuItem::with_id(handle, "save-file", "Save", true, Some("CmdOrCtrl+S"))?;
+    // Quit (⌘Q) as a custom item, NOT `.quit()`: the predefined one sends
+    // `terminate:` straight to AppKit, which nothing on the Rust side can
+    // cancel — and the confirm-on-quit prompt has to be able to cancel it.
+    // `request_quit` decides; see the menu-event relay in `run`.
+    let quit = tauri::menu::MenuItem::with_id(
+        handle,
+        "quit",
+        format!("Quit {}", pkg.name),
+        true,
+        Some("CmdOrCtrl+Q"),
+    )?;
 
     let app_menu = SubmenuBuilder::new(handle, &pkg.name)
         .about(Some(about))
@@ -442,7 +498,7 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         .hide()
         .hide_others()
         .separator()
-        .quit()
+        .item(&quit)
         .build()?;
 
     // No Close Window here — leaving ⌘W to the frontend is why this menu is custom
