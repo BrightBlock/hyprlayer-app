@@ -62,19 +62,27 @@ export function CodexHarnessTab({
     for (const m of available) map.set(m.id, m.displayName);
     return map;
   }, [available]);
+  // An empty selection means "not customised" → offer every model Codex reports,
+  // the dynamic-list twin of how Claude shows all its presets until you narrow
+  // them. Removing a model from that default set materialises an explicit list.
+  const effectiveIds = useMemo(
+    () => (selectedModels.length > 0 ? selectedModels : available.map((m) => m.id)),
+    [selectedModels, available],
+  );
+  const usingAllDefault = selectedModels.length === 0 && available.length > 0;
   // Effort tiers differ per model (GPT-5.6-Sol has `ultra`, Luna stops at `max`),
-  // so offer the union across the SELECTED models — these settings apply to
-  // whichever of them a chat runs on. Falls back to the common core before the
+  // so offer the union across the models actually on offer — these settings apply
+  // to whichever of them a chat runs on. Falls back to the common core before the
   // list loads.
   const effortChoices = useMemo(
     () =>
       codexEfforts(
         available
-          .filter((m) => selectedModels.includes(m.id))
+          .filter((m) => effectiveIds.includes(m.id))
           .flatMap((m) => m.supportedEfforts)
           .filter((e, i, all) => all.indexOf(e) === i),
       ),
-    [available, selectedModels],
+    [available, effectiveIds],
   );
 
   function patchCodex(next: Partial<CodexSettings>) {
@@ -137,12 +145,23 @@ export function CodexHarnessTab({
           <CardTitle className="mb-0">
             Models{" "}
             <span className="ml-1 font-normal text-ink-dim">
-              {selectedModels.length} selected
+              {effectiveIds.length} selected
             </span>
           </CardTitle>
-          <Button onClick={() => setPickerOpen(true)} disabled={!installed || probe.isLoading}>
-            <PlusIcon size={14} /> Add models
-          </Button>
+          <div className="flex items-center gap-2">
+            {!usingAllDefault && selectedModels.length > 0 && (
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+                onClick={() => patchCodex({ selectedModels: NO_MODELS })}
+              >
+                Reset to default
+              </button>
+            )}
+            <Button onClick={() => setPickerOpen(true)} disabled={!installed || probe.isLoading}>
+              <PlusIcon size={14} /> Add models
+            </Button>
+          </div>
         </div>
 
         {!installed ? (
@@ -162,14 +181,16 @@ export function CodexHarnessTab({
             Codex didn&apos;t return any models. Sign in with{" "}
             <code className="font-mono">codex login</code>, then refresh.
           </p>
-        ) : selectedModels.length === 0 ? (
-          <p className="mt-3 text-xs text-ink-dim">
-            No models selected yet. Add the models you want available in the composer.
-          </p>
         ) : (
           <>
+            {usingAllDefault && (
+              <p className="mt-3 text-xs text-ink-dim">
+                Every model Codex offers is available in the composer by default. Remove any you
+                don&apos;t want, or reset to restore the full list.
+              </p>
+            )}
             <div className="mt-3 space-y-1.5">
-              {selectedModels.map((id) => (
+              {effectiveIds.map((id) => (
                 <div
                   key={id}
                   className="flex items-center justify-between rounded-md border border-edge bg-panel-2 px-3 py-2"
@@ -181,7 +202,7 @@ export function CodexHarnessTab({
                   <button
                     type="button"
                     aria-label={`Remove ${id}`}
-                    onClick={() => setSelectedModels(selectedModels.filter((m) => m !== id))}
+                    onClick={() => setSelectedModels(effectiveIds.filter((m) => m !== id))}
                     className="text-ink-dim hover:text-bad"
                   >
                     <XIcon />
@@ -197,7 +218,7 @@ export function CodexHarnessTab({
                   <ModelSelect
                     label="Codex default model"
                     value={codex.defaultModel}
-                    ids={selectedModels}
+                    ids={effectiveIds}
                     names={displayName}
                     onChange={(v) => patchCodex({ defaultModel: v })}
                   />
@@ -224,7 +245,7 @@ export function CodexHarnessTab({
                   <ModelSelect
                     label="Codex Commit and Ship model"
                     value={codex.commitModel}
-                    ids={selectedModels}
+                    ids={effectiveIds}
                     names={displayName}
                     onChange={(v) => patchCodex({ commitModel: v })}
                   />
@@ -260,7 +281,7 @@ export function CodexHarnessTab({
           open
           onClose={() => setPickerOpen(false)}
           onSave={setSelectedModels}
-          selected={selectedModels}
+          selected={effectiveIds}
           searchPlaceholder="Filter Codex models"
           emptyLabel="Codex returned no models. Sign in with `codex login`, then refresh."
           groups={[

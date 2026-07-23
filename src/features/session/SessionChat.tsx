@@ -57,6 +57,7 @@ import {
   modelOption,
   modelSupportsUltracode,
   resolveCodexEffort,
+  resolveCodexModelIds,
   resumeModelFlag,
   visibleModels,
 } from "@/lib/domain/models";
@@ -1154,13 +1155,20 @@ export function SessionChat({
     ocModels[0] ??
     ollamaModels[0] ??
     null;
-  const codexModels = codexDefaults?.selectedModels ?? [];
-  const codexModel = shell.codexModel ?? codexDefaults?.defaultModel ?? codexModels[0] ?? null;
   // Codex reports its effort tiers PER MODEL (GPT-5.6-Sol has `ultra`, Luna stops
   // at `max`), so the picker is driven by the chosen model's own list rather than
   // a static ladder — offering a tier the model rejects would fail the turn. The
-  // query is cached for an hour and only runs when this tab is on Codex.
-  const codexCatalog = useCodexProbe(usingCodex && codexModels.length > 0);
+  // probe also enumerates the models themselves: it runs whenever this tab is on
+  // Codex so the picker can offer them even before the user has curated a
+  // selection (empty ⇒ all, like Claude's presets). Cached a few minutes.
+  const codexCatalog = useCodexProbe(usingCodex);
+  // No explicit selection ⇒ offer every model Codex reports, the same way Claude
+  // shows all its presets until you narrow them.
+  const codexModels = resolveCodexModelIds(
+    codexDefaults?.selectedModels,
+    codexCatalog.data?.models ?? [],
+  );
+  const codexModel = shell.codexModel ?? codexDefaults?.defaultModel ?? codexModels[0] ?? null;
   const codexSupportedEfforts = useMemo(
     () => codexCatalog.data?.models.find((m) => m.id === codexModel)?.supportedEfforts,
     [codexCatalog.data, codexModel],

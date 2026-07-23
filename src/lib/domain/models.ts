@@ -247,3 +247,18 @@ export function resolveCodexEffort(
     options[0]
   );
 }
+
+/**
+ * The Codex model ids to offer, given the user's `selectedModels` setting and the
+ * live probe. An explicit selection wins; an empty one means "not customised" and
+ * falls back to every model Codex reports — the dynamic-list equivalent of how
+ * Claude shows all its presets until you narrow them (see [`visibleModelKeys`]).
+ * Signed out (empty probe) it yields nothing, which is correct: there's nothing to
+ * offer. `probed` is the probe's model list (`CodexProbe.models`).
+ */
+export function resolveCodexModelIds(
+  selected: readonly string[] | null | undefined,
+  probed: readonly { id: string }[],
+): string[] {
+  return selected && selected.length > 0 ? [...selected] : probed.map((m) => m.id);
+}

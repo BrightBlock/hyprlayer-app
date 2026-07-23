@@ -5,6 +5,7 @@ import {
   CODEX_EFFORTS,
   codexEfforts,
   resolveCodexEffort,
+  resolveCodexModelIds,
   EFFORTS,
   effectiveEffort,
   modelOption,
@@ -45,6 +46,31 @@ describe("Codex reasoning effort", () => {
     expect(resolveCodexEffort(undefined, sol).key).toBe("medium");
     expect(resolveCodexEffort("ultracode", sol).key).toBe("medium");
     expect(resolveCodexEffort(null, undefined).key).toBe("medium");
+  });
+});
+
+describe("resolveCodexModelIds", () => {
+  const probed = [{ id: "gpt-5.4-codex" }, { id: "gpt-5.4" }, { id: "gpt-5.4-mini" }];
+
+  it("offers every probed model when the user hasn't curated a selection", () => {
+    // The point of the change: signed in + no explicit picks ⇒ all models, the
+    // dynamic-list twin of Claude showing all its presets by default.
+    expect(resolveCodexModelIds(undefined, probed)).toEqual([
+      "gpt-5.4-codex",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+    ]);
+    expect(resolveCodexModelIds(null, probed)).toEqual(["gpt-5.4-codex", "gpt-5.4", "gpt-5.4-mini"]);
+    expect(resolveCodexModelIds([], probed)).toEqual(["gpt-5.4-codex", "gpt-5.4", "gpt-5.4-mini"]);
+  });
+
+  it("honours an explicit selection over the full probe", () => {
+    expect(resolveCodexModelIds(["gpt-5.4"], probed)).toEqual(["gpt-5.4"]);
+  });
+
+  it("yields nothing when signed out (no models to offer)", () => {
+    expect(resolveCodexModelIds(undefined, [])).toEqual([]);
+    expect(resolveCodexModelIds([], [])).toEqual([]);
   });
 });
 
