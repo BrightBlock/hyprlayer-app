@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.5.0",
+      "date": "2026-07-23",
+      "summary": "Native Codex harness support, and a confirm-before-quit setting.",
+      "notes": [
+        "Codex is now a first-class harness alongside Claude and OpenCode, with its own model picker, API-key sign-in, and live reasoning-effort switching mid-chat.",
+        "Quitting the app (⌘Q, Quit menu, or the window close button) now asks for confirmation by default, since it kills every running agent, PTY, and lifecycle script. Turn it off in Settings > General.",
+        "Fixed a handful of Windows-only process bugs affecting Codex and OpenCode: process spawning, orphaned server processes on quit, and startup races that could make a signed-in Codex account look signed out.",
+        "The transcript no longer misreports certain internal Claude protocol lines as errors, and re-pins its scroll position correctly when the window resizes."
+      ]
+    },
+    {
       "version": "0.4.27",
       "date": "2026-07-22",
       "summary": "Fix CLI detection on Windows falsely reporting itself installed.",
