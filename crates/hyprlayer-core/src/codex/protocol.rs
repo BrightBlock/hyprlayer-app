@@ -76,17 +76,19 @@ pub fn decode_line(line: &str) -> Option<Incoming> {
 
 /// The Codex approval + sandbox posture for one of our permission modes.
 ///
-/// The two axes are independent, which is what makes the four modes expressible:
-/// `approvalPolicy` decides whether Codex *asks*, `sandbox` decides what it may
-/// touch without asking. So `acceptEdits` is "don't interrupt me, but stay in the
-/// worktree" — never ask, yet still sandboxed — and `plan` maps to read-only
-/// because Codex has no plan-tool gate, only the same look-don't-touch posture.
+/// Two independent axes: `approvalPolicy` decides whether Codex *asks*, `sandbox`
+/// decides what a command may do without asking. `default` uses `untrusted` so Codex
+/// asks before each command — the user then permits the host/network access the
+/// sandbox would otherwise deny *silently* (Codex's own escalation is model-driven
+/// and misses cases like a bare `ping`). `acceptEdits` never asks (contained to the
+/// worktree); `plan` is read-only; only `bypass` drops the sandbox. The allow/deny
+/// tool lists have no Codex analog, so this posture is the only guardrail.
 ///
 /// The emitted values are pinned by the `VALID_*` test consts below; anything
 /// outside them fails the whole `thread/start` rather than degrading.
 pub fn approval_posture(mode: PermissionMode) -> (&'static str, &'static str) {
     match mode {
-        PermissionMode::Default => ("on-request", "workspace-write"),
+        PermissionMode::Default => ("untrusted", "workspace-write"),
         PermissionMode::AcceptEdits => ("never", "workspace-write"),
         PermissionMode::Plan => ("on-request", "read-only"),
         PermissionMode::BypassPermissions => ("never", "danger-full-access"),
@@ -1350,7 +1352,7 @@ mod tests {
     fn permission_modes_map_to_codex_postures() {
         assert_eq!(
             approval_posture(PermissionMode::Default),
-            ("on-request", "workspace-write")
+            ("untrusted", "workspace-write")
         );
         assert_eq!(
             approval_posture(PermissionMode::AcceptEdits),
@@ -1358,7 +1360,7 @@ mod tests {
         );
         // Plan is "look, don't touch": read-only sandbox.
         assert_eq!(approval_posture(PermissionMode::Plan), ("on-request", "read-only"));
-        // Bypass is the only mode that leaves the sandbox.
+        // Default asks before commands (untrusted); only Bypass drops the sandbox.
         assert_eq!(
             approval_posture(PermissionMode::BypassPermissions),
             ("never", "danger-full-access")

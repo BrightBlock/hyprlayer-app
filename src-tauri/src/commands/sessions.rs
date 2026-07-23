@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use hyprlayer_core::agent::{AgentDriver, Harness};
-use hyprlayer_core::claude::{ClaudeDriver, PermissionMode, SessionEvent, SessionState, SpawnConfig};
+use hyprlayer_core::claude::{
+    ClaudeDriver, ExitOutcome, PermissionMode, SessionEvent, SessionState, SpawnConfig,
+};
 use hyprlayer_core::codex::{CodexDriver, SpawnConfig as CodexSpawnConfig};
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
@@ -458,32 +460,62 @@ pub async fn start_stage_session(
         db_task(state.db.clone(), move |db| db.insert_session(new)).await?
     };
 
-    let driver = launch_session(
-        &state,
-        LaunchParams {
-            app,
-            session: session.clone(),
-            project_path: ws.project_path,
-            model,
-            effort,
-            permission_mode,
-            resume: false,
-            start_seq: 0,
-            channel: on_event,
-        },
-    )
-    .await?;
-
-    // Kick off the first turn (the composed skill prompt + attached docs).
-    driver
-        .send_user_turn(
-            &wire_prompt,
-            Some(session.stage.as_str()),
-            prompt_name.as_deref(),
-        )
-        .map_err(AppError::from)?;
+    // Launch + first turn run in the BACKGROUND so this command returns as soon as
+    // the row and prompt exist — the frontend then paints the echoed prompt and the
+    // "Connecting to <harness>…" spinner immediately instead of blocking on a slow
+    // launch. Codex handshakes (`initialize` + `thread/start`, ~1s) before its first
+    // turn; Claude/OpenCode already return fast. Outcomes — including a failure —
+    // arrive as events over `on_event`.
+    let err_channel = on_event.clone();
+    let launch = LaunchParams {
+        app: app.clone(),
+        session: session.clone(),
+        project_path: ws.project_path,
+        model,
+        effort,
+        permission_mode,
+        resume: false,
+        start_seq: 0,
+        channel: on_event,
+    };
+    tauri::async_runtime::spawn(async move {
+        // Re-acquire managed state off the command thread — AppState isn't `Clone`
+        // (Mutex-guarded watchers), but the AppHandle lends it back.
+        let state = app.state::<AppState>();
+        match launch_session(&state, launch).await {
+            // Kick off the first turn (the composed skill prompt + attached docs).
+            Ok(driver) => {
+                if let Err(e) = driver.send_user_turn(
+                    &wire_prompt,
+                    Some(stage_kind.as_str()),
+                    prompt_name.as_deref(),
+                ) {
+                    emit_start_failure(&err_channel, &AppError::from(e).message);
+                }
+            }
+            // Launch failed after the row was written (missing binary, logged out,
+            // handshake timeout): emit a terminal event so "Connecting…" clears.
+            Err(e) => emit_start_failure(&err_channel, &e.message),
+        }
+    });
 
     Ok(StartedSession { session, prompt })
+}
+
+/// Report a background launch failure over the session channel: a visible reason
+/// then a terminal `Exited`, so the "Connecting…" spinner clears with the reason
+/// instead of pulsing forever. Used only by [`start_stage_session`], whose launch
+/// now runs after the command returns.
+fn emit_start_failure(channel: &Channel<SessionEvent>, reason: &str) {
+    let _ = channel.send(SessionEvent::AssistantText {
+        text: format!("⚠ Failed to start the agent: {reason}"),
+        parent_id: None,
+    });
+    let _ = channel.send(SessionEvent::Exited {
+        outcome: ExitOutcome::SpawnFailed,
+        code: None,
+        stderr_tail: String::new(),
+    });
 }
 
 /// Resume a previously-started session that's no longer live (e.g. after an app

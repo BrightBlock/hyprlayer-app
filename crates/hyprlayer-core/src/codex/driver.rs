@@ -231,16 +231,23 @@ impl CodexDriver {
         if let Some(model) = &config.model {
             params["model"] = json!(model);
         }
-        // Grant write access to roots outside the worktree (the thoughts tree),
-        // so skills can write research/plan docs through the symlinks. Codex
-        // takes these as config overrides on the workspace-write sandbox.
-        if !config.add_dirs.is_empty() && sandbox == "workspace-write" {
+        // Configure the workspace-write sandbox: enable network so a *permitted*
+        // command can actually reach it — Codex blocks network here by default, and
+        // approving the command (untrusted) doesn't lift that, so without this an
+        // allowed `curl` still fails to resolve. Also grant write access to roots
+        // outside the worktree (the thoughts tree) so skills can write their docs.
+        if sandbox == "workspace-write" {
             let roots: Vec<String> = config
                 .add_dirs
                 .iter()
                 .map(|d| d.to_string_lossy().into_owned())
                 .collect();
-            params["config"] = json!({ "sandbox_workspace_write": { "writable_roots": roots } });
+            params["config"] = json!({
+                "sandbox_workspace_write": {
+                    "network_access": true,
+                    "writable_roots": roots,
+                }
+            });
         }
 
         let (method, params) = match &config.resume {
