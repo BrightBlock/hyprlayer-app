@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.5.2",
+      "date": "2026-07-24",
+      "summary": "Stop false crash reports and orphaned processes on quit.",
+      "notes": [
+        "Sessions terminated by an app quit or restart no longer show as \"Session crashed\" on Windows.",
+        "Fixed Codex/OpenCode tabs getting stuck behind a phantom turn after resuming a restarted app.",
+        "Agent and OpenCode processes are now killed on app exit instead of occasionally outliving the app for days.",
+        "New thoughts repo roots created from onboarding or profile creation are now scaffolded so the CLI accepts them immediately, instead of only while empty."
+      ]
+    },
+    {
       "version": "0.5.1",
       "date": "2026-07-23",
       "summary": "Codex follow-up fixes: model picker, network access, faster launch.",
