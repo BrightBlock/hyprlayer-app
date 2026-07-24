@@ -6,9 +6,11 @@ use crate::error::Result;
 use crate::pipeline::Stage;
 
 /// How a workstream is backed: `isolated` (app-created branch + dedicated
-/// worktree), `existing` (user's local branch in a dedicated worktree), or
-/// `inplace` (no worktree — the project's own checkout). Governs whether the
-/// branch + directory are app-owned and safe to drop on archive/delete.
+/// worktree), `existing` (user's local branch in a dedicated worktree),
+/// `inplace` (no worktree — the project's own checkout), or `folder` (a
+/// [`ProjectSource::Folder`](super::ProjectSource) project — the project
+/// directory itself, with no git at all). Governs whether the branch +
+/// directory are app-owned and safe to drop on archive/delete.
 ///
 /// Tolerance: an unrecognized stored value reads (via [`WorktreeMode::parse`])
 /// as `Inplace` — the touch-nothing mode — so a mangled row can never make
@@ -20,6 +22,7 @@ pub enum WorktreeMode {
     Isolated,
     Existing,
     Inplace,
+    Folder,
 }
 
 impl WorktreeMode {
@@ -28,6 +31,7 @@ impl WorktreeMode {
             WorktreeMode::Isolated => "isolated",
             WorktreeMode::Existing => "existing",
             WorktreeMode::Inplace => "inplace",
+            WorktreeMode::Folder => "folder",
         }
     }
 
@@ -36,6 +40,7 @@ impl WorktreeMode {
         match s {
             "isolated" => WorktreeMode::Isolated,
             "existing" => WorktreeMode::Existing,
+            "folder" => WorktreeMode::Folder,
             _ => WorktreeMode::Inplace,
         }
     }
@@ -99,16 +104,31 @@ impl Workstream {
         }
     }
 
-    /// `inplace` workstreams have no dedicated worktree — `worktree_path` IS the
-    /// project's main checkout. The archive/restore/delete paths special-case
-    /// these so they never move, remove, or re-link the user's repo.
+    /// `inplace` workstreams share the project checkout AND adopt one of its
+    /// branches — the case the one-per-project guard exists for.
     pub fn is_inplace(&self) -> bool {
         self.worktree_mode == WorktreeMode::Inplace
     }
 
+    /// No dedicated worktree — `worktree_path` IS the user's own project
+    /// directory. The archive/restore/delete paths special-case these so they
+    /// never move, remove, or re-link it.
+    pub fn shares_project_dir(&self) -> bool {
+        matches!(
+            self.worktree_mode,
+            WorktreeMode::Inplace | WorktreeMode::Folder
+        )
+    }
+
+    /// A `folder` project's workstream: no git, no branch, no thoughts mapping.
+    /// Every git/PR/thoughts surface is skipped for these.
+    pub fn is_folder(&self) -> bool {
+        self.worktree_mode == WorktreeMode::Folder
+    }
+
     /// True only when the app created the branch (`isolated`). `existing` and
-    /// `inplace` workstreams adopt a branch the user already had, so the app must
-    /// never delete it on archive/cleanup.
+    /// `inplace` workstreams adopt a branch the user already had, and `folder`
+    /// has none, so the app must never delete it on archive/cleanup.
     pub fn app_owns_branch(&self) -> bool {
         self.worktree_mode == WorktreeMode::Isolated
     }
@@ -442,6 +462,49 @@ mod tests {
             .is_some());
 
         assert!(db.get_workstream("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn folder_workstreams_own_nothing_and_never_look_inplace() {
+        let db = Db::open_in_memory().unwrap();
+        let row = db
+            .insert_workstream(NewWorkstream {
+                project_path: "/notes".into(),
+                title: "reading".into(),
+                slug: "reading-abcd".into(),
+                branch: String::new(),
+                worktree_path: "/notes".into(),
+                base_branch: String::new(),
+                worktree_mode: WorktreeMode::Folder,
+            })
+            .unwrap();
+        let got = db.get_workstream(&row.id).unwrap().unwrap();
+
+        assert_eq!(got.worktree_mode, WorktreeMode::Folder);
+        assert!(got.is_folder());
+        // Shares the user's directory, so archive/restore must never move it...
+        assert!(got.shares_project_dir());
+        // ...but it is NOT `inplace`: that's the one-per-project branch-adopting
+        // mode, and a folder project can hold as many workstreams as it likes.
+        assert!(!got.is_inplace());
+        assert!(!got.app_owns_branch());
+
+        // A second one in the same folder is fine.
+        db.insert_workstream(NewWorkstream {
+            project_path: "/notes".into(),
+            title: "drafting".into(),
+            slug: "drafting-efgh".into(),
+            branch: String::new(),
+            worktree_path: "/notes".into(),
+            base_branch: String::new(),
+            worktree_mode: WorktreeMode::Folder,
+        })
+        .unwrap();
+        assert_eq!(db.list_workstreams("/notes", false).unwrap().len(), 2);
+
+        // A value from a newer schema still falls back to the touch-nothing mode.
+        assert_eq!(WorktreeMode::parse("submodule"), WorktreeMode::Inplace);
+        assert_eq!(WorktreeMode::parse("folder"), WorktreeMode::Folder);
     }
 
     #[test]

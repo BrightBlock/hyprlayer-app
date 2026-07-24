@@ -112,9 +112,11 @@ async fn tick(app: &tauri::AppHandle, last: &mut HashMap<String, Option<PrStatus
     last.retain(|id, _| alive.contains(id.as_str()));
 
     // A merged PR is terminal — its status can't change again, so stop polling
-    // it (the workstream is usually archived right after anyway).
+    // it (the workstream is usually archived right after anyway). Folder rows
+    // have no repo to ask, so gh would fail (or answer for an enclosing repo).
     let to_poll: Vec<Workstream> = items
         .into_iter()
+        .filter(|item| !item.is_folder())
         .filter(|item| !matches!(last.get(&item.id), Some(Some(s)) if s.state == PrState::Merged))
         .collect();
 

@@ -29,6 +29,16 @@ export const commands = {
 	 */
 	importProject: (path: string, branch: string | null, directoryName: string | null, thoughtsDir: string | null, profile: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("import_project", { path, branch, directoryName, thoughtsDir, profile, bootstrapUser })),
 	/**
+	 *  Register a plain local directory as a project — no git, no thoughts, no
+	 *  hyprlayer CLI, and no config bootstrap. The folder is left exactly as
+	 *  found; workstreams run agent sessions in it directly (see
+	 *  `WorktreeMode::Folder`).
+	 * 
+	 *  Refuses a path that IS a git repo: a repo belongs in `import_project`,
+	 *  where it keeps its branches, worktrees, and thoughts mapping.
+	 */
+	importLocalFolder: (path: string, directoryName: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("import_local_folder", { path, directoryName })),
+	/**
 	 *  Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
 	 *  register it as a project.
 	 */
@@ -1692,15 +1702,36 @@ export type Project = {
 	existsOnDisk: boolean,
 	/**  The git source this clone tracks; None for a local-only repo. */
 	originUrl: string | null,
-	/**  `clone` | `disk` — how it was added. */
-	source: string,
+	/**  How it was added. `folder` has no git and no thoughts mapping. */
+	source: ProjectSource,
 };
 
 export type ProjectDetail = {
 	project: Project,
-	storage: StorageInfo,
+	/**
+	 *  None for `folder` projects — they have no thoughts mapping, so the
+	 *  `hyprlayer storage info` subprocess is never run for them.
+	 */
+	storage: StorageInfo | null,
 	thoughtsRoot: string | null,
 };
+
+/**
+ *  How a project entered the registry. `Folder` is the odd one out: a plain
+ *  directory with no git and no thoughts mapping, so every git, PR, and
+ *  hyprlayer-CLI surface is skipped for it.
+ * 
+ *  Tolerance: an unrecognized stored value reads as `Disk` — the in-place,
+ *  touch-nothing kind — so a mangled row can never make removal delete files
+ *  the app doesn't own.
+ */
+export type ProjectSource = 
+/**  Cloned from a URL into the repos root. */
+"clone" | 
+/**  An existing git repo imported in place. */
+"disk" | 
+/**  A local directory that isn't a git repo. */
+"folder";
 
 /**
  *  The live values behind prompt `{{variables}}` for a workstream. The frontend
@@ -2438,15 +2469,17 @@ export type WorktreeGitStatus = {
 
 /**
  *  How a workstream is backed: `isolated` (app-created branch + dedicated
- *  worktree), `existing` (user's local branch in a dedicated worktree), or
- *  `inplace` (no worktree — the project's own checkout). Governs whether the
- *  branch + directory are app-owned and safe to drop on archive/delete.
+ *  worktree), `existing` (user's local branch in a dedicated worktree),
+ *  `inplace` (no worktree — the project's own checkout), or `folder` (a
+ *  [`ProjectSource::Folder`](super::ProjectSource) project — the project
+ *  directory itself, with no git at all). Governs whether the branch +
+ *  directory are app-owned and safe to drop on archive/delete.
  * 
  *  Tolerance: an unrecognized stored value reads (via [`WorktreeMode::parse`])
  *  as `Inplace` — the touch-nothing mode — so a mangled row can never make
  *  archive/cleanup delete a branch or checkout the app doesn't own.
  */
-export type WorktreeMode = "isolated" | "existing" | "inplace";
+export type WorktreeMode = "isolated" | "existing" | "inplace" | "folder";
 
 export type WorktreeStatus = {
 	exists: boolean,

@@ -1,15 +1,25 @@
 import type { WorkstreamView } from "@/lib/bindings";
 import { Spinner } from "@/components/ui";
+import { isFolderWorkstream } from "@/lib/domain/projects";
 import { useReprovisionWorkstream } from "@/lib/queries";
 
 /**
  * Compact git status for the active workstream: branch name, change counters
  * ("●n ↑n ↓n", each only when non-zero), and a thoughts-broken warning with
- * an inline Fix (reprovision) action.
+ * an inline Fix (reprovision) action. A folder workstream has none of these —
+ * it shows only a missing-folder warning.
  */
 export function WorkstreamChips({ view }: { view: WorkstreamView }) {
   const reprovision = useReprovisionWorkstream();
   const { git, item } = view;
+
+  if (isFolderWorkstream(view)) {
+    return git.exists ? null : (
+      <span className="shrink-0 rounded bg-warn/15 px-1.5 py-0.5 text-xs font-medium text-warn">
+        folder missing on disk
+      </span>
+    );
+  }
 
   const counters: string[] = [];
   if (git.dirty > 0) counters.push(`●${git.dirty}`);

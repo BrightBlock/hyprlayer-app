@@ -12,6 +12,7 @@ import {
   Field,
   Spinner,
   TextInput,
+  Toggle,
 } from "@/components/ui";
 import { HyprlayerMark } from "@/components/Logo";
 import { RepoAvatar } from "@/components/RepoAvatar";
@@ -22,6 +23,7 @@ import {
   useCloneProject,
   useCreateThoughtsProfile,
   useDefaultUsername,
+  useImportLocalFolder,
   useImportProject,
   useRepoPathInfo,
   useThoughtsProfiles,
@@ -78,6 +80,9 @@ function repoLabel(source: RepoSource): string {
  * never copied, so worktrees branch off the user's existing repo). Step 2 —
  * thoughts: pick the profile and folder the repo's research/plans/notes map
  * into, with a live preview of the resulting path.
+ *
+ * A non-git folder can skip both: "Add as local folder" registers the
+ * directory as-is and submits from step 1 — no git, no thoughts, no CLI.
  */
 export function AddProjectDialog(props: Props) {
   // Unmount when closed: every piece of wizard state resets for free, so
@@ -99,6 +104,9 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   });
   const [user, setUser] = useState("");
   const [initBranch, setInitBranch] = useState("main");
+  // Only consulted for a non-git folder. Off (the default) adds it as a plain
+  // folder — the non-mutating choice; git init is the opt-in.
+  const [setUpGit, setSetUpGit] = useState(false);
 
   // Step 2 — where the repo maps into thoughts.
   const [profileName, setProfileName] = useState<string | null>(null);
@@ -110,6 +118,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
 
   const clone = useCloneProject();
   const importProject = useImportProject();
+  const importFolder = useImportLocalFolder();
   const defaultUser = useDefaultUsername();
   // Prefetch on mount so the Thoughts step renders instantly after Next.
   const profiles = useThoughtsProfiles();
@@ -123,9 +132,12 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const status = source.mode === "disk" ? pathInfo.data : undefined;
   const needsInit = status === "nonGit";
   const isBare = status === "bare";
+  // Only a confirmed non-git folder can be taken as-is; if the probe later says
+  // otherwise the choice falls away on its own, no reset bookkeeping.
+  const asFolder = needsInit && !setUpGit;
 
-  const pending = clone.isPending || importProject.isPending;
-  const error = clone.error ?? importProject.error;
+  const pending = clone.isPending || importProject.isPending || importFolder.isPending;
+  const error = clone.error ?? importProject.error ?? importFolder.error;
 
   // First run: prefill "Your name" with the shell username ($USER), matching
   // the CLI default, without clobbering an in-session edit.
@@ -212,21 +224,34 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
         : "";
   const step1Ok =
     Boolean(primaryInput) &&
-    (!configMissing || Boolean(user.trim())) &&
-    (!needsInit || Boolean(initBranch.trim())) &&
+    // Whether a disk path submits as folder or repo depends on the probe, so
+    // wait for it — a pre-probe submit would silently git-init a plain folder.
+    (source.mode !== "disk" || status !== undefined || pathInfo.isError) &&
+    // A folder project writes no config, so it needs no username.
+    (!configMissing || asFolder || Boolean(user.trim())) &&
+    (!needsInit || asFolder || Boolean(initBranch.trim())) &&
     !isBare;
   const folderOk = folderChoice === NEW_FOLDER ? Boolean(customFolder.trim()) : true;
-  const canSubmit = step1Ok && folderOk && !newProfileOpen && !pending;
+  const canSubmit = step1Ok && (asFolder || folderOk) && !newProfileOpen && !pending;
 
   const [submitIdle, submitBusy] =
     source.mode === "clone"
       ? ["Clone repo", "Cloning…"]
-      : needsInit
-        ? ["Initialize & add", "Initializing…"]
-        : ["Add project", "Importing…"];
+      : asFolder
+        ? ["Add folder", "Adding…"]
+        : needsInit
+          ? ["Initialize & add", "Initializing…"]
+          : ["Add project", "Importing…"];
 
   const submit = () => {
     if (!canSubmit) return;
+    if (asFolder) {
+      importFolder.mutate(
+        { path: primaryInput, directoryName: null },
+        { onSuccess: succeed },
+      );
+      return;
+    }
     // Auto = let the CLI derive the folder; anything else is an explicit pick.
     const thoughtsDir = folderChoice === AUTO_FOLDER ? null : resolvedFolder || null;
     const profile = selectedProfile?.name ?? null;
@@ -307,7 +332,11 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
         <span className="flex items-baseline justify-between gap-3">
           <span>Add project</span>
           <span className="text-xs font-normal tracking-normal text-ink-dim">
-            {step === 1 ? "Step 1 of 2 · Repository" : "Step 2 of 2 · Thoughts"}
+            {asFolder
+              ? "Local folder"
+              : step === 1
+                ? "Step 1 of 2 · Repository"
+                : "Step 2 of 2 · Thoughts"}
           </span>
         </span>
       }
@@ -316,7 +345,8 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
         className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (step === 1) {
+          // A folder has no thoughts step — step 1 IS the whole dialog.
+          if (step === 1 && !asFolder) {
             if (step1Ok) setStep(2);
           } else {
             submit();
@@ -330,10 +360,15 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
               onChange={setSource}
               modes={["clone", "disk"]}
               disabled={pending}
+              diskLabel={asFolder ? "Folder" : "Repository or folder"}
+              diskBrowseTitle="Select a repository or folder"
+              diskPlaceholder="/path/to/repo-or-folder"
               diskFooter={
                 needsInit ? (
                   <p className="mt-1 text-xs text-ink-dim">
-                    Not a git repository — hyprlayer can set one up for you.
+                    {asFolder
+                      ? "Added as a plain folder — no git, no thoughts."
+                      : "Not a git repository — one will be initialized here."}
                   </p>
                 ) : isBare ? (
                   <p className="mt-1 text-xs text-bad">
@@ -343,7 +378,21 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
               }
             />
 
+            {/* Not a <Field>: it wraps children in a <label>, which would steal
+                the switch's accessible name. */}
             {needsInit && (
+              <div className="flex items-center justify-between gap-4">
+                <p className="min-w-0 text-sm text-ink">Set up a git repository</p>
+                <Toggle
+                  aria-label="Set up a git repository"
+                  checked={setUpGit}
+                  onChange={setSetUpGit}
+                  disabled={pending}
+                />
+              </div>
+            )}
+
+            {needsInit && !asFolder && (
               <Field label="Initial branch">
                 <TextInput
                   value={initBranch}
@@ -355,7 +404,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
               </Field>
             )}
 
-            {configMissing && (
+            {configMissing && !asFolder && (
               <Field label="Your name">
                 <TextInput
                   value={user}
@@ -547,8 +596,13 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
               <Button type="button" onClick={close} disabled={pending}>
                 Cancel
               </Button>
-              <Button type="submit" variant="primary" disabled={!step1Ok}>
-                Next
+              <Button
+                type="submit"
+                variant="primary"
+                busy={asFolder && pending}
+                disabled={asFolder ? !canSubmit : !step1Ok}
+              >
+                {asFolder ? (pending ? submitBusy : submitIdle) : "Next"}
               </Button>
             </>
           ) : (

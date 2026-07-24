@@ -679,6 +679,24 @@ pub async fn detect_base_branch(git: &Path, repo: &Path) -> Result<String> {
     })
 }
 
+/// Status for a `folder` workstream: the directory either exists or it
+/// doesn't. No git and no thoughts links, so every counter is zero and the
+/// link status is `Unsupported` rather than the git default of `Broken`.
+pub fn folder_status(dir: &Path) -> WorktreeStatus {
+    WorktreeStatus {
+        exists: dir.is_dir(),
+        branch: None,
+        dirty: 0,
+        additions: 0,
+        deletions: 0,
+        untracked: 0,
+        ahead: 0,
+        behind: 0,
+        ahead_of_base: 0,
+        thoughts: LinkStatus::Unsupported,
+    }
+}
+
 /// Sync status snapshot via git2 (cheap; callers use spawn_blocking).
 /// `base_branch` is the merge target used for ahead/behind when the branch
 /// has no upstream yet (the usual state before first push).
@@ -799,6 +817,28 @@ pub fn unique_slug(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_status_reports_a_live_directory_git_status_would_call_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        std::fs::create_dir(&notes).unwrap();
+        std::fs::write(notes.join("todo.md"), "hi\n").unwrap();
+
+        // The git reader can't open a plain folder, so it reports `exists: false`
+        // — which the UI renders as "missing on disk". Folder workstreams must
+        // not go through it.
+        assert!(!status(&notes, "", None).exists);
+
+        let st = folder_status(&notes);
+        assert!(st.exists);
+        assert_eq!(st.branch, None);
+        assert_eq!((st.dirty, st.untracked, st.ahead, st.behind), (0, 0, 0, 0));
+        // No thoughts links to be broken — the chip must stay quiet.
+        assert_eq!(st.thoughts, LinkStatus::Unsupported);
+
+        assert!(!folder_status(&dir.path().join("gone")).exists);
+    }
 
     fn sh(repo: &Path, args: &[&str]) {
         // `-c commit.gpgsign=false`: keep test commits hermetic from the user's

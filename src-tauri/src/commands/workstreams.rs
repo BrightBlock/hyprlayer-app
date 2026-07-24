@@ -73,7 +73,12 @@ fn pr_dir(item: &Workstream) -> &Path {
 
 /// Live git + thoughts-link status for one item (blocking work).
 fn item_view(item: Workstream, link: Option<LinkStatus>) -> WorkstreamView {
-    let git = worktree::status(Path::new(&item.worktree_path), &item.base_branch, link);
+    let dir = Path::new(&item.worktree_path);
+    let git = if item.is_folder() {
+        worktree::folder_status(dir)
+    } else {
+        worktree::status(dir, &item.base_branch, link)
+    };
     WorkstreamView {
         item,
         git,
@@ -228,6 +233,40 @@ pub async fn list_workstream_bases(
     })
 }
 
+/// A workstream in a `folder` project: no worktree, no branch, no thoughts
+/// provisioning, no Setup script — just a row pointing at the project folder,
+/// which agent sessions run in directly. Unlike `inplace` there's no
+/// one-per-project limit: with no branch to fight over, parallel workstreams in
+/// the same folder are just parallel conversations.
+async fn create_folder_workstream(
+    state: &AppState,
+    project_path: String,
+    title: String,
+) -> CmdResult<WorkstreamView> {
+    let dir = PathBuf::from(&project_path);
+    if !dir.is_dir() {
+        return Err(AppError {
+            code: "folder_missing".into(),
+            message: format!("{project_path} is no longer a directory."),
+            remedy: Some("The folder was moved or deleted. Remove the project and re-add it.".into()),
+        });
+    }
+
+    let new_item = NewWorkstream {
+        slug: worktree::unique_slug(&title),
+        title,
+        // No git: an empty branch/base is the honest value, and every git
+        // surface is skipped for `Folder` rather than reading these.
+        branch: String::new(),
+        base_branch: String::new(),
+        worktree_path: project_path.clone(),
+        project_path,
+        worktree_mode: WorktreeMode::Folder,
+    };
+    let item = db_task(state.db.clone(), move |db| db.insert_workstream(new_item)).await?;
+    Ok(item_view(item, None))
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn create_workstream(
@@ -249,6 +288,16 @@ pub async fn create_workstream(
         });
     }
 
+    // A folder project has no git and no thoughts mapping — the requested mode,
+    // base, and branch are all meaningless. Read the registry, not the caller,
+    // so a stale UI can't ask for a worktree in a plain directory.
+    if !super::projects::project_source(&state, &project_path)
+        .await
+        .is_git()
+    {
+        return create_folder_workstream(&state, project_path, title).await;
+    }
+
     // Resolve the requested backing mode up front so an unknown mode or a
     // missing branch fails before any git work.
     let branch_choice = branch.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
@@ -267,6 +316,16 @@ pub async fn create_workstream(
         WorktreeMode::Inplace => CreateMode::InPlace {
             branch: needs_branch("in-place")?,
         },
+        // Only a folder project can back a folder workstream, and that path
+        // returned above — here the mode contradicts the project.
+        WorktreeMode::Folder => {
+            return Err(AppError {
+                code: "invalid_mode".into(),
+                message: "This project is a git repository, so its workstreams need a branch."
+                    .into(),
+                remedy: Some("Pick a branch, or create a new one.".into()),
+            })
+        }
     };
     let inplace = mode == WorktreeMode::Inplace;
 
@@ -649,10 +708,10 @@ pub async fn archive_workstream(
     // Stop any live Run process and drop this workstream's script state.
     state.scripts.clear_workstream(&id).await;
 
-    // In-place: nothing to move or unlink — just flip the row. (The shared
-    // project checkout, its branch, and its thoughts links stay put.) Archive
-    // scripts only run for dedicated worktrees, so skip them here too.
-    if item.is_inplace() {
+    // In-place / folder: nothing to move or unlink — just flip the row. (The
+    // shared project directory, its branch, and its thoughts links stay put.)
+    // Archive scripts only run for dedicated worktrees, so skip them here too.
+    if item.shares_project_dir() {
         return db_task(state.db.clone(), move |db| db.archive_workstream(&id)).await;
     }
 
@@ -776,10 +835,10 @@ pub async fn list_archived_workstreams(
             .into_iter()
             .map(|item| {
                 let archive_path = archive_dir_for(Path::new(&item.project_path), &item.slug);
-                // In-place rows were never moved to an archive dir — archive is a
-                // pure status flip, and restore is too — so they're always
-                // restorable regardless of whether the (unused) path exists.
-                let archive_exists = item.is_inplace() || archive_path.exists();
+                // In-place/folder rows were never moved to an archive dir —
+                // archive is a pure status flip, and restore is too — so they're
+                // always restorable regardless of whether the (unused) path exists.
+                let archive_exists = item.shares_project_dir() || archive_path.exists();
                 ArchivedWorkstreamView {
                     archive_path: archive_path.display().to_string(),
                     archive_exists,
@@ -811,18 +870,26 @@ pub async fn restore_workstream(
         });
     }
 
-    // In-place: archive never moved anything, so restore is just the status
-    // flip plus a fresh link read against the project checkout.
-    if item.is_inplace() {
-        let effective = effective_for(&state, &item.project_path).await?;
-        let link = thoughts_links::check_thoughts(Path::new(&item.worktree_path), &effective);
+    // In-place / folder: archive never moved anything, so restore is just the
+    // status flip plus a fresh link read against the project directory (a
+    // folder project has no links to read).
+    if item.shares_project_dir() {
+        let link = if item.is_folder() {
+            None
+        } else {
+            let effective = effective_for(&state, &item.project_path).await?;
+            Some(thoughts_links::check_thoughts(
+                Path::new(&item.worktree_path),
+                &effective,
+            ))
+        };
         let id_for_db = id.clone();
         db_task(state.db.clone(), move |db| {
             db.unarchive_workstream(&id_for_db)
         })
         .await?;
         let item = load_item(&state, &id).await?;
-        return Ok(item_view(item, Some(link)));
+        return Ok(item_view(item, link));
     }
 
     let project_path = Path::new(&item.project_path);
@@ -910,6 +977,11 @@ pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) 
             remedy: Some("Archive it first.".into()),
         });
     }
+    // A folder row owns nothing on disk — no archive dir, no branch, no git.
+    // Purging it is a registry prune.
+    if item.is_folder() {
+        return db_task(state.db.clone(), move |db| db.delete_workstream(&id)).await;
+    }
     let git = state
         .binaries
         .require(BinaryKind::Git)
@@ -956,41 +1028,51 @@ pub async fn cleanup_archived_workstreams(
     state: State<'_, AppState>,
     before_ms: Option<f64>,
 ) -> CmdResult<ArchiveCleanupReport> {
-    let git = state
-        .binaries
-        .require(BinaryKind::Git)
-        .await
-        .map_err(AppError::from)?;
-    let delete_branch_setting = state.settings.get().await.git.delete_branch_on_archive;
-
     let items = db_task(state.db.clone(), |db| db.list_archived_workstreams()).await?;
+    // Filter: None → all; Some(cut) → only rows archived before the cutoff.
+    let items: Vec<_> = items
+        .into_iter()
+        .filter(|w| before_ms.map_or(true, |cut| w.archived_at.map_or(false, |a| a < cut)))
+        .collect();
+
+    // Folder rows purge without git (mirroring delete_archived_workstream), so
+    // only require the binary when a git-backed row is actually in the batch.
+    let git = if items.iter().any(|w| !w.is_folder()) {
+        Some(
+            state
+                .binaries
+                .require(BinaryKind::Git)
+                .await
+                .map_err(AppError::from)?,
+        )
+    } else {
+        None
+    };
+    let delete_branch_setting = state.settings.get().await.git.delete_branch_on_archive;
 
     let mut deleted = 0u32;
     let mut failed = 0u32;
 
     for w in items {
-        // Filter: None → all; Some(cut) → only rows archived before the cutoff.
-        if let Some(cut) = before_ms {
-            if !w.archived_at.map_or(false, |a| a < cut) {
+        let id = w.id.clone();
+
+        // A folder row owns nothing on disk — no archive dir, no branch.
+        if !w.is_folder() {
+            let git = git.as_ref().expect("required above for non-folder rows");
+            let project_path = PathBuf::from(&w.project_path);
+            let archive_path = archive_dir_for(&project_path, &w.slug);
+            // Never delete a branch the app didn't create (existing/inplace).
+            let delete_branch = delete_branch_setting && w.app_owns_branch();
+
+            if let Err(e) = state
+                .worktrees
+                .purge_archive(git, &project_path, &archive_path, &w.branch, delete_branch)
+                .await
+            {
+                log::warn!("cleanup_archived_workstreams: purge {id} failed: {e}");
+                failed += 1;
                 continue;
             }
-        }
-
-        let project_path = PathBuf::from(&w.project_path);
-        let archive_path = archive_dir_for(&project_path, &w.slug);
-        let id = w.id.clone();
-        let branch = w.branch.clone();
-        // Never delete a branch the app didn't create (existing/inplace).
-        let delete_branch = delete_branch_setting && w.app_owns_branch();
-
-        if let Err(e) = state
-            .worktrees
-            .purge_archive(&git, &project_path, &archive_path, &branch, delete_branch)
-            .await
-        {
-            log::warn!("cleanup_archived_workstreams: purge {id} failed: {e}");
-            failed += 1;
-            continue;
         }
 
         match db_task(state.db.clone(), move |db| db.delete_workstream(&id)).await {
@@ -1014,6 +1096,15 @@ pub async fn reprovision_workstream(
     id: String,
 ) -> CmdResult<WorkstreamView> {
     let item = load_item(&state, &id).await?;
+    // Provisioning would write thoughts symlinks into a folder the app
+    // promised to leave untouched.
+    if item.is_folder() {
+        return Err(AppError {
+            code: "folder_no_thoughts".into(),
+            message: "This workstream runs in a plain folder — it has no thoughts links.".into(),
+            remedy: None,
+        });
+    }
     let effective = effective_for(&state, &item.project_path).await?;
     let link = thoughts_links::provision_thoughts(Path::new(&item.worktree_path), &effective)
         .map_err(AppError::from)?;
@@ -1359,6 +1450,15 @@ pub async fn attach_workstream_pr(
     pr_number: u32,
 ) -> CmdResult<Option<PrStatus>> {
     let item = load_item(&state, &id).await?;
+    // No repo here — gh would walk UP to any enclosing checkout and happily
+    // attach some other repo's PR to this row.
+    if item.is_folder() {
+        return Err(AppError {
+            code: "folder_no_git".into(),
+            message: "This workstream runs in a plain folder — it has no branches or PRs.".into(),
+            remedy: None,
+        });
+    }
     let gh = state
         .binaries
         .require(BinaryKind::Gh)

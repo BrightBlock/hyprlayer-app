@@ -7,7 +7,7 @@ use hyprlayer_core::config::{
 use hyprlayer_core::hyprcli::{HyprCli, StorageInfo};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryState, BinaryStatus};
 use hyprlayer_core::repos;
-use hyprlayer_core::store::NewProject;
+use hyprlayer_core::store::{NewProject, ProjectSource};
 // Items, not the module: `create_thoughts_profile` has an arg of the same name.
 use hyprlayer_core::thoughts_repo::{classify_root, scaffold as scaffold_thoughts_root, RootState};
 use hyprlayer_core::worktree::thoughts_links;
@@ -37,8 +37,8 @@ pub struct Project {
     pub exists_on_disk: bool,
     /// The git source this clone tracks; None for a local-only repo.
     pub origin_url: Option<String>,
-    /// `clone` | `disk` — how it was added.
-    pub source: String,
+    /// How it was added. `folder` has no git and no thoughts mapping.
+    pub source: ProjectSource,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -100,7 +100,9 @@ pub struct Bootstrap {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDetail {
     pub project: Project,
-    pub storage: StorageInfo,
+    /// None for `folder` projects — they have no thoughts mapping, so the
+    /// `hyprlayer storage info` subprocess is never run for them.
+    pub storage: Option<StorageInfo>,
     pub thoughts_root: Option<String>,
 }
 
@@ -167,11 +169,16 @@ pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
                 .unwrap_or_else(|| "git".to_string());
             // The CLI-sanitized `repoMappings` key, separate from the display
             // name so doc queries can filter on it. Falls back to the registry
-            // name when the project isn't mapped into thoughts yet.
-            let thoughts_project = eff
-                .as_ref()
-                .and_then(|e| e.mapped_name.clone())
-                .unwrap_or_else(|| r.name.clone());
+            // name when the project isn't mapped into thoughts yet. A folder
+            // project is never mapped: empty, so a same-named mapped project's
+            // docs can't leak into its surfaces.
+            let thoughts_project = if r.source.is_git() {
+                eff.as_ref()
+                    .and_then(|e| e.mapped_name.clone())
+                    .unwrap_or_else(|| r.name.clone())
+            } else {
+                String::new()
+            };
             Project {
                 exists_on_disk: Path::new(&r.path).is_dir(),
                 path: r.path,
@@ -184,6 +191,19 @@ pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
             }
         })
         .collect()
+}
+
+/// How a registered project was added — the switch every git/thoughts surface
+/// reads. An unregistered path answers `Disk`, the git-backed default, so a
+/// stale caller can never accidentally get the skip-everything treatment.
+pub(crate) async fn project_source(state: &AppState, path: &str) -> ProjectSource {
+    let path = path.to_string();
+    db_task(state.db.clone(), move |db| db.get_project_record(&path))
+        .await
+        .ok()
+        .flatten()
+        .map(|r| r.source)
+        .unwrap_or(ProjectSource::Disk)
 }
 
 /// The config health summary shown during onboarding. The project list is
@@ -249,6 +269,15 @@ fn find_project(projects: &[Project], path: &str) -> CmdResult<Project> {
 pub async fn get_project(state: State<'_, AppState>, path: String) -> CmdResult<ProjectDetail> {
     let project = find_project(&registry_projects(&state).await, &path)?;
 
+    // A folder project has no thoughts mapping: no CLI call, no thoughts root.
+    if !project.source.is_git() {
+        return Ok(ProjectDetail {
+            project,
+            storage: None,
+            thoughts_root: None,
+        });
+    }
+
     let storage = HyprCli::new(&state.binaries)
         .storage_info(Path::new(&path))
         .await?;
@@ -257,7 +286,7 @@ pub async fn get_project(state: State<'_, AppState>, path: String) -> CmdResult<
 
     Ok(ProjectDetail {
         project,
-        storage,
+        storage: Some(storage),
         thoughts_root,
     })
 }
@@ -352,7 +381,7 @@ async fn register_repo(
     repo: &Path,
     name: &str,
     thoughts: ThoughtsTarget<'_>,
-    kind: &str,
+    kind: ProjectSource,
     owned: bool,
 ) -> CmdResult<Project> {
     if let Err(e) = HyprCli::new(&state.binaries)
@@ -371,7 +400,7 @@ async fn register_repo(
         path: path.clone(),
         name: name.to_string(),
         origin_url: origin,
-        source: kind.to_string(),
+        source: kind,
     };
     if let Err(e) = db_task(state.db.clone(), move |db| db.insert_project(row)).await {
         if owned {
@@ -398,7 +427,7 @@ async fn provision_project(
     source: &str,
     name: &str,
     thoughts: ThoughtsTarget<'_>,
-    kind: &str,
+    kind: ProjectSource,
     location: Option<&str>,
 ) -> CmdResult<Project> {
     let git = state
@@ -478,6 +507,21 @@ pub async fn import_project(
         _ => {}
     }
 
+    // Refuse a path already registered as a folder project — the upsert would
+    // silently flip its kind while old folder workstreams keep WorktreeMode::
+    // Folder, and the git init below would mutate a folder the user was
+    // promised stays untouched. Checked before any side effect.
+    let canonical = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let key = canonical.display().to_string();
+    let existing = db_task(state.db.clone(), move |db| db.get_project_record(&key)).await?;
+    if existing.is_some_and(|r| !r.source.is_git()) {
+        return Err(AppError {
+            code: "project_kind_conflict".into(),
+            message: format!("{path} is already added as a local folder project."),
+            remedy: Some("Remove the project first, then re-add it as a repository.".into()),
+        });
+    }
+
     ensure_config(&state, bootstrap_user).await?;
 
     let git = state
@@ -526,6 +570,72 @@ pub async fn import_project(
     result
 }
 
+/// Register a plain local directory as a project — no git, no thoughts, no
+/// hyprlayer CLI, and no config bootstrap. The folder is left exactly as
+/// found; workstreams run agent sessions in it directly (see
+/// `WorktreeMode::Folder`).
+///
+/// Refuses a path that IS a git repo: a repo belongs in `import_project`,
+/// where it keeps its branches, worktrees, and thoughts mapping.
+#[tauri::command]
+#[specta::specta]
+pub async fn import_local_folder(
+    state: State<'_, AppState>,
+    path: String,
+    directory_name: Option<String>,
+) -> CmdResult<Project> {
+    let dir = Path::new(&path);
+    match repos::classify_repo_path(dir) {
+        repos::RepoPathStatus::Missing => {
+            return Err(AppError {
+                code: "invalid_path".into(),
+                message: format!("{path} is not a directory"),
+                remedy: None,
+            });
+        }
+        repos::RepoPathStatus::NonGit => {}
+        _ => {
+            return Err(AppError {
+                code: "folder_is_git_repo".into(),
+                message: format!("{path} is a git repository."),
+                remedy: Some("Add it as a repository instead, so it keeps its branches and thoughts.".into()),
+            });
+        }
+    }
+
+    // Same canonicalization as the repo import: a stable registered path so
+    // later lookups and removals match exactly.
+    let dir = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let name = project_name(directory_name, &dir.to_string_lossy(), &dir);
+    let registered = dir.display().to_string();
+    // The classify check above already rejects live repos; this catches a
+    // registered repo whose `.git` vanished out-of-band, which would otherwise
+    // flip the project's kind under its existing workstreams.
+    let key = registered.clone();
+    let existing = db_task(state.db.clone(), move |db| db.get_project_record(&key)).await?;
+    if existing.is_some_and(|r| r.source.is_git()) {
+        return Err(AppError {
+            code: "project_kind_conflict".into(),
+            message: format!("{path} is already added as a repository project."),
+            remedy: Some("Remove the project first, then re-add it as a folder.".into()),
+        });
+    }
+    db_task(state.db.clone(), {
+        let row = NewProject {
+            path: registered.clone(),
+            name,
+            origin_url: None,
+            source: ProjectSource::Folder,
+        };
+        move |db| db.insert_project(row)
+    })
+    .await?;
+
+    // No ConfigChanged / index rebuild: nothing about thoughts changed. The
+    // caller invalidates the project list on its own.
+    find_project(&registry_projects(&state).await, &registered)
+}
+
 /// Canonicalize an on-disk repo path, derive its project name, and register it —
 /// the disk-import tail of `import_project`, after any needed git setup.
 async fn register_disk_project(
@@ -542,7 +652,17 @@ async fn register_disk_project(
     // into project URLs and trips git/tools.
     let repo = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let name = project_name(directory_name, &repo.to_string_lossy(), &repo);
-    register_repo(app, state, git, &repo, &name, thoughts, "disk", false).await
+    register_repo(
+        app,
+        state,
+        git,
+        &repo,
+        &name,
+        thoughts,
+        ProjectSource::Disk,
+        false,
+    )
+    .await
 }
 
 /// Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
@@ -584,7 +704,16 @@ pub async fn clone_project(
         dir: thoughts_dir.as_deref(),
         profile: profile.as_deref(),
     };
-    provision_project(&app, &state, &url, &name, thoughts, "clone", location.as_deref()).await
+    provision_project(
+        &app,
+        &state,
+        &url,
+        &name,
+        thoughts,
+        ProjectSource::Clone,
+        location.as_deref(),
+    )
+    .await
 }
 
 /// Remove a project from the registry; with `delete_files`, also delete its
@@ -620,8 +749,12 @@ pub async fn remove_project(
         });
     }
 
+    // A folder project was never mapped into thoughts, so there's nothing to
+    // uninit — and no CLI to run.
+    let git_backed = project_source(&state, &path).await.is_git();
+
     // Drop the thoughts repoMapping (best-effort; the directory may be gone).
-    if repo.is_dir() {
+    if git_backed && repo.is_dir() {
         let _ = HyprCli::new(&state.binaries).thoughts_uninit(&repo).await;
     }
 
@@ -633,9 +766,11 @@ pub async fn remove_project(
         remove_dir_all_bg(&repo).await;
     }
 
-    state.config.invalidate().await;
-    let _ = crate::events::ConfigChanged.emit(&app);
-    crate::rebuild_thoughts_index(app.clone()).await;
+    if git_backed {
+        state.config.invalidate().await;
+        let _ = crate::events::ConfigChanged.emit(&app);
+        crate::rebuild_thoughts_index(app.clone()).await;
+    }
     Ok(())
 }
 
@@ -817,7 +952,16 @@ pub async fn run_backend_health(
             .cloned()
             .expect("status_all covers every binary kind")
     };
-    for kind in [BinaryKind::Hyprlayer, BinaryKind::Git, BinaryKind::Claude] {
+
+    // A folder project needs neither git nor the hyprlayer CLI, and has no
+    // mapping or links to check — only an agent to run and a folder to run in.
+    let git_backed = project_source(&state, &path).await.is_git();
+    let required = if git_backed {
+        &[BinaryKind::Hyprlayer, BinaryKind::Git, BinaryKind::Claude][..]
+    } else {
+        &[BinaryKind::Claude][..]
+    };
+    for &kind in required {
         let status = status_of(kind);
         let (check_status, detail, remedy) = match &status.state {
             BinaryState::Ok => (
@@ -849,6 +993,22 @@ pub async fn run_backend_health(
             detail,
             remedy,
         });
+    }
+
+    // A folder project has no remote, no mapping, and no links — the folder
+    // being there is the whole contract.
+    if !git_backed {
+        let dir = Path::new(&path);
+        let exists = dir.is_dir();
+        checks.push(HealthCheck {
+            id: "folder.exists".into(),
+            label: "Project folder".into(),
+            status: pass_if(exists),
+            detail: Some(path.clone()),
+            remedy: (!exists)
+                .then(|| "The folder was moved or deleted. Remove the project and re-add it.".into()),
+        });
+        return Ok(HealthReport { checks });
     }
 
     // gh is optional: warn, never fail.

@@ -26,6 +26,12 @@ type Props = {
   /** Extra content rendered under the disk path field — e.g. a hint that the
    *  folder isn't a git repo. Disk mode only. */
   diskFooter?: ReactNode;
+  /** Field label for the disk path. Override when the target isn't a repo. */
+  diskLabel?: string;
+  /** Title of the disk mode's native folder picker. */
+  diskBrowseTitle?: string;
+  /** Placeholder for the disk path field. */
+  diskPlaceholder?: string;
 };
 
 const MODE_LABELS: Record<RepoSource["mode"], string> = {
@@ -47,6 +53,9 @@ export function RepoSourcePicker({
   disabled = false,
   showRecents = true,
   diskFooter,
+  diskLabel = "Local repository",
+  diskBrowseTitle = "Select a git repository",
+  diskPlaceholder = "/path/to/your/repo",
 }: Props) {
   const recents = useRecentRepos(showRecents && value.mode === "clone");
 
@@ -145,19 +154,19 @@ export function RepoSourcePicker({
       )}
 
       {value.mode === "disk" && (
-        <Field label="Local repository">
+        <Field label={diskLabel}>
           <div className="flex gap-2">
             <TextInput
               value={value.path}
               onChange={(e) => onChange({ ...value, path: e.target.value })}
-              placeholder="/path/to/your/repo"
+              placeholder={diskPlaceholder}
               autoFocus
               disabled={disabled}
               className="font-mono text-xs"
             />
             <Button
               type="button"
-              onClick={() => void browse((p) => onChange({ ...value, path: p }), "Select a git repository")}
+              onClick={() => void browse((p) => onChange({ ...value, path: p }), diskBrowseTitle)}
               disabled={disabled}
             >
               Browse

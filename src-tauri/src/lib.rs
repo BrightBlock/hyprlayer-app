@@ -32,6 +32,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::projects::get_project,
             commands::projects::inspect_repo_path,
             commands::projects::import_project,
+            commands::projects::import_local_folder,
             commands::projects::clone_project,
             commands::projects::remove_project,
             commands::projects::reorder_projects,

@@ -7,6 +7,7 @@ import { IS_MACOS } from "@/lib/platform";
 import { ChordHint } from "@/components/ui";
 import { effectiveChord, type Overrides } from "@/lib/keybindings/resolve";
 import { GitCommitIcon, GitPullRequestIcon, PencilIcon, ZapIcon } from "@/components/icons";
+import { isFolderWorkstream } from "@/lib/domain/projects";
 import { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
 import { closePromptPalette, usePromptPaletteStore } from "./promptsStore";
 import {
@@ -65,6 +66,8 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
     const noWs = activeWorkstream ? null : "Open a workstream to run prompts";
 
     const builtinRow = (id: BuiltinPromptId): Row | null => {
+      // Commit/Ship can never apply to a folder workstream — hide, don't gray.
+      if (activeWorkstream && isFolderWorkstream(activeWorkstream)) return null;
       const def = BUILTIN_PROMPTS.find((b) => b.id === id)!;
       const body = effectiveBuiltinBody(settings, defaults, id);
       if (q && !def.name.toLowerCase().includes(q) && !body.toLowerCase().includes(q)) {

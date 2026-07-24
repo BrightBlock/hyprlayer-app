@@ -12,6 +12,8 @@ type Props = {
   onClose: () => void;
   /** Called with the freshly created item so the caller can select its tab. */
   onCreated: (view: WorkstreamView) => void;
+  /** A folder project: no git, so the dialog is title-only. */
+  folder?: boolean;
 };
 
 /** Where work on an existing branch lives: a dedicated worktree, or the
@@ -41,8 +43,17 @@ function filterBranches(all: string[], query: string): string[] {
  * project's own checkout to it with no worktree. There is no mode dropdown; the
  * branch you choose determines the shape. The list is local branches only — a
  * remote-tracking ref would detach HEAD.
+ *
+ * A folder project has none of that: the dialog collapses to a title, and the
+ * workstream runs in the project folder itself.
  */
-export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }: Props) {
+export function CreateWorkstreamDialog({
+  projectPath,
+  open,
+  onClose,
+  onCreated,
+  folder = false,
+}: Props) {
   const [title, setTitle] = useState("");
   const [query, setQuery] = useState("");
   // null = the pinned "New branch" row; otherwise the chosen existing branch.
@@ -52,7 +63,8 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
   const [userPickedBase, setUserPickedBase] = useState(false);
   const [place, setPlace] = useState<Place>("worktree");
   const create = useCreateWorkstream(projectPath);
-  const bases = useWorkstreamBases(projectPath, open);
+  // A folder project has no branches to list — don't even ask.
+  const bases = useWorkstreamBases(projectPath, open && !folder);
 
   const defaultBase = bases.data?.defaultBase ?? "";
   const currentBranch = bases.data?.currentBranch ?? "";
@@ -81,9 +93,9 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
   // Re-scan local branches on open, since the dialog stays mounted across
   // opens and react-query's normal refetch-on-mount never fires again.
   useEffect(() => {
-    if (open) void bases.refetch();
+    if (open && !folder) void bases.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, folder]);
 
   // Pre-select the new-branch base: the detected default, else the first
   // branch. Follows a late-arriving default until the user picks one
@@ -112,6 +124,7 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
 
   // Resolve the combobox state into the backend's (mode, base, branch) shape.
   const resolved = (): { mode: WorktreeMode; base: string | null; branch: string | null } => {
+    if (folder) return { mode: "folder", base: null, branch: null };
     if (isNew) return { mode: "isolated", base: base || null, branch: null };
     if (place === "here") return { mode: "inplace", base: null, branch: selectedBranch };
     return { mode: "existing", base: null, branch: selectedBranch };
@@ -141,14 +154,20 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
     defaultBase && !branches.includes(defaultBase) ? [defaultBase, ...branches] : branches;
 
   const inplace = !isNew && place === "here";
-  const busyLabel = inplace ? "Switching branch…" : "Provisioning worktree…";
-  const hint = isNew
-    ? "Creates a new branch named from your title, in a dedicated worktree."
+  const busyLabel = folder
+    ? "Creating…"
     : inplace
-      ? currentSelected
-        ? `Attaches a workstream to ${selectedBranch} in your current checkout. No worktree is created.`
-        : `Switches your checkout to ${selectedBranch}. No worktree is created.`
-      : `Checks ${selectedBranch} out into a dedicated worktree.`;
+      ? "Switching branch…"
+      : "Provisioning worktree…";
+  const hint = folder
+    ? "Runs in the project folder. No branch, no worktree — add as many as you like."
+    : isNew
+      ? "Creates a new branch named from your title, in a dedicated worktree."
+      : inplace
+        ? currentSelected
+          ? `Attaches a workstream to ${selectedBranch} in your current checkout. No worktree is created.`
+          : `Switches your checkout to ${selectedBranch}. No worktree is created.`
+        : `Checks ${selectedBranch} out into a dedicated worktree.`;
 
   return (
     <Dialog open={open} onClose={close} title="New workstream">
@@ -167,6 +186,7 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
           disabled={create.isPending}
         />
 
+        {!folder && (
         <Field label="Branch">
           <div className="overflow-hidden rounded-md border border-edge">
             <TextInput
@@ -206,8 +226,9 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
             </ul>
           </div>
         </Field>
+        )}
 
-        {isNew ? (
+        {folder ? null : isNew ? (
           <Field label="Branched from">
             <Select
               value={base}
@@ -247,7 +268,7 @@ export function CreateWorkstreamDialog({ projectPath, open, onClose, onCreated }
         )}
 
         <p className="text-xs leading-relaxed text-ink-dim">{hint}</p>
-        {bases.isError && <ErrorNote error={bases.error} />}
+        {!folder && bases.isError && <ErrorNote error={bases.error} />}
         {create.isError && <ErrorNote error={create.error} />}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={close} disabled={create.isPending}>

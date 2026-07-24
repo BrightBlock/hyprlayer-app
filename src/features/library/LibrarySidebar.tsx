@@ -4,6 +4,7 @@ import { Badge, ErrorNote, Field, Select, Spinner, TextInput } from "@/component
 import { ChevronDownIcon, ChevronRightIcon, FolderIcon, PlusIcon } from "@/components/icons";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import type { Project, QueryResult } from "@/lib/bindings";
+import { isGitProject } from "@/lib/domain/projects";
 import type { LibrarySearch } from "./librarySearch";
 import { formatRelativeTime } from "@/lib/format";
 import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES, STATUS_TONE } from "./constants";
@@ -84,7 +85,8 @@ export function LibrarySidebar({
 
       <div className="shrink-0 space-y-2 border-b border-edge p-3">
         <ProjectSwitcher
-          projects={projects}
+          // Folder projects have no thoughts mapping, so no docs scope.
+          projects={projects.filter(isGitProject)}
           value={search.project}
           total={result?.total}
           // Changing project scope drops the open doc: a doc is project-scoped,

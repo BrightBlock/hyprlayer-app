@@ -1,5 +1,6 @@
 import type { WorkstreamView } from "@/lib/bindings";
 import { Button, Dialog, ErrorNote } from "@/components/ui";
+import { isFolderWorkstream } from "@/lib/domain/projects";
 import { isAppError } from "@/lib/ipc";
 import { useArchiveWorkstream } from "@/lib/queries";
 
@@ -44,6 +45,8 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
   // The backend aborts archive (before any teardown) when the project's Archive
   // script fails, so the user can fix it and retry, or skip the script.
   const scriptFailed = isAppError(archive.error) && archive.error.code === "archive_script_failed";
+  // Folder rows archive as a pure status flip — no worktree, no branch.
+  const folder = target !== null && isFolderWorkstream(target);
 
   return (
     <Dialog open={target !== null} onClose={close} title="Archive workstream?">
@@ -51,12 +54,24 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
         <p className="text-sm leading-relaxed text-ink-dim">
           {target && (
             <>
-              <span className="font-medium text-ink">{target.item.title}</span>{" "}
-              <span className="font-mono text-xs">({target.item.branch})</span> —{" "}
+              <span className="font-medium text-ink">{target.item.title}</span>
+              {!folder && (
+                <>
+                  {" "}
+                  <span className="font-mono text-xs">({target.item.branch})</span>
+                </>
+              )}{" "}
+              —{" "}
             </>
           )}
-          the worktree moves to <span className="font-mono text-xs">archived-contexts/</span> and
-          the branch is preserved. You can unarchive it later from the Archive view.
+          {folder ? (
+            "the folder is left untouched; only this workstream is archived. You can unarchive it later from the Archive view."
+          ) : (
+            <>
+              the worktree moves to <span className="font-mono text-xs">archived-contexts/</span>{" "}
+              and the branch is preserved. You can unarchive it later from the Archive view.
+            </>
+          )}
         </p>
         {archive.isError && <ErrorNote error={archive.error} />}
         <div className="flex justify-end gap-2">

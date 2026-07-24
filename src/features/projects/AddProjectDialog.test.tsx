@@ -12,6 +12,7 @@ const q = vi.hoisted(() => ({
   useBootstrap: vi.fn(),
   useCloneProject: vi.fn(),
   useImportProject: vi.fn(),
+  useImportLocalFolder: vi.fn(),
   useDefaultUsername: vi.fn(),
   useRepoPathInfo: vi.fn(),
   useRecentRepos: vi.fn(),
@@ -43,21 +44,26 @@ const defaultProfile: ThoughtsProfile = {
   foldersError: null,
 };
 
-function setupHooks(profiles: ThoughtsProfile[] = [defaultProfile]) {
+function setupHooks(
+  profiles: ThoughtsProfile[] = [defaultProfile],
+  configState: "ok" | "missing" = "ok",
+) {
   const clone = mutation();
   const importProject = mutation();
+  const importFolder = mutation();
   const createProfile = mutation();
   q.useBootstrap.mockReturnValue({
-    data: { config: { state: "ok" }, settings: { reposRoot: "/repos" } },
+    data: { config: { state: configState }, settings: { reposRoot: "/repos" } },
   });
   q.useCloneProject.mockReturnValue(clone);
   q.useImportProject.mockReturnValue(importProject);
+  q.useImportLocalFolder.mockReturnValue(importFolder);
   q.useDefaultUsername.mockReturnValue({ data: "jane" });
   q.useRepoPathInfo.mockReturnValue({ data: undefined });
   q.useRecentRepos.mockReturnValue({ data: [], isLoading: false });
   q.useThoughtsProfiles.mockReturnValue({ data: profiles, isLoading: false, error: null });
   q.useCreateThoughtsProfile.mockReturnValue(createProfile);
-  return { clone, importProject, createProfile };
+  return { clone, importProject, importFolder, createProfile };
 }
 
 const next = () => fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -71,14 +77,14 @@ function pick(field: string, option: string) {
 }
 
 /** Render in disk mode with a mocked classification for the browsed folder. */
-function setupDisk(status: RepoPathStatus | undefined) {
-  const hooks = setupHooks();
+function setupDisk(status: RepoPathStatus | undefined, configState: "ok" | "missing" = "ok") {
+  const hooks = setupHooks([defaultProfile], configState);
   q.useRepoPathInfo.mockReturnValue({ data: status });
 
   render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
   // Switch to the "Open from disk" tab and type a path.
   fireEvent.click(screen.getByRole("button", { name: "Open from disk" }));
-  fireEvent.change(screen.getByPlaceholderText("/path/to/your/repo"), {
+  fireEvent.change(screen.getByPlaceholderText("/path/to/repo-or-folder"), {
     target: { value: "/my/folder" },
   });
   return hooks;
@@ -95,15 +101,19 @@ function setupClone(profiles: ThoughtsProfile[] = [defaultProfile]) {
 }
 
 describe("AddProjectDialog disk import", () => {
-  it("offers to initialize a folder that isn't a git repo", () => {
+  it("offers a non-git folder as a plain folder by default", () => {
     setupDisk("nonGit");
-    expect(screen.getByText(/Not a git repository/)).toBeDefined();
-    next();
-    expect(screen.getByRole("button", { name: /Initialize & add/ })).toBeDefined();
+    expect(screen.getByText(/plain folder/)).toBeDefined();
+    // Plain folder is the non-mutating default; git init is the opt-in.
+    expect(
+      screen.getByRole("switch", { name: /Set up a git repository/ }).getAttribute("aria-checked"),
+    ).toBe("false");
+    expect(screen.getByRole("button", { name: "Add folder" })).toBeDefined();
   });
 
-  it("initializes with the chosen branch on submit", () => {
+  it("initializes with the chosen branch when git setup is toggled on", () => {
     const { importProject } = setupDisk("nonGit");
+    fireEvent.click(screen.getByRole("switch", { name: /Set up a git repository/ }));
     // Override the default branch name (a step-1 field).
     fireEvent.change(screen.getByPlaceholderText("main"), { target: { value: "master" } });
     next();
@@ -141,18 +151,63 @@ describe("AddProjectDialog disk import", () => {
     expect(importProject.mutate).not.toHaveBeenCalled();
   });
 
-  it("still routes to import before the probe resolves (no stale mis-routing)", () => {
-    // With the probe unresolved (data undefined) we can't yet know the folder is
-    // non-git, but the single import command re-classifies on the backend — so an
-    // early submit dispatches import rather than erroring with `not_a_git_repo`.
-    const { importProject } = setupDisk(undefined);
-    expect(screen.queryByText(/Not a git repository/)).toBeNull();
-    next();
-    fireEvent.click(screen.getByRole("button", { name: "Add project" }));
-    expect(importProject.mutate).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "/my/folder", branch: null }),
+  it("adds a non-git folder as-is, skipping the thoughts step entirely", () => {
+    const { importFolder, importProject } = setupDisk("nonGit");
+    // Folder-first: no git setup to configure, no second step — step 1 submits,
+    // and nothing in the dialog calls the target a repo.
+    expect(screen.queryByPlaceholderText("main")).toBeNull();
+    expect(screen.queryByText("Repository or folder")).toBeNull();
+    expect(screen.getByText("Folder")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Add folder" }));
+    expect(screen.queryByText("Step 2 of 2 · Thoughts")).toBeNull();
+    expect(importProject.mutate).not.toHaveBeenCalled();
+    expect(importFolder.mutate).toHaveBeenCalledWith(
+      { path: "/my/folder", directoryName: null },
       expect.anything(),
     );
+  });
+
+  it("needs no bootstrap username for a folder — it writes no config", () => {
+    // A true first run (no hyprlayer config yet). The repo paths demand a
+    // username to bootstrap one; a folder project never touches the config.
+    const { importFolder } = setupDisk("nonGit", "missing");
+    // Folder-first: no username demanded. Opting into git brings it back.
+    // (The Field's <label> also wraps its hint text, so match loosely.)
+    expect(screen.queryByLabelText(/Your name/)).toBeNull();
+    fireEvent.click(screen.getByRole("switch", { name: /Set up a git repository/ }));
+    expect(screen.getByLabelText(/Your name/)).toBeDefined();
+    fireEvent.click(screen.getByRole("switch", { name: /Set up a git repository/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add folder" }));
+    expect(importFolder.mutate).toHaveBeenCalled();
+  });
+
+  it("drops the folder offer if the path turns out to be a git repo", () => {
+    const { importFolder } = setupDisk("nonGit");
+    // The debounced probe lands: it's a real repo after all. The choice is gone
+    // and the wizard is back to its two-step self — no stale folder submit.
+    q.useRepoPathInfo.mockReturnValue({ data: "ready" });
+    cleanup();
+    render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open from disk" }));
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo-or-folder"), {
+      target: { value: "/my/folder" },
+    });
+    expect(screen.queryByRole("switch", { name: /Set up a git repository/ })).toBeNull();
+    next();
+    expect(screen.getByText("Step 2 of 2 · Thoughts")).toBeDefined();
+    expect(importFolder.mutate).not.toHaveBeenCalled();
+  });
+
+  it("waits for the probe before allowing submit (no blind git init)", () => {
+    // Which command a disk path submits to depends on the classification —
+    // folder-first means a pre-probe submit could silently git-init a plain
+    // folder, so Next stays gated until the probe lands.
+    const { importProject } = setupDisk(undefined);
+    const nextButton = screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
+    expect(nextButton.disabled).toBe(true);
+    fireEvent.click(nextButton);
+    expect(screen.queryByRole("button", { name: "Add project" })).toBeNull();
+    expect(importProject.mutate).not.toHaveBeenCalled();
   });
 });
 

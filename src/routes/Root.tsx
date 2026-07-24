@@ -36,6 +36,7 @@ import { triggerActiveFileSave } from "@/lib/fileSave";
 import { docTitle } from "@/features/library/text";
 import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
 import { startEdgeDrag } from "@/lib/resize";
+import { isFolderWorkstream, isGitProject } from "@/lib/domain/projects";
 import { GLASS_BAND } from "@/lib/glass";
 import { IS_MACOS } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
@@ -874,7 +875,7 @@ export function Root() {
   // cache with the GIT panel's PR controls, so it adds no extra `gh` calls.
   const activePr = useWorkstreamPr(
     activeWorkstreamId ?? "",
-    Boolean(activeWorkstream),
+    Boolean(activeWorkstream && !isFolderWorkstream(activeWorkstream)),
   );
   useEffect(() => {
     if (!archiveOnMerge || !activeWorkstream) return;
@@ -986,7 +987,8 @@ export function Root() {
   // panel) plus the docs button (project routes only) — and, off macOS, the
   // leading Hyprlayer mark (the VSCode-style product icon; macOS shows none, its
   // icon lives in the Dock, so the cluster there clears only the controls).
-  const leftClusterIcons = (IS_MACOS ? 0 : 1) + 1 + (currentProject ? 1 : 0);
+  const leftClusterIcons =
+    (IS_MACOS ? 0 : 1) + 1 + (currentProject && isGitProject(currentProject) ? 1 : 0);
   const leftClusterRight =
     leftClusterLeft +
     leftClusterIcons * LEFT_CLUSTER_ICON +
@@ -1039,7 +1041,9 @@ export function Root() {
   useCommand("nav.settings", () => toggleNav("/settings"));
   useCommand(
     "nav.projectDocs",
-    currentProject ? () => openProjectDocs(currentProject) : null,
+    currentProject && isGitProject(currentProject)
+      ? () => openProjectDocs(currentProject)
+      : null,
   );
   useCommand("nav.back", canGoBack ? () => router.history.back() : null);
   useCommand("view.toggleProjectSidebar", toggleSidebar);
@@ -1172,7 +1176,7 @@ export function Root() {
           {/* Project docs lives here (a fixed left anchor) rather than in the
               right cluster, so it doesn't shift when the diff sidebar inset
               changes. */}
-          {currentProject && (
+          {currentProject && isGitProject(currentProject) && (
             <button
               type="button"
               onClick={() => openProjectDocs(currentProject)}
@@ -1784,6 +1788,8 @@ export function Root() {
                         // title to match the design, so the distinction lives in the
                         // tooltip rather than a leading glyph.
                         const inplace = view.item.worktreeMode === "inplace";
+                        // A folder workstream has no branch at all.
+                        const folder = isFolderWorkstream(view);
                         return (
                           <Link
                             key={view.item.id}
@@ -1802,9 +1808,13 @@ export function Root() {
                                 ? "bg-accent/15 text-ink"
                                 : "text-ink-dim hover:bg-edge/50 hover:text-ink"
                             }`}
-                            title={`${view.item.title} · ${view.item.branch}${
-                              inplace ? " · main checkout (no worktree)" : ""
-                            }`}
+                            title={
+                              folder
+                                ? `${view.item.title} · project folder`
+                                : `${view.item.title} · ${view.item.branch}${
+                                    inplace ? " · main checkout (no worktree)" : ""
+                                  }`
+                            }
                           >
                             {isActiveItem && (
                               <span
@@ -1826,12 +1836,14 @@ export function Root() {
                             <span
                               className="flex shrink-0 items-center text-ink-dim/70"
                               title={
-                                inplace
-                                  ? "Runs in the main checkout (no worktree)"
-                                  : "Runs in a dedicated worktree"
+                                folder
+                                  ? "Runs in the project folder"
+                                  : inplace
+                                    ? "Runs in the main checkout (no worktree)"
+                                    : "Runs in a dedicated worktree"
                               }
                             >
-                              {inplace ? (
+                              {inplace || folder ? (
                                 <MainCheckoutIcon />
                               ) : (
                                 <GitBranchIcon />
@@ -1907,14 +1919,18 @@ export function Root() {
           >
             Rename workstream…
           </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => {
-              setAttachPrTarget(itemMenu.view);
-              setItemMenu(null);
-            }}
-          >
-            {itemMenu.view.item.prNumber === null ? "Attach PR…" : "Change PR…"}
-          </ContextMenuItem>
+          {/* A folder workstream has no repo to attach a PR to. Detach below
+              stays: the escape hatch for a row that got one before this gate. */}
+          {!isFolderWorkstream(itemMenu.view) && (
+            <ContextMenuItem
+              onClick={() => {
+                setAttachPrTarget(itemMenu.view);
+                setItemMenu(null);
+              }}
+            >
+              {itemMenu.view.item.prNumber === null ? "Attach PR…" : "Change PR…"}
+            </ContextMenuItem>
+          )}
           {itemMenu.view.item.prNumber !== null && (
             <ContextMenuItem
               onClick={() => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { Project } from "@/lib/bindings";
 import { Button, Dialog, ErrorNote } from "@/components/ui";
+import { isUserDirectory } from "@/lib/domain/projects";
 import { useRemoveProject } from "@/lib/queries";
 
 type Props = {
@@ -14,17 +15,17 @@ type Props = {
 
 /**
  * Remove a project from the sidebar. Always drops it from the registry; the
- * checkbox additionally deletes the directory from disk. For `disk`-sourced
- * projects that directory is the user's own working copy, so we warn harder.
+ * checkbox additionally deletes the directory from disk. For disk and folder
+ * projects that directory is the user's own, so we warn harder.
  */
 export function RemoveProjectDialog({ target, onClose, onRemoved }: Props) {
   const remove = useRemoveProject();
   const [deleteFiles, setDeleteFiles] = useState(false);
 
   // On-disk projects can be deleted (backend refuses while workstreams are
-  // active). An in-place import is the user's own working copy, so warn sterner.
+  // active). Only a clone is the app's to drop quietly.
   const canDeleteFiles = Boolean(target?.existsOnDisk);
-  const isImported = target?.source === "disk";
+  const userOwned = isUserDirectory(target);
 
   // Reset the toggle whenever a different project opens the dialog.
   useEffect(() => {
@@ -74,8 +75,8 @@ export function RemoveProjectDialog({ target, onClose, onRemoved }: Props) {
               <span className="mt-0.5 block truncate font-mono text-xs text-ink-dim">
                 {target?.path}
               </span>
-              <span className={`mt-1 block text-xs ${isImported ? "text-bad" : "text-ink-dim"}`}>
-                {isImported ? "Your working copy — can't be undone." : "Permanent."}
+              <span className={`mt-1 block text-xs ${userOwned ? "text-bad" : "text-ink-dim"}`}>
+                {userOwned ? "Your own directory — can't be undone." : "Permanent."}
               </span>
             </span>
           </label>

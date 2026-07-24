@@ -231,6 +231,15 @@ export function useImportProject() {
   });
 }
 
+/** Register a plain local directory (no git, no thoughts, no CLI) as a project. */
+export function useImportLocalFolder() {
+  return useMutation({
+    mutationFn: (args: { path: string; directoryName: string | null }) =>
+      unwrap(commands.importLocalFolder(args.path, args.directoryName)),
+    onSettled: invalidateProjects,
+  });
+}
+
 /** Clone a hosted repo (a GitHub URL) into the repos root and register it. */
 export function useCloneProject() {
   return useMutation({

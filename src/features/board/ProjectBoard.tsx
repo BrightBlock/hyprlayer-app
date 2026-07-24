@@ -11,11 +11,14 @@ import { WorkstreamCard } from "./WorkstreamCard";
  *  Empty projects show a "create your first workstream" CTA. */
 export function ProjectBoard({
   views,
+  folder = false,
   onOpen,
   onNewWorkstream,
   onCardContextMenu,
 }: {
   views: WorkstreamView[];
+  /** Folder project: the empty state must not promise branches/worktrees. */
+  folder?: boolean;
   onOpen: (id: string) => void;
   onNewWorkstream: () => void;
   onCardContextMenu?: (view: WorkstreamView, x: number, y: number) => void;
@@ -31,8 +34,9 @@ export function ProjectBoard({
             <div className="rounded-lg border border-edge bg-panel p-6 text-center">
               <p className="text-base font-medium text-ink">Create your first workstream</p>
               <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink-dim">
-                Each workstream gets its own branch and worktree, so agents can research, plan, and
-                implement without touching your checkout.
+                {folder
+                  ? "Each workstream is its own conversation, all running in this folder — start as many as you need."
+                  : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}
               </p>
               <Button variant="primary" className="mt-4" onClick={onNewWorkstream}>
                 <PlusIcon />

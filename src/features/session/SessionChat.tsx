@@ -516,13 +516,16 @@ function AttachMenu({
   onFiles,
   onScreenshots,
 }: {
-  onLibrary: () => void;
+  /** null hides the library item — folder projects have no docs scope. */
+  onLibrary: (() => void) | null;
   onFiles: () => void;
   onScreenshots: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const items = [
-    { key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary },
+    ...(onLibrary
+      ? [{ key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary }]
+      : []),
     { key: "files", label: "Add files…", icon: <DocIcon size={14} />, run: onFiles },
     { key: "shots", label: "Add screenshots…", icon: <ImageIcon size={14} />, run: onScreenshots },
   ];
@@ -1040,7 +1043,7 @@ type Props = {
    *  Context so it auto-attaches to the next session this tab starts. */
   onAttachHandoffDoc: (path: string) => void;
   /** Open the library picker (centered modal) to attach context docs. */
-  onBrowseDocs: () => void;
+  onBrowseDocs: (() => void) | null;
   /** Native OS file dialog → attach the chosen files as context. */
   onAddFiles: () => void;
   /** Native OS file dialog filtered to images → attach screenshots. */

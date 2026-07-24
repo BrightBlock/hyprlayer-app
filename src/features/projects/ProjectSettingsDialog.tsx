@@ -20,6 +20,7 @@ import {
   TextInput,
 } from "@/components/ui";
 import type { CheckStatus, HealthCheck } from "@/lib/bindings";
+import { isGitProject } from "@/lib/domain/projects";
 import { ScriptsCard } from "./ScriptsCard";
 
 const CHECK_TONE: Record<CheckStatus, "ok" | "warn" | "bad"> = {
@@ -147,6 +148,8 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
   const sync = useSyncThoughts(projectPath);
 
   const title = detail.data ? `Project settings — ${detail.data.project.mappedName}` : "Project settings";
+  // A folder project has no thoughts to sync and no worktrees to seed.
+  const gitBacked = isGitProject(detail.data?.project);
 
   return (
     <Dialog open onClose={onClose} title={title} className="!max-w-3xl">
@@ -160,14 +163,16 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
             <p className="selectable min-w-0 truncate font-mono text-xs text-ink-dim">
               {detail.data!.project.path}
             </p>
-            <Button
-              variant="primary"
-              onClick={() => sync.mutate(null)}
-              busy={sync.isPending}
-              title="hyprlayer thoughts sync"
-            >
-              Sync thoughts
-            </Button>
+            {gitBacked && (
+              <Button
+                variant="primary"
+                onClick={() => sync.mutate(null)}
+                busy={sync.isPending}
+                title="hyprlayer thoughts sync"
+              >
+                Sync thoughts
+              </Button>
+            )}
           </div>
 
           {sync.isError && <ErrorNote error={sync.error} />}
@@ -184,23 +189,32 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
             <CardTitle>Storage</CardTitle>
             <div className="space-y-1 text-sm">
               <p>
-                <Badge tone="accent">{detail.data!.storage.backend}</Badge>
-                {detail.data!.project.profile && (
+                <Badge tone={detail.data!.storage ? "accent" : "dim"}>
+                  {detail.data!.storage?.backend ?? "local folder"}
+                </Badge>
+                {detail.data!.project.profile && detail.data!.storage && (
                   <span className="ml-2 text-ink-dim">profile {detail.data!.project.profile}</span>
                 )}
               </p>
-              {detail.data!.thoughtsRoot && (
+              {detail.data!.thoughtsRoot ? (
                 <p className="text-ink-dim">
                   Thoughts root:{" "}
                   <span className="selectable font-mono text-xs text-ink">
                     {detail.data!.thoughtsRoot}
                   </span>
                 </p>
+              ) : (
+                !gitBacked && (
+                  <p className="text-ink-dim">
+                    Not a git repository — no branches, worktrees or thoughts. Agents run in the
+                    folder itself.
+                  </p>
+                )
               )}
             </div>
           </Card>
 
-          <WorktreeFilesCard projectPath={projectPath} />
+          {gitBacked && <WorktreeFilesCard projectPath={projectPath} />}
 
           <ScriptsCard projectPath={projectPath} />
 

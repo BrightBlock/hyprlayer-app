@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { WorkstreamView } from "@/lib/bindings";
+import { isFolderWorkstream } from "@/lib/domain/projects";
 import { useWorkstreamPr, useWorktreeGitStatus } from "@/lib/queries";
 import {
   commitWorkstream,
@@ -27,7 +28,8 @@ import {
  */
 export function useWorkstreamGitActions(view: WorkstreamView | null) {
   const id = view?.item.id ?? "";
-  const enabled = view !== null;
+  // A folder workstream never gets git/PR queries — not even failing ones.
+  const enabled = view !== null && !isFolderWorkstream(view);
   const pr = useWorkstreamPr(id, enabled);
   const status = useWorktreeGitStatus(id, enabled);
   const shipBusy = useWorkstreamShipBusy(view?.item.id ?? null);
@@ -40,7 +42,7 @@ export function useWorkstreamGitActions(view: WorkstreamView | null) {
 
   const canCommit = enabled && changedCount > 0 && !shipBusy && !shipping;
   const canShip = Boolean(
-    view && !hasLivePr && (changedCount > 0 || view.git.aheadOfBase > 0),
+    enabled && view && !hasLivePr && (changedCount > 0 || view.git.aheadOfBase > 0),
   );
 
   const doCommit = () => {

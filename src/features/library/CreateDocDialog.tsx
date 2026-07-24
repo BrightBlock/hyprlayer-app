@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "@/components/ui";
+import { isGitProject } from "@/lib/domain/projects";
 import { useBootstrap, useCreateDoc } from "@/lib/queries";
 import { DOC_SCOPES, DOC_TYPES } from "./constants";
 import { parseTagsInput } from "./text";
@@ -24,7 +25,8 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
   const createDoc = useCreateDoc();
   const navigate = useNavigate();
 
-  const projects = bootstrap.data?.projects ?? [];
+  // Folder projects have no thoughts mapping — docs can't be created in them.
+  const projects = (bootstrap.data?.projects ?? []).filter(isGitProject);
 
   const [title, setTitle] = useState("");
   const [docType, setDocType] = useState<string>("note");

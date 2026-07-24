@@ -75,6 +75,7 @@ import {
   IMAGE_EXTENSIONS,
   type Attachment,
 } from "@/features/session/attachments";
+import { isGitProject } from "@/lib/domain/projects";
 import { nextModeStage, stageLabel, type StageKey } from "@/lib/domain/stages";
 import {
   archiveShellState,
@@ -509,6 +510,9 @@ export function ProjectPage() {
       />
     );
   }
+
+  // A folder project has no git: no branch, diff, or PR surfaces anywhere.
+  const folderProject = !isGitProject(project);
 
   // The active workstream's own tab strip (1 workstream -> N shells).
   const tabs = wsId ? (tabsByWs[wsId] ?? defaultTabState()) : null;
@@ -1082,7 +1086,8 @@ export function ProjectPage() {
           ? s
           : { ...s, docs: [...s.docs, { path, role: "handoff" }] },
       ),
-    onBrowseDocs: () => setDocsModalShellId(shell.id),
+    // No library attach for folder projects: their docs scope doesn't exist.
+    onBrowseDocs: folderProject ? null : () => setDocsModalShellId(shell.id),
     onAddFiles: () => void addFilesToShell(shell.id, false),
     onAddScreenshots: () => void addFilesToShell(shell.id, true),
     onAddAttachments: (atts: Attachment[]) => addAttachmentsToShell(shell.id, atts),
@@ -1317,9 +1322,13 @@ export function ProjectPage() {
       <>
         <ProjectBoard
           views={views}
+          folder={folderProject}
           onOpen={(id) => selectItem(id)}
           onNewWorkstream={() => setCreateOpen(true)}
-          onCardContextMenu={(view, x, y) => setCardMenu({ x, y, view })}
+          // The card menu is only PR attach/detach — meaningless without git.
+          onCardContextMenu={
+            folderProject ? undefined : (view, x, y) => setCardMenu({ x, y, view })
+          }
         />
         {cardMenu && (
           <ContextMenu position={cardMenu} onClose={() => setCardMenu(null)}>
@@ -1346,6 +1355,7 @@ export function ProjectPage() {
         <AttachPrDialog target={attachPrTarget} onClose={() => setAttachPrTarget(null)} />
         <CreateWorkstreamDialog
           projectPath={projectPath}
+          folder={folderProject}
           open={createOpen}
           onClose={() => setCreateOpen(false)}
           onCreated={(view) => selectItem(view.item.id)}
@@ -1675,6 +1685,7 @@ export function ProjectPage() {
             </Dialog>
             <CreateWorkstreamDialog
               projectPath={projectPath}
+              folder={folderProject}
               open={createOpen}
               onClose={() => setCreateOpen(false)}
               onCreated={(view) => selectItem(view.item.id)}
@@ -1737,8 +1748,9 @@ export function ProjectPage() {
                   <div className="rounded-lg border border-edge bg-panel p-6 text-center">
                     <p className="text-base font-medium text-ink">Create your first workstream</p>
                     <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink-dim">
-                      Each workstream gets its own branch and worktree, so agents can research,
-                      plan, and implement without touching your checkout.
+                      {folderProject
+                        ? "Each workstream is its own conversation, all running in this folder — start as many as you need."
+                        : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}
                     </p>
                     <Button variant="primary" className="mt-4" onClick={() => setCreateOpen(true)}>
                       <PlusIcon />
@@ -1785,13 +1797,16 @@ export function ProjectPage() {
         inert={!showAside}
       >
         <div className="absolute inset-y-0 right-0 flex flex-col" style={{ width: diffWidth }}>
-          <GitPanel view={activeView ?? null} />
+          {/* A folder project keeps the file tree (browse + open into editor
+              tabs); only the git header and the Changes tab drop away. */}
+          {!folderProject && <GitPanel view={activeView ?? null} />}
           <div className="flex min-h-0 flex-1 flex-col">
             <ChangesPanel
               workstreamId={activeView?.item.id ?? null}
               onOpenDoc={openDocPreview}
               onOpenDiff={openDiff}
               onOpenFile={openFile}
+              filesOnly={folderProject}
             />
           </div>
           <SidebarTasksPanel sessionId={focusedShell?.sessionId} />
@@ -1804,7 +1819,7 @@ export function ProjectPage() {
               orientation="right"
             />
           )}
-          <PrChecksPanel view={activeView ?? null} />
+          {!folderProject && <PrChecksPanel view={activeView ?? null} />}
         </div>
       </aside>
 
@@ -1817,7 +1832,7 @@ export function ProjectPage() {
         className="!max-w-2xl"
       >
         <WorkstreamDocsPanel
-          thoughtsProject={project.thoughtsProject}
+          thoughtsProject={folderProject ? null : project.thoughtsProject}
           targetTitle={docsModalShell?.title ?? null}
           attachedPaths={(docsModalShell?.attachments ?? []).map((a) => a.path)}
           onAttach={attachDocToShell}

@@ -14,6 +14,7 @@ import {
 import { ChevronDownIcon, ChevronRightIcon, DocIcon, FolderIcon } from "@/components/icons";
 import { FileTypeIcon } from "@/components/fileIcon";
 import { basename } from "@/lib/path";
+import { queryClient } from "@/lib/queryClient";
 import {
   useDiscardFiles,
   useStageFiles,
@@ -446,18 +447,30 @@ type Props = {
   onOpenDoc: (path: string, title: string) => void;
   onOpenDiff: (path: string, staged: boolean) => void;
   onOpenFile: (path: string) => void;
+  /** Folder project: no git, so only the file tree — no Changes tab, no status query. */
+  filesOnly?: boolean;
 };
 
 /** Right-hand source-control panel: a Changes tab (split staged/unstaged with
- *  stage / unstage / discard actions) and a Files tab (lazy worktree tree). */
-export function ChangesPanel({ workstreamId, onOpenDoc, onOpenDiff, onOpenFile }: Props) {
-  const [tab, setTab] = useState<"changes" | "files">("changes");
+ *  stage / unstage / discard actions) and a Files tab (lazy worktree tree).
+ *  With `filesOnly` it collapses to just the tree — the browse-and-edit surface
+ *  a folder project still needs. */
+export function ChangesPanel({
+  workstreamId,
+  onOpenDoc,
+  onOpenDiff,
+  onOpenFile,
+  filesOnly = false,
+}: Props) {
+  const [rawTab, setTab] = useState<"changes" | "files">("changes");
+  const tab = filesOnly ? "files" : rawTab;
   const [view, setView] = useState<"list" | "tree">("list");
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState<GitFileEntry | null>(null);
 
   const id = workstreamId ?? "";
-  const status = useWorktreeGitStatus(id, workstreamId !== null);
+  // Never ask git about a folder project — there's no repo to answer.
+  const status = useWorktreeGitStatus(id, workstreamId !== null && !filesOnly);
   const stage = useStageFiles(id);
   const unstage = useUnstageFiles(id);
   const discard = useDiscardFiles(id);
@@ -473,18 +486,22 @@ export function ChangesPanel({ workstreamId, onOpenDoc, onOpenDiff, onOpenFile }
     <>
       <div className="flex h-9 items-center justify-between gap-2 border-b border-edge px-3">
         <div className="flex items-center gap-1">
-          {(["changes", "files"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={`rounded-md px-2 py-1 text-xs font-medium capitalize ${
-                tab === t ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+          {filesOnly ? (
+            <span className="px-2 py-1 text-xs font-medium text-ink">Files</span>
+          ) : (
+            (["changes", "files"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={`rounded-md px-2 py-1 text-xs font-medium capitalize ${
+                  tab === t ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink"
+                }`}
+              >
+                {t}
+              </button>
+            ))
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           {tab === "changes" && <Badge tone="dim">{changedCount}</Badge>}
@@ -492,6 +509,9 @@ export function ChangesPanel({ workstreamId, onOpenDoc, onOpenDiff, onOpenFile }
             <IconButton
               onClick={() => {
                 if (tab === "changes") void status.refetch();
+                // The tree is lazy per directory level; drop them all so
+                // reopening re-reads from disk.
+                else void queryClient.invalidateQueries({ queryKey: ["workstream", id, "dir"] });
               }}
               disabled={tab === "changes" && status.isFetching}
               title="Refresh"
