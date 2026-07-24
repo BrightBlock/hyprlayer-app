@@ -139,4 +139,123 @@ impl SessionRegistry {
     pub async fn live_ids(&self) -> Vec<String> {
         self.live.lock().await.keys().cloned().collect()
     }
+
+    /// Best-effort synchronous teardown for app exit: kill every live agent so its
+    /// process tree doesn't outlive us. Mirrors [`TerminalRegistry::kill_all_blocking`]
+    /// — `try_lock` because the `RunEvent` exit handler has no async context, and
+    /// `AgentDriver::kill` is synchronous (SIGTERM to the process group / `taskkill
+    /// /T`). On the rare lock miss, Windows still has the drivers' job objects
+    /// (`process::spawn_supervised`); Unix has nothing, which is the case this
+    /// exists for.
+    ///
+    /// Doesn't wait for the resulting `exited` events, and doesn't need to: the
+    /// kill lands well before the window tears down, so the forwarders persist
+    /// them on their own (verified on Windows — the session reads back `killed`,
+    /// exit code 1 from `taskkill`). Best-effort, not guaranteed; a session that
+    /// misses its write replays as non-terminal and settles to idle, since the
+    /// frontend derives transcript state from the event log, not the row.
+    pub fn kill_all_blocking(&self) {
+        if let Ok(live) = self.live.try_lock() {
+            for session in live.values() {
+                session.driver.kill();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyprlayer_core::claude::events::SessionEvent;
+    use hyprlayer_core::error::Result;
+    use serde_json::Value;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+    use tokio::sync::broadcast;
+
+    /// Counts `kill()`s. A real driver's forwarder is what removes the session
+    /// from the registry once the process exits, so the tests drive that half by
+    /// hand to model "the exit landed" vs "the child is wedged".
+    struct FakeDriver(Arc<AtomicUsize>);
+
+    impl AgentDriver for FakeDriver {
+        fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
+            broadcast::channel(1).1
+        }
+        fn send_user_turn(&self, _: &str, _: Option<&str>, _: Option<&str>) -> Result<()> {
+            Ok(())
+        }
+        fn respond_permission(&self, _: &str, _: bool, _: Option<&str>) -> Result<()> {
+            Ok(())
+        }
+        fn answer_question(&self, _: &str, _: Value) -> Result<()> {
+            Ok(())
+        }
+        fn interrupt(&self) -> Result<()> {
+            Ok(())
+        }
+        fn kill(&self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+        fn pid(&self) -> Option<u32> {
+            None
+        }
+    }
+
+    async fn registry_with(n: usize, kills: &Arc<AtomicUsize>) -> SessionRegistry {
+        let reg = SessionRegistry::new();
+        for i in 0..n {
+            reg.insert(format!("s{i}"), Arc::new(FakeDriver(kills.clone())), None)
+                .await;
+        }
+        reg
+    }
+
+    #[tokio::test]
+    async fn kill_all_blocking_kills_every_live_session() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let reg = registry_with(3, &kills).await;
+
+        reg.kill_all_blocking();
+
+        assert_eq!(kills.load(Ordering::SeqCst), 3);
+    }
+
+    /// Runs on the exit path, so it must never block — not even with a wedged
+    /// child that will never drain from the registry.
+    #[tokio::test]
+    async fn kill_all_blocking_returns_promptly() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let reg = registry_with(1, &kills).await;
+
+        let start = Instant::now();
+        reg.kill_all_blocking();
+
+        assert_eq!(kills.load(Ordering::SeqCst), 1);
+        assert!(start.elapsed() < Duration::from_millis(500), "blocked on exit");
+        assert_eq!(reg.live_ids().await.len(), 1); // draining is the forwarder's job
+    }
+
+    /// The exit path fires twice (ExitRequested, then Exit); the second pass over
+    /// an empty registry must be a no-op.
+    #[tokio::test]
+    async fn kill_all_blocking_on_an_empty_registry_is_a_no_op() {
+        let reg = SessionRegistry::new();
+        reg.kill_all_blocking();
+        assert!(reg.live_ids().await.is_empty());
+    }
+
+    /// The lock is held while an op is in flight; the exit handler must skip
+    /// rather than deadlock (the Windows job object is the backstop there).
+    #[tokio::test]
+    async fn kill_all_blocking_skips_a_held_lock_instead_of_hanging() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let reg = registry_with(1, &kills).await;
+
+        let guard = reg.live.lock().await;
+        reg.kill_all_blocking(); // must not deadlock
+        drop(guard);
+
+        assert_eq!(kills.load(Ordering::SeqCst), 0);
+    }
 }

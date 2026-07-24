@@ -217,7 +217,10 @@ impl ClaudeDriver {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let mut child = cmd.spawn().map_err(|e| {
+        // Supervised: on Windows the job object kills claude (and anything it
+        // spawned) even when our destructors never run — a `process::exit` or a
+        // hard kill would otherwise orphan it.
+        let mut child = crate::process::spawn_supervised(&mut cmd).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 CoreError::BinaryMissing {
                     name: "claude".into(),
@@ -228,9 +231,9 @@ impl ClaudeDriver {
         })?;
 
         let pid = child.id();
-        let stdin = child.stdin.take().expect("stdin piped");
-        let stdout = child.stdout.take().expect("stdout piped");
-        let stderr = child.stderr.take().expect("stderr piped");
+        let stdin = child.take_stdin().expect("stdin piped");
+        let stdout = child.take_stdout().expect("stdout piped");
+        let stderr = child.take_stderr().expect("stderr piped");
 
         let (events_tx, _) = broadcast::channel(EVENT_CHANNEL_CAP);
         // Subscribe BEFORE the reader task is spawned: the returned receiver
@@ -540,7 +543,7 @@ async fn stderr_loop(stderr: tokio::process::ChildStderr, ring: Arc<StdMutex<Vec
 
 #[allow(clippy::too_many_arguments)]
 async fn read_and_wait(
-    mut child: tokio::process::Child,
+    mut child: crate::process::SupervisedChild,
     stdout: tokio::process::ChildStdout,
     events: broadcast::Sender<SessionEvent>,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
@@ -612,7 +615,7 @@ async fn read_and_wait(
     } else {
         match (&status, saw_result, saw_error_result) {
             (Ok(s), true, false) if s.success() => ExitOutcome::Completed,
-            (Ok(_), _, _) => ExitOutcome::Crashed,
+            (Ok(_), _, _) => ExitOutcome::from_unclean_exit(code),
             (Err(_), _, _) => ExitOutcome::SpawnFailed,
         }
     };

@@ -48,6 +48,20 @@ impl OpenCodeManager {
         Self::default()
     }
 
+    /// Best-effort synchronous teardown for app exit: stop the shared server so it
+    /// doesn't outlive us. Unlike agent sessions this process isn't in the session
+    /// registry — it's held here for the app's lifetime — so nothing else reaps it,
+    /// and on Unix `Drop` never runs under `process::exit`. Observed cost of the
+    /// gap: two `opencode serve` processes still running 14 days after their app
+    /// died. `try_lock` because the `RunEvent` exit handler has no async context.
+    pub fn kill_blocking(&self) {
+        if let Ok(guard) = self.inner.try_lock() {
+            if let Some(server) = guard.as_ref() {
+                server.kill_blocking();
+            }
+        }
+    }
+
     /// The shared server, starting it on first use (or restarting it if the
     /// previous one died). `bin` is the resolved `opencode` path; `path` is the
     /// augmented PATH spawned children inherit; `data_dir` is the app-owned
@@ -63,6 +77,10 @@ impl OpenCodeManager {
             if s.is_healthy().await {
                 return Ok(s.clone());
             }
+        }
+        // Replacing an unhealthy server: stop the old one rather than leaking it.
+        if let Some(dead) = guard.take() {
+            dead.kill_blocking();
         }
         let server = Arc::new(OpenCodeServer::start(bin, path, data_dir).await?);
         *guard = Some(server.clone());
@@ -189,6 +207,13 @@ impl OpenCodeServer {
             model_context,
             _child: Mutex::new(child),
         })
+    }
+
+    /// Stop the server process tree. See [`OpenCodeManager::kill_blocking`].
+    fn kill_blocking(&self) {
+        if let Ok(child) = self._child.try_lock() {
+            child.kill_blocking();
+        }
     }
 
     /// The context window (tokens) OpenCode runs `model_id` (`provider/model`)

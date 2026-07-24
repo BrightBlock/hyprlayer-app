@@ -590,10 +590,12 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
 function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
   switch (event.kind) {
     case "init":
+      // "Process is up", not "turn started" — codex/opencode emit it on every
+      // spawn, so carrying `streaming` (rather than setting it) is what keeps a
+      // bare resume from pulsing on a turn nobody asked for.
       return {
         ...view,
         state: "running",
-        streaming: true,
         claudeSessionId: event.claudeSessionId || view.claudeSessionId,
         model: event.model ?? view.model,
       };

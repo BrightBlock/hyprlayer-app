@@ -240,6 +240,41 @@ impl SupervisedChild {
     pub fn id(&self) -> Option<u32> {
         self.child.id()
     }
+
+    /// The piped stdio handles, taken once each (as on [`tokio::process::Child`]).
+    /// The child itself stays owned here so the job handle outlives it — handing
+    /// out the `Child` would let a caller drop the supervision and keep the pipes.
+    pub fn take_stdin(&mut self) -> Option<tokio::process::ChildStdin> {
+        self.child.stdin.take()
+    }
+
+    pub fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
+        self.child.stdout.take()
+    }
+
+    pub fn take_stderr(&mut self) -> Option<tokio::process::ChildStderr> {
+        self.child.stderr.take()
+    }
+
+    pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.child.wait().await
+    }
+
+    /// Kill the child's process tree synchronously, for the app-exit path: `Drop`
+    /// never runs under `process::exit`, and on Unix there's no job object to fall
+    /// back on (that's how an `opencode serve` outlived its app by two weeks).
+    /// Windows needs nothing — the kernel closes the job handle for us.
+    /// Assumes the child leads its own group, as `process_group(0)` spawns do.
+    pub fn kill_blocking(&self) {
+        let Some(pid) = self.child.id() else { return };
+        #[cfg(unix)]
+        // Negative pid = the whole group, so wrappers and grandchildren go too.
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGTERM);
+        }
+        #[cfg(windows)]
+        let _ = pid;
+    }
 }
 
 /// Spawn a long-lived child so that killing us kills everything it started.

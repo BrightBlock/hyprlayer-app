@@ -408,12 +408,25 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // Best-effort: kill any live terminal shells when the app quits, so
-            // they don't outlive the window. The PTY master's SIGHUP-on-drop at
-            // process exit is the backstop if this path is ever missed.
-            if let tauri::RunEvent::ExitRequested { .. } = event {
+            // Take our children down with us: terminal shells and agent processes
+            // alike. Unix has no job object, so without this a `process::exit`
+            // leaves claude/codex/opencode running indefinitely (observed: an
+            // `opencode serve` still alive 14 days after its app died); Windows
+            // has `spawn_supervised`'s job as a second line. Both calls are sync
+            // and best-effort — this runs on the exit path, so it must not block.
+            // `Exit` as well as `ExitRequested`: not every quit path raises the
+            // latter, and a second pass over a drained registry is a no-op.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
                 use tauri::Manager;
-                app.state::<AppState>().terminals.kill_all_blocking();
+                let state = app.state::<AppState>();
+                state.terminals.kill_all_blocking();
+                state.sessions.kill_all_blocking();
+                // The shared `opencode serve` isn't in the session registry — it's
+                // held for the app's lifetime — so it needs its own nudge.
+                state.opencode.kill_blocking();
             }
         });
 }

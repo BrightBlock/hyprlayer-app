@@ -21,7 +21,25 @@ pub enum ExitOutcome {
     SpawnFailed,
 }
 
+/// `DBG_TERMINATE_PROCESS` — only ever delivered by an external `TerminateProcess`
+/// explicitly passing it: the debug subsystem, or Windows tearing the session down.
+/// No routine kill picks it (measured on Win11: job-object close gives 0, taskkill
+/// 1, `Process::kill` -1) and no program exits with it itself, so it always means
+/// something outside ended the child. Unreachable on Unix, where `code()` is 8-bit.
+const EXTERNALLY_TERMINATED: i32 = 0x4001_0004;
+
 impl ExitOutcome {
+    /// Classify a process that exited without its driver's clean-finish signal.
+    /// An externally-terminated child ended, it didn't crash — that's the
+    /// "Session crashed (exit 1073807364)" a Windows restart could greet you with.
+    pub fn from_unclean_exit(code: Option<i32>) -> Self {
+        if code == Some(EXTERNALLY_TERMINATED) {
+            ExitOutcome::Killed
+        } else {
+            ExitOutcome::Crashed
+        }
+    }
+
     /// The [`SessionState`] a terminal outcome persists as. Lives next to the
     /// enum so storage can't drift from the variants.
     pub fn state(self) -> SessionState {
@@ -304,5 +322,17 @@ mod tests {
             r#"{"kind":"rewound"}"#
         );
         assert_eq!(SessionEvent::Rewound {}.kind(), "rewound");
+    }
+
+    /// A child the app took down with it on quit reads as ended, not crashed —
+    /// the "Session crashed (exit 1073807364)" every Windows restart used to show.
+    #[test]
+    fn windows_external_termination_is_a_kill_not_a_crash() {
+        assert_eq!(
+            ExitOutcome::from_unclean_exit(Some(1_073_807_364)),
+            ExitOutcome::Killed
+        );
+        assert_eq!(ExitOutcome::from_unclean_exit(Some(1)), ExitOutcome::Crashed);
+        assert_eq!(ExitOutcome::from_unclean_exit(None), ExitOutcome::Crashed);
     }
 }

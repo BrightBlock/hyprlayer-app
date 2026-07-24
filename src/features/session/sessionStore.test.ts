@@ -150,6 +150,16 @@ describe("conversation steering (mid-turn message queue)", () => {
     expect(h.sendUserMessage).not.toHaveBeenCalled();
   });
 
+  it("keeps a fresh turn busy when init only reports process readiness", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+
+    expect(isWorking(entryOf(id))).toBe(true);
+    await sendMessage(id, "follow-up");
+    expect(queued(id)).toEqual(["follow-up"]);
+    expect(h.sendUserMessage).not.toHaveBeenCalled();
+  });
+
   it("delivers queued messages one per turn as turns finish, in order", async () => {
     const id = await startBusySession();
     await sendMessage(id, "A");
@@ -499,6 +509,59 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     // The resumed process is idle, so the queued turn is released rather than
     // sitting forever behind a turn that will never arrive.
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null);
+    expect(queued(id)).toEqual([]);
+  });
+
+  it("keeps an optimistic detached turn busy across a silent resume", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(TURN_DONE);
+    emit(EXITED);
+
+    await sendMessage(id, "new turn");
+
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "new turn", [], null);
+    expect(isWorking(entryOf(id))).toBe(true);
+    expect(isBusy(entryOf(id))).toBe(true);
+
+    await sendMessage(id, "follow-up");
+    expect(h.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(queued(id)).toEqual(["follow-up"]);
+  });
+
+  // codex/opencode emit `init` on every spawn, claude only with a turn. Reading a
+  // bare one as "a turn started" left a restarted app's codex tabs on a phantom
+  // turn: ticking counter, composer stuck on "it'll queue…", Stop button.
+  const resumeEmitting = (...burst: SessionEvent[]) =>
+    h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
+      const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
+      for (const event of burst) ch.onmessage?.(event);
+      return { status: "ok", data: {} };
+    });
+
+  it("a resume whose only sign of life is a bare `init` settles instead of pulsing", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(TURN_DONE);
+    emit(EXITED);
+
+    resumeEmitting(INIT);
+    await resumeSession(id);
+
+    const entry = entryOf(id);
+    expect(isWorking(entry)).toBe(false); // no phantom "time working" counter
+    expect(isBusy(entry)).toBe(false); // composer isn't locked behind a ghost turn
+  });
+
+  it("flushes a queued follow-up after a bare-`init` resume", async () => {
+    const id = await startBusySession();
+    await sendMessage(id, "later");
+    emit(EXITED);
+
+    resumeEmitting(INIT);
+    await resumeSession(id);
+
     expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null);
     expect(queued(id)).toEqual([]);
   });

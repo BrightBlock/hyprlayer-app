@@ -463,17 +463,18 @@ export async function resumeSession(sessionId: string): Promise<void> {
 
   activate(sessionId); // bind + flush events buffered during the resume call
 
-  // A resumed claude is silent until the next message — it emits `init` only with
-  // a turn, never on bare spawn — so a re-attach onto a quiet process would pin the
-  // session in `starting`: "Connecting…" never clears, `isWorking` stays true so
-  // the activity pill keeps pulsing, and a follow-up would queue behind a turn that
-  // never arrives. If the buffered events left us still in `starting` (a real
-  // in-flight turn would have advanced us to `running`/streaming), settle to the
-  // resting state and release any queued follow-up — same rationale as
-  // `restartSession`. The `starting` guard is what keeps a tail_live re-attach onto
-  // a process that genuinely IS mid-turn from being clobbered back to idle.
+  // A resumed harness is silent until the next message — claude emits `init` only
+  // with a turn, codex/opencode emit a bare one on spawn — so a re-attach onto a
+  // quiet process would look mid-turn forever: "Connecting…" never clears,
+  // `isWorking` keeps the pill pulsing, and a follow-up queues behind a turn that
+  // never arrives. Settle to the resting state and release any queued follow-up
+  // unless a turn is already in flight. That can be proven by the resume burst, or
+  // by an optimistic user message added before this call (`deliverMessage` resumes
+  // a detached session before sending it). `starting` alone is therefore not proof
+  // that the process is idle. The terminal check leaves a dead-on-arrival resume
+  // alone.
   const after = entryOf(sessionId);
-  if (after && after.state === "starting") {
+  if (after && !isTerminal(after.state) && !after.streaming) {
     setEntry(sessionId, {
       ...after,
       items: closeOpenAssistant(after.items),
