@@ -17,6 +17,12 @@ pub enum ExitOutcome {
     Crashed,
     /// We killed the process tree (hard stop / cleanup).
     Killed,
+    /// The app took the process down as part of its own lifecycle — quitting, or
+    /// relaunching this session under new settings — not something that happened
+    /// to the session. Terminal for the live process only: nothing is persisted,
+    /// so the session replays clean and resumable (see the forwarder's `Exited`
+    /// arm).
+    Detached,
     /// Failed to spawn / disappeared immediately.
     SpawnFailed,
 }
@@ -28,28 +34,82 @@ pub enum ExitOutcome {
 /// something outside ended the child. Unreachable on Unix, where `code()` is 8-bit.
 const EXTERNALLY_TERMINATED: i32 = 0x4001_0004;
 
+/// SIGHUP/SIGINT/SIGTERM/SIGKILL — something *asked* the process to stop, i.e.
+/// a kill from outside the app. A fault the process hit itself (SIGSEGV,
+/// SIGABRT, SIGBUS…) is still a crash.
+#[cfg(unix)]
+fn is_stop_signal(signal: i32) -> bool {
+    matches!(
+        signal,
+        libc::SIGHUP | libc::SIGINT | libc::SIGTERM | libc::SIGKILL
+    )
+}
+
+#[cfg(not(unix))]
+fn is_stop_signal(_signal: i32) -> bool {
+    false // no signals on Windows — `code` carries the whole story
+}
+
+/// The `128 + N` exit codes for those same signals. A harness that installs its
+/// own SIGTERM handler reports the kill THIS way, not as a signal death:
+/// measured on macOS, `kill -TERM` on the claude binary yields code 143 with no
+/// signal, because claude catches it and exits by convention. Without this a
+/// kill from outside still read as "Session crashed (exit 143)".
+fn is_stop_exit_code(code: i32) -> bool {
+    matches!(code, 129 | 130 | 137 | 143) // HUP, INT, KILL, TERM
+}
+
 impl ExitOutcome {
     /// Classify a process that exited without its driver's clean-finish signal.
-    /// An externally-terminated child ended, it didn't crash — that's the
+    /// Our own kills never reach here — the driver's `KillFlag` short-circuits
+    /// first — so a stop signal or [`EXTERNALLY_TERMINATED`] means something
+    /// outside the app ended the child. That's an ending, not a crash: it's the
     /// "Session crashed (exit 1073807364)" a Windows restart could greet you with.
-    pub fn from_unclean_exit(code: Option<i32>) -> Self {
-        if code == Some(EXTERNALLY_TERMINATED) {
-            ExitOutcome::Killed
-        } else {
-            ExitOutcome::Crashed
+    pub fn from_unclean_exit(code: Option<i32>, signal: Option<i32>) -> Self {
+        if let Some(signal) = signal {
+            return if is_stop_signal(signal) {
+                ExitOutcome::Killed
+            } else {
+                ExitOutcome::Crashed
+            };
+        }
+        match code {
+            Some(EXTERNALLY_TERMINATED) => ExitOutcome::Killed,
+            Some(code) if is_stop_exit_code(code) => ExitOutcome::Killed,
+            _ => ExitOutcome::Crashed,
         }
     }
 
+    /// Same, from a real [`ExitStatus`](std::process::ExitStatus) — the drivers'
+    /// entry point, which keeps the signal read (Unix-only) out of their bodies.
+    pub fn from_status(status: &std::process::ExitStatus) -> Self {
+        #[cfg(unix)]
+        let signal = std::os::unix::process::ExitStatusExt::signal(status);
+        #[cfg(not(unix))]
+        let signal = None;
+        Self::from_unclean_exit(status.code(), signal)
+    }
+
     /// The [`SessionState`] a terminal outcome persists as. Lives next to the
-    /// enum so storage can't drift from the variants.
+    /// enum so storage can't drift from the variants. `Detached` never reaches
+    /// storage (the forwarder skips the row write); `Idle` is what the session
+    /// replays as either way.
     pub fn state(self) -> SessionState {
         match self {
             ExitOutcome::Completed => SessionState::Completed,
             ExitOutcome::Interrupted => SessionState::Interrupted,
             ExitOutcome::Crashed => SessionState::Crashed,
             ExitOutcome::Killed => SessionState::Killed,
+            ExitOutcome::Detached => SessionState::Idle,
             ExitOutcome::SpawnFailed => SessionState::SpawnFailed,
         }
+    }
+
+    /// Whether this outcome is worth a line in the transcript and a terminal row.
+    /// A `Detached` exit is the app's own bookkeeping — the user never asked for
+    /// it, so it leaves no trace.
+    pub fn is_reportable(self) -> bool {
+        !matches!(self, ExitOutcome::Detached)
     }
 }
 
@@ -329,10 +389,77 @@ mod tests {
     #[test]
     fn windows_external_termination_is_a_kill_not_a_crash() {
         assert_eq!(
-            ExitOutcome::from_unclean_exit(Some(1_073_807_364)),
+            ExitOutcome::from_unclean_exit(Some(1_073_807_364), None),
             ExitOutcome::Killed
         );
-        assert_eq!(ExitOutcome::from_unclean_exit(Some(1)), ExitOutcome::Crashed);
-        assert_eq!(ExitOutcome::from_unclean_exit(None), ExitOutcome::Crashed);
+        assert_eq!(
+            ExitOutcome::from_unclean_exit(Some(1), None),
+            ExitOutcome::Crashed
+        );
+        assert_eq!(
+            ExitOutcome::from_unclean_exit(None, None),
+            ExitOutcome::Crashed
+        );
+    }
+
+    /// `kill(1)` from a terminal, Activity Monitor, an OOM killer: the session
+    /// ended, and saying so beats the "Session crashed" it used to read as. A
+    /// fault the process hit itself is still a crash.
+    #[test]
+    fn unix_stop_signals_are_kills_but_faults_are_crashes() {
+        for signal in [1, 2, 15, 9] {
+            assert_eq!(
+                ExitOutcome::from_unclean_exit(None, Some(signal)),
+                ExitOutcome::Killed,
+                "signal {signal}"
+            );
+        }
+        for signal in [6, 11] {
+            assert_eq!(
+                ExitOutcome::from_unclean_exit(None, Some(signal)),
+                ExitOutcome::Crashed,
+                "signal {signal}"
+            );
+        }
+    }
+
+    /// The encoding that actually shows up in practice: a harness that catches
+    /// SIGTERM exits `128 + N` with NO signal on its status. Measured on macOS —
+    /// `kill -TERM` on the claude binary lands here as 143, and without this the
+    /// external kill read as "Session crashed (exit 143)".
+    #[test]
+    fn stop_exit_codes_are_kills_not_crashes() {
+        for code in [129, 130, 137, 143] {
+            assert_eq!(
+                ExitOutcome::from_unclean_exit(Some(code), None),
+                ExitOutcome::Killed,
+                "exit {code}"
+            );
+        }
+        // Ordinary failures keep reporting as crashes.
+        for code in [1, 2, 127, 128] {
+            assert_eq!(
+                ExitOutcome::from_unclean_exit(Some(code), None),
+                ExitOutcome::Crashed,
+                "exit {code}"
+            );
+        }
+    }
+
+    /// The app's own teardown leaves no trace: nothing to persist, and the
+    /// session replays idle so it stays resumable.
+    #[test]
+    fn detached_is_unreportable_and_replays_idle() {
+        assert!(!ExitOutcome::Detached.is_reportable());
+        assert_eq!(ExitOutcome::Detached.state(), SessionState::Idle);
+        for outcome in [
+            ExitOutcome::Completed,
+            ExitOutcome::Interrupted,
+            ExitOutcome::Crashed,
+            ExitOutcome::Killed,
+            ExitOutcome::SpawnFailed,
+        ] {
+            assert!(outcome.is_reportable(), "{outcome:?}");
+        }
     }
 }

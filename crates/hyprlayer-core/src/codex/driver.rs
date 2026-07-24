@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
@@ -32,6 +32,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use super::protocol::{
     approval_posture, approval_reply, decode_line, question_reply, Incoming, Translator,
 };
+use crate::agent::KillFlag;
 use crate::claude::driver::PermissionMode;
 use crate::claude::events::{ExitOutcome, SessionEvent};
 use crate::error::{CoreError, Result};
@@ -83,7 +84,7 @@ pub struct CodexDriver {
     model: StdMutex<Option<String>>,
     effort: StdMutex<Option<String>>,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
-    killed: Arc<AtomicBool>,
+    kill_flag: Arc<KillFlag>,
     /// Requests awaiting a reply, keyed by rpc id. The reader resolves them.
     pending: Arc<StdMutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, String>>>>>,
     /// Shared with the reader task: which approvals/questions are open, plus the
@@ -147,7 +148,7 @@ impl CodexDriver {
         let primary_rx = events_tx.subscribe();
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
-        let killed = Arc::new(AtomicBool::new(false));
+        let kill_flag = Arc::new(KillFlag::default());
         let pending = Arc::new(StdMutex::new(HashMap::new()));
         let state = Arc::new(StdMutex::new(Translator::resumed(config.prior_user_turns)));
 
@@ -162,7 +163,7 @@ impl CodexDriver {
             stdout,
             events_tx.clone(),
             stderr_ring.clone(),
-            killed.clone(),
+            kill_flag.clone(),
             pending.clone(),
             state.clone(),
             stdin_tx.downgrade(),
@@ -176,7 +177,7 @@ impl CodexDriver {
             model: StdMutex::new(config.model.clone()),
             effort: StdMutex::new(config.effort.clone()),
             stderr_ring,
-            killed,
+            kill_flag,
             pending,
             state,
             killer: Killer { pid },
@@ -442,7 +443,14 @@ impl CodexDriver {
     }
 
     pub fn kill(&self) {
-        self.killed.store(true, Ordering::SeqCst);
+        self.kill_flag.mark_killed();
+        self.killer.kill();
+    }
+
+    /// Same teardown, but for the app's own bookkeeping (quit, relaunch) — the
+    /// exit is classified `Detached` and leaves the transcript untouched.
+    pub fn kill_detached(&self) {
+        self.kill_flag.mark_detached();
         self.killer.kill();
     }
 
@@ -576,7 +584,7 @@ async fn read_and_wait(
     stdout: tokio::process::ChildStdout,
     events: broadcast::Sender<SessionEvent>,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
-    killed: Arc<AtomicBool>,
+    kill_flag: Arc<KillFlag>,
     pending: Arc<StdMutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, String>>>>>,
     state: Arc<StdMutex<Translator>>,
     stdin_tx: mpsc::WeakUnboundedSender<String>,
@@ -642,18 +650,15 @@ async fn read_and_wait(
     let code = status.as_ref().ok().and_then(|s| s.code());
     let stderr_tail = stderr_ring.lock().map(|r| r.join("\n")).unwrap_or_default();
 
-    // An app-initiated kill takes precedence; otherwise a clean exit code is
-    // Completed and anything else is a crash. Unlike Claude there's no terminal
-    // `result` line to key on — the app-server just exits when its stdin closes.
-    let outcome = if killed.load(Ordering::SeqCst) {
-        ExitOutcome::Killed
-    } else {
-        match &status {
-            Ok(s) if s.success() || clean_exit => ExitOutcome::Completed,
-            Ok(_) => ExitOutcome::from_unclean_exit(code),
-            Err(_) => ExitOutcome::SpawnFailed,
-        }
-    };
+    // An app-initiated kill takes precedence (and carries its reason); otherwise
+    // a clean exit code is Completed and anything else is read from the wait
+    // status. Unlike Claude there's no terminal `result` line to key on — the
+    // app-server just exits when its stdin closes.
+    let outcome = kill_flag.outcome().unwrap_or_else(|| match &status {
+        Ok(s) if s.success() || clean_exit => ExitOutcome::Completed,
+        Ok(s) => ExitOutcome::from_status(s),
+        Err(_) => ExitOutcome::SpawnFailed,
+    });
 
     let _ = events.send(SessionEvent::Exited {
         outcome,

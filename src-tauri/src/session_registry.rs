@@ -148,16 +148,15 @@ impl SessionRegistry {
     /// (`process::spawn_supervised`); Unix has nothing, which is the case this
     /// exists for.
     ///
-    /// Doesn't wait for the resulting `exited` events, and doesn't need to: the
-    /// kill lands well before the window tears down, so the forwarders persist
-    /// them on their own (verified on Windows — the session reads back `killed`,
-    /// exit code 1 from `taskkill`). Best-effort, not guaranteed; a session that
-    /// misses its write replays as non-terminal and settles to idle, since the
-    /// frontend derives transcript state from the event log, not the row.
+    /// Detaching, not killing: quitting is the app's own bookkeeping, so the
+    /// exits report `Detached` and persist nothing. Whether a forwarder wins the
+    /// race with the window teardown therefore doesn't matter — either way the
+    /// session replays clean and resumable, exactly as it did back when quitting
+    /// orphaned these processes instead of ending them.
     pub fn kill_all_blocking(&self) {
         if let Ok(live) = self.live.try_lock() {
             for session in live.values() {
-                session.driver.kill();
+                session.driver.kill_detached();
             }
         }
     }
@@ -173,10 +172,18 @@ mod tests {
     use std::time::{Duration, Instant};
     use tokio::sync::broadcast;
 
-    /// Counts `kill()`s. A real driver's forwarder is what removes the session
-    /// from the registry once the process exits, so the tests drive that half by
-    /// hand to model "the exit landed" vs "the child is wedged".
-    struct FakeDriver(Arc<AtomicUsize>);
+    /// Counts each kind of kill separately — app-exit teardown must DETACH, not
+    /// kill, or every session logs a "Session ended" on the next launch.
+    #[derive(Default)]
+    struct Kills {
+        hard: AtomicUsize,
+        detached: AtomicUsize,
+    }
+
+    /// A real driver's forwarder is what removes the session from the registry
+    /// once the process exits, so the tests drive that half by hand to model
+    /// "the exit landed" vs "the child is wedged".
+    struct FakeDriver(Arc<Kills>);
 
     impl AgentDriver for FakeDriver {
         fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
@@ -195,14 +202,17 @@ mod tests {
             Ok(())
         }
         fn kill(&self) {
-            self.0.fetch_add(1, Ordering::SeqCst);
+            self.0.hard.fetch_add(1, Ordering::SeqCst);
+        }
+        fn kill_detached(&self) {
+            self.0.detached.fetch_add(1, Ordering::SeqCst);
         }
         fn pid(&self) -> Option<u32> {
             None
         }
     }
 
-    async fn registry_with(n: usize, kills: &Arc<AtomicUsize>) -> SessionRegistry {
+    async fn registry_with(n: usize, kills: &Arc<Kills>) -> SessionRegistry {
         let reg = SessionRegistry::new();
         for i in 0..n {
             reg.insert(format!("s{i}"), Arc::new(FakeDriver(kills.clone())), None)
@@ -211,27 +221,30 @@ mod tests {
         reg
     }
 
+    /// Every live session goes down — as a DETACH, so quitting leaves the
+    /// transcripts clean and the sessions resumable.
     #[tokio::test]
-    async fn kill_all_blocking_kills_every_live_session() {
-        let kills = Arc::new(AtomicUsize::new(0));
+    async fn kill_all_blocking_detaches_every_live_session() {
+        let kills = Arc::new(Kills::default());
         let reg = registry_with(3, &kills).await;
 
         reg.kill_all_blocking();
 
-        assert_eq!(kills.load(Ordering::SeqCst), 3);
+        assert_eq!(kills.detached.load(Ordering::SeqCst), 3);
+        assert_eq!(kills.hard.load(Ordering::SeqCst), 0);
     }
 
     /// Runs on the exit path, so it must never block — not even with a wedged
     /// child that will never drain from the registry.
     #[tokio::test]
     async fn kill_all_blocking_returns_promptly() {
-        let kills = Arc::new(AtomicUsize::new(0));
+        let kills = Arc::new(Kills::default());
         let reg = registry_with(1, &kills).await;
 
         let start = Instant::now();
         reg.kill_all_blocking();
 
-        assert_eq!(kills.load(Ordering::SeqCst), 1);
+        assert_eq!(kills.detached.load(Ordering::SeqCst), 1);
         assert!(start.elapsed() < Duration::from_millis(500), "blocked on exit");
         assert_eq!(reg.live_ids().await.len(), 1); // draining is the forwarder's job
     }
@@ -249,13 +262,13 @@ mod tests {
     /// rather than deadlock (the Windows job object is the backstop there).
     #[tokio::test]
     async fn kill_all_blocking_skips_a_held_lock_instead_of_hanging() {
-        let kills = Arc::new(AtomicUsize::new(0));
+        let kills = Arc::new(Kills::default());
         let reg = registry_with(1, &kills).await;
 
         let guard = reg.live.lock().await;
         reg.kill_all_blocking(); // must not deadlock
         drop(guard);
 
-        assert_eq!(kills.load(Ordering::SeqCst), 0);
+        assert_eq!(kills.detached.load(Ordering::SeqCst), 0);
     }
 }

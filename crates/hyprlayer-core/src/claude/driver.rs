@@ -16,7 +16,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
@@ -27,6 +26,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::events::{ExitOutcome, SessionEvent};
 use super::protocol::{self, Block, ParsedLine};
+use crate::agent::KillFlag;
 use crate::error::{CoreError, Result};
 
 /// Per-stage permission posture (maps to claude's `--permission-mode`). Also
@@ -121,9 +121,9 @@ pub struct ClaudeDriver {
     control_seq: std::sync::atomic::AtomicU64,
     /// Last 200 stderr lines (for crash diagnostics).
     stderr_ring: Arc<StdMutex<Vec<String>>>,
-    /// Set when `kill` is called, so the waiter classifies the exit as an
-    /// app-initiated `Killed` rather than an unexpected `Crashed`.
-    killed: Arc<AtomicBool>,
+    /// Set when `kill`/`kill_detached` is called, so the waiter classifies the
+    /// exit as app-initiated rather than an unexpected `Crashed`.
+    kill_flag: Arc<KillFlag>,
     /// Tool inputs from open `can_use_tool` requests, keyed by request id —
     /// echoed back as `updatedInput` when allowing (claude's schema requires it).
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
@@ -241,7 +241,7 @@ impl ClaudeDriver {
         let primary_rx = events_tx.subscribe();
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
-        let killed = Arc::new(AtomicBool::new(false));
+        let kill_flag = Arc::new(KillFlag::default());
         let pending_permissions = Arc::new(StdMutex::new(HashMap::<String, Value>::new()));
         let pending_controls =
             Arc::new(StdMutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
@@ -258,7 +258,7 @@ impl ClaudeDriver {
             stdout,
             events_tx.clone(),
             stderr_ring.clone(),
-            killed.clone(),
+            kill_flag.clone(),
             pending_permissions.clone(),
             pending_controls.clone(),
         ));
@@ -270,7 +270,7 @@ impl ClaudeDriver {
                 events: events_tx,
                 control_seq: std::sync::atomic::AtomicU64::new(0),
                 stderr_ring,
-                killed,
+                kill_flag,
                 pending_permissions,
                 pending_controls,
                 killer: Killer { pid },
@@ -482,7 +482,14 @@ impl ClaudeDriver {
     /// Hard stop: kill the process (group on Unix). The waiter task observes the
     /// exit and emits the terminal event (classified `Killed`).
     pub fn kill(&self) {
-        self.killed.store(true, Ordering::SeqCst);
+        self.kill_flag.mark_killed();
+        self.killer.kill();
+    }
+
+    /// Same teardown, but for the app's own bookkeeping (quit, relaunch) — the
+    /// exit is classified `Detached` and leaves the transcript untouched.
+    pub fn kill_detached(&self) {
+        self.kill_flag.mark_detached();
         self.killer.kill();
     }
 
@@ -547,7 +554,7 @@ async fn read_and_wait(
     stdout: tokio::process::ChildStdout,
     events: broadcast::Sender<SessionEvent>,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
-    killed: Arc<AtomicBool>,
+    kill_flag: Arc<KillFlag>,
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
 ) {
@@ -608,17 +615,16 @@ async fn read_and_wait(
     let code = status.as_ref().ok().and_then(|s| s.code());
     let stderr_tail = stderr_ring.lock().map(|r| r.join("\n")).unwrap_or_default();
 
-    // Classify: an app-initiated kill takes precedence; otherwise a clean
-    // terminal result + exit 0 is Completed and anything else is a crash.
-    let outcome = if killed.load(Ordering::SeqCst) {
-        ExitOutcome::Killed
-    } else {
+    // Classify: an app-initiated kill takes precedence (and carries its reason);
+    // otherwise a clean terminal result + exit 0 is Completed and anything else
+    // is read from the wait status.
+    let outcome = kill_flag.outcome().unwrap_or_else(|| {
         match (&status, saw_result, saw_error_result) {
             (Ok(s), true, false) if s.success() => ExitOutcome::Completed,
-            (Ok(_), _, _) => ExitOutcome::from_unclean_exit(code),
+            (Ok(s), _, _) => ExitOutcome::from_status(s),
             (Err(_), _, _) => ExitOutcome::SpawnFailed,
         }
-    };
+    });
 
     let _ = events.send(SessionEvent::Exited {
         outcome,

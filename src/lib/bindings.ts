@@ -1186,6 +1186,14 @@ export type ExitOutcome =
 "crashed" | 
 /**  We killed the process tree (hard stop / cleanup). */
 "killed" | 
+/**
+ *  The app took the process down as part of its own lifecycle — quitting, or
+ *  relaunching this session under new settings — not something that happened
+ *  to the session. Terminal for the live process only: nothing is persisted,
+ *  so the session replays clean and resumable (see the forwarder's `Exited`
+ *  arm).
+ */
+"detached" | 
 /**  Failed to spawn / disappeared immediately. */
 "spawn_failed";
 

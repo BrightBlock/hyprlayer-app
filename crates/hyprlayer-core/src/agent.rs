@@ -8,13 +8,57 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-use crate::claude::{ClaudeDriver, SessionEvent};
+use crate::claude::{ClaudeDriver, ExitOutcome, SessionEvent};
 use crate::codex::CodexDriver;
 use crate::error::{CoreError, Result};
+
+const KILL_NONE: u8 = 0;
+const KILL_USER: u8 = 1;
+const KILL_DETACH: u8 = 2;
+
+/// Why the app ended a session's process — shared between a driver's kill entry
+/// points and the waiter that classifies the exit, so the reason survives the
+/// hop. First writer wins: the request that actually took the process down is
+/// the honest reason, and a later racing call can't relabel it.
+#[derive(Debug, Default)]
+pub struct KillFlag(AtomicU8);
+
+impl KillFlag {
+    /// The user ended this session (Stop escalating to a force-stop, clearing
+    /// the context). Returns whether this call is the one that set it — drivers
+    /// use that to stay idempotent.
+    pub fn mark_killed(&self) -> bool {
+        self.set(KILL_USER)
+    }
+
+    /// The app is tearing the process down as its own bookkeeping — quitting, or
+    /// relaunching the session under new settings. Reported as
+    /// [`ExitOutcome::Detached`], which leaves no trace in the transcript.
+    pub fn mark_detached(&self) -> bool {
+        self.set(KILL_DETACH)
+    }
+
+    /// The outcome an app-initiated kill forces, or `None` to classify from the
+    /// process's own wait status.
+    pub fn outcome(&self) -> Option<ExitOutcome> {
+        match self.0.load(Ordering::SeqCst) {
+            KILL_USER => Some(ExitOutcome::Killed),
+            KILL_DETACH => Some(ExitOutcome::Detached),
+            _ => None,
+        }
+    }
+
+    fn set(&self, kind: u8) -> bool {
+        self.0
+            .compare_exchange(KILL_NONE, kind, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+}
 
 /// Which harness backs a session — the vocabulary the store persists
 /// (`sessions.harness`), the IPC surface selects on, and the shell dispatches
@@ -116,6 +160,13 @@ pub trait AgentDriver: Send + Sync {
     /// terminal `Exited` event.
     fn kill(&self);
 
+    /// Terminate the session because the APP is tearing it down — quitting, or
+    /// relaunching it under new settings — rather than the user ending it. Same
+    /// teardown as [`kill`](Self::kill), but the exit reports
+    /// [`ExitOutcome::Detached`]: nothing is persisted, so the transcript stays
+    /// clean and the session replays resumable.
+    fn kill_detached(&self);
+
     /// The OS process id backing the session, if any (for the orphan ledger).
     fn pid(&self) -> Option<u32>;
 }
@@ -158,6 +209,9 @@ impl AgentDriver for ClaudeDriver {
     }
     fn kill(&self) {
         self.kill()
+    }
+    fn kill_detached(&self) {
+        self.kill_detached()
     }
     fn pid(&self) -> Option<u32> {
         self.pid()
@@ -209,6 +263,9 @@ impl AgentDriver for CodexDriver {
     }
     fn kill(&self) {
         self.kill()
+    }
+    fn kill_detached(&self) {
+        self.kill_detached()
     }
     fn pid(&self) -> Option<u32> {
         self.pid()

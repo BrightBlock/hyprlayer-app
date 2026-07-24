@@ -42,9 +42,12 @@ fn session_not_found(id: &str) -> AppError {
 /// [`restart_session`] (so a relaunch can't race the still-dying process) and
 /// [`crate::commands::workstreams::archive_workstream`] (so archiving tears the
 /// session down instead of leaking a process + driver against a deleted worktree).
+///
+/// Detached, not killed: both callers are the app reorganizing itself, not the
+/// user ending the conversation, so the exit leaves no mark on the transcript.
 pub(crate) async fn kill_and_await_exit(state: &AppState, session_id: &str) {
     if let Some(driver) = state.sessions.get(session_id).await {
-        driver.kill();
+        driver.kill_detached();
         let mut waited_ms = 0u64;
         while state.sessions.get(session_id).await.is_some() && waited_ms < 10_000 {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1180,6 +1183,9 @@ enum RowWrite {
         state: SessionState,
         summary: Option<String>,
     },
+    /// The app took the process down itself. The row keeps its pre-exit state so
+    /// the session replays resumable; only the orphan ledger needs clearing.
+    Detached,
 }
 
 fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
@@ -1251,8 +1257,16 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
             // never persisted, only forwarded. Skipping it removes a per-token
             // write storm. Usage pings stay persisted (tiny) so the context meter
             // survives a restart even when a turn was interrupted before its
-            // result event landed.
-            let payload = (!matches!(event, SessionEvent::PartialText { .. }))
+            // result event landed. A `Detached` exit is skipped for a different
+            // reason: the app ended that process for its own bookkeeping (quit,
+            // relaunch), so writing it would stamp "Session ended" across every
+            // transcript on the next launch.
+            let ephemeral = match &event {
+                SessionEvent::PartialText { .. } => true,
+                SessionEvent::Exited { outcome, .. } => !outcome.is_reportable(),
+                _ => false,
+            };
+            let payload = (!ephemeral)
                 .then(|| serde_json::to_string(&event).ok())
                 .flatten();
             let kind = event.kind();
@@ -1283,6 +1297,13 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                 ),
                 SessionEvent::TurnDone { cost_usd, .. } => {
                     (RowWrite::TurnDone { cost: *cost_usd }, None, false)
+                }
+                // Terminal either way — the driver is gone, so the forwarder stops
+                // and the registry drops it. A detached exit just says so quietly:
+                // no row write, and no lifecycle emit (a relaunch announces its own
+                // `Running`, and a quit has nobody left to tell).
+                SessionEvent::Exited { outcome, .. } if !outcome.is_reportable() => {
+                    (RowWrite::Detached, None, true)
                 }
                 SessionEvent::Exited {
                     outcome,
@@ -1337,6 +1358,9 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                         }
                         RowWrite::Exited { state, summary } => {
                             let _ = db.finish_session(&sid, state, summary.as_deref());
+                            let _ = db.clear_orphans_for(&sid);
+                        }
+                        RowWrite::Detached => {
                             let _ = db.clear_orphans_for(&sid);
                         }
                         RowWrite::None => {}

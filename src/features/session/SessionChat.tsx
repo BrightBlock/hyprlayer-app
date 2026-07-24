@@ -1350,9 +1350,10 @@ export function SessionChat({
     }
   }, [shell.sessionId, hasEntry, view.item.id, shell.mode, restorePermissionFlag]);
 
-  // Auto-resume terminal sessions on first sight — covers the archive→restore
-  // case (where the kill was app-initiated, not user-chosen) and any other
-  // session that came back terminal. The ref guards against re-firing: if the
+  // Auto-resume terminal sessions on first sight — a session that came back
+  // crashed or killed. App-initiated teardown (quit, archive, relaunch) exits
+  // `detached` instead, which never lands terminal, so it isn't this path's job:
+  // those resume lazily on the next send. The ref guards against re-firing: if the
   // resume itself fails and bounces back to terminal, we surface the banner
   // for an explicit retry instead of looping. Cleared when the user opts
   // out via "New session" (sessionId becomes undefined).

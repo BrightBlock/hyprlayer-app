@@ -614,6 +614,31 @@ describe("turn + exit lifecycle", () => {
     expect(isTerminal(view.state)).toBe(true);
   });
 
+  it("a detached exit leaves no notice and stays resumable", () => {
+    // Quitting the app (or relaunching a session under a new model/mode) kills
+    // the process, but the user never ended the conversation — so the transcript
+    // stays exactly as it was and the session rests idle, not terminal.
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "assistantText", text: "hi", parentId: null });
+    const before = view.items.length;
+    view = reduceEvent(view, { kind: "exited", outcome: "detached", code: null, stderrTail: "" });
+    expect(view.items).toHaveLength(before);
+    expect(view.items.some((it) => it.kind === "exit")).toBe(false);
+    expect(view.state).toBe("idle");
+    expect(view.streaming).toBe(false);
+    expect(isTerminal(view.state)).toBe(false);
+  });
+
+  it("a detached exit cancels open asks so the session can't strand busy", () => {
+    // The request ids died with the process; an open card would keep the
+    // composer locked on an ask no live agent can answer.
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+    view = reduceEvent(view, { kind: "exited", outcome: "detached", code: null, stderrTail: "" });
+    expect(view.pendingQuestion).toBeNull();
+    expect(isBusy(view)).toBe(false);
+  });
+
   it("protocolError surfaces without disrupting state", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "protocolError", detail: "bad line", raw: "{garbage" });

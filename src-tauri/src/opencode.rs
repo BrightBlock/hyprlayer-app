@@ -17,11 +17,10 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use hyprlayer_core::agent::AgentDriver;
+use hyprlayer_core::agent::{AgentDriver, KillFlag};
 use hyprlayer_core::claude::{ExitOutcome, SessionEvent};
 use hyprlayer_core::error::Result as CoreResult;
 use serde_json::{json, Value};
@@ -376,7 +375,7 @@ pub struct OpenCodeDriver {
     /// model per prompt) via [`AgentDriver::set_model`].
     model: std::sync::Mutex<Option<(String, String)>>,
     events: broadcast::Sender<SessionEvent>,
-    killed: Arc<AtomicBool>,
+    kill_flag: Arc<KillFlag>,
     filter_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     /// Pending `question.asked` payloads (questionID → its `questions` array).
     /// The UI answers with a `{question text → label}` map; OpenCode wants
@@ -487,11 +486,27 @@ impl OpenCodeDriver {
             session_id,
             model: std::sync::Mutex::new(model),
             events,
-            killed: Arc::new(AtomicBool::new(false)),
+            kill_flag: Arc::new(KillFlag::default()),
             filter_task: Mutex::new(Some(task)),
             pending_questions,
         });
         Ok((driver, primary_rx))
+    }
+
+    /// Abort the turn, stop the SSE filter, and emit the terminal event. The
+    /// shared server stays up — only this session is done.
+    fn end(&self, outcome: ExitOutcome) {
+        self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
+        if let Ok(mut guard) = self.filter_task.try_lock() {
+            if let Some(handle) = guard.take() {
+                handle.abort();
+            }
+        }
+        let _ = self.events.send(SessionEvent::Exited {
+            outcome,
+            code: None,
+            stderr_tail: String::new(),
+        });
     }
 
     /// Fire an HTTP POST without blocking the (sync) trait method; failures land
@@ -653,21 +668,17 @@ impl AgentDriver for OpenCodeDriver {
     }
 
     fn kill(&self) {
-        if self.killed.swap(true, Ordering::SeqCst) {
-            return;
+        if self.kill_flag.mark_killed() {
+            self.end(ExitOutcome::Killed);
         }
-        self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
-        if let Ok(mut guard) = self.filter_task.try_lock() {
-            if let Some(handle) = guard.take() {
-                handle.abort();
-            }
+    }
+
+    /// The app's own teardown (quit, relaunch) — same abort, but reported as
+    /// `Detached` so it leaves no mark on the transcript.
+    fn kill_detached(&self) {
+        if self.kill_flag.mark_detached() {
+            self.end(ExitOutcome::Detached);
         }
-        // The shared server stays up; this session is done.
-        let _ = self.events.send(SessionEvent::Exited {
-            outcome: ExitOutcome::Killed,
-            code: None,
-            stderr_tail: String::new(),
-        });
     }
 
     fn pid(&self) -> Option<u32> {

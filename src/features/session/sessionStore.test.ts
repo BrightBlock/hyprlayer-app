@@ -706,6 +706,20 @@ describe("classifyEntry — background activity state", () => {
     expect(entry.state).toBe("killed");
     expect(classifyEntry(entry)).toBe("idle");
   });
+
+  it("a DETACHED session drops its live flag but stays non-terminal", async () => {
+    // The app quit and took the process with it. The tab must come back to a
+    // clean, resumable session — not a terminal one that auto-resumes on sight.
+    const id = await startBusySession();
+    emit(INIT);
+    emit(BASH_BG_SPAWN("tu-1", "task-a"));
+    emit({ kind: "exited", outcome: "detached", code: null, stderrTail: "" });
+
+    const entry = entryOf(id);
+    expect(entry.state).toBe("idle");
+    expect(entry.live).toBe(false);
+    expect(entry.items.some((it) => it.kind === "exit")).toBe(false);
+  });
 });
 
 // ─── workstreamShipBusy — hide Commit while Ship commits ────────────────────

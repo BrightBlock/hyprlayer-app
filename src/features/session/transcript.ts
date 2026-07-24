@@ -903,6 +903,14 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       // or a kill while streaming) leaves its block `streaming: true`, so its
       // blinking caret keeps pulsing even though the turn is over.
       const closed = { ...view, items: closeOpenAssistant(view.items) };
+      // A detached exit is the app taking the process down for its own reasons
+      // (quit, relaunch under new settings). Nothing ended the conversation, so
+      // it leaves no notice and no terminal state — the session rests idle and
+      // resumes on the next send. Open asks are cancelled: their request ids died
+      // with the process, so leaving one would strand the session busy forever.
+      if (event.outcome === "detached") {
+        return { ...cancelPendingPrompts(closed), streaming: false, state: "idle" };
+      }
       return {
         ...closed,
         ...appended(
@@ -1120,11 +1128,14 @@ export function describeState(
   }
 }
 
+// `detached` never reaches here — the reducer draws no notice for it — but the
+// map stays total so a new outcome can't slip through unlabelled.
 const EXIT_LABEL: Record<ExitOutcome, string> = {
   completed: "Session completed",
   interrupted: "Turn interrupted",
   crashed: "Session crashed",
   killed: "Session ended",
+  detached: "Session ended",
   spawn_failed: "Failed to start session",
 };
 
