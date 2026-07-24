@@ -23,6 +23,7 @@ pub mod skills;
 pub mod store;
 pub mod system;
 pub mod terminal;
+pub mod thoughts_repo;
 pub mod worktree;
 
 pub use error::CoreError;

@@ -8,6 +8,8 @@ use hyprlayer_core::hyprcli::{HyprCli, StorageInfo};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryState, BinaryStatus};
 use hyprlayer_core::repos;
 use hyprlayer_core::store::NewProject;
+// Items, not the module: `create_thoughts_profile` has an arg of the same name.
+use hyprlayer_core::thoughts_repo::{classify_root, scaffold as scaffold_thoughts_root, RootState};
 use hyprlayer_core::worktree::thoughts_links;
 use hyprlayer_core::CoreError;
 use serde::Serialize;
@@ -723,6 +725,30 @@ pub async fn create_thoughts_profile(
         .filter(|r| !r.is_empty())
         .map(String::from)
         .unwrap_or_else(|| format!("~/{name}-thoughts"));
+
+    // `thoughts profile create` only writes config, so without this the
+    // profile's first use dies on the CLI's "not a git repository". An
+    // `Occupied` root is left for the CLI to refuse rather than restructured.
+    let root = hyprlayer_core::config::expand_path(&repo);
+    if matches!(
+        classify_root(&root, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR),
+        RootState::Scaffoldable | RootState::Adoptable
+    ) {
+        let git = state
+            .binaries
+            .require(BinaryKind::Git)
+            .await
+            .map_err(AppError::from)?;
+        let user = loaded
+            .config
+            .thoughts
+            .as_ref()
+            .map(|t| t.user.as_str())
+            .unwrap_or_default();
+        scaffold_thoughts_root(&git, &root, user, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
+            .await
+            .map_err(AppError::from)?;
+    }
 
     // Not repo-scoped (the config is global); the config's own directory is a
     // cwd that's guaranteed to exist here.

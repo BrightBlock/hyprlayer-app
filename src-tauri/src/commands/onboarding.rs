@@ -7,8 +7,10 @@
 use std::path::{Path, PathBuf};
 
 use hyprlayer_core::config;
+use hyprlayer_core::config::{DEFAULT_GLOBAL_DIR, DEFAULT_REPOS_DIR};
 use hyprlayer_core::hyprcli::{AiStatus, HyprCli};
 use hyprlayer_core::repos;
+use hyprlayer_core::thoughts_repo;
 use hyprlayer_core::worktree::thoughts_links;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -151,7 +153,11 @@ pub async fn init_thoughts_repo(
                 .require(hyprlayer_core::process::binaries::BinaryKind::Git)
                 .await
                 .map_err(AppError::from)?;
-            repos::init_repo(&git, &p).await.map_err(AppError::from)?;
+            // A bare `git init` root is accepted only while it stays empty —
+            // one stray file and every later `thoughts init` refuses it.
+            thoughts_repo::scaffold(&git, &p, user.trim(), DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
+                .await
+                .map_err(AppError::from)?;
             p
         }
     };

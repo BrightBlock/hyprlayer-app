@@ -223,3 +223,79 @@ async fn real_storage_info_round_trips() {
     assert!(info.mapped_name.is_some());
     assert_eq!(info.schema.len(), 10, "thought schema has 10 fields");
 }
+
+/// A root the app scaffolds must be one the real CLI adopts — the contract
+/// "Add project" depends on, pinned against the installed binary because the
+/// rule lives in the CLI, not here.
+#[tokio::test]
+#[ignore = "requires the hyprlayer CLI installed; run with --ignored"]
+async fn scaffolded_root_is_accepted_by_the_real_cli() {
+    let git = which::which("git").expect("git installed");
+    let hyprlayer = which::which("hyprlayer").expect("hyprlayer CLI installed");
+    let tmp = tempfile::tempdir().unwrap();
+
+    // The thoughts root, shaped by the app exactly as the wizard would.
+    let root = tmp.path().join("thoughts");
+    hyprlayer_core::thoughts_repo::scaffold(&git, &root, "tester", "repos", "global")
+        .await
+        .expect("scaffold should succeed");
+
+    // A throwaway project to run `thoughts init` from.
+    let code = tmp.path().join("proj");
+    std::fs::create_dir_all(&code).unwrap();
+    for args in [
+        vec!["init", "-b", "main", code.to_str().unwrap()],
+        vec!["-C", code.to_str().unwrap(), "commit", "--allow-empty", "-m", "init",
+             "-c", "commit.gpgsign=false"],
+    ] {
+        std::process::Command::new(&git)
+            .args(&args)
+            .env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("git should run");
+    }
+
+    // An isolated config so the run can't touch the developer's real one.
+    let cfg = tmp.path().join("config.json");
+    std::fs::write(
+        &cfg,
+        serde_json::json!({
+            "version": 4,
+            "disableUpdateCheck": true,
+            "thoughts": {
+                "backend": {
+                    "kind": "git",
+                    "thoughtsRepo": root.to_str().unwrap(),
+                    "reposDir": "repos",
+                    "globalDir": "global",
+                },
+                "profiles": {}, "currentProfile": null, "repoMappings": {}, "user": "tester",
+            },
+            "ai": {"agentTool": "claude"},
+            "telemetry": {"mode": "off"},
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let out = std::process::Command::new(&hyprlayer)
+        .current_dir(&code)
+        .args(["thoughts", "init", "--yes", "--directory", "Proj",
+               "--config-file", cfg.to_str().unwrap()])
+        .stdin(Stdio::null())
+        .output()
+        .expect("hyprlayer should run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    println!("exit={:?}\nstderr: {stderr}", out.status.code());
+
+    assert!(
+        out.status.success(),
+        "the CLI must adopt an app-scaffolded root, but refused it:\n{stderr}"
+    );
+    assert!(
+        code.join("thoughts").join("global").exists(),
+        "the CLI should have linked thoughts/global into the scaffolded root"
+    );
+    assert!(root.join("repos").join("Proj").is_dir(), "project tree created");
+}
