@@ -1795,7 +1795,9 @@ export function Root() {
                               setProjectMenu(null);
                               setItemMenu({ x: e.clientX, y: e.clientY, view });
                             }}
-                            className={`relative flex items-center gap-2.5 overflow-hidden rounded-lg py-2 pl-6 pr-2 text-sm ${
+                            // pl-10 puts this title on the project title's x: it
+                            // trails the header's chevron (ml-1 + w-4) + avatar.
+                            className={`relative flex items-center gap-2.5 overflow-hidden rounded-lg py-2 pl-10 pr-2 text-sm ${
                               isActiveItem
                                 ? "bg-accent/15 text-ink"
                                 : "text-ink-dim hover:bg-edge/50 hover:text-ink"
