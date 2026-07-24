@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.5.3",
+      "date": "2026-07-24",
+      "summary": "Stop mislabeling app-initiated kills as \"Session ended\".",
+      "notes": [
+        "Quitting, archiving, or relaunching a session no longer stamps \"Session ended\" across every transcript on next launch — the app can now tear a process down for its own bookkeeping without marking the session as user-ended.",
+        "On macOS, sessions stopped by a signal (like Ctrl-C) now correctly show as killed instead of crashed."
+      ]
+    },
+    {
       "version": "0.5.2",
       "date": "2026-07-24",
       "summary": "Stop false crash reports and orphaned processes on quit.",
