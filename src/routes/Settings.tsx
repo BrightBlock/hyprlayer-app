@@ -5,6 +5,7 @@ import {
   useAiStatus,
   useBootstrap,
   useGithubUsername,
+  useClaudeProbe,
   useOpencodeCatalog,
   useRedetectBinaries,
   useSetAppSettings,
@@ -23,7 +24,7 @@ import {
   type ResolvedEngine,
 } from "@/features/multiplexer/engines";
 import { EngineGlyph } from "@/features/multiplexer/agentStateUi";
-import { MODELS } from "@/lib/domain/models";
+import { claudeModels } from "@/lib/domain/models";
 import { DEFAULT_HARNESS_OPTIONS } from "@/lib/domain/harnessing";
 import { invalidateNotificationSettingsCache, sendTestNotification } from "@/lib/notifications";
 import {
@@ -510,6 +511,9 @@ function QuitCard({ settings }: { settings: AppSettings }) {
 function TabTitlesCard({ settings }: { settings: AppSettings }) {
   const save = useSetAppSettings();
   const catalog = useOpencodeCatalog();
+  // Same live-first list the composer offers, so the title model can't name one
+  // the CLI won't run.
+  const claudeCatalog = claudeModels(useClaudeProbe().data?.models);
   const tab: Required<TabTitleSettings> = {
     enabled: settings.tabTitles?.enabled ?? true,
     model: settings.tabTitles?.model ?? null,
@@ -577,8 +581,8 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
               onChange={(e) => patch({ model: e.target.value })}
             >
               <optgroup label="Claude">
-                {MODELS.map((m) => (
-                  <option key={m.key} value={`claude:${m.flag ?? ""}`}>
+                {claudeCatalog.map((m) => (
+                  <option key={m.key} value={`claude:${m.flag ?? ""}`} disabled={m.disabled}>
                     {m.label}
                     {m.hint ? ` (${m.hint})` : ""}
                   </option>

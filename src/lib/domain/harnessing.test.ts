@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AppSettings } from "@/lib/bindings";
+import type { ModelOption } from "./models";
 import {
   actionAgentDefaults,
   actionLaunchArgs,
@@ -157,6 +158,54 @@ describe("actionLaunchArgs", () => {
       model: null,
       effort: "high",
     });
+  });
+
+  it("clamps the effort to what the live catalog says the model accepts", () => {
+    // Commit/Ship on a Haiku commit model: the CLI takes no --effort for it, so
+    // the configured "medium" must be dropped, not sent.
+    const catalog: ModelOption[] = [
+      { key: "haiku", label: "Haiku 4.5", flag: "haiku", contextWindow: 200_000, efforts: [] },
+      {
+        key: "sonnet",
+        label: "Sonnet 5",
+        flag: "sonnet",
+        contextWindow: 200_000,
+        efforts: ["low", "medium", "high"],
+      },
+    ];
+    expect(actionLaunchArgs({ harness: "claude", model: "haiku", effort: "medium" }, catalog))
+      .toEqual({ harness: "claude", model: "haiku", effort: null });
+    // An unsupported stored tier clamps to a tier the model reports.
+    expect(actionLaunchArgs({ harness: "claude", model: "sonnet", effort: "max" }, catalog))
+      .toEqual({ harness: "claude", model: "sonnet", effort: "high" });
+  });
+
+  it("substitutes the catalog default when the configured model is org-disabled", () => {
+    // Headless launches (Commit/Ship) have nowhere to show "disabled by org
+    // policy"; a substituted default beats a crashed agent tab.
+    const catalog: ModelOption[] = [
+      {
+        key: "opus",
+        label: "Opus 5",
+        flag: null,
+        contextWindow: 1_000_000,
+        efforts: ["low", "medium", "high"],
+      },
+      {
+        key: "sonnet",
+        label: "Sonnet 5",
+        flag: "sonnet",
+        contextWindow: 200_000,
+        efforts: ["low", "medium", "high"],
+        disabled: true,
+      },
+    ];
+    expect(actionLaunchArgs({ harness: "claude", model: "sonnet", effort: "medium" }, catalog))
+      .toEqual({ harness: "claude", model: null, effort: "medium" });
+    const settings = withProviders({
+      claude: { defaultModel: "sonnet" },
+    } as AppSettings["providers"]);
+    expect(newChatLaunchArgs(settings, {}, catalog).model).toBeNull();
   });
 
   it("passes an OpenCode provider/model id through, with no effort", () => {

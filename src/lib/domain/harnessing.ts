@@ -1,5 +1,11 @@
 import type { AppSettings, CatalogProvider, Harness, PermissionMode } from "@/lib/bindings";
-import { effectiveEffort, modelOption, resolveCodexEffort } from "./models";
+import {
+  MODELS,
+  effectiveEffort,
+  modelOption,
+  resolveCodexEffort,
+  type ModelOption,
+} from "./models";
 import { permissionModeOption } from "./permissions";
 
 /**
@@ -95,20 +101,34 @@ export function actionAgentDefaults(
   };
 }
 
+/** A model that can actually launch: the pick itself, or — when org policy has
+ *  disabled it — the catalog's default row. These are the headless launch paths
+ *  (Commit/Ship, prompt runs); unlike the composer there is nowhere to show
+ *  "disabled by org policy", and a substituted default beats a crashed agent. */
+function launchableModel(model: ModelOption, catalog: readonly ModelOption[]): ModelOption {
+  return model.disabled ? modelOption(undefined, catalog) : model;
+}
+
 /** The `startSession` model/effort args for resolved [`ActionAgentDefaults`]:
  *  Claude translates its model KEY to the `--model` flag (Sonnet's key and flag
- *  coincide; `"opus"` → the null default; a custom id → itself); Codex and
- *  OpenCode pass their model id through as-is, and only OpenCode drops effort. */
-export function actionLaunchArgs(d: ActionAgentDefaults): {
+ *  coincide; `"opus"` → the null default; a custom id → itself) and clamps the
+ *  effort to what that model accepts — pass the live catalog so the clamp knows
+ *  (a Haiku commit model must not get `--effort medium`); Codex and OpenCode
+ *  pass their model id through as-is, and only OpenCode drops effort. */
+export function actionLaunchArgs(
+  d: ActionAgentDefaults,
+  catalog: readonly ModelOption[] = MODELS,
+): {
   harness: Harness;
   model: string | null;
   effort: string | null;
 } {
   if (d.harness === "claude") {
+    const model = launchableModel(modelOption(d.model ?? undefined, catalog), catalog);
     return {
       harness: "claude",
-      model: d.model ? modelOption(d.model).flag : null,
-      effort: d.effort,
+      model: d.model ? model.flag : null,
+      effort: effectiveEffort(d.effort ?? undefined, model)?.key ?? null,
     };
   }
   return { harness: d.harness, model: d.model, effort: d.harness === "codex" ? d.effort : null };
@@ -136,6 +156,9 @@ export type ShellLaunchPicks = {
 export function newChatLaunchArgs(
   settings: AppSettings | null | undefined,
   shell: ShellLaunchPicks | null | undefined,
+  /** The live Claude catalog when the caller has one — resolves stored keys to
+   *  live rows and clamps effort the same way the composer would. */
+  catalog: readonly ModelOption[] = MODELS,
 ): {
   harness: Harness;
   model: string | null;
@@ -175,9 +198,12 @@ export function newChatLaunchArgs(
       permissionMode,
     };
   }
-  const model = modelOption(shell?.model ?? claude?.defaultModel ?? undefined);
+  const model = launchableModel(
+    modelOption(shell?.model ?? claude?.defaultModel ?? undefined, catalog),
+    catalog,
+  );
   const effort = effectiveEffort(shell?.effort ?? claude?.defaultEffort ?? undefined, model);
-  return { harness: "claude", model: model.flag, effort: effort.key, permissionMode };
+  return { harness: "claude", model: model.flag, effort: effort?.key ?? null, permissionMode };
 }
 
 /** OpenCode Zen (and similar gateways) expose anonymous `-free` models that

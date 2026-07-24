@@ -299,3 +299,46 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
     );
     assert!(root.join("repos").join("Proj").is_dir(), "project tree created");
 }
+
+/// The model-catalog probe drives a REAL `claude`, end to end.
+///
+/// The parse is unit-tested off a captured payload; what this pins is the spawn
+/// path — args, neutral cwd, and holding stdin open until the reply lands. Get
+/// any of those wrong and the probe times out instead of failing loudly, which
+/// unit tests can't catch. Costs no tokens: no user message is ever sent.
+#[tokio::test]
+#[ignore = "spawns a real `claude`; run in the session the app launches from"]
+async fn claude_answers_the_model_catalog_probe() {
+    let resolver = BinaryResolver::initialize(HashMap::new());
+    resolver.enrich_with_login_shell().await;
+    let bin = resolver
+        .status(BinaryKind::Claude)
+        .await
+        .path
+        .expect("claude should resolve");
+    let path_env = resolver.augmented_path().await;
+
+    let probe = hyprlayer_core::claude::probe::probe(
+        std::path::Path::new(&bin),
+        &path_env,
+        &hyprlayer_core::claude::probe::neutral_cwd(),
+        &[],
+    )
+    .await
+    .expect("claude should answer list_models");
+
+    for m in &probe.models {
+        println!(
+            "{:?} -> {:?} [{}] efforts={:?} fast={}",
+            m.flag, m.resolved_model, m.display_name, m.supported_effort_levels, m.supports_fast_mode
+        );
+    }
+    assert!(!probe.models.is_empty(), "a signed-in CLI offers models");
+    // Exactly one row launches with no `--model`; the composer's default entry
+    // maps onto it, so a second (or zero) would break that mapping.
+    assert_eq!(
+        probe.models.iter().filter(|m| m.flag.is_none()).count(),
+        1,
+        "expected exactly one default (no --model) row"
+    );
+}

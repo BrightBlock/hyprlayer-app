@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 
 import {
@@ -21,6 +22,7 @@ import {
   type WorkstreamView,
   type WorktreeFile,
 } from "./bindings";
+import { pendingModelSync, type ModelOption } from "./domain/models";
 import { unwrap } from "./ipc";
 import { queryClient } from "./queryClient";
 
@@ -1075,6 +1077,60 @@ export function useCodexProbe(enabled = true) {
   return useQuery({
     queryKey: ["codex-probe"],
     queryFn: () => unwrap(commands.codexProbe()),
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * Fold models the picker has never offered into a curated visible-models list,
+ * once per app run, as soon as the catalog is known.
+ *
+ * Without it a curated list is an allowlist frozen on the day it was edited, and
+ * the only way to see a newly-shipped model is Settings → "Reset to default" —
+ * which also undoes every deliberate removal. Strictly additive, and a no-op for
+ * anyone who never curated. Failures are swallowed: this is a convenience, and a
+ * settings write that didn't stick must not surface as an error in the composer.
+ *
+ * `catalogSettled` must stay false until the probe has finished (either way):
+ * the static fallback is always non-empty, so syncing before the live catalog
+ * lands would latch against it and never see the live-only keys. A sync that
+ * ran against the static fallback (probe errored) only latches that TIER — if
+ * a refetch later lands the live catalog, it still gets one sync of its own.
+ */
+export function useSyncClaudeModels(
+  catalog: readonly ModelOption[],
+  catalogSettled: boolean,
+  catalogLive: boolean,
+) {
+  const settings = useBootstrap().data?.settings.providers?.claude;
+  const synced = useRef<"none" | "static" | "live">("none");
+  const hasCatalog = catalog.length > 0;
+
+  useEffect(() => {
+    if (!settings || !catalogSettled || !hasCatalog) return;
+    if (synced.current === "live" || (synced.current === "static" && !catalogLive)) return;
+    const sync = pendingModelSync(settings.visibleModels, settings.seenModelKeys, catalog);
+    // Latch before awaiting: several composers mount at once and would
+    // otherwise each fire the same write.
+    synced.current = catalogLive ? "live" : "static";
+    if (!sync) return;
+    void commands
+      .claudeSyncModels(sync.add, sync.seen)
+      .then(() => queryClient.invalidateQueries({ queryKey: ["bootstrap"] }))
+      .catch(() => {});
+  }, [settings, catalog, catalogSettled, catalogLive, hasCatalog]);
+}
+
+/** The `claude` CLI's own model catalog (`list_models`), which reflects this
+ *  install's provider, settings and org policy — the authority on what the
+ *  picker can offer. Deduped by react-query across tabs, so many open composers
+ *  cost one ~1s probe; callers fall back to the static table while it loads or
+ *  if it fails (no CLI, signed out, older CLI without the control request). */
+export function useClaudeProbe(enabled = true) {
+  return useQuery({
+    queryKey: ["claude-probe"],
+    queryFn: () => unwrap(commands.claudeProbe()),
     enabled,
     staleTime: 5 * 60_000,
   });

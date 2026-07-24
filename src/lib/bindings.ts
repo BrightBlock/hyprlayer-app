@@ -489,11 +489,42 @@ export const commands = {
 	 */
 	installOpencode: () => typedError<null, AppError>(__TAURI_INVOKE("install_opencode")),
 	/**
+	 *  Fold newly-offered Claude models into a CURATED picker list, and record what
+	 *  the catalog offered this time.
+	 * 
+	 *  Without this, a user who ever curated Settings → Models never sees a model
+	 *  Anthropic ships later — their stored list is an allowlist frozen at the day
+	 *  they edited it, and the only cure is "Reset to default", which also undoes
+	 *  their removals. `add` is strictly additive and `seen` is the watermark that
+	 *  keeps it additive: a model the user deliberately removed is in `seen`, so it
+	 *  is never re-added, while a model that simply didn't exist then is not.
+	 * 
+	 *  Deliberately a narrow command rather than a `set_app_settings` round-trip:
+	 *  that one replaces the whole object, so a second app instance writing
+	 *  concurrently would lose the other's edits (two dev builds share one
+	 *  `settings.json`). This mutates the two fields under the store's lock.
+	 */
+	claudeSyncModels: (add: string[], seen: string[]) => typedError<AppSettings, AppError>(__TAURI_INVOKE("claude_sync_models", { add, seen })),
+	/**
 	 *  Current Claude authentication, parsed from `claude auth status --json`.
 	 *  Never errors on a logged-out / missing CLI — returns a disconnected status so
 	 *  the UI degrades gracefully.
 	 */
 	claudeAuthStatus: () => typedError<ClaudeAuthStatus, AppError>(__TAURI_INVOKE("claude_auth_status")),
+	/**
+	 *  The model catalog the `claude` CLI's own `/model` picker offers, read with a
+	 *  one-shot `list_models` control request.
+	 * 
+	 *  Authoritative for what this install can run — provider, settings cascade, and
+	 *  org policy are already applied — but NARROWER than what `--model` accepts:
+	 *  legacy ids are absent from it yet still launch. The composer merges these
+	 *  rows over its static table rather than replacing it.
+	 * 
+	 *  A missing CLI is a benign empty catalog (the composer falls back to the static
+	 *  table); a probe that ran and failed errors, so a transient failure can't be
+	 *  cached as "this install has no models".
+	 */
+	claudeProbe: () => typedError<ClaudeProbe, AppError>(__TAURI_INVOKE("claude_probe")),
 	/**
 	 *  Account + model list for the Codex settings tab, from ONE app-server session.
 	 * 
@@ -900,6 +931,40 @@ export type ClaudeAuthStatus = {
 	account: string | null,
 };
 
+/**  One selectable model, as the CLI's own picker sees it. */
+export type ClaudeModel = {
+	/**
+	 *  The `--model` value, or `None` for the "default" row (which launches with
+	 *  no `--model` at all). Mirrors `ModelOption.flag` on the frontend.
+	 */
+	flag: string | null,
+	/**
+	 *  Canonical id the row resolves to, e.g. `claude-opus-5[1m]`. Keys the
+	 *  Models-API context-window lookup once the `[1m]` suffix is stripped.
+	 */
+	resolvedModel: string | null,
+	/**  Picker label, e.g. `Opus (1M context)`. */
+	displayName: string,
+	description: string | null,
+	/**
+	 *  Effort tiers this model accepts. Empty means it takes no `--effort` at
+	 *  all (Haiku), which is different from "we don't know".
+	 */
+	supportedEffortLevels: string[],
+	supportsFastMode: boolean,
+	/**  Listed but not selectable — org policy can restrict a model. */
+	disabled: boolean,
+};
+
+/**  The CLI's selectable model catalog. */
+export type ClaudeProbe = {
+	/**
+	 *  Empty only if the CLI answered with an empty catalog; a probe that could
+	 *  not run at all is an `Err`, so the two stay distinguishable.
+	 */
+	models: ClaudeModel[],
+};
+
 /**  Claude provider defaults. */
 export type ClaudeSettings = {
 	/**
@@ -927,11 +992,20 @@ export type ClaudeSettings = {
 	/**  Start new sessions in plan permission mode (`--permission-mode plan`). */
 	defaultPlanMode?: boolean,
 	/**
-	 *  Which model keys appear in the composer's picker. `None` shows every
-	 *  built-in model; `Some(list)` shows exactly those keys (presets plus any
-	 *  custom model ids the user added).
+	 *  Which model keys appear in the composer's picker. `None` shows the
+	 *  whole catalog (the CLI's live list when it resolves, else the built-in
+	 *  presets, minus org-disabled rows); `Some(list)` shows exactly those keys
+	 *  (presets plus any custom model ids the user added).
 	 */
 	visibleModels?: string[] | null,
+	/**
+	 *  Model keys the picker had already offered the last time it was open —
+	 *  the watermark that lets a new model be added to a CURATED
+	 *  [`Self::visible_models`] without resurrecting one the user removed on
+	 *  purpose. `None` on an install that predates the check; the frontend then
+	 *  seeds it from a frozen snapshot of the pre-catalog preset list.
+	 */
+	seenModelKeys?: string[] | null,
 	/**
 	 *  How `claude` authenticates: `"cli"` (subscription/login, the default and
 	 *  historical behaviour — the spawned process inherits the user's env and

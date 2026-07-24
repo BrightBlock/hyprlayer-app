@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 use tauri_specta::Event;
 
+use hyprlayer_core::claude::{self, ClaudeProbe};
 use hyprlayer_core::codex::{self, CodexProbe};
 use hyprlayer_core::opencode::config as oc;
 use hyprlayer_core::process::binaries::BinaryKind;
@@ -361,6 +362,30 @@ pub async fn claude_auth_status(state: State<'_, AppState>) -> CmdResult<ClaudeA
         org,
         account,
     })
+}
+
+/// The model catalog the `claude` CLI's own `/model` picker offers, read with a
+/// one-shot `list_models` control request.
+///
+/// Authoritative for what this install can run — provider, settings cascade, and
+/// org policy are already applied — but NARROWER than what `--model` accepts:
+/// legacy ids are absent from it yet still launch. The composer merges these
+/// rows over its static table rather than replacing it.
+///
+/// A missing CLI is a benign empty catalog (the composer falls back to the static
+/// table); a probe that ran and failed errors, so a transient failure can't be
+/// cached as "this install has no models".
+#[tauri::command]
+#[specta::specta]
+pub async fn claude_probe(state: State<'_, AppState>) -> CmdResult<ClaudeProbe> {
+    let Some(bin) = state.binaries.resolve(BinaryKind::Claude).await else {
+        return Ok(ClaudeProbe::default());
+    };
+    let path = state.binaries.augmented_path().await;
+    let env = crate::commands::claude_auth_env(&state.settings.get().await.providers.claude);
+    claude::probe::probe(&bin, &path, &claude::probe::neutral_cwd(), &env)
+        .await
+        .map_err(Into::into)
 }
 
 /* ------------------------------- codex --------------------------------- */

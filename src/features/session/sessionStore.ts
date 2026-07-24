@@ -27,6 +27,7 @@ import { useShallow } from "zustand/shallow";
 import {
   commands,
   type Bootstrap,
+  type ClaudeProbe,
   type Harness,
   type PermissionMode,
   type Stage,
@@ -60,6 +61,7 @@ import {
   newChatLaunchArgs,
   type ActionAgentDefaults,
 } from "@/lib/domain/harnessing";
+import { claudeModels, type ModelOption } from "@/lib/domain/models";
 import {
   bindSessionToShell,
   openCommitTab,
@@ -969,6 +971,12 @@ function commitShipDefaults(): ActionAgentDefaults {
   return actionAgentDefaults(queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings);
 }
 
+/** The Claude catalog as the composer would see it: the cached probe when one
+ *  has resolved (any mounted composer fetches it), else the static presets. */
+function claudeCatalogSnapshot(): ModelOption[] {
+  return claudeModels(queryClient.getQueryData<ClaudeProbe>(["claude-probe"])?.models);
+}
+
 /** The effective Commit body for a FOLLOW-UP run in a live commit tab: the
  *  Settings → Prompts override with its `{{variables}}` resolved from the
  *  worktree, else the stock `/commit`. Session STARTS get the same treatment
@@ -1055,7 +1063,7 @@ export async function runPromptTextInWorkstream(
       input: text,
       // Launch on what pressing Enter in that tab would use: the reused tab's
       // own composer picks, else the configured new-chat defaults.
-      ...newChatLaunchArgs(settings, reuseShell ? active : null),
+      ...newChatLaunchArgs(settings, reuseShell ? active : null, claudeCatalogSnapshot()),
       promptName: title,
     });
     if (reuseShell) {
@@ -1093,7 +1101,7 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
     workstreamId,
     stage: "commit",
     input: "",
-    ...actionLaunchArgs(defaults),
+    ...actionLaunchArgs(defaults, claudeCatalogSnapshot()),
   });
   openCommitTab(workstreamId, session.id, defaults);
 }
@@ -1121,7 +1129,7 @@ export async function shipWorkstream(workstreamId: string): Promise<void> {
     workstreamId,
     stage: "ship",
     input: "",
-    ...actionLaunchArgs(defaults),
+    ...actionLaunchArgs(defaults, claudeCatalogSnapshot()),
   });
   openShipTab(workstreamId, session.id, defaults);
 }
@@ -1163,7 +1171,7 @@ export async function addressPrFeedback(
     workstreamId,
     stage: "revise",
     input: instruction,
-    ...actionLaunchArgs(defaults),
+    ...actionLaunchArgs(defaults, claudeCatalogSnapshot()),
   });
   openShipTab(workstreamId, session.id, defaults);
 }

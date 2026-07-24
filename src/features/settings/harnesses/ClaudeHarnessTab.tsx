@@ -5,16 +5,16 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import type { AppSettings, BinaryStatus, ClaudeSettings } from "@/lib/bindings";
 import {
   useClaudeAuthStatus,
+  useClaudeProbe,
   useEditorTargets,
   useSetAppSettings,
 } from "@/lib/queries";
 import {
-  ALL_MODEL_KEYS,
-  ALL_MODEL_KEY_SET,
   DEFAULT_EFFORT_KEY,
   DEFAULT_MODEL_KEY,
   EFFORTS,
-  MODELS,
+  claudeModels,
+  knownModelKeys,
   modelOption,
   normalizeVisibleModelKeys,
 } from "@/lib/domain/models";
@@ -50,6 +50,9 @@ export function ClaudeHarnessTab({
   const providers = settings.providers ?? {};
   const claude: ClaudeSettings = providers.claude ?? {};
   const save = useSetAppSettings();
+  // Same catalog the composer offers, so the defaults can't name a model the
+  // picker doesn't list.
+  const catalog = claudeModels(useClaudeProbe().data?.models);
 
   function patchClaude(next: Partial<ClaudeSettings>) {
     save.mutate({
@@ -127,8 +130,8 @@ export function ClaudeHarnessTab({
                   onChange={(e) => patchClaude({ defaultModel: e.target.value })}
                   className="w-36"
                 >
-                  {MODELS.map((m) => (
-                    <option key={m.key} value={m.key}>
+                  {catalog.map((m) => (
+                    <option key={m.key} value={m.key} disabled={m.disabled}>
                       {m.label}
                       {m.hint ? ` (${m.hint})` : ""}
                     </option>
@@ -162,8 +165,8 @@ export function ClaudeHarnessTab({
                   onChange={(e) => patchClaude({ commitModel: e.target.value })}
                   className="w-36"
                 >
-                  {MODELS.map((m) => (
-                    <option key={m.key} value={m.key}>
+                  {catalog.map((m) => (
+                    <option key={m.key} value={m.key} disabled={m.disabled}>
                       {m.label}
                       {m.hint ? ` (${m.hint})` : ""}
                     </option>
@@ -464,13 +467,22 @@ function VisibleModelsCard({
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  // The CLI's live catalog, plus the legacy pins it no longer lists; the static
+  // table stands in until the probe resolves (or if it can't run). Org-disabled
+  // rows resolve (a curated list can already name one) but aren't offered.
+  const catalog = claudeModels(useClaudeProbe().data?.models);
+  const catalogKeys = catalog.filter((m) => !m.disabled).map((m) => m.key);
+  // "Custom" means a user-typed id — a preset the catalog happens not to carry
+  // is still one of ours, so `knownModelKeys` (not the catalog) draws that line.
+  const known = new Set(knownModelKeys(catalog));
+
   const visible = claude.visibleModels ?? null;
-  const explicit = visible ?? ALL_MODEL_KEYS;
-  const customKeys = (visible ?? []).filter((k) => !ALL_MODEL_KEY_SET.has(k));
-  const shown = explicit.map(modelOption);
+  const explicit = visible ?? catalogKeys;
+  const customKeys = (visible ?? []).filter((k) => !known.has(k));
+  const shown = explicit.map((k) => modelOption(k, catalog));
 
   function setVisible(next: string[]) {
-    patchClaude({ visibleModels: normalizeVisibleModelKeys(next) });
+    patchClaude({ visibleModels: normalizeVisibleModelKeys(next, catalog) });
   }
 
   return (
@@ -511,9 +523,19 @@ function VisibleModelsCard({
                 <span className="text-sm text-ink">
                   {m.label}
                   {m.hint ? ` ${m.hint}` : ""}
-                  {!ALL_MODEL_KEY_SET.has(m.key) && (
+                  {!known.has(m.key) && (
                     <span className="ml-1.5 align-middle">
                       <Badge tone="dim">custom</Badge>
+                    </span>
+                  )}
+                  {m.unlisted && (
+                    <span className="ml-1.5 align-middle">
+                      <Badge tone="dim">unlisted</Badge>
+                    </span>
+                  )}
+                  {m.disabled && (
+                    <span className="ml-1.5 align-middle">
+                      <Badge tone="warn">disabled by org policy</Badge>
                     </span>
                   )}
                 </span>
@@ -541,13 +563,32 @@ function VisibleModelsCard({
         searchPlaceholder="Filter Claude Code models"
         groups={[
           {
-            key: "presets",
-            models: MODELS.map((m) => ({
-              id: m.key,
-              name: m.hint ? `${m.label} ${m.hint}` : m.label,
-              detail: m.flag ?? m.key,
-            })),
+            key: "listed",
+            models: catalog
+              .filter((m) => !m.unlisted && !m.disabled)
+              .map((m) => ({
+                id: m.key,
+                name: m.hint ? `${m.label} ${m.hint}` : m.label,
+                detail: m.flag ?? m.key,
+              })),
           },
+          // Older ids the CLI's catalog doesn't list. `--model` still takes them,
+          // but nothing can confirm they run until the first API call.
+          ...(catalog.some((m) => m.unlisted)
+            ? [
+                {
+                  key: "unlisted",
+                  label: "Not listed by the CLI",
+                  models: catalog
+                    .filter((m) => m.unlisted)
+                    .map((m) => ({
+                      id: m.key,
+                      name: m.hint ? `${m.label} ${m.hint}` : m.label,
+                      detail: m.flag ?? m.key,
+                    })),
+                },
+              ]
+            : []),
           ...(customKeys.length > 0
             ? [
                 {
@@ -561,14 +602,14 @@ function VisibleModelsCard({
         // Claude's `--model` accepts any alias or dated id, so the picker doubles
         // as the way to add one the built-in list doesn't carry.
         addCustom={{ placeholder: "Add a model ID (e.g. claude-opus-4-7-20260115)" }}
-        // Eleven presets make all/none worth a click; the other harnesses have
+        // A dozen-odd rows make all/none worth a click; the other harnesses have
         // far longer catalogs where "select all" isn't a sensible action.
         bulkActions={(apply) => (
           <>
             <button
               type="button"
               className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
-              onClick={() => apply([...ALL_MODEL_KEYS, ...customKeys])}
+              onClick={() => apply([...catalogKeys, ...customKeys])}
             >
               All
             </button>

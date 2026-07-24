@@ -148,6 +148,44 @@ pub async fn set_app_settings(
     Ok(state.settings.get().await)
 }
 
+/// Fold newly-offered Claude models into a CURATED picker list, and record what
+/// the catalog offered this time.
+///
+/// Without this, a user who ever curated Settings → Models never sees a model
+/// Anthropic ships later — their stored list is an allowlist frozen at the day
+/// they edited it, and the only cure is "Reset to default", which also undoes
+/// their removals. `add` is strictly additive and `seen` is the watermark that
+/// keeps it additive: a model the user deliberately removed is in `seen`, so it
+/// is never re-added, while a model that simply didn't exist then is not.
+///
+/// Deliberately a narrow command rather than a `set_app_settings` round-trip:
+/// that one replaces the whole object, so a second app instance writing
+/// concurrently would lose the other's edits (two dev builds share one
+/// `settings.json`). This mutates the two fields under the store's lock.
+#[tauri::command]
+#[specta::specta]
+pub async fn claude_sync_models(
+    state: State<'_, AppState>,
+    add: Vec<String>,
+    seen: Vec<String>,
+) -> CmdResult<AppSettings> {
+    state
+        .settings
+        .update(|s| {
+            let claude = &mut s.providers.claude;
+            // `None` means "show everything" — already current, nothing to add.
+            if let Some(visible) = claude.visible_models.as_mut() {
+                for key in &add {
+                    if !visible.contains(key) {
+                        visible.push(key.clone());
+                    }
+                }
+            }
+            claude.seen_model_keys = Some(seen);
+        })
+        .await
+}
+
 /// Installed editors/terminals plus the OS file manager, for the "Open in…"
 /// menu. Pure filesystem probing (no child processes), so it's safe to call on
 /// every menu open; the frontend caches it anyway.

@@ -39,7 +39,14 @@ import { eventToChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { basename } from "@/lib/path";
 import { IS_MACOS } from "@/lib/platform";
-import { useBootstrap, useCodexProbe, useOpencodeCatalog, useWorkstreamSessions } from "@/lib/queries";
+import {
+  useBootstrap,
+  useClaudeProbe,
+  useCodexProbe,
+  useOpencodeCatalog,
+  useSyncClaudeModels,
+  useWorkstreamSessions,
+} from "@/lib/queries";
 import type { WorkstreamView } from "@/lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "@/features/workstreams/WorkstreamDocChips";
 import { PromptChips, usePinnedPrompts } from "@/features/prompts/PromptChips";
@@ -50,16 +57,18 @@ import { generateTabTitle } from "./tabTitles";
 import type { ShellTab } from "./workstreamTabs";
 import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "@/lib/domain/stages";
 import {
-  EFFORTS,
   apiContextWindow,
+  claudeModels,
   codexEfforts,
   effectiveEffort,
+  effortsForModel,
   modelOption,
   modelSupportsUltracode,
   resolveCodexEffort,
   resolveCodexModelIds,
   resumeModelFlag,
   visibleModels,
+  type ModelOption,
 } from "@/lib/domain/models";
 import { useModelWindowMap } from "./modelWindowsStore";
 import {
@@ -196,6 +205,10 @@ type MenuGroup = {
   icon?: ReactNode;
   items: MenuItem[];
   disabled?: boolean;
+  /** Rows folded behind a "more" row, revealed on click — the Claude group hides
+   *  the older models the CLI's catalog no longer lists. Auto-expanded when the
+   *  active selection lives in here, so the current pick is never hidden. */
+  more?: { label: string; items: MenuItem[] };
 };
 
 /**
@@ -248,6 +261,9 @@ function ComposerMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Which groups have their `more` tail revealed. Reset when the menu closes so
+  // it reopens in the tidy state.
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
   const [text, setText] = useState("");
   // Every selectable row across flat items and groups (disabled group/row excluded).
   const allItems = groups
@@ -264,6 +280,7 @@ function ComposerMenu({
     setOpen(false);
     setEditing(false);
     setText("");
+    setExpandedGroups(new Set());
   };
   const beginCustom = () => {
     setText(customActive ? activeKey : "");
@@ -319,53 +336,81 @@ function ComposerMenu({
           <div className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[60vh] min-w-[190px] max-w-[22rem] overflow-y-auto overflow-x-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
             {groups ? (
               <>
-                {groups.map((g, gi) => (
-                  <div key={g.key}>
-                    {gi > 0 && <div className="my-1 border-t border-edge" />}
-                    <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-medium text-ink-dim/70">
-                      {g.icon && <span className="shrink-0">{g.icon}</span>}
-                      <span>{g.label}</span>
+                {groups.map((g, gi) => {
+                  const renderItem = (it: MenuItem) =>
+                    g.disabled || it.disabled ? (
+                      <div
+                        key={it.key}
+                        title={
+                          it.disabled && !g.disabled
+                            ? "Locked to this session's provider — start a new agent to use a different provider"
+                            : undefined
+                        }
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim/40"
+                      >
+                        {it.icon && <span className="shrink-0">{it.icon}</span>}
+                        <span className="min-w-0 truncate font-medium">{it.label}</span>
+                        {it.hint && <span className="shrink-0 text-[10px] text-ink-dim/70">{it.hint}</span>}
+                        {g.disabled && (
+                          <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        key={it.key}
+                        type="button"
+                        onClick={() => {
+                          onSelect(it.key);
+                          close();
+                        }}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
+                          it.key === activeKey ? "text-ink" : "text-ink-dim"
+                        }`}
+                      >
+                        {it.icon && <span className="shrink-0">{it.icon}</span>}
+                        <span className="min-w-0 truncate font-medium">{it.label}</span>
+                        {it.hint && <span className="shrink-0 text-ink-dim">{it.hint}</span>}
+                        {it.key === activeKey && (
+                          <span className="ml-auto shrink-0 text-[11px] text-ink">✓</span>
+                        )}
+                      </button>
+                    );
+                  const showMore = g.more && (expandedGroups.has(g.key) || g.more.items.some((it) => it.key === activeKey));
+                  return (
+                    <div key={g.key}>
+                      {gi > 0 && <div className="my-1 border-t border-edge" />}
+                      <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-medium text-ink-dim/70">
+                        {g.icon && <span className="shrink-0">{g.icon}</span>}
+                        <span>{g.label}</span>
+                      </div>
+                      {g.items.map(renderItem)}
+                      {g.more && g.more.items.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedGroups((prev) => {
+                                const next = new Set(prev);
+                                if (!next.delete(g.key)) next.add(g.key);
+                                return next;
+                              })
+                            }
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim hover:bg-edge/50"
+                          >
+                            <span className="shrink-0">
+                              {showMore ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
+                            </span>
+                            <span className="min-w-0 truncate font-medium">{g.more.label}</span>
+                            <span className="ml-auto shrink-0 text-[10px] text-ink-dim/70">
+                              {g.more.items.length}
+                            </span>
+                          </button>
+                          {showMore && g.more.items.map(renderItem)}
+                        </>
+                      )}
                     </div>
-                    {g.items.map((it) =>
-                      g.disabled || it.disabled ? (
-                        <div
-                          key={it.key}
-                          title={
-                            it.disabled && !g.disabled
-                              ? "Locked to this session's provider — start a new agent to use a different provider"
-                              : undefined
-                          }
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim/40"
-                        >
-                          {it.icon && <span className="shrink-0">{it.icon}</span>}
-                          <span className="min-w-0 truncate font-medium">{it.label}</span>
-                          {g.disabled && (
-                            <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
-                          )}
-                        </div>
-                      ) : (
-                        <button
-                          key={it.key}
-                          type="button"
-                          onClick={() => {
-                            onSelect(it.key);
-                            close();
-                          }}
-                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
-                            it.key === activeKey ? "text-ink" : "text-ink-dim"
-                          }`}
-                        >
-                          {it.icon && <span className="shrink-0">{it.icon}</span>}
-                          <span className="min-w-0 truncate font-medium">{it.label}</span>
-                          {it.hint && <span className="shrink-0 text-ink-dim">{it.hint}</span>}
-                          {it.key === activeKey && (
-                            <span className="ml-auto shrink-0 text-[11px] text-ink">✓</span>
-                          )}
-                        </button>
-                      ),
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
                 {footer && (
                   <>
                     <div className="my-1 border-t border-edge" />
@@ -1108,8 +1153,24 @@ export function SessionChat({
   // in Settings → Models → Claude, then to claude's own defaults. `defaultPlanMode`
   // seeds the permission posture to "plan" for fresh tabs.
   const claudeDefaults = useBootstrap().data?.settings.providers?.claude;
-  const model = modelOption(shell.model ?? claudeDefaults?.defaultModel ?? undefined);
+  // The CLI's own catalog is the authority on which models this install can run
+  // (and each one's effort tiers); the static table is the fallback while it
+  // loads or if the probe can't run. See `claudeModels`.
+  const claudeProbe = useClaudeProbe();
+  const claudeCatalog = claudeModels(claudeProbe.data?.models);
+  // Fold anything newly on offer into a curated picker list, so a model shipped
+  // after the user last edited Settings → Models still shows up. Gated on the
+  // probe settling so the watermark never latches off the static fallback; a
+  // paused fetch (offline) counts as settled-static so new static presets still
+  // reach curated lists, as they did before the probe existed.
+  useSyncClaudeModels(
+    claudeCatalog,
+    !claudeProbe.isPending || claudeProbe.fetchStatus === "paused",
+    Boolean(claudeProbe.data?.models.length),
+  );
+  const model = modelOption(shell.model ?? claudeDefaults?.defaultModel ?? undefined, claudeCatalog);
   const effort = effectiveEffort(shell.effort ?? claudeDefaults?.defaultEffort ?? undefined, model);
+  const claudeEffortItems = effortsForModel(model);
   // Live per-model context windows from the Models API (fetched once, reused);
   // empty until it resolves, or if it can't (offline/logged out) — the static
   // `model.contextWindow` table then covers the meter.
@@ -1117,7 +1178,7 @@ export function SessionChat({
   const permissionMode = permissionModeOption(
     shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
   );
-  const modelItems = visibleModels(claudeDefaults?.visibleModels);
+  const modelItems = visibleModels(claudeDefaults?.visibleModels, claudeCatalog);
 
   // The harness is implied by which model you pick: the model menu groups models
   // by harness (Claude / Codex / OpenCode), so selecting one sets BOTH the model
@@ -1187,8 +1248,9 @@ export function SessionChat({
   );
   const startModelFlag = usingOpencode ? ocModel : usingCodex ? codexModel : model.flag;
   // Each harness gets its OWN effort ladder: Codex's values differ from Claude's,
-  // and OpenCode has no effort control at all (the driver ignores it).
-  const startEffort = usingCodex ? codexEffort.key : usingOpencode ? null : effort.key;
+  // and OpenCode has no effort control at all (the driver ignores it). A null
+  // Claude effort means the model takes no --effort (Haiku) — omit the flag.
+  const startEffort = usingCodex ? codexEffort.key : usingOpencode ? null : (effort?.key ?? null);
   // Friendly OpenCode model names from the models.dev catalog — the raw ids are
   // long `provider/model` paths. Only fetched when this tab has OpenCode models
   // to label; the query is cached hard and falls back to a bundled snapshot.
@@ -1211,18 +1273,28 @@ export function SessionChat({
   const lockOther = (itemProvider: string): Pick<MenuItem, "disabled"> =>
     lockedProvider !== null && itemProvider !== lockedProvider ? { disabled: true } : {};
 
+  // Org-disabled rows (a curated list can still name one) render greyed with
+  // the reason, and can't be picked into a session the CLI would refuse.
+  const claudeRow = (m: ModelOption): MenuItem => ({
+    key: `claude:${m.key}`,
+    label: m.label,
+    hint: m.disabled ? "disabled by org policy" : m.hint,
+    icon: composerMark("claude"),
+    ...(m.disabled ? { disabled: true } : lockOther("claude")),
+  });
+
   const modelGroups: MenuGroup[] = [
     {
       key: "claude",
       label: "Claude Code",
       icon: composerMark("claude"),
-      items: modelItems.map((m) => ({
-        key: `claude:${m.key}`,
-        label: m.label,
-        hint: m.hint,
-        icon: composerMark("claude"),
-        ...lockOther("claude"),
-      })),
+      // Current models up front; anything the CLI's catalog doesn't list folds
+      // behind "More models" so the older pins don't crowd the everyday picks.
+      items: modelItems.filter((m) => !m.unlisted).map(claudeRow),
+      more: {
+        label: "More models",
+        items: modelItems.filter((m) => m.unlisted).map(claudeRow),
+      },
     },
     {
       key: "codex",
@@ -1297,7 +1369,8 @@ export function SessionChat({
   // (or when detached) we just record the choice; it applies at the next spawn.
   const applyClaudeModel = async (key: string) => {
     if (key === model.key) return; // no change (re-picked the active model)
-    const next = modelOption(key);
+    const next = modelOption(key, claudeCatalog);
+    if (next.disabled) return; // org policy — the row is greyed, belt and braces
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
     if (live && session && isBusy(session)) {
       const ok = await confirm(
@@ -1312,7 +1385,7 @@ export function SessionChat({
         shell.effort ?? claudeDefaults?.defaultEffort ?? undefined,
         next,
       );
-      await applyModel(sid, resumeModelFlag(next), nextEffort.key, permissionMode.flag);
+      await applyModel(sid, resumeModelFlag(next), nextEffort?.key ?? null, permissionMode.flag);
     }
   };
 
@@ -1668,6 +1741,12 @@ export function SessionChat({
   const handleStart = async () => {
     const input = draft.trim();
     if (!canSubmit || starting) return;
+    // A stored default can name a model org policy has since disabled; the CLI
+    // would refuse it anyway, so fail here with the reason instead.
+    if (!usingOpencode && !usingCodex && model.disabled) {
+      setError(`${model.label} is disabled by org policy — pick another model.`);
+      return;
+    }
     setStarting(true);
     setError(null);
     try {
@@ -2107,12 +2186,15 @@ export function SessionChat({
                       compact={compactComposer}
                     />
                   )}
-                  {!usingOpencode && !usingCodex && (
+                  {/* Hidden entirely for a model the CLI says takes no `--effort`
+                      (Haiku): an empty tier list means "not applicable", not "we
+                      don't know". */}
+                  {!usingOpencode && !usingCodex && claudeEffortItems.length > 0 && (
                     <ComposerMenu
                       title="Reasoning effort"
                       leading={<EffortIcon size={14} />}
-                      label={effort.label}
-                      items={EFFORTS.map((e) => {
+                      label={effort?.label ?? "Default"}
+                      items={claudeEffortItems.map((e) => {
                         // Ultracode needs an xhigh-capable model; grey it out (with
                         // the reason) on any other model so it can't be picked into
                         // a session the CLI would reject.
@@ -2120,14 +2202,14 @@ export function SessionChat({
                         return {
                           key: e.key,
                           label: e.label,
-                          hint: blocked ? "needs Opus 4.7+, Sonnet 5, or Fable 5" : undefined,
+                          hint: blocked ? "needs an xhigh-capable model" : undefined,
                           disabled: blocked,
                           // Accent-tint Ultracode so it's spottable in the list and,
                           // when selected, in the composer trigger.
                           accent: e.key === "ultracode",
                         };
                       })}
-                      activeKey={effort.key}
+                      activeKey={effort?.key ?? ""}
                       onSelect={onEffortChange}
                       compact={compactComposer}
                     />

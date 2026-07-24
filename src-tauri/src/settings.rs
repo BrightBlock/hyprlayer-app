@@ -231,10 +231,17 @@ pub struct ClaudeSettings {
     pub commit_effort: Option<String>,
     /// Start new sessions in plan permission mode (`--permission-mode plan`).
     pub default_plan_mode: bool,
-    /// Which model keys appear in the composer's picker. `None` shows every
-    /// built-in model; `Some(list)` shows exactly those keys (presets plus any
-    /// custom model ids the user added).
+    /// Which model keys appear in the composer's picker. `None` shows the
+    /// whole catalog (the CLI's live list when it resolves, else the built-in
+    /// presets, minus org-disabled rows); `Some(list)` shows exactly those keys
+    /// (presets plus any custom model ids the user added).
     pub visible_models: Option<Vec<String>>,
+    /// Model keys the picker had already offered the last time it was open —
+    /// the watermark that lets a new model be added to a CURATED
+    /// [`Self::visible_models`] without resurrecting one the user removed on
+    /// purpose. `None` on an install that predates the check; the frontend then
+    /// seeds it from a frozen snapshot of the pre-catalog preset list.
+    pub seen_model_keys: Option<Vec<String>>,
 
     // --- Authentication (Settings → Harnesses → Claude Code). ---
     /// How `claude` authenticates: `"cli"` (subscription/login, the default and
