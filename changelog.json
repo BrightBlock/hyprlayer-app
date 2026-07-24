@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.5.4",
+      "date": "2026-07-24",
+      "summary": "Plain local folders as projects, and a live Claude model catalog.",
+      "notes": [
+        "Plain local folders can now be added as projects, without needing to be a git repo — git, PR, and thoughts features stay hidden for these.",
+        "The model picker now syncs live from the claude CLI's own model list, so new models show up automatically and org-disabled models are clearly marked instead of silently failing.",
+        "Fixed item rows in the sidebar being misaligned with their project header."
+      ]
+    },
+    {
       "version": "0.5.3",
       "date": "2026-07-24",
       "summary": "Stop mislabeling app-initiated kills as \"Session ended\".",
