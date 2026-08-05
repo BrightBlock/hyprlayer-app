@@ -4,9 +4,11 @@
 # is no CI release — everything below is published from here, end to end:
 #   1. build, Developer ID–sign + notarize, and ed25519-sign the arm64 .dmg and
 #      updater .app.tar.gz (locally)
-#   2. build the Windows x64 NSIS installer on a remote Windows builder over SSH
-#      (nexus-win by default), copy it back, and ed25519-sign it HERE — so the
-#      signing key never leaves this Mac and the builder needs no secrets
+#   2. build the Windows x64 NSIS installer on a Windows builder — either nexus-win
+#      over SSH (default) or a GitHub Actions windows-latest runner as a fallback
+#      (HYPRLAYER_WIN_BUILDER=actions, see .github/workflows/windows-build.yml) —
+#      copy it back, and ed25519-sign it HERE — so the signing key never leaves
+#      this Mac and neither builder needs any secrets
 #   3. create the GitHub Release on the PUBLIC releases repo (binaries only —
 #      never the source) and upload both platforms' assets
 #   4. write the signed updater manifest (latest.json — darwin-aarch64 +
@@ -41,7 +43,9 @@
 #     Override the identity / key location via APPLE_SIGNING_IDENTITY and
 #     APPLE_API_KEY_PATH (defaults are wired in the config block below).
 #   * (unless --mac-only) SSH access to the Windows builder. Override the host
-#     with HYPRLAYER_WIN_SSH_HOST (default: nexus-win).
+#     with HYPRLAYER_WIN_SSH_HOST (default: nexus-win). Or set
+#     HYPRLAYER_WIN_BUILDER=actions to build on GitHub Actions instead (needs
+#     no SSH — just `gh` auth with push access, already required above).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -61,9 +65,14 @@ APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: JON 
 APPLE_API_KEY="${APPLE_API_KEY:-JUMDZ7DQF5}"
 APPLE_API_ISSUER="${APPLE_API_ISSUER:-4724564e-817f-4077-8b88-b4411b7978e9}"
 APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH:-$HOME/.tauri/AuthKey_JUMDZ7DQF5.p8}"
-# Remote Windows builder, reached over SSH (a Tailscale MagicDNS name by default).
+# Windows builder backend: "ssh" (nexus-win, default) or "actions" (GitHub
+# Actions windows-latest fallback — see .github/workflows/windows-build.yml).
+# Both are headless compile boxes only; signing/publishing always stay local.
+WIN_BUILDER="${HYPRLAYER_WIN_BUILDER:-ssh}"
 WIN_SSH_HOST="${HYPRLAYER_WIN_SSH_HOST:-nexus-win}"
 WIN_HELPER="scripts/release-win-remote.ps1"
+WIN_ACTIONS_REPO="${HYPRLAYER_WIN_ACTIONS_REPO:-BrightBlock/hyprlayer-app}"
+WIN_ACTIONS_WORKFLOW="windows-build.yml"
 # Where the copied-down + signed Windows installer lands (under target/, which is
 # gitignored — mirrors where the mac bundle lives).
 WIN_OUT="target/windows-release"
@@ -94,7 +103,7 @@ trap cleanup EXIT
 
 # ─── preflight ──────────────────────────────────────────────────────
 REQUIRED_TOOLS=(gh cargo pnpm shasum node rustup curl)
-[[ "$INCLUDE_WINDOWS" == "1" ]] && REQUIRED_TOOLS+=(ssh scp git)
+[[ "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" ]] && REQUIRED_TOOLS+=(ssh scp git)
 for tool in "${REQUIRED_TOOLS[@]}"; do
   command -v "$tool" >/dev/null || die "missing required tool: $tool"
 done
@@ -125,10 +134,20 @@ rustup target list --installed 2>/dev/null | grep -q '^aarch64-apple-darwin$' \
 # Windows builder reachability — fail now, before any build, with a clear path
 # out (so we never silently publish a mac-only manifest when both were intended).
 if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
-  [[ -f "$WIN_HELPER" ]] || die "missing $WIN_HELPER"
-  say "Checking Windows builder ($WIN_SSH_HOST) is reachable…"
-  ssh -o BatchMode=yes -o ConnectTimeout=10 "$WIN_SSH_HOST" "echo ok" >/dev/null 2>&1 \
-    || die "Windows builder '$WIN_SSH_HOST' unreachable over SSH — wake it / check Tailscale, set HYPRLAYER_WIN_SSH_HOST, or run with --mac-only"
+  case "$WIN_BUILDER" in
+    ssh)
+      [[ -f "$WIN_HELPER" ]] || die "missing $WIN_HELPER"
+      say "Checking Windows builder ($WIN_SSH_HOST) is reachable…"
+      ssh -o BatchMode=yes -o ConnectTimeout=10 "$WIN_SSH_HOST" "echo ok" >/dev/null 2>&1 \
+        || die "Windows builder '$WIN_SSH_HOST' unreachable over SSH — wake it / check Tailscale, set HYPRLAYER_WIN_SSH_HOST, run with HYPRLAYER_WIN_BUILDER=actions, or run with --mac-only"
+      ;;
+    actions)
+      say "Checking GitHub Actions Windows builder ($WIN_ACTIONS_REPO) is reachable…"
+      gh workflow view "$WIN_ACTIONS_WORKFLOW" --repo "$WIN_ACTIONS_REPO" >/dev/null 2>&1 \
+        || die "workflow $WIN_ACTIONS_WORKFLOW not found on $WIN_ACTIONS_REPO — push .github/workflows/windows-build.yml to main first"
+      ;;
+    *) die "unknown HYPRLAYER_WIN_BUILDER '$WIN_BUILDER' (expected ssh or actions)" ;;
+  esac
 fi
 
 PLATFORM_DESC="macOS arm64"
@@ -145,14 +164,40 @@ TMP="$(mktemp -d)"; TMPDIRS+=("$TMP")
 WIN_PID=""
 WIN_LOG="$TMP/windows-build.log"
 if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
-  say "Shipping $TAG source to $WIN_SSH_HOST and starting NSIS build (background)…"
-  git archive --format=tar.gz -o "$TMP/hyprlayer-src.tgz" "$TAG"
-  scp -q "$TMP/hyprlayer-src.tgz" "$WIN_SSH_HOST:hyprlayer-src.tgz"
-  scp -q "$WIN_HELPER" "$WIN_SSH_HOST:release-win-remote.ps1"
-  ssh "$WIN_SSH_HOST" \
-    "powershell -NoProfile -ExecutionPolicy Bypass -File %USERPROFILE%\\release-win-remote.ps1" \
-    >"$WIN_LOG" 2>&1 &
-  WIN_PID=$!
+  case "$WIN_BUILDER" in
+    ssh)
+      say "Shipping $TAG source to $WIN_SSH_HOST and starting NSIS build (background)…"
+      git archive --format=tar.gz -o "$TMP/hyprlayer-src.tgz" "$TAG"
+      scp -q "$TMP/hyprlayer-src.tgz" "$WIN_SSH_HOST:hyprlayer-src.tgz"
+      scp -q "$WIN_HELPER" "$WIN_SSH_HOST:release-win-remote.ps1"
+      ssh "$WIN_SSH_HOST" \
+        "powershell -NoProfile -ExecutionPolicy Bypass -File %USERPROFILE%\\release-win-remote.ps1" \
+        >"$WIN_LOG" 2>&1 &
+      WIN_PID=$!
+      ;;
+    actions)
+      say "Triggering GitHub Actions Windows build for $TAG (background)…"
+      (
+        set -euo pipefail
+        TRIGGERED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        gh workflow run "$WIN_ACTIONS_WORKFLOW" --repo "$WIN_ACTIONS_REPO" -f "tag=$TAG"
+        # workflow_dispatch doesn't hand back a run id — poll for the run it just
+        # created (most recent workflow_dispatch run at/after the trigger time).
+        RUN_ID=""
+        for _ in $(seq 1 15); do
+          sleep 4
+          RUN_ID="$(gh run list --repo "$WIN_ACTIONS_REPO" --workflow "$WIN_ACTIONS_WORKFLOW" \
+            --limit 5 --json databaseId,createdAt,event \
+            -q "[.[] | select(.event == \"workflow_dispatch\" and .createdAt >= \"$TRIGGERED_AT\")] | sort_by(.createdAt) | .[0].databaseId")"
+          [[ -n "$RUN_ID" ]] && break
+        done
+        [[ -n "$RUN_ID" ]] || { echo "could not find the triggered Actions run"; exit 1; }
+        echo "RUN_ID=$RUN_ID"
+        gh run watch "$RUN_ID" --repo "$WIN_ACTIONS_REPO" --exit-status
+      ) >"$WIN_LOG" 2>&1 &
+      WIN_PID=$!
+      ;;
+  esac
 fi
 
 # ─── 1b. build + sign mac arm64 ─────────────────────────────────────
@@ -184,21 +229,41 @@ ok "Built $DMG_NAME (sha256 $DMG_SHA)"
 # (the key never leaves this Mac). A Windows failure aborts before any push.
 SETUP_NAME=""; WIN_SIG=""
 if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
-  say "Waiting for the Windows build on ${WIN_SSH_HOST}…"
-  if ! wait "$WIN_PID"; then
-    echo "── Windows build log ─────────────────────────────────────"
-    cat "$WIN_LOG"
-    echo "──────────────────────────────────────────────────────────"
-    die "Windows build failed on $WIN_SSH_HOST (log above)"
-  fi
-  # The helper prints `SETUP_EXE=<full windows path>` as its last line.
-  SETUP_REMOTE="$(grep -E '^SETUP_EXE=' "$WIN_LOG" | tail -n1 | sed 's/^SETUP_EXE=//' | tr -d '\r')"
-  [[ -n "$SETUP_REMOTE" ]] || { cat "$WIN_LOG"; die "no SETUP_EXE line in Windows build output"; }
-  SETUP_REMOTE_FWD="${SETUP_REMOTE//\\//}"   # backslashes → slashes for scp + basename
-  SETUP_NAME="$(basename "$SETUP_REMOTE_FWD")"
-  mkdir -p "$WIN_OUT"
-  scp -q "$WIN_SSH_HOST:${SETUP_REMOTE_FWD}" "$WIN_OUT/$SETUP_NAME" \
-    || die "failed to copy $SETUP_NAME down from $WIN_SSH_HOST"
+  case "$WIN_BUILDER" in
+    ssh)
+      say "Waiting for the Windows build on ${WIN_SSH_HOST}…"
+      if ! wait "$WIN_PID"; then
+        echo "── Windows build log ─────────────────────────────────────"
+        cat "$WIN_LOG"
+        echo "──────────────────────────────────────────────────────────"
+        die "Windows build failed on $WIN_SSH_HOST (log above)"
+      fi
+      # The helper prints `SETUP_EXE=<full windows path>` as its last line.
+      SETUP_REMOTE="$(grep -E '^SETUP_EXE=' "$WIN_LOG" | tail -n1 | sed 's/^SETUP_EXE=//' | tr -d '\r')"
+      [[ -n "$SETUP_REMOTE" ]] || { cat "$WIN_LOG"; die "no SETUP_EXE line in Windows build output"; }
+      SETUP_REMOTE_FWD="${SETUP_REMOTE//\\//}"   # backslashes → slashes for scp + basename
+      SETUP_NAME="$(basename "$SETUP_REMOTE_FWD")"
+      mkdir -p "$WIN_OUT"
+      scp -q "$WIN_SSH_HOST:${SETUP_REMOTE_FWD}" "$WIN_OUT/$SETUP_NAME" \
+        || die "failed to copy $SETUP_NAME down from $WIN_SSH_HOST"
+      ;;
+    actions)
+      say "Waiting for the GitHub Actions Windows build (${WIN_ACTIONS_REPO})…"
+      if ! wait "$WIN_PID"; then
+        echo "── Windows build log ─────────────────────────────────────"
+        cat "$WIN_LOG"
+        echo "──────────────────────────────────────────────────────────"
+        die "Windows build failed on GitHub Actions (log above)"
+      fi
+      RUN_ID="$(grep -E '^RUN_ID=' "$WIN_LOG" | tail -n1 | sed 's/^RUN_ID=//' | tr -d '\r')"
+      [[ -n "$RUN_ID" ]] || { cat "$WIN_LOG"; die "no RUN_ID line in Actions trigger output"; }
+      mkdir -p "$WIN_OUT"
+      gh run download "$RUN_ID" --repo "$WIN_ACTIONS_REPO" -n windows-installer -D "$WIN_OUT" \
+        || die "failed to download windows-installer artifact from run $RUN_ID"
+      SETUP_NAME="$(basename "$(ls "$WIN_OUT"/*-setup.exe | head -n1)")"
+      [[ -n "$SETUP_NAME" ]] || die "no *-setup.exe found in downloaded artifact"
+      ;;
+  esac
   say "Signing $SETUP_NAME on the Mac (key stays local)…"
   TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_PATH")" \
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
