@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.5.5",
+      "date": "2026-08-05",
+      "summary": "Custom prompts can now take {{input}} arguments via /slug.",
+      "notes": [
+        "Custom prompts can define {{input}} / {{input:label}} slots filled at run time — typing a prompt's /slug in the composer holds the send until the argument is typed, instead of baking a fixed body.",
+        "The composer's autocomplete now offers prompt slugs alongside claude's real commands, deferring to a real command on name collision."
+      ]
+    },
+    {
       "version": "0.5.4",
       "date": "2026-07-24",
       "summary": "Plain local folders as projects, and a live Claude model catalog.",
