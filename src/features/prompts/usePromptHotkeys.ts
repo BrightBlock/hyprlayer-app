@@ -16,7 +16,7 @@ import { IS_MACOS } from "@/lib/platform";
 import { eventToChord, hasPrimaryModifier, normalizeChord } from "@/lib/keybindings/chord";
 import { chordToCommand, type Overrides } from "@/lib/keybindings/resolve";
 import { isEditableTarget } from "@/lib/keybindings/useKeybindings";
-import { customPrompts } from "./prompts";
+import { customPrompts, isRunnablePrompt } from "./prompts";
 import { runCustomPrompt } from "./runPrompt";
 
 const EMPTY_OVERRIDES: Overrides = {};
@@ -39,6 +39,9 @@ export function usePromptHotkeys(activeWorkstream: WorkstreamView | null): void 
       if (!hasPrimaryModifier(chord) && isEditableTarget(e.target)) return;
       const prompt = prompts.find((p) => p.chord && normalizeChord(p.chord) === chord);
       if (!prompt || !activeWorkstream) return;
+      // An empty body for this project sends nothing — leave the chord to the
+      // browser rather than swallowing it for a no-op run.
+      if (!isRunnablePrompt(prompt, activeWorkstream.item.projectPath)) return;
       e.preventDefault();
       void runCustomPrompt(activeWorkstream, prompt);
     };

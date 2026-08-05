@@ -29,9 +29,11 @@ import { conflictsFor, effectiveChord, type Overrides } from "@/lib/keybindings/
 import { isReserved } from "@/lib/keybindings/reserved";
 import {
   BUILTIN_PROMPTS,
+  PROMPT_INPUT_TOKEN,
   PROMPT_VARS,
   effectiveBuiltinBody,
   isBuiltinModified,
+  promptSlug,
   type BuiltinPromptId,
 } from "./prompts";
 import { ExportPromptsDialog } from "./ExportPromptsDialog";
@@ -753,6 +755,14 @@ export function PromptLibrary({
                 className="max-w-60 font-medium"
               />
             )}
+            {selPrompt && promptSlug(selName) && (
+              <code
+                className="shrink-0 rounded border border-edge bg-panel-2 px-1.5 py-0.5 text-[11px] text-ink-dim"
+                title="Type this in a session composer to run the prompt. Text after it fills {{input}}."
+              >
+                /{promptSlug(selName)}
+              </code>
+            )}
             {selModified && <Badge tone="warn">Modified</Badge>}
             <div className="ml-auto flex shrink-0 items-center gap-2">
               <Button onClick={() => void exportSelected()} title="Save this prompt as a .hlprompts file">
@@ -930,7 +940,8 @@ export function PromptLibrary({
                 Insert variable
               </button>
               <span className="text-xs text-ink-dim">
-                Variables resolve from the worktree when the prompt runs.
+                Variables resolve from the worktree; <code>{"{{input}}"}</code> asks you when
+                the prompt runs.
               </span>
               {varPickerOpen && (
                 <>
@@ -956,6 +967,23 @@ export function PromptLibrary({
                         </span>
                       </button>
                     ))}
+                    <div className="my-1 border-t border-edge/60" />
+                    <button
+                      type="button"
+                      onClick={() => insertVariable(PROMPT_INPUT_TOKEN)}
+                      className="flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left hover:bg-edge/50"
+                    >
+                      <code className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent">
+                        {PROMPT_INPUT_TOKEN}
+                      </code>
+                      <span className="min-w-0 flex-1 truncate text-xs text-ink-dim">
+                        Ask me for a value when it runs
+                      </span>
+                    </button>
+                    <p className="px-2 pb-1 pt-0.5 text-[11px] leading-relaxed text-ink-dim/80">
+                      Name the field with <code>{"{{input:which module}}"}</code>. Repeat a token
+                      to fill it once and use it twice.
+                    </p>
                   </div>
                 </>
               )}

@@ -80,6 +80,7 @@ import { toggleSearch } from "@/features/search/searchStore";
 import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
 import { ConfirmQuitDialog } from "@/features/system/ConfirmQuitDialog";
 import { PromptPalette } from "@/features/prompts/PromptPalette";
+import { PromptArgsDialog } from "@/features/prompts/PromptArgsDialog";
 import { togglePromptPalette } from "@/features/prompts/promptsStore";
 import { usePromptHotkeys } from "@/features/prompts/usePromptHotkeys";
 import {
@@ -2054,6 +2055,7 @@ export function Root() {
 
       <SearchPalette />
       <PromptPalette activeWorkstream={activeWorkstream ?? null} />
+      <PromptArgsDialog />
       <Toast />
       <FullDiskAccessNotice />
       <ConfirmQuitDialog />

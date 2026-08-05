@@ -15,6 +15,7 @@ import {
   customPrompts,
   effectiveBuiltinBody,
   effectiveCustomBody,
+  isRunnablePrompt,
   promptFirstLine,
   type BuiltinPromptId,
 } from "./prompts";
@@ -110,7 +111,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         desc: promptFirstLine(body),
         chord: p.chord ?? null,
         icon: <ZapIcon size={14} className="shrink-0 text-accent" />,
-        disabled: noWs ?? (body.trim() ? null : "This prompt has no text yet"),
+        disabled: noWs ?? (isRunnablePrompt(p, projectPath) ? null : "This prompt has no text yet"),
         run: () => {
           if (activeWorkstream) void runCustomPrompt(activeWorkstream, p);
         },

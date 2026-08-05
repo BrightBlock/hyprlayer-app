@@ -4,22 +4,17 @@ import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
 import { useBootstrap } from "@/lib/queries";
 import { ChordHint } from "@/components/ui";
 import { ZapIcon } from "@/components/icons";
-import { customPrompts, effectiveCustomBody } from "./prompts";
-import { runCustomPrompt } from "./runPrompt";
+import { customPrompts, isRunnablePrompt } from "./prompts";
 
 /**
- * The pinned prompts that should surface as composer chips for a project. An
- * empty effective body (for THIS project) would run as a silent no-op, so
- * those stay hidden — matching the palette's "no text yet" gate. Exported so
- * SessionChat can reserve the drawer strip's space only when chips will show.
+ * The pinned prompts that should surface as composer chips for a project.
+ * Exported so SessionChat can reserve the drawer strip's space only when chips
+ * will show.
  */
 export function usePinnedPrompts(projectPath: string): CustomPrompt[] {
   const settings = useBootstrap().data?.settings;
   return useMemo(
-    () =>
-      customPrompts(settings).filter(
-        (p) => p.pinned && effectiveCustomBody(p, projectPath).trim(),
-      ),
+    () => customPrompts(settings).filter((p) => p.pinned && isRunnablePrompt(p, projectPath)),
     [settings, projectPath],
   );
 }
@@ -28,18 +23,20 @@ export function usePinnedPrompts(projectPath: string): CustomPrompt[] {
  * Pinned custom prompts as one-click chips. SessionChat anchors this to the
  * composer's top edge (`absolute bottom-full right-*`) so the chips share the
  * strip the task drawer's handle occupies on the left — one line, chips right,
- * TASKS tab left — instead of stacking their own row above it. No edit
- * affordance here on purpose: the library is already reachable three ways
- * (nav rail ⚡, agent-bar ⚡, the ⌘K palette's manage row). Renders nothing
- * when no usable prompt is pinned.
+ * TASKS tab left — instead of stacking their own row above it. A chip doesn't
+ * run anything itself: it hands the prompt to the host, which fills the composer
+ * with the matching `/command` so an argument can be typed before sending. No
+ * edit affordance here on purpose — the library is already reachable three ways
+ * (nav rail ⚡, agent-bar ⚡, the ⌘K palette's manage row). Renders nothing when
+ * no usable prompt is pinned.
  */
 export function PromptChips({
   view,
-  shellId,
+  onPick,
   className,
 }: {
   view: WorkstreamView;
-  shellId: number;
+  onPick: (prompt: CustomPrompt) => void;
   /** Positioning classes from the host (e.g. the composer-anchored absolute). */
   className?: string;
 }) {
@@ -54,8 +51,8 @@ export function PromptChips({
         <button
           key={p.id}
           type="button"
-          onClick={() => void runCustomPrompt(view, p, shellId)}
-          title="Runs immediately in this session — the transcript shows a card, not the body"
+          onClick={() => onPick(p)}
+          title="Fills the composer with this prompt's /command — add an argument, then Enter"
           className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs text-ink hover:border-accent/50 hover:bg-accent/10"
         >
           <span className="shrink-0 text-accent">

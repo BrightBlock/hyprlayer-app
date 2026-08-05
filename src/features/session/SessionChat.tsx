@@ -47,9 +47,16 @@ import {
   useSyncClaudeModels,
   useWorkstreamSessions,
 } from "@/lib/queries";
-import type { WorkstreamView } from "@/lib/bindings";
+import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "@/features/workstreams/WorkstreamDocChips";
 import { PromptChips, usePinnedPrompts } from "@/features/prompts/PromptChips";
+import {
+  pendingComposerArg,
+  prefillSlashCommand,
+  promptInputLabel,
+  promptSlug,
+} from "@/features/prompts/prompts";
+import { resolveCustomPrompt, runCustomPrompt } from "@/features/prompts/runPrompt";
 import { AttachmentCards } from "./AttachmentCard";
 import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
 import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
@@ -1727,6 +1734,7 @@ export function SessionChat({
   }, [pendingFocusShellId, shell.id]);
   const autocomplete = useComposerAutocomplete({
     workstreamId,
+    projectPath: view.item.projectPath,
     value: draft,
     onChange: onDraftChange,
     textareaRef,
@@ -1741,9 +1749,63 @@ export function SessionChat({
     },
   });
 
+  // `/slug` with its one argument still empty: the composer is that field, so
+  // hold the send and name what's missing instead of opening the dialog over it.
+  const { matchPrompt } = autocomplete;
+  const pendingArg = useMemo(() => {
+    const hit = matchPrompt(draft);
+    return hit ? pendingComposerArg(hit, view.item.projectPath) : null;
+  }, [matchPrompt, draft, view.item.projectPath]);
+
+  // A draft whose first token is a custom prompt's `/slug` expands to that
+  // prompt's body before it goes anywhere — same arguments and transcript card
+  // the ⌘K palette produces. Null means don't send: the argument dialog was
+  // cancelled, or the expansion came back empty.
+  type ExpandedDraft = { text: string; title: string | null };
+  const expandDraft = async (text: string): Promise<ExpandedDraft | null> => {
+    const hit = autocomplete.matchPrompt(text);
+    if (!hit) return { text, title: null };
+    const resolved = await resolveCustomPrompt(
+      view.item.id,
+      view.item.projectPath,
+      hit.prompt,
+      hit.typed,
+    );
+    if (!resolved) return null;
+    // An all-argument body (`{{input}}`) answered with nothing resolves to an
+    // empty turn — the same guard `runPromptTextInWorkstream` applies, which
+    // this path bypasses.
+    if (!resolved.text.trim()) {
+      setError(`${hit.prompt.name || "That prompt"} needs an argument — nothing to send.`);
+      return null;
+    }
+    return { text: resolved.text, title: resolved.title };
+  };
+
+  // A pinned chip fills the composer with its `/slug` rather than firing, so the
+  // argument — and what will actually run — stays visible until Enter. A prompt
+  // with no expandable slug (unusable name, or one a real command owns) has no
+  // command to prefill, so it still runs outright.
+  const pickPrompt = (prompt: CustomPrompt) => {
+    const slug = promptSlug(prompt.name ?? "");
+    if (!slug || autocomplete.offeredPrompts.get(slug) !== prompt) {
+      void runCustomPrompt(view, prompt, shell.id);
+      return;
+    }
+    onDraftChange(prefillSlashCommand(draft, slug));
+    const caret = slug.length + 2;
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(caret, caret);
+      autocomplete.syncCaret();
+    });
+  };
+
   const handleStart = async () => {
     const input = draft.trim();
-    if (!canSubmit || starting) return;
+    if (!canSubmit || pendingArg || starting) return;
     // A stored default can name a model org policy has since disabled; the CLI
     // would refuse it anyway, so fail here with the reason instead.
     if (!usingOpencode && !usingCodex && model.disabled) {
@@ -1753,6 +1815,8 @@ export function SessionChat({
     setStarting(true);
     setError(null);
     try {
+      const expanded = await expandDraft(input);
+      if (!expanded) return;
       // Library docs and staged files/screenshots both ride along as pin cards
       // in the echo (so no raw path shows) and as paths in the backend prompt.
       const atts: Attachment[] = [
@@ -1762,19 +1826,24 @@ export function SessionChat({
       const created = await startSession({
         workstreamId: view.item.id,
         stage: shell.mode,
-        input,
+        input: expanded.text,
         attachments: atts,
         harness: harness.key,
         model: startModelFlag,
         effort: startEffort,
         permissionMode: permissionMode.flag,
+        promptName: expanded.title,
       });
       onSessionStarted(created.id);
       // Auto-title this tab from the first prompt (best-effort, fire-and-forget;
       // a no-op for already-locked tabs and when the feature is off). Skip
       // attachment-only starts — there's no prompt text to summarize.
-      if (input) {
-        void generateTabTitle({ workstreamId: view.item.id, shellId: shell.id, input });
+      if (expanded.text) {
+        void generateTabTitle({
+          workstreamId: view.item.id,
+          shellId: shell.id,
+          input: expanded.text,
+        });
       }
       onDraftChange("");
       setHistoryNav(IDLE_NAV);
@@ -1791,10 +1860,12 @@ export function SessionChat({
     const text = draft.trim();
     // No `busy` guard: while a turn is in flight `sendMessage` queues the message
     // and delivers it when the turn finishes (conversation steering).
-    if ((!text && attachments.length === 0) || !sid) return;
+    if ((!text && attachments.length === 0) || pendingArg || !sid) return;
     setError(null);
     try {
-      await sendMessage(sid, text, attachments);
+      const expanded = await expandDraft(text);
+      if (!expanded) return;
+      await sendMessage(sid, expanded.text, attachments, expanded.title);
       // Sending is an explicit "bring me back to the conversation" — re-stick to
       // the bottom so the user sees their message (and the reply) even if they'd
       // scrolled up. No-ops when already at the bottom.
@@ -2058,7 +2129,7 @@ export function SessionChat({
                 {pinnedPrompts.length > 0 && (
                   <PromptChips
                     view={view}
-                    shellId={shell.id}
+                    onPick={pickPrompt}
                     className="absolute bottom-full right-3 z-20 mb-1.5 max-w-[70%]"
                   />
                 )}
@@ -2085,6 +2156,7 @@ export function SessionChat({
                     value={draft}
                     commandNames={autocomplete.commandNames}
                     scrollTop={composerScroll}
+                    argHint={pendingArg && promptInputLabel(pendingArg)}
                   />
                   <textarea
                     ref={textareaRef}
@@ -2291,14 +2363,18 @@ export function SessionChat({
                     )}
                     <button
                       type="button"
-                      disabled={!canSubmit || starting || Boolean(pendingQuestion)}
+                      disabled={
+                        !canSubmit || Boolean(pendingArg) || starting || Boolean(pendingQuestion)
+                      }
                       onClick={() => (started ? void handleSend() : void handleStart())}
                       title={
-                        !started
-                          ? "Start session"
-                          : busy
-                            ? "Queue message — sends when the turn finishes"
-                            : "Send"
+                        pendingArg
+                          ? `Type this prompt's argument after the command${pendingArg.label ? ` (${pendingArg.label})` : ""}`
+                          : !started
+                            ? "Start session"
+                            : busy
+                              ? "Queue message — sends when the turn finishes"
+                              : "Send"
                       }
                       aria-label={!started ? "Start" : busy ? "Queue message" : "Send"}
                       className="flex h-8 w-8 items-center justify-center rounded-md border border-edge bg-edge/70 text-ink hover:bg-edge disabled:opacity-40 disabled:hover:bg-edge/70"

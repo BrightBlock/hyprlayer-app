@@ -11,6 +11,16 @@ import {
 import { commands as ipc, type SlashCommand } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { basename } from "@/lib/path";
+import { useBootstrap } from "@/lib/queries";
+import {
+  customPrompts,
+  effectiveCustomBody,
+  matchComposerPrompt,
+  offeredPrompts,
+  promptFirstLine,
+  type ComposerPromptMatch,
+} from "@/features/prompts/prompts";
+import type { CustomPrompt } from "@/lib/bindings";
 
 /** A live autocomplete trigger detected at the caret: a `/command` or `@file`
  *  token, either of which can open any whitespace-delimited token in the draft.
@@ -26,6 +36,9 @@ export type Suggestion = {
   label: string;
   /** Secondary detail (description / directory), shown dimmed. */
   detail: string;
+  /** Trailing tag — set for prompt-library entries, which the app expands
+   *  itself rather than handing to the harness as a command. */
+  badge?: string;
 };
 
 const FILE_LIMIT = 20;
@@ -80,6 +93,11 @@ export type ComposerAutocomplete = {
   loading: boolean;
   /** Names of every known command — drives the in-prompt skill highlight. */
   commandNames: Set<string>;
+  /** The custom prompt `draft` would expand to when sent, or null. */
+  matchPrompt: (draft: string) => ComposerPromptMatch | null;
+  /** The prompts this composer will actually expand, by slug — one that collided
+   *  with a real command, or came from an unusable name, is absent. */
+  offeredPrompts: ReadonlyMap<string, CustomPrompt>;
   /** Apply the suggestion at `index`, splicing it into the draft. */
   apply: (index: number) => void;
   /** Call FIRST inside the textarea's onKeyDown. Returns true when it consumed
@@ -101,15 +119,19 @@ export type ComposerAutocomplete = {
  *  handed to the host. Falls back to the inline `@path ` splice when omitted. */
 export function useComposerAutocomplete(opts: {
   workstreamId: string;
+  /** Project the workstream belongs to — picks the right per-project prompt body. */
+  projectPath: string;
   value: string;
   onChange: (next: string) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   enabled: boolean;
   onPickFile?: (path: string) => void;
 }): ComposerAutocomplete {
-  const { workstreamId, value, onChange, textareaRef, enabled, onPickFile } = opts;
+  const { workstreamId, projectPath, value, onChange, textareaRef, enabled, onPickFile } = opts;
 
-  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  // Null until the harness list lands — the collision rule below can't be
+  // applied without it, so no prompt is offered while it's in flight.
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[] | null>(null);
   const [caret, setCaret] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [files, setFiles] = useState<string[]>([]);
@@ -129,6 +151,33 @@ export function useComposerAutocomplete(opts: {
       alive = false;
     };
   }, [workstreamId]);
+
+  // The user's own prompts answer to `/slug` as well, offered above claude's so
+  // they lead the dropdown. One map decides both what the dropdown lists and
+  // what a draft expands to, so the two can't disagree.
+  const settings = useBootstrap().data?.settings;
+  const prompts = useMemo(() => customPrompts(settings), [settings]);
+  const offered = useMemo(
+    () =>
+      slashCommands === null
+        ? new Map<string, CustomPrompt>()
+        : offeredPrompts(prompts, projectPath, new Set(slashCommands.map((c) => c.name))),
+    [prompts, slashCommands, projectPath],
+  );
+
+  const allCommands = useMemo<SlashCommand[]>(
+    () => [
+      ...[...offered].map(([slug, p]) => ({
+        name: slug,
+        description: promptFirstLine(effectiveCustomBody(p, projectPath)),
+        source: "prompt" as const,
+      })),
+      ...(slashCommands ?? []),
+    ],
+    [offered, slashCommands, projectPath],
+  );
+
+  const matchPrompt = useCallback((draft: string) => matchComposerPrompt(draft, offered), [offered]);
 
   const trigger = useMemo(
     () => (enabled ? detectTrigger(value, caret) : null),
@@ -169,10 +218,11 @@ export function useComposerAutocomplete(opts: {
 
   const suggestions = useMemo<Suggestion[]>(() => {
     if (trigger?.type === "command") {
-      return filterCommands(slashCommands, trigger.query).map((c) => ({
+      return filterCommands(allCommands, trigger.query).map((c) => ({
         value: c.name,
         label: c.name,
         detail: c.description,
+        badge: c.source === "prompt" ? "prompt" : undefined,
       }));
     }
     if (trigger?.type === "file") {
@@ -183,7 +233,7 @@ export function useComposerAutocomplete(opts: {
       }));
     }
     return [];
-  }, [trigger, slashCommands, files]);
+  }, [trigger, allCommands, files]);
 
   // Reset the highlighted row whenever the candidate set changes.
   useEffect(() => {
@@ -197,10 +247,7 @@ export function useComposerAutocomplete(opts: {
     !dismissedHere &&
     (suggestions.length > 0 || (trigger.type === "file" && loading));
 
-  const commandNames = useMemo(
-    () => new Set(slashCommands.map((c) => c.name)),
-    [slashCommands],
-  );
+  const commandNames = useMemo(() => new Set(allCommands.map((c) => c.name)), [allCommands]);
 
   const apply = useCallback(
     (index: number) => {
@@ -295,6 +342,8 @@ export function useComposerAutocomplete(opts: {
     setActiveIndex,
     loading,
     commandNames,
+    matchPrompt,
+    offeredPrompts: offered,
     apply,
     handleKeyDown,
     syncCaret,
@@ -354,6 +403,11 @@ export function AutocompleteDropdown({
                 {s.detail && (
                   <span className="truncate text-xs text-ink-dim">{s.detail}</span>
                 )}
+                {s.badge && (
+                  <span className="ml-auto shrink-0 rounded bg-edge/60 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-dim">
+                    {s.badge}
+                  </span>
+                )}
               </button>
             </li>
           );
@@ -393,10 +447,14 @@ export function HighlightBackdrop({
   value,
   commandNames,
   scrollTop,
+  argHint,
 }: {
   value: string;
   commandNames: Set<string>;
   scrollTop: number;
+  /** Ghost text trailing the draft, naming the argument the `/command` still
+   *  wants. Only set when nothing follows the command, so it can't shift text. */
+  argHint?: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -425,6 +483,9 @@ export function HighlightBackdrop({
         ) : (
           <span key={i}>{seg.text}</span>
         ),
+      )}
+      {argHint && (
+        <span className="text-ink-dim/70">{/\s$/.test(value) ? argHint : ` ${argHint}`}</span>
       )}
       {/* Trailing newline guard so the box height matches the textarea's. */}
       {"\n"}
