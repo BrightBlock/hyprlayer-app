@@ -4,10 +4,10 @@
 
 | Command | What it does |
 |---|---|
-| `cargo test` | Rust workspace tests (287) + regenerates `src/lib/bindings.ts` |
+| `cargo test` | Rust workspace tests (385) + regenerates `src/lib/bindings.ts` |
 | `pnpm typecheck` | Frontend type-check (`tsc --noEmit`) |
 | `pnpm lint` | ESLint (includes import-boundary rules) |
-| `pnpm test` | Vitest (598 tests) |
+| `pnpm test` | Vitest (838 tests) |
 | `pnpm build` | typecheck + vite build |
 
 Always run all four before pushing. The release gate is `scripts/release.sh` which runs the same checks.

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { WorkstreamView } from "@/lib/bindings";
-import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "@/components/ui";
+import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/components/ui";
 import { PlusIcon, SplitIcon } from "@/components/icons";
 import type { WorktreeMode } from "@/lib/bindings";
 import { useCreateWorkstream, useWorkstreamBases } from "@/lib/queries";
@@ -230,21 +230,20 @@ export function CreateWorkstreamDialog({
 
         {folder ? null : isNew ? (
           <Field label="Branched from">
-            <Select
+            <DropdownSelect
+              aria-label="Branched from"
               value={base}
-              onChange={(e) => {
-                setBase(e.target.value);
+              onChange={(v) => {
+                setBase(v);
                 setUserPickedBase(true);
               }}
               disabled={create.isPending || bases.isLoading}
-            >
-              {bases.isLoading && <option value="">Loading branches…</option>}
-              {baseOptions.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </Select>
+              options={
+                bases.isLoading
+                  ? [{ value: "", label: "Loading branches…" }]
+                  : baseOptions.map((b) => ({ value: b, label: b }))
+              }
+            />
           </Field>
         ) : (
           <Field label="Where">

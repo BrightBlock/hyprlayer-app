@@ -15,9 +15,10 @@ import {
   Card,
   CardTitle,
   Dialog,
+  DropdownSelect,
   ErrorNote,
-  Select,
   Spinner,
+  type DropdownOption,
   TextInput,
 } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
@@ -306,29 +307,28 @@ function keepIfOffered(effort: string | null | undefined, offered: Set<string>):
   return offered.size === 0 || offered.has(effort) ? effort : null;
 }
 
-/** The one control shape all four Codex defaults use: a fixed-width select whose
- *  empty option means "let Codex decide". */
+/** The one control shape all four Codex defaults use: a fixed-width dropdown
+ *  whose empty option means "let Codex decide". The width sets the trigger only
+ *  — the open menu grows past it to fit the longest model id. */
 function DefaultSelect({
   label,
   value,
   onChange,
-  children,
+  options,
 }: {
   label: string;
   value: string | null | undefined;
   onChange: (value: string | null) => void;
-  children: React.ReactNode;
+  options: DropdownOption[];
 }) {
   return (
     <div className="w-56">
-      <Select
+      <DropdownSelect
         aria-label={label}
         value={value ?? ""}
-        onChange={(e) => onChange(e.target.value || null)}
-      >
-        <option value="">Codex default</option>
-        {children}
-      </Select>
+        onChange={(v) => onChange(v || null)}
+        options={[{ value: "", label: "Codex default" }, ...options]}
+      />
     </div>
   );
 }
@@ -347,13 +347,12 @@ function ModelSelect({
   onChange: (value: string | null) => void;
 }) {
   return (
-    <DefaultSelect label={label} value={value} onChange={onChange}>
-      {ids.map((id) => (
-        <option key={id} value={id}>
-          {names.get(id) ?? id}
-        </option>
-      ))}
-    </DefaultSelect>
+    <DefaultSelect
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={ids.map((id) => ({ value: id, label: names.get(id) ?? id }))}
+    />
   );
 }
 
@@ -369,13 +368,12 @@ function EffortSelect({
   onChange: (value: string | null) => void;
 }) {
   return (
-    <DefaultSelect label={label} value={value} onChange={onChange}>
-      {choices.map((e) => (
-        <option key={e.key} value={e.key}>
-          {e.label}
-        </option>
-      ))}
-    </DefaultSelect>
+    <DefaultSelect
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={choices.map((e) => ({ value: e.key, label: e.label }))}
+    />
   );
 }
 

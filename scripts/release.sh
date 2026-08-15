@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Cut a release tag locally. Then run ./scripts/release-local.sh to build +
-# ed25519-sign the macOS arm64 and Windows x64 bundles, upload a GitHub Release,
-# and write the updater manifest + changelog to brightblock.ai. Running apps see
-# the new version via the in-app Update pill within a few minutes.
+# ed25519-sign the macOS arm64, Windows x64, and Linux x64 bundles, upload a
+# GitHub Release, and write the updater manifest + changelog to brightblock.ai.
+# Running apps see the new version via the in-app Update pill within a few
+# minutes.
 # (There is no CI release — GitHub Actions was removed; releases are local-only.)
 #
 # Before bumping versions this script gates on changelog.json: the entry for
@@ -124,5 +125,6 @@ git tag "v$NEW"
 
 echo ""
 echo "✓ Tagged v$NEW."
-echo "  Publish (mac + win):  ./scripts/release-local.sh"
-echo "  Publish (mac only):   ./scripts/release-local.sh --mac-only"
+echo "  Publish (all three):   ./scripts/release-local.sh"
+echo "  Publish (skip Linux):  ./scripts/release-local.sh --no-linux"
+echo "  Publish (mac only):    ./scripts/release-local.sh --mac-only"

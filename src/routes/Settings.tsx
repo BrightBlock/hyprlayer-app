@@ -24,7 +24,7 @@ import {
   type ResolvedEngine,
 } from "@/features/multiplexer/engines";
 import { EngineGlyph } from "@/features/multiplexer/agentStateUi";
-import { claudeModels } from "@/lib/domain/models";
+import { claudeModels, modelOptions } from "@/lib/domain/models";
 import { DEFAULT_HARNESS_OPTIONS } from "@/lib/domain/harnessing";
 import { invalidateNotificationSettingsCache, sendTestNotification } from "@/lib/notifications";
 import {
@@ -33,11 +33,11 @@ import {
   Card,
   CardTitle,
   Dialog,
+  DropdownSelect,
   ErrorNote,
   Field,
   PageError,
   PageSpinner,
-  Select,
   TextInput,
   Toggle,
 } from "@/components/ui";
@@ -48,7 +48,7 @@ import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection";
 import { SettingRow } from "@/features/settings/parts";
 import { THEMES, useThemeStore } from "@/lib/theme";
-import { IS_MACOS, IS_WINDOWS } from "@/lib/platform";
+import { IS_MACOS } from "@/lib/platform";
 import { AnytypeIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PersonIcon, PlusIcon, XIcon } from "@/components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
@@ -573,38 +573,29 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
         <SettingRow
           title="Title model"
           control={
-            <Select
+            <DropdownSelect
               aria-label="Title model"
               className="w-56"
               disabled={!tab.enabled}
               value={selectedModel}
-              onChange={(e) => patch({ model: e.target.value })}
-            >
-              <optgroup label="Claude">
-                {claudeCatalog.map((m) => (
-                  <option key={m.key} value={`claude:${m.flag ?? ""}`} disabled={m.disabled}>
-                    {m.label}
-                    {m.hint ? ` (${m.hint})` : ""}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Codex">
-                {codexModels.map((id) => (
-                  <option key={id} value={`codex:${id}`}>
-                    {id}
-                  </option>
-                ))}
-              </optgroup>
-              {opencodeModels.length > 0 && (
-                <optgroup label="OpenCode">
-                  {opencodeModels.map((id) => (
-                    <option key={id} value={`opencode:${id}`}>
-                      {modelName.get(id) ?? id}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </Select>
+              onChange={(v) => patch({ model: v })}
+              options={[
+                ...modelOptions(claudeCatalog, (m) => `claude:${m.flag ?? ""}`).map((o) => ({
+                  ...o,
+                  group: "Claude",
+                })),
+                ...codexModels.map((id) => ({
+                  value: `codex:${id}`,
+                  label: id,
+                  group: "Codex",
+                })),
+                ...opencodeModels.map((id) => ({
+                  value: `opencode:${id}`,
+                  label: modelName.get(id) ?? id,
+                  group: "OpenCode",
+                })),
+              ]}
+            />
           }
         >
           {settings.providers?.defaultHarness === "codex"
@@ -922,17 +913,16 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
             <SettingRow
               title="Default engine"
               control={
-                <Select
+                <DropdownSelect
+                  aria-label="Default engine"
                   className="min-w-44"
                   value={cfg.defaultEngineId}
-                  onChange={(e) => patchMux({ defaultEngineId: e.target.value })}
-                >
-                  {enabledEngines(cfg).map((engine) => (
-                    <option key={engine.id} value={engine.id}>
-                      {engine.label}
-                    </option>
-                  ))}
-                </Select>
+                  onChange={(v) => patchMux({ defaultEngineId: v })}
+                  options={enabledEngines(cfg).map((engine) => ({
+                    value: engine.id,
+                    label: engine.label,
+                  }))}
+                />
               }
             >
               What a new agent tab launches with (⌘T).
@@ -1097,9 +1087,11 @@ export function Settings() {
       <div className="min-w-0 flex-1 space-y-4">
         {section === "general" && (
           <>
-            {/* macOS checks for updates from the app menu; Windows has no such
-                menu, so keep the manual "Check now" card there. */}
-            {IS_WINDOWS && <UpdatesCard />}
+            {/* macOS checks for updates from the app menu (the only platform
+                that gets one — see macos_menu in src-tauri/src/lib.rs), so
+                Windows and Linux need the manual "Check now" card here or they
+                have no way to ask at all. */}
+            {!IS_MACOS && <UpdatesCard />}
             <AiToolCard />
             <DefaultHarnessCard settings={data.settings} />
             <HyprlayerConfigCard config={data} />

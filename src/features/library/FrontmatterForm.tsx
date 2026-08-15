@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 import type { DocMeta, FmPatchDto, FmSetEntry } from "@/lib/bindings";
-import { Button, Field, Select, TextInput } from "@/components/ui";
+import { Button, DropdownSelect, Field, TextInput } from "@/components/ui";
 import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES } from "./constants";
 import { parseTagsInput } from "./text";
 
@@ -9,9 +9,11 @@ const STRING_KEYS = ["title", "type", "date", "status", "ticket", "project", "sc
 type StringKey = (typeof STRING_KEYS)[number];
 type FormValues = Record<StringKey, string> & { tags: string };
 
-/** Keep a non-canonical current value selectable instead of silently dropping it. */
-function optionsFor(canonical: readonly string[], current: string): string[] {
-  return current && !canonical.includes(current) ? [current, ...canonical] : [...canonical];
+/** Keep a non-canonical current value selectable instead of silently dropping it,
+ *  plus a leading "—" for clearing the field. */
+function optionsFor(canonical: readonly string[], current: string) {
+  const values = current && !canonical.includes(current) ? [current, ...canonical] : [...canonical];
+  return [{ value: "", label: "—" }, ...values.map((v) => ({ value: v, label: v }))];
 }
 
 type Props = {
@@ -74,14 +76,12 @@ export function FrontmatterForm({ meta, disabled, busy, onApply }: Props) {
 
   const selectField = (label: string, key: StringKey, canonical: readonly string[]) => (
     <Field label={label}>
-      <Select value={values[key]} onChange={(e) => setValue(key, e.target.value)}>
-        <option value="">—</option>
-        {optionsFor(canonical, values[key]).map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </Select>
+      <DropdownSelect
+        aria-label={label}
+        value={values[key]}
+        options={optionsFor(canonical, values[key])}
+        onChange={(v) => setValue(key, v)}
+      />
     </Field>
   );
 

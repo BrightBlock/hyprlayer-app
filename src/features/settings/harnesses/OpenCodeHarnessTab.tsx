@@ -17,8 +17,8 @@ import {
   Button,
   Card,
   CardTitle,
+  DropdownSelect,
   ErrorNote,
-  Select,
   Spinner,
 } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
@@ -204,18 +204,18 @@ export function OpenCodeHarnessTab({
                 title="Default model"
                 control={
                   <div className="w-56">
-                    <Select
+                    <DropdownSelect
                       aria-label="OpenCode default model"
                       value={opencode.defaultModel ?? ""}
-                      onChange={(e) => setDefault.mutate(e.target.value || null)}
-                    >
-                      <option value="">OpenCode default</option>
-                      {selectedModels.map((id) => (
-                        <option key={id} value={id}>
-                          {modelName.get(id) ?? id}
-                        </option>
-                      ))}
-                    </Select>
+                      onChange={(v) => setDefault.mutate(v || null)}
+                      options={[
+                        { value: "", label: "OpenCode default" },
+                        ...selectedModels.map((id) => ({
+                          value: id,
+                          label: modelName.get(id) ?? id,
+                        })),
+                      ]}
+                    />
                   </div>
                 }
               >
@@ -225,26 +225,26 @@ export function OpenCodeHarnessTab({
                 title="Commit & Ship model"
                 control={
                   <div className="w-56">
-                    <Select
+                    <DropdownSelect
                       aria-label="OpenCode Commit and Ship model"
                       value={opencode.commitModel ?? ""}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         save.mutate({
                           ...settings,
                           providers: {
                             ...(settings.providers ?? {}),
-                            opencode: { ...opencode, commitModel: e.target.value || null },
+                            opencode: { ...opencode, commitModel: v || null },
                           },
                         })
                       }
-                    >
-                      <option value="">OpenCode default</option>
-                      {selectedModels.map((id) => (
-                        <option key={id} value={id}>
-                          {modelName.get(id) ?? id}
-                        </option>
-                      ))}
-                    </Select>
+                      options={[
+                        { value: "", label: "OpenCode default" },
+                        ...selectedModels.map((id) => ({
+                          value: id,
+                          label: modelName.get(id) ?? id,
+                        })),
+                      ]}
+                    />
                   </div>
                 }
               >

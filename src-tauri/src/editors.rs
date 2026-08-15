@@ -8,11 +8,17 @@
 //!   `data:` URL.
 //! - **Windows** — probe well-known install locations for each editor's `.exe`
 //!   (the full path becomes `openWith`), falling back to a PATHEXT-aware PATH
-//!   lookup so `.cmd` CLI shims like VS Code's `code.cmd` are found. Terminals
-//!   are skipped: `openPath(dir, app)` passes the directory as a positional
-//!   argument, which editors treat as "open this folder" but terminals need a
-//!   dedicated flag (`wt -d`) for, so a generic invocation wouldn't `cd`.
+//!   lookup so `.cmd` CLI shims like VS Code's `code.cmd` are found.
 //! - **Linux** — PATH lookup of each command name.
+//!
+//! **Terminals are macOS-only.** `openPath(dir, app)` bottoms out in
+//! `Command::new(app).arg(dir)` — one program, one positional argument. Editors
+//! read that as "open this folder"; terminals don't, and every one of them wants
+//! its own working-directory flag instead (`wt -d`, `kitty --directory`,
+//! `alacritty --working-directory`, `wezterm start --cwd`). There's nowhere to
+//! put a flag in a single `openWith` string, so off macOS — where
+//! `open -a Terminal <dir>` genuinely opens the directory — terminals are left
+//! out rather than listed and silently failing.
 //!
 //! The frontend does the actual opening through `@tauri-apps/plugin-opener`,
 //! passing `openWith` for the GUI apps below (Finder/Explorer use the default
@@ -62,9 +68,10 @@ struct Candidate {
     /// `openWith` value. Unused off Windows.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     windows_paths: &'static [&'static str],
-    /// Command names to look for on PATH (Linux always; Windows fallback,
-    /// PATHEXT-aware). The matched name is the `openWith` value. Unused on
-    /// macOS, which detects via `.app` bundles instead.
+    /// Command names to look for on PATH (Linux, and as a PATHEXT-aware Windows
+    /// fallback). The matched name is the `openWith` value. Unused on macOS,
+    /// which detects via `.app` bundles instead — and unused for terminals
+    /// anywhere, since only macOS lists those (see the module docs).
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     bins: &'static [&'static str],
 }
@@ -273,9 +280,6 @@ fn detect_candidate(c: &Candidate) -> Option<(String, Option<PathBuf>)> {
     }
     #[cfg(target_os = "windows")]
     {
-        // Terminals need a per-app working-directory flag (e.g. `wt -d`); the
-        // generic `openPath(dir, app)` can't supply one, so we'd open them in
-        // the wrong directory. Offer only apps that take a folder positionally.
         if matches!(c.kind, EditorKind::Terminal) {
             return None;
         }
@@ -296,6 +300,9 @@ fn detect_candidate(c: &Candidate) -> Option<(String, Option<PathBuf>)> {
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
+        if matches!(c.kind, EditorKind::Terminal) {
+            return None;
+        }
         c.bins
             .iter()
             .find(|bin| bin_on_path(bin))

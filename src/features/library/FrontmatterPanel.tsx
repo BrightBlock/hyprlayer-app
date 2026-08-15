@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from "react";
 
 import type { DocMeta, FmPatchDto } from "@/lib/bindings";
-import { Select, TextInput } from "@/components/ui";
+import { DropdownSelect, TextInput } from "@/components/ui";
 import { DOC_STATUSES, DOC_TYPES } from "./constants";
 
-/** Keep a non-canonical current value selectable instead of silently dropping it. */
-function optionsFor(canonical: readonly string[], current: string): string[] {
-  return current && !canonical.includes(current) ? [current, ...canonical] : [...canonical];
+/** Keep a non-canonical current value selectable instead of silently dropping it,
+ *  plus a leading "—" for clearing the field. */
+function optionsFor(canonical: readonly string[], current: string) {
+  const values = current && !canonical.includes(current) ? [current, ...canonical] : [...canonical];
+  return [{ value: "", label: "—" }, ...values.map((v) => ({ value: v, label: v }))];
 }
 
 function Labeled({ label, children }: { label: string; children: ReactNode }) {
@@ -94,36 +96,26 @@ export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
       >
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           <Labeled label="Type">
-            <Select
+            <DropdownSelect
+              aria-label="Type"
               value={type}
-              onChange={(e) => {
-                setType(e.target.value);
-                applyField("type", e.target.value);
+              options={optionsFor(DOC_TYPES, type)}
+              onChange={(v) => {
+                setType(v);
+                applyField("type", v);
               }}
-            >
-              <option value="">—</option>
-              {optionsFor(DOC_TYPES, type).map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </Select>
+            />
           </Labeled>
           <Labeled label="Status">
-            <Select
+            <DropdownSelect
+              aria-label="Status"
               value={status}
-              onChange={(e) => {
-                setStatus(e.target.value);
-                applyField("status", e.target.value);
+              options={optionsFor(DOC_STATUSES, status)}
+              onChange={(v) => {
+                setStatus(v);
+                applyField("status", v);
               }}
-            >
-              <option value="">—</option>
-              {optionsFor(DOC_STATUSES, status).map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
+            />
           </Labeled>
           <Labeled label="Author">
             <TextInput

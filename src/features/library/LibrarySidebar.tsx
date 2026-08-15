@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Badge, ErrorNote, Field, Select, Spinner, TextInput } from "@/components/ui";
+import { Badge, DropdownSelect, ErrorNote, Field, Spinner, TextInput } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, FolderIcon, PlusIcon } from "@/components/icons";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import type { Project, QueryResult } from "@/lib/bindings";
@@ -313,30 +313,26 @@ function MoreFilters({
       {open && (
         <div className="mt-2 space-y-2">
           <Field label="Status">
-            <Select
+            <DropdownSelect
+              aria-label="Status"
               value={search.status ?? ""}
-              onChange={(e) => onUpdate({ status: single(e.target.value) })}
-            >
-              <option value="">All statuses</option>
-              {DOC_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
+              options={[
+                { value: "", label: "All statuses" },
+                ...DOC_STATUSES.map((s) => ({ value: s, label: s })),
+              ]}
+              onChange={(v) => onUpdate({ status: single(v) })}
+            />
           </Field>
           <Field label="Scope">
-            <Select
+            <DropdownSelect
+              aria-label="Scope"
               value={search.scope ?? ""}
-              onChange={(e) => onUpdate({ scope: single(e.target.value) })}
-            >
-              <option value="">All scopes</option>
-              {DOC_SCOPES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
+              options={[
+                { value: "", label: "All scopes" },
+                ...DOC_SCOPES.map((s) => ({ value: s, label: s })),
+              ]}
+              onChange={(v) => onUpdate({ scope: single(v) })}
+            />
           </Field>
           <Field label="Author">
             <TextInput

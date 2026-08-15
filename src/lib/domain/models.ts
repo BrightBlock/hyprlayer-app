@@ -8,6 +8,7 @@
  */
 
 import type { ClaudeModel } from "@/lib/bindings";
+import type { DropdownOption } from "@/components/ui";
 
 /** A selectable model. `flag` is the `--model` value, or null to leave it to
  *  claude's own default (which is what gives the 1M-context Opus today). */
@@ -547,4 +548,24 @@ export function resolveCodexModelIds(
   probed: readonly { id: string }[],
 ): string[] {
   return selected && selected.length > 0 ? [...selected] : probed.map((m) => m.id);
+}
+
+/**
+ * A model catalog as `DropdownSelect` options: the hint rides in the label
+ * (there's no separate slot for it), and a policy-restricted row stays visible
+ * but unpickable — the same treatment `<option disabled>` used to give it.
+ *
+ * `value` defaults to the option key, which is what the harness settings store.
+ * Settings' cross-harness title-model picker keys rows by `claude:<flag>`
+ * instead, so it passes its own mapper.
+ */
+export function modelOptions(
+  catalog: readonly ModelOption[],
+  value: (m: ModelOption) => string = (m) => m.key,
+): DropdownOption[] {
+  return catalog.map((m) => ({
+    value: value(m),
+    label: m.hint ? `${m.label} (${m.hint})` : m.label,
+    ...(m.disabled ? { disabled: true } : {}),
+  }));
 }

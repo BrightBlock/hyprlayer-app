@@ -1,11 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   ButtonHTMLAttributes,
   HTMLAttributes,
   InputHTMLAttributes,
   ReactNode,
-  SelectHTMLAttributes,
 } from "react";
 
 import { errorMessage, errorRemedy } from "@/lib/ipc";
@@ -127,35 +126,47 @@ export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputE
   );
 }
 
-export function Select({ className, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      className={cx(
-        "w-full rounded-md border border-edge bg-panel-2 px-2 py-1.5 text-sm text-ink",
-        "focus:border-ink-dim/70 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
-        className,
-      )}
-      {...rest}
-    />
-  );
-}
+/** Gap between the trigger and its menu, and the menu's minimum inset from any
+ *  viewport edge. Shared by the open-position and clamp passes below. */
+const GAP = 4;
+const MARGIN = 8;
+
+export type DropdownOption = {
+  value: string;
+  label: string;
+  /** Rendered dimmed and unselectable — the `<option disabled>` equivalent. */
+  disabled?: boolean;
+  /** Heading to file this option under; runs of equal values share one header
+   *  (the `<optgroup>` equivalent). Ungrouped options render bare. */
+  group?: string;
+};
 
 type DropdownSelectProps = {
   value: string;
-  options: Array<{ value: string; label: string }>;
+  options: DropdownOption[];
   onChange: (value: string) => void;
   disabled?: boolean;
   className?: string;
+  /** Names the trigger when no surrounding text does. */
+  "aria-label"?: string;
+  /** Trigger text when `value` matches no option — otherwise a stale/unknown
+   *  value would leak onto the button as raw text. */
+  placeholder?: string;
 };
 
 /**
- * In-app replacement for a native `<select>`: the open menu is part of the UI
- * (panel tone, anchored under the trigger at trigger width) instead of an OS
- * popup. The menu is positioned `fixed` off the trigger's rect so overflow
- * containers (dialog panels, sidebars) can't clip it, capped to the viewport
- * and scrollable, flipping upward when there's more room above. Inside a
- * `Field` the wrapping label names the trigger, and Escape closes only the
- * menu (the handler stacks above a dialog's).
+ * The app's ONLY select control. There is deliberately no `<select>` wrapper
+ * in this file: a native select's open menu is drawn by the OS, not the page,
+ * so on Linux/WebKitGTK it renders in the GTK theme's colors — a white popup
+ * over every dark app theme — and on macOS/Windows it ignores the palette too.
+ * This draws the menu in the DOM instead: panel tone, anchored under the
+ * trigger at trigger width, themed like everything else on every platform.
+ *
+ * The menu is positioned `fixed` off the trigger's rect so overflow containers
+ * (dialog panels, sidebars) can't clip it, capped to the viewport and
+ * scrollable, flipping upward when there's more room above. Inside a `Field`
+ * the wrapping label names the trigger, and Escape closes only the menu (the
+ * handler stacks above a dialog's).
  *
  * The open menu + backdrop render in a portal on `document.body`, NOT inline:
  * inline they'd be descendants of `Field`'s `<label>`, and WebKit forwards any
@@ -163,8 +174,20 @@ type DropdownSelectProps = {
  * click would re-toggle the trigger and the menu never closes. The portal also
  * escapes the dialog overlay's `backdrop-blur`, which turns `position: fixed`
  * coordinates relative in WebKit.
+ *
+ * Keyboard parity with the native control it replaces: ↓/↑ (or Enter/Space) on
+ * the trigger opens, ↓/↑/Home/End walk the enabled options, Enter/Space picks
+ * the focused one (they're real buttons, so that's free), Escape cancels.
  */
-export function DropdownSelect({ value, options, onChange, disabled, className }: DropdownSelectProps) {
+export function DropdownSelect({
+  value,
+  options,
+  onChange,
+  disabled,
+  className,
+  placeholder,
+  "aria-label": ariaLabel,
+}: DropdownSelectProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{
@@ -181,12 +204,22 @@ export function DropdownSelect({ value, options, onChange, disabled, className }
   };
   useEscape(open ? close : null);
 
-  // Bring the current choice into view when a long list opens — once, not on
-  // every re-render, which would fight the user's own scrolling.
+  // Focus the current choice when the menu opens — that both scrolls a long
+  // list to it and puts the arrow keys below on the right starting point.
+  // Once, not on every re-render, which would fight the user's own scrolling.
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
+    const list = listRef.current;
+    if (!list) return;
+    const target =
+      list.querySelector<HTMLButtonElement>('[aria-selected="true"]:not([disabled])') ??
+      list.querySelector<HTMLButtonElement>('[role="option"]:not([disabled])');
+    // preventScroll + an explicit nearest scroll: a bare focus() can jerk the
+    // whole page when the portal sits at the document root. Optional-call the
+    // scroll — jsdom doesn't implement it, so tests would throw here.
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView?.({ block: "nearest" });
   }, [open]);
 
   // Measure on open (before paint, so the menu never flashes at 0,0).
@@ -194,20 +227,59 @@ export function DropdownSelect({ value, options, onChange, disabled, className }
     const el = triggerRef.current;
     if (!open || !el) return;
     const r = el.getBoundingClientRect();
-    const gap = 4;
-    const margin = 8;
-    const below = window.innerHeight - r.bottom - gap - margin;
-    const above = r.top - gap - margin;
+    const below = window.innerHeight - r.bottom - GAP - MARGIN;
+    const above = r.top - GAP - MARGIN;
     const openUp = below < 160 && above > below;
     setPos({
       left: r.left,
       width: r.width,
       maxHeight: Math.min(288, Math.max(120, openUp ? above : below)),
-      ...(openUp ? { bottom: window.innerHeight - r.top + gap } : { top: r.bottom + gap }),
+      ...(openUp ? { bottom: window.innerHeight - r.top + GAP } : { top: r.bottom + GAP }),
     });
   }, [open]);
 
+  // The trigger's width is only a MINIMUM for the menu (see the style below), so
+  // a narrow trigger — "Haiku 4.5" in a settings row — still shows full option
+  // labels instead of "Opus 4.…". A menu that grew past the right edge would be
+  // clipped, though, so once it has laid out at its content width, pull it back
+  // inside the viewport. Second pass on purpose: the width isn't knowable until
+  // the options have rendered. Guarded on an actual change, so it settles in one
+  // extra frame rather than looping.
+  useLayoutEffect(() => {
+    const el = triggerRef.current;
+    const list = listRef.current;
+    if (!open || !el || !list) return;
+    // Anchor off the LIVE trigger rect, not `pos.left`: both layout effects run
+    // in the same commit, so on the opening pass `pos` is still its initial
+    // zero — clamping against that pinned every menu to the left viewport edge.
+    const desiredLeft = el.getBoundingClientRect().left;
+    const width = list.getBoundingClientRect().width;
+    const clamped = Math.max(MARGIN, Math.min(desiredLeft, window.innerWidth - width - MARGIN));
+    if (Math.abs(clamped - pos.left) > 0.5) setPos((p) => ({ ...p, left: clamped }));
+  }, [open, pos.left, options]);
+
+  // Roving focus over the enabled options. Enter/Space need no handling — each
+  // option is a real <button>, so activation is the browser's job.
+  const moveFocus = (delta: number | "first" | "last") => {
+    const list = listRef.current;
+    if (!list) return;
+    const items = Array.from(
+      list.querySelectorAll<HTMLButtonElement>('[role="option"]:not([disabled])'),
+    );
+    if (items.length === 0) return;
+    const from = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      delta === "first"
+        ? 0
+        : delta === "last"
+          ? items.length - 1
+          : Math.min(items.length - 1, Math.max(0, (from < 0 ? 0 : from) + delta));
+    items[next]?.focus({ preventScroll: true });
+    items[next]?.scrollIntoView?.({ block: "nearest" });
+  };
+
   const selected = options.find((o) => o.value === value);
+  const hasWidthClass = /(^|\s)(w-|min-w-|max-w-)/.test(className ?? "");
 
   return (
     <>
@@ -217,14 +289,29 @@ export function DropdownSelect({ value, options, onChange, disabled, className }
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={ariaLabel}
         onClick={() => (open ? close() : setOpen(true))}
+        onKeyDown={(e) => {
+          if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
         className={cx(
-          "flex w-full items-center justify-between gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-left text-sm text-ink",
+          "flex items-center justify-between gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-left text-sm text-ink",
+          // `w-full` only when the caller didn't ask for a width. Appending both
+          // and hoping the caller's wins doesn't work: Tailwind sorts utilities
+          // into the stylesheet itself, so `w-full` beats `w-56` no matter which
+          // is written last — which is how the Title-model picker ended up 101px
+          // wide with its options truncated to "Opus 4.…".
+          !hasWidthClass && "w-full",
           "focus:border-ink-dim/70 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
       >
-        <span className="min-w-0 truncate">{selected?.label ?? value}</span>
+        <span className={cx("min-w-0 truncate", !selected && placeholder && "text-ink-dim")}>
+          {selected?.label ?? placeholder ?? value}
+        </span>
         <ChevronDownIcon size={12} className="shrink-0 text-ink-dim" />
       </button>
       {open &&
@@ -235,33 +322,76 @@ export function DropdownSelect({ value, options, onChange, disabled, className }
             <div
               ref={listRef}
               role="listbox"
+              aria-label={ariaLabel}
+              onKeyDown={(e) => {
+                const move =
+                  e.key === "ArrowDown"
+                    ? 1
+                    : e.key === "ArrowUp"
+                      ? -1
+                      : e.key === "Home"
+                        ? ("first" as const)
+                        : e.key === "End"
+                          ? ("last" as const)
+                          : null;
+                if (move === null) return;
+                e.preventDefault();
+                moveFocus(move);
+              }}
               className="fixed z-50 overflow-y-auto rounded-md border border-edge bg-panel p-1 shadow-2xl"
               style={{
                 top: pos.top,
                 bottom: pos.bottom,
                 left: pos.left,
-                width: pos.width,
+                // Align with the trigger and never be narrower than it, but grow
+                // to fit the longest label rather than truncating it — a native
+                // select's popup sizes to its content too. Capped to the viewport
+                // so a long model id can't run off-screen.
+                minWidth: pos.width,
+                maxWidth: `calc(100vw - ${MARGIN * 2}px)`,
                 maxHeight: pos.maxHeight,
               }}
             >
-              {options.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  role="option"
-                  aria-selected={o.value === value}
-                  onClick={() => {
-                    onChange(o.value);
-                    close();
-                  }}
-                  className={cx(
-                    "flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm hover:bg-panel-2",
-                    o.value === value ? "text-ink" : "text-ink-dim hover:text-ink",
+              {options.map((o, i) => (
+                <Fragment key={`${o.group ?? ""} ${o.value}`}>
+                  {o.group && o.group !== options[i - 1]?.group && (
+                    <div
+                      role="presentation"
+                      className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-dim first:pt-1"
+                    >
+                      {o.group}
+                    </div>
                   )}
-                >
-                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                  {o.value === value && <span className="shrink-0 text-[11px]">✓</span>}
-                </button>
+                  <button
+                    type="button"
+                    role="option"
+                    disabled={o.disabled}
+                    aria-selected={o.value === value}
+                    onClick={() => {
+                      onChange(o.value);
+                      close();
+                    }}
+                    className={cx(
+                      "flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm",
+                      "focus:outline-none enabled:hover:bg-panel-2 enabled:focus-visible:bg-panel-2",
+                      o.disabled
+                        ? "cursor-not-allowed text-ink-dim/50"
+                        : o.value === value
+                          ? "text-ink"
+                          : "text-ink-dim hover:text-ink",
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                    {/* Decorative: `aria-selected` already says this is the
+                        choice, and without hiding it the glyph lands in the
+                        option's accessible name ("main✓"). */}
+                    {o.value === value && (
+                      <span aria-hidden="true" className="shrink-0 text-[11px]">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+                </Fragment>
               ))}
             </div>
           </>,
