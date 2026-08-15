@@ -64,8 +64,17 @@ function renderDialog(open: boolean) {
   );
 }
 
-// The "Branched from" base picker — the only <select> in the dialog.
-const baseSelect = () => screen.getByRole("combobox") as HTMLSelectElement;
+// The "Branched from" base picker. It's a DropdownSelect, so the trigger is a
+// button whose label IS the current choice, and the options only exist in the
+// DOM while the menu is open.
+const baseTrigger = () => screen.getByRole("button", { name: "Branched from" });
+const baseValue = () => baseTrigger().textContent;
+/** Open the menu and click one option — the DropdownSelect equivalent of
+ *  `fireEvent.change(select, …)`. */
+function pickBase(label: string) {
+  fireEvent.click(baseTrigger());
+  fireEvent.click(screen.getByRole("option", { name: label }));
+}
 
 describe("CreateWorkstreamDialog base detection", () => {
   it("re-scans local branches on the open edge, not while closed", () => {
@@ -95,7 +104,7 @@ describe("CreateWorkstreamDialog base detection", () => {
       currentBranch: "feature-x",
     });
     const { rerender } = renderDialog(true);
-    expect(baseSelect().value).toBe("feature-x");
+    expect(baseValue()).toBe("feature-x");
 
     // The open refetch lands: `main` now exists on disk and is the detected
     // default. The picker must follow it — the whole point of the fix.
@@ -113,8 +122,9 @@ describe("CreateWorkstreamDialog base detection", () => {
         onCreated={vi.fn()}
       />,
     );
-    expect(baseSelect().value).toBe("main");
+    expect(baseValue()).toBe("main");
     // And `main` is offered as an option.
+    fireEvent.click(baseTrigger());
     expect(screen.getByRole("option", { name: "main" })).toBeDefined();
   });
 
@@ -126,11 +136,11 @@ describe("CreateWorkstreamDialog base detection", () => {
       currentBranch: "feature-x",
     });
     const { rerender } = renderDialog(true);
-    expect(baseSelect().value).toBe("dev");
+    expect(baseValue()).toBe("dev");
 
     // User overrides the default.
-    fireEvent.change(baseSelect(), { target: { value: "feature-x" } });
-    expect(baseSelect().value).toBe("feature-x");
+    pickBase("feature-x");
+    expect(baseValue()).toBe("feature-x");
 
     // A later refetch surfaces `main` as the new default — the manual pick wins.
     mockBases({
@@ -147,6 +157,6 @@ describe("CreateWorkstreamDialog base detection", () => {
         onCreated={vi.fn()}
       />,
     );
-    expect(baseSelect().value).toBe("feature-x");
+    expect(baseValue()).toBe("feature-x");
   });
 });

@@ -256,7 +256,13 @@ struct CliCandidate {
 }
 
 fn cli_install_candidates() -> &'static [CliCandidate] {
-    #[cfg(target_os = "macos")]
+    // Homebrew on macOS, and on Linux too: Homebrew-on-Linux installs the same
+    // tap with the same command. `available` gates it on `brew` actually being
+    // on PATH, so a Linux box without it still sees the manual instructions
+    // rather than a button that can't work — and without this the Linux
+    // onboarding step listed nothing at all, dead-ending on "install one of the
+    // options below" with no options below it.
+    #[cfg(not(target_os = "windows"))]
     let candidates: &[CliCandidate] = &[CliCandidate {
         id: CliInstallMethodId::Homebrew,
         label: "Homebrew",
@@ -281,13 +287,12 @@ fn cli_install_candidates() -> &'static [CliCandidate] {
             probe: "scoop",
         },
     ];
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let candidates: &[CliCandidate] = &[];
     candidates
 }
 
-/// hyprlayer CLI install options for this OS (macOS → Homebrew; Windows →
-/// winget + Scoop), each flagged by whether its package manager is installed.
+/// hyprlayer CLI install options for this OS (macOS + Linux → Homebrew;
+/// Windows → winget + Scoop), each flagged by whether its package manager is
+/// installed.
 #[tauri::command]
 #[specta::specta]
 pub async fn detect_cli_install_methods(

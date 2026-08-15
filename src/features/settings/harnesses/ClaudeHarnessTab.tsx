@@ -16,6 +16,7 @@ import {
   claudeModels,
   knownModelKeys,
   modelOption,
+  modelOptions,
   normalizeVisibleModelKeys,
 } from "@/lib/domain/models";
 import {
@@ -24,8 +25,8 @@ import {
   Card,
   CardTitle,
   Dialog,
+  DropdownSelect,
   ErrorNote,
-  Select,
   Spinner,
   TextInput,
   Toggle,
@@ -124,31 +125,20 @@ export function ClaudeHarnessTab({
             title="Default model"
             control={
               <div className="flex gap-2">
-                <Select
+                <DropdownSelect
                   aria-label="Default model"
                   value={claude.defaultModel ?? DEFAULT_MODEL_KEY}
-                  onChange={(e) => patchClaude({ defaultModel: e.target.value })}
+                  onChange={(v) => patchClaude({ defaultModel: v })}
                   className="w-36"
-                >
-                  {catalog.map((m) => (
-                    <option key={m.key} value={m.key} disabled={m.disabled}>
-                      {m.label}
-                      {m.hint ? ` (${m.hint})` : ""}
-                    </option>
-                  ))}
-                </Select>
-                <Select
+                  options={modelOptions(catalog)}
+                />
+                <DropdownSelect
                   aria-label="Default effort"
                   value={claude.defaultEffort ?? DEFAULT_EFFORT_KEY}
-                  onChange={(e) => patchClaude({ defaultEffort: e.target.value })}
+                  onChange={(v) => patchClaude({ defaultEffort: v })}
                   className="w-32"
-                >
-                  {EFFORTS.map((eo) => (
-                    <option key={eo.key} value={eo.key}>
-                      {eo.label}
-                    </option>
-                  ))}
-                </Select>
+                  options={EFFORTS.map((eo) => ({ value: eo.key, label: eo.label }))}
+                />
               </div>
             }
           >
@@ -159,31 +149,20 @@ export function ClaudeHarnessTab({
             title="Commit & Ship model"
             control={
               <div className="flex gap-2">
-                <Select
+                <DropdownSelect
                   aria-label="Commit and Ship model"
                   value={claude.commitModel ?? "sonnet"}
-                  onChange={(e) => patchClaude({ commitModel: e.target.value })}
+                  onChange={(v) => patchClaude({ commitModel: v })}
                   className="w-36"
-                >
-                  {catalog.map((m) => (
-                    <option key={m.key} value={m.key} disabled={m.disabled}>
-                      {m.label}
-                      {m.hint ? ` (${m.hint})` : ""}
-                    </option>
-                  ))}
-                </Select>
-                <Select
+                  options={modelOptions(catalog)}
+                />
+                <DropdownSelect
                   aria-label="Commit and Ship reasoning"
                   value={claude.commitEffort ?? "medium"}
-                  onChange={(e) => patchClaude({ commitEffort: e.target.value })}
+                  onChange={(v) => patchClaude({ commitEffort: v })}
                   className="w-32"
-                >
-                  {EFFORTS.map((eo) => (
-                    <option key={eo.key} value={eo.key}>
-                      {eo.label}
-                    </option>
-                  ))}
-                </Select>
+                  options={EFFORTS.map((eo) => ({ value: eo.key, label: eo.label }))}
+                />
               </div>
             }
           >
@@ -411,31 +390,24 @@ function OpenInEditor({ relPath }: { relPath: string }) {
     await (openWith ? openPath(path, openWith) : openPath(path)).catch(() => {});
   }
 
-  // Select's base style is `w-full`, so constrain it with a fixed-width wrapper
-  // rather than a competing width utility (which wouldn't reliably win).
+  // The w-40 wrapper sets the trigger width (passing `className="w-40"` would
+  // work too — DropdownSelect drops its own `w-full` when the caller sets one).
+  // `value` stays "" — this is an action menu, not a stored choice, so the
+  // trigger always reads "Open in…" and picking never sticks.
   return (
     <div className="w-40 shrink-0">
-      <Select
+      <DropdownSelect
         aria-label="Open Claude settings in"
         value=""
-        onChange={(e) => {
-          const v = e.target.value;
-          void open(v === "__default__" ? null : v);
-          e.currentTarget.value = "";
-        }}
-      >
-        <option value="" disabled>
-          Open in…
-        </option>
-        <option value="__default__">Default app</option>
-        {targets
-          .filter((t) => t.openWith)
-          .map((t) => (
-            <option key={t.id} value={t.openWith as string}>
-              {t.name}
-            </option>
-          ))}
-      </Select>
+        onChange={(v) => void open(v === "__default__" ? null : v)}
+        options={[
+          { value: "", label: "Open in…", disabled: true },
+          { value: "__default__", label: "Default app" },
+          ...targets
+            .filter((t) => t.openWith)
+            .map((t) => ({ value: t.openWith as string, label: t.name })),
+        ]}
+      />
     </div>
   );
 }

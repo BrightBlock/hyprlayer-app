@@ -78,6 +78,18 @@
   --color-nebula-5: #a78bfa;
 }
 
+/* Tell the engine the page is dark, so the chrome we DON'T draw ourselves —
+   text carets, native focus rings, the form-control internals WebKit paints,
+   and any scrollbar that falls back off our `::-webkit-scrollbar` pills —
+   renders dark instead of defaulting to the light scheme. Most visible on
+   Linux/WebKitGTK, which otherwise paints those in the GTK light palette over
+   a charcoal app. Lives here rather than in `@theme`: that block takes theme
+   VARIABLES only, and this is a plain property. `html.light` overrides it (and
+   wins on specificity); the other themes are all dark and inherit this. */
+:root {
+  color-scheme: dark;
+}
+
 /* Light — warm neutral creams + ivories, terracotta accent shifted darker so
    it keeps contrast on the light surface. */
 html.light {

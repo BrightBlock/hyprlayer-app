@@ -467,6 +467,13 @@ export function ChangesPanel({
   const [view, setView] = useState<"list" | "tree">("list");
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState<GitFileEntry | null>(null);
+  // Whether the USER asked for this refresh. Deliberately NOT `status.isFetching`:
+  // the backend's worktree watcher invalidates git-status on every file change
+  // (see lib/events → worktreeChanged), so during an agent turn or a build that
+  // flag strobes true/false several times a second — and the button visibly
+  // flickered between its glyph and the spinner, dimming on each disabled edge.
+  // Background refreshes now update the list silently, as they should.
+  const [refreshing, setRefreshing] = useState(false);
 
   const id = workstreamId ?? "";
   // Never ask git about a folder project — there's no repo to answer.
@@ -508,16 +515,20 @@ export function ChangesPanel({
           {workstreamId !== null && (
             <IconButton
               onClick={() => {
-                if (tab === "changes") void status.refetch();
-                // The tree is lazy per directory level; drop them all so
-                // reopening re-reads from disk.
-                else void queryClient.invalidateQueries({ queryKey: ["workstream", id, "dir"] });
+                if (tab === "changes") {
+                  setRefreshing(true);
+                  void status.refetch().finally(() => setRefreshing(false));
+                } else {
+                  // The tree is lazy per directory level; drop them all so
+                  // reopening re-reads from disk.
+                  void queryClient.invalidateQueries({ queryKey: ["workstream", id, "dir"] });
+                }
               }}
-              disabled={tab === "changes" && status.isFetching}
+              disabled={refreshing}
               title="Refresh"
               aria-label="Refresh"
             >
-              {tab === "changes" && status.isFetching ? <Spinner size={14} /> : <RefreshIcon />}
+              {refreshing ? <Spinner size={14} /> : <RefreshIcon />}
             </IconButton>
           )}
         </div>

@@ -19,7 +19,13 @@ use std::time::Duration;
 use hyprlayer_core::config::ConfigService;
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryResolver};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
+// Only the macOS menu relay calls the raw `app.emit(name, payload)`; everywhere
+// else emits through tauri-specta's typed `events::X.emit(&handle)`, which
+// doesn't need this trait in scope. Ungated it warns on every Windows and Linux
+// build.
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
 use crate::settings::SettingsStore;

@@ -13,9 +13,9 @@ import {
   Button,
   Card,
   CardTitle,
+  DropdownSelect,
   ErrorNote,
   Field,
-  Select,
   Spinner,
   TextInput,
   Toggle,
@@ -223,18 +223,15 @@ export function OllamaHarnessTab({
                     title="Default model"
                     control={
                       <div className="w-56">
-                        <Select
+                        <DropdownSelect
                           aria-label="Ollama default model"
                           value={ollama.defaultModel ?? ""}
-                          onChange={(e) => setDefault.mutate(e.target.value || null)}
-                        >
-                          <option value="">No default</option>
-                          {selected.map((id) => (
-                            <option key={id} value={`ollama/${id}`}>
-                              {id}
-                            </option>
-                          ))}
-                        </Select>
+                          onChange={(v) => setDefault.mutate(v || null)}
+                          options={[
+                            { value: "", label: "No default" },
+                            ...selected.map((id) => ({ value: `ollama/${id}`, label: id })),
+                          ]}
+                        />
                       </div>
                     }
                   >
@@ -244,26 +241,23 @@ export function OllamaHarnessTab({
                     title="Commit & Ship model"
                     control={
                       <div className="w-56">
-                        <Select
+                        <DropdownSelect
                           aria-label="Ollama Commit and Ship model"
                           value={ollama.commitModel ?? ""}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             save.mutate({
                               ...settings,
                               providers: {
                                 ...(settings.providers ?? {}),
-                                ollama: { ...ollama, commitModel: e.target.value || null },
+                                ollama: { ...ollama, commitModel: v || null },
                               },
                             })
                           }
-                        >
-                          <option value="">No default</option>
-                          {selected.map((id) => (
-                            <option key={id} value={`ollama/${id}`}>
-                              {id}
-                            </option>
-                          ))}
-                        </Select>
+                          options={[
+                            { value: "", label: "No default" },
+                            ...selected.map((id) => ({ value: `ollama/${id}`, label: id })),
+                          ]}
+                        />
                       </div>
                     }
                   >

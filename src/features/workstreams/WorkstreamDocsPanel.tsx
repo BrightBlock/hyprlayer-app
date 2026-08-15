@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { Badge, Button, ErrorNote, Select, Spinner, TextInput } from "@/components/ui";
+import { Badge, Button, DropdownSelect, ErrorNote, Spinner, TextInput } from "@/components/ui";
 import { DOC_TYPES, STATUS_TONE } from "@/features/library/constants";
 import { docTitle } from "@/features/library/text";
 import type { DocMeta, ThoughtQuery } from "@/lib/bindings";
@@ -68,19 +68,16 @@ export function WorkstreamDocsPanel({
           onChange={(e) => setText(e.target.value)}
           placeholder="Search project docs…"
         />
-        <Select
+        <DropdownSelect
           value={type}
-          onChange={(e) => setType(e.target.value)}
+          onChange={setType}
           className="w-36"
           aria-label="Filter by type"
-        >
-          <option value="">All types</option>
-          {DOC_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </Select>
+          options={[
+            { value: "", label: "All types" },
+            ...DOC_TYPES.map((t) => ({ value: t, label: t })),
+          ]}
+        />
       </div>
       {targetTitle && (
         <p className="text-xs text-ink-dim">

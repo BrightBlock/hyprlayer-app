@@ -403,8 +403,23 @@ fn well_known_dirs() -> Vec<PathBuf> {
     .into_iter()
     .flatten()
     .collect::<Vec<_>>();
+    // Linux: an AppImage launched from a desktop file inherits the session's
+    // PATH, which on most desktops is /usr/bin only — no Nix, no Snap, no
+    // Flatpak exports. The login-shell capture above usually fills those in,
+    // but it needs $SHELL set and an rc file that exports them, and neither is
+    // guaranteed from a .desktop launch. These cover the package managers a
+    // developer's claude/codex/gh most often comes from.
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let platform: [PathBuf; 0] = [];
+    let platform = [
+        Some(PathBuf::from("/usr/local/bin")),
+        Some(PathBuf::from("/var/lib/flatpak/exports/bin")),
+        Some(PathBuf::from("/snap/bin")),
+        dirs::home_dir().map(|home| home.join(".nix-profile").join("bin")),
+        dirs::data_dir().map(|share| share.join("flatpak").join("exports").join("bin")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
 
     common.chain(platform).collect()
 }

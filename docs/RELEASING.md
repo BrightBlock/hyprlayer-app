@@ -11,25 +11,49 @@ which holds releases only — no source.
 
 ## How it fits together
 
+There is **no CI release** — GitHub Actions was removed to save minutes.
+Everything is built, signed, and published from the release Mac by
+`scripts/release-local.sh`, which farms the two non-Mac bundles out to headless
+builders over SSH and signs their output locally, so the ed25519 signing key
+never leaves the Mac.
+
 ```
-private: BrightBlock/hyprlayer-app  (source + CI)
+private: BrightBlock/hyprlayer-app  (source)
 public:  BrightBlock/hyprlayer-releases  (binaries only)
 public:  brightblock.ai  (manifest JSON, served by Vercel)
 
-./scripts/release.sh patch        # bump version + tag, locally (private repo)
-        │  git push --tags
+./scripts/release.sh patch        # bump version + tag, locally (no push)
         ▼
-.github/workflows/release.yml      # on tag v*
-  ├─ build-mac      → Hyprlayer_<v>_universal.dmg + Hyprlayer.app.tar.gz(.sig)
-  ├─ build-windows  → Hyprlayer_<v>_x64-setup.exe(.sig)
-  ├─ release        → GitHub Release on hyprlayer-releases (public) w/ assets
-  └─ bump-website   → commits latest.json + changelog.json to
-                      jtsiros/brightblock.ai → Vercel deploys
+./scripts/release-local.sh        # build + sign + publish, all from the Mac
+  ├─ mac    (here)      → Hyprlayer_<v>_aarch64.dmg + Hyprlayer.app.tar.gz(.sig)
+  │                       Developer ID–signed + notarized during the build
+  ├─ win    (nexus-win) → Hyprlayer_<v>_x64-setup.exe   ─┐ built unsigned,
+  ├─ linux  (nexus)     → Hyprlayer_<v>_amd64.AppImage  ─┘ scp'd back,
+  │                                                        ed25519-signed here
+  ├─ release      → GitHub Release on hyprlayer-releases (public) w/ assets
+  ├─ manifest     → latest.json + changelog.json → jtsiros/hyprlayer.dev
+  │                 (darwin-aarch64 + windows-x86_64 + linux-x86_64) → Vercel
+  └─ cask         → BrightBlock/homebrew-tap version + dmg sha256 bump
         ▼
 Running apps  check() → https://brightblock.ai/hyprlayer/updates/latest.json
                         → asset URLs on hyprlayer-releases (public)
               downloadAndInstall() → relaunch()
 ```
+
+Both remote builders compile a clean `git archive` of the release tag shipped to
+them — never their own working clone — so what they produce matches the tag byte
+for byte. Neither holds any secret.
+
+| Flag | Builds |
+| --- | --- |
+| *(none)* | macOS arm64 + Windows x64 + Linux x64 |
+| `--no-linux` | macOS + Windows |
+| `--no-windows` | macOS + Linux |
+| `--mac-only` | macOS only |
+
+A platform left out is simply absent from `latest.json`, so its installs see
+"no update" until the next all-platform release — they are never served a
+mismatched build.
 
 Update packages are **ed25519-signed**; the public key is baked into the app
 (`src-tauri/tauri.conf.json` → `plugins.updater.pubkey`) and verifies every
@@ -127,6 +151,55 @@ signs. Verify a cut build with `spctl -a -vvv -t install <app>` and
 
 Still unsigned. To drop the SmartScreen prompt, add a signing step with an EV/OV
 (or Azure Trusted Signing) certificate to `scripts/release-win-remote.ps1`.
+
+### Linux (no OS signing)
+
+AppImages carry no OS-level code signature, so there's nothing to add here — the
+ed25519 updater signature is the only one, and it's applied on the Mac like the
+Windows installer's.
+
+## Remote builders
+
+Both are headless compile boxes reached over SSH. They need no secrets, no Git
+credentials, and no signing key.
+
+| Builder | Host (override) | Helper | Produces |
+| --- | --- | --- | --- |
+| Windows | `nexus-win` (`HYPRLAYER_WIN_SSH_HOST`) | `scripts/release-win-remote.ps1` | `*-setup.exe` |
+| Linux | `nexus` (`HYPRLAYER_LINUX_SSH_HOST`) | `scripts/release-linux-remote.sh` | `*.AppImage` |
+
+Windows also has a CI fallback: `HYPRLAYER_WIN_BUILDER=actions` runs
+`.github/workflows/windows-build.yml` on a `windows-latest` runner and downloads
+the artifact instead of using SSH. Linux has no such fallback yet — build hosted
+if you need one, or run with `--no-linux`.
+
+**Linux builder prerequisites** (Arch package names; the helper resolves
+toolchains through a login shell, so mise/nvm/volta shims are fine):
+
+```sh
+# toolchains
+rustup default stable
+# system deps for Tauri 2 + the AppImage bundler
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg \
+                        base-devel curl openssl fuse2
+```
+
+The AppImage bundler downloads `linuxdeploy` on first use; the helper exports
+`APPIMAGE_EXTRACT_AND_RUN=1` so it works without a mountable FUSE device.
+
+### How Linux updates install
+
+Unlike macOS (a `.app.tar.gz` unpacked over the bundle) and Windows (an NSIS
+installer re-run), the Linux updater payload **is the AppImage itself**:
+`tauri-plugin-updater` writes the downloaded bytes straight over the running
+file. Two consequences worth knowing:
+
+- `latest.json`'s `linux-x86_64` URL points at the raw `.AppImage`, not a
+  tarball. That's why the release uploads `*.AppImage` + `*.AppImage.sig`.
+- The AppImage must sit on a **writable** filesystem, and the updater's temp dir
+  must be on the **same mount point** (it renames the old file aside as a
+  backup). An AppImage on a read-only mount or a different device than `/tmp`
+  fails the install with `TempDirNotOnSameMountPoint`.
 
 ## Local development
 

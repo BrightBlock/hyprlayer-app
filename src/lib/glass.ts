@@ -15,7 +15,7 @@ import { IS_MACOS } from "./platform";
  *   2. a scroller extends up underneath it (`-mt-9` + padding restoring the
  *      resting position — see the Projects band and the agent tab strip).
  * A band with only flat colour beneath it blurs that flat colour and looks
- * identical to an opaque one. That is why the h-11 window header is NOT glass:
+ * identical to an opaque one. That is why the h-10 window header is NOT glass:
  * the h-9 bands sit under it, and they're solid.
  *
  * Off macOS this is just `bg-panel`, so Windows/Linux keep the bands they had.

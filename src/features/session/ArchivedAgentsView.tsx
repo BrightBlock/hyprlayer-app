@@ -7,7 +7,15 @@
 
 import { useMemo, useState } from "react";
 
-import { Badge, Button, Dialog, EmptyState, Select, TextInput, type BadgeTone } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Dialog,
+  DropdownSelect,
+  EmptyState,
+  TextInput,
+  type BadgeTone,
+} from "@/components/ui";
 import { ArchiveIcon, GitBranchIcon, ModeIcon, SearchIcon, UnarchiveIcon, XIcon } from "@/components/icons";
 import type { ShellTab } from "./workstreamTabs";
 import { engineLabel } from "@/features/multiplexer/engines";
@@ -112,14 +120,15 @@ export function ArchivedAgentsView({
             />
           </div>
           <div className="w-36">
-            <Select
+            <DropdownSelect
               value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
+              onChange={(v) => setSort(v as SortKey)}
               aria-label="Sort archived agents"
-            >
-              <option value="recent">Last archived</option>
-              <option value="name">Name</option>
-            </Select>
+              options={[
+                { value: "recent", label: "Last archived" },
+                { value: "name", label: "Name" },
+              ]}
+            />
           </div>
         </div>
       </div>

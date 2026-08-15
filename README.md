@@ -54,8 +54,12 @@ your config and your thoughts storage; the app gives you a workspace on top of i
 
 ## Platform Support
 
-- **macOS** — universal binary, signed, with in-app auto-updates
-- **Windows** — signed installer (Tauri 2 + WebView2), with in-app auto-updates
+- **macOS** — Apple Silicon `.dmg`, Developer ID–signed and notarized, with
+  in-app auto-updates
+- **Windows** — x64 NSIS installer (Tauri 2 + WebView2), with in-app auto-updates
+- **Linux** — x64 AppImage (Tauri 2 + WebKitGTK 4.1), with in-app auto-updates.
+  Needs `webkit2gtk-4.1` (Arch) / `libwebkit2gtk-4.1-0` (Debian/Ubuntu), and the
+  AppImage must live somewhere writable so updates can rewrite it in place.
 
 Running apps poll a signed manifest and install updates in place; there is no
 separate update step to run.

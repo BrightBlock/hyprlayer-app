@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Cut a macOS (Apple Silicon) + Windows (x64) release entirely from this machine.
-# This is THE release path: GitHub Actions was removed to save minutes, so there
-# is no CI release — everything below is published from here, end to end:
+# Cut a macOS (Apple Silicon) + Windows (x64) + Linux (x64) release entirely
+# from this machine. This is THE release path: GitHub Actions was removed to save
+# minutes, so there is no CI release — everything below is published from here,
+# end to end:
 #   1. build, Developer ID–sign + notarize, and ed25519-sign the arm64 .dmg and
 #      updater .app.tar.gz (locally)
 #   2. build the Windows x64 NSIS installer on a Windows builder — either nexus-win
@@ -9,28 +10,38 @@
 #      (HYPRLAYER_WIN_BUILDER=actions, see .github/workflows/windows-build.yml) —
 #      copy it back, and ed25519-sign it HERE — so the signing key never leaves
 #      this Mac and neither builder needs any secrets
-#   3. create the GitHub Release on the PUBLIC releases repo (binaries only —
-#      never the source) and upload both platforms' assets
-#   4. write the signed updater manifest (latest.json — darwin-aarch64 +
-#      windows-x86_64) + changelog to brightblock.ai, so running apps update
-#   5. bump the Homebrew cask (version + dmg sha256)
+#   3. build the Linux x64 AppImage on the nexus builder over SSH, copy it back,
+#      and ed25519-sign it HERE too (same key-never-leaves rule). The AppImage IS
+#      the Linux updater payload — tauri-plugin-updater rewrites the running
+#      AppImage in place with the downloaded bytes.
+#   4. create the GitHub Release on the PUBLIC releases repo (binaries only —
+#      never the source) and upload every platform's assets
+#   5. write the signed updater manifest (latest.json — darwin-aarch64 +
+#      windows-x86_64 + linux-x86_64) + changelog to brightblock.ai, so running
+#      apps update
+#   6. bump the Homebrew cask (version + dmg sha256)
 #
-# The Windows installer is built from a clean `git archive` of the release tag
-# shipped to the builder — NOT from any working clone there — so it matches what
-# this Mac publishes byte for byte. The builder needs Rust (x86_64-pc-windows-msvc
-# target), Node + pnpm, VS Build Tools, and `tar`; it does NOT need the signing
-# key or Git credentials.
+# Both remote installers are built from a clean `git archive` of the release tag
+# shipped to the builder — NOT from any working clone there — so they match what
+# this Mac publishes byte for byte. The Windows builder needs Rust
+# (x86_64-pc-windows-msvc target), Node + pnpm, VS Build Tools, and `tar`; the
+# Linux builder needs Rust, Node + pnpm, and the webkit2gtk-4.1 / gtk3 / librsvg
+# / appindicator dev packages (see scripts/release-linux-remote.sh). Neither
+# needs the signing key or Git credentials.
 #
-# Pass --mac-only to skip Windows entirely (the old behavior): the manifest then
-# carries a single darwin-aarch64 key, so any Windows/Intel install just sees
-# "no update" until the next all-platform release.
+# Pass --mac-only to skip both remote builders (the old behavior): the manifest
+# then carries a single darwin-aarch64 key, so any Windows/Linux/Intel install
+# just sees "no update" until the next all-platform release. --no-windows /
+# --no-linux drop one platform without dropping the other.
 #
 # Usage:
 #   ./scripts/release.sh patch              # step 1: bump version, write changelog,
 #                                           #         commit + tag (local, no push)
 #   ./scripts/release-local.sh              # step 2: build + publish the cut tag
 #   ./scripts/release-local.sh -y           # ...skipping the pre-publish confirmation
-#   ./scripts/release-local.sh --mac-only   # macOS arm64 only (no Windows)
+#   ./scripts/release-local.sh --mac-only   # macOS arm64 only (no Windows, no Linux)
+#   ./scripts/release-local.sh --no-linux   # macOS + Windows (skip the AppImage)
+#   ./scripts/release-local.sh --no-windows # macOS + Linux (skip the installer)
 #
 # Prerequisites:
 #   * gh authenticated (`gh auth status`) with push access to the releases repo,
@@ -42,10 +53,12 @@
 #     Connect notary key (.p8) on disk, for macOS code signing + notarization.
 #     Override the identity / key location via APPLE_SIGNING_IDENTITY and
 #     APPLE_API_KEY_PATH (defaults are wired in the config block below).
-#   * (unless --mac-only) SSH access to the Windows builder. Override the host
-#     with HYPRLAYER_WIN_SSH_HOST (default: nexus-win). Or set
+#   * (unless --mac-only/--no-windows) SSH access to the Windows builder. Override
+#     the host with HYPRLAYER_WIN_SSH_HOST (default: nexus-win). Or set
 #     HYPRLAYER_WIN_BUILDER=actions to build on GitHub Actions instead (needs
 #     no SSH — just `gh` auth with push access, already required above).
+#   * (unless --mac-only/--no-linux) SSH access to the Linux builder. Override the
+#     host with HYPRLAYER_LINUX_SSH_HOST (default: nexus).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -73,9 +86,14 @@ WIN_SSH_HOST="${HYPRLAYER_WIN_SSH_HOST:-nexus-win}"
 WIN_HELPER="scripts/release-win-remote.ps1"
 WIN_ACTIONS_REPO="${HYPRLAYER_WIN_ACTIONS_REPO:-BrightBlock/hyprlayer-app}"
 WIN_ACTIONS_WORKFLOW="windows-build.yml"
-# Where the copied-down + signed Windows installer lands (under target/, which is
+# Linux builder: SSH only (nexus). Same contract as the Windows SSH path —
+# headless compile box, no secrets; signing/publishing stay local.
+LINUX_SSH_HOST="${HYPRLAYER_LINUX_SSH_HOST:-nexus}"
+LINUX_HELPER="scripts/release-linux-remote.sh"
+# Where the copied-down + signed installers land (under target/, which is
 # gitignored — mirrors where the mac bundle lives).
 WIN_OUT="target/windows-release"
+LINUX_OUT="target/linux-release"
 # Vercel only deploys commits whose author email is tied to a Vercel account, so
 # the website/tap commits must be authored as the project owner (same as CI).
 PUSH_AUTHOR_NAME="jtsiros"
@@ -84,11 +102,14 @@ PUSH_AUTHOR_EMAIL="jon@brightblock.ai"
 # ─── args ───────────────────────────────────────────────────────────
 ASSUME_YES=0
 INCLUDE_WINDOWS=1
+INCLUDE_LINUX=1
 for arg in "$@"; do
   case "$arg" in
-    -y|--yes)   ASSUME_YES=1 ;;
-    --mac-only) INCLUDE_WINDOWS=0 ;;
-    *) echo "unknown arg: $arg (expected -y/--yes or --mac-only)" >&2; exit 1 ;;
+    -y|--yes)     ASSUME_YES=1 ;;
+    --mac-only)   INCLUDE_WINDOWS=0; INCLUDE_LINUX=0 ;;
+    --no-windows) INCLUDE_WINDOWS=0 ;;
+    --no-linux)   INCLUDE_LINUX=0 ;;
+    *) echo "unknown arg: $arg (expected -y/--yes, --mac-only, --no-windows or --no-linux)" >&2; exit 1 ;;
   esac
 done
 
@@ -103,7 +124,10 @@ trap cleanup EXIT
 
 # ─── preflight ──────────────────────────────────────────────────────
 REQUIRED_TOOLS=(gh cargo pnpm shasum node rustup curl)
-[[ "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" ]] && REQUIRED_TOOLS+=(ssh scp git)
+# Either SSH builder needs the same three; the Actions path for Windows doesn't.
+if [[ "$INCLUDE_LINUX" == "1" || ( "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" ) ]]; then
+  REQUIRED_TOOLS+=(ssh scp git)
+fi
 for tool in "${REQUIRED_TOOLS[@]}"; do
   command -v "$tool" >/dev/null || die "missing required tool: $tool"
 done
@@ -150,25 +174,39 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   esac
 fi
 
+# Same for the Linux builder — fail before any build rather than after the mac
+# compile, so a sleeping nexus costs seconds instead of ten minutes.
+if [[ "$INCLUDE_LINUX" == "1" ]]; then
+  [[ -f "$LINUX_HELPER" ]] || die "missing $LINUX_HELPER"
+  say "Checking Linux builder ($LINUX_SSH_HOST) is reachable…"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$LINUX_SSH_HOST" "echo ok" >/dev/null 2>&1 \
+    || die "Linux builder '$LINUX_SSH_HOST' unreachable over SSH — wake it / check Tailscale, set HYPRLAYER_LINUX_SSH_HOST, or run with --no-linux"
+fi
+
 PLATFORM_DESC="macOS arm64"
-[[ "$INCLUDE_WINDOWS" == "1" ]] && PLATFORM_DESC="macOS arm64 + Windows x64"
+[[ "$INCLUDE_WINDOWS" == "1" ]] && PLATFORM_DESC="$PLATFORM_DESC + Windows x64"
+[[ "$INCLUDE_LINUX" == "1" ]] && PLATFORM_DESC="$PLATFORM_DESC + Linux x64"
 say "Releasing Hyprlayer $TAG — $PLATFORM_DESC, locally"
 
 TMP="$(mktemp -d)"; TMPDIRS+=("$TMP")
 
-# ─── 1a. kick off the Windows build (overlaps the mac compile) ──────
-# The remote NSIS build is the long pole (~15 min cold), so start it now in the
-# background and collect the result after the mac build. It builds a clean
-# `git archive` of $TAG — never the builder's working clone. The helper defaults
-# its source/build paths under the builder's home dir, so we just scp there.
+# ─── 1a. kick off the remote builds (they overlap the mac compile) ──
+# Both remote builds are long poles (~15 min cold), so start them now in the
+# background and collect the results after the mac build. Each builds a clean
+# `git archive` of $TAG — never the builder's working clone. The helpers default
+# their source/build paths under the builder's home dir, so we just scp there.
+SRC_TGZ="$TMP/hyprlayer-src.tgz"
+if [[ "$INCLUDE_LINUX" == "1" || ( "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" ) ]]; then
+  git archive --format=tar.gz -o "$SRC_TGZ" "$TAG"
+fi
+
 WIN_PID=""
 WIN_LOG="$TMP/windows-build.log"
 if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   case "$WIN_BUILDER" in
     ssh)
       say "Shipping $TAG source to $WIN_SSH_HOST and starting NSIS build (background)…"
-      git archive --format=tar.gz -o "$TMP/hyprlayer-src.tgz" "$TAG"
-      scp -q "$TMP/hyprlayer-src.tgz" "$WIN_SSH_HOST:hyprlayer-src.tgz"
+      scp -q "$SRC_TGZ" "$WIN_SSH_HOST:hyprlayer-src.tgz"
       scp -q "$WIN_HELPER" "$WIN_SSH_HOST:release-win-remote.ps1"
       ssh "$WIN_SSH_HOST" \
         "powershell -NoProfile -ExecutionPolicy Bypass -File %USERPROFILE%\\release-win-remote.ps1" \
@@ -198,6 +236,19 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
       WIN_PID=$!
       ;;
   esac
+fi
+
+LINUX_PID=""
+LINUX_LOG="$TMP/linux-build.log"
+if [[ "$INCLUDE_LINUX" == "1" ]]; then
+  say "Shipping $TAG source to $LINUX_SSH_HOST and starting AppImage build (background)…"
+  scp -q "$SRC_TGZ" "$LINUX_SSH_HOST:hyprlayer-src.tgz"
+  scp -q "$LINUX_HELPER" "$LINUX_SSH_HOST:release-linux-remote.sh"
+  # `bash -lc` so a login shell resolves mise/nvm/volta/cargo shims — a bare
+  # non-interactive SSH command often has none of them on PATH.
+  ssh "$LINUX_SSH_HOST" "bash -lc 'bash ~/release-linux-remote.sh'" \
+    >"$LINUX_LOG" 2>&1 &
+  LINUX_PID=$!
 fi
 
 # ─── 1b. build + sign mac arm64 ─────────────────────────────────────
@@ -274,19 +325,56 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   ok "Built + signed $SETUP_NAME (sha256 $WIN_SHA)"
 fi
 
+# ─── 1d. collect + sign the Linux AppImage ──────────────────────────
+# Same contract as Windows: the builder produces the raw AppImage, this Mac
+# ed25519-signs it. On Linux the AppImage IS the updater payload (the updater
+# rewrites the running file in place), so this one asset serves both the
+# download link and the update.
+APPIMAGE_NAME=""; LINUX_SIG=""
+if [[ "$INCLUDE_LINUX" == "1" ]]; then
+  say "Waiting for the Linux build on ${LINUX_SSH_HOST}…"
+  if ! wait "$LINUX_PID"; then
+    echo "── Linux build log ───────────────────────────────────────"
+    cat "$LINUX_LOG"
+    echo "──────────────────────────────────────────────────────────"
+    die "Linux build failed on $LINUX_SSH_HOST (log above)"
+  fi
+  # The helper prints `APPIMAGE=<full path>` as its last line.
+  APPIMAGE_REMOTE="$(grep -E '^APPIMAGE=' "$LINUX_LOG" | tail -n1 | sed 's/^APPIMAGE=//' | tr -d '\r')"
+  [[ -n "$APPIMAGE_REMOTE" ]] || { cat "$LINUX_LOG"; die "no APPIMAGE line in Linux build output"; }
+  APPIMAGE_NAME="$(basename "$APPIMAGE_REMOTE")"
+  mkdir -p "$LINUX_OUT"
+  scp -q "$LINUX_SSH_HOST:${APPIMAGE_REMOTE}" "$LINUX_OUT/$APPIMAGE_NAME" \
+    || die "failed to copy $APPIMAGE_NAME down from $LINUX_SSH_HOST"
+
+  say "Signing $APPIMAGE_NAME on the Mac (key stays local)…"
+  TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_PATH")" \
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
+    pnpm exec tauri signer sign "$LINUX_OUT/$APPIMAGE_NAME" >/dev/null
+  [[ -f "$LINUX_OUT/$APPIMAGE_NAME.sig" ]] || die "signing did not produce $APPIMAGE_NAME.sig"
+  LINUX_SIG="$(cat "$LINUX_OUT/$APPIMAGE_NAME.sig")"
+  LINUX_SHA="$(shasum -a 256 "$LINUX_OUT/$APPIMAGE_NAME" | awk '{print $1}')"
+  ok "Built + signed $APPIMAGE_NAME (sha256 $LINUX_SHA)"
+fi
+
 # ─── confirm before any outward push ────────────────────────────────
 if [[ "$ASSUME_YES" -ne 1 ]]; then
   echo ""
+  # Name exactly the platform keys the manifest will carry, so a partial
+  # release is never a surprise: anything missing here stays on its current
+  # version until the next all-platform release.
+  KEYS="darwin-aarch64"
+  [[ "$INCLUDE_WINDOWS" == "1" ]] && KEYS="$KEYS + windows-x86_64"
+  [[ "$INCLUDE_LINUX" == "1" ]] && KEYS="$KEYS + linux-x86_64"
+  ASSET_DESC="dmg + updater tarball"
+  [[ "$INCLUDE_WINDOWS" == "1" ]] && ASSET_DESC="$ASSET_DESC + Windows setup.exe"
+  [[ "$INCLUDE_LINUX" == "1" ]] && ASSET_DESC="$ASSET_DESC + Linux AppImage"
   echo "About to publish $TAG:"
   echo "  • push commit + tag to origin/main"
-  if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
-    echo "  • GitHub Release on $RELEASES_REPO (dmg + updater tarball + Windows setup.exe + sigs)"
-    echo "  • updater manifest (darwin-aarch64 + windows-x86_64) → $WEBSITE_REPO"
-  else
-    echo "  • GitHub Release on $RELEASES_REPO (dmg + updater tarball + sig)"
-    echo "  • updater manifest (darwin-aarch64 only) → $WEBSITE_REPO"
-    echo "  Windows + Intel installs will NOT be served this version."
-  fi
+  echo "  • GitHub Release on $RELEASES_REPO ($ASSET_DESC + sigs)"
+  echo "  • updater manifest ($KEYS) → $WEBSITE_REPO"
+  [[ "$INCLUDE_WINDOWS" == "1" ]] || echo "  Windows installs will NOT be served this version."
+  [[ "$INCLUDE_LINUX" == "1" ]] || echo "  Linux installs will NOT be served this version."
   echo "  • Homebrew cask bump → $TAP_REPO"
   read -r -p "Proceed? [y/N] " reply
   [[ "$reply" == "y" || "$reply" == "Y" ]] || die "aborted (build artifacts kept under target/)"
@@ -322,6 +410,17 @@ Download and run \`$SETUP_NAME\`. It isn't code-signed yet, so SmartScreen shows
 an "unknown publisher" prompt — choose **More info → Run anyway**.
 EOF
 fi
+if [[ "$INCLUDE_LINUX" == "1" ]]; then
+cat >> "$NOTES_FILE" <<EOF
+
+### Linux (x64)
+
+Download \`$APPIMAGE_NAME\`, make it executable (\`chmod +x\`), and run it. It
+needs a GTK desktop with WebKitGTK 4.1 (\`webkit2gtk-4.1\` on Arch,
+\`libwebkit2gtk-4.1-0\` on Debian/Ubuntu). Keep it somewhere writable — in-app
+updates rewrite the AppImage in place.
+EOF
+fi
 cat >> "$NOTES_FILE" <<EOF
 
 ## Updates
@@ -330,10 +429,13 @@ After the first install the app self-updates via the in-app **Update** pill
 (bottom-left of the sidebar).
 EOF
 
-# darwin assets always; windows assets when built.
+# darwin assets always; windows/linux assets when built.
 ASSETS=("$DMG" "$TARBALL" "$TARBALL.sig")
 if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   ASSETS+=("$WIN_OUT/$SETUP_NAME" "$WIN_OUT/$SETUP_NAME.sig")
+fi
+if [[ "$INCLUDE_LINUX" == "1" ]]; then
+  ASSETS+=("$LINUX_OUT/$APPIMAGE_NAME" "$LINUX_OUT/$APPIMAGE_NAME.sig")
 fi
 if gh release view "$TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
   say "release $TAG already exists — re-uploading assets (--clobber)"
@@ -350,9 +452,11 @@ SITE="$(mktemp -d)"; TMPDIRS+=("$SITE")
 gh repo clone "$WEBSITE_REPO" "$SITE" -- --depth 1
 BASE="https://github.com/$RELEASES_REPO/releases/download/$TAG"
 mkdir -p "$SITE/$(dirname "$WEBSITE_MANIFEST_PATH")"
-# Build the platforms map: darwin-aarch64 always; windows-x86_64 when built.
-# A locally cut --mac-only release omits the windows key, so Windows installs
-# just see "no update" until the next all-platform release.
+# Build the platforms map: darwin-aarch64 always; windows-x86_64 / linux-x86_64
+# when built. A locally cut --mac-only release omits both, so those installs
+# just see "no update" until the next all-platform release. The linux URL points
+# at the raw .AppImage — tauri-plugin-updater writes the downloaded bytes
+# straight over the running AppImage, so there is no tarball wrapper.
 PLATFORMS="    \"darwin-aarch64\": {
       \"signature\": \"$SIG\",
       \"url\": \"$BASE/$TARBALL_NAME\"
@@ -362,6 +466,13 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
     \"windows-x86_64\": {
       \"signature\": \"$WIN_SIG\",
       \"url\": \"$BASE/$SETUP_NAME\"
+    }"
+fi
+if [[ "$INCLUDE_LINUX" == "1" ]]; then
+  PLATFORMS="$PLATFORMS,
+    \"linux-x86_64\": {
+      \"signature\": \"$LINUX_SIG\",
+      \"url\": \"$BASE/$APPIMAGE_NAME\"
     }"
 fi
 cat > "$SITE/$WEBSITE_MANIFEST_PATH" <<JSON
@@ -382,7 +493,8 @@ if git -C "$SITE" diff --cached --quiet; then
   say "manifest already current — nothing to commit"
 else
   WIN_NOTE=""; [[ "$INCLUDE_WINDOWS" == "1" ]] && WIN_NOTE=" + win-x64"
-  git -C "$SITE" commit -q -m "hyprlayer: updater bump to $VERSION (arm64${WIN_NOTE}) + changelog"
+  LINUX_NOTE=""; [[ "$INCLUDE_LINUX" == "1" ]] && LINUX_NOTE=" + linux-x64"
+  git -C "$SITE" commit -q -m "hyprlayer: updater bump to $VERSION (arm64${WIN_NOTE}${LINUX_NOTE}) + changelog"
   git -C "$SITE" push -q
 fi
 ok "Updater manifest live (Vercel redeploys within its cache TTL)"
@@ -422,12 +534,19 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   curl -fsI -L "$BASE/$SETUP_NAME" >/dev/null || die "setup.exe not reachable at $BASE/$SETUP_NAME"
   ok "Windows setup.exe reachable"
 fi
+if [[ "$INCLUDE_LINUX" == "1" ]]; then
+  curl -fsI -L "$BASE/$APPIMAGE_NAME" >/dev/null || die "AppImage not reachable at $BASE/$APPIMAGE_NAME"
+  ok "Linux AppImage reachable"
+fi
 
 echo ""
 ok "Released Hyprlayer $TAG ($PLATFORM_DESC)"
 echo "  Release : https://github.com/$RELEASES_REPO/releases/tag/$TAG"
 echo "  Updates : https://brightblock.ai/hyprlayer/updates/latest.json"
-if [[ "$INCLUDE_WINDOWS" != "1" ]]; then
-  echo "  Note    : Windows + Intel installs stay on their current version until"
+if [[ "$INCLUDE_WINDOWS" != "1" || "$INCLUDE_LINUX" != "1" ]]; then
+  SKIPPED=""
+  [[ "$INCLUDE_WINDOWS" != "1" ]] && SKIPPED="Windows"
+  [[ "$INCLUDE_LINUX" != "1" ]] && SKIPPED="${SKIPPED:+$SKIPPED + }Linux"
+  echo "  Note    : $SKIPPED + Intel installs stay on their current version until"
   echo "            the next all-platform release."
 fi

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { Button, Dialog, ErrorNote, Field, Select, TextInput } from "@/components/ui";
+import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/components/ui";
 import { isGitProject } from "@/lib/domain/projects";
 import { useBootstrap, useCreateDoc } from "@/lib/queries";
 import { DOC_SCOPES, DOC_TYPES } from "./constants";
@@ -78,34 +78,34 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type">
-            <Select value={docType} onChange={(e) => setDocType(e.target.value)}>
-              {DOC_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </Select>
+            <DropdownSelect
+              aria-label="Type"
+              value={docType}
+              options={DOC_TYPES.map((t) => ({ value: t, label: t }))}
+              onChange={setDocType}
+            />
           </Field>
           <Field label="Scope">
-            <Select value={scope} onChange={(e) => setScope(e.target.value)}>
-              {DOC_SCOPES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
+            <DropdownSelect
+              aria-label="Scope"
+              value={scope}
+              options={DOC_SCOPES.map((s) => ({ value: s, label: s }))}
+              onChange={setScope}
+            />
           </Field>
         </div>
         {!isGlobal && (
           <Field label="Project">
-            <Select value={projectPath} onChange={(e) => setProjectPath(e.target.value)}>
-              {projects.length === 0 && <option value="">No projects mapped</option>}
-              {projects.map((p) => (
-                <option key={p.path} value={p.path}>
-                  {p.mappedName}
-                </option>
-              ))}
-            </Select>
+            <DropdownSelect
+              aria-label="Project"
+              value={projectPath}
+              options={
+                projects.length === 0
+                  ? [{ value: "", label: "No projects mapped" }]
+                  : projects.map((p) => ({ value: p.path, label: p.mappedName }))
+              }
+              onChange={setProjectPath}
+            />
             {projects.length === 0 && (
               <p className="mt-1 text-xs text-warn">
                 Add a project first, or pick the global scope.

@@ -406,8 +406,9 @@ export const commands = {
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
 	/**
-	 *  hyprlayer CLI install options for this OS (macOS → Homebrew; Windows →
-	 *  winget + Scoop), each flagged by whether its package manager is installed.
+	 *  hyprlayer CLI install options for this OS (macOS + Linux → Homebrew;
+	 *  Windows → winget + Scoop), each flagged by whether its package manager is
+	 *  installed.
 	 */
 	detectCliInstallMethods: () => typedError<CliInstallMethod[], AppError>(__TAURI_INVOKE("detect_cli_install_methods")),
 	/**

@@ -120,7 +120,9 @@ const EMPTY_OVERRIDES: Overrides = {};
 const PROJECT_SIDEBAR_MIN = 180;
 const PROJECT_SIDEBAR_MAX = 360;
 // The activity-bar nav rail that sits left of the project panel (fixed width).
-const NAV_RAIL_WIDTH = 56;
+// 48 holds the 32px icon squares with 8px of breathing room each side — the
+// same ratio VSCode's activity bar uses, and 8px tighter than the original 56.
+const NAV_RAIL_WIDTH = 48;
 // The header's left controls (sidebar toggle, dashboard, and — on a project —
 // docs) live in an absolutely-positioned cluster, so they're out of flow: the
 // header content must be inset past the cluster's right edge or the breadcrumb
@@ -288,7 +290,7 @@ function SettingsIcon({ size = 18 }: { size?: number }) {
  *  reads as "home base / dashboard" and, paired with the accent-filled active
  *  state, becomes the white-on-accent square button from the mock. Tuned to the
  *  mock: a bold, generously rounded outline that fills ~40% of the button. */
-function SquareIcon({ size = 18 }: { size?: number }) {
+function SquareIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
@@ -313,7 +315,7 @@ function SquareIcon({ size = 18 }: { size?: number }) {
 /** Isometric cube for the nav rail's Projects entry — a 3D box reads as "a
  *  project / a unit of work," distinct from the flat square (Home) and the book
  *  (Library). Geometry from Lucide's `box`; sized to the mock (~47% of button). */
-function CubeIcon({ size = 22 }: { size?: number }) {
+function CubeIcon({ size = 19 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
@@ -336,7 +338,7 @@ function CubeIcon({ size = 22 }: { size?: number }) {
 /** Book glyph for the nav rail's Library entry — the mock's book: a spine curve
  *  on the left plus the inside-cover line near the foot. Geometry from Lucide's
  *  `book`; distinct from the lined `BookIcon` used for project docs / chat. */
-function RailBookIcon({ size = 21 }: { size?: number }) {
+function RailBookIcon({ size = 19 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
@@ -394,7 +396,7 @@ const topIconClass =
 // tint + ring + accent glyph). So the active section reads as an outlined box
 // while Home stays solid — exactly the two states the mockup shows side by side.
 const RAIL_ICON_BASE =
-  "flex h-9 w-9 items-center justify-center rounded-[11px] transition-colors";
+  "flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors";
 const railHomeClass = `${RAIL_ICON_BASE} bg-accent text-white shadow-sm`;
 const railNavClass = (active: boolean): string =>
   `${RAIL_ICON_BASE} ${
@@ -1125,8 +1127,8 @@ export function Root() {
 
   return (
     <div className="flex h-full flex-col bg-surface">
-      {/* A tall toolbar with the breadcrumb + window controls vertically
-          centered, leaving padding above and below. On macOS the traffic lights
+      {/* A compact toolbar with the breadcrumb + window controls vertically
+          centered. On macOS the traffic lights
           are pushed down to this bar's center via trafficLightPosition
           (tauri.conf.json y ≈ header height / 2) so they line up with the
           centered content. */}
@@ -1136,7 +1138,7 @@ export function Root() {
           glass lives on those two bands instead, which do have scrollers
           directly beneath them. */}
       <header
-        className="relative flex h-11 shrink-0 items-center border-b border-edge bg-panel"
+        className="relative flex h-10 shrink-0 items-center border-b border-edge bg-panel"
         data-tauri-drag-region
       >
         <div
@@ -1393,11 +1395,11 @@ export function Root() {
             when active; Archive + Settings (and the update pill) sit at the
             foot. Always visible, independent of the project panel's collapse. */}
         <nav
-          className="flex shrink-0 flex-col items-center border-r border-edge bg-surface py-4"
+          className="flex shrink-0 flex-col items-center border-r border-edge bg-surface py-2.5"
           style={{ width: NAV_RAIL_WIDTH }}
           aria-label="Primary"
         >
-          <div className="flex flex-col items-center gap-3">
+          <div className="flex flex-col items-center gap-1.5">
             {/* Home — its glyph doubles as the Multiplexer-mode indicator: the
                 lone rounded square "splits" into a 2×2 grid of panes while the
                 mode is on (set in Settings → Advanced), reverting when off. Still
@@ -1413,7 +1415,7 @@ export function Root() {
               aria-label={mux.enabled ? "Home (Multiplexer mode on)" : "Home"}
             >
               {mux.enabled ? (
-                <MultiplexerIcon size={18} strokeWidth={2} />
+                <MultiplexerIcon size={16} strokeWidth={2} />
               ) : (
                 <SquareIcon />
               )}
@@ -1466,12 +1468,12 @@ export function Root() {
               title="Prompt library"
               aria-label="Prompt library"
             >
-              {/* Sized with its neighbours (Cube 22 / Book 21), not the 18 of
+              {/* Sized with its neighbours (Cube / Book at 19), not the 16 of
                   the foot icons — the top group runs visually larger. */}
-              <ZapIcon size={21} strokeWidth={1.6} />
+              <ZapIcon size={19} strokeWidth={1.6} />
             </button>
           </div>
-          <div className="mt-auto flex flex-col items-center gap-3">
+          <div className="mt-auto flex flex-col items-center gap-1.5">
             <button
               type="button"
               onClick={() => toggleNav("/archive")}
@@ -1479,7 +1481,7 @@ export function Root() {
               title="Archive"
               aria-label="Archive"
             >
-              <ArchiveIcon size={18} />
+              <ArchiveIcon size={16} />
             </button>
             <button
               type="button"
@@ -1496,7 +1498,7 @@ export function Root() {
               }
               aria-label="Terminal and scripts dock"
             >
-              <ScriptPanelIcon size={18} />
+              <ScriptPanelIcon size={16} />
               {scriptsRunning && (
                 <span
                   aria-hidden
@@ -1515,7 +1517,7 @@ export function Root() {
               title="Settings"
               aria-label="Settings"
             >
-              <SettingsIcon size={18} />
+              <SettingsIcon size={16} />
             </button>
           </div>
         </nav>
