@@ -99,6 +99,41 @@ pub fn list_local_branches(repo_path: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// Remote-tracking branch shorthands (`origin/main`), sorted + deduped, skipping the
+/// symbolic `*/HEAD` aliases. The branch picker offers these so a branch that only
+/// exists on the remote can be adopted — the caller materializes a local tracking
+/// branch before any checkout. Cheap git2; run on the blocking pool.
+pub fn list_remote_branches(repo_path: &Path) -> Result<Vec<String>> {
+    let repo = open_repo(repo_path)?;
+    let branches =
+        repo.branches(Some(git2::BranchType::Remote))
+            .map_err(|e| CoreError::OutputParse {
+                program: "git2 remote branches".into(),
+                detail: e.message().to_string(),
+            })?;
+    let mut names = Vec::new();
+    for (branch, _kind) in branches.flatten() {
+        if let Ok(Some(name)) = branch.name() {
+            if name.ends_with("/HEAD") {
+                continue;
+            }
+            names.push(name.to_string());
+        }
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// The local branch name a remote-tracking shorthand maps to: `origin/feat/x` →
+/// `feat/x`. `None` when there's no remote prefix to strip (not a remote ref).
+pub fn local_name_for_remote(remote_ref: &str) -> Option<&str> {
+    remote_ref
+        .split_once('/')
+        .map(|(_remote, rest)| rest)
+        .filter(|rest| !rest.is_empty())
+}
+
 /// Shorthand of the repo's current branch (HEAD); `None` when detached or unborn.
 /// The "in-place" mode pre-selects it so attaching to the current branch needs no switch.
 pub fn current_branch(repo_path: &Path) -> Option<String> {
@@ -876,6 +911,62 @@ pub fn write_text_file(worktree: &Path, rel: &str, content: &str) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_branches_are_listed_apart_from_locals_and_map_to_local_names() {
+        // `origin/feat/x` → the local branch `git checkout feat/x` would create.
+        assert_eq!(local_name_for_remote("origin/feat/x"), Some("feat/x"));
+        assert_eq!(local_name_for_remote("upstream/main"), Some("main"));
+        // Not a remote shorthand: nothing to strip.
+        assert_eq!(local_name_for_remote("main"), None);
+        assert_eq!(local_name_for_remote("origin/"), None);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let origin = tmp.path().join("origin");
+        let repo_dir = tmp.path().join("clone");
+        let git = |cwd: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .expect("git runs");
+            assert!(out.status.success(), "git {args:?}");
+        };
+        std::fs::create_dir(&origin).unwrap();
+        git(&origin, &["init", "-b", "main"]);
+        std::fs::write(origin.join("README.md"), "hi\n").unwrap();
+        git(&origin, &["add", "."]);
+        git(
+            &origin,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "init"],
+        );
+        // A branch that exists only on the remote — a colleague's pushed work.
+        git(&origin, &["branch", "linux-support"]);
+        git(
+            tmp.path(),
+            &[
+                "clone",
+                origin.to_str().unwrap(),
+                repo_dir.to_str().unwrap(),
+            ],
+        );
+
+        // Only `main` is checked out locally; the other branch is remote-only.
+        assert_eq!(list_local_branches(&repo_dir).unwrap(), vec!["main"]);
+        let remotes = list_remote_branches(&repo_dir).unwrap();
+        assert!(remotes.contains(&"origin/linux-support".to_string()));
+        // `origin/HEAD` is a symbolic alias, never a branch you can adopt.
+        assert!(!remotes.iter().any(|r| r.ends_with("/HEAD")), "{remotes:?}");
+        // The combined base list still carries both kinds.
+        let all = list_branches(&repo_dir).unwrap();
+        assert!(all.contains(&"main".to_string()));
+        assert!(all.contains(&"origin/linux-support".to_string()));
+    }
 
     #[test]
     fn search_files_ranks_filename_hits_and_skips_infra() {

@@ -33,13 +33,19 @@ pub struct WorkstreamView {
 }
 
 /// Branch choices for the "new workstream" dialog. `branches` (local + remote)
-/// feeds the isolated base picker; `local_branches` feeds the existing/in-place
-/// pickers (a remote ref would detach HEAD); `current_branch` is the in-place default.
+/// feeds the isolated base picker; `local_branches` and `remote_branches` feed the
+/// existing/in-place picker; `current_branch` is the in-place default.
+///
+/// `remote_branches` holds only the remote-tracking refs with *no* local branch of
+/// the same name (`origin/feature` when there's no local `feature`) — a branch that
+/// exists locally is already offered as a local row. Adopting one materializes a
+/// local tracking branch first, since a remote ref would detach HEAD.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkstreamBases {
     pub branches: Vec<String>,
     pub local_branches: Vec<String>,
+    pub remote_branches: Vec<String>,
     pub default_base: String,
     pub current_branch: Option<String>,
 }
@@ -217,19 +223,124 @@ pub async fn list_workstream_bases(
     let default_base = worktree::detect_base_branch(&git, &repo)
         .await
         .unwrap_or_default();
-    let (branches, local_branches, current_branch) = blocking("list_branches", move || {
-        let branches = hyprlayer_core::gitops::list_branches(&repo)?;
-        let local_branches = hyprlayer_core::gitops::list_local_branches(&repo)?;
-        let current_branch = hyprlayer_core::gitops::current_branch(&repo);
-        Ok::<_, CoreError>((branches, local_branches, current_branch))
-    })
-    .await?
-    .map_err(AppError::from)?;
+    let (branches, local_branches, remote_branches, current_branch) =
+        blocking("list_branches", move || {
+            let branches = hyprlayer_core::gitops::list_branches(&repo)?;
+            let local_branches = hyprlayer_core::gitops::list_local_branches(&repo)?;
+            // Remote-only: a remote ref whose local counterpart already exists is
+            // the same branch, and the local row is the one that can be checked out.
+            let remote_branches = hyprlayer_core::gitops::list_remote_branches(&repo)?
+                .into_iter()
+                .filter(|r| match hyprlayer_core::gitops::local_name_for_remote(r) {
+                    Some(local) => !local_branches.iter().any(|l| l == local),
+                    None => false,
+                })
+                .collect();
+            let current_branch = hyprlayer_core::gitops::current_branch(&repo);
+            Ok::<_, CoreError>((branches, local_branches, remote_branches, current_branch))
+        })
+        .await?
+        .map_err(AppError::from)?;
     Ok(WorkstreamBases {
         branches,
         local_branches,
+        remote_branches,
         default_base,
         current_branch,
+    })
+}
+
+/// `git fetch --prune origin` in the project's own checkout, so the branch picker
+/// sees branches pushed since the app last fetched. The new-workstream dialog fires
+/// this on open and refetches the branch list when it lands — the list renders
+/// immediately from the refs already on disk, then fills in.
+#[tauri::command]
+#[specta::specta]
+pub async fn fetch_project_remote(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> CmdResult<()> {
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+    worktree::fetch_remote(&git, Path::new(&project_path))
+        .await
+        .map_err(AppError::from)?;
+    Ok(())
+}
+
+/// The local branch an existing/in-place workstream will check out, and whether the
+/// app had to create it (a remote-only pick) — the rollback path deletes only
+/// branches we created.
+struct AdoptedBranch {
+    branch: String,
+    created: bool,
+}
+
+/// Resolve a branch the user picked in the new-workstream dialog into a local branch
+/// name. A local branch passes straight through; a remote-tracking ref
+/// (`origin/feature`) gets a local branch created to track it — the same two steps
+/// `git checkout feature` does by hand for a remote-only branch. Anything else is an
+/// `invalid_branch` error.
+async fn adopt_branch(
+    state: &AppState,
+    project_path: &str,
+    branch: String,
+) -> CmdResult<AdoptedBranch> {
+    let repo = PathBuf::from(project_path);
+    let probe = repo.clone();
+    let (locals, remotes) = blocking("list_branches_for_adopt", move || {
+        let locals = hyprlayer_core::gitops::list_local_branches(&probe)?;
+        let remotes = hyprlayer_core::gitops::list_remote_branches(&probe)?;
+        Ok::<_, CoreError>((locals, remotes))
+    })
+    .await?
+    .map_err(AppError::from)?;
+
+    if locals.contains(&branch) {
+        return Ok(AdoptedBranch {
+            branch,
+            created: false,
+        });
+    }
+
+    if remotes.contains(&branch) {
+        let local = hyprlayer_core::gitops::local_name_for_remote(&branch)
+            .unwrap_or(branch.as_str())
+            .to_string();
+        // Raced with a local branch of the same name appearing (the picker hides a
+        // remote whose local exists): adopt that local rather than failing on a
+        // name collision.
+        if locals.contains(&local) {
+            return Ok(AdoptedBranch {
+                branch: local,
+                created: false,
+            });
+        }
+        let git = state
+            .binaries
+            .require(BinaryKind::Git)
+            .await
+            .map_err(AppError::from)?;
+        // Freshen the remote ref so the new branch starts at the remote's current
+        // tip rather than whatever was last fetched. Offline is fine — the ref on
+        // disk still works, it's just older.
+        let _ = worktree::fetch_remote(&git, &repo).await;
+        worktree::create_tracking_branch(&git, &repo, &local, &branch)
+            .await
+            .map_err(AppError::from)?;
+        return Ok(AdoptedBranch {
+            branch: local,
+            created: true,
+        });
+    }
+
+    Err(AppError {
+        code: "invalid_branch".into(),
+        message: format!("`{branch}` is not a local or remote branch."),
+        remedy: Some("Pick a branch from the list, or create a new one.".into()),
     })
 }
 
@@ -298,9 +409,26 @@ pub async fn create_workstream(
         return create_folder_workstream(&state, project_path, title).await;
     }
 
-    // Resolve the requested backing mode up front so an unknown mode or a
-    // missing branch fails before any git work.
-    let branch_choice = branch.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+    // Existing/in-place adopt a branch the user already has, and both check it out
+    // somewhere (a worktree, or the main checkout) — a remote-tracking ref or tag
+    // would detach HEAD, so resolve the pick to a *local* branch first, creating one
+    // that tracks the remote when the user picked a remote-only branch. Rejects
+    // anything that is neither: the UI only offers real branches, but a direct Tauri
+    // invoke could pass anything. (`WorktreeManager` documents the local-branch
+    // invariant; this is where it's enforced.)
+    let picked = branch
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty());
+    let (branch_choice, branch_is_ours) = match picked {
+        Some(b) => {
+            let adopted = adopt_branch(&state, &project_path, b).await?;
+            (Some(adopted.branch), adopted.created)
+        }
+        None => (None, false),
+    };
+
+    // Resolve the requested backing mode so an unknown mode or a missing branch
+    // fails before any worktree work.
     let needs_branch = |m: &str| {
         branch_choice.clone().ok_or_else(|| AppError {
             code: "invalid_branch".into(),
@@ -328,27 +456,6 @@ pub async fn create_workstream(
         }
     };
     let inplace = mode == WorktreeMode::Inplace;
-
-    // Existing/in-place adopt a branch the user already has, and both check it
-    // out somewhere (a worktree, or the main checkout) — a remote-tracking ref or
-    // tag would detach HEAD. The UI only offers local branches, but a direct
-    // Tauri invoke could pass anything, so validate server-side before any git
-    // work. (`WorktreeManager` documents this as a caller invariant; enforce it.)
-    if let Some(branch) = branch_choice.clone() {
-        let repo = PathBuf::from(&project_path);
-        let locals = blocking("list_local_branches", move || {
-            hyprlayer_core::gitops::list_local_branches(&repo)
-        })
-        .await?
-        .map_err(AppError::from)?;
-        if !locals.contains(&branch) {
-            return Err(AppError {
-                code: "invalid_branch".into(),
-                message: format!("`{branch}` is not a local branch."),
-                remedy: Some("Pick an existing local branch to start from.".into()),
-            });
-        }
-    }
 
     // At most one in-place workstream per project: every in-place row shares the
     // single project checkout, so a second one would claim a different branch on
@@ -436,7 +543,8 @@ pub async fn create_workstream(
             Ok(link) => link,
             Err(e) => {
                 // Roll the worktree back. Delete the branch only when WE created
-                // it (isolated); an adopted existing branch is the user's.
+                // it — isolated, or the local tracking branch we just made for a
+                // remote-only pick. An adopted existing branch is the user's.
                 let _ = state
                     .worktrees
                     .remove(
@@ -446,7 +554,7 @@ pub async fn create_workstream(
                         &created.branch,
                         &created.base_branch,
                         RemovePolicy::ForceDiscard,
-                        mode == WorktreeMode::Isolated,
+                        mode == WorktreeMode::Isolated || branch_is_ours,
                     )
                     .await;
                 return Err(AppError::from(e));

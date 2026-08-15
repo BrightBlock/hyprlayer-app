@@ -4,7 +4,7 @@ import type { WorkstreamView } from "@/lib/bindings";
 import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/components/ui";
 import { PlusIcon, SplitIcon } from "@/components/icons";
 import type { WorktreeMode } from "@/lib/bindings";
-import { useCreateWorkstream, useWorkstreamBases } from "@/lib/queries";
+import { useCreateWorkstream, useFetchProjectRemote, useWorkstreamBases } from "@/lib/queries";
 
 type Props = {
   projectPath: string;
@@ -35,14 +35,24 @@ function filterBranches(all: string[], query: string): string[] {
   return [...prefix, ...substr];
 }
 
+/** The remote-only rows carry their full ref (`origin/feature`); the local branch
+ * they'd create is the ref minus its remote prefix. */
+function localNameFor(remoteRef: string): string {
+  const slash = remoteRef.indexOf("/");
+  return slash === -1 ? remoteRef : remoteRef.slice(slash + 1);
+}
+
 /**
  * New-workstream dialog. A single branch combobox is the heart of it: the
  * pinned "New branch" row (the default) creates a fresh branch + worktree from a
- * base; picking an existing local branch instead reveals a Worktree/Here choice
+ * base; picking an existing branch instead reveals a Worktree/Here choice
  * — Worktree checks it out into a dedicated worktree, Here switches the
  * project's own checkout to it with no worktree. There is no mode dropdown; the
- * branch you choose determines the shape. The list is local branches only — a
- * remote-tracking ref would detach HEAD.
+ * branch you choose determines the shape. The list is local branches plus the
+ * remote-only ones (a colleague's pushed branch); picking a remote row creates the
+ * local tracking branch first, since checking a remote ref out would detach HEAD.
+ * Opening the dialog fires a `git fetch` so a just-pushed branch shows up without
+ * a trip to the terminal.
  *
  * A folder project has none of that: the dialog collapses to a title, and the
  * workstream runs in the project folder itself.
@@ -65,6 +75,7 @@ export function CreateWorkstreamDialog({
   const create = useCreateWorkstream(projectPath);
   // A folder project has no branches to list — don't even ask.
   const bases = useWorkstreamBases(projectPath, open && !folder);
+  const refreshRemote = useFetchProjectRemote(projectPath);
 
   const defaultBase = bases.data?.defaultBase ?? "";
   const currentBranch = bases.data?.currentBranch ?? "";
@@ -75,9 +86,21 @@ export function CreateWorkstreamDialog({
     () => bases.data?.localBranches ?? [],
     [bases.data?.localBranches],
   );
-  const filtered = useMemo(() => filterBranches(localBranches, query), [localBranches, query]);
+  // Remote-only branches, already filtered backend-side to those with no local
+  // counterpart — listed after the locals so the branches you have come first.
+  const remoteBranches = useMemo(
+    () => bases.data?.remoteBranches ?? [],
+    [bases.data?.remoteBranches],
+  );
+  const pickable = useMemo(
+    () => [...localBranches, ...remoteBranches],
+    [localBranches, remoteBranches],
+  );
+  const remoteSet = useMemo(() => new Set(remoteBranches), [remoteBranches]);
+  const filtered = useMemo(() => filterBranches(pickable, query), [pickable, query]);
 
   const isNew = selectedBranch === null;
+  const remoteSelected = !isNew && !!selectedBranch && remoteSet.has(selectedBranch);
   // The current branch is already checked out in the project's own tree, so it
   // can't also be checked out into a dedicated worktree — git refuses a branch
   // already checked out elsewhere. Only "My checkout" (in-place) is valid for it.
@@ -90,10 +113,14 @@ export function CreateWorkstreamDialog({
     if (currentSelected && place === "worktree") setPlace("here");
   }, [currentSelected, place]);
 
-  // Re-scan local branches on open, since the dialog stays mounted across
-  // opens and react-query's normal refetch-on-mount never fires again.
+  // Re-scan branches on open, since the dialog stays mounted across opens and
+  // react-query's normal refetch-on-mount never fires again. The fetch runs
+  // alongside: the list paints immediately from the refs already on disk, and any
+  // branch pushed since the last fetch drops in when the network call lands.
   useEffect(() => {
-    if (open && !folder) void bases.refetch();
+    if (!open || folder) return;
+    void bases.refetch();
+    refreshRemote.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, folder]);
 
@@ -159,15 +186,22 @@ export function CreateWorkstreamDialog({
     : inplace
       ? "Switching branch…"
       : "Provisioning worktree…";
+  // A remote-only pick becomes a local branch tracking it, so say what will be
+  // created rather than naming a branch the user doesn't have yet.
+  const localFor = remoteSelected && selectedBranch ? localNameFor(selectedBranch) : selectedBranch;
   const hint = folder
     ? "Runs in the project folder. No branch, no worktree — add as many as you like."
     : isNew
       ? "Creates a new branch named from your title, in a dedicated worktree."
-      : inplace
-        ? currentSelected
-          ? `Attaches a workstream to ${selectedBranch} in your current checkout. No worktree is created.`
-          : `Switches your checkout to ${selectedBranch}. No worktree is created.`
-        : `Checks ${selectedBranch} out into a dedicated worktree.`;
+      : remoteSelected
+        ? inplace
+          ? `Creates local branch ${localFor} tracking ${selectedBranch} and switches your checkout to it. No worktree is created.`
+          : `Creates local branch ${localFor} tracking ${selectedBranch}, in a dedicated worktree.`
+        : inplace
+          ? currentSelected
+            ? `Attaches a workstream to ${selectedBranch} in your current checkout. No worktree is created.`
+            : `Switches your checkout to ${selectedBranch}. No worktree is created.`
+          : `Checks ${selectedBranch} out into a dedicated worktree.`;
 
   return (
     <Dialog open={open} onClose={close} title="New workstream">
@@ -217,12 +251,17 @@ export function CreateWorkstreamDialog({
                   key={b}
                   icon={<SplitIcon size={14} />}
                   label={b}
-                  detail={b === currentBranch ? "active" : undefined}
+                  detail={
+                    remoteSet.has(b) ? "remote" : b === currentBranch ? "active" : undefined
+                  }
                   selected={selectedBranch === b}
                   disabled={create.isPending}
                   onSelect={() => setSelectedBranch(b)}
                 />
               ))}
+              {refreshRemote.isPending && (
+                <li className="px-3 py-2 text-xs text-ink-dim">Fetching remote branches…</li>
+              )}
             </ul>
           </div>
         </Field>

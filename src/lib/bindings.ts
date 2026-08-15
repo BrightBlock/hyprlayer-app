@@ -113,6 +113,13 @@ export const commands = {
 	 *  re-detects on create) so a repo with no resolvable main/master still lists branches.
 	 */
 	listWorkstreamBases: (projectPath: string) => typedError<WorkstreamBases, AppError>(__TAURI_INVOKE("list_workstream_bases", { projectPath })),
+	/**
+	 *  `git fetch --prune origin` in the project's own checkout, so the branch picker
+	 *  sees branches pushed since the app last fetched. The new-workstream dialog fires
+	 *  this on open and refetches the branch list when it lands — the list renders
+	 *  immediately from the refs already on disk, then fills in.
+	 */
+	fetchProjectRemote: (projectPath: string) => typedError<null, AppError>(__TAURI_INVOKE("fetch_project_remote", { projectPath })),
 	createWorkstream: (projectPath: string, title: string, base: string | null, mode: WorktreeMode, branch: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base, mode, branch })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
 	/**
@@ -2410,12 +2417,18 @@ export type Workstream = {
 
 /**
  *  Branch choices for the "new workstream" dialog. `branches` (local + remote)
- *  feeds the isolated base picker; `local_branches` feeds the existing/in-place
- *  pickers (a remote ref would detach HEAD); `current_branch` is the in-place default.
+ *  feeds the isolated base picker; `local_branches` and `remote_branches` feed the
+ *  existing/in-place picker; `current_branch` is the in-place default.
+ * 
+ *  `remote_branches` holds only the remote-tracking refs with *no* local branch of
+ *  the same name (`origin/feature` when there's no local `feature`) — a branch that
+ *  exists locally is already offered as a local row. Adopting one materializes a
+ *  local tracking branch first, since a remote ref would detach HEAD.
  */
 export type WorkstreamBases = {
 	branches: string[],
 	localBranches: string[],
+	remoteBranches: string[],
 	defaultBase: string,
 	currentBranch: string | null,
 };

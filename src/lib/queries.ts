@@ -514,6 +514,19 @@ export function useWorkstreamBases(projectPath: string, enabled = true) {
   });
 }
 
+/** `git fetch --prune origin` in the project's checkout, so the branch picker sees
+ * branches pushed since the app last fetched. Fired when the new-workstream dialog
+ * opens; the refreshed branch list arrives via the invalidation below. Failure is
+ * the caller's to ignore — an offline fetch just leaves the on-disk refs in place. */
+export function useFetchProjectRemote(projectPath: string) {
+  return useMutation({
+    mutationFn: () => unwrap(commands.fetchProjectRemote(projectPath)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workstream-bases", projectPath] });
+    },
+  });
+}
+
 /** How a new workstream is backed. `isolated` creates a fresh branch + worktree;
  * `existing` checks a chosen local branch out into a worktree; `inplace` runs in
  * the project's own checkout with no worktree. */

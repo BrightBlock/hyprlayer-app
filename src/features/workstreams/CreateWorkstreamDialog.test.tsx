@@ -11,6 +11,7 @@ import type { WorkstreamBases } from "@/lib/bindings";
 const q = vi.hoisted(() => ({
   useWorkstreamBases: vi.fn(),
   useCreateWorkstream: vi.fn(),
+  useFetchProjectRemote: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
 
@@ -29,6 +30,7 @@ function basesResult(data: Partial<WorkstreamBases>, refetch = vi.fn()): BasesRe
     data: {
       branches: [],
       localBranches: [],
+      remoteBranches: [],
       defaultBase: "",
       currentBranch: "",
       ...data,
@@ -44,14 +46,18 @@ function mockBases(data: Partial<WorkstreamBases>, refetch = vi.fn()) {
   q.useWorkstreamBases.mockReturnValue(basesResult(data, refetch));
 }
 
-// Stable no-op mutation.
+// Stable no-op mutations. `create.mutate` is re-stubbed per test that asserts on
+// what the dialog submits.
+const createMutate = vi.fn();
 q.useCreateWorkstream.mockReturnValue({
   isPending: false,
   isError: false,
   error: null,
   reset: vi.fn(),
-  mutate: vi.fn(),
+  mutate: createMutate,
 });
+const fetchRemoteMutate = vi.fn();
+q.useFetchProjectRemote.mockReturnValue({ mutate: fetchRemoteMutate, isPending: false });
 
 function renderDialog(open: boolean) {
   return render(
@@ -75,6 +81,69 @@ function pickBase(label: string) {
   fireEvent.click(baseTrigger());
   fireEvent.click(screen.getByRole("option", { name: label }));
 }
+
+describe("CreateWorkstreamDialog remote branches", () => {
+  it("offers a remote-only branch and submits its full ref", () => {
+    createMutate.mockClear();
+    mockBases({
+      branches: ["main", "origin/main", "origin/linux-support"],
+      localBranches: ["main"],
+      remoteBranches: ["origin/linux-support"],
+      defaultBase: "main",
+      currentBranch: "main",
+    });
+    renderDialog(true);
+
+    // The remote-only branch is pickable and flagged as such.
+    const row = screen.getByRole("button", { name: /origin\/linux-support/ });
+    expect(row.textContent).toContain("remote");
+    fireEvent.click(row);
+
+    // The hint names the local branch that will be created to track it.
+    expect(
+      screen.getByText(/Creates local branch linux-support tracking origin\/linux-support/),
+    ).toBeDefined();
+
+    fireEvent.change(screen.getByPlaceholderText("What are you working on?"), {
+      target: { value: "Linux" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    // The backend resolves the ref to a local tracking branch, so the dialog
+    // hands it the ref verbatim.
+    expect(createMutate).toHaveBeenCalledWith(
+      { title: "Linux", mode: "existing", base: null, branch: "origin/linux-support" },
+      expect.anything(),
+    );
+  });
+
+  it("fetches the remote on the open edge, not while closed", () => {
+    fetchRemoteMutate.mockClear();
+    mockBases({ branches: ["main"], localBranches: ["main"], defaultBase: "main" });
+
+    const { rerender } = renderDialog(false);
+    expect(fetchRemoteMutate).not.toHaveBeenCalled();
+
+    rerender(
+      <CreateWorkstreamDialog projectPath="/repo" open onClose={vi.fn()} onCreated={vi.fn()} />,
+    );
+    expect(fetchRemoteMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the fetch for a folder project, which has no branches", () => {
+    fetchRemoteMutate.mockClear();
+    mockBases({});
+    render(
+      <CreateWorkstreamDialog
+        projectPath="/repo"
+        open
+        folder
+        onClose={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    expect(fetchRemoteMutate).not.toHaveBeenCalled();
+  });
+});
 
 describe("CreateWorkstreamDialog base detection", () => {
   it("re-scans local branches on the open edge, not while closed", () => {
