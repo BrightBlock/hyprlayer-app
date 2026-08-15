@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.5.7",
+      "date": "2026-08-15",
+      "summary": "Linux fixes: clean process env, clipboard image paste, and bundled fonts.",
+      "notes": [
+        "Terminals and harness CLIs (claude, codex, opencode) launched from the Linux AppImage no longer inherit its bundled runtime environment — the worst case broke every `python` invocation with a missing-stdlib error.",
+        "Pasting a screenshot into the composer now works on Linux — WebKitGTK's clipboard paste never carried image bytes, so it now falls back to reading the OS clipboard directly.",
+        "The UI now bundles Inter and JetBrains Mono instead of relying on the system font stack, fixing missing font weights and a non-monospaced code font on typical Linux installs."
+      ]
+    },
+    {
       "version": "0.5.6",
       "date": "2026-08-15",
       "summary": "Hyprlayer now ships for Linux, with in-app dropdowns and smarter branch picking.",
