@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -334,27 +334,50 @@ fn join_deduped(mut segments: Vec<PathBuf>) -> OsString {
     env::join_paths(segments).unwrap_or_else(|_| env::var_os("PATH").unwrap_or_default())
 }
 
+/// Is `dir` a cargo profile output dir (`target/debug`, `target/release`)?
+///
+/// Identified by the bookkeeping cargo always leaves alongside the binaries,
+/// because the directory name alone proves nothing.
+fn is_cargo_build_dir(dir: &Path) -> bool {
+    dir.join(".fingerprint").is_dir() || dir.join(".cargo-lock").is_file()
+}
+
+/// Directories the resolver must never hand a binary back from: `cargo run`
+/// puts `target/<profile>` on PATH, where the GUI binary matches a search for
+/// `hyprlayer` and we would spawn a second copy of ourselves.
+///
+/// Scoped to cargo output dirs on purpose. A packaged Linux install puts the
+/// app at `/usr/bin/Hyprlayer`, so blindly forbidding `current_exe()`'s parent
+/// blacklisted all of `/usr/bin` — hiding the real `hyprlayer` CLI, `git`, and
+/// `gh` (which then fell through to a mise shim that prints a banner on stdout
+/// and corrupted every parse). Empty for any normal install location.
+fn build_artifact_dirs(exe: Option<&Path>) -> Vec<PathBuf> {
+    let Some(dir) = exe.and_then(Path::parent) else {
+        return Vec::new();
+    };
+    // The running binary is either in `target/<profile>/` or the `deps/` copy
+    // cargo keeps beside it.
+    let root = match dir.file_name() {
+        Some(name) if name == "deps" => dir.parent().unwrap_or(dir),
+        _ => dir,
+    };
+    if !is_cargo_build_dir(root) {
+        return Vec::new();
+    }
+    [root.to_path_buf(), root.join("deps")]
+        .into_iter()
+        .filter_map(|d| d.canonicalize().ok())
+        .collect()
+}
+
 fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> {
     let cwd = env::current_dir().ok()?;
 
-    // On Windows dev builds `cargo run` puts `target\debug` on PATH, where the
-    // GUI exe `Hyprlayer.exe` matches a search for `hyprlayer` — so the resolver
-    // must not hand back its own build artifacts and spawn a second app instance.
-    let forbidden: Vec<PathBuf> = env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(PathBuf::from))
-        .map(|dir| {
-            // Both `target\debug\` and the `target\debug\deps\` copy cargo keeps.
-            let mut dirs = vec![dir.clone(), dir.join("deps")];
-            if dir.file_name().is_some_and(|n| n == "deps") {
-                dirs.extend(dir.parent().map(PathBuf::from));
-            }
-            dirs.into_iter()
-                .filter_map(|d| d.canonicalize().ok())
-                .collect()
-        })
-        .unwrap_or_default();
+    let forbidden = build_artifact_dirs(env::current_exe().ok().as_deref());
     let is_build_artifact = |p: &PathBuf| {
+        if forbidden.is_empty() {
+            return false;
+        }
         p.canonicalize()
             .ok()
             .and_then(|c| c.parent().map(PathBuf::from))
@@ -501,6 +524,48 @@ mod tests {
         );
         assert_eq!(state_for(BinaryKind::Git, None), BinaryState::Ok);
         assert_eq!(state_for(BinaryKind::Gh, None), BinaryState::Ok);
+    }
+
+    #[test]
+    fn an_installed_app_forbids_nothing() {
+        // The 0.5.8 Linux regression: the deb/rpm/AUR packages put the app at
+        // /usr/bin/Hyprlayer, so forbidding current_exe()'s parent blacklisted
+        // all of /usr/bin — `hyprlayer` and `git` resolved to nothing and `gh`
+        // fell through to a mise shim. A normal bin dir must forbid nothing.
+        assert!(build_artifact_dirs(Some(Path::new("/usr/bin/Hyprlayer"))).is_empty());
+        assert!(build_artifact_dirs(Some(Path::new("/usr/local/bin/Hyprlayer"))).is_empty());
+        assert!(build_artifact_dirs(None).is_empty());
+    }
+
+    #[test]
+    fn a_cargo_profile_dir_is_still_forbidden() {
+        // ...but the guard it was added for must survive: `cargo run` puts
+        // target/<profile> on PATH, where the GUI binary answers to `hyprlayer`.
+        let tmp = tempfile::tempdir().unwrap();
+        let profile = tmp.path().join("target").join("debug");
+        std::fs::create_dir_all(profile.join(".fingerprint")).unwrap();
+        std::fs::create_dir_all(profile.join("deps")).unwrap();
+
+        for exe in [profile.join("Hyprlayer"), profile.join("deps/Hyprlayer")] {
+            let forbidden = build_artifact_dirs(Some(&exe));
+            assert!(
+                forbidden.contains(&profile.canonicalize().unwrap()),
+                "{exe:?} must forbid the profile dir"
+            );
+            assert!(
+                forbidden.contains(&profile.join("deps").canonicalize().unwrap()),
+                "{exe:?} must forbid the deps copy"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bin_dir_that_merely_looks_like_a_target_is_not_forbidden() {
+        // Name-based detection would trip on this; the cargo marker doesn't.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("target").join("release");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(build_artifact_dirs(Some(&dir.join("Hyprlayer"))).is_empty());
     }
 
     #[test]
