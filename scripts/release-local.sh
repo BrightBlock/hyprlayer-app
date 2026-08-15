@@ -10,16 +10,17 @@
 #      (HYPRLAYER_WIN_BUILDER=actions, see .github/workflows/windows-build.yml) —
 #      copy it back, and ed25519-sign it HERE — so the signing key never leaves
 #      this Mac and neither builder needs any secrets
-#   3. build the Linux x64 AppImage on the nexus builder over SSH, copy it back,
-#      and ed25519-sign it HERE too (same key-never-leaves rule). The AppImage IS
-#      the Linux updater payload — tauri-plugin-updater rewrites the running
-#      AppImage in place with the downloaded bytes.
+#   3. build the Linux x64 .deb + .rpm on the nexus builder over SSH and copy
+#      them back. No ed25519 signature: distro packages are owned by the package
+#      manager, so the app never self-installs on Linux (see step 5).
 #   4. create the GitHub Release on the PUBLIC releases repo (binaries only —
 #      never the source) and upload every platform's assets
 #   5. write the signed updater manifest (latest.json — darwin-aarch64 +
-#      windows-x86_64 + linux-x86_64) + changelog to brightblock.ai, so running
-#      apps update
+#      windows-x86_64) + changelog to brightblock.ai, so running apps update.
+#      Linux is deliberately absent: those installs read the changelog and point
+#      at pacman/apt/dnf instead of installing over themselves.
 #   6. bump the Homebrew cask (version + dmg sha256)
+#   7. push the rendered PKGBUILD/.SRCINFO to the AUR (hyprlayer-desktop-bin)
 #
 # Both remote installers are built from a clean `git archive` of the release tag
 # shipped to the builder — NOT from any working clone there — so they match what
@@ -40,8 +41,10 @@
 #   ./scripts/release-local.sh              # step 2: build + publish the cut tag
 #   ./scripts/release-local.sh -y           # ...skipping the pre-publish confirmation
 #   ./scripts/release-local.sh --mac-only   # macOS arm64 only (no Windows, no Linux)
-#   ./scripts/release-local.sh --no-linux   # macOS + Windows (skip the AppImage)
+#   ./scripts/release-local.sh --no-linux   # macOS + Windows (skip deb/rpm + AUR)
 #   ./scripts/release-local.sh --no-windows # macOS + Linux (skip the installer)
+#   ./scripts/release-local.sh --no-aur     # build + publish Linux packages, but
+#                                           # don't push the AUR package
 #
 # Prerequisites:
 #   * gh authenticated (`gh auth status`) with push access to the releases repo,
@@ -59,6 +62,9 @@
 #     no SSH — just `gh` auth with push access, already required above).
 #   * (unless --mac-only/--no-linux) SSH access to the Linux builder. Override the
 #     host with HYPRLAYER_LINUX_SSH_HOST (default: nexus).
+#   * (unless --no-aur) the `aur-ci` key loaded in the 1Password SSH agent — the
+#     same agent every other hyprlayer SSH host uses. Nothing AUR-specific to
+#     set up; override the target with HYPRLAYER_AUR_SSH.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -90,6 +96,19 @@ WIN_ACTIONS_WORKFLOW="windows-build.yml"
 # headless compile box, no secrets; signing/publishing stay local.
 LINUX_SSH_HOST="${HYPRLAYER_LINUX_SSH_HOST:-nexus}"
 LINUX_HELPER="scripts/release-linux-remote.sh"
+# AUR: the primary Linux channel. The package is binary-only (`-bin`) because the
+# source repo is private; the builder renders PKGBUILD/.SRCINFO and this Mac
+# pushes them. AUR only accepts `master`.
+#
+# Auth is the `aur-ci` key already in the 1Password SSH agent — the same agent
+# `Host *` in ~/.ssh/config points every other hyprlayer host at, so there is no
+# AUR-specific key to manage. Override HYPRLAYER_AUR_SSH with an ssh_config alias
+# to pin a different identity.
+AUR_PKGNAME="hyprlayer-desktop-bin"
+AUR_SSH="${HYPRLAYER_AUR_SSH:-aur@aur.archlinux.org}"
+AUR_REPO="ssh://${AUR_SSH}/${AUR_PKGNAME}.git"
+AUR_AUTHOR_NAME="${HYPRLAYER_AUR_AUTHOR_NAME:-Jon Tsiros}"
+AUR_AUTHOR_EMAIL="${HYPRLAYER_AUR_AUTHOR_EMAIL:-jon@brightblock.ai}"
 # Where the copied-down + signed installers land (under target/, which is
 # gitignored — mirrors where the mac bundle lives).
 WIN_OUT="target/windows-release"
@@ -103,15 +122,20 @@ PUSH_AUTHOR_EMAIL="jon@brightblock.ai"
 ASSUME_YES=0
 INCLUDE_WINDOWS=1
 INCLUDE_LINUX=1
+INCLUDE_AUR=1
 for arg in "$@"; do
   case "$arg" in
     -y|--yes)     ASSUME_YES=1 ;;
     --mac-only)   INCLUDE_WINDOWS=0; INCLUDE_LINUX=0 ;;
     --no-windows) INCLUDE_WINDOWS=0 ;;
     --no-linux)   INCLUDE_LINUX=0 ;;
-    *) echo "unknown arg: $arg (expected -y/--yes, --mac-only, --no-windows or --no-linux)" >&2; exit 1 ;;
+    --no-aur)     INCLUDE_AUR=0 ;;
+    *) echo "unknown arg: $arg (expected -y/--yes, --mac-only, --no-windows, --no-linux or --no-aur)" >&2; exit 1 ;;
   esac
 done
+# The AUR package's source is the published .deb, so it can't be pushed without
+# a Linux build.
+[[ "$INCLUDE_LINUX" == "1" ]] || INCLUDE_AUR=0
 
 say() { printf '\033[1;36m→ %s\033[0m\n' "$*"; }
 ok()  { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
@@ -178,9 +202,21 @@ fi
 # compile, so a sleeping nexus costs seconds instead of ten minutes.
 if [[ "$INCLUDE_LINUX" == "1" ]]; then
   [[ -f "$LINUX_HELPER" ]] || die "missing $LINUX_HELPER"
+  [[ -f "packaging/aur/PKGBUILD.in" ]] || die "missing packaging/aur/PKGBUILD.in (the builder renders it)"
   say "Checking Linux builder ($LINUX_SSH_HOST) is reachable…"
   ssh -o BatchMode=yes -o ConnectTimeout=10 "$LINUX_SSH_HOST" "echo ok" >/dev/null 2>&1 \
     || die "Linux builder '$LINUX_SSH_HOST' unreachable over SSH — wake it / check Tailscale, set HYPRLAYER_LINUX_SSH_HOST, or run with --no-linux"
+fi
+
+# AUR auth too — a rejected push after the Release is already public leaves the
+# AUR package a version behind, so prove the key works before anything ships.
+# Same 1Password agent as the nexus check above, so a locked vault has already
+# bitten by here; this only adds the aur-ci key to what it's asked to approve.
+if [[ "$INCLUDE_AUR" == "1" ]]; then
+  say "Checking AUR SSH access (may prompt in 1Password)…"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+    "$AUR_SSH" help >/dev/null 2>&1 \
+    || die "AUR SSH auth failed as '$AUR_SSH' — unlock 1Password and confirm the aur-ci key is loaded (\`ssh-add -l\`), or run with --no-aur"
 fi
 
 PLATFORM_DESC="macOS arm64"
@@ -241,7 +277,7 @@ fi
 LINUX_PID=""
 LINUX_LOG="$TMP/linux-build.log"
 if [[ "$INCLUDE_LINUX" == "1" ]]; then
-  say "Shipping $TAG source to $LINUX_SSH_HOST and starting AppImage build (background)…"
+  say "Shipping $TAG source to $LINUX_SSH_HOST and starting deb/rpm build (background)…"
   scp -q "$SRC_TGZ" "$LINUX_SSH_HOST:hyprlayer-src.tgz"
   scp -q "$LINUX_HELPER" "$LINUX_SSH_HOST:release-linux-remote.sh"
   # `bash -lc` so a login shell resolves mise/nvm/volta/cargo shims — a bare
@@ -325,12 +361,12 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   ok "Built + signed $SETUP_NAME (sha256 $WIN_SHA)"
 fi
 
-# ─── 1d. collect + sign the Linux AppImage ──────────────────────────
-# Same contract as Windows: the builder produces the raw AppImage, this Mac
-# ed25519-signs it. On Linux the AppImage IS the updater payload (the updater
-# rewrites the running file in place), so this one asset serves both the
-# download link and the update.
-APPIMAGE_NAME=""; LINUX_SIG=""
+# ─── 1d. collect the Linux packages + the AUR files ─────────────────
+# Unlike mac/Windows there is no ed25519 signature here: a distro package is
+# installed and updated by pacman/apt/dnf, so the app never installs over
+# itself on Linux and ships no updater payload. Integrity for the AUR path is
+# the sha256 baked into the PKGBUILD the builder just rendered.
+DEB_NAME=""; RPM_NAME=""
 if [[ "$INCLUDE_LINUX" == "1" ]]; then
   say "Waiting for the Linux build on ${LINUX_SSH_HOST}…"
   if ! wait "$LINUX_PID"; then
@@ -339,22 +375,36 @@ if [[ "$INCLUDE_LINUX" == "1" ]]; then
     echo "──────────────────────────────────────────────────────────"
     die "Linux build failed on $LINUX_SSH_HOST (log above)"
   fi
-  # The helper prints `APPIMAGE=<full path>` as its last line.
-  APPIMAGE_REMOTE="$(grep -E '^APPIMAGE=' "$LINUX_LOG" | tail -n1 | sed 's/^APPIMAGE=//' | tr -d '\r')"
-  [[ -n "$APPIMAGE_REMOTE" ]] || { cat "$LINUX_LOG"; die "no APPIMAGE line in Linux build output"; }
-  APPIMAGE_NAME="$(basename "$APPIMAGE_REMOTE")"
+  # The helper prints DEB=/RPM=/AUR_DIR= as its last lines.
+  linux_out_path() {
+    grep -E "^$1=" "$LINUX_LOG" | tail -n1 | sed "s/^$1=//" | tr -d '\r'
+  }
+  DEB_REMOTE="$(linux_out_path DEB)"
+  RPM_REMOTE="$(linux_out_path RPM)"
+  AUR_REMOTE="$(linux_out_path AUR_DIR)"
+  [[ -n "$DEB_REMOTE" && -n "$RPM_REMOTE" && -n "$AUR_REMOTE" ]] \
+    || { cat "$LINUX_LOG"; die "Linux build output is missing a DEB/RPM/AUR_DIR line"; }
+  DEB_NAME="$(basename "$DEB_REMOTE")"
+  RPM_NAME="$(basename "$RPM_REMOTE")"
   mkdir -p "$LINUX_OUT"
-  scp -q "$LINUX_SSH_HOST:${APPIMAGE_REMOTE}" "$LINUX_OUT/$APPIMAGE_NAME" \
-    || die "failed to copy $APPIMAGE_NAME down from $LINUX_SSH_HOST"
-
-  say "Signing $APPIMAGE_NAME on the Mac (key stays local)…"
-  TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_PATH")" \
-  TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
-    pnpm exec tauri signer sign "$LINUX_OUT/$APPIMAGE_NAME" >/dev/null
-  [[ -f "$LINUX_OUT/$APPIMAGE_NAME.sig" ]] || die "signing did not produce $APPIMAGE_NAME.sig"
-  LINUX_SIG="$(cat "$LINUX_OUT/$APPIMAGE_NAME.sig")"
-  LINUX_SHA="$(shasum -a 256 "$LINUX_OUT/$APPIMAGE_NAME" | awk '{print $1}')"
-  ok "Built + signed $APPIMAGE_NAME (sha256 $LINUX_SHA)"
+  rm -rf "$LINUX_OUT/aur"
+  scp -q "$LINUX_SSH_HOST:${DEB_REMOTE}" "$LINUX_OUT/$DEB_NAME" \
+    || die "failed to copy $DEB_NAME down from $LINUX_SSH_HOST"
+  scp -q "$LINUX_SSH_HOST:${RPM_REMOTE}" "$LINUX_OUT/$RPM_NAME" \
+    || die "failed to copy $RPM_NAME down from $LINUX_SSH_HOST"
+  # -r so the dotfile .SRCINFO comes along; a bare glob would drop it.
+  scp -qr "$LINUX_SSH_HOST:${AUR_REMOTE}" "$LINUX_OUT/aur" \
+    || die "failed to copy the AUR files down from $LINUX_SSH_HOST"
+  [[ -f "$LINUX_OUT/aur/PKGBUILD" && -s "$LINUX_OUT/aur/.SRCINFO" ]] \
+    || die "AUR files incomplete under $LINUX_OUT/aur (need PKGBUILD + .SRCINFO)"
+  # The PKGBUILD pins the deb's sha256; if it doesn't match what we're about to
+  # upload, every makepkg run fails validation.
+  DEB_SHA="$(shasum -a 256 "$LINUX_OUT/$DEB_NAME" | awk '{print $1}')"
+  grep -qF "$DEB_SHA" "$LINUX_OUT/aur/PKGBUILD" \
+    || die "PKGBUILD sha256 does not match the copied-down $DEB_NAME ($DEB_SHA)"
+  RPM_SHA="$(shasum -a 256 "$LINUX_OUT/$RPM_NAME" | awk '{print $1}')"
+  ok "Built $DEB_NAME (sha256 $DEB_SHA)"
+  ok "Built $RPM_NAME (sha256 $RPM_SHA)"
 fi
 
 # ─── confirm before any outward push ────────────────────────────────
@@ -365,17 +415,17 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
   # version until the next all-platform release.
   KEYS="darwin-aarch64"
   [[ "$INCLUDE_WINDOWS" == "1" ]] && KEYS="$KEYS + windows-x86_64"
-  [[ "$INCLUDE_LINUX" == "1" ]] && KEYS="$KEYS + linux-x86_64"
   ASSET_DESC="dmg + updater tarball"
   [[ "$INCLUDE_WINDOWS" == "1" ]] && ASSET_DESC="$ASSET_DESC + Windows setup.exe"
-  [[ "$INCLUDE_LINUX" == "1" ]] && ASSET_DESC="$ASSET_DESC + Linux AppImage"
+  [[ "$INCLUDE_LINUX" == "1" ]] && ASSET_DESC="$ASSET_DESC + Linux deb/rpm"
   echo "About to publish $TAG:"
   echo "  • push commit + tag to origin/main"
   echo "  • GitHub Release on $RELEASES_REPO ($ASSET_DESC + sigs)"
   echo "  • updater manifest ($KEYS) → $WEBSITE_REPO"
   [[ "$INCLUDE_WINDOWS" == "1" ]] || echo "  Windows installs will NOT be served this version."
-  [[ "$INCLUDE_LINUX" == "1" ]] || echo "  Linux installs will NOT be served this version."
   echo "  • Homebrew cask bump → $TAP_REPO"
+  [[ "$INCLUDE_AUR" == "1" ]] && echo "  • AUR push → $AUR_PKGNAME"
+  [[ "$INCLUDE_LINUX" == "1" ]] || echo "  Linux packages will NOT be published this version."
   read -r -p "Proceed? [y/N] " reply
   [[ "$reply" == "y" || "$reply" == "Y" ]] || die "aborted (build artifacts kept under target/)"
 fi
@@ -415,18 +465,28 @@ cat >> "$NOTES_FILE" <<EOF
 
 ### Linux (x64)
 
-Download \`$APPIMAGE_NAME\`, make it executable (\`chmod +x\`), and run it. It
-needs a GTK desktop with WebKitGTK 4.1 (\`webkit2gtk-4.1\` on Arch,
-\`libwebkit2gtk-4.1-0\` on Debian/Ubuntu). Keep it somewhere writable — in-app
-updates rewrite the AppImage in place.
+**Arch** — install \`$AUR_PKGNAME\` from the AUR:
+
+\`\`\`sh
+paru -S $AUR_PKGNAME    # or: yay -S $AUR_PKGNAME
+\`\`\`
+
+**Debian / Ubuntu** — \`sudo apt install ./$DEB_NAME\`
+
+**Fedora / RHEL / openSUSE** — \`sudo dnf install ./$RPM_NAME\`
+
+All three pull in WebKitGTK 4.1 and GTK 3 as dependencies. The .deb and .rpm are
+built on Arch, so they want a reasonably current glibc — Ubuntu 24.04, Debian 13
+or Fedora 40 and newer.
 EOF
 fi
 cat >> "$NOTES_FILE" <<EOF
 
 ## Updates
 
-After the first install the app self-updates via the in-app **Update** pill
-(bottom-left of the sidebar).
+On macOS and Windows the app self-updates from the in-app update toast. Linux
+packages belong to your package manager, so the app tells you when a new version
+is out and you install it the usual way (\`paru -Syu\`, \`apt\`, \`dnf\`).
 EOF
 
 # darwin assets always; windows/linux assets when built.
@@ -435,7 +495,7 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   ASSETS+=("$WIN_OUT/$SETUP_NAME" "$WIN_OUT/$SETUP_NAME.sig")
 fi
 if [[ "$INCLUDE_LINUX" == "1" ]]; then
-  ASSETS+=("$LINUX_OUT/$APPIMAGE_NAME" "$LINUX_OUT/$APPIMAGE_NAME.sig")
+  ASSETS+=("$LINUX_OUT/$DEB_NAME" "$LINUX_OUT/$RPM_NAME")
 fi
 if gh release view "$TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
   say "release $TAG already exists — re-uploading assets (--clobber)"
@@ -452,11 +512,15 @@ SITE="$(mktemp -d)"; TMPDIRS+=("$SITE")
 gh repo clone "$WEBSITE_REPO" "$SITE" -- --depth 1
 BASE="https://github.com/$RELEASES_REPO/releases/download/$TAG"
 mkdir -p "$SITE/$(dirname "$WEBSITE_MANIFEST_PATH")"
-# Build the platforms map: darwin-aarch64 always; windows-x86_64 / linux-x86_64
-# when built. A locally cut --mac-only release omits both, so those installs
-# just see "no update" until the next all-platform release. The linux URL points
-# at the raw .AppImage — tauri-plugin-updater writes the downloaded bytes
-# straight over the running AppImage, so there is no tarball wrapper.
+# Build the platforms map: darwin-aarch64 always, windows-x86_64 when built. A
+# locally cut --mac-only release omits Windows, so those installs just see "no
+# update" until the next all-platform release.
+#
+# There is deliberately no linux-x86_64 key. Every Linux install now comes from a
+# distro package that pacman/apt/dnf owns, and tauri-plugin-updater would try to
+# install over it (dpkg -i under pkexec, or rewriting the binary in place) — on
+# an AUR box that is simply wrong. Linux clients read changelog.json instead and
+# point at the package manager; see src/lib/updater.ts.
 PLATFORMS="    \"darwin-aarch64\": {
       \"signature\": \"$SIG\",
       \"url\": \"$BASE/$TARBALL_NAME\"
@@ -466,13 +530,6 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
     \"windows-x86_64\": {
       \"signature\": \"$WIN_SIG\",
       \"url\": \"$BASE/$SETUP_NAME\"
-    }"
-fi
-if [[ "$INCLUDE_LINUX" == "1" ]]; then
-  PLATFORMS="$PLATFORMS,
-    \"linux-x86_64\": {
-      \"signature\": \"$LINUX_SIG\",
-      \"url\": \"$BASE/$APPIMAGE_NAME\"
     }"
 fi
 cat > "$SITE/$WEBSITE_MANIFEST_PATH" <<JSON
@@ -493,8 +550,7 @@ if git -C "$SITE" diff --cached --quiet; then
   say "manifest already current — nothing to commit"
 else
   WIN_NOTE=""; [[ "$INCLUDE_WINDOWS" == "1" ]] && WIN_NOTE=" + win-x64"
-  LINUX_NOTE=""; [[ "$INCLUDE_LINUX" == "1" ]] && LINUX_NOTE=" + linux-x64"
-  git -C "$SITE" commit -q -m "hyprlayer: updater bump to $VERSION (arm64${WIN_NOTE}${LINUX_NOTE}) + changelog"
+  git -C "$SITE" commit -q -m "hyprlayer: updater bump to $VERSION (arm64${WIN_NOTE}) + changelog"
   git -C "$SITE" push -q
 fi
 ok "Updater manifest live (Vercel redeploys within its cache TTL)"
@@ -535,18 +591,47 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   ok "Windows setup.exe reachable"
 fi
 if [[ "$INCLUDE_LINUX" == "1" ]]; then
-  curl -fsI -L "$BASE/$APPIMAGE_NAME" >/dev/null || die "AppImage not reachable at $BASE/$APPIMAGE_NAME"
-  ok "Linux AppImage reachable"
+  curl -fsI -L "$BASE/$DEB_NAME" >/dev/null || die "deb not reachable at $BASE/$DEB_NAME"
+  ok "Linux .deb reachable"
+  curl -fsI -L "$BASE/$RPM_NAME" >/dev/null || die "rpm not reachable at $BASE/$RPM_NAME"
+  ok "Linux .rpm reachable"
+fi
+
+# ─── 7. AUR package ─────────────────────────────────────────────────
+# Last, because the PKGBUILD's source URL is the Release asset verified just
+# above: pushing earlier would publish a package that can't download its source.
+if [[ "$INCLUDE_AUR" == "1" ]]; then
+  say "Pushing $AUR_PKGNAME $VERSION to the AUR…"
+  AUR="$(mktemp -d)"; TMPDIRS+=("$AUR")
+  git clone -q "$AUR_REPO" "$AUR" \
+    || die "could not clone $AUR_REPO — check AUR SSH access, or re-run with --no-aur"
+  # AUR rejects any branch but master, and a clone of a not-yet-created package
+  # lands on whatever init.defaultBranch is set to locally.
+  git -C "$AUR" checkout -q -B master
+  cp "$LINUX_OUT/aur/PKGBUILD" "$LINUX_OUT/aur/.SRCINFO" "$AUR/"
+  git -C "$AUR" config user.name "$AUR_AUTHOR_NAME"
+  git -C "$AUR" config user.email "$AUR_AUTHOR_EMAIL"
+  git -C "$AUR" add PKGBUILD .SRCINFO
+  if git -C "$AUR" diff --cached --quiet; then
+    say "AUR package already at $VERSION — nothing to commit"
+  else
+    git -C "$AUR" commit -q -m "$AUR_PKGNAME $VERSION"
+    git -C "$AUR" push -q origin master \
+      || die "AUR push rejected — inspect $LINUX_OUT/aur and push by hand"
+  fi
+  ok "AUR package published"
 fi
 
 echo ""
 ok "Released Hyprlayer $TAG ($PLATFORM_DESC)"
 echo "  Release : https://github.com/$RELEASES_REPO/releases/tag/$TAG"
 echo "  Updates : https://brightblock.ai/hyprlayer/updates/latest.json"
-if [[ "$INCLUDE_WINDOWS" != "1" || "$INCLUDE_LINUX" != "1" ]]; then
-  SKIPPED=""
-  [[ "$INCLUDE_WINDOWS" != "1" ]] && SKIPPED="Windows"
-  [[ "$INCLUDE_LINUX" != "1" ]] && SKIPPED="${SKIPPED:+$SKIPPED + }Linux"
-  echo "  Note    : $SKIPPED + Intel installs stay on their current version until"
+[[ "$INCLUDE_AUR" == "1" ]] && echo "  AUR     : https://aur.archlinux.org/packages/$AUR_PKGNAME"
+if [[ "$INCLUDE_WINDOWS" != "1" ]]; then
+  echo "  Note    : Windows + Intel installs stay on their current version until"
   echo "            the next all-platform release."
+fi
+if [[ "$INCLUDE_LINUX" != "1" ]]; then
+  echo "  Note    : no Linux packages this version — the AUR/deb/rpm channels stay"
+  echo "            on whatever was published last."
 fi

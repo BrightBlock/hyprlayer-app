@@ -57,12 +57,24 @@ your config and your thoughts storage; the app gives you a workspace on top of i
 - **macOS** — Apple Silicon `.dmg`, Developer ID–signed and notarized, with
   in-app auto-updates
 - **Windows** — x64 NSIS installer (Tauri 2 + WebView2), with in-app auto-updates
-- **Linux** — x64 AppImage (Tauri 2 + WebKitGTK 4.1), with in-app auto-updates.
-  Needs `webkit2gtk-4.1` (Arch) / `libwebkit2gtk-4.1-0` (Debian/Ubuntu), and the
-  AppImage must live somewhere writable so updates can rewrite it in place.
+- **Linux** — x64 distro packages (Tauri 2 + WebKitGTK 4.1). Arch is the primary
+  target via the AUR; `.deb` and `.rpm` are published for everyone else. No
+  AppImage.
 
-Running apps poll a signed manifest and install updates in place; there is no
-separate update step to run.
+```sh
+paru -S hyprlayer-desktop-bin            # Arch (or yay)
+sudo apt install ./Hyprlayer_*_amd64.deb # Debian / Ubuntu
+sudo dnf install ./Hyprlayer-*.x86_64.rpm # Fedora / RHEL / openSUSE
+```
+
+Each package pulls in WebKitGTK 4.1, GTK 3, `git` and `xdg-utils`. The `.deb`
+and `.rpm` are built on Arch, so they need a reasonably current glibc — Ubuntu
+24.04, Debian 13 or Fedora 40 and newer.
+
+On macOS and Windows, running apps poll a signed manifest and install updates in
+place; there is no separate update step. Linux packages belong to the package
+manager, so the app only tells you a new version is out — `paru -Syu`, `apt` or
+`dnf` installs it.
 
 ## Development
 

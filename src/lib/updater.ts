@@ -5,14 +5,20 @@
 // downloadAndInstall() swaps the app in place — then relaunch() restarts into
 // the new version.
 //
+// Linux is notify-only. Every Linux install is a distro package (AUR, .deb,
+// .rpm) that pacman/apt/dnf owns, so nothing may write over /usr/bin — the
+// release manifest carries no linux-x86_64 key at all, and version discovery
+// comes from changelog.json instead. See docs/RELEASING.md.
+//
 // Surfaces that consume this store:
 //   - Toast (bottom-right)    — the single update nudge: a "Restart to update"
 //     toast, shown by the background probe and the explicit "Check for Updates".
 //   - Settings → Updates card — current version + manual "Check now".
 //
 // The changelog is a separate, human-authored file fetched over plain HTTP
-// (CSP is null in tauri.conf.json, so no allow-listing needed). It's optional
-// polish: if the fetch fails the updater still works, just without notes.
+// (CSP is null in tauri.conf.json, so no allow-listing needed). Off Linux it's
+// optional polish: if the fetch fails the updater still works, just without
+// notes.
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -20,6 +26,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 
+import { IS_LINUX } from "./platform";
 import { useToast } from "./toast";
 
 const MANIFEST_BASE = "https://brightblock.ai/hyprlayer/updates";
@@ -45,6 +52,25 @@ type Installing = "downloading" | "installing" | null;
 // ever touches, so the store exposes just the version string the UI needs —
 // which also lets the dev mock set a version without faking the whole type.
 let pendingUpdate: Update | null = null;
+
+/** Whether this build can install an update over itself. False on Linux, where
+ *  the package manager owns the files — the UI points at it instead of offering
+ *  a button that would fail. */
+export const CAN_SELF_INSTALL = !IS_LINUX;
+
+/** Is `a` a newer release than `b`? Both are the strict `x.y.z` that
+ *  scripts/release.sh produces; anything else is treated as "not newer" so a
+ *  malformed changelog can't nag. */
+export function isNewerVersion(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  if (pa.length !== 3 || pb.length !== 3) return false;
+  if ([...pa, ...pb].some((n) => !Number.isInteger(n) || n < 0)) return false;
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] > pb[i];
+  }
+  return false;
+}
 
 interface UpdateState {
   /** Running app version (getVersion()). Empty until resolved. */
@@ -72,7 +98,29 @@ let _initialized = false;
 // re-pop the same nudge. The explicit menu check ignores this (always shows).
 let toastedVersion: string | null = null;
 
-async function fetchChangelog(set: (p: Partial<UpdateState>) => void) {
+type Set = (p: Partial<UpdateState>) => void;
+type Get = () => UpdateState;
+
+/** The pending version, or null when up to date.
+ *
+ *  Off Linux this is the signed manifest via the updater plugin, and it leaves
+ *  `pendingUpdate` armed for install(). On Linux there is no manifest entry to
+ *  check, so the changelog's newest entry is the signal — discovery only, since
+ *  the actual install goes through the distro's own verified channel. */
+async function findPending(set: Set, get: Get): Promise<string | null> {
+  if (!IS_LINUX) {
+    pendingUpdate = await check();
+    return pendingUpdate?.version ?? null;
+  }
+  await fetchChangelog(set);
+  // getVersion() rather than state.currentVersion: init() resolves that
+  // asynchronously and the first probe can beat it.
+  const current = await getVersion().catch(() => "");
+  const latest = get().changelog?.[0]?.version;
+  return current && latest && isNewerVersion(latest, current) ? latest : null;
+}
+
+async function fetchChangelog(set: Set) {
   try {
     const res = await fetch(CHANGELOG_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -128,12 +176,13 @@ export const useUpdate = create<UpdateState>()(
           return;
         }
 
-        void fetchChangelog(set);
+        // Off Linux the changelog is decoration fetched alongside the manifest
+        // check; on Linux findPending() awaits it as the check itself.
+        if (!IS_LINUX) void fetchChangelog(set);
 
         const probe = async () => {
           try {
-            pendingUpdate = await check();
-            const v = pendingUpdate?.version ?? null;
+            const v = await findPending(set, get);
             set({ pendingVersion: v });
             // Nudge once per session for a freshly-found version the user hasn't
             // already dismissed. The explicit menu check always re-shows it.
@@ -162,11 +211,11 @@ export const useUpdate = create<UpdateState>()(
           }
           return "uptodate";
         }
-        void fetchChangelog(set);
+        if (!IS_LINUX) void fetchChangelog(set); // Linux: findPending awaits it
         try {
-          pendingUpdate = await check();
-          set({ pendingVersion: pendingUpdate?.version ?? null });
-          return pendingUpdate ? "available" : "uptodate";
+          const v = await findPending(set, get);
+          set({ pendingVersion: v });
+          return v ? "available" : "uptodate";
         } catch (e) {
           console.warn("[updater] manual check failed:", e);
           return "error";
@@ -174,7 +223,9 @@ export const useUpdate = create<UpdateState>()(
       },
 
       install: async () => {
-        if (!pendingUpdate || get().installing) return;
+        // No-op on Linux: pacman/apt/dnf own the install, and the UI offers no
+        // button — this is the belt to that suspenders.
+        if (!CAN_SELF_INSTALL || !pendingUpdate || get().installing) return;
         set({ installing: "downloading" });
         try {
           await pendingUpdate.downloadAndInstall();
@@ -204,17 +255,25 @@ export const useUpdate = create<UpdateState>()(
 /** Surface the pending update as a sticky bottom-right toast carrying a one-click
  *  "Restart to update" action — the single update surface now that the sidebar
  *  pill is gone. Used by the background probe and the explicit "Check for
- *  Updates" menu action. No-op when nothing is pending. */
+ *  Updates" menu action. No-op when nothing is pending.
+ *
+ *  On Linux it carries no action: the same nudge, but the install belongs to the
+ *  package manager. */
 export function showUpdateToast(): void {
   const { pendingVersion, changelog, install, dismissUpdate } = useUpdate.getState();
   if (!pendingVersion) return;
   const summary = changelog?.find((e) => e.version === pendingVersion)?.summary;
-  useToast.getState().show(
-    "Update available",
-    summary ? `v${pendingVersion} — ${summary}` : `Hyprlayer v${pendingVersion} is ready to install.`,
-    {
+  const fallback = CAN_SELF_INSTALL
+    ? `Hyprlayer v${pendingVersion} is ready to install.`
+    : `Hyprlayer v${pendingVersion} is out — update it with your package manager.`;
+  const message = summary
+    ? `v${pendingVersion} — ${summary}${CAN_SELF_INSTALL ? "" : " Update it with your package manager."}`
+    : fallback;
+  useToast.getState().show("Update available", message, {
       tone: "ok",
-      action: { label: "Restart to update", busyLabel: "Updating…", onClick: () => install() },
+      action: CAN_SELF_INSTALL
+        ? { label: "Restart to update", busyLabel: "Updating…", onClick: () => install() }
+        : undefined,
       onDismiss: dismissUpdate,
     },
   );

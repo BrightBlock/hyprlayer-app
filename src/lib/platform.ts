@@ -17,3 +17,10 @@ export const IS_MACOS =
 
 export const IS_WINDOWS =
   typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
+
+/** Matched positively (WebKitGTK reports "X11; Linux x86_64") rather than as
+ *  "neither of the above", so jsdom's UA doesn't make every test look like
+ *  Linux. Read where the *install channel* differs, not the chrome: Linux ships
+ *  as distro packages, so it can't self-update — see `lib/updater`. */
+export const IS_LINUX =
+  typeof navigator !== "undefined" && /Linux|X11/.test(navigator.userAgent);

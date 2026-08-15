@@ -660,6 +660,8 @@ pub(crate) async fn migrate_config_if_needed(
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
+
     /// Regenerates `src/lib/bindings.ts` (same output as the dev-server
     /// export); drift shows up as an uncommitted diff after `cargo test`.
     #[test]
@@ -672,5 +674,49 @@ mod tests {
                 "../src/lib/bindings.ts",
             )
             .expect("bindings must export cleanly");
+    }
+
+    /// RFC 7386 merge — what Tauri applies to `tauri.<platform>.conf.json`.
+    fn merge(base: &mut Value, overlay: &Value) {
+        match (base, overlay) {
+            (Value::Object(base), Value::Object(overlay)) => {
+                for (key, value) in overlay {
+                    merge(base.entry(key.clone()).or_insert(Value::Null), value);
+                }
+            }
+            (base, overlay) => *base = overlay.clone(),
+        }
+    }
+
+    /// The platform overlays only ever load on their own platform, so a typo in
+    /// one is otherwise invisible until a release build on that box — and
+    /// `DebConfig`/`RpmConfig` are `deny_unknown_fields`, so it would be fatal
+    /// there. Parse all three here instead, on whatever host runs the tests.
+    #[test]
+    fn platform_configs_merge_into_a_valid_config() {
+        let base: Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri.conf.json is valid JSON");
+        for (platform, overlay) in [
+            ("linux", include_str!("../tauri.linux.conf.json")),
+            ("windows", include_str!("../tauri.windows.conf.json")),
+        ] {
+            let overlay: Value =
+                serde_json::from_str(overlay).unwrap_or_else(|e| panic!("{platform}: {e}"));
+            let mut merged = base.clone();
+            merge(&mut merged, &overlay);
+            serde_json::from_value::<tauri::utils::config::Config>(merged)
+                .unwrap_or_else(|e| panic!("{platform} config does not deserialize: {e}"));
+        }
+    }
+
+    /// AppImage is not a shipping target (see docs/RELEASING.md): the Linux
+    /// bundles are the distro packages the AUR/deb/rpm channels install.
+    #[test]
+    fn linux_bundles_deb_and_rpm_only() {
+        let overlay: Value = serde_json::from_str(include_str!("../tauri.linux.conf.json")).unwrap();
+        let targets = overlay["bundle"]["targets"]
+            .as_array()
+            .expect("linux config pins bundle.targets");
+        assert_eq!(targets, &[Value::from("deb"), Value::from("rpm")]);
     }
 }

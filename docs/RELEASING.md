@@ -21,19 +21,22 @@ never leaves the Mac.
 private: BrightBlock/hyprlayer-app  (source)
 public:  BrightBlock/hyprlayer-releases  (binaries only)
 public:  brightblock.ai  (manifest JSON, served by Vercel)
+public:  aur.archlinux.org/hyprlayer-desktop-bin  (PKGBUILD only)
 
 ./scripts/release.sh patch        # bump version + tag, locally (no push)
         ▼
 ./scripts/release-local.sh        # build + sign + publish, all from the Mac
   ├─ mac    (here)      → Hyprlayer_<v>_aarch64.dmg + Hyprlayer.app.tar.gz(.sig)
   │                       Developer ID–signed + notarized during the build
-  ├─ win    (nexus-win) → Hyprlayer_<v>_x64-setup.exe   ─┐ built unsigned,
-  ├─ linux  (nexus)     → Hyprlayer_<v>_amd64.AppImage  ─┘ scp'd back,
-  │                                                        ed25519-signed here
+  ├─ win    (nexus-win) → Hyprlayer_<v>_x64-setup.exe  built unsigned, scp'd
+  │                                                    back, ed25519-signed here
+  ├─ linux  (nexus)     → Hyprlayer_<v>_amd64.deb + Hyprlayer-<v>-1.x86_64.rpm
+  │                       + a rendered PKGBUILD/.SRCINFO (no signature — see below)
   ├─ release      → GitHub Release on hyprlayer-releases (public) w/ assets
   ├─ manifest     → latest.json + changelog.json → jtsiros/hyprlayer.dev
-  │                 (darwin-aarch64 + windows-x86_64 + linux-x86_64) → Vercel
-  └─ cask         → BrightBlock/homebrew-tap version + dmg sha256 bump
+  │                 (darwin-aarch64 + windows-x86_64) → Vercel
+  ├─ cask         → BrightBlock/homebrew-tap version + dmg sha256 bump
+  └─ aur          → hyprlayer-desktop-bin PKGBUILD + .SRCINFO
         ▼
 Running apps  check() → https://brightblock.ai/hyprlayer/updates/latest.json
                         → asset URLs on hyprlayer-releases (public)
@@ -46,9 +49,10 @@ for byte. Neither holds any secret.
 
 | Flag | Builds |
 | --- | --- |
-| *(none)* | macOS arm64 + Windows x64 + Linux x64 |
-| `--no-linux` | macOS + Windows |
-| `--no-windows` | macOS + Linux |
+| *(none)* | macOS arm64 + Windows x64 + Linux x64 + AUR |
+| `--no-linux` | macOS + Windows (implies `--no-aur`) |
+| `--no-windows` | macOS + Linux + AUR |
+| `--no-aur` | everything, but don't push the AUR package |
 | `--mac-only` | macOS only |
 
 A platform left out is simply absent from `latest.json`, so its installs see
@@ -58,7 +62,8 @@ mismatched build.
 Update packages are **ed25519-signed**; the public key is baked into the app
 (`src-tauri/tauri.conf.json` → `plugins.updater.pubkey`) and verifies every
 download before install. The app also reads `changelog.json` from the same
-host to show release notes — non-fatal if it's missing.
+host to show release notes — non-fatal if it's missing, except on Linux where
+it *is* the update signal (see "How Linux updates work").
 
 ## Cutting a release
 
@@ -103,6 +108,32 @@ The Astro site serves `public/` at the root, so the first release creates
 `public/hyprlayer/updates/{latest,changelog}.json`, reachable at
 `https://brightblock.ai/hyprlayer/updates/latest.json` — which is the endpoint
 configured in `tauri.conf.json`. No site change needed; Vercel deploys on push.
+
+### 3. AUR access (Linux)
+
+Already set up — no new key, no new account. `release-local.sh` pushes
+`hyprlayer-desktop-bin` over SSH as the last step, authenticating with the
+**`aur-ci` key in the 1Password SSH agent**. `~/.ssh/config` points `Host *` at
+that agent, which is the same path `nexus` and GitHub already take, so AUR needs
+no entry of its own:
+
+```sh
+ssh-add -l                       # aur-ci (ED25519) should be listed
+ssh aur@aur.archlinux.org help   # prints the AUR command list
+```
+
+The agent prompts for approval on first use in a session, so an unattended `-y`
+run needs 1Password already unlocked and the key approved. Override the target
+with `HYPRLAYER_AUR_SSH` (e.g. an ssh_config alias) to pin a different identity.
+
+The AUR repo is created by the first push — no separate "new package" step. The
+script preflights auth and refuses to start without it; pass `--no-aur` to cut a
+release without touching the AUR. AUR only accepts pushes to `master`, which the
+script forces (`checkout -B master`) since a clone of a not-yet-created package
+lands on whatever your local `init.defaultBranch` is.
+
+If a push ever fails after the GitHub Release is live, the rendered files are
+kept at `target/linux-release/aur/` — clone the AUR repo and push them by hand.
 
 ## Code signing
 
@@ -154,9 +185,10 @@ Still unsigned. To drop the SmartScreen prompt, add a signing step with an EV/OV
 
 ### Linux (no OS signing)
 
-AppImages carry no OS-level code signature, so there's nothing to add here — the
-ed25519 updater signature is the only one, and it's applied on the Mac like the
-Windows installer's.
+Distro packages carry no OS-level code signature of ours. The `.deb` and `.rpm`
+go up unsigned; the AUR package's integrity is the `sha256sum` the PKGBUILD pins
+against the published `.deb`. There is no ed25519 signature either, because
+nothing on Linux self-installs — see below.
 
 ## Remote builders
 
@@ -166,7 +198,7 @@ credentials, and no signing key.
 | Builder | Host (override) | Helper | Produces |
 | --- | --- | --- | --- |
 | Windows | `nexus-win` (`HYPRLAYER_WIN_SSH_HOST`) | `scripts/release-win-remote.ps1` | `*-setup.exe` |
-| Linux | `nexus` (`HYPRLAYER_LINUX_SSH_HOST`) | `scripts/release-linux-remote.sh` | `*.AppImage` |
+| Linux | `nexus` (`HYPRLAYER_LINUX_SSH_HOST`) | `scripts/release-linux-remote.sh` | `*.deb`, `*.rpm`, `PKGBUILD` + `.SRCINFO` |
 
 Windows also has a CI fallback: `HYPRLAYER_WIN_BUILDER=actions` runs
 `.github/workflows/windows-build.yml` on a `windows-latest` runner and downloads
@@ -179,27 +211,60 @@ toolchains through a login shell, so mise/nvm/volta shims are fine):
 ```sh
 # toolchains
 rustup default stable
-# system deps for Tauri 2 + the AppImage bundler
-sudo pacman -S --needed webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg \
-                        base-devel curl openssl fuse2
+# system deps for Tauri 2
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 librsvg base-devel
 ```
 
-The AppImage bundler downloads `linuxdeploy` on first use; the helper exports
-`APPIMAGE_EXTRACT_AND_RUN=1` so it works without a mountable FUSE device.
+Both bundlers are pure Rust — no `dpkg`, no `rpmbuild`, no FUSE. `makepkg`
+(from `pacman`, always present) renders the `.SRCINFO`, which is why that file
+is generated on the builder rather than on the Mac.
 
-### How Linux updates install
+### Linux packaging
 
-Unlike macOS (a `.app.tar.gz` unpacked over the bundle) and Windows (an NSIS
-installer re-run), the Linux updater payload **is the AppImage itself**:
-`tauri-plugin-updater` writes the downloaded bytes straight over the running
-file. Two consequences worth knowing:
+The builder is an **Arch** box, and Arch is the primary Linux target, so the ELF
+it produces links Arch's `webkit2gtk-4.1` — exactly what the AUR package wants.
+The same binary is wrapped as `.deb` and `.rpm` for everyone else, which sets a
+glibc floor: those install cleanly on Ubuntu 24.04, Debian 13 and Fedora 40 and
+newer, but not on older LTS releases. Targeting those properly means building in
+an old-glibc container; that isn't wired up.
 
-- `latest.json`'s `linux-x86_64` URL points at the raw `.AppImage`, not a
-  tarball. That's why the release uploads `*.AppImage` + `*.AppImage.sig`.
-- The AppImage must sit on a **writable** filesystem, and the updater's temp dir
-  must be on the **same mount point** (it renames the old file aside as a
-  backup). An AppImage on a read-only mount or a different device than `/tmp`
-  fails the install with `TempDirNotOnSameMountPoint`.
+Runtime dependencies are declared in three places, and they must stay in step:
+
+| Package | Declared in | Names |
+| --- | --- | --- |
+| AUR | `packaging/aur/PKGBUILD.in` | `webkit2gtk-4.1`, `gtk3`, `git`, `xdg-utils`, `hicolor-icon-theme` |
+| deb | `src-tauri/tauri.linux.conf.json` | `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `git`, `xdg-utils` |
+| rpm | `src-tauri/tauri.linux.conf.json` | `libwebkit2gtk-4.1.so.0()(64bit)`, `libgtk-3.so.0()(64bit)`, `git`, `xdg-utils` |
+
+WebKitGTK pulls glib2/cairo/pango/gdk-pixbuf/libsoup3 transitively; GTK 3 is
+named because the binary links it directly. `git` is spawned for every network
+and branch operation, and `xdg-utils` backs `tauri-plugin-opener`. There's no
+appindicator dependency — the app has no tray icon. The RPM side uses soname
+`Requires` rather than package names because Fedora (`webkit2gtk4.1`) and
+openSUSE (`libwebkit2gtk-4_1-0`) disagree on the latter.
+
+The AUR package is `hyprlayer-desktop-bin` — a **binary** package, because the
+source repo is private and there is nothing for an AUR user to build from. Its
+`package()` unpacks the published `.deb`; since that `.deb` was itself built on
+Arch, this is transport only, with no Debian runtime involved.
+
+### How Linux updates work
+
+They don't, in-app. Every Linux install now comes from a distro package that
+pacman/apt/dnf owns, so nothing may write over `/usr/bin` — and the app can't
+even tell which package manager it came from, since the AUR package is unpacked
+from the `.deb` and inherits its `Deb` bundle stamp. `tauri-plugin-updater`
+would happily try `pkexec dpkg -i` on an Arch box.
+
+So `latest.json` deliberately carries **no `linux-x86_64` key**, and
+`src/lib/updater.ts` takes a different path there: it compares the running
+version against the newest entry in `changelog.json` and shows a notify-only
+toast pointing at the package manager. That's discovery only — the install goes
+through the distro's own verified channel, so the missing signature costs
+nothing.
+
+Consequence for the 0.5.6–0.5.7 AppImage users: they'll stop being offered
+updates and need to reinstall from a package once. That's the whole migration.
 
 ## Local development
 

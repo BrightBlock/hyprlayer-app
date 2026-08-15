@@ -1,5 +1,10 @@
 //! Undo the AppImage runtime's environment for children we spawn.
 //!
+//! Linux ships as distro packages now (see docs/RELEASING.md), so nothing we
+//! build sets `APPDIR` and every function here is inert. Kept because it costs
+//! one env lookup per spawn and is the only thing standing between a
+//! reintroduced AppImage and the bug below.
+//!
 //! The AppImage `AppRun` rewrites the process environment to point at the
 //! mounted AppDir before handing control to the app: `PATH`,
 //! `LD_LIBRARY_PATH`, `XDG_DATA_DIRS`, the GTK/GIO module caches, and — the

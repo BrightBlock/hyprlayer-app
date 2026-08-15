@@ -14,5 +14,22 @@
         "visible": false
       }
     ]
+  },
+  "bundle": {
+    "targets": ["deb", "rpm"],
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "git", "xdg-utils"],
+        "section": "devel"
+      },
+      "rpm": {
+        "depends": [
+          "libwebkit2gtk-4.1.so.0()(64bit)",
+          "libgtk-3.so.0()(64bit)",
+          "git",
+          "xdg-utils"
+        ]
+      }
+    }
   }
 }
