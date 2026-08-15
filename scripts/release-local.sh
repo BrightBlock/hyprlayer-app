@@ -35,6 +35,12 @@
 # just sees "no update" until the next all-platform release. --no-windows /
 # --no-linux drop one platform without dropping the other.
 #
+# Each platform's signed output for the current version is checked for on disk
+# before that leg builds, so re-running after a transient failure (a flaky
+# builder, a missing tool) reuses whatever already succeeded instead of
+# rebuilding everything. Pass --rebuild to ignore the cache and force a clean
+# build of every included platform.
+#
 # Usage:
 #   ./scripts/release.sh patch              # step 1: bump version, write changelog,
 #                                           #         commit + tag (local, no push)
@@ -45,6 +51,7 @@
 #   ./scripts/release-local.sh --no-windows # macOS + Linux (skip the installer)
 #   ./scripts/release-local.sh --no-aur     # build + publish Linux packages, but
 #                                           # don't push the AUR package
+#   ./scripts/release-local.sh --rebuild    # ignore cached artifacts, build fresh
 #
 # Prerequisites:
 #   * gh authenticated (`gh auth status`) with push access to the releases repo,
@@ -123,6 +130,7 @@ ASSUME_YES=0
 INCLUDE_WINDOWS=1
 INCLUDE_LINUX=1
 INCLUDE_AUR=1
+FORCE_REBUILD=0
 for arg in "$@"; do
   case "$arg" in
     -y|--yes)     ASSUME_YES=1 ;;
@@ -130,7 +138,8 @@ for arg in "$@"; do
     --no-windows) INCLUDE_WINDOWS=0 ;;
     --no-linux)   INCLUDE_LINUX=0 ;;
     --no-aur)     INCLUDE_AUR=0 ;;
-    *) echo "unknown arg: $arg (expected -y/--yes, --mac-only, --no-windows, --no-linux or --no-aur)" >&2; exit 1 ;;
+    --rebuild)    FORCE_REBUILD=1 ;;
+    *) echo "unknown arg: $arg (expected -y/--yes, --mac-only, --no-windows, --no-linux, --no-aur or --rebuild)" >&2; exit 1 ;;
   esac
 done
 # The AUR package's source is the published .deb, so it can't be pushed without
@@ -175,13 +184,53 @@ git rev-parse "$TAG" >/dev/null 2>&1 || die "tag $TAG not found — run ./script
 CL_TOP="$(node -p 'JSON.parse(require("fs").readFileSync("changelog.json","utf8")).versions[0].version' 2>/dev/null || echo "")"
 [[ "$CL_TOP" == "$VERSION" ]] || die "changelog.json top entry ($CL_TOP) != $VERSION — fix it and re-run ./scripts/release.sh"
 
+# ─── artifact cache (resume support) ─────────────────────────────────
+# A transient failure on one leg (flaky builder, missing tool) shouldn't force
+# rebuilding legs that already succeeded. Each platform's signed output for
+# this exact $VERSION is checked for on disk; --rebuild ignores all of this
+# and forces a clean build. Windows/Linux filenames are already version-scoped
+# so presence is enough; the mac updater tarball's name isn't (Hyprlayer.app.tar.gz,
+# no version), so a marker file records which version it was last built for.
+BUNDLE="target/aarch64-apple-darwin/release/bundle"
+MAC_DMG="$BUNDLE/dmg/Hyprlayer_${VERSION}_aarch64.dmg"
+MAC_TARBALL="$BUNDLE/macos/Hyprlayer.app.tar.gz"
+MAC_MARKER="$BUNDLE/.release-version"
+MAC_CACHED=0
+if [[ "$FORCE_REBUILD" != "1" && -f "$MAC_DMG" && -f "$MAC_TARBALL" && -f "$MAC_TARBALL.sig" \
+      && -f "$MAC_MARKER" && "$(cat "$MAC_MARKER" 2>/dev/null)" == "$VERSION" ]]; then
+  MAC_CACHED=1
+fi
+
+WIN_SETUP_NAME="Hyprlayer_${VERSION}_x64-setup.exe"
+WIN_CACHED=0
+if [[ "$FORCE_REBUILD" != "1" && "$INCLUDE_WINDOWS" == "1" \
+      && -f "$WIN_OUT/$WIN_SETUP_NAME" && -f "$WIN_OUT/$WIN_SETUP_NAME.sig" ]]; then
+  WIN_CACHED=1
+fi
+
+LINUX_DEB_NAME="Hyprlayer_${VERSION}_amd64.deb"
+LINUX_RPM_EXPECTED="$(ls "$LINUX_OUT"/Hyprlayer-"${VERSION}"-*.x86_64.rpm 2>/dev/null | head -n1 || true)"
+LINUX_CACHED=0
+if [[ "$FORCE_REBUILD" != "1" && "$INCLUDE_LINUX" == "1" \
+      && -f "$LINUX_OUT/$LINUX_DEB_NAME" && -n "$LINUX_RPM_EXPECTED" && -f "$LINUX_RPM_EXPECTED" \
+      && -f "$LINUX_OUT/aur/PKGBUILD" && -s "$LINUX_OUT/aur/.SRCINFO" ]] \
+    && grep -qE "^pkgver=$VERSION\$" "$LINUX_OUT/aur/PKGBUILD" \
+    && grep -qF "$(shasum -a 256 "$LINUX_OUT/$LINUX_DEB_NAME" | awk '{print $1}')" "$LINUX_OUT/aur/PKGBUILD"; then
+  LINUX_CACHED=1
+fi
+
+[[ "$MAC_CACHED" == "1" ]] && say "Reusing already-built macOS bundle for $VERSION (pass --rebuild to force a fresh build)…"
+[[ "$WIN_CACHED" == "1" ]] && say "Reusing already-built Windows installer for $VERSION (pass --rebuild to force a fresh build)…"
+[[ "$LINUX_CACHED" == "1" ]] && say "Reusing already-built Linux packages for $VERSION (pass --rebuild to force a fresh build)…"
+
 # arm64 toolchain (no-op if already installed).
 rustup target list --installed 2>/dev/null | grep -q '^aarch64-apple-darwin$' \
   || rustup target add aarch64-apple-darwin
 
 # Windows builder reachability — fail now, before any build, with a clear path
 # out (so we never silently publish a mac-only manifest when both were intended).
-if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
+# Skipped when the signed installer for this version is already cached.
+if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" != "1" ]]; then
   case "$WIN_BUILDER" in
     ssh)
       [[ -f "$WIN_HELPER" ]] || die "missing $WIN_HELPER"
@@ -199,8 +248,9 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
 fi
 
 # Same for the Linux builder — fail before any build rather than after the mac
-# compile, so a sleeping nexus costs seconds instead of ten minutes.
-if [[ "$INCLUDE_LINUX" == "1" ]]; then
+# compile, so a sleeping nexus costs seconds instead of ten minutes. Skipped
+# when the packages for this version are already cached.
+if [[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" != "1" ]]; then
   [[ -f "$LINUX_HELPER" ]] || die "missing $LINUX_HELPER"
   [[ -f "packaging/aur/PKGBUILD.in" ]] || die "missing packaging/aur/PKGBUILD.in (the builder renders it)"
   say "Checking Linux builder ($LINUX_SSH_HOST) is reachable…"
@@ -232,13 +282,13 @@ TMP="$(mktemp -d)"; TMPDIRS+=("$TMP")
 # `git archive` of $TAG — never the builder's working clone. The helpers default
 # their source/build paths under the builder's home dir, so we just scp there.
 SRC_TGZ="$TMP/hyprlayer-src.tgz"
-if [[ "$INCLUDE_LINUX" == "1" || ( "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" ) ]]; then
+if [[ ( "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" != "1" ) || ( "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" && "$WIN_CACHED" != "1" ) ]]; then
   git archive --format=tar.gz -o "$SRC_TGZ" "$TAG"
 fi
 
 WIN_PID=""
 WIN_LOG="$TMP/windows-build.log"
-if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
+if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" != "1" ]]; then
   case "$WIN_BUILDER" in
     ssh)
       say "Shipping $TAG source to $WIN_SSH_HOST and starting NSIS build (background)…"
@@ -276,7 +326,7 @@ fi
 
 LINUX_PID=""
 LINUX_LOG="$TMP/linux-build.log"
-if [[ "$INCLUDE_LINUX" == "1" ]]; then
+if [[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" != "1" ]]; then
   say "Shipping $TAG source to $LINUX_SSH_HOST and starting deb/rpm build (background)…"
   scp -q "$SRC_TGZ" "$LINUX_SSH_HOST:hyprlayer-src.tgz"
   scp -q "$LINUX_HELPER" "$LINUX_SSH_HOST:release-linux-remote.sh"
@@ -288,34 +338,48 @@ if [[ "$INCLUDE_LINUX" == "1" ]]; then
 fi
 
 # ─── 1b. build + sign mac arm64 ─────────────────────────────────────
-say "Building, signing + notarizing arm64 bundle (compiles Rust, then waits on Apple's notary — several minutes)…"
-# APPLE_* → Tauri Developer-ID-signs the .app, submits it to Apple's notary, and
-# staples the ticket (hardened runtime is enabled automatically). TAURI_SIGNING_*
-# is the separate ed25519 updater signature. Both run in this one build.
-APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
-APPLE_API_KEY="$APPLE_API_KEY" \
-APPLE_API_ISSUER="$APPLE_API_ISSUER" \
-APPLE_API_KEY_PATH="$APPLE_API_KEY_PATH" \
-TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_PATH")" \
-TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
-  pnpm tauri build --target aarch64-apple-darwin
+if [[ "$MAC_CACHED" == "1" ]]; then
+  DMG="$MAC_DMG"
+  TARBALL="$MAC_TARBALL"
+else
+  say "Building, signing + notarizing arm64 bundle (compiles Rust, then waits on Apple's notary — several minutes)…"
+  # APPLE_* → Tauri Developer-ID-signs the .app, submits it to Apple's notary, and
+  # staples the ticket (hardened runtime is enabled automatically). TAURI_SIGNING_*
+  # is the separate ed25519 updater signature. Both run in this one build.
+  APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" \
+  APPLE_API_KEY="$APPLE_API_KEY" \
+  APPLE_API_ISSUER="$APPLE_API_ISSUER" \
+  APPLE_API_KEY_PATH="$APPLE_API_KEY_PATH" \
+  TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_PATH")" \
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
+    pnpm tauri build --target aarch64-apple-darwin
 
-BUNDLE="target/aarch64-apple-darwin/release/bundle"
-DMG="$(ls "$BUNDLE"/dmg/*.dmg 2>/dev/null | head -n1 || true)"
-TARBALL="$(ls "$BUNDLE"/macos/*.app.tar.gz 2>/dev/null | head -n1 || true)"
-[[ -f "${DMG:-}" && -f "${TARBALL:-}" && -f "${TARBALL:-}.sig" ]] \
-  || die "expected build artifacts missing under $BUNDLE"
+  DMG="$(ls "$BUNDLE"/dmg/*.dmg 2>/dev/null | head -n1 || true)"
+  TARBALL="$(ls "$BUNDLE"/macos/*.app.tar.gz 2>/dev/null | head -n1 || true)"
+  [[ -f "${DMG:-}" && -f "${TARBALL:-}" && -f "${TARBALL:-}.sig" ]] \
+    || die "expected build artifacts missing under $BUNDLE"
+  echo "$VERSION" > "$MAC_MARKER"
+fi
 DMG_NAME="$(basename "$DMG")"
 TARBALL_NAME="$(basename "$TARBALL")"
 DMG_SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
 SIG="$(cat "$TARBALL.sig")"
-ok "Built $DMG_NAME (sha256 $DMG_SHA)"
+if [[ "$MAC_CACHED" == "1" ]]; then
+  ok "Reused $DMG_NAME (sha256 $DMG_SHA)"
+else
+  ok "Built $DMG_NAME (sha256 $DMG_SHA)"
+fi
 
 # ─── 1c. collect + sign the Windows installer ───────────────────────
 # Wait for the remote build, copy the installer down, and ed25519-sign it HERE
 # (the key never leaves this Mac). A Windows failure aborts before any push.
 SETUP_NAME=""; WIN_SIG=""
-if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
+if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" == "1" ]]; then
+  SETUP_NAME="$WIN_SETUP_NAME"
+  WIN_SIG="$(cat "$WIN_OUT/$SETUP_NAME.sig")"
+  WIN_SHA="$(shasum -a 256 "$WIN_OUT/$SETUP_NAME" | awk '{print $1}')"
+  ok "Reused $SETUP_NAME (sha256 $WIN_SHA)"
+elif [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   case "$WIN_BUILDER" in
     ssh)
       say "Waiting for the Windows build on ${WIN_SSH_HOST}…"
@@ -367,7 +431,14 @@ fi
 # itself on Linux and ships no updater payload. Integrity for the AUR path is
 # the sha256 baked into the PKGBUILD the builder just rendered.
 DEB_NAME=""; RPM_NAME=""
-if [[ "$INCLUDE_LINUX" == "1" ]]; then
+if [[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" == "1" ]]; then
+  DEB_NAME="$LINUX_DEB_NAME"
+  RPM_NAME="$(basename "$LINUX_RPM_EXPECTED")"
+  DEB_SHA="$(shasum -a 256 "$LINUX_OUT/$DEB_NAME" | awk '{print $1}')"
+  RPM_SHA="$(shasum -a 256 "$LINUX_OUT/$RPM_NAME" | awk '{print $1}')"
+  ok "Reused $DEB_NAME (sha256 $DEB_SHA)"
+  ok "Reused $RPM_NAME (sha256 $RPM_SHA)"
+elif [[ "$INCLUDE_LINUX" == "1" ]]; then
   say "Waiting for the Linux build on ${LINUX_SSH_HOST}…"
   if ! wait "$LINUX_PID"; then
     echo "── Linux build log ───────────────────────────────────────"

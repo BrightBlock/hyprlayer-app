@@ -54,10 +54,19 @@ for byte. Neither holds any secret.
 | `--no-windows` | macOS + Linux + AUR |
 | `--no-aur` | everything, but don't push the AUR package |
 | `--mac-only` | macOS only |
+| `--rebuild` | ignore cached artifacts, force a clean build of everything |
 
 A platform left out is simply absent from `latest.json`, so its installs see
 "no update" until the next all-platform release — they are never served a
 mismatched build.
+
+Each platform's signed output for the version being published is checked for
+on disk before that leg builds, so re-running after a transient failure (a
+flaky builder, a missing tool) reuses whatever already succeeded instead of
+rebuilding everything — mac and Windows artifacts are keyed by their
+version-stamped filename, Linux by its deb/rpm filenames plus the rendered
+AUR PKGBUILD/.SRCINFO. Pass `--rebuild` to ignore all of that and force a
+fresh build.
 
 Update packages are **ed25519-signed**; the public key is baked into the app
 (`src-tauri/tauri.conf.json` → `plugins.updater.pubkey`) and verifies every
