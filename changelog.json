@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.5.8",
+      "date": "2026-08-15",
+      "summary": "Linux now ships as an AUR/deb/rpm package instead of an AppImage.",
+      "notes": [
+        "Linux installs now come from a proper distro package — the AUR (Arch), a .deb (Debian/Ubuntu), or a .rpm (Fedora/RHEL/openSUSE) — instead of a self-updating AppImage.",
+        "Because your package manager now owns installs and updates, the app no longer self-updates on Linux — it points you at `paru`/`apt`/`dnf` instead when a new version is out.",
+        "If you're on the 0.5.6 or 0.5.7 AppImage: it won't offer this update. Grab the AUR/deb/rpm package once and your package manager takes it from there."
+      ]
+    },
+    {
       "version": "0.5.7",
       "date": "2026-08-15",
       "summary": "Linux fixes: clean process env, clipboard image paste, and bundled fonts.",
