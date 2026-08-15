@@ -20,6 +20,7 @@
     },
     "opener:allow-open-url",
     "dialog:default",
+    "clipboard-manager:allow-read-image",
     "log:default",
     "window-state:default",
     "updater:default",

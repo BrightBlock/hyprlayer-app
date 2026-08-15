@@ -196,6 +196,9 @@ impl ClaudeDriver {
             cmd.arg("--chrome");
         }
 
+        // Before any explicit env, so an AppImage build doesn't hand the harness
+        // (and every tool subprocess it spawns) our bundled AppDir.
+        crate::process::appimage::scrub_tokio(&mut cmd);
         cmd.current_dir(&config.cwd)
             .env("CLAUDE_CODE_ENTRYPOINT", "hyprlayer-app")
             .stdin(Stdio::piped())

@@ -225,6 +225,10 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Image paste. WebKitGTK doesn't surface clipboard images through the
+        // webview's paste DataTransfer, so the composer reads them natively
+        // instead (arboard, with both the Wayland and X11 backends).
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)

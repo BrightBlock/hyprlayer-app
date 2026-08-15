@@ -65,7 +65,10 @@ class XtermEngine implements TerminalEngine {
   constructor(opts: { fontSize: number; theme: TerminalTheme; cursorBlink?: boolean }) {
     this.term = new Terminal({
       fontSize: opts.fontSize,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      // Bundled first: `ui-monospace` resolves to a *proportional* face through
+      // fontconfig on a typical Linux box (see the typography block in index.css).
+      fontFamily:
+        '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace',
       // Pin the weights to 400 / 700: any other weight makes xterm's WebGL atlas
       // interpolate, which WKWebView rasterizes soft/garbled. lineHeight 1.0 is
       // what TUIs (claude/codex/gemini) assume — a larger value inflates each

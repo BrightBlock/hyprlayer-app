@@ -104,6 +104,9 @@ impl CodexDriver {
         let startup = crate::codex::startup_lock().lock().await;
 
         let mut cmd = Command::new(&config.codex_bin);
+        // Before any explicit env, so an AppImage build doesn't hand the harness
+        // (and every tool subprocess it spawns) our bundled AppDir.
+        crate::process::appimage::scrub_tokio(&mut cmd);
         cmd.args(["app-server", "--stdio"])
             .current_dir(&config.cwd)
             .stdin(Stdio::piped())

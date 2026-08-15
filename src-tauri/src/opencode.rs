@@ -136,6 +136,7 @@ impl OpenCodeServer {
         let _ = std::fs::create_dir_all(&data_dir);
 
         let mut cmd = Command::new(&bin);
+        hyprlayer_core::process::appimage::scrub_tokio(&mut cmd);
         cmd.args(["serve", "--hostname", "127.0.0.1", "--port", &port.to_string()])
             .current_dir(&home)
             .env("PATH", &path)

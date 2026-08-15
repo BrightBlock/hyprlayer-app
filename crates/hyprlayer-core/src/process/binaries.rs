@@ -134,7 +134,13 @@ impl BinaryResolver {
     pub fn initialize(overrides: HashMap<BinaryKind, PathBuf>) -> Self {
         let mut segments: Vec<PathBuf> = Vec::new();
         if let Some(process_path) = env::var_os("PATH") {
-            segments.extend(env::split_paths(&process_path));
+            // An AppImage prepends its own bin dirs, which hold nothing but our
+            // launcher and a fallback xdg-open. This PATH is handed to terminals
+            // and harnesses *after* the AppImage env scrub, so leaving the
+            // entries in would undo it.
+            segments.extend(
+                env::split_paths(&process_path).filter(|p| !super::appimage::is_appdir_path(p)),
+            );
         }
         segments.extend(well_known_dirs());
 

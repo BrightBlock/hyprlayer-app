@@ -58,7 +58,12 @@ import {
 } from "@/features/prompts/prompts";
 import { resolveCustomPrompt, runCustomPrompt } from "@/features/prompts/runPrompt";
 import { AttachmentCards } from "./AttachmentCard";
-import { importDroppedPaths, saveClipboardImage, type Attachment } from "./attachments";
+import {
+  importDroppedPaths,
+  saveClipboardImage,
+  saveClipboardImageFromOs,
+  type Attachment,
+} from "./attachments";
 import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
 import { generateTabTitle } from "./tabTitles";
 import type { ShellTab } from "./workstreamTabs";
@@ -1534,11 +1539,23 @@ export function SessionChat({
         if (file) images.push(file);
       }
     }
-    if (images.length === 0) return;
-    e.preventDefault();
-    void Promise.all(images.map((f) => saveClipboardImage(workstreamId, f))).then((res) => {
-      const atts = res.filter((a): a is Attachment => a !== null);
-      if (atts.length) onAddAttachments(atts);
+    if (images.length > 0) {
+      e.preventDefault();
+      void Promise.all(images.map((f) => saveClipboardImage(workstreamId, f))).then((res) => {
+        const atts = res.filter((a): a is Attachment => a !== null);
+        if (atts.length) onAddAttachments(atts);
+      });
+      return;
+    }
+    // No image in the event — which is also exactly what a screenshot paste
+    // looks like on WebKitGTK, where the webview never surfaces clipboard
+    // images. Probe the OS clipboard, but only when the paste carried no text
+    // either, so an ordinary text paste neither pays for the round-trip nor
+    // risks attaching an unrelated image that happens to be on the clipboard.
+    // Nothing is inserted on this path, so the event is left to its default.
+    if (e.clipboardData?.getData("text/plain")) return;
+    void saveClipboardImageFromOs(workstreamId).then((att) => {
+      if (att) onAddAttachments([att]);
     });
   };
 

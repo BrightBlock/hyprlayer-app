@@ -113,3 +113,50 @@ export async function saveClipboardImage(
     return null;
   }
 }
+
+/**
+ * Persist a clipboard image read from the OS rather than from the paste event.
+ *
+ * The webview's `paste` DataTransfer is the fast path and stays first, but it
+ * only carries image bytes on some platforms — WebKitGTK (the Linux Tauri
+ * runtime) hands over text and nothing else, which is why pasting a screenshot
+ * did nothing on Linux while dragging the same file in worked (drag-drop goes
+ * through Tauri's native event, never the webview).
+ *
+ * `readImage()` returns raw RGBA, not an encoded file, so it goes through a
+ * canvas to become a PNG. Returns null whenever the clipboard holds no image —
+ * which is the common case, since this runs on every paste that carried no
+ * image in the event.
+ */
+export async function saveClipboardImageFromOs(
+  workstreamId: string,
+): Promise<Attachment | null> {
+  try {
+    const { readImage } = await import("@tauri-apps/plugin-clipboard-manager");
+    const image = await readImage();
+    const [{ width, height }, rgba] = await Promise.all([image.size(), image.rgba()]);
+    if (!width || !height || rgba.length < width * height * 4) return null;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/png"),
+    );
+    if (!blob) return null;
+
+    const name = "pasted-image.png";
+    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+    const stored = await unwrap(commands.saveAttachment(workstreamId, name, bytes));
+    return { path: stored, name, kind: "image" };
+  } catch {
+    // No image on the clipboard (the usual case for a text paste), or the
+    // platform/permission denied the read. Either way the paste falls through
+    // to its normal text behaviour.
+    return null;
+  }
+}

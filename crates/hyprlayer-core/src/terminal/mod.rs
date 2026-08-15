@@ -92,6 +92,15 @@ impl PtySession {
         }
         cmd.cwd(&cfg.cwd);
         cmd.env("TERM", "xterm-256color");
+        // An AppImage build hands us an environment pointing at the mounted
+        // AppDir; an interactive shell must not inherit it. Applied before the
+        // caller's env so an explicit override still wins.
+        for (key, value) in crate::process::appimage::child_env_overrides() {
+            match value {
+                Some(value) => cmd.env(key, value),
+                None => cmd.env_remove(key),
+            }
+        }
         for (k, v) in &cfg.env {
             cmd.env(k, v);
         }

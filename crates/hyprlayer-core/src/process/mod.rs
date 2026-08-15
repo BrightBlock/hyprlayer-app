@@ -4,6 +4,7 @@
 //! else goes through [`Exec`]: absolute binary path, explicit cwd, args as
 //! vectors (never a shell), captured output, timeout, typed errors.
 
+pub mod appimage;
 pub mod binaries;
 #[cfg(windows)]
 mod job;
@@ -131,6 +132,8 @@ impl Exec {
         if let Some(cwd) = &self.cwd {
             cmd.current_dir(cwd);
         }
+        // Before caller env, so an explicit override still wins.
+        appimage::scrub_tokio(&mut cmd);
         for (k, v) in &self.env {
             cmd.env(k, v);
         }

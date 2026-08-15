@@ -68,3 +68,4 @@ uuid = { version = "1.23.3", features = ["v4"] }
 # added a `From` impl that breaks coherence in cookie 0.18.1 (E0119).
 # Remove once cookie ships a fix and tauri picks it up.
 time = { version = ">=0.3.36, <0.3.48", default-features = false }
+tauri-plugin-clipboard-manager = "2"

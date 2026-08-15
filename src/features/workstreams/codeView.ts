@@ -59,7 +59,9 @@ const themeChrome = EditorView.theme({
     height: "100%",
   },
   ".cm-scroller": {
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+    // Bundled first — see the typography block in index.css.
+    fontFamily:
+      '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
     lineHeight: "1.5",
   },
   "&.cm-focused": { outline: "none" },

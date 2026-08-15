@@ -93,6 +93,7 @@ async fn ask(
     env: &[(String, String)],
 ) -> Result<Vec<ClaudeModel>> {
     let mut cmd = Command::new(bin);
+    crate::process::appimage::scrub_tokio(&mut cmd);
     cmd.arg("-p")
         .args(["--input-format", "stream-json"])
         .args(["--output-format", "stream-json"])

@@ -515,7 +515,9 @@ fn capture_codex(worktree: Option<&str>, after_ms: f64, exclude: &[String]) -> O
 /// tree. See [`mint_codex_session`].
 fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<String> {
     use std::process::{Command, Stdio};
-    let mut child = Command::new(command)
+    let mut cmd = Command::new(command);
+    hyprlayer_core::process::appimage::scrub_std(&mut cmd);
+    let mut child = cmd
         .args(["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "hello."])
         .current_dir(worktree)
         .env("PATH", path)

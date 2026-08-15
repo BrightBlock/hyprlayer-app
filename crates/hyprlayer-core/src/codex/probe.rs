@@ -164,6 +164,7 @@ async fn ask_inner(bin: &Path, path_env: &OsString, calls: &[(&str, Value)]) -> 
     let _startup = super::startup_lock().lock().await;
 
     let mut cmd = Command::new(bin);
+    crate::process::appimage::scrub_tokio(&mut cmd);
     cmd.args(["app-server", "--stdio"])
         .env("PATH", path_env)
         .stdin(Stdio::piped())
