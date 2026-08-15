@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.5.9",
+      "date": "2026-08-15",
+      "summary": "Fixed the 0.5.8 Linux packages breaking hyprlayer, git, and gh detection.",
+      "notes": [
+        "Installing the 0.5.8 deb/rpm/AUR package to /usr/bin made a dev-build safety guard blacklist the entire system bin directory, so the app could no longer find the hyprlayer CLI, shell out to git, or read gh's logged-in account correctly. All three now resolve again."
+      ]
+    },
+    {
       "version": "0.5.8",
       "date": "2026-08-15",
       "summary": "Linux now ships as an AUR/deb/rpm package instead of an AppImage.",
