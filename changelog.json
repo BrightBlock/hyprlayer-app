@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.5.6",
+      "date": "2026-08-15",
+      "summary": "Hyprlayer now ships for Linux, with in-app dropdowns and smarter branch picking.",
+      "notes": [
+        "Hyprlayer is now available on Linux (x64) as an AppImage, alongside macOS and Windows — the same in-app Update pill keeps it current.",
+        "Every dropdown and select is now drawn in-app instead of as an OS popup, fixing white GTK menus on Linux and inconsistent sizing on every platform.",
+        "New workstreams can now adopt a branch that only exists on the remote — a colleague's pushed work, or a branch from another machine — instead of hiding it from the picker."
+      ]
+    },
+    {
       "version": "0.5.5",
       "date": "2026-08-05",
       "summary": "Custom prompts can now take {{input}} arguments via /slug.",
