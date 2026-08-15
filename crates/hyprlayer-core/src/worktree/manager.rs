@@ -609,6 +609,24 @@ pub async fn fetch_remote(git: &Path, worktree: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Create local branch `local` tracking `remote_ref` (e.g. `origin/feature`) —
+/// `git branch --track <local> <remote_ref>`. The existing/in-place modes check a
+/// *local* branch out (a remote-tracking ref would detach HEAD), so adopting a
+/// branch that only exists on the remote goes through here first. Errors when
+/// `local` already exists, which the caller avoids by checking the local list.
+pub async fn create_tracking_branch(
+    git: &Path,
+    repo: &Path,
+    local: &str,
+    remote_ref: &str,
+) -> Result<()> {
+    git_in(git, repo, &["branch", "--track", local, remote_ref])
+        .timeout(Duration::from_secs(60))
+        .run()
+        .await?;
+    Ok(())
+}
+
 /// Delete `branch` on the `origin` remote (`git push origin --delete <branch>`).
 /// The local branch name equals the remote head name for app-created branches,
 /// so this clears the leftover GitHub branch after a merged PR is archived (the
@@ -872,6 +890,79 @@ mod tests {
         sh(&repo, &["add", "."]);
         sh(&repo, &["commit", "-m", "init"]);
         (dir, repo)
+    }
+
+    /// A branch that only exists on the remote (the colleague's-branch case) is
+    /// adopted by first creating a local branch tracking it — `worktree add` on
+    /// `origin/x` would detach HEAD.
+    #[tokio::test]
+    async fn remote_only_branch_is_adopted_via_a_local_tracking_branch() {
+        let (_guard, origin) = fixture_repo();
+        sh(&origin, &["branch", "linux-support"]);
+        let clones = tempfile::tempdir().unwrap();
+        let repo = clones.path().join("proj");
+        sh(
+            clones.path(),
+            &["clone", origin.to_str().unwrap(), repo.to_str().unwrap()],
+        );
+        let git = which::which("git").expect("git on PATH");
+
+        // Nothing local to check out yet.
+        assert!(!crate::gitops::list_local_branches(&repo)
+            .unwrap()
+            .contains(&"linux-support".to_string()));
+
+        create_tracking_branch(&git, &repo, "linux-support", "origin/linux-support")
+            .await
+            .unwrap();
+
+        // The new local branch tracks the remote, so ahead/behind and a later
+        // push both target the right place.
+        let upstream = std::process::Command::new(&git)
+            .arg("-C")
+            .arg(&repo)
+            .args(["rev-parse", "--abbrev-ref", "linux-support@{upstream}"])
+            .output()
+            .expect("git runs");
+        assert_eq!(
+            String::from_utf8_lossy(&upstream.stdout).trim(),
+            "origin/linux-support"
+        );
+
+        // And it checks out into a dedicated worktree like any other local branch.
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Linux support".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Existing {
+                        branch: "linux-support".into(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.branch, "linux-support");
+        assert_eq!(
+            status(Path::new(&created.path), "main", None)
+                .branch
+                .as_deref(),
+            Some("linux-support")
+        );
+
+        // A second attempt at the same local name fails rather than silently
+        // adopting an unrelated branch — the caller checks the local list first.
+        assert!(
+            create_tracking_branch(&git, &repo, "linux-support", "origin/linux-support")
+                .await
+                .is_err()
+        );
     }
 
     #[test]
