@@ -317,7 +317,10 @@ fn parse_pr(stdout: &str) -> Result<PrStatus> {
     })?;
     let checks_list = build_checks(raw.status_check_rollup, &raw.url);
     let (checks, checks_total, checks_passed, checks_failed) = summarize(&checks_list);
-    let review_decision = raw.review_decision.as_deref().and_then(ReviewDecision::parse);
+    let review_decision = raw
+        .review_decision
+        .as_deref()
+        .and_then(ReviewDecision::parse);
     Ok(PrStatus {
         number: raw.number,
         url: raw.url,
@@ -712,7 +715,10 @@ mod tests {
         };
         let rd = |raw: &str| parse_pr(&mk(raw)).unwrap().review_decision;
         assert_eq!(rd("REVIEW_REQUIRED"), Some(ReviewDecision::ReviewRequired));
-        assert_eq!(rd("CHANGES_REQUESTED"), Some(ReviewDecision::ChangesRequested));
+        assert_eq!(
+            rd("CHANGES_REQUESTED"),
+            Some(ReviewDecision::ChangesRequested)
+        );
         assert_eq!(rd("APPROVED"), Some(ReviewDecision::Approved));
         // Empty (no required review) and any unrecognized value → None: nothing to
         // gate on, so the Merge button isn't blocked by a verdict we can't read.

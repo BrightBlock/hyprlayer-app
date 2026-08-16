@@ -543,7 +543,10 @@ mod tests {
         assert!(got.archived_at.is_none());
         assert!(db.list_archived_workstreams().unwrap().is_empty());
         // Untouched siblings stay untouched.
-        assert_eq!(db.get_workstream(&b.id).unwrap().unwrap().status, WorkstreamStatus::Active);
+        assert_eq!(
+            db.get_workstream(&b.id).unwrap().unwrap().status,
+            WorkstreamStatus::Active
+        );
     }
 
     #[test]

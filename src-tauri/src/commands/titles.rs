@@ -61,9 +61,7 @@ pub async fn suggest_tab_title(
     let prompt = build_prompt(&text);
 
     let raw = match parse_model_tag(&model_tag) {
-        TitleModel::Claude(flag) => {
-            generate_with_claude(&state, flag, &prompt).await?
-        }
+        TitleModel::Claude(flag) => generate_with_claude(&state, flag, &prompt).await?,
         TitleModel::OpenCode(provider_model) => {
             generate_with_opencode(&app, &state, provider_model, &prompt).await?
         }
@@ -120,11 +118,7 @@ fn parse_model_tag(tag: &str) -> TitleModel<'_> {
 /// questions, and a self-contained summarization needs no tools. The prompt is
 /// piped over stdin (not argv) so the user's task text never lands in a process
 /// listing.
-async fn generate_with_claude(
-    state: &AppState,
-    flag: &str,
-    prompt: &str,
-) -> CmdResult<String> {
+async fn generate_with_claude(state: &AppState, flag: &str, prompt: &str) -> CmdResult<String> {
     let bin = state
         .binaries
         .require(BinaryKind::Claude)
@@ -187,12 +181,13 @@ async fn generate_with_opencode(
     // The session cwd only scopes tool resolution; titling uses no tools, so a
     // throwaway temp dir keeps it away from any real project.
     let cwd = std::env::temp_dir().to_string_lossy().into_owned();
-    let (driver, mut rx) =
-        OpenCodeDriver::spawn(server, &cwd, Some(provider_model.to_string()))
-            .await
-            .map_err(AppError::internal)?;
+    let (driver, mut rx) = OpenCodeDriver::spawn(server, &cwd, Some(provider_model.to_string()))
+        .await
+        .map_err(AppError::internal)?;
 
-    driver.send_user_turn(prompt, None, None).map_err(AppError::from)?;
+    driver
+        .send_user_turn(prompt, None, None)
+        .map_err(AppError::from)?;
     let collected = drain_title(&mut rx).await;
     driver.kill();
     // Throwaway session: delete the record so one-shot titling doesn't pollute
@@ -236,7 +231,9 @@ async fn generate_with_codex(state: &AppState, model: &str, prompt: &str) -> Cmd
     .await
     .map_err(AppError::from)?;
 
-    driver.send_user_turn(prompt, None, None).map_err(AppError::from)?;
+    driver
+        .send_user_turn(prompt, None, None)
+        .map_err(AppError::from)?;
     let collected = drain_title(&mut rx).await;
     driver.kill();
 
@@ -287,7 +284,11 @@ async fn drain_title(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<Strin
             }
         }
     }
-    let raw = if !finalized.trim().is_empty() { finalized } else { streamed };
+    let raw = if !finalized.trim().is_empty() {
+        finalized
+    } else {
+        streamed
+    };
     let title = raw.trim().to_string();
     (!title.is_empty()).then_some(title)
 }
@@ -321,13 +322,19 @@ mod tests {
 
     #[test]
     fn strips_quotes_and_collapses_whitespace() {
-        assert_eq!(sanitize_title("\"OAuth Token Refresh\""), "OAuth Token Refresh");
+        assert_eq!(
+            sanitize_title("\"OAuth Token Refresh\""),
+            "OAuth Token Refresh"
+        );
         assert_eq!(sanitize_title("`Fix   Flaky Tests`"), "Fix Flaky Tests");
     }
 
     #[test]
     fn takes_first_line_only() {
-        assert_eq!(sanitize_title("Add Dark Mode\nHere is why: ..."), "Add Dark Mode");
+        assert_eq!(
+            sanitize_title("Add Dark Mode\nHere is why: ..."),
+            "Add Dark Mode"
+        );
     }
 
     #[test]
@@ -343,7 +350,10 @@ mod tests {
 
     #[test]
     fn routes_model_tags() {
-        assert!(matches!(parse_model_tag("claude:haiku"), TitleModel::Claude("haiku")));
+        assert!(matches!(
+            parse_model_tag("claude:haiku"),
+            TitleModel::Claude("haiku")
+        ));
         assert!(matches!(parse_model_tag("claude:"), TitleModel::Claude("")));
         assert!(matches!(
             parse_model_tag("opencode:anthropic/claude-haiku-4-5"),
@@ -354,17 +364,30 @@ mod tests {
             TitleModel::Codex("gpt-5.4-codex")
         ));
         // Untagged → treated as a Claude flag.
-        assert!(matches!(parse_model_tag("sonnet"), TitleModel::Claude("sonnet")));
+        assert!(matches!(
+            parse_model_tag("sonnet"),
+            TitleModel::Claude("sonnet")
+        ));
     }
 
     fn partial(text: &str) -> SessionEvent {
-        SessionEvent::PartialText { text: text.into(), parent_id: None }
+        SessionEvent::PartialText {
+            text: text.into(),
+            parent_id: None,
+        }
     }
     fn assistant(text: &str) -> SessionEvent {
-        SessionEvent::AssistantText { text: text.into(), parent_id: None }
+        SessionEvent::AssistantText {
+            text: text.into(),
+            parent_id: None,
+        }
     }
     fn turn_done() -> SessionEvent {
-        SessionEvent::TurnDone { cost_usd: None, num_turns: None, context_tokens: None }
+        SessionEvent::TurnDone {
+            cost_usd: None,
+            num_turns: None,
+            context_tokens: None,
+        }
     }
 
     // Newer OpenCode builds stream text as PartialText and can end the turn

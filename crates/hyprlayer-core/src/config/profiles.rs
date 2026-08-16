@@ -92,8 +92,7 @@ fn display_root(backend: &BackendConfig) -> Option<String> {
 /// failure (permission denied, I/O) is returned as a message instead of
 /// being silently flattened to "no folders".
 fn existing_folders(backend: &BackendConfig) -> (Vec<String>, Option<String>) {
-    let (Some(root), Some((repos_dir, _))) = (backend.thoughts_root(), backend.tree_dirs())
-    else {
+    let (Some(root), Some((repos_dir, _))) = (backend.thoughts_root(), backend.tree_dirs()) else {
         return (Vec::new(), None);
     };
     if repos_dir.is_empty() {
@@ -189,7 +188,10 @@ mod tests {
         assert_eq!(profiles[1].thoughts_repo, None);
         assert_eq!(profiles[1].repos_dir, None);
         assert!(profiles[1].folders.is_empty());
-        assert_eq!(profiles[2].thoughts_repo.as_deref(), Some("~/work-thoughts"));
+        assert_eq!(
+            profiles[2].thoughts_repo.as_deref(),
+            Some("~/work-thoughts")
+        );
     }
 
     #[test]

@@ -327,7 +327,10 @@ mod tests {
 
         // The links still resolve (the old root exists) but point at the wrong
         // tree — an exists()-style check would call this healthy.
-        assert_eq!(check_thoughts(worktree.path(), &new_eff), LinkStatus::Broken);
+        assert_eq!(
+            check_thoughts(worktree.path(), &new_eff),
+            LinkStatus::Broken
+        );
         assert_eq!(broken_thoughts_links(worktree.path(), &new_eff).len(), 3);
 
         // Re-provisioning against a completely empty new root creates the
@@ -336,7 +339,10 @@ mod tests {
             provision_thoughts(worktree.path(), &new_eff).unwrap(),
             LinkStatus::Ok
         );
-        assert_eq!(check_thoughts(worktree.path(), &old_eff), LinkStatus::Broken);
+        assert_eq!(
+            check_thoughts(worktree.path(), &old_eff),
+            LinkStatus::Broken
+        );
         std::fs::write(worktree.path().join("thoughts/shared/note.md"), "x").unwrap();
         assert!(new_root.path().join("repos/myproj/shared/note.md").exists());
     }

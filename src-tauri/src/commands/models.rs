@@ -62,7 +62,8 @@ pub async fn claude_model_windows(state: State<'_, AppState>) -> CmdResult<Vec<M
     let cfg = state.settings.get().await.providers.claude;
     let auth = resolve_auth(&cfg).await.ok_or_else(|| AppError {
         code: "no_claude_auth".into(),
-        message: "No Claude credentials found (log in with the claude CLI or set an API key).".into(),
+        message: "No Claude credentials found (log in with the claude CLI or set an API key)."
+            .into(),
         remedy: None,
     })?;
 
@@ -75,7 +76,9 @@ pub async fn claude_model_windows(state: State<'_, AppState>) -> CmdResult<Vec<M
     // API-key/proxy users may point at a custom base; the OAuth login is scoped
     // to the first-party API, so it always hits api.anthropic.com.
     let base = match &auth {
-        Auth::ApiKey { base_url: Some(b), .. } if !b.is_empty() => b.trim_end_matches('/'),
+        Auth::ApiKey {
+            base_url: Some(b), ..
+        } if !b.is_empty() => b.trim_end_matches('/'),
         _ => "https://api.anthropic.com",
     };
     let url = format!("{base}/v1/models?limit=1000");
@@ -119,7 +122,10 @@ pub async fn claude_model_windows(state: State<'_, AppState>) -> CmdResult<Vec<M
 enum Auth {
     /// Explicit api-key mode (Settings → Harnesses → Claude), with any custom
     /// base URL for a proxy/gateway.
-    ApiKey { key: String, base_url: Option<String> },
+    ApiKey {
+        key: String,
+        base_url: Option<String>,
+    },
     /// The Claude Code CLI login (an OAuth access token).
     OAuth(String),
 }

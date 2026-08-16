@@ -476,11 +476,9 @@ mod tests {
     fn check_glob_hit_and_miss() {
         let (repo, _wt) = dirs();
         write(repo.path(), "pkg/web/.env", b"A");
-        assert!(
-            check_worktree_patterns(repo.path(), &["**/.env".into()])
-                .missing
-                .is_empty()
-        );
+        assert!(check_worktree_patterns(repo.path(), &["**/.env".into()])
+            .missing
+            .is_empty());
         assert_eq!(
             check_worktree_patterns(repo.path(), &["**/*.secret".into()]).missing,
             vec!["**/*.secret"]

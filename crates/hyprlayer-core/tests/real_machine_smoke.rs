@@ -32,9 +32,15 @@ async fn a_resolved_binary_spawns_directly() {
         .arg("--version")
         .output()
         .await
-        .expect("a resolved binary must be spawnable as-is — if this fails on a \
-                 .cmd shim, the app needs its own cmd.exe wrapper again");
-    println!("exit={:?} out={:?}", out.status.code(), String::from_utf8_lossy(&out.stdout).trim());
+        .expect(
+            "a resolved binary must be spawnable as-is — if this fails on a \
+                 .cmd shim, the app needs its own cmd.exe wrapper again",
+        );
+    println!(
+        "exit={:?} out={:?}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).trim()
+    );
     assert!(out.status.success(), "`opencode --version` should exit 0");
 }
 
@@ -119,8 +125,7 @@ async fn port_settles(port: u16, want_open: bool, budget: Duration) -> bool {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let deadline = tokio::time::Instant::now() + budget;
     loop {
-        let open =
-            std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok();
+        let open = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok();
         if open == want_open {
             return true;
         }
@@ -245,13 +250,23 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
     std::fs::create_dir_all(&code).unwrap();
     for args in [
         vec!["init", "-b", "main", code.to_str().unwrap()],
-        vec!["-C", code.to_str().unwrap(), "commit", "--allow-empty", "-m", "init",
-             "-c", "commit.gpgsign=false"],
+        vec![
+            "-C",
+            code.to_str().unwrap(),
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+            "-c",
+            "commit.gpgsign=false",
+        ],
     ] {
         std::process::Command::new(&git)
             .args(&args)
-            .env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t")
-            .env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t")
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
             .output()
             .expect("git should run");
     }
@@ -281,8 +296,15 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
 
     let out = std::process::Command::new(&hyprlayer)
         .current_dir(&code)
-        .args(["thoughts", "init", "--yes", "--directory", "Proj",
-               "--config-file", cfg.to_str().unwrap()])
+        .args([
+            "thoughts",
+            "init",
+            "--yes",
+            "--directory",
+            "Proj",
+            "--config-file",
+            cfg.to_str().unwrap(),
+        ])
         .stdin(Stdio::null())
         .output()
         .expect("hyprlayer should run");
@@ -297,7 +319,10 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
         code.join("thoughts").join("global").exists(),
         "the CLI should have linked thoughts/global into the scaffolded root"
     );
-    assert!(root.join("repos").join("Proj").is_dir(), "project tree created");
+    assert!(
+        root.join("repos").join("Proj").is_dir(),
+        "project tree created"
+    );
 }
 
 /// The model-catalog probe drives a REAL `claude`, end to end.
@@ -330,7 +355,11 @@ async fn claude_answers_the_model_catalog_probe() {
     for m in &probe.models {
         println!(
             "{:?} -> {:?} [{}] efforts={:?} fast={}",
-            m.flag, m.resolved_model, m.display_name, m.supported_effort_levels, m.supports_fast_mode
+            m.flag,
+            m.resolved_model,
+            m.display_name,
+            m.supported_effort_levels,
+            m.supports_fast_mode
         );
     }
     assert!(!probe.models.is_empty(), "a signed-in CLI offers models");

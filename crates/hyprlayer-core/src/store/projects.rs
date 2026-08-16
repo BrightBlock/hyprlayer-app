@@ -144,8 +144,9 @@ impl Db {
         self.with(|conn| {
             // `position` is the drag-to-reorder rank; `name` tiebreaks so rows
             // still at the default 0 (never reordered) stay alphabetical.
-            let mut stmt =
-                conn.prepare(&format!("SELECT {COLS} FROM projects ORDER BY position, name"))?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {COLS} FROM projects ORDER BY position, name"
+            ))?;
             let rows = stmt.query_map([], row_to_project)?;
             rows.collect()
         })

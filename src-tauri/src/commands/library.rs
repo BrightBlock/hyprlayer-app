@@ -387,12 +387,11 @@ pub async fn doc_web_url(state: State<'_, AppState>, id: String) -> CmdResult<Op
         return Ok(None);
     };
     let abs = PathBuf::from(&id);
-    let url = tauri::async_runtime::spawn_blocking(move || {
-        hyprlayer_core::gitops::file_web_url(&abs)
-    })
-    .await
-    .ok()
-    .flatten();
+    let url =
+        tauri::async_runtime::spawn_blocking(move || hyprlayer_core::gitops::file_web_url(&abs))
+            .await
+            .ok()
+            .flatten();
     Ok(url)
 }
 

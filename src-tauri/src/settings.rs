@@ -508,7 +508,13 @@ impl Engine {
     /// map onto existing theme colors: terracotta / violet / blue / teal.
     pub fn builtins() -> Vec<Engine> {
         vec![
-            Engine::builtin(DEFAULT_ENGINE_ID, "Claude Code", "✻", "--color-accent", "claude"),
+            Engine::builtin(
+                DEFAULT_ENGINE_ID,
+                "Claude Code",
+                "✻",
+                "--color-accent",
+                "claude",
+            ),
             Engine::builtin("codex", "Codex", "◆", "--color-validate", "codex"),
             Engine::builtin("gemini", "Gemini", "✦", "--color-brand", "gemini"),
             Engine::builtin("antigravity", "Antigravity", "◉", "--color-commit", "agy"),
@@ -859,10 +865,9 @@ mod tests {
             Some("Use vitest for {{changed_files}}.")
         );
         // A custom prompt missing optional fields still deserializes (defaults).
-        let sparse: AppSettings = serde_json::from_str(
-            r#"{"prompts":{"custom":[{"id":"x","name":"N","body":""}]}}"#,
-        )
-        .unwrap();
+        let sparse: AppSettings =
+            serde_json::from_str(r#"{"prompts":{"custom":[{"id":"x","name":"N","body":""}]}}"#)
+                .unwrap();
         assert_eq!(sparse.prompts.custom[0].chord, None);
         assert!(!sparse.prompts.custom[0].pinned);
         assert!(sparse.prompts.custom[0].overrides.is_empty());

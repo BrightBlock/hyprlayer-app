@@ -168,7 +168,10 @@ async fn exchange(
 /// Pick our `control_response` out of the stream. `Ok(body)` is the success
 /// payload, `Err(msg)` the CLI's refusal; `None` for every other line (the
 /// stream also carries `system`/`assistant` traffic).
-fn control_response_for(line: &str, request_id: &str) -> Option<std::result::Result<Value, String>> {
+fn control_response_for(
+    line: &str,
+    request_id: &str,
+) -> Option<std::result::Result<Value, String>> {
     let v: Value = serde_json::from_str(line).ok()?;
     (v.get("type").and_then(Value::as_str) == Some("control_response")).then_some(())?;
     let response = v.get("response")?;
@@ -281,7 +284,10 @@ mod tests {
         let default = &models[0];
         assert_eq!(default.flag, None);
         assert_eq!(default.resolved_model.as_deref(), Some("claude-opus-5[1m]"));
-        assert_eq!(default.supported_effort_levels, ["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(
+            default.supported_effort_levels,
+            ["low", "medium", "high", "xhigh", "max"]
+        );
         assert!(default.supports_fast_mode);
         assert!(!default.disabled);
 
@@ -313,14 +319,16 @@ mod tests {
         assert!(control_response_for("not json", REQUEST_ID).is_none());
 
         // A response to somebody else's request must not be mistaken for ours.
-        let mismatched =
-            r#"{"type":"control_response","response":{"subtype":"success","request_id":"other","response":{}}}"#;
+        let mismatched = r#"{"type":"control_response","response":{"subtype":"success","request_id":"other","response":{}}}"#;
         assert!(control_response_for(mismatched, REQUEST_ID).is_none());
 
         let ours = format!(
             r#"{{"type":"control_response","response":{{"subtype":"success","request_id":"{REQUEST_ID}","response":{{"models":[]}}}}}}"#
         );
-        assert!(matches!(control_response_for(&ours, REQUEST_ID), Some(Ok(_))));
+        assert!(matches!(
+            control_response_for(&ours, REQUEST_ID),
+            Some(Ok(_))
+        ));
     }
 
     #[test]

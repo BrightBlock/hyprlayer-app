@@ -116,7 +116,10 @@ mod tests {
 
     #[test]
     fn detect_port_ignores_non_url_port_mentions() {
-        assert_eq!(detect_port("Port 5173 is in use, trying another one..."), None);
+        assert_eq!(
+            detect_port("Port 5173 is in use, trying another one..."),
+            None
+        );
         assert_eq!(detect_port("  ➜  Network: use --host to expose"), None);
         assert_eq!(detect_port(""), None);
     }
@@ -162,7 +165,13 @@ mod tests {
             .expect("run sh");
         assert!(!out.status.success(), "block should fail on `false`");
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains("one"), "first command should run: {stdout:?}");
-        assert!(!stdout.contains("two"), "must halt before `two`: {stdout:?}");
+        assert!(
+            stdout.contains("one"),
+            "first command should run: {stdout:?}"
+        );
+        assert!(
+            !stdout.contains("two"),
+            "must halt before `two`: {stdout:?}"
+        );
     }
 }

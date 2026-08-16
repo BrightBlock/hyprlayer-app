@@ -407,14 +407,18 @@ pub fn run() {
 
             // Relay macOS menu item clicks to the frontend as Tauri events.
             #[cfg(target_os = "macos")]
-            app.on_menu_event(|app, event| {
-                match event.id().as_ref() {
-                    "check-updates" => { let _ = app.emit("menu:check-for-updates", ()); }
-                    "open-settings" => { let _ = app.emit("menu:open-settings", ()); }
-                    "save-file" => { let _ = app.emit("menu:save-file", ()); }
-                    "quit" => request_quit(app),
-                    _ => {}
+            app.on_menu_event(|app, event| match event.id().as_ref() {
+                "check-updates" => {
+                    let _ = app.emit("menu:check-for-updates", ());
                 }
+                "open-settings" => {
+                    let _ = app.emit("menu:open-settings", ());
+                }
+                "save-file" => {
+                    let _ = app.emit("menu:save-file", ());
+                }
+                "quit" => request_quit(app),
+                _ => {}
             });
 
             Ok(())
@@ -498,10 +502,20 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         ..Default::default()
     };
 
-    let check_updates =
-        tauri::menu::MenuItem::with_id(handle, "check-updates", "Check for Updates…", true, None::<&str>)?;
-    let open_settings =
-        tauri::menu::MenuItem::with_id(handle, "open-settings", "Settings", true, Some("CmdOrCtrl+,"))?;
+    let check_updates = tauri::menu::MenuItem::with_id(
+        handle,
+        "check-updates",
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
+    let open_settings = tauri::menu::MenuItem::with_id(
+        handle,
+        "open-settings",
+        "Settings",
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
     // File ▸ Save (⌘S), relayed to the frontend as `menu:save-file`. On the menu
     // so ⌘S fires app-wide, even when the editor isn't focused (e.g. md preview).
     let save_file =
@@ -534,7 +548,9 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
 
     // No Close Window here — leaving ⌘W to the frontend is why this menu is custom
     // (see call site).
-    let file_menu = SubmenuBuilder::new(handle, "File").item(&save_file).build()?;
+    let file_menu = SubmenuBuilder::new(handle, "File")
+        .item(&save_file)
+        .build()?;
 
     let edit_menu = SubmenuBuilder::new(handle, "Edit")
         .undo()
@@ -558,7 +574,14 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
     let help_menu = SubmenuBuilder::new(handle, "Help").build()?;
 
     MenuBuilder::new(handle)
-        .items(&[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu, &help_menu])
+        .items(&[
+            &app_menu,
+            &file_menu,
+            &edit_menu,
+            &view_menu,
+            &window_menu,
+            &help_menu,
+        ])
         .build()
 }
 
@@ -610,10 +633,22 @@ pub(crate) async fn rebuild_thoughts_index(app: tauri::AppHandle) {
             };
             let _ = payload.emit(&emit_handle);
         });
-        match hyprlayer_core::index::watcher::watch_roots(state.index.clone(), roots, callback) {
-            Ok(handle) => Some(handle),
-            Err(e) => {
+        // Arming walks the roots to plan the watch set (skipping `.git`), so it
+        // belongs off the async workers for the same reason `full_scan` does —
+        // a cold or network-mounted root would stall unrelated work.
+        let watch_index = state.index.clone();
+        let armed = tauri::async_runtime::spawn_blocking(move || {
+            hyprlayer_core::index::watcher::watch_roots(watch_index, roots, callback)
+        })
+        .await;
+        match armed {
+            Ok(Ok(handle)) => Some(handle),
+            Ok(Err(e)) => {
                 log::warn!("thoughts watcher failed to start: {e}");
+                None
+            }
+            Err(e) => {
+                log::warn!("thoughts watcher task failed: {e}");
                 None
             }
         }
@@ -713,7 +748,8 @@ mod tests {
     /// bundles are the distro packages the AUR/deb/rpm channels install.
     #[test]
     fn linux_bundles_deb_and_rpm_only() {
-        let overlay: Value = serde_json::from_str(include_str!("../tauri.linux.conf.json")).unwrap();
+        let overlay: Value =
+            serde_json::from_str(include_str!("../tauri.linux.conf.json")).unwrap();
         let targets = overlay["bundle"]["targets"]
             .as_array()
             .expect("linux config pins bundle.targets");

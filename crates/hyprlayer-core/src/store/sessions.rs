@@ -178,7 +178,12 @@ impl Db {
     }
 
     /// Terminal update: state + ended_at + a short exit summary.
-    pub fn finish_session(&self, id: &str, state: SessionState, exit_summary: Option<&str>) -> Result<()> {
+    pub fn finish_session(
+        &self,
+        id: &str,
+        state: SessionState,
+        exit_summary: Option<&str>,
+    ) -> Result<()> {
         self.with(|conn| {
             conn.execute(
                 "UPDATE sessions SET state = ?2, ended_at = ?3, exit_summary = ?4 WHERE id = ?1",
@@ -427,7 +432,8 @@ mod tests {
         )
         .unwrap();
         db.set_session_cost("s1", 0.05).unwrap();
-        db.finish_session("s1", SessionState::Completed, Some("done")).unwrap();
+        db.finish_session("s1", SessionState::Completed, Some("done"))
+            .unwrap();
 
         let reloaded = db.get_session("s1").unwrap().unwrap();
         assert_eq!(reloaded.claude_session_id.as_deref(), Some("claude-abc"));

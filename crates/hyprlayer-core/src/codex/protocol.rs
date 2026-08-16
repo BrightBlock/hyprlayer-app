@@ -16,14 +16,17 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Map, Value};
 
-use crate::claude::events::SessionEvent;
 use crate::claude::driver::PermissionMode;
+use crate::claude::events::SessionEvent;
 
 /// One decoded line of the app-server's stdout.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Incoming {
     /// A reply to a request we sent (`id` + `result`/`error`).
-    Response { id: u64, result: Result<Value, String> },
+    Response {
+        id: u64,
+        result: Result<Value, String>,
+    },
     /// A server-initiated request we must answer on stdin.
     ServerRequest {
         id: Value,
@@ -274,8 +277,10 @@ impl Translator {
         match method {
             "item/commandExecution/requestApproval" => {
                 let request_id = approval_request_id(p);
-                self.pending_approvals
-                    .insert(request_id.clone(), (id.clone(), ApprovalKind::CommandExecution));
+                self.pending_approvals.insert(
+                    request_id.clone(),
+                    (id.clone(), ApprovalKind::CommandExecution),
+                );
                 let mut input = Map::new();
                 if let Some(c) = p.get("command") {
                     input.insert("command".into(), c.clone());
@@ -314,7 +319,12 @@ impl Translator {
                 let requested = p.get("permissions").cloned().unwrap_or(json!({}));
                 self.pending_approvals.insert(
                     request_id.clone(),
-                    (id.clone(), ApprovalKind::Permissions { requested: requested.clone() }),
+                    (
+                        id.clone(),
+                        ApprovalKind::Permissions {
+                            requested: requested.clone(),
+                        },
+                    ),
                 );
                 vec![SessionEvent::PermissionAsk {
                     request_id,
@@ -358,7 +368,11 @@ impl Translator {
             }
             "item/tool/requestUserInput" => {
                 let request_id = approval_request_id(p);
-                let questions = p.get("questions").and_then(Value::as_array).cloned().unwrap_or_default();
+                let questions = p
+                    .get("questions")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
                 let mut by_text = HashMap::new();
                 // Re-shape into the `AskUserQuestion` payload the composer's
                 // interactive picker already renders (Claude's vocabulary):
@@ -366,7 +380,10 @@ impl Translator {
                 let ui: Vec<Value> = questions
                     .iter()
                     .map(|q| {
-                        let text = q.get("question").and_then(Value::as_str).unwrap_or_default();
+                        let text = q
+                            .get("question")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
                         if let Some(qid) = q.get("id").and_then(Value::as_str) {
                             by_text.insert(text.to_string(), qid.to_string());
                         }
@@ -384,7 +401,10 @@ impl Translator {
                     .collect();
                 self.pending_questions.insert(
                     request_id.clone(),
-                    PendingQuestion { rpc_id: id.clone(), by_text },
+                    PendingQuestion {
+                        rpc_id: id.clone(),
+                        by_text,
+                    },
                 );
                 vec![SessionEvent::QuestionAsk {
                     request_id,
@@ -442,7 +462,11 @@ impl Translator {
 
     fn item_completed(&mut self, item: &Value) -> Vec<SessionEvent> {
         let kind = item.get("type").and_then(Value::as_str).unwrap_or_default();
-        let id = item.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
+        let id = item
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
 
         match kind {
             // We emit `UserMessage` ourselves in `send_user_turn` (so the turn is
@@ -452,7 +476,11 @@ impl Translator {
                 Vec::new()
             }
             "agentMessage" => vec![SessionEvent::AssistantText {
-                text: item.get("text").and_then(Value::as_str).unwrap_or_default().to_string(),
+                text: item
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
                 parent_id: None,
             }],
             "reasoning" => {
@@ -465,7 +493,10 @@ impl Translator {
                 if text.is_empty() {
                     Vec::new()
                 } else {
-                    vec![SessionEvent::Thinking { text, parent_id: None }]
+                    vec![SessionEvent::Thinking {
+                        text,
+                        parent_id: None,
+                    }]
                 }
             }
             "contextCompaction" => vec![SessionEvent::CompactBoundary {
@@ -565,7 +596,11 @@ pub fn question_reply(pending: &PendingQuestion, answers: &Value) -> Value {
 /// reusing that vocabulary means the existing plan UI works with no frontend
 /// change (the same trick `normalize_tool` plays for OpenCode's file tools).
 fn plan_events(p: &Value) -> Vec<SessionEvent> {
-    let steps = p.get("plan").and_then(Value::as_array).cloned().unwrap_or_default();
+    let steps = p
+        .get("plan")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     if steps.is_empty() {
         return Vec::new();
     }
@@ -628,7 +663,10 @@ fn tool_call(item: &Value) -> Option<(String, String, Value)> {
             Some(file_change_tool(id, changes))
         }
         "mcpToolCall" => {
-            let server = item.get("server").and_then(Value::as_str).unwrap_or_default();
+            let server = item
+                .get("server")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let tool = item.get("tool").and_then(Value::as_str).unwrap_or_default();
             Some((
                 id,
@@ -638,7 +676,10 @@ fn tool_call(item: &Value) -> Option<(String, String, Value)> {
         }
         "dynamicToolCall" => Some((
             id,
-            item.get("tool").and_then(Value::as_str).unwrap_or("tool").to_string(),
+            item.get("tool")
+                .and_then(Value::as_str)
+                .unwrap_or("tool")
+                .to_string(),
             item.get("arguments").cloned().unwrap_or(json!({})),
         )),
         "webSearch" => Some((
@@ -669,7 +710,12 @@ fn tool_call(item: &Value) -> Option<(String, String, Value)> {
 /// preview then re-diffs, so Codex patches render as real diffs rather than raw
 /// patch text.
 fn file_change_tool(id: String, changes: &[Value]) -> (String, String, Value) {
-    let path_of = |c: &Value| c.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
+    let path_of = |c: &Value| {
+        c.get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     let first_path = changes.first().map(path_of).unwrap_or_default();
 
     if changes.len() == 1 {
@@ -700,7 +746,8 @@ fn file_change_tool(id: String, changes: &[Value]) -> (String, String, Value) {
     let edits: Vec<Value> = changes
         .iter()
         .map(|c| {
-            let (old, new) = split_unified_diff(c.get("diff").and_then(Value::as_str).unwrap_or_default());
+            let (old, new) =
+                split_unified_diff(c.get("diff").and_then(Value::as_str).unwrap_or_default());
             json!({ "file_path": path_of(c), "old_string": old, "new_string": new })
         })
         .collect();
@@ -751,7 +798,10 @@ fn split_unified_diff(diff: &str) -> (String, String) {
 
 /// The result text + error flag for a completed tool item.
 fn tool_result(item: &Value) -> (String, bool) {
-    let status = item.get("status").and_then(Value::as_str).unwrap_or("completed");
+    let status = item
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("completed");
     let failed = matches!(status, "failed" | "declined");
     match item.get("type").and_then(Value::as_str).unwrap_or_default() {
         "commandExecution" => {
@@ -773,7 +823,10 @@ fn tool_result(item: &Value) -> (String, bool) {
             (text, is_error)
         }
         "fileChange" => {
-            let n = item.get("changes").and_then(Value::as_array).map_or(0, Vec::len);
+            let n = item
+                .get("changes")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
             let text = if failed {
                 "patch not applied".to_string()
             } else {
@@ -782,7 +835,11 @@ fn tool_result(item: &Value) -> (String, bool) {
             (text, failed)
         }
         "mcpToolCall" => {
-            if let Some(err) = item.get("error").and_then(|e| e.get("message")).and_then(Value::as_str) {
+            if let Some(err) = item
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(Value::as_str)
+            {
                 return (err.to_string(), true);
             }
             (value_to_text(item.get("result")), failed)
@@ -892,7 +949,10 @@ mod tests {
         // private chain-of-thought into the transcript as prose — the same
         // regression the OpenCode translator guards against.
         let mut t = Translator::default();
-        for method in ["item/reasoning/textDelta", "item/reasoning/summaryTextDelta"] {
+        for method in [
+            "item/reasoning/textDelta",
+            "item/reasoning/summaryTextDelta",
+        ] {
             let out = t.notification(method, &json!({ "itemId": "r1", "delta": "secret plan" }));
             assert!(out.is_empty(), "{method} leaked: {out:?}");
         }
@@ -930,7 +990,9 @@ mod tests {
             &json!({ "item": { "type": "commandExecution", "id": "c1", "command": "ls -la", "cwd": "/w" } }),
         );
         match &started[0] {
-            SessionEvent::ToolUse { name, input, id, .. } => {
+            SessionEvent::ToolUse {
+                name, input, id, ..
+            } => {
                 assert_eq!(name, "Bash");
                 assert_eq!(id, "c1");
                 // `command` is what toolSummary("Bash") renders.
@@ -947,7 +1009,12 @@ mod tests {
         );
         assert_eq!(ev_names(&done), ["toolResult"]);
         match &done[0] {
-            SessionEvent::ToolResult { content, is_error, tool_use_id, .. } => {
+            SessionEvent::ToolResult {
+                content,
+                is_error,
+                tool_use_id,
+                ..
+            } => {
                 assert_eq!(tool_use_id, "c1");
                 assert_eq!(content, "a.txt");
                 assert!(!is_error);
@@ -967,7 +1034,9 @@ mod tests {
         // Never started → the card is emitted alongside its result.
         assert_eq!(ev_names(&out), ["toolUse", "toolResult"]);
         match &out[1] {
-            SessionEvent::ToolResult { is_error, content, .. } => {
+            SessionEvent::ToolResult {
+                is_error, content, ..
+            } => {
                 assert!(is_error);
                 // Empty output would render as "(no output)" — say why it failed.
                 assert_eq!(content, "exited with 1");
@@ -1182,8 +1251,10 @@ mod tests {
     /// or a Stop between turns would address a turn that already finished.
     #[test]
     fn turn_completion_clears_the_requested_turn_fallback() {
-        let mut t = Translator::default();
-        t.requested_turn = Some("t8".into());
+        let mut t = Translator {
+            requested_turn: Some("t8".into()),
+            ..Default::default()
+        };
         t.notification(
             "turn/completed",
             &json!({ "turn": { "id": "t8", "status": "completed" } }),
@@ -1228,7 +1299,11 @@ mod tests {
             &json!({ "itemId": "c5", "command": "rm -rf build", "cwd": "/w", "reason": null }),
         );
         match &out[0] {
-            SessionEvent::PermissionAsk { request_id, tool_name, input } => {
+            SessionEvent::PermissionAsk {
+                request_id,
+                tool_name,
+                input,
+            } => {
                 assert_eq!(request_id, "c5");
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(parse(input)["command"], json!("rm -rf build"));
@@ -1237,8 +1312,14 @@ mod tests {
         }
         let (rpc_id, kind) = t.pending_approvals.get("c5").expect("approval is pending");
         assert_eq!(rpc_id, &json!(11));
-        assert_eq!(approval_reply(kind, true, None), json!({ "decision": "accept" }));
-        assert_eq!(approval_reply(kind, false, None), json!({ "decision": "decline" }));
+        assert_eq!(
+            approval_reply(kind, true, None),
+            json!({ "decision": "accept" })
+        );
+        assert_eq!(
+            approval_reply(kind, false, None),
+            json!({ "decision": "decline" })
+        );
     }
 
     #[test]
@@ -1264,7 +1345,10 @@ mod tests {
             &json!({ "callId": "call-1", "command": ["git", "push"], "cwd": "/w" }),
         );
         let (_, kind) = t.pending_approvals.get("call-1").expect("pending");
-        assert_eq!(approval_reply(kind, true, None), json!({ "decision": "approved" }));
+        assert_eq!(
+            approval_reply(kind, true, None),
+            json!({ "decision": "approved" })
+        );
         assert_eq!(
             approval_reply(kind, false, Some("nope")),
             json!({ "decision": { "denied": { "rejection": "nope" } } })
@@ -1304,7 +1388,10 @@ mod tests {
             ] }),
         );
         match &out[0] {
-            SessionEvent::QuestionAsk { request_id, questions } => {
+            SessionEvent::QuestionAsk {
+                request_id,
+                questions,
+            } => {
                 assert_eq!(request_id, "q1");
                 let qs = parse(questions);
                 // Reshaped into the AskUserQuestion payload the composer renders.
@@ -1359,7 +1446,10 @@ mod tests {
             ("never", "workspace-write")
         );
         // Plan is "look, don't touch": read-only sandbox.
-        assert_eq!(approval_posture(PermissionMode::Plan), ("on-request", "read-only"));
+        assert_eq!(
+            approval_posture(PermissionMode::Plan),
+            ("on-request", "read-only")
+        );
         // Default asks before commands (untrusted); only Bypass drops the sandbox.
         assert_eq!(
             approval_posture(PermissionMode::BypassPermissions),
@@ -1396,7 +1486,10 @@ mod tests {
         let mut t = Translator::default();
         assert!(t.notification("thread/goal/updated", &json!({})).is_empty());
         assert!(t
-            .notification("item/completed", &json!({ "item": { "type": "sleep", "id": "s1" } }))
+            .notification(
+                "item/completed",
+                &json!({ "item": { "type": "sleep", "id": "s1" } })
+            )
             .is_empty());
     }
 

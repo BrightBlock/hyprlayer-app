@@ -116,8 +116,8 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
         let raw = std::fs::read_to_string(path)?;
         // Parsing into a Map (not a bare Value) also rejects a non-object
         // root, which the `v[…] = …` writes below would panic on.
-        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&raw)
-            .map_err(|e| CoreError::ConfigParse {
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&raw).map_err(|e| CoreError::ConfigParse {
                 path: path.to_path_buf(),
                 source: e,
             })?;
@@ -195,7 +195,10 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
 /// ADR-0002's write discipline, in one place.
 fn write_config_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(value).expect("json value"))?;
+    std::fs::write(
+        &tmp,
+        serde_json::to_string_pretty(value).expect("json value"),
+    )?;
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -519,8 +522,11 @@ mod tests {
 
         // Pre-v4 with a thoughts section: the CLI must migrate it first.
         let old = dir.path().join("old.json");
-        std::fs::write(&old, r#"{"version":2,"thoughts":{"user":"alice","backend":"git"}}"#)
-            .unwrap();
+        std::fs::write(
+            &old,
+            r#"{"version":2,"thoughts":{"user":"alice","backend":"git"}}"#,
+        )
+        .unwrap();
         let err = ensure_thoughts_config(&old, "alice", "~/thoughts").unwrap_err();
         assert_eq!(err.code(), "config_needs_migration");
 

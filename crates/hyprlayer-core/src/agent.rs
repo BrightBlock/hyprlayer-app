@@ -64,13 +64,14 @@ impl KillFlag {
 /// (`sessions.harness`), the IPC surface selects on, and the shell dispatches
 /// drivers by. sqlite stores `as_str` TEXT; read back via the tolerant
 /// [`Harness::parse`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum Harness {
     // Last-variant #[serde(other)] isn't needed here — Claude is first so a
     // struct-level default covers it; unknown wire values are a caller bug we
     // want surfaced, while row reads go through `parse`.
+    #[default]
     Claude,
     Opencode,
     Codex,
@@ -92,12 +93,6 @@ impl Harness {
             "codex" => Harness::Codex,
             _ => Harness::Claude,
         }
-    }
-}
-
-impl Default for Harness {
-    fn default() -> Self {
-        Harness::Claude
     }
 }
 
@@ -129,8 +124,12 @@ pub trait AgentDriver: Send + Sync {
     fn set_effort(&self, _effort: Option<String>) {}
 
     /// Answer a `PermissionAsk` (allow/deny, with an optional message).
-    fn respond_permission(&self, request_id: &str, allow: bool, message: Option<&str>)
-        -> Result<()>;
+    fn respond_permission(
+        &self,
+        request_id: &str,
+        allow: bool,
+        message: Option<&str>,
+    ) -> Result<()>;
 
     /// Answer an `AskUserQuestion` prompt; `answers` is a JSON object mapping
     /// each question's text to the chosen answer(s).

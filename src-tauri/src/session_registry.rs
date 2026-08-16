@@ -125,7 +125,11 @@ impl SessionRegistry {
     /// The `--permission-mode` the live session's process is actually running, or
     /// `None` if the session isn't live or has no mode (OpenCode).
     pub async fn permission_mode(&self, id: &str) -> Option<PermissionMode> {
-        self.live.lock().await.get(id).and_then(|s| s.permission_mode)
+        self.live
+            .lock()
+            .await
+            .get(id)
+            .and_then(|s| s.permission_mode)
     }
 
     pub async fn remove(&self, id: &str) {
@@ -245,7 +249,10 @@ mod tests {
         reg.kill_all_blocking();
 
         assert_eq!(kills.detached.load(Ordering::SeqCst), 1);
-        assert!(start.elapsed() < Duration::from_millis(500), "blocked on exit");
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "blocked on exit"
+        );
         assert_eq!(reg.live_ids().await.len(), 1); // draining is the forwarder's job
     }
 

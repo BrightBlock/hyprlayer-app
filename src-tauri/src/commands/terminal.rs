@@ -443,7 +443,12 @@ fn ps_quote(s: &str) -> String {
 /// File/dir mtime as epoch milliseconds.
 fn mtime_ms(path: &Path) -> Option<f64> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    Some(modified.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as f64)
+    Some(
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_millis() as f64,
+    )
 }
 
 /// `(path, mtime_ms)` for every `*.jsonl` under `dir` (bounded depth) whose mtime
@@ -518,7 +523,14 @@ fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<Str
     let mut cmd = Command::new(command);
     hyprlayer_core::process::appimage::scrub_std(&mut cmd);
     let mut child = cmd
-        .args(["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "hello."])
+        .args([
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "-s",
+            "read-only",
+            "hello.",
+        ])
         .current_dir(worktree)
         .env("PATH", path)
         .stdin(Stdio::null())
@@ -531,11 +543,17 @@ fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<Str
         // Drain to EOF — let the seed turn finish and the process exit — so the
         // session is persisted *complete*. Killing mid-turn leaves it "interrupted",
         // which codex then surfaces on resume. The id is the first event.
-        for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+        for line in std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+        {
             if id.is_none() {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     if v.get("type").and_then(|t| t.as_str()) == Some("thread.started") {
-                        id = v.get("thread_id").and_then(|t| t.as_str()).map(String::from);
+                        id = v
+                            .get("thread_id")
+                            .and_then(|t| t.as_str())
+                            .map(String::from);
                     }
                 }
             }
@@ -568,9 +586,11 @@ fn codex_rollout_exists(session_id: &str) -> bool {
     let Some(root) = dirs::home_dir().map(|h| h.join(".codex").join("sessions")) else {
         return false;
     };
-    recent_jsonl(&root, 4, 0.0)
-        .iter()
-        .any(|(p, _)| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(session_id)))
+    recent_jsonl(&root, 4, 0.0).iter().any(|(p, _)| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.contains(session_id))
+    })
 }
 
 /// Whether an Antigravity conversation dir for `session_id` exists.

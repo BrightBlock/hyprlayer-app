@@ -184,10 +184,8 @@ impl ClaudeDriver {
                 // over the settings-implied xhigh, so xhigh is passed explicitly;
                 // enableWorkflows pins the workflows feature on. --settings layers
                 // over the user's settings, leaving all other keys untouched.
-                cmd.args(["--effort", "xhigh"]).args([
-                    "--settings",
-                    r#"{"ultracode":true,"enableWorkflows":true}"#,
-                ]);
+                cmd.args(["--effort", "xhigh"])
+                    .args(["--settings", r#"{"ultracode":true,"enableWorkflows":true}"#]);
             } else {
                 cmd.args(["--effort", effort]);
             }
@@ -246,8 +244,9 @@ impl ClaudeDriver {
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
         let kill_flag = Arc::new(KillFlag::default());
         let pending_permissions = Arc::new(StdMutex::new(HashMap::<String, Value>::new()));
-        let pending_controls =
-            Arc::new(StdMutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
+        let pending_controls = Arc::new(StdMutex::new(
+            HashMap::<String, oneshot::Sender<Value>>::new(),
+        ));
 
         // Writer task: drain the queue onto stdin, one line per message.
         tokio::spawn(write_loop(stdin, stdin_rx));
@@ -391,12 +390,11 @@ impl ClaudeDriver {
         // Resolve which uuid to peel down to (pure; unit-tested). An unreachable
         // target leaves the conversation untouched and drops the caller to a
         // log-only rewind.
-        let start = rewind_local_start(ordinal, uuids.len()).map_err(|detail| {
-            CoreError::OutputParse {
+        let start =
+            rewind_local_start(ordinal, uuids.len()).map_err(|detail| CoreError::OutputParse {
                 program: "claude".into(),
                 detail,
-            }
-        })?;
+            })?;
         for uuid in uuids[start..].iter().rev() {
             let outcome = self.rewind_conversation(uuid, true).await?;
             if !outcome.rewound {
@@ -621,13 +619,14 @@ async fn read_and_wait(
     // Classify: an app-initiated kill takes precedence (and carries its reason);
     // otherwise a clean terminal result + exit 0 is Completed and anything else
     // is read from the wait status.
-    let outcome = kill_flag.outcome().unwrap_or_else(|| {
-        match (&status, saw_result, saw_error_result) {
-            (Ok(s), true, false) if s.success() => ExitOutcome::Completed,
-            (Ok(s), _, _) => ExitOutcome::from_status(s),
-            (Err(_), _, _) => ExitOutcome::SpawnFailed,
-        }
-    });
+    let outcome =
+        kill_flag
+            .outcome()
+            .unwrap_or_else(|| match (&status, saw_result, saw_error_result) {
+                (Ok(s), true, false) if s.success() => ExitOutcome::Completed,
+                (Ok(s), _, _) => ExitOutcome::from_status(s),
+                (Err(_), _, _) => ExitOutcome::SpawnFailed,
+            });
 
     let _ = events.send(SessionEvent::Exited {
         outcome,
@@ -846,7 +845,11 @@ fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
                 return None;
             }
             // `origin.kind`, when present, must be human.
-            if let Some(kind) = v.get("origin").and_then(|o| o.get("kind")).and_then(Value::as_str) {
+            if let Some(kind) = v
+                .get("origin")
+                .and_then(|o| o.get("kind"))
+                .and_then(Value::as_str)
+            {
                 if kind != "human" {
                     return None;
                 }

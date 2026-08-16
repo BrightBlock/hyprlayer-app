@@ -132,7 +132,16 @@ pub async fn commit_empty_initial(git: &Path, repo: &Path) -> Result<()> {
         program: "git commit".into(),
         detail: "repository path is not valid UTF-8".into(),
     })?;
-    let commit = ["-C", repo_str, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Initial commit"];
+    let commit = [
+        "-C",
+        repo_str,
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "Initial commit",
+    ];
     if Exec::new(git)
         .args(commit)
         .timeout(Duration::from_secs(30))
@@ -142,11 +151,18 @@ pub async fn commit_empty_initial(git: &Path, repo: &Path) -> Result<()> {
     {
         Exec::new(git)
             .args([
-                "-C", repo_str,
-                "-c", "commit.gpgsign=false",
-                "-c", "user.name=hyprlayer",
-                "-c", "user.email=hyprlayer@localhost",
-                "commit", "--allow-empty", "-m", "Initial commit",
+                "-C",
+                repo_str,
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "user.name=hyprlayer",
+                "-c",
+                "user.email=hyprlayer@localhost",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "Initial commit",
             ])
             .timeout(Duration::from_secs(30))
             .run()

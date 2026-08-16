@@ -30,7 +30,10 @@ fn main() {
     std::io::stdin()
         .read_to_string(&mut raw)
         .expect("read PR numbers from stdin");
-    let merged: HashSet<u32> = raw.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+    let merged: HashSet<u32> = raw
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
     assert!(!merged.is_empty(), "no PR numbers on stdin");
 
     let mut promoted = 0usize;

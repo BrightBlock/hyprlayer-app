@@ -88,12 +88,13 @@ fn edit_settings_doc(
 ) -> Result<()> {
     let path = checked_settings_path(repo)?;
     let mut doc = match std::fs::read_to_string(&path) {
-        Ok(raw) => raw
-            .parse::<toml_edit::DocumentMut>()
-            .map_err(|e| CoreError::RepoSettingsParse {
-                path: path.clone(),
-                message: e.to_string(),
-            })?,
+        Ok(raw) => {
+            raw.parse::<toml_edit::DocumentMut>()
+                .map_err(|e| CoreError::RepoSettingsParse {
+                    path: path.clone(),
+                    message: e.to_string(),
+                })?
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml_edit::DocumentMut::new(),
         Err(e) => return Err(CoreError::Io(e)),
     };
@@ -231,7 +232,11 @@ mod tests {
         let repo = make_repo();
         let dir = repo.path().join(".hyprlayer");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("settings.toml"), b"[worktree]\ncopy = [\".env\"]\n").unwrap();
+        std::fs::write(
+            dir.join("settings.toml"),
+            b"[worktree]\ncopy = [\".env\"]\n",
+        )
+        .unwrap();
         let settings = read(repo.path()).unwrap();
         assert_eq!(settings.scripts.setup, "");
         assert_eq!(settings.scripts.run, "");
@@ -273,7 +278,10 @@ mod tests {
         set_scripts(repo.path(), &scripts).unwrap();
 
         let raw = std::fs::read_to_string(dir.join("settings.toml")).unwrap();
-        assert!(raw.contains("# repo-level hyprlayer settings"), "comment missing: {raw}");
+        assert!(
+            raw.contains("# repo-level hyprlayer settings"),
+            "comment missing: {raw}"
+        );
         assert!(raw.contains("[worktree]"), "[worktree] missing: {raw}");
         assert!(raw.contains(".env"), "worktree copy missing: {raw}");
         assert!(raw.contains("[scripts]"), "[scripts] missing: {raw}");

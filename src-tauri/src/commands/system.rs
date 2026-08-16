@@ -351,7 +351,9 @@ pub async fn install_hyprlayer_cli(
 /// True when `manager --version` exits cleanly through the login shell.
 async fn package_manager_available(shell: &Path, path: &std::ffi::OsStr, manager: &str) -> bool {
     Exec::new(shell)
-        .args(super::terminal::login_shell_args(&format!("{manager} --version")))
+        .args(super::terminal::login_shell_args(&format!(
+            "{manager} --version"
+        )))
         .env("PATH", path)
         .timeout(Duration::from_secs(15))
         .run()

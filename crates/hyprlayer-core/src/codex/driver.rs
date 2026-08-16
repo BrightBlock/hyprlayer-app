@@ -70,6 +70,10 @@ pub struct SpawnConfig {
     pub env: Vec<(String, String)>,
 }
 
+/// RPC requests awaiting a reply, keyed by rpc id.
+type PendingReplies =
+    Arc<StdMutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, String>>>>>;
+
 /// A handle to a live Codex session. Dropping it does NOT kill the child (the
 /// waiter task owns it); call [`CodexDriver::kill`] for a hard stop.
 pub struct CodexDriver {
@@ -86,7 +90,7 @@ pub struct CodexDriver {
     stderr_ring: Arc<StdMutex<Vec<String>>>,
     kill_flag: Arc<KillFlag>,
     /// Requests awaiting a reply, keyed by rpc id. The reader resolves them.
-    pending: Arc<StdMutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, String>>>>>,
+    pending: PendingReplies,
     /// Shared with the reader task: which approvals/questions are open, plus the
     /// active turn id (for `turn/interrupt`) and the user-turn count (for rollback).
     state: Arc<StdMutex<Translator>>,
@@ -201,7 +205,10 @@ impl CodexDriver {
             }
         };
 
-        let driver = Self { thread_id, ..driver };
+        let driver = Self {
+            thread_id,
+            ..driver
+        };
 
         // Mirrors the Claude driver's `init` line: records the harness session id
         // (used for resume) and flips the session row to running.
@@ -414,10 +421,13 @@ impl CodexDriver {
         let Some(turn_id) = turn_id else {
             return Ok(());
         };
-        let _ = self.request_channel(
+        // Fire-and-forget: this is sync, so there is no reply to await. The
+        // receiver is dropped deliberately — the interrupt lands via the write,
+        // and the response handler discards the orphaned pending entry.
+        drop(self.request_channel(
             "turn/interrupt",
             json!({ "threadId": self.thread_id, "turnId": turn_id }),
-        )?;
+        )?);
         Ok(())
     }
 
@@ -588,7 +598,7 @@ async fn read_and_wait(
     events: broadcast::Sender<SessionEvent>,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
     kill_flag: Arc<KillFlag>,
-    pending: Arc<StdMutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, String>>>>>,
+    pending: PendingReplies,
     state: Arc<StdMutex<Translator>>,
     stdin_tx: mpsc::WeakUnboundedSender<String>,
 ) {
@@ -775,6 +785,9 @@ mod tests {
         auto_decline(&tx.downgrade(), &json!(10), "applyPatchApproval");
         let line = rx.try_recv().expect("a reply was written");
         let v: Value = serde_json::from_str(line.trim()).unwrap();
-        assert_eq!(v["result"]["decision"]["denied"]["rejection"], json!("unsupported by this client"));
+        assert_eq!(
+            v["result"]["decision"]["denied"]["rejection"],
+            json!("unsupported by this client")
+        );
     }
 }

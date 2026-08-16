@@ -391,7 +391,10 @@ mod tests {
 
     #[test]
     fn general_passes_input_through_verbatim() {
-        assert_eq!(compose_prompt(Stage::General, "  hello  ", "main", &Default::default()), "hello");
+        assert_eq!(
+            compose_prompt(Stage::General, "  hello  ", "main", &Default::default()),
+            "hello"
+        );
         // Plain chat sends no skill prefix, but explicitly attached docs (e.g. a
         // pasted screenshot) are still listed via append_docs so the agent can
         // read them (the caller composes, then appends for the wire prompt).
@@ -407,7 +410,12 @@ mod tests {
     #[test]
     fn research_invokes_the_skill() {
         assert_eq!(
-            compose_prompt(Stage::Research, "how does auth work?", "main", &Default::default()),
+            compose_prompt(
+                Stage::Research,
+                "how does auth work?",
+                "main",
+                &Default::default()
+            ),
             "/research_codebase how does auth work?"
         );
     }
@@ -434,9 +442,14 @@ mod tests {
     #[test]
     fn ship_sends_the_directive_not_a_skill() {
         // Button-driven ship has no input: the bare directive, naming the base.
-        assert_eq!(compose_prompt(Stage::Ship, "", "main", &Default::default()), ship_prompt("main"));
+        assert_eq!(
+            compose_prompt(Stage::Ship, "", "main", &Default::default()),
+            ship_prompt("main")
+        );
         // The target branch is named in the directive (git-flow re-targeting).
-        assert!(compose_prompt(Stage::Ship, "", "develop", &Default::default()).contains("`develop`"));
+        assert!(
+            compose_prompt(Stage::Ship, "", "develop", &Default::default()).contains("`develop`")
+        );
         // The stored base is a git rev; the PR targets the branch, so `origin/`
         // is stripped — and the frontend `shipPrompt` mirrors this.
         assert_eq!(ship_prompt("origin/develop"), ship_prompt("develop"));
@@ -453,7 +466,12 @@ description from the repository's template and update the PR."
         );
         // Extra context is appended below the directive.
         assert_eq!(
-            compose_prompt(Stage::Ship, "skip the changelog", "main", &Default::default()),
+            compose_prompt(
+                Stage::Ship,
+                "skip the changelog",
+                "main",
+                &Default::default()
+            ),
             format!("{}\n\nskip the changelog", ship_prompt("main")),
         );
         // Ship is a prose directive (commit via the /commit skill, then push,
@@ -478,7 +496,12 @@ description from the repository's template and update the PR."
         // A multi-line body takes prose semantics: extra input rides below as a
         // paragraph (still reaching the /commit skill as its argument).
         assert_eq!(
-            compose_prompt(Stage::Commit, "split into two commits", "main", &Default::default()),
+            compose_prompt(
+                Stage::Commit,
+                "split into two commits",
+                "main",
+                &Default::default()
+            ),
             format!("{COMMIT_PROMPT_DEFAULT}\n\nsplit into two commits"),
         );
         // Push is neither pre-approved nor denied — it must route through the
@@ -503,7 +526,10 @@ description from the repository's template and update the PR."
         assert_eq!(Stage::Revise.as_str(), "revise");
         assert_eq!(Stage::Revise.command(), None);
         // Bare directive when there's no extra context...
-        assert_eq!(compose_prompt(Stage::Revise, "", "main", &Default::default()), REVISE_PROMPT);
+        assert_eq!(
+            compose_prompt(Stage::Revise, "", "main", &Default::default()),
+            REVISE_PROMPT
+        );
         // ...the specific feedback is appended below it.
         assert_eq!(
             compose_prompt(Stage::Revise, "CI is failing", "main", &Default::default()),

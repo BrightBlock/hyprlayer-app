@@ -146,7 +146,11 @@ fn parse_models(result: &Value) -> Vec<CodexModel> {
 
 /// Ask one app-server several things, in order, over a single connection.
 async fn ask(bin: &Path, path_env: &OsString, calls: &[(&str, Value)]) -> Result<Vec<Value>> {
-    let label = calls.iter().map(|(m, _)| *m).collect::<Vec<_>>().join(" + ");
+    let label = calls
+        .iter()
+        .map(|(m, _)| *m)
+        .collect::<Vec<_>>()
+        .join(" + ");
     tokio::time::timeout(PROBE_TIMEOUT, ask_inner(bin, path_env, calls))
         .await
         .unwrap_or_else(|_| {
@@ -209,7 +213,6 @@ async fn exchange(
     stdout: tokio::process::ChildStdout,
     calls: &[(&str, Value)],
 ) -> Result<Vec<Value>> {
-
     // Write the whole exchange up front — the app-server answers in order, so
     // there's nothing to interleave. `stdin` is deliberately held open until the
     // replies land: the server treats EOF as "shut down" and races us, exiting

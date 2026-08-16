@@ -109,7 +109,9 @@ enum Plan {
 impl Plan {
     fn rect(self) -> (i32, i32, f64, f64) {
         match self {
-            Plan::RestoreExact { x, y, w, h } | Plan::DefaultCentered { x, y, w, h } => (x, y, w, h),
+            Plan::RestoreExact { x, y, w, h } | Plan::DefaultCentered { x, y, w, h } => {
+                (x, y, w, h)
+            }
         }
     }
 }
@@ -128,8 +130,11 @@ fn try_restore(app: &AppHandle) -> tauri::Result<()> {
 
     // available_monitors() is reliable this early; current_monitor() can be None
     // before the window is placed (Linux/GTK), so it's only a default-path hint.
-    let monitors: Vec<MonitorDesc> =
-        win.available_monitors()?.iter().map(MonitorDesc::from_monitor).collect();
+    let monitors: Vec<MonitorDesc> = win
+        .available_monitors()?
+        .iter()
+        .map(MonitorDesc::from_monitor)
+        .collect();
     if monitors.is_empty() {
         return Ok(());
     }
@@ -152,7 +157,10 @@ fn try_restore(app: &AppHandle) -> tauri::Result<()> {
     // (possibly mid-move) monitor — see the module docs.
     let (x, y, w, h) = plan.rect();
     win.set_position(PhysicalPosition { x, y })?;
-    win.set_size(LogicalSize { width: w, height: h })?;
+    win.set_size(LogicalSize {
+        width: w,
+        height: h,
+    })?;
 
     // The frame above is the pre-maximize ("unmaximize") target.
     if saved.map(|s| s.maximized).unwrap_or(false) {
@@ -177,7 +185,11 @@ fn config_dims(app: &AppHandle) -> (f64, f64, f64, f64) {
 /// Read the plugin's saved state, tolerating a missing/corrupt file. Mirrors the
 /// plugin's own "ignore the all-zero default" guard.
 fn load_saved(app: &AppHandle) -> Option<SavedWindow> {
-    let path = app.path().app_config_dir().ok()?.join(tauri_plugin_window_state::DEFAULT_FILENAME);
+    let path = app
+        .path()
+        .app_config_dir()
+        .ok()?
+        .join(tauri_plugin_window_state::DEFAULT_FILENAME);
     let raw = std::fs::read_to_string(path).ok()?;
     let mut map: HashMap<String, SavedWindow> = serde_json::from_str(&raw).ok()?;
     let s = map.remove("main")?;
@@ -197,8 +209,15 @@ fn decide(
     if let Some(s) = saved {
         // Maximized windows save the monitor's top-left in x/y; the real frame is
         // in prev_x/prev_y. Decide placement from the frame either way.
-        let (px, py) = if s.maximized { (s.prev_x, s.prev_y) } else { (s.x, s.y) };
-        if let Some(m) = monitors.iter().find(|m| intersects(m, px, py, s.width, s.height)) {
+        let (px, py) = if s.maximized {
+            (s.prev_x, s.prev_y)
+        } else {
+            (s.x, s.y)
+        };
+        if let Some(m) = monitors
+            .iter()
+            .find(|m| intersects(m, px, py, s.width, s.height))
+        {
             // Trust the saved physical size only if it's still >= min at this
             // monitor's DPI. A low→high-DPI landing yields a sub-min logical size
             // the OS would clamp up to min (the "forgot my size" bug), so fall
@@ -209,7 +228,12 @@ fn decide(
             if lw >= min_w - 1.0 && lh >= min_h - 1.0 {
                 let (x, y, w, h) = clamp_to_work_area(px, py, s.width, s.height, m);
                 // Physical size → logical points for the target monitor's DPI.
-                return Plan::RestoreExact { x, y, w: w as f64 / m.scale, h: h as f64 / m.scale };
+                return Plan::RestoreExact {
+                    x,
+                    y,
+                    w: w as f64 / m.scale,
+                    h: h as f64 / m.scale,
+                };
             }
             return default_on(m, min_w, min_h, def_w, def_h);
         }
@@ -254,13 +278,22 @@ fn default_on(m: &MonitorDesc, min_w: f64, min_h: f64, def_w: f64, def_h: f64) -
     let h_px = (h_l * m.scale).round() as i32;
     let x = m.work_x + (m.work_w as i32 - w_px) / 2;
     let y = m.work_y + (m.work_h as i32 - h_px) / 2;
-    Plan::DefaultCentered { x, y, w: w_l, h: h_l }
+    Plan::DefaultCentered {
+        x,
+        y,
+        w: w_l,
+        h: h_l,
+    }
 }
 
 /// One axis of the default size (logical): a fraction of the work area, at least
 /// the config default, capped, and never within a sliver of filling the screen.
 fn default_axis(work: f64, min: f64, def: f64, cap: f64) -> f64 {
-    (DEFAULT_FRACTION * work).max(def).min(cap).min(MAX_WORK_FRACTION * work).max(min)
+    (DEFAULT_FRACTION * work)
+        .max(def)
+        .min(cap)
+        .min(MAX_WORK_FRACTION * work)
+        .max(min)
 }
 
 #[cfg(test)]
@@ -269,11 +302,29 @@ mod tests {
 
     // Full-rect == work-area monitor at the given origin/size/scale.
     fn mon(x: i32, y: i32, w: u32, h: u32, scale: f64) -> MonitorDesc {
-        MonitorDesc { x, y, w, h, work_x: x, work_y: y, work_w: w, work_h: h, scale }
+        MonitorDesc {
+            x,
+            y,
+            w,
+            h,
+            work_x: x,
+            work_y: y,
+            work_w: w,
+            work_h: h,
+            scale,
+        }
     }
 
     fn saved(x: i32, y: i32, w: u32, h: u32) -> SavedWindow {
-        SavedWindow { width: w, height: h, x, y, prev_x: x, prev_y: y, maximized: false }
+        SavedWindow {
+            width: w,
+            height: h,
+            x,
+            y,
+            prev_x: x,
+            prev_y: y,
+            maximized: false,
+        }
     }
 
     // Standard config dims for tests.
@@ -289,7 +340,12 @@ mod tests {
         let s = saved(200, 150, 1400, 900);
         assert_eq!(
             decide_std(Some(s), &[m], m),
-            Plan::RestoreExact { x: 200, y: 150, w: 1400.0, h: 900.0 }
+            Plan::RestoreExact {
+                x: 200,
+                y: 150,
+                w: 1400.0,
+                h: 900.0
+            }
         );
     }
 
@@ -300,7 +356,12 @@ mod tests {
         let s = saved(100, 100, 2400, 1600);
         assert_eq!(
             decide_std(Some(s), &[m], m),
-            Plan::RestoreExact { x: 100, y: 100, w: 1200.0, h: 800.0 }
+            Plan::RestoreExact {
+                x: 100,
+                y: 100,
+                w: 1200.0,
+                h: 800.0
+            }
         );
     }
 
@@ -309,10 +370,15 @@ mod tests {
         // External at negative coords is gone; only the 2x built-in remains.
         let built_in = mon(0, 0, 3024, 1964, 2.0);
         let s = saved(-3249, -888, 1934, 1109); // the real bug report's numbers
-        // Default 1280x800 logical, centered (its 2560x1600 physical footprint fits).
+                                                // Default 1280x800 logical, centered (its 2560x1600 physical footprint fits).
         assert_eq!(
             decide_std(Some(s), &[built_in], built_in),
-            Plan::DefaultCentered { x: 232, y: 182, w: 1280.0, h: 800.0 }
+            Plan::DefaultCentered {
+                x: 232,
+                y: 182,
+                w: 1280.0,
+                h: 800.0
+            }
         );
     }
 
@@ -322,7 +388,10 @@ mod tests {
         // physical size is small → 1200/2 = 600 logical < 1180 min → reject.
         let m = mon(0, 0, 1920, 1080, 2.0);
         let s = saved(100, 100, 1200, 700);
-        assert!(matches!(decide_std(Some(s), &[m], m), Plan::DefaultCentered { .. }));
+        assert!(matches!(
+            decide_std(Some(s), &[m], m),
+            Plan::DefaultCentered { .. }
+        ));
     }
 
     #[test]
@@ -331,7 +400,12 @@ mod tests {
         let s = saved(0, 0, 4000, 3000); // bigger than the monitor
         assert_eq!(
             decide_std(Some(s), &[m], m),
-            Plan::RestoreExact { x: 0, y: 0, w: 1920.0, h: 1080.0 }
+            Plan::RestoreExact {
+                x: 0,
+                y: 0,
+                w: 1920.0,
+                h: 1080.0
+            }
         );
     }
 
@@ -341,7 +415,12 @@ mod tests {
         // 0.75 * 1920 = 1440 wide, 0.75 * 1080 = 810 tall, centered.
         assert_eq!(
             decide_std(None, &[m], m),
-            Plan::DefaultCentered { x: 240, y: 135, w: 1440.0, h: 810.0 }
+            Plan::DefaultCentered {
+                x: 240,
+                y: 135,
+                w: 1440.0,
+                h: 810.0
+            }
         );
     }
 
@@ -352,7 +431,12 @@ mod tests {
         let m = mon(0, 0, 3440, 1440, 1.0);
         assert_eq!(
             decide_std(None, &[m], m),
-            Plan::DefaultCentered { x: 440, y: 180, w: 2560.0, h: 1080.0 }
+            Plan::DefaultCentered {
+                x: 440,
+                y: 180,
+                w: 2560.0,
+                h: 1080.0
+            }
         );
     }
 
@@ -363,7 +447,12 @@ mod tests {
         let s = saved(-3000, 200, 1934, 1109); // lives on the external
         assert_eq!(
             decide_std(Some(s), &[primary, left], primary),
-            Plan::RestoreExact { x: -3000, y: 200, w: 1934.0, h: 1109.0 }
+            Plan::RestoreExact {
+                x: -3000,
+                y: 200,
+                w: 1934.0,
+                h: 1109.0
+            }
         );
     }
 
@@ -374,7 +463,12 @@ mod tests {
         let m = mon(0, 0, 1300, 900, 1.0);
         assert_eq!(
             decide_std(None, &[m], m),
-            Plan::DefaultCentered { x: 39, y: 50, w: 1222.0, h: 800.0 }
+            Plan::DefaultCentered {
+                x: 39,
+                y: 50,
+                w: 1222.0,
+                h: 800.0
+            }
         );
     }
 
@@ -402,7 +496,12 @@ mod tests {
         // Placement decided from prev coords → external, restored verbatim.
         assert_eq!(
             decide_std(Some(s), &[primary, external], primary),
-            Plan::RestoreExact { x: -2000, y: 100, w: 1600.0, h: 1000.0 }
+            Plan::RestoreExact {
+                x: -2000,
+                y: 100,
+                w: 1600.0,
+                h: 1000.0
+            }
         );
     }
 }

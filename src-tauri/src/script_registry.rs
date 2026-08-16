@@ -110,12 +110,19 @@ impl ScriptRegistry {
         } else {
             output
         };
-        self.outputs.lock().await.insert((ws.to_string(), kind), capped);
+        self.outputs
+            .lock()
+            .await
+            .insert((ws.to_string(), kind), capped);
     }
 
     /// The last-run output for one script, if captured this session.
     pub async fn get_output(&self, ws: &str, kind: ScriptKind) -> Option<String> {
-        self.outputs.lock().await.get(&(ws.to_string(), kind)).cloned()
+        self.outputs
+            .lock()
+            .await
+            .get(&(ws.to_string(), kind))
+            .cloned()
     }
 
     /// Forget one script's captured output (the dock's Clear). Leaves its status
@@ -250,8 +257,10 @@ mod tests {
     #[tokio::test]
     async fn clear_output_drops_only_that_script() {
         let reg = ScriptRegistry::new();
-        reg.set_output("ws1", ScriptKind::Run, "run log".into()).await;
-        reg.set_output("ws1", ScriptKind::Setup, "setup log".into()).await;
+        reg.set_output("ws1", ScriptKind::Run, "run log".into())
+            .await;
+        reg.set_output("ws1", ScriptKind::Setup, "setup log".into())
+            .await;
         reg.set_status("ws1", ScriptKind::Run, RunPhase::Passed, Some(0))
             .await;
 

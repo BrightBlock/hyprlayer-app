@@ -304,7 +304,10 @@ mod tests {
             Some(OLLAMA_DEFAULT_NUM_CTX as u32)
         );
         assert_eq!(opencode_model_context_window("opencode/grok-code"), None);
-        assert_eq!(opencode_model_context_window("anthropic/claude-opus-4-6"), None);
+        assert_eq!(
+            opencode_model_context_window("anthropic/claude-opus-4-6"),
+            None
+        );
     }
 
     /// A temp HOME so the XDG fallbacks resolve into an isolated dir.
@@ -318,7 +321,8 @@ mod tests {
     }
     impl TmpHome {
         fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("hl-opencode-test-{tag}-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("hl-opencode-test-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let s = Self {
@@ -368,7 +372,9 @@ mod tests {
 
         let entries = list_auth().unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(entries.iter().any(|e| e.provider == "anthropic" && e.kind == "api"));
+        assert!(entries
+            .iter()
+            .any(|e| e.provider == "anthropic" && e.kind == "api"));
         assert!(entries.iter().any(|e| e.provider == "openai"));
 
         // The raw key is on disk but never returned by list_auth.
@@ -396,7 +402,11 @@ mod tests {
         // Pre-existing unrelated keys survive a model update.
         let mut obj = v.as_object().unwrap().clone();
         obj.insert("theme".into(), Value::String("dark".into()));
-        std::fs::write(&path, serde_json::to_string_pretty(&Value::Object(obj)).unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&Value::Object(obj)).unwrap(),
+        )
+        .unwrap();
         set_default_model(Some("openai/gpt-4o")).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["model"], "openai/gpt-4o");
@@ -410,8 +420,15 @@ mod tests {
         // --- ollama provider block (merge-preserving) ---
         // Seed an unrelated sibling provider to prove it survives our writes.
         let mut obj = v.as_object().unwrap().clone();
-        obj.insert("provider".into(), serde_json::json!({ "openai": { "npm": "x" } }));
-        std::fs::write(&path, serde_json::to_string_pretty(&Value::Object(obj)).unwrap()).unwrap();
+        obj.insert(
+            "provider".into(),
+            serde_json::json!({ "openai": { "npm": "x" } }),
+        );
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&Value::Object(obj)).unwrap(),
+        )
+        .unwrap();
 
         set_ollama_provider(
             "http://nexus:11434/",
@@ -421,10 +438,16 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["theme"], "dark"); // unrelated key preserved
         assert_eq!(v["provider"]["openai"]["npm"], "x"); // sibling provider preserved
-        assert_eq!(v["provider"]["ollama"]["options"]["baseURL"], "http://nexus:11434/v1");
+        assert_eq!(
+            v["provider"]["ollama"]["options"]["baseURL"],
+            "http://nexus:11434/v1"
+        );
         assert_eq!(v["provider"]["ollama"]["options"]["apiKey"], "ollama");
         assert_eq!(v["provider"]["ollama"]["npm"], "@ai-sdk/openai-compatible");
-        assert_eq!(v["provider"]["ollama"]["models"]["qwen2.5-coder:7b"]["tool_call"], true);
+        assert_eq!(
+            v["provider"]["ollama"]["models"]["qwen2.5-coder:7b"]["tool_call"],
+            true
+        );
         assert!(v["provider"]["ollama"]["models"]["llama3.2:latest"].is_object());
 
         // Empty list removes only the ollama block; siblings stay.

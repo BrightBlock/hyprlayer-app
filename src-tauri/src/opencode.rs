@@ -137,13 +137,19 @@ impl OpenCodeServer {
 
         let mut cmd = Command::new(&bin);
         hyprlayer_core::process::appimage::scrub_tokio(&mut cmd);
-        cmd.args(["serve", "--hostname", "127.0.0.1", "--port", &port.to_string()])
-            .current_dir(&home)
-            .env("PATH", &path)
-            .env("XDG_DATA_HOME", &data_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        cmd.args([
+            "serve",
+            "--hostname",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ])
+        .current_dir(&home)
+        .env("PATH", &path)
+        .env("XDG_DATA_HOME", &data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
         // Keep using the user's real provider credentials (written by the
         // OpenCode settings tab) even though the data home is app-owned. Inject
         // the auth.json *contents* (the path-based OPENCODE_AUTH_JSON is ignored).
@@ -360,7 +366,10 @@ fn parse_model_context(body: &str) -> std::collections::HashMap<String, u32> {
     for p in parsed.providers {
         for (model_id, m) in p.models {
             if let Some(ctx) = m.limit.and_then(|l| l.context).filter(|c| *c > 0) {
-                out.insert(format!("{}/{model_id}", p.id), ctx.min(u32::MAX as u64) as u32);
+                out.insert(
+                    format!("{}/{model_id}", p.id),
+                    ctx.min(u32::MAX as u64) as u32,
+                );
             }
         }
     }
@@ -467,7 +476,10 @@ impl OpenCodeDriver {
                                 if let Ok(mut m) = pq.lock() {
                                     m.insert(
                                         qid.to_string(),
-                                        ev.properties.get("questions").cloned().unwrap_or(json!([])),
+                                        ev.properties
+                                            .get("questions")
+                                            .cloned()
+                                            .unwrap_or(json!([])),
                                     );
                                 }
                             }
@@ -645,7 +657,10 @@ impl AgentDriver for OpenCodeDriver {
             .map(|qs| {
                 qs.iter()
                     .map(|q| {
-                        let text = q.get("question").and_then(Value::as_str).unwrap_or_default();
+                        let text = q
+                            .get("question")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
                         answers
                             .get(text)
                             .and_then(Value::as_str)
@@ -752,7 +767,10 @@ impl Translator {
             }
             // Live streaming on newer builds: incremental text/reasoning deltas.
             "message.part.delta" => {
-                let mid = p.get("messageID").and_then(Value::as_str).unwrap_or_default();
+                let mid = p
+                    .get("messageID")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 if self.roles.get(mid).map(String::as_str) != Some("assistant") {
                     return Vec::new();
                 }
@@ -849,7 +867,11 @@ impl Translator {
     }
 
     fn handle_part(&mut self, part: &Value) -> Vec<SessionEvent> {
-        let pid = part.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
+        let pid = part
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         let ptype = part.get("type").and_then(Value::as_str).unwrap_or_default();
         // Remember this part's type *before* the role gate. A reasoning part can be
         // announced (this `message.part.updated`) before its owning message's role
@@ -865,7 +887,10 @@ impl Translator {
         // Only assistant output: the user's echoed prompt part is already shown
         // (we emit UserMessage in send_user_turn). Roles arrive via message.updated
         // before the message's parts, so an unknown role means "not assistant yet".
-        let mid = part.get("messageID").and_then(Value::as_str).unwrap_or_default();
+        let mid = part
+            .get("messageID")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if self.roles.get(mid).map(String::as_str) != Some("assistant") {
             return Vec::new();
         }
@@ -905,8 +930,16 @@ impl Translator {
                 }
             }
             "tool" => {
-                let call_id = part.get("callID").and_then(Value::as_str).unwrap_or_default().to_string();
-                let tool = part.get("tool").and_then(Value::as_str).unwrap_or_default().to_string();
+                let call_id = part
+                    .get("callID")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let tool = part
+                    .get("tool")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
                 // The `question` tool is surfaced interactively via `question.asked`
                 // (→ QuestionAsk). Don't also render it as a generic tool card, which
                 // would sit "working" forever while waiting for the answer.
@@ -914,7 +947,10 @@ impl Translator {
                     return out;
                 }
                 let state = part.get("state").cloned().unwrap_or(Value::Null);
-                let status = state.get("status").and_then(Value::as_str).unwrap_or_default();
+                let status = state
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 if !call_id.is_empty()
                     && status != "pending"
                     && self.tool_started.insert(call_id.clone())
@@ -955,7 +991,11 @@ impl Translator {
                     // OpenCode's `total` already sums input+output+reasoning; fall
                     // back to input+output on older shapes that omit it.
                     let total = f("total");
-                    (if total > 0.0 { total } else { f("input") + f("output") }) as u32
+                    (if total > 0.0 {
+                        total
+                    } else {
+                        f("input") + f("output")
+                    }) as u32
                 });
                 out.push(SessionEvent::TurnDone {
                     cost_usd: cost,
@@ -970,7 +1010,10 @@ impl Translator {
 }
 
 fn str_field(v: &Value, k: &str) -> String {
-    v.get(k).and_then(Value::as_str).unwrap_or_default().to_string()
+    v.get(k)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Map an OpenCode tool call onto the Claude-Code tool vocabulary the transcript
@@ -1127,7 +1170,10 @@ mod tests {
     }
 
     fn oc(kind: &str, properties: Value) -> OcEvent {
-        OcEvent { kind: kind.to_string(), properties }
+        OcEvent {
+            kind: kind.to_string(),
+            properties,
+        }
     }
 
     #[test]
@@ -1147,7 +1193,10 @@ mod tests {
         assert!(out.is_empty());
 
         // 2. Now the role lands.
-        x.handle(&oc("message.updated", json!({ "info": { "id": "m1", "role": "assistant" } })));
+        x.handle(&oc(
+            "message.updated",
+            json!({ "info": { "id": "m1", "role": "assistant" } }),
+        ));
 
         // 3. Reasoning streams as field:"text" deltas — must be suppressed.
         let out = x.handle(&oc(

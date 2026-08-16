@@ -374,6 +374,8 @@ struct ThoughtsTarget<'a> {
 /// failure we roll back so no half-set-up project lingers: an owned clone is
 /// deleted outright; an in-place repo (the user's working copy) is never
 /// deleted — only its thoughts provisioning is undone.
+// Arity mirrors the IPC contract this command exposes.
+#[allow(clippy::too_many_arguments)]
 async fn register_repo(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -473,6 +475,8 @@ pub fn inspect_repo_path(path: String) -> CmdResult<repos::RepoPathStatus> {
 /// - **bare repo** → refused, since worktrees can't be cut from it.
 #[tauri::command]
 #[specta::specta]
+// Arity mirrors the IPC contract this command exposes.
+#[allow(clippy::too_many_arguments)]
 pub async fn import_project(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -545,9 +549,9 @@ pub async fn import_project(
                 .await
                 .map_err(AppError::from)
         }
-        repos::RepoPathStatus::Unborn => {
-            repos::commit_empty_initial(&git, repo).await.map_err(AppError::from)
-        }
+        repos::RepoPathStatus::Unborn => repos::commit_empty_initial(&git, repo)
+            .await
+            .map_err(AppError::from),
         _ => Ok(()),
     };
 
@@ -598,7 +602,9 @@ pub async fn import_local_folder(
             return Err(AppError {
                 code: "folder_is_git_repo".into(),
                 message: format!("{path} is a git repository."),
-                remedy: Some("Add it as a repository instead, so it keeps its branches and thoughts.".into()),
+                remedy: Some(
+                    "Add it as a repository instead, so it keeps its branches and thoughts.".into(),
+                ),
             });
         }
     }
@@ -669,6 +675,8 @@ async fn register_disk_project(
 /// register it as a project.
 #[tauri::command]
 #[specta::specta]
+// Arity mirrors the IPC contract this command exposes.
+#[allow(clippy::too_many_arguments)]
 pub async fn clone_project(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -809,9 +817,7 @@ pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repo
 /// stays truthful before any config exists.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_thoughts_profiles(
-    state: State<'_, AppState>,
-) -> CmdResult<Vec<ThoughtsProfile>> {
+pub async fn list_thoughts_profiles(state: State<'_, AppState>) -> CmdResult<Vec<ThoughtsProfile>> {
     let thoughts = match state.config.load().await {
         Ok(loaded) => loaded.config.thoughts.clone(),
         Err(CoreError::ConfigMissing { .. }) => None,
@@ -1005,8 +1011,9 @@ pub async fn run_backend_health(
             label: "Project folder".into(),
             status: pass_if(exists),
             detail: Some(path.clone()),
-            remedy: (!exists)
-                .then(|| "The folder was moved or deleted. Remove the project and re-add it.".into()),
+            remedy: (!exists).then(|| {
+                "The folder was moved or deleted. Remove the project and re-add it.".into()
+            }),
         });
         return Ok(HealthReport { checks });
     }

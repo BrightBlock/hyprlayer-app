@@ -185,7 +185,10 @@ pub async fn script_run(
     if commands.trim().is_empty() {
         return Err(AppError {
             code: "script_empty".into(),
-            message: format!("No {} script is configured for this project.", kind.as_str()),
+            message: format!(
+                "No {} script is configured for this project.",
+                kind.as_str()
+            ),
             remedy: Some("Add commands in Project Settings → Scripts.".into()),
         });
     }
@@ -221,7 +224,12 @@ pub async fn script_run(
         kind,
         terminal_id.clone(),
     );
-    attach_stream(&session, on_event, state.terminals.clone(), terminal_id.clone());
+    attach_stream(
+        &session,
+        on_event,
+        state.terminals.clone(),
+        terminal_id.clone(),
+    );
     Ok(terminal_id)
 }
 
@@ -329,7 +337,10 @@ fn script_env(item: &Workstream, port: u16, augmented: &OsStr) -> Vec<(String, S
     vec![
         ("PATH".to_string(), augmented.to_string_lossy().into_owned()),
         (scripts::ENV_PORT.to_string(), port.to_string()),
-        (scripts::ENV_WORKTREE.to_string(), item.worktree_path.clone()),
+        (
+            scripts::ENV_WORKTREE.to_string(),
+            item.worktree_path.clone(),
+        ),
         (scripts::ENV_BRANCH.to_string(), item.branch.clone()),
         (scripts::ENV_PROJECT.to_string(), item.project_path.clone()),
         (scripts::ENV_SLUG.to_string(), item.slug.clone()),
@@ -391,7 +402,9 @@ fn spawn_monitor(
                     if kind == ScriptKind::Run && !port_found {
                         if let Some(port) = scan_for_port(&data) {
                             port_found = true;
-                            scripts.set_run_port(&workstream_id, &terminal_id, port).await;
+                            scripts
+                                .set_run_port(&workstream_id, &terminal_id, port)
+                                .await;
                             emit_changed(
                                 &app,
                                 &workstream_id,

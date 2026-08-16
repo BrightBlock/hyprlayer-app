@@ -290,10 +290,7 @@ pub enum SessionEvent {
     /// resuming. `completed`/`cancelled` close the bracket and render nothing (the
     /// turn's own content already shows how it ended). Both carry the same
     /// `command_uuid`.
-    CommandLifecycle {
-        command_uuid: String,
-        state: String,
-    },
+    CommandLifecycle { command_uuid: String, state: String },
     /// A background shell task (spawned by `Bash{run_in_background:true}`) reached
     /// a terminal state. claude emits the underlying `task_notification`
     /// asynchronously the moment the shell finishes — even if the agent never

@@ -572,9 +572,14 @@ mod tests {
     fn version_floor_still_flags_too_old() {
         assert_eq!(
             state_for(BinaryKind::Claude, Some("2.0.9")),
-            BinaryState::TooOld { min: "2.1.0".into() }
+            BinaryState::TooOld {
+                min: "2.1.0".into()
+            }
         );
-        assert_eq!(state_for(BinaryKind::Claude, Some("2.1.0")), BinaryState::Ok);
+        assert_eq!(
+            state_for(BinaryKind::Claude, Some("2.1.0")),
+            BinaryState::Ok
+        );
     }
 
     #[tokio::test]

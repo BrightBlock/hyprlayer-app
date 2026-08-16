@@ -8,7 +8,9 @@ use hyprlayer_core::pr::{self, MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::scripts::ScriptKind;
 use hyprlayer_core::skills::SlashCommand;
-use hyprlayer_core::store::{NewWorkstream, Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};
+use hyprlayer_core::store::{
+    NewWorkstream, Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode,
+};
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{
     self, archive_dir_for, CreateMode, CreateSpec, PullOutcome, RemovePolicy, WorktreeStatus,
@@ -195,8 +197,7 @@ pub async fn watch_worktree(
     let handle = blocking("watch_worktree", move || {
         // The watcher needs the git dir to notice commits/staging in a linked
         // worktree; fall back to `<worktree>/.git` if unresolved.
-        let git_dir =
-            hyprlayer_core::gitops::git_dir(&path).unwrap_or_else(|| path.join(".git"));
+        let git_dir = hyprlayer_core::gitops::git_dir(&path).unwrap_or_else(|| path.join(".git"));
         hyprlayer_core::index::watcher::watch_worktree(
             &path,
             &git_dir,
@@ -369,7 +370,9 @@ async fn create_folder_workstream(
         return Err(AppError {
             code: "folder_missing".into(),
             message: format!("{project_path} is no longer a directory."),
-            remedy: Some("The folder was moved or deleted. Remove the project and re-add it.".into()),
+            remedy: Some(
+                "The folder was moved or deleted. Remove the project and re-add it.".into(),
+            ),
         });
     }
 
@@ -875,7 +878,10 @@ pub async fn archive_workstream(
                     if let Err(e) =
                         worktree::delete_remote_branch(&git, project_path, &item.branch).await
                     {
-                        log::warn!("delete remote branch {} on archive failed: {e}", item.branch);
+                        log::warn!(
+                            "delete remote branch {} on archive failed: {e}",
+                            item.branch
+                        );
                     }
                 }
             }
@@ -901,7 +907,11 @@ pub async fn archive_workstream(
         let keep = hyprlayer_core::repo_settings::read(project_path)
             .map(|s| s.worktree.copy)
             .unwrap_or_default();
-        if let Err(e) = state.worktrees.clean_ignored(&git, worktree_path, &keep).await {
+        if let Err(e) = state
+            .worktrees
+            .clean_ignored(&git, worktree_path, &keep)
+            .await
+        {
             log::warn!("prune ignored files before archive failed: {e}");
         }
     }
@@ -1150,7 +1160,7 @@ pub async fn cleanup_archived_workstreams(
     // Filter: None → all; Some(cut) → only rows archived before the cutoff.
     let items: Vec<_> = items
         .into_iter()
-        .filter(|w| before_ms.map_or(true, |cut| w.archived_at.map_or(false, |a| a < cut)))
+        .filter(|w| before_ms.is_none_or(|cut| w.archived_at.is_some_and(|a| a < cut)))
         .collect();
 
     // Folder rows purge without git (mirroring delete_archived_workstream), so
@@ -1299,12 +1309,7 @@ pub async fn workstream_prompt_context(
         .unwrap_or(&item.base_branch)
         .to_string();
     let git = blocking("workstream_prompt_context", move || {
-        hyprlayer_core::gitops::prompt_git_vars(
-            Path::new(&item.worktree_path),
-            true,
-            true,
-            true,
-        )
+        hyprlayer_core::gitops::prompt_git_vars(Path::new(&item.worktree_path), true, true, true)
     })
     .await?;
     Ok(PromptContext {
@@ -1687,7 +1692,10 @@ mod tests {
         // A plain message is passed through untouched (trimmed only).
         assert_eq!(clean_gh_stderr("  not found  "), "not found");
         // A trailing parenthetical that isn't a field path (has spaces) is kept.
-        assert_eq!(clean_gh_stderr("failed (try again later)"), "failed (try again later)");
+        assert_eq!(
+            clean_gh_stderr("failed (try again later)"),
+            "failed (try again later)"
+        );
     }
 
     #[test]
@@ -1699,7 +1707,10 @@ mod tests {
         };
         // The exec error's stderr becomes the message — no `gh` framing leaks.
         let app = attach_pr_error(999, Some(err));
-        assert_eq!(app.message, "Could not resolve to a PullRequest with the number of 999.");
+        assert_eq!(
+            app.message,
+            "Could not resolve to a PullRequest with the number of 999."
+        );
         assert!(!app.message.contains("gh"));
         // No usable detail → a plain not-found fallback.
         assert_eq!(

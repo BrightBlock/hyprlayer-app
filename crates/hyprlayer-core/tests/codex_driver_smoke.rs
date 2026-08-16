@@ -17,7 +17,10 @@ fn spawn_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> Spa
     // Don't leave test threads in the user's ~/.codex/sessions history. Note this
     // is the *titling* posture, not what a real session uses — see
     // `persisted_config` for the cases that need a materialized thread.
-    SpawnConfig { ephemeral: true, ..persisted_config(bin, permission_mode) }
+    SpawnConfig {
+        ephemeral: true,
+        ..persisted_config(bin, permission_mode)
+    }
 }
 
 fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> SpawnConfig {
@@ -55,9 +58,15 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     // already waiting on the channel — the receiver subscribes before the reader
     // task can broadcast.
     let thread_id = match tokio::time::timeout(Duration::from_secs(5), events.recv()).await {
-        Ok(Ok(SessionEvent::Init { claude_session_id, model })) => {
+        Ok(Ok(SessionEvent::Init {
+            claude_session_id,
+            model,
+        })) => {
             println!("init: thread={claude_session_id} model={model:?}");
-            assert!(!claude_session_id.is_empty(), "codex should mint a thread id");
+            assert!(
+                !claude_session_id.is_empty(),
+                "codex should mint a thread id"
+            );
             // The thread must actually be on the model we asked for — this is what
             // the composer's picker promises.
             assert_eq!(model.as_deref(), Some("gpt-5.4"));
@@ -68,7 +77,11 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     assert_eq!(driver.thread_id(), thread_id);
 
     driver
-        .send_user_turn("Reply with exactly the word: pong. Nothing else.", None, None)
+        .send_user_turn(
+            "Reply with exactly the word: pong. Nothing else.",
+            None,
+            None,
+        )
         .expect("send turn");
 
     // The session stays alive between turns, so the turn ends at TurnDone.
@@ -121,7 +134,11 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     .await
     .expect("session should exit after kill");
     println!("exited after kill: {exited:?}");
-    assert_eq!(exited, ExitOutcome::Killed, "an app-initiated kill is Killed");
+    assert_eq!(
+        exited,
+        ExitOutcome::Killed,
+        "an app-initiated kill is Killed"
+    );
 }
 
 /// A tool-using turn: the shell call must arrive as a `Bash` ToolUse (Claude's
@@ -164,7 +181,9 @@ async fn tool_calls_and_usage_reach_the_transcript() {
                     assert!(v.get("command").is_some(), "Bash input needs a `command`");
                 }
             }
-            Ok(Ok(SessionEvent::ToolResult { content, is_error, .. })) => {
+            Ok(Ok(SessionEvent::ToolResult {
+                content, is_error, ..
+            })) => {
                 println!("result (error={is_error}): {content}");
                 saw_result |= content.contains("hyprlayer-smoke");
             }
@@ -193,10 +212,19 @@ async fn tool_calls_and_usage_reach_the_transcript() {
     }
 
     driver.kill();
-    assert!(saw_bash, "the shell call should surface as a `Bash` ToolUse");
-    assert!(saw_result, "the command's output should surface as a ToolResult");
+    assert!(
+        saw_bash,
+        "the shell call should surface as a `Bash` ToolUse"
+    );
+    assert!(
+        saw_result,
+        "the command's output should surface as a ToolResult"
+    );
     assert!(saw_usage, "thread/tokenUsage/updated should feed the meter");
-    assert!(saw_window, "the model's context window is the meter's denominator");
+    assert!(
+        saw_window,
+        "the model's context window is the meter's denominator"
+    );
 }
 
 /// `thread/rollback` must truncate the model's own memory: after three turns, a
@@ -217,7 +245,12 @@ async fn rewind_to_ordinal_truncates_model_memory() {
 
     run_turn(&driver, &mut events, "Remember the word ALPHA. Reply: ok.").await;
     run_turn(&driver, &mut events, "Remember the word BRAVO. Reply: ok.").await;
-    run_turn(&driver, &mut events, "Remember the word CHARLIE. Reply: ok.").await;
+    run_turn(
+        &driver,
+        &mut events,
+        "Remember the word CHARLIE. Reply: ok.",
+    )
+    .await;
 
     // Rewinding to turn 2 keeps turn 1 (ALPHA) and drops turns 2–3.
     driver
@@ -235,7 +268,10 @@ async fn rewind_to_ordinal_truncates_model_memory() {
     driver.kill();
 
     let recalled = recalled.to_uppercase();
-    assert!(recalled.contains("ALPHA"), "turn 1 should survive: {recalled:?}");
+    assert!(
+        recalled.contains("ALPHA"),
+        "turn 1 should survive: {recalled:?}"
+    );
     assert!(
         !recalled.contains("BRAVO") && !recalled.contains("CHARLIE"),
         "the rewound turns should be forgotten: {recalled:?}"
@@ -260,7 +296,10 @@ async fn every_permission_mode_starts_a_thread() {
         let (driver, _events) = CodexDriver::spawn(spawn_config(codex.clone(), mode))
             .await
             .unwrap_or_else(|e| panic!("{mode:?} should start a thread, got: {e}"));
-        assert!(!driver.thread_id().is_empty(), "{mode:?} produced no thread id");
+        assert!(
+            !driver.thread_id().is_empty(),
+            "{mode:?} produced no thread id"
+        );
         println!("{mode:?}: thread {}", driver.thread_id());
         driver.kill();
     }
@@ -281,11 +320,17 @@ async fn probes_report_account_and_models() {
     println!("auth: {:?}", probe.auth);
     println!("{} models", probe.models.len());
     for m in &probe.models {
-        println!("  {} — {} (efforts: {:?})", m.id, m.display_name, m.supported_efforts);
+        println!(
+            "  {} — {} (efforts: {:?})",
+            m.id, m.display_name, m.supported_efforts
+        );
     }
 
     if probe.auth.signed_in() {
-        assert!(!probe.models.is_empty(), "a signed-in codex should offer models");
+        assert!(
+            !probe.models.is_empty(),
+            "a signed-in codex should offer models"
+        );
         // The composer launches with `id` and offers `supported_efforts`; a blank
         // id would be unlaunchable and a blank label unreadable.
         assert!(probe
@@ -345,7 +390,11 @@ async fn run_turn(
             Ok(Ok(SessionEvent::AssistantText { text: t, .. })) => finalized.push_str(&t),
             Ok(Ok(SessionEvent::PartialText { text: t, .. })) => streamed.push_str(&t),
             Ok(Ok(SessionEvent::TurnDone { .. })) => {
-                return if finalized.trim().is_empty() { streamed } else { finalized };
+                return if finalized.trim().is_empty() {
+                    streamed
+                } else {
+                    finalized
+                };
             }
             Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
                 panic!("session exited mid-turn: {outcome:?}")

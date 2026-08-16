@@ -82,12 +82,12 @@ pub fn list_branches(repo_path: &Path) -> Result<Vec<String>> {
 /// offer locals only. Cheap git2; run on the blocking pool.
 pub fn list_local_branches(repo_path: &Path) -> Result<Vec<String>> {
     let repo = open_repo(repo_path)?;
-    let branches = repo
-        .branches(Some(git2::BranchType::Local))
-        .map_err(|e| CoreError::OutputParse {
-            program: "git2 local branches".into(),
-            detail: e.message().to_string(),
-        })?;
+    let branches =
+        repo.branches(Some(git2::BranchType::Local))
+            .map_err(|e| CoreError::OutputParse {
+                program: "git2 local branches".into(),
+                detail: e.message().to_string(),
+            })?;
     let mut names = Vec::new();
     for (branch, _kind) in branches.flatten() {
         if let Ok(Some(name)) = branch.name() {
@@ -1009,7 +1009,10 @@ mod tests {
 
         // Git dir is the main repo's per-worktree metadata, outside the tree.
         let gd = git_dir(&wt).unwrap();
-        assert!(!gd.starts_with(&wt), "git dir {gd:?} must be outside the worktree");
+        assert!(
+            !gd.starts_with(&wt),
+            "git dir {gd:?} must be outside the worktree"
+        );
         assert!(gd.ends_with("worktrees/feat"), "unexpected git dir: {gd:?}");
         // watch_worktree's discriminator: gitfile vs. real `.git` dir.
         assert!(wt.join(".git").is_file());
@@ -1169,7 +1172,10 @@ mod tests {
 
         let status = worktree_git_status(dir.path()).unwrap();
         let paths = entry_paths(&status.unstaged);
-        assert!(paths.contains(&"pkg/a.rs"), "missing nested file: {paths:?}");
+        assert!(
+            paths.contains(&"pkg/a.rs"),
+            "missing nested file: {paths:?}"
+        );
         assert!(
             paths.contains(&"pkg/sub/b.rs"),
             "missing deeply nested file: {paths:?}"

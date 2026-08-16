@@ -562,10 +562,14 @@ pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOu
     // Prefer the remote-tracking ref (it carries the new commits); fall back to
     // the base as given (a local-only target branch).
     let remote_ref = format!("origin/{branch}");
-    let merge_ref = if git_in(git, worktree, &["rev-parse", "--verify", "--quiet", &remote_ref])
-        .run()
-        .await
-        .is_ok()
+    let merge_ref = if git_in(
+        git,
+        worktree,
+        &["rev-parse", "--verify", "--quiet", &remote_ref],
+    )
+    .run()
+    .await
+    .is_ok()
     {
         remote_ref
     } else {
@@ -1104,7 +1108,10 @@ mod tests {
         // Push to a bare remote and set upstream — the state that hid Ship.
         let remote = guard.path().join("remote.git");
         sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
-        sh(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
         sh(&repo, &["push", "-u", "origin", "feature/x"]);
 
         let after = status(&repo, "main", None);
@@ -1164,7 +1171,10 @@ mod tests {
 
         // Move the main checkout off main so the create has to switch it back.
         sh(&repo, &["checkout", "-b", "side"]);
-        assert_eq!(crate::gitops::current_branch(&repo).as_deref(), Some("side"));
+        assert_eq!(
+            crate::gitops::current_branch(&repo).as_deref(),
+            Some("side")
+        );
 
         let created = manager
             .create(
@@ -1191,7 +1201,10 @@ mod tests {
             "in-place must not create a worktree under the root"
         );
         // The main checkout was switched onto the chosen branch.
-        assert_eq!(crate::gitops::current_branch(&repo).as_deref(), Some("main"));
+        assert_eq!(
+            crate::gitops::current_branch(&repo).as_deref(),
+            Some("main")
+        );
     }
 
     /// In-place onto a *different* branch refuses a dirty tree: a plain checkout
@@ -1227,7 +1240,10 @@ mod tests {
 
         assert!(matches!(err, CoreError::WorktreeDirty(_)), "got {err:?}");
         // Nothing moved: still on main, edit intact.
-        assert_eq!(crate::gitops::current_branch(&repo).as_deref(), Some("main"));
+        assert_eq!(
+            crate::gitops::current_branch(&repo).as_deref(),
+            Some("main")
+        );
         assert_eq!(
             std::fs::read_to_string(repo.join("README.md")).unwrap(),
             "dirty edit\n"

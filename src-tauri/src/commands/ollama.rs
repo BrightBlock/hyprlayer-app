@@ -90,7 +90,12 @@ async fn probe(endpoint: &str) -> OllamaStatus {
         return unreachable();
     };
     let url = format!("{endpoint}/api/tags");
-    let resp = match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
+    let resp = match client
+        .get(&url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+    {
         Ok(r) => r,
         Err(e) => {
             // Don't swallow the reason — a connect error to a LAN/`.local` host on
@@ -123,7 +128,7 @@ async fn probe(endpoint: &str) -> OllamaStatus {
             }
         })
         .collect();
-    models.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
+    models.sort_by_key(|m| m.id.to_lowercase());
     OllamaStatus {
         reachable: true,
         endpoint: endpoint.to_string(),
@@ -148,7 +153,13 @@ async fn sync_opencode_provider(state: &AppState) -> CmdResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub async fn ollama_status(state: State<'_, AppState>) -> CmdResult<OllamaStatus> {
-    let endpoint = state.settings.get().await.providers.ollama.effective_endpoint();
+    let endpoint = state
+        .settings
+        .get()
+        .await
+        .providers
+        .ollama
+        .effective_endpoint();
     Ok(probe(&endpoint).await)
 }
 
@@ -160,7 +171,9 @@ pub async fn ollama_set_endpoint(
     state: State<'_, AppState>,
     endpoint: Option<String>,
 ) -> CmdResult<OllamaStatus> {
-    let normalized = endpoint.map(|e| e.trim().to_string()).filter(|e| !e.is_empty());
+    let normalized = endpoint
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty());
     state
         .settings
         .update(|s| s.providers.ollama.endpoint = normalized.clone())
@@ -171,7 +184,13 @@ pub async fn ollama_set_endpoint(
     // server's selection into the composer and the `provider.ollama` block,
     // pointing at models that don't exist here. If the new endpoint is
     // unreachable we can't enumerate its models, so leave the selection as-is.
-    let effective = state.settings.get().await.providers.ollama.effective_endpoint();
+    let effective = state
+        .settings
+        .get()
+        .await
+        .providers
+        .ollama
+        .effective_endpoint();
     let status = probe(&effective).await;
     if status.reachable {
         let available: std::collections::HashSet<&str> =
@@ -230,8 +249,13 @@ pub async fn ollama_set_default_model(
         .settings
         .update(|s| {
             let valid = requested.as_deref().is_some_and(|m| {
-                m.strip_prefix("ollama/")
-                    .is_some_and(|id| s.providers.ollama.selected_models.iter().any(|sel| sel == id))
+                m.strip_prefix("ollama/").is_some_and(|id| {
+                    s.providers
+                        .ollama
+                        .selected_models
+                        .iter()
+                        .any(|sel| sel == id)
+                })
             });
             s.providers.ollama.default_model = if valid { requested.clone() } else { None };
         })

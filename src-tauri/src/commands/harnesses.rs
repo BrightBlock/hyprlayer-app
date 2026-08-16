@@ -181,7 +181,8 @@ pub async fn opencode_catalog(app: tauri::AppHandle, force: bool) -> CmdResult<O
     if !force {
         if let Some(ref p) = cache {
             if let Some(c) = read_cache(p) {
-                let fresh = now_ms().saturating_sub(c.fetched_at_ms) < CATALOG_TTL.as_millis() as u64;
+                let fresh =
+                    now_ms().saturating_sub(c.fetched_at_ms) < CATALOG_TTL.as_millis() as u64;
                 if fresh {
                     return Ok(OpencodeCatalog {
                         providers: c.providers,

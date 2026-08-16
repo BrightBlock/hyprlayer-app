@@ -116,10 +116,7 @@ pub enum ParsedLine {
     /// `rewind_conversation`, …). We act only on the ones we're awaiting (keyed by
     /// `request_id`); the rest — e.g. interrupt acks — are dropped. `payload` is
     /// the innermost result object (for rewind: `{rewound, prefillText, error?}`).
-    ControlResponse {
-        request_id: String,
-        payload: Value,
-    },
+    ControlResponse { request_id: String, payload: Value },
     /// A line we don't model — kept verbatim so the driver can log it.
     Unknown { raw: String },
 }
@@ -318,7 +315,9 @@ fn parse_queue_operation(v: &Value) -> ParsedLine {
             return ParsedLine::TaskNotification {
                 task_id: task_id.to_string(),
                 tool_use_id: xml_tag(content, "tool-use-id").map(str::to_string),
-                status: xml_tag(content, "status").map(str::to_string).unwrap_or_default(),
+                status: xml_tag(content, "status")
+                    .map(str::to_string)
+                    .unwrap_or_default(),
             };
         }
     }
@@ -344,7 +343,10 @@ fn xml_tag<'a>(s: &'a str, tag: &str) -> Option<&'a str> {
 /// key (no request_id) degrades to an ignored `System` line.
 fn parse_control_response(v: &Value) -> ParsedLine {
     let resp = v.get("response");
-    match resp.and_then(|r| r.get("request_id")).and_then(Value::as_str) {
+    match resp
+        .and_then(|r| r.get("request_id"))
+        .and_then(Value::as_str)
+    {
         Some(id) => ParsedLine::ControlResponse {
             request_id: id.to_string(),
             payload: resp
@@ -608,7 +610,10 @@ mod tests {
                 status,
             } => {
                 assert_eq!(task_id, "b9vew92w3");
-                assert_eq!(tool_use_id.as_deref(), Some("toolu_01KXEEjFzSxWBxnYuvAz9pdG"));
+                assert_eq!(
+                    tool_use_id.as_deref(),
+                    Some("toolu_01KXEEjFzSxWBxnYuvAz9pdG")
+                );
                 assert_eq!(status, "completed");
             }
             other => panic!("expected TaskNotification, got {other:?}"),
@@ -667,7 +672,8 @@ mod tests {
     /// `completed` — passed through verbatim, not normalized.
     #[test]
     fn command_lifecycle_cancelled_passes_through() {
-        let line = r#"{"type":"command_lifecycle","command_uuid":"c1","state":"cancelled","uuid":"u1"}"#;
+        let line =
+            r#"{"type":"command_lifecycle","command_uuid":"c1","state":"cancelled","uuid":"u1"}"#;
         assert!(
             matches!(parse_line(line), ParsedLine::CommandLifecycle { state, .. } if state == "cancelled")
         );
@@ -717,8 +723,7 @@ mod tests {
     /// error. Line verbatim from a real session.
     #[test]
     fn control_cancel_request_is_system() {
-        let line =
-            r#"{"type":"control_cancel_request","request_id":"365bf5ed-5f59-4b2e-8b6b-c0a731c086b0"}"#;
+        let line = r#"{"type":"control_cancel_request","request_id":"365bf5ed-5f59-4b2e-8b6b-c0a731c086b0"}"#;
         assert!(matches!(
             parse_line(line),
             ParsedLine::System { subtype } if subtype == "control_cancel_request"
@@ -735,7 +740,10 @@ mod tests {
                 uuid, is_replay, ..
             } => {
                 assert!(is_replay);
-                assert_eq!(uuid.as_deref(), Some("d2052f84-2034-4399-81e7-bd28d28bc691"));
+                assert_eq!(
+                    uuid.as_deref(),
+                    Some("d2052f84-2034-4399-81e7-bd28d28bc691")
+                );
             }
             other => panic!("expected a User line, got {other:?}"),
         }

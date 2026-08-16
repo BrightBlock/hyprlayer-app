@@ -34,7 +34,11 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     .expect("spawn claude");
 
     driver
-        .send_user_turn("Reply with exactly the word: pong. Nothing else.", None, None)
+        .send_user_turn(
+            "Reply with exactly the word: pong. Nothing else.",
+            None,
+            None,
+        )
         .expect("send turn");
 
     // A stream-json session stays alive between turns, so the turn completes at
@@ -143,9 +147,24 @@ async fn rewind_to_ordinal_truncates_model_memory() {
     })
     .expect("spawn claude");
 
-    run_turn(&driver, &mut events, "Remember: my favorite color is blue. Reply OK.").await;
-    run_turn(&driver, &mut events, "Remember: my favorite number is seven. Reply OK.").await;
-    run_turn(&driver, &mut events, "Remember: my favorite animal is the otter. Reply OK.").await;
+    run_turn(
+        &driver,
+        &mut events,
+        "Remember: my favorite color is blue. Reply OK.",
+    )
+    .await;
+    run_turn(
+        &driver,
+        &mut events,
+        "Remember: my favorite number is seven. Reply OK.",
+    )
+    .await;
+    run_turn(
+        &driver,
+        &mut events,
+        "Remember: my favorite animal is the otter. Reply OK.",
+    )
+    .await;
 
     // Rewind to turn 2: drop turns 2 (number) and 3 (animal), keep turn 1 (color).
     driver
@@ -222,9 +241,24 @@ async fn rewind_across_resume_truncates_pre_resume_turns() {
     // Generation 1: three turns, then kill the process — i.e. an app restart.
     {
         let (driver, mut events) = spawn_haiku(&cwd, &session_id, false);
-        run_turn(&driver, &mut events, "Remember: my favorite color is blue. Reply OK.").await;
-        run_turn(&driver, &mut events, "Remember: my favorite number is seven. Reply OK.").await;
-        run_turn(&driver, &mut events, "Remember: my favorite animal is the otter. Reply OK.").await;
+        run_turn(
+            &driver,
+            &mut events,
+            "Remember: my favorite color is blue. Reply OK.",
+        )
+        .await;
+        run_turn(
+            &driver,
+            &mut events,
+            "Remember: my favorite number is seven. Reply OK.",
+        )
+        .await;
+        run_turn(
+            &driver,
+            &mut events,
+            "Remember: my favorite animal is the otter. Reply OK.",
+        )
+        .await;
         driver.kill();
         // Let it exit so the resume can't race the still-dying process.
         tokio::time::timeout(Duration::from_secs(10), async {

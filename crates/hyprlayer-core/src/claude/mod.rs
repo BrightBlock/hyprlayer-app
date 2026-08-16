@@ -9,5 +9,5 @@ pub mod probe;
 pub mod protocol;
 
 pub use driver::{ClaudeDriver, PermissionMode, SpawnConfig};
-pub use probe::{ClaudeModel, ClaudeProbe};
 pub use events::{ExitOutcome, SessionEvent, SessionState};
+pub use probe::{ClaudeModel, ClaudeProbe};

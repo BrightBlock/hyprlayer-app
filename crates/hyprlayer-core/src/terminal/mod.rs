@@ -188,13 +188,9 @@ impl PtySession {
                 drop(sb);
                 pending.clear();
             };
-            loop {
-                // Block for the next read; a closed channel means the reader is
-                // done, so drop out and emit the exit below.
-                let first = match chunk_rx.recv() {
-                    Ok(c) => c,
-                    Err(_) => break,
-                };
+            // Block for the next read; a closed channel means the reader is
+            // done, so drop out and emit the exit below.
+            while let Ok(first) = chunk_rx.recv() {
                 pending.extend_from_slice(&first);
                 // Drain whatever ELSE is already queued (a genuine flood, where
                 // reads pile up faster than we encode+broadcast) up to the byte
@@ -515,7 +511,10 @@ mod tests {
         let mut seen = String::new();
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         let child_pid: i32 = loop {
-            assert!(tokio::time::Instant::now() < deadline, "never saw pid: {seen:?}");
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "never saw pid: {seen:?}"
+            );
             if let Ok(Ok(TerminalEvent::Output { data })) =
                 tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
             {
