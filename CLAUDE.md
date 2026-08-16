@@ -4,13 +4,31 @@
 
 | Command | What it does |
 |---|---|
-| `cargo test` | Rust workspace tests (385) + regenerates `src/lib/bindings.ts` |
+| `cargo fmt --all` | Formats the Rust workspace — **run before every push** |
+| `cargo test` | Rust workspace tests (422) + regenerates `src/lib/bindings.ts` |
 | `pnpm typecheck` | Frontend type-check (`tsc --noEmit`) |
 | `pnpm lint` | ESLint (includes import-boundary rules) |
-| `pnpm test` | Vitest (838 tests) |
+| `pnpm test` | Vitest (847 tests) |
 | `pnpm build` | typecheck + vite build |
 
-Always run all four before pushing. The release gate is `scripts/release.sh` which runs the same checks.
+Always run all of these before pushing. The release gate is `scripts/release.sh` which runs the same checks.
+
+**`cargo fmt --all` is not optional.** There is no CI to catch drift (ADR-0001 —
+releases are built locally by design), so an unformatted commit stays
+unformatted, and the next person to run the formatter gets a diff touching files
+they never edited. The tree was reformatted wholesale once for exactly that
+reason; keep it clean so it never has to happen again.
+
+```bash
+cargo fmt --all              # fix
+cargo fmt --all -- --check   # verify (exit non-zero on drift)
+cargo clippy --workspace --all-targets   # must be warning-free
+```
+
+Clippy is warning-free across the workspace. When a lint is genuinely wrong for
+the code — a `#[tauri::command]` whose arity *is* the IPC contract, say — add
+`#[allow(clippy::...)]` with a comment saying why, rather than reshaping a
+signature the bindings depend on.
 
 ## Architecture: two thin shells
 

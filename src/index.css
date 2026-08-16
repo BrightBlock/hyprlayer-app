@@ -535,6 +535,28 @@ a {
   }
 }
 
+/* ── Background window: stop the looping animations ──────────────────────────
+   A WebKitGTK window keeps painting when it is not on screen — the Page
+   Visibility API stays "visible" for a window on another workspace, so the
+   throttling a browser would normally apply never engages. Painting is the
+   expensive part: on a 4K 144 Hz output the single `kg-pulse` ring below costs
+   a whole CPU core, and no amount of layer promotion (will-change, opacity-only
+   keyframes, a composited HTML ring) brings it under half of one. Not animating
+   is the only lever that works, so an unfocused window stops.
+
+   Only the infinite decorative loops are paused; one-shot transitions (toasts,
+   step-in) still finish. `lib/motion.ts` sets the attribute from Tauri's
+   window-focus signal — `visibilitychange` and DOM focus/blur never fire here.
+   Paused (not cancelled) so each resumes mid-cycle rather than restarting. */
+:root[data-window-blurred] .animate-tab-glow,
+:root[data-window-blurred] .kg-pulse,
+:root[data-window-blurred] .animate-work-pulse,
+:root[data-window-blurred] .hl-layer,
+:root[data-window-blurred] .animate-pulse,
+:root[data-window-blurred] .animate-ping {
+  animation-play-state: paused;
+}
+
 /* ── Toast enter / exit animations ──────────────────────────────────────── */
 @keyframes toast-in {
   0%   { opacity: 0; transform: translateY(calc(100% + 48px)); }

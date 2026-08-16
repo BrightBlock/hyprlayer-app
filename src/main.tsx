@@ -11,6 +11,7 @@ import { removeSessionsForWorkstream } from "./features/session/sessionStore";
 import { unwrap } from "./lib/ipc";
 import { onWorkstreamArchived } from "./lib/queries";
 import { queryClient } from "./lib/queryClient";
+import { setupMotionGate } from "./lib/motion";
 import { setupQueryFocus } from "./lib/queryFocus";
 import { router } from "./router";
 import { initTheme } from "./lib/theme";
@@ -39,6 +40,9 @@ setupNotificationActions();
 // Route React Query's focus refetch through Tauri's window-focus signal (the
 // WKWebview doesn't emit the browser focus event on app switches).
 setupQueryFocus();
+// Stop the looping animations while the app is in the background — a WebKitGTK
+// window keeps painting off-screen, and painting one is not cheap.
+setupMotionGate();
 
 // Suppress the webview's native right-click menu app-wide so the app doesn't
 // feel like a web page. Editable surfaces (inputs, textareas, the CodeMirror
