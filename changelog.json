@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.5.11",
+      "date": "2026-08-16",
+      "summary": "Fixed idle CPU burn from filesystem watching and background animations.",
+      "notes": [
+        "On Linux, the app could sit at ~34% of a core doing nothing — a git-status read was mistaken for a file change and kept re-triggering itself. Filesystem watching is also far lighter now: one real worktree went from 4052 armed watches down to 60.",
+        "Decorative animations (like the dashboard's pulse ring) now pause while the window isn't focused instead of rendering off-screen — an unfocused window dropped from 8.5% to under 1% of a core."
+      ]
+    },
+    {
       "version": "0.5.10",
       "date": "2026-08-16",
       "summary": "Fixed Ship going stale from spent GitHub quota; PR docs auto-close on merge.",
