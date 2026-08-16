@@ -232,13 +232,26 @@ export const commands = {
 	 *  Point the live worktree watcher at this workstream, so external edits emit
 	 *  `WorktreeChanged` and refresh the Changes panel + git status without a focus
 	 *  event. Single-slot: switching replaces the previous watcher; same id is a no-op.
+	 * 
+	 *  `None` clears the slot — the route calls it when no workstream is on screen.
+	 *  That matters beyond the file watcher: `pr_watch` reads this slot to decide
+	 *  which workstream deserves live PR polling, so a slot left pointing at the
+	 *  last-viewed workstream keeps spending GitHub API quota on a branch nobody is
+	 *  looking at.
 	 */
-	watchWorktree: (workstreamId: string) => typedError<null, AppError>(__TAURI_INVOKE("watch_worktree", { workstreamId })),
+	watchWorktree: (workstreamId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("watch_worktree", { workstreamId })),
 	/**
 	 *  The pull request for a workstream — the manually attached PR (by number) when
-	 *  one is set, otherwise the branch's own PR. Derived live from `gh`. Degrades to
-	 *  `None` (never an error) when gh is missing/unauthenticated or the call fails —
-	 *  the PR bar simply stays hidden, matching `list_recent_repos`.
+	 *  one is set, otherwise the branch's own PR. Derived live from `gh`.
+	 * 
+	 *  `None` means GitHub answered and this branch has no PR; a gh that's simply
+	 *  absent/unauthenticated says the same thing (no GitHub in play at all), so it
+	 *  degrades to `None` too — matching `list_recent_repos`.
+	 * 
+	 *  A gh that IS there and failed (spent API quota, network, a wedged repo) is an
+	 *  error, deliberately: collapsing that into `None` told the UI "no PR exists",
+	 *  which un-hides Ship on a branch that already has one. Erroring instead leaves
+	 *  React Query holding the last known status.
 	 */
 	workstreamPrStatus: (id: string) => typedError<{
 	number: number,

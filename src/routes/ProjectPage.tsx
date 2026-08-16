@@ -399,14 +399,9 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, workstreams.isSuccess, workstreams.isFetching]);
 
-  // Point the backend's live worktree watcher at the viewed workstream, so
-  // external edits (an editor, a build, a git checkout) push a refresh of the
-  // Changes panel + git status without waiting for window focus — the way the
-  // agent and terminal panes already stream live.
-  useEffect(() => {
-    if (!wsId) return;
-    void commands.watchWorktree(wsId);
-  }, [wsId]);
+  // (The backend's live worktree watcher is pointed at the on-screen workstream
+  // from Root, which owns the one definition of "active" — see its
+  // `watchWorktree` effect.)
 
   // Multiplexer persistence: keep this workstream's pty agents spawned +
   // monitored — so background agents still badge/notify, and a restart relaunches

@@ -36,7 +36,7 @@ import {
 } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { queryClient } from "@/lib/queryClient";
-import { invalidateWorktreeGit } from "@/lib/queries";
+import { invalidateWorkstreamPr, invalidateWorktreeGit } from "@/lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notifications";
 import { useToast } from "@/lib/toast";
 import { currentAppLocation } from "@/lib/appNav";
@@ -313,6 +313,9 @@ function dispatch(sessionId: string, event: SessionEvent): void {
     // The agent likely touched the worktree; refresh the Changes panel
     // (git-status), any open diffs (file-sides), and the sidebar's line counts.
     invalidateWorktreeGit(current.workstreamId);
+    // A finished turn may have opened or updated a PR (Ship, Fix CI). One `gh`
+    // call per turn end, unlike the worktree watcher's per-file-change firing.
+    invalidateWorkstreamPr(current.workstreamId);
   }
   if (event.kind === "turnDone") {
     // The turn is free — deliver the next message queued while it ran.

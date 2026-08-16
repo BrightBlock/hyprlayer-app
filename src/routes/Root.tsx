@@ -74,7 +74,7 @@ import {
   ZapIcon,
 } from "@/components/icons";
 import { useMultiplexer } from "@/features/multiplexer/engines";
-import type { EditorTarget } from "@/lib/bindings";
+import { commands, type EditorTarget } from "@/lib/bindings";
 import { SearchPalette } from "@/features/search/SearchPalette";
 import { toggleSearch } from "@/features/search/searchStore";
 import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
@@ -1017,6 +1017,17 @@ export function Root() {
       onEnd: () => setResizingSidebar(false),
     });
   };
+
+  // Point the backend's live worktree watcher at the workstream on screen, and
+  // clear it (null) when none is — leaving a project route, or deselecting on
+  // the board. Driven from the same `activeWorkstreamId` the PR query mounts
+  // for, and from the shell rather than the page, so the backend's notion of
+  // "active" can't drift from the UI's and no unmount races the next set.
+  // It gates more than the file watcher: `pr_watch` reads this slot to pick the
+  // one workstream that gets live (API-spending) PR polling.
+  useEffect(() => {
+    void commands.watchWorktree(activeWorkstreamId ?? null);
+  }, [activeWorkstreamId]);
 
   // Commit / Ship gating + actions, shared with the GIT panel's buttons via
   // `useWorkstreamGitActions` so the keyboard commands below stay in lockstep

@@ -9,6 +9,9 @@ import {
   useWorkstreamShipBusy,
 } from "@/features/session/sessionStore";
 
+/** How often to re-ask `gh` for the PR while a ship turn is running. */
+const SHIP_POLL_MS = 10_000;
+
 /**
  * The Commit / Ship gating + actions for a workstream, shared by the GIT panel's
  * buttons and Root's `ws.commit` / `ws.ship` keybindings so the two never
@@ -30,11 +33,15 @@ export function useWorkstreamGitActions(view: WorkstreamView | null) {
   const id = view?.item.id ?? "";
   // A folder workstream never gets git/PR queries — not even failing ones.
   const enabled = view !== null && !isFolderWorkstream(view);
-  const pr = useWorkstreamPr(id, enabled);
-  const status = useWorktreeGitStatus(id, enabled);
   const shipBusy = useWorkstreamShipBusy(view?.item.id ?? null);
   const [committing, setCommitting] = useState(false);
   const [shipping, setShipping] = useState(false);
+  // Poll only while a ship turn runs, and only until a PR resolves. The PR
+  // appears MID-turn (the stock Ship prompt opens it, then runs /describe_pr),
+  // and the watcher is in its slowest cadence precisely because this branch has
+  // no PR yet — so nothing else notices until the turn finally ends.
+  const pr = useWorkstreamPr(id, enabled, shipBusy || shipping ? SHIP_POLL_MS : undefined);
+  const status = useWorktreeGitStatus(id, enabled);
 
   const changedCount =
     (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0);

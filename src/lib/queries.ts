@@ -450,6 +450,9 @@ export function useDefaultUsername() {
 // List cache lives at ["workstreams", projectPath]; everything scoped to one
 // item (docs, diff, detail) lives under the ["workstream", id] prefix so a
 // single prefix invalidation refreshes the whole family.
+//
+// The gh-backed PR queries deliberately sit OUTSIDE that prefix, under
+// ["workstream-pr", id] — see `invalidateWorkstreamPr`.
 
 function invalidateWorkstream(id: string) {
   // Whole ["workstreams"] prefix: the project's list AND the sidebar's
@@ -648,19 +651,48 @@ export function useCleanupArchivedWorkstreams() {
 
 // ── Pull request (derived live from gh) ─────────────────────────────────────
 
+/** How long an errored PR probe waits before trying again. One mounted query,
+ *  so ~60 calls/hr worst case — the cost of never getting stuck. */
+const PR_ERROR_RETRY_MS = 60_000;
+
+/** Refresh a workstream's gh-backed PR queries. They sit under their own root,
+ *  outside the `["workstream", id]` prefix `invalidateWorkstream` sweeps: the
+ *  rest of that family reads local disk, but these spend a GitHub GraphQL call,
+ *  and the worktree watcher sweeps on every file change. Riding the prefix cost
+ *  one API call per file an agent wrote — enough to drain the 5000/hr quota,
+ *  after which every probe fails and a failed probe reads as "no PR". */
+export function invalidateWorkstreamPr(id: string) {
+  void queryClient.invalidateQueries({ queryKey: ["workstream-pr", id] });
+}
+
 /** The branch's PR (or null), derived live from `gh`. Fetches once on mount;
  *  liveness is push-based after that — the backend PR watcher diffs each poll
  *  and emits `prStatusChanged`, which invalidates this query (see
  *  `src/lib/events.ts`). So the bar advances on its own (checks settling, a
- *  merge landing elsewhere flipping Merge → Archive) without a UI timer. */
-export function useWorkstreamPr(id: string, enabled = true) {
+ *  merge landing elsewhere flipping Merge → Archive) without a UI timer.
+ *
+ *  `pollMs` opts into a temporary timer for the one window the push can't cover
+ *  fast enough: a ship turn, where the PR appears mid-turn and the watcher is
+ *  in its slow "no PR to track" cadence (see `useWorkstreamGitActions`). The
+ *  timer stops itself the moment a PR resolves, so it never outlives its job. */
+export function useWorkstreamPr(id: string, enabled = true, pollMs?: number) {
   return useQuery({
-    queryKey: ["workstream", id, "pr"],
+    queryKey: ["workstream-pr", id],
     queryFn: () => unwrap(commands.workstreamPrStatus(id)),
     enabled: enabled && id.length > 0,
     // Reuse cached status across rapid workstream switches instead of re-running
     // the `gh` subprocess each time; the backend watcher pushes updates between.
     staleTime: 8000,
+    refetchInterval: (query) => {
+      // A failed probe has to heal itself, and slowly. React Query keeps the
+      // last good data on error, so nothing else would ever correct it: the
+      // backend stops polling a PR it has already seen merge, and a stuck error
+      // would strand the bar on the pre-merge state. Retrying at `pollMs` here
+      // would be worse than not retrying — the usual cause is a spent API quota,
+      // and 10s hammering is what spends it.
+      if (query.state.status === "error") return PR_ERROR_RETRY_MS;
+      return pollMs && !query.state.data ? pollMs : false;
+    },
   });
 }
 
@@ -668,7 +700,7 @@ export function useMergePr(id: string) {
   return useMutation({
     mutationFn: (method: MergeMethod) => unwrap(commands.mergeWorkstreamPr(id, method)),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstreamPr(id);
       invalidateWorkstream(id);
     },
   });
@@ -678,7 +710,7 @@ export function useMergePr(id: string) {
  *  `query` (GitHub search syntax). Enabled only while the picker is open. */
 export function useWorkstreamOpenPrs(id: string, query: string, enabled = true) {
   return useQuery({
-    queryKey: ["workstream", id, "open-prs", query],
+    queryKey: ["workstream-pr", id, "open", query],
     queryFn: () => unwrap(commands.listWorkstreamOpenPrs(id, query)),
     enabled: enabled && id.length > 0,
     // Each `gh pr list` is a subprocess; keep results briefly so reopening the
@@ -691,7 +723,7 @@ export function useWorkstreamOpenPrs(id: string, query: string, enabled = true) 
  *  null when no such PR exists — confirms the number before attaching. */
 export function useWorkstreamPrPreview(id: string, prNumber: number | null, enabled = true) {
   return useQuery({
-    queryKey: ["workstream", id, "pr-preview", prNumber],
+    queryKey: ["workstream-pr", id, "preview", prNumber],
     queryFn: () => unwrap(commands.previewWorkstreamPr(id, prNumber as number)),
     enabled: enabled && id.length > 0 && prNumber !== null,
     staleTime: 15_000,
@@ -704,7 +736,7 @@ export function useAttachPr(id: string) {
   return useMutation({
     mutationFn: (prNumber: number) => unwrap(commands.attachWorkstreamPr(id, prNumber)),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstreamPr(id);
       invalidateWorkstream(id);
     },
   });
@@ -714,13 +746,13 @@ export function useAttachPr(id: string) {
  *  Takes the id as the mutate variable, not a hook arg: this fires from a context
  *  menu that closes on click, so a closed-over id churns to "" (the menu's
  *  fallback) before the async detach resolves — and `onSuccess` would then
- *  invalidate `["workstream", "", "pr"]`, leaving the PR bar stale until the next
+ *  invalidate the empty id's PR key, leaving the PR bar stale until the next
  *  window-focus refetch. Reading `id` from the mutation variable pins it. */
 export function useDetachPr() {
   return useMutation({
     mutationFn: (id: string) => unwrap(commands.detachWorkstreamPr(id)),
     onSuccess: (_data, id) => {
-      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstreamPr(id);
       invalidateWorkstream(id);
     },
   });
@@ -734,7 +766,7 @@ export function useSetWorkstreamBase(id: string) {
     mutationFn: (base: string) => unwrap(commands.setWorkstreamBaseBranch(id, base)),
     onSuccess: () => {
       invalidateWorktreeGit(id); // ahead/behind recompute against the new base
-      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstreamPr(id);
       invalidateWorkstream(id); // sidebar list shows the stored base
     },
   });
@@ -762,7 +794,7 @@ export function useFetchWorkstreamRemote(id: string) {
   return useMutation({
     mutationFn: () => unwrap(commands.fetchWorkstreamRemote(id)),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["workstream", id, "pr"] });
+      invalidateWorkstreamPr(id);
       invalidateWorktreeGit(id); // also invalidates the workstreams list (ahead/behind)
     },
   });

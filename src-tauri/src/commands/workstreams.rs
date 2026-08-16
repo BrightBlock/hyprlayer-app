@@ -159,14 +159,24 @@ pub async fn list_all_workstreams(state: State<'_, AppState>) -> CmdResult<Vec<W
 /// Point the live worktree watcher at this workstream, so external edits emit
 /// `WorktreeChanged` and refresh the Changes panel + git status without a focus
 /// event. Single-slot: switching replaces the previous watcher; same id is a no-op.
+///
+/// `None` clears the slot — the route calls it when no workstream is on screen.
+/// That matters beyond the file watcher: `pr_watch` reads this slot to decide
+/// which workstream deserves live PR polling, so a slot left pointing at the
+/// last-viewed workstream keeps spending GitHub API quota on a branch nobody is
+/// looking at.
 #[tauri::command]
 #[specta::specta]
 pub async fn watch_worktree(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-    workstream_id: String,
+    workstream_id: Option<String>,
 ) -> CmdResult<()> {
     let mut guard = state.worktree_watch.lock().await;
+    let Some(workstream_id) = workstream_id else {
+        *guard = None;
+        return Ok(());
+    };
     if guard.as_ref().is_some_and(|(id, _)| id == &workstream_id) {
         return Ok(());
     }
@@ -1473,9 +1483,16 @@ pub async fn worktree_search_files(
 }
 
 /// The pull request for a workstream — the manually attached PR (by number) when
-/// one is set, otherwise the branch's own PR. Derived live from `gh`. Degrades to
-/// `None` (never an error) when gh is missing/unauthenticated or the call fails —
-/// the PR bar simply stays hidden, matching `list_recent_repos`.
+/// one is set, otherwise the branch's own PR. Derived live from `gh`.
+///
+/// `None` means GitHub answered and this branch has no PR; a gh that's simply
+/// absent/unauthenticated says the same thing (no GitHub in play at all), so it
+/// degrades to `None` too — matching `list_recent_repos`.
+///
+/// A gh that IS there and failed (spent API quota, network, a wedged repo) is an
+/// error, deliberately: collapsing that into `None` told the UI "no PR exists",
+/// which un-hides Ship on a branch that already has one. Erroring instead leaves
+/// React Query holding the last known status.
 #[tauri::command]
 #[specta::specta]
 pub async fn workstream_pr_status(
@@ -1487,13 +1504,12 @@ pub async fn workstream_pr_status(
         return Ok(None);
     };
     let pr_ref = item.pr_ref();
-    match pr::pr_status(&gh, Path::new(&item.worktree_path), &pr_ref).await {
-        Ok(status) => Ok(status),
-        Err(e) => {
+    pr::pr_status(&gh, Path::new(&item.worktree_path), &pr_ref)
+        .await
+        .map_err(|e| {
             log::debug!("gh pr status unavailable for {pr_ref}: {e}");
-            Ok(None)
-        }
-    }
+            AppError::from(e)
+        })
 }
 
 /// Open PRs in the workstream's repo for the "Attach PR" picker, filtered by

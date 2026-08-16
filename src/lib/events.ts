@@ -1,6 +1,11 @@
 import { events } from "./bindings";
 import { queryClient } from "./queryClient";
-import { invalidateScriptOutput, invalidateScriptRuntime, invalidateWorktreeGit } from "./queries";
+import {
+  invalidateScriptOutput,
+  invalidateScriptRuntime,
+  invalidateWorkstreamPr,
+  invalidateWorktreeGit,
+} from "./queries";
 
 /**
  * A feature-owned set of event subscriptions, attached/detached together with
@@ -41,8 +46,7 @@ export function attachEventListeners(): () => void {
     // refetch that workstream's PR query — only the mounted one (active
     // workstream / archive-on-merge) actually re-runs `gh`.
     events.prStatusChanged.listen((event) => {
-      const { workstreamId } = event.payload;
-      void queryClient.invalidateQueries({ queryKey: ["workstream", workstreamId, "pr"] });
+      invalidateWorkstreamPr(event.payload.workstreamId);
     }),
     // The active workstream's worktree changed on disk (an external edit, a
     // build, a git checkout). The backend watches it and pushed this, so refresh
