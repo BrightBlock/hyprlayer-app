@@ -387,22 +387,21 @@ const topIconClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink";
 
 /** Primary nav-rail icon button — Home / Projects / Library up top and the
- *  Archive / Settings utilities at the foot. Active wears the redesign's
- *  accent-filled rounded square (white glyph); idle sits dim with a soft
- *  accent-tinted hover. */
-// The nav rail's Home button is the persistent accent-filled square from the
-// mockup — it always wears the solid fill. Every other entry stays plain until
-// its route is active, when it takes the mockup's outlined treatment (accent
-// tint + ring + accent glyph). So the active section reads as an outlined box
-// while Home stays solid — exactly the two states the mockup shows side by side.
+ *  Archive / Settings utilities at the foot. Active marks itself with the
+ *  activity-bar edge bar, not a fill on the glyph; Home alone keeps the
+ *  mockup's persistent accent square. */
 const RAIL_ICON_BASE =
-  "flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors";
+  "relative flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors";
 const railHomeClass = `${RAIL_ICON_BASE} bg-accent text-white shadow-sm`;
+// -left-2 cancels the rail's 8px icon inset so the bar sits flush on its edge.
+const RAIL_ACTIVE_BAR =
+  "before:absolute before:-left-2 before:top-1/2 before:h-8 before:w-[2px] " +
+  "before:-translate-y-1/2 before:rounded-r-full before:bg-accent before:content-['']";
 const railNavClass = (active: boolean): string =>
   `${RAIL_ICON_BASE} ${
     active
-      ? "bg-accent/20 text-accent ring-[1.5px] ring-inset ring-accent/55"
-      : "text-ink-dim hover:bg-accent/10 hover:text-ink"
+      ? `text-ink ${RAIL_ACTIVE_BAR}`
+      : "text-ink-dim hover:bg-edge/60 hover:text-ink"
   }`;
 
 /** A row/trigger icon for a detected app: its real rendered icon when the
@@ -1391,15 +1390,15 @@ export function Root() {
 
       <div className="flex min-h-0 flex-1">
         {/* Primary nav rail — the activity-bar column from the redesign. Home,
-            Projects, and Library ride up top as accent-filled rounded squares
-            when active; Archive + Settings (and the update pill) sit at the
+            Projects and Library ride up top; Archive + Settings sit at the
             foot. Always visible, independent of the project panel's collapse. */}
         <nav
           className="flex shrink-0 flex-col items-center border-r border-edge bg-surface py-2.5"
           style={{ width: NAV_RAIL_WIDTH }}
           aria-label="Primary"
         >
-          <div className="flex flex-col items-center gap-1.5">
+          {/* 32px squares + gap-3 = 44px pitch, a touch tighter than VSCode's 48. */}
+          <div className="flex flex-col items-center gap-3">
             {/* Home — its glyph doubles as the Multiplexer-mode indicator: the
                 lone rounded square "splits" into a 2×2 grid of panes while the
                 mode is on (set in Settings → Advanced), reverting when off. Still
@@ -1473,7 +1472,7 @@ export function Root() {
               <ZapIcon size={19} strokeWidth={1.6} />
             </button>
           </div>
-          <div className="mt-auto flex flex-col items-center gap-1.5">
+          <div className="mt-auto flex flex-col items-center gap-3">
             <button
               type="button"
               onClick={() => toggleNav("/archive")}
