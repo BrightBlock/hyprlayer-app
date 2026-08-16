@@ -66,6 +66,9 @@ pub enum CoreError {
     ProfileExists { name: String },
 
     #[error(transparent)]
+    Frontmatter(#[from] crate::docs::frontmatter::FmError),
+
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
@@ -138,6 +141,7 @@ impl CoreError {
             CoreError::RepoSettingsParse { .. } => "repo_settings_parse",
             CoreError::ProfileInvalid { .. } => "invalid_profile_name",
             CoreError::ProfileExists { .. } => "profile_exists",
+            CoreError::Frontmatter(_) => "frontmatter_patch",
             CoreError::Io(_) => "io",
         }
     }

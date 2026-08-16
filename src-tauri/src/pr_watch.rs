@@ -15,6 +15,7 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use hyprlayer_core::docs::pr_record;
 use hyprlayer_core::error::Result;
 use hyprlayer_core::pr::{self, ChecksState, PrState, PrStatus};
 use hyprlayer_core::process::binaries::BinaryKind;
@@ -120,6 +121,13 @@ async fn tick(app: &tauri::AppHandle, last: &mut HashMap<String, Option<PrStatus
         .filter(|item| !matches!(last.get(&item.id), Some(Some(s)) if s.state == PrState::Merged))
         .collect();
 
+    // Kept alongside the poll because the result rows carry only the workstream
+    // id, and promoting a merged PR's record needs the project it belongs to.
+    let projects: HashMap<String, String> = to_poll
+        .iter()
+        .map(|item| (item.id.clone(), item.project_path.clone()))
+        .collect();
+
     let results = poll_all(&gh, to_poll).await;
 
     for (id, res) in results {
@@ -136,12 +144,62 @@ async fn tick(app: &tauri::AppHandle, last: &mut HashMap<String, Option<PrStatus
         // ship reaches the UI). First sight only fires a no-op invalidation for
         // unmounted workstreams, so the startup pass is cheap.
         if last.get(&id) != Some(&status) {
+            // Merged is terminal and we stop polling it above, so this is the
+            // only tick that ever sees the transition — promote the PR's
+            // thoughts record here or never. First sight counts: it's how a
+            // merge that landed while the app was closed gets caught up.
+            if let Some(s) = status.as_ref().filter(|s| s.state == PrState::Merged) {
+                if let Some(project) = projects.get(&id) {
+                    promote_record(app, project, s.number).await;
+                }
+            }
             last.insert(id.clone(), status);
             let _ = PrStatusChanged { workstream_id: id }.emit(app);
         }
     }
 
     cadence(last)
+}
+
+/// Promote PR `number`'s thoughts record now that it has merged.
+///
+/// The record is where a PR's description survives after the branch is gone,
+/// but nothing outside a `describe_pr` run ever wrote its `status` — so a PR
+/// merged from the GitHub UI, `gh pr merge`, or a queued auto-merge left the
+/// record claiming the PR was still open. This is the callback that closes it.
+///
+/// Best-effort and silent on the normal misses: most PRs were never described
+/// (no record on disk), `notion`/`anytype` have no local tree to patch, and an
+/// unmapped project has no record location at all.
+async fn promote_record(app: &tauri::AppHandle, project_path: &str, number: u32) {
+    let config = app.state::<AppState>().config.clone();
+    let Ok(loaded) = config.load().await else {
+        return;
+    };
+    let Some(thoughts) = loaded.config.thoughts.as_ref() else {
+        return;
+    };
+
+    let effective = thoughts.effective_config_for(project_path);
+    let (Some(root), Some((repos_dir, _)), Some(mapped)) = (
+        effective.backend.thoughts_root(),
+        effective.backend.tree_dirs(),
+        effective.mapped_name.as_deref(),
+    ) else {
+        return;
+    };
+    let path = pr_record::record_path(&root, repos_dir, mapped, number);
+
+    // Sync IO (read + patch + write of one small file) off the async runtime.
+    match tauri::async_runtime::spawn_blocking(move || pr_record::promote_merged_record(&path))
+        .await
+    {
+        Ok(Ok(true)) => log::info!("pr watch: PR #{number} merged — record promoted"),
+        // No record, or its status was already terminal.
+        Ok(Ok(false)) => {}
+        Ok(Err(e)) => log::debug!("pr watch: promoting PR #{number} record failed: {e}"),
+        Err(e) => log::debug!("pr watch: promote task join error: {e}"),
+    }
 }
 
 /// Run `gh pr view` for each workstream with bounded concurrency, returning
