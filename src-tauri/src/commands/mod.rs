@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod attachments;
 pub mod harnesses;
 pub mod library;

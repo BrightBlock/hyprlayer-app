@@ -40,13 +40,13 @@ import {
   PageSpinner,
   TextInput,
   Toggle,
+  SettingRow,
 } from "@/components/ui";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
 import { BinaryCard } from "@/features/system/BinaryCard";
 import { UpdatesCard } from "@/features/system/updates";
 import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection";
-import { SettingRow } from "@/features/settings/parts";
 import { THEMES, useThemeStore } from "@/lib/theme";
 import { IS_MACOS } from "@/lib/platform";
 import { AnytypeIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PersonIcon, PlusIcon, XIcon } from "@/components/icons";

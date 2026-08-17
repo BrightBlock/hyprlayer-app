@@ -30,13 +30,13 @@ import {
   Spinner,
   TextInput,
   Toggle,
+  SettingRow,
 } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
 import { BinaryCard } from "@/features/system/BinaryCard";
 import { AuthCard, AuthDetailRows } from "./AuthCard";
 import { ModelMultiSelectDialog } from "./ModelMultiSelectDialog";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
-import { SettingRow } from "@/features/settings/parts";
 
 const CLAUDE_SETTINGS_REL = ".claude/settings.json";
 const CHROME_DOCS = "https://code.claude.com/docs/en/chrome";

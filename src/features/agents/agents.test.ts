@@ -1,0 +1,306 @@
+import { describe, expect, it } from "vitest";
+
+import type { AgentFile, AgentLibrarySettings } from "@/lib/bindings";
+import {
+  AGENT_TOOLS,
+  agentRows,
+  collaboratorFor,
+  DEFAULT_OVERLAY,
+  dotColor,
+  duplicateAgent,
+  extraTools,
+  initialsOf,
+  inheritsAllTools,
+  isAllProjects,
+  isSystem,
+  isUnsaved,
+  mcpEnabled,
+  mcpTools,
+  modelLabel,
+  newAgent,
+  newRule,
+  overlayFor,
+  promptStats,
+  readOnlyTools,
+  hasUnknownMemoryScope,
+  memoryLabel,
+  MEMORY_SCOPES,
+  setMcp,
+  setTool,
+  shortDescription,
+  statusOf,
+  toolEnabled,
+  toolSummary,
+  visibleAgents,
+} from "./agents";
+
+const agent = (over: Partial<AgentFile>): AgentFile => ({
+  path: `/home/u/.claude/agents/${over.name ?? "a"}.md`,
+  source: "user",
+  plugin: null,
+  name: "a",
+  description: "",
+  tools: [],
+  model: null,
+  color: null,
+  memory: null,
+  prompt: "",
+  updatedAt: null,
+  shippedPath: null,
+  modified: false,
+  ...over,
+});
+
+const library = (over: Partial<AgentLibrarySettings> = {}): AgentLibrarySettings => ({
+  folders: [],
+  overlays: {},
+  defaultAgent: null,
+  ...over,
+});
+
+describe("newAgent", () => {
+  it("starts unsaved, inheriting model and tools", () => {
+    const a = newAgent("user");
+    expect(isUnsaved(a)).toBe(true);
+    expect(a.path).toBe("");
+    expect(a.model).toBeNull();
+    expect(inheritsAllTools(a)).toBe(true);
+  });
+
+  it("is saved once it has a path", () => {
+    expect(isUnsaved(agent({ name: "x" }))).toBe(false);
+  });
+});
+
+describe("tools", () => {
+  it("treats an empty list as inheriting, not as no tools", () => {
+    expect(inheritsAllTools(agent({ tools: [] }))).toBe(true);
+    expect(toolEnabled(agent({ tools: [] }), "Bash")).toBe(true);
+    expect(toolSummary(agent({ tools: [] }))).toMatch(/inherits every tool/i);
+  });
+
+  it("spells the rest out when the first tool is turned off", () => {
+    // The file has no way to say "all but one", so the toggle materializes the list.
+    const next = setTool(agent({ tools: [] }), "Bash", false);
+    expect(next).toHaveLength(AGENT_TOOLS.length - 1);
+    expect(next).not.toContain("Bash");
+  });
+
+  it("keeps entries it doesn't model when materializing", () => {
+    const a = agent({ tools: ["Read", "mcp__notion__*", "SomeNewTool"] });
+    expect(setTool(a, "Read", false)).toEqual(["mcp__notion__*", "SomeNewTool"]);
+    expect(readOnlyTools(a)).toEqual(["Read", "Glob", "Grep", "mcp__notion__*", "SomeNewTool"]);
+  });
+
+  it("reports unmodelled non-MCP entries so a save can't look lossy", () => {
+    expect(extraTools(["Read", "mcp__notion__*", "SomeNewTool"])).toEqual(["SomeNewTool"]);
+  });
+
+  it("counts only the tools the editor models", () => {
+    expect(toolSummary(agent({ tools: ["Read", "Grep", "mcp__x__y"] }))).toMatch(
+      new RegExp(`^2 of ${AGENT_TOOLS.length} enabled`),
+    );
+  });
+});
+
+describe("mcp", () => {
+  it("reads a server's state off the agent's own tool list", () => {
+    const a = agent({ tools: ["Read", "mcp__github__create_pr"] });
+    expect(mcpEnabled(a, "github")).toBe(true);
+    expect(mcpEnabled(a, "linear")).toBe(false);
+    expect(mcpTools(a, "github")).toEqual(["mcp__github__create_pr"]);
+  });
+
+  it("enables a server wholesale and removes every trace when turned off", () => {
+    const a = agent({ tools: ["Read"] });
+    const on = setMcp(a, "github", true);
+    expect(on).toEqual(["Read", "mcp__github__*"]);
+    expect(setMcp({ ...a, tools: on }, "github", false)).toEqual(["Read"]);
+  });
+});
+
+describe("memory scope", () => {
+  it("calls an absent scope Off rather than inventing one", () => {
+    expect(memoryLabel(null)).toBe("Off");
+    expect(hasUnknownMemoryScope(null)).toBe(false);
+  });
+
+  it("labels every scope the editor offers", () => {
+    for (const s of MEMORY_SCOPES) {
+      expect(memoryLabel(s.key)).toBe(s.label);
+      expect(hasUnknownMemoryScope(s.key)).toBe(false);
+    }
+  });
+
+  it("passes an unrecognized scope through instead of hiding it", () => {
+    expect(memoryLabel("some-future-scope")).toBe("some-future-scope");
+    expect(hasUnknownMemoryScope("some-future-scope")).toBe(true);
+  });
+});
+
+describe("shortDescription", () => {
+  it("keeps a short description whole", () => {
+    expect(shortDescription("Finds where code lives")).toBe("Finds where code lives");
+  });
+
+  it("collapses the newlines a frontmatter block scalar leaves behind", () => {
+    expect(shortDescription("  Finds where\n  code lives  ")).toBe("Finds where code lives");
+  });
+
+  it("stops at the first sentence of a paragraph", () => {
+    expect(
+      shortDescription("Locates files and directories. Call it with a human language prompt."),
+    ).toBe("Locates files and directories.");
+  });
+
+  it("elides a first sentence that is itself a paragraph, on a word boundary", () => {
+    const out = shortDescription(
+      "Use this agent when the user asks questions about Claude Code, the Agent SDK, " +
+        "the Claude API, or Claude in Slack, and wants a definitive answer.",
+    );
+    expect(out).toBe(
+      "Use this agent when the user asks questions about Claude Code, the Agent SDK, the Claude…",
+    );
+    expect(out.length).toBeLessThanOrEqual(91);
+  });
+
+  it("is empty for an agent with no description", () => {
+    expect(shortDescription("")).toBe("");
+  });
+});
+
+describe("visibleAgents", () => {
+  const all = [
+    agent({ name: "codebase-locator", description: "Finds where code lives" }),
+    agent({ name: "repo-linter", source: "project", path: "/repo/.claude/agents/repo-linter.md" }),
+    agent({ name: "code-reviewer", source: "plugin", plugin: "pr-review-toolkit" }),
+  ];
+
+  it("splits your agents from the plugins' system agents", () => {
+    expect(
+      visibleAgents(all, { tab: "yours", scope: "global", search: "" }).map((a) => a.name),
+    ).toEqual(["codebase-locator", "repo-linter"]);
+    expect(
+      visibleAgents(all, { tab: "system", scope: "global", search: "" }).map((a) => a.name),
+    ).toEqual(["code-reviewer"]);
+  });
+
+  it("narrows to the project's own agents", () => {
+    expect(
+      visibleAgents(all, { tab: "yours", scope: "project", search: "" }).map((a) => a.name),
+    ).toEqual(["repo-linter"]);
+  });
+
+  it("matches name and description case-insensitively", () => {
+    expect(
+      visibleAgents(all, { tab: "yours", scope: "global", search: "LOCATOR" }).map((a) => a.name),
+    ).toEqual(["codebase-locator"]);
+    expect(
+      visibleAgents(all, { tab: "yours", scope: "global", search: "Where Code" }).map((a) => a.name),
+    ).toEqual(["codebase-locator"]);
+    expect(visibleAgents(all, { tab: "yours", scope: "global", search: "nope" })).toHaveLength(0);
+  });
+});
+
+describe("agentRows", () => {
+  const loose = agent({ name: "loose" });
+  const filed = agent({ name: "filed" });
+  const lib = library({
+    folders: ["Review"],
+    overlays: { [filed.path]: { folder: "Review" } },
+  });
+
+  it("puts loose agents first, then each folder's header", () => {
+    expect(agentRows([loose, filed], lib, ["Review"], new Set(["Review"]))).toEqual([
+      { kind: "agent", agent: loose, indent: 0 },
+      { kind: "group", folder: "Review", count: 1, open: true },
+      { kind: "agent", agent: filed, indent: 14 },
+    ]);
+  });
+
+  it("keeps a collapsed folder's header but hides its agents", () => {
+    const rows = agentRows([loose, filed], lib, ["Review"], new Set());
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toEqual({ kind: "group", folder: "Review", count: 1, open: false });
+  });
+
+  it("drops a folder nothing is in rather than rendering a dead header", () => {
+    expect(agentRows([loose], lib, ["Review"], new Set(["Review"]))).toHaveLength(1);
+  });
+});
+
+describe("overlays", () => {
+  it("fills every field a stored partial leaves out", () => {
+    const lib = library({ overlays: { "/a.md": { effort: "max" } } });
+    expect(overlayFor(lib, "/a.md")).toEqual({ ...DEFAULT_OVERLAY, effort: "max" });
+    expect(overlayFor(lib, "/missing.md")).toEqual(DEFAULT_OVERLAY);
+  });
+
+  it("appends rules with an id that doesn't collide", () => {
+    expect(newRule([]).id).toBe("r1");
+    expect(newRule([{ id: "r1" }, { id: "r7" }]).id).toBe("r8");
+  });
+});
+
+describe("status and scope", () => {
+  it("calls a plugin agent active and yours a draft until published", () => {
+    const plugin = agent({ source: "plugin", plugin: "pr-review-toolkit" });
+    expect(statusOf(plugin, DEFAULT_OVERLAY)).toEqual({ label: "Active", tone: "ok" });
+    expect(statusOf(agent({}), { ...DEFAULT_OVERLAY, status: "draft" })).toEqual({
+      label: "Draft",
+      tone: "warn",
+    });
+    expect(isSystem(plugin)).toBe(true);
+  });
+
+  it("reads scope off the directory that holds the file", () => {
+    expect(isAllProjects(agent({}))).toBe(true);
+    expect(isAllProjects(agent({ source: "project" }))).toBe(false);
+  });
+
+  it("dots a draft amber and otherwise follows the frontmatter colour", () => {
+    expect(dotColor(agent({}), { ...DEFAULT_OVERLAY, status: "draft" })).toBe("var(--color-warn)");
+    expect(dotColor(agent({ color: "Green" }), DEFAULT_OVERLAY)).toBe("var(--color-ok)");
+  });
+});
+
+describe("duplicateAgent", () => {
+  it("copies under a new name and no path, so it saves as a new file", () => {
+    const source = agent({ name: "codebase-locator", tools: ["Read", "Grep"] });
+    const copy = duplicateAgent(source);
+    expect(copy.name).toBe("codebase-locator copy");
+    expect(copy.path).toBe("");
+    // Deep copy: editing the copy's tools must not reach back into the source.
+    copy.tools.push("Bash");
+    expect(source.tools).toEqual(["Read", "Grep"]);
+  });
+
+  it("lands a plugin agent's copy in your own library", () => {
+    const copy = duplicateAgent(agent({ source: "plugin", plugin: "pr-review-toolkit" }));
+    expect(copy.source).toBe("user");
+    expect(copy.plugin).toBeNull();
+  });
+});
+
+describe("labels", () => {
+  it("names a known model and passes an unknown id through", () => {
+    expect(modelLabel(null)).toBe("Inherit");
+    expect(modelLabel("sonnet")).toBe("Sonnet 5");
+    expect(modelLabel("opus")).toBe("Opus 5 (1M)");
+    expect(modelLabel("claude-something-new")).toBe("claude-something-new");
+  });
+
+  it("never reports zero tokens for a non-empty prompt", () => {
+    expect(promptStats("")).toBe("0 chars · ~1 tokens");
+    expect(promptStats("x".repeat(38))).toBe("38 chars · ~10 tokens");
+  });
+
+  it("derives a person from an invited address", () => {
+    expect(collaboratorFor("maya.ortiz@brightblock.ai")).toEqual({
+      name: "maya ortiz",
+      email: "maya.ortiz@brightblock.ai",
+      role: "Editor",
+    });
+    expect(initialsOf("Maya Ortiz")).toBe("MO");
+  });
+});

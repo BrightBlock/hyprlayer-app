@@ -20,12 +20,12 @@ import {
   DropdownSelect,
   ErrorNote,
   Spinner,
+  SettingRow,
 } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
 import { BinaryCard } from "@/features/system/BinaryCard";
 import { ProviderPickerModal } from "./ProviderPickerModal";
 import { ModelPickerModal } from "./ModelPickerModal";
-import { SettingRow } from "@/features/settings/parts";
 
 const DOCS_URL = "https://opencode.ai/docs";
 

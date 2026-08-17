@@ -17,6 +17,27 @@ export function PlusIcon({ size = 16, strokeWidth = 2 }: IconProps) {
   );
 }
 
+/** The Agents rail entry: a boxy head with an antenna, so it reads as "a saved
+ *  configuration that runs" rather than as another chat bubble. */
+export function AgentIcon({ size = 19, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+    >
+      <rect x="3.5" y="8" width="17" height="12" rx="3.5" stroke="currentColor" strokeWidth={strokeWidth} />
+      <path d="M12 4.6V8" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <circle cx="12" cy="3.4" r="1.3" fill="currentColor" />
+      <circle cx="9" cy="13.6" r="1.35" fill="currentColor" />
+      <circle cx="15" cy="13.6" r="1.35" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function ZapIcon({ size = 14, strokeWidth = 1.7, className }: IconProps) {
   return (
     // The bolt spans the viewBox like its rail siblings (Cube/Book fill ~80% of

@@ -169,6 +169,13 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::onboarding::init_thoughts_repo,
             commands::prompts::read_prompts_file,
             commands::prompts::write_prompts_file,
+            commands::agents::list_agent_files,
+            commands::agents::save_agent_file,
+            commands::agents::delete_agent_file,
+            commands::agents::new_agent_file_path,
+            commands::agents::agent_context_files,
+            commands::agents::agent_mcp_servers,
+            commands::agents::export_agent_file,
         ])
         .events(collect_events![
             events::ConfigChanged,

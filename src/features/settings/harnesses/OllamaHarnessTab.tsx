@@ -19,9 +19,9 @@ import {
   Spinner,
   TextInput,
   Toggle,
+  SettingRow,
 } from "@/components/ui";
 import { BinaryCard } from "@/features/system/BinaryCard";
-import { SettingRow } from "@/features/settings/parts";
 
 const DOCS_URL = "https://ollama.com";
 const DEFAULT_ENDPOINT = "http://localhost:11434";

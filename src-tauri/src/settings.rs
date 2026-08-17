@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use hyprlayer_core::agents::AgentOverlay;
 use hyprlayer_core::process::binaries::BinaryKind;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -59,6 +60,20 @@ pub struct CustomPrompt {
     pub pinned: bool,
 }
 
+/// The Agents view's app-side state. The agent definitions themselves are the
+/// `.claude/agents/*.md` files — this holds only what those files have no key
+/// for, keyed by the agent's absolute path.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentLibrarySettings {
+    /// List-only folders, including ones no agent has been moved into yet.
+    pub folders: Vec<String>,
+    /// Launch settings per agent path (effort, harness, permissions, rules).
+    pub overlays: HashMap<String, AgentOverlay>,
+    /// Path of the agent the composer opens on. Only one can hold it.
+    pub default_agent: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
@@ -73,6 +88,9 @@ pub struct AppSettings {
     pub keybindings: KeybindingSettings,
     /// The prompt library: built-in prompt overrides + custom prompts.
     pub prompts: PromptSettings,
+    /// The agent library's app-side state — folders and the launch settings
+    /// claude's own agent frontmatter has no key for.
+    pub agents: AgentLibrarySettings,
     /// Per-provider defaults (default model, etc.). Surfaced in Settings → Models.
     pub providers: ProviderSettings,
     /// OS-toast behaviour when a session transitions to "needs you".

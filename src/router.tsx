@@ -25,6 +25,9 @@ const LibraryPage = lazy(() =>
 const PromptsPage = lazy(() =>
   import("./routes/PromptsPage").then((m) => ({ default: m.PromptsPage })),
 );
+const AgentsPage = lazy(() =>
+  import("./routes/AgentsPage").then((m) => ({ default: m.AgentsPage })),
+);
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -82,6 +85,22 @@ const promptsRoute = createRoute({
   }),
 });
 
+/** The agent library's selection lives in the URL; a bare `/agents` is the list. */
+export type AgentsSearch = {
+  agent?: string;
+  tab?: string;
+};
+
+const agentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/agents",
+  component: AgentsPage,
+  validateSearch: (search: Record<string, unknown>): AgentsSearch => ({
+    agent: optionalString(search.agent),
+    tab: optionalString(search.tab),
+  }),
+});
+
 const libraryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/library",
@@ -123,6 +142,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
   archiveRoute,
   promptsRoute,
+  agentsRoute,
   libraryRoute,
   projectRoute,
 ]);

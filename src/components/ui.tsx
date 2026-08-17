@@ -401,6 +401,28 @@ export function DropdownSelect({
   );
 }
 
+/** One labelled settings row (title + description left, control right), shared
+ *  by Settings, the Harnesses tabs and the agent editor. */
+export function SettingRow({
+  title,
+  children,
+  control,
+}: {
+  title: ReactNode;
+  children?: ReactNode;
+  control: ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-3.5">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-sm text-ink">{title}</div>
+        {children && <p className="mt-0.5 text-xs text-ink-dim">{children}</p>}
+      </div>
+      <div className="shrink-0 pt-0.5">{control}</div>
+    </div>
+  );
+}
+
 /** Labeled form row. NOTE: children render inside a `<label>`, and WebKit
  *  forwards clicks on any label descendant to the first labelable child —
  *  overlays/menus opened from inside a Field must portal out (see

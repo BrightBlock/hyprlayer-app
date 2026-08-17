@@ -778,6 +778,23 @@ export const commands = {
 	 *  has already ensured the path ends in `.hlprompts` and built the JSON body.
 	 */
 	writePromptsFile: (path: string, contents: string) => typedError<null, AppError>(__TAURI_INVOKE("write_prompts_file", { path, contents })),
+	/**  Every agent visible from `project_path` — that project's own plus the user's. */
+	listAgentFiles: (projectPath: string | null) => typedError<AgentFile[], AppError>(__TAURI_INVOKE("list_agent_files", { projectPath })),
+	/**  Write `agent` back to its own `.md` file, returning it as re-read from disk. */
+	saveAgentFile: (agent: AgentFile) => typedError<AgentFile, AppError>(__TAURI_INVOKE("save_agent_file", { agent })),
+	/**  Delete an agent definition — the file IS the agent. */
+	deleteAgentFile: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_agent_file", { path })),
+	/**
+	 *  The path a new agent called `name` would occupy in `source`'s directory.
+	 *  Returns `None` when that root doesn't apply (a project agent with no project).
+	 */
+	newAgentFilePath: (name: string, source: string, projectPath: string | null) => typedError<string | null, AppError>(__TAURI_INVOKE("new_agent_file_path", { name, source, projectPath })),
+	/**  Docs in the project worth appending to an agent's prompt. */
+	agentContextFiles: (projectPath: string | null) => typedError<AgentContextFile[], AppError>(__TAURI_INVOKE("agent_context_files", { projectPath })),
+	/**  MCP servers claude is configured with, for the Capabilities tab. */
+	agentMcpServers: (projectPath: string | null) => typedError<AgentMcpServer[], AppError>(__TAURI_INVOKE("agent_mcp_servers", { projectPath })),
+	/**  Write a portable `.agent.json` to Downloads; returns where it landed. */
+	exportAgentFile: (agent: AgentFile, overlay: AgentOverlay) => typedError<string, AppError>(__TAURI_INVOKE("export_agent_file", { agent, overlay })),
 };
 
 /** Events */
@@ -801,6 +818,126 @@ export type ActiveSessionView = {
 	session: Session,
 	workstreamTitle: string,
 	projectPath: string,
+};
+
+export type AgentCollaborator = {
+	name: string,
+	email: string,
+	role: string,
+};
+
+/**
+ *  A doc the editor offers to append to the prompt. Discovered in the worktree,
+ *  never invented — an absent file is simply not offered.
+ */
+export type AgentContextFile = {
+	/**  Worktree-relative path, which is also the key the overlay enables. */
+	path: string,
+	note: string,
+};
+
+export type AgentFile = {
+	/**  Absolute path to the `.md` file — the identity a save or delete targets. */
+	path: string,
+	/**  `project` | `user` | `plugin` — which root supplied it. */
+	source: string,
+	/**  The plugin that ships this agent, when `source` is `plugin`. */
+	plugin: string | null,
+	/**  Frontmatter `name`, falling back to the filename stem. */
+	name: string,
+	description: string,
+	/**
+	 *  Frontmatter `tools`, comma-separated in the file. EMPTY MEANS INHERIT
+	 *  every tool — it is not the same as an agent with no tools.
+	 */
+	tools: string[],
+	/**  Frontmatter `model` (`sonnet`, `opus`, …); absent inherits the parent's. */
+	model: string | null,
+	/**  Frontmatter `color`, used by claude's own picker. */
+	color: string | null,
+	/**
+	 *  Frontmatter `memory` — the persistent-memory scope claude keeps for this
+	 *  agent between invocations: `user` (every project), `project` (this repo's
+	 *  `.claude/agent-memory/<name>/`), or `local` (session only). Absent means
+	 *  the agent remembers nothing across runs. Stored as claude writes it, not
+	 *  as an enum: an unrecognized scope is preserved rather than dropped.
+	 */
+	memory: string | null,
+	/**  Everything after the frontmatter block — the agent's system prompt. */
+	prompt: string,
+	/**
+	 *  File mtime in epoch milliseconds, for the list's Updated column. `None`
+	 *  when the file has never been written (a new agent) or the OS withholds it.
+	 */
+	updatedAt: number | null,
+	/**
+	 *  For a plugin agent, the file the plugin ships. `path` points at the
+	 *  user's override instead once one exists.
+	 */
+	shippedPath: string | null,
+	/**  A plugin agent the user has overridden — `path` is the override. */
+	modified: boolean,
+};
+
+/**
+ *  The Agents view's app-side state. The agent definitions themselves are the
+ *  `.claude/agents/*.md` files — this holds only what those files have no key
+ *  for, keyed by the agent's absolute path.
+ */
+export type AgentLibrarySettings = {
+	/**  List-only folders, including ones no agent has been moved into yet. */
+	folders?: string[],
+	/**  Launch settings per agent path (effort, harness, permissions, rules). */
+	overlays?: { [key in string]: AgentOverlay },
+	/**  Path of the agent the composer opens on. Only one can hold it. */
+	defaultAgent?: string | null,
+};
+
+/**
+ *  An MCP server claude is configured with, for the Capabilities tab. Whether a
+ *  given agent may use it is expressed in its own `tools` list as
+ *  `mcp__<name>__*`, so there is nothing extra to persist.
+ */
+export type AgentMcpServer = {
+	name: string,
+	/**  `project` | `user` — which config declares it. */
+	scope: string,
+	/**  Transport as declared (`stdio`, `http`, `sse`). */
+	transport: string,
+};
+
+/**
+ *  Launch settings the app keeps for an agent that claude's own frontmatter has
+ *  no key for — effort, harness, permission posture, folder. Stored app-side
+ *  keyed by the agent's file path so the `.md` stays a plain claude agent.
+ */
+export type AgentOverlay = {
+	effort?: string,
+	harness?: string,
+	/**  List-only grouping; `""` is no folder. */
+	folder?: string,
+	/**  `published` | `draft` — a draft is hidden from the composer. */
+	status?: string,
+	permissionMode?: string,
+	rules?: AgentRule[],
+	network?: boolean,
+	outsideWorktree?: boolean,
+	/**  Paths from [`context_candidates`] stitched onto the prompt at launch. */
+	context?: string[],
+	/**  Agent file paths this one may spawn with the `Task` tool. */
+	delegates?: string[],
+	visibility?: string,
+	collaborators?: AgentCollaborator[],
+};
+
+/**
+ *  One permission rule. `action` is `allow` | `ask` | `deny`; `pattern` uses the
+ *  harness's own `Tool(arg:*)` syntax.
+ */
+export type AgentRule = {
+	id: string,
+	action: string,
+	pattern: string,
 };
 
 /**
@@ -840,6 +977,11 @@ export type AppSettings = {
 	keybindings?: KeybindingSettings,
 	/**  The prompt library: built-in prompt overrides + custom prompts. */
 	prompts?: PromptSettings,
+	/**
+	 *  The agent library's app-side state — folders and the launch settings
+	 *  claude's own agent frontmatter has no key for.
+	 */
+	agents?: AgentLibrarySettings,
 	/**  Per-provider defaults (default model, etc.). Surfaced in Settings → Models. */
 	providers?: ProviderSettings,
 	/**  OS-toast behaviour when a session transitions to "needs you". */

@@ -20,6 +20,7 @@ import {
   Spinner,
   type DropdownOption,
   TextInput,
+  SettingRow,
 } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
 import { BinaryCard } from "@/features/system/BinaryCard";
@@ -27,7 +28,6 @@ import { AuthCard, AuthDetailRows } from "./AuthCard";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
 import { codexEfforts } from "@/lib/domain/models";
 import { ModelMultiSelectDialog } from "./ModelMultiSelectDialog";
-import { SettingRow } from "@/features/settings/parts";
 
 const DOCS_URL = "https://developers.openai.com/codex";
 

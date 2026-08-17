@@ -58,6 +58,7 @@ import { RepoAvatar } from "@/components/RepoAvatar";
 import { HyprlayerMark } from "@/components/Logo";
 import { WindowControls } from "@/components/WindowControls";
 import {
+  AgentIcon,
   BookIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -376,6 +377,7 @@ function routeSection(pathname: string): string {
   if (pathname.startsWith("/projects/")) return "Agent";
   if (pathname.startsWith("/library")) return "Library";
   if (pathname.startsWith("/prompts")) return "Prompt Library";
+  if (pathname.startsWith("/agents")) return "Agents";
   if (pathname.startsWith("/settings")) return "Settings";
   if (pathname.startsWith("/archive")) return "Archive";
   if (pathname.startsWith("/onboarding")) return "Setup";
@@ -803,7 +805,7 @@ export function Root() {
     else fallback();
   };
   const toggleNav = (
-    target: "/library" | "/settings" | "/archive" | "/prompts",
+    target: "/library" | "/settings" | "/archive" | "/prompts" | "/agents",
   ) => {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
@@ -1481,6 +1483,15 @@ export function Root() {
               {/* Sized with its neighbours (Cube / Book at 19), not the 16 of
                   the foot icons — the top group runs visually larger. */}
               <ZapIcon size={19} strokeWidth={1.6} />
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleNav("/agents")}
+              className={railNavClass(pathname.startsWith("/agents"))}
+              title="Agents"
+              aria-label="Agents"
+            >
+              <AgentIcon size={19} strokeWidth={1.7} />
             </button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-3">

@@ -14,6 +14,9 @@ import type {
   PromptContext,
   PromptDefaults,
 } from "@/lib/bindings";
+// Shared with the agent library, so the tokens live in lib/domain; re-exported
+// here for this feature's existing call sites.
+import { PROMPT_VARS } from "@/lib/domain/promptVars";
 
 /** The overridable built-in action prompts. `commandId` is the keyboard-catalog
  *  command that runs them — a built-in's "shortcut" IS that command's binding,
@@ -41,19 +44,7 @@ export const BUILTIN_PROMPTS: ReadonlyArray<{
   },
 ];
 
-/** The variables a prompt body may reference. Values resolve from the focused
- *  workstream's worktree when the prompt runs (`workstream_prompt_context`). */
-export const PROMPT_VARS: ReadonlyArray<{
-  token: string;
-  key: keyof PromptContext;
-  desc: string;
-}> = [
-  { token: "{{branch}}", key: "branch", desc: "Current worktree branch" },
-  { token: "{{base_branch}}", key: "baseBranch", desc: "PR target branch" },
-  { token: "{{changed_files}}", key: "changedFiles", desc: "Working-tree change summary" },
-  { token: "{{diff}}", key: "diff", desc: "Working-tree diff vs HEAD (truncated)" },
-  { token: "{{last_commit}}", key: "lastCommit", desc: "Most recent commit subject" },
-];
+export { PROMPT_VARS };
 
 /** An argument slot the user fills in when the prompt runs: `{{input}}`, or
  *  `{{input:Which module?}}` to label the field. */
