@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use hyprlayer_core::agent::{AgentDriver, Harness};
+use hyprlayer_core::agents;
 use hyprlayer_core::claude::{
     ClaudeDriver, ExitOutcome, PermissionMode, SessionEvent, SessionState, SpawnConfig,
 };
@@ -251,7 +252,25 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             // skills can write research/plan docs through the symlinks.
             let effective = effective_for(state, &project_path).await?;
             let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
-            let policy = pipeline::policy_for(session.stage);
+            let mut policy = pipeline::policy_for(session.stage);
+            // Draft agents are denied session-wide: they must not show up in the
+            // Agent tool at all, not merely be hidden from the composer.
+            let settings = state.settings.get().await;
+            let library = &settings.agents;
+            let drafts: Vec<String> =
+                agents::list_agents(Some(std::path::Path::new(&project_path)))
+                    .into_iter()
+                    .filter(|a| {
+                        library
+                            .overlays
+                            .get(&a.path)
+                            .is_some_and(|o| o.status == "draft")
+                    })
+                    .map(|a| a.name)
+                    .collect();
+            policy
+                .disallowed_tools
+                .extend(agents::agent_deny_rules(&drafts));
             // The stage sets a default permission posture; an explicit user
             // choice in the composer (e.g. "Bypass permissions") overrides just
             // the mode, keeping the stage's allow/deny tool lists as guardrails.
@@ -264,7 +283,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             // spawned `claude` uses them instead of the user's logged-in session.
             let path = state.binaries.augmented_path().await;
             let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-            let claude_cfg = state.settings.get().await.providers.claude;
+            let claude_cfg = settings.providers.claude;
             env.extend(super::claude_auth_env(&claude_cfg));
 
             let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {

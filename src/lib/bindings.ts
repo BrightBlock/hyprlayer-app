@@ -803,6 +803,8 @@ export const commands = {
 	agentContextFiles: (projectPath: string | null) => typedError<AgentContextFile[], AppError>(__TAURI_INVOKE("agent_context_files", { projectPath })),
 	/**  MCP servers claude is configured with, for the Capabilities tab. */
 	agentMcpServers: (projectPath: string | null) => typedError<AgentMcpServer[], AppError>(__TAURI_INVOKE("agent_mcp_servers", { projectPath })),
+	/**  Skills an agent's `skills:` key can name, for the Capabilities tab. */
+	agentSkills: (projectPath: string | null) => typedError<AgentSkill[], AppError>(__TAURI_INVOKE("agent_skills", { projectPath })),
 	/**  Write a portable `.agent.json` to Downloads; returns where it landed. */
 	exportAgentFile: (agent: AgentFile, overlay: AgentOverlay) => typedError<string, AppError>(__TAURI_INVOKE("export_agent_file", { agent, overlay })),
 };
@@ -862,6 +864,12 @@ export type AgentFile = {
 	 *  every tool — it is not the same as an agent with no tools.
 	 */
 	tools: string[],
+	/**
+	 *  Frontmatter `skills` — skill names claude preloads into this agent when
+	 *  it runs. Canonical names: the skill's directory, or `plugin:skill`.
+	 *  Empty means the key is absent; unlike `tools`, that is simply "none".
+	 */
+	skills: string[],
 	/**  Frontmatter `model` (`sonnet`, `opus`, …); absent inherits the parent's. */
 	model: string | null,
 	/**  Frontmatter `color`, used by claude's own picker. */
@@ -949,6 +957,30 @@ export type AgentRule = {
 	id: string,
 	action: string,
 	pattern: string,
+};
+
+/**  One skill an agent's `skills:` key can name. */
+export type AgentSkill = {
+	/**
+	 *  The canonical name claude resolves: the skill's directory, or
+	 *  `plugin:skill` for a plugin's.
+	 */
+	name: string,
+	description: string,
+	/**  `project` | `user` | `plugin`. */
+	source: string,
+	plugin: string | null,
+	/**
+	 *  Body length in characters. Preloading injects the whole body on every
+	 *  spawn, so this is a recurring context cost, not a one-off — the card
+	 *  renders it rather than letting a toggle quietly cost thousands of tokens.
+	 */
+	chars: number,
+	/**
+	 *  The skill sets `disable-model-invocation: true` — its author reserved it
+	 *  for the user to invoke. Preloading injects it anyway, so the card says so.
+	 */
+	userOnly: boolean,
 };
 
 /**

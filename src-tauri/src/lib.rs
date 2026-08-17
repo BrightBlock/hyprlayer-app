@@ -176,6 +176,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::agents::new_agent_file_path,
             commands::agents::agent_context_files,
             commands::agents::agent_mcp_servers,
+            commands::agents::agent_skills,
             commands::agents::export_agent_file,
         ])
         .events(collect_events![

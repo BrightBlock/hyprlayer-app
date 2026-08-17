@@ -31,6 +31,7 @@ const KEY_TOOLS: &str = "tools";
 const KEY_MODEL: &str = "model";
 const KEY_COLOR: &str = "color";
 const KEY_MEMORY: &str = "memory";
+const KEY_SKILLS: &str = "skills";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -48,6 +49,10 @@ pub struct AgentFile {
     /// Frontmatter `tools`, comma-separated in the file. EMPTY MEANS INHERIT
     /// every tool — it is not the same as an agent with no tools.
     pub tools: Vec<String>,
+    /// Frontmatter `skills` — skill names claude preloads into this agent when
+    /// it runs. Canonical names: the skill's directory, or `plugin:skill`.
+    /// Empty means the key is absent; unlike `tools`, that is simply "none".
+    pub skills: Vec<String>,
     /// Frontmatter `model` (`sonnet`, `opus`, …); absent inherits the parent's.
     pub model: Option<String>,
     /// Frontmatter `color`, used by claude's own picker.
@@ -208,7 +213,14 @@ pub fn parse_agent(path: &Path, source: &str, text: &str) -> AgentFile {
         plugin: None,
         name: pick(KEY_NAME).unwrap_or(stem),
         description: pick(KEY_DESCRIPTION).unwrap_or_default(),
-        tools: split_tools(pick(KEY_TOOLS).as_deref()),
+        tools: pick(KEY_TOOLS)
+            .as_deref()
+            .map(split_list)
+            .unwrap_or_default(),
+        skills: pick(KEY_SKILLS)
+            .as_deref()
+            .map(split_list)
+            .unwrap_or_default(),
         model: pick(KEY_MODEL),
         color: pick(KEY_COLOR),
         memory: pick(KEY_MEMORY),
@@ -221,14 +233,44 @@ pub fn parse_agent(path: &Path, source: &str, text: &str) -> AgentFile {
     }
 }
 
-fn split_tools(raw: Option<&str>) -> Vec<String> {
-    raw.map(|t| {
-        t.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    })
-    .unwrap_or_default()
+/// Split a frontmatter list value the way claude's own agent loader does:
+/// entries separated by commas or whitespace, except inside parentheses, so
+/// `Bash(git commit:*)` stays one entry. A YAML sequence arrives pre-rendered
+/// as JSON (`["a","b"]`) because unknown keys are stored that way.
+fn split_list(raw: &str) -> Vec<String> {
+    if let Ok(items) = serde_json::from_str::<Vec<String>>(raw) {
+        return items.into_iter().flat_map(|s| split_scalar(&s)).collect();
+    }
+    split_scalar(raw)
+}
+
+fn split_scalar(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    let mut push = |current: &mut String| {
+        let entry = current.trim();
+        if !entry.is_empty() {
+            out.push(entry.to_string());
+        }
+        current.clear();
+    };
+    for ch in raw.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            }
+            c if depth == 0 && (c == ',' || c.is_whitespace()) => push(&mut current),
+            _ => current.push(ch),
+        }
+    }
+    push(&mut current);
+    out
 }
 
 /// The file's mtime in epoch ms. Absent for a path that isn't on disk yet.
@@ -355,14 +397,14 @@ pub fn render_agent(original: &str, agent: &AgentFile) -> Result<String> {
         KEY_DESCRIPTION.into(),
         FmValue::Str(agent.description.clone()),
     ));
-    // An empty tools list means "inherit every tool", which the file expresses
-    // by omitting the key — not by an empty string.
-    if agent.tools.is_empty() {
-        patch.remove.push(KEY_TOOLS.into());
-    } else {
-        patch
-            .set
-            .push((KEY_TOOLS.into(), FmValue::Str(agent.tools.join(", "))));
+    // An empty list means the key is absent: for `tools` that reads as "inherit
+    // every tool", for `skills` as "preload none". Neither is an empty string.
+    for (key, list) in [(KEY_TOOLS, &agent.tools), (KEY_SKILLS, &agent.skills)] {
+        if list.is_empty() {
+            patch.remove.push(key.into());
+        } else {
+            patch.set.push((key.into(), FmValue::Str(list.join(", "))));
+        }
     }
     for (key, value) in [
         (KEY_MODEL, &agent.model),
@@ -519,6 +561,18 @@ pub fn mcp_servers(worktree: Option<&Path>) -> Vec<AgentMcpServer> {
     out
 }
 
+/// `Agent(<name>)` deny rules for agents that must not be spawnable. Claude's
+/// rule parser splits on the first `(` and last `)`, so a name carrying either —
+/// or a comma — can't be expressed as a rule and is skipped rather than
+/// silently denying something else.
+pub fn agent_deny_rules(names: &[String]) -> Vec<String> {
+    names
+        .iter()
+        .filter(|n| !n.contains(['(', ')', ',']))
+        .map(|n| format!("Agent({n})"))
+        .collect()
+}
+
 /// Write a portable `<slug>.agent.json` (definition + launch settings, no
 /// credentials) to the user's Downloads folder. Returns where it landed.
 pub fn export_agent(agent: &AgentFile, overlay: &AgentOverlay) -> Result<String> {
@@ -531,6 +585,7 @@ pub fn export_agent(agent: &AgentFile, overlay: &AgentOverlay) -> Result<String>
         "name": agent.name,
         "description": agent.description,
         "tools": agent.tools,
+        "skills": agent.skills,
         "model": agent.model,
         "color": agent.color,
         "prompt": agent.prompt,
@@ -589,6 +644,24 @@ mod tests {
         );
     }
 
+    /// Real claude keys the app doesn't model — the ones an agent author is
+    /// likely to hand-write next — must survive a save byte-identical.
+    #[test]
+    fn render_round_trips_and_keeps_specific_claude_keys_the_app_does_not_model() {
+        let original = "---\nname: a\ndescription: d\ndisallowedTools: Bash(git push:*)\nmaxTurns: 5\nisolation: strict\nobserver: true\n---\n\nBody.\n";
+        let mut agent = parse_agent(Path::new("/x/a.md"), "user", original);
+        agent.description = "updated".into();
+        let out = render_agent(original, &agent).unwrap();
+        for line in [
+            "disallowedTools: Bash(git push:*)",
+            "maxTurns: 5",
+            "isolation: strict",
+            "observer: true",
+        ] {
+            assert!(out.contains(line), "key dropped: {line}\n{out}");
+        }
+    }
+
     #[test]
     fn clearing_tools_removes_the_key_rather_than_writing_an_empty_one() {
         let mut agent = parse_agent(Path::new("/x/a.md"), "user", SAMPLE);
@@ -604,6 +677,99 @@ mod tests {
     }
 
     #[test]
+    fn clearing_skills_removes_the_key_rather_than_writing_an_empty_one() {
+        let with_skills =
+            "---\nname: a\ndescription: d\nskills: research_codebase, create_plan\n---\n\nBody.\n";
+        let mut agent = parse_agent(Path::new("/x/a.md"), "user", with_skills);
+        assert_eq!(agent.skills, ["research_codebase", "create_plan"]);
+        agent.skills.clear();
+        let out = render_agent(with_skills, &agent).unwrap();
+        assert!(
+            !out.contains("skills:"),
+            "empty skills should be absent:\n{out}"
+        );
+        assert!(parse_agent(Path::new("/x/a.md"), "user", &out)
+            .skills
+            .is_empty());
+    }
+
+    #[test]
+    fn skills_round_trip_from_a_comma_separated_value_and_survive_a_rename() {
+        let original =
+            "---\nname: locator\ndescription: d\nskills: research_codebase, create_plan\n---\n\nBody.\n";
+        let mut agent = parse_agent(Path::new("/x/locator.md"), "user", original);
+        assert_eq!(agent.skills, ["research_codebase", "create_plan"]);
+        agent.name = "renamed".into();
+        let out = render_agent(original, &agent).unwrap();
+        let back = parse_agent(Path::new("/x/locator.md"), "user", &out);
+        assert_eq!(back.name, "renamed");
+        assert_eq!(back.skills, ["research_codebase", "create_plan"]);
+    }
+
+    /// A YAML flow sequence lands in `extra` pre-rendered as JSON, since the
+    /// frontmatter parser doesn't know `tools`/`skills` are lists. Both keys
+    /// must read that form correctly — the pre-existing `tools` bug this fixes.
+    #[test]
+    fn flow_sequence_values_parse_as_lists() {
+        let with_tools_seq = "---\nname: a\ndescription: d\ntools: [Read, Grep]\n---\n\nBody.\n";
+        let a = parse_agent(Path::new("/x/a.md"), "user", with_tools_seq);
+        assert_eq!(a.tools, ["Read", "Grep"]);
+
+        let with_skills_seq =
+            "---\nname: a\ndescription: d\nskills: [research_codebase, create_plan]\n---\n\nBody.\n";
+        let b = parse_agent(Path::new("/x/a.md"), "user", with_skills_seq);
+        assert_eq!(b.skills, ["research_codebase", "create_plan"]);
+    }
+
+    /// Claude's own splitter is paren-aware: `Bash(git commit:*)` and
+    /// `Task(researcher, planner)` are single entries, and re-rendering must
+    /// not mangle them back into fragments.
+    #[test]
+    fn tools_split_is_paren_aware_and_re_renders_unchanged() {
+        let original = "---\nname: a\ndescription: d\ntools: Read, Bash(git commit:*), Task(researcher, planner)\n---\n\nBody.\n";
+        let agent = parse_agent(Path::new("/x/a.md"), "user", original);
+        assert_eq!(
+            agent.tools,
+            ["Read", "Bash(git commit:*)", "Task(researcher, planner)"]
+        );
+        let out = render_agent(original, &agent).unwrap();
+        assert!(
+            out.contains("tools: Read, Bash(git commit:*), Task(researcher, planner)"),
+            "paren-bearing entries were mangled on re-render:\n{out}"
+        );
+    }
+
+    #[test]
+    fn whitespace_separated_tools_parse_to_two_entries() {
+        let original = "---\nname: a\ndescription: d\ntools: Read Grep\n---\n\nBody.\n";
+        let agent = parse_agent(Path::new("/x/a.md"), "user", original);
+        assert_eq!(agent.tools, ["Read", "Grep"]);
+    }
+
+    #[test]
+    fn a_new_file_rendered_from_nothing_with_skills_set_parses_back_with_them() {
+        let agent = AgentFile {
+            path: "/x/new.md".into(),
+            source: "user".into(),
+            plugin: None,
+            name: "New Agent".into(),
+            description: "does things".into(),
+            tools: vec![],
+            skills: vec!["research_codebase".into(), "create_plan".into()],
+            model: None,
+            color: None,
+            memory: None,
+            prompt: "Be helpful.".into(),
+            updated_at: None,
+            shipped_path: None,
+            modified: false,
+        };
+        let out = render_agent("", &agent).unwrap();
+        let back = parse_agent(Path::new("/x/new.md"), "user", &out);
+        assert_eq!(back.skills, ["research_codebase", "create_plan"]);
+    }
+
+    #[test]
     fn renders_a_brand_new_file_from_nothing() {
         let agent = AgentFile {
             path: "/x/new.md".into(),
@@ -612,6 +778,7 @@ mod tests {
             name: "New Agent".into(),
             description: "does things".into(),
             tools: vec!["Read".into()],
+            skills: vec![],
             model: Some("sonnet".into()),
             color: None,
             memory: Some("project".into()),
@@ -689,5 +856,28 @@ mod tests {
     #[test]
     fn context_candidates_are_empty_without_a_worktree() {
         assert!(context_candidates(None).is_empty());
+    }
+
+    #[test]
+    fn agent_deny_rules_render_one_per_name_in_order() {
+        let names = vec!["cartographer".to_string(), "foreman".to_string()];
+        assert_eq!(
+            agent_deny_rules(&names),
+            vec!["Agent(cartographer)", "Agent(foreman)"]
+        );
+    }
+
+    #[test]
+    fn agent_deny_rules_drop_names_that_carry_rule_syntax() {
+        let names = vec![
+            "cartographer".to_string(),
+            "weird(name)".to_string(),
+            "a,b".to_string(),
+            "foreman".to_string(),
+        ];
+        assert_eq!(
+            agent_deny_rules(&names),
+            vec!["Agent(cartographer)", "Agent(foreman)"]
+        );
     }
 }

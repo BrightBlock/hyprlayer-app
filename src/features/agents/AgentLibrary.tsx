@@ -79,6 +79,10 @@ export function AgentLibrary({
     queryKey: ["agent-mcp-servers", projectPath],
     queryFn: () => unwrap(commands.agentMcpServers(projectPath)),
   });
+  const skills = useQuery({
+    queryKey: ["agent-skills", projectPath],
+    queryFn: () => unwrap(commands.agentSkills(projectPath)),
+  });
 
   const [tab, setTab] = useState<AgentTab>("yours");
   const [scope, setScope] = useState<AgentScope>("global");
@@ -236,14 +240,27 @@ export function AgentLibrary({
     onEditorTab("setup");
   };
 
-  const patch = (p: Partial<AgentFile>) =>
-    working && workingOverlay && baseline
-      ? setDraft({ base: baseline, agent: { ...working, ...p }, overlay: workingOverlay })
-      : undefined;
-  const patchOverlay = (p: Partial<Overlay>) =>
-    working && workingOverlay && baseline
-      ? setDraft({ base: baseline, agent: working, overlay: { ...workingOverlay, ...p } })
-      : undefined;
+  // One functional update behind both patches: a handler that touches the file
+  // and the overlay together (the Skills card) would otherwise have the second
+  // call overwrite the first with this render's stale copy.
+  const patchDraft = (p: { agent?: Partial<AgentFile>; overlay?: Partial<Overlay> }) =>
+    setDraft((prev) => {
+      const from =
+        prev && (prev.agent.path === selectedPath || selectedPath === NEW_AGENT_PATH)
+          ? prev
+          : working && workingOverlay && baseline
+            ? { base: baseline, agent: working, overlay: workingOverlay }
+            : null;
+      if (!from) return prev;
+      return {
+        base: from.base,
+        agent: p.agent ? { ...from.agent, ...p.agent } : from.agent,
+        overlay: p.overlay ? { ...from.overlay, ...p.overlay } : from.overlay,
+      };
+    });
+
+  const patch = (p: Partial<AgentFile>) => patchDraft({ agent: p });
+  const patchOverlay = (p: Partial<Overlay>) => patchDraft({ overlay: p });
 
   // "Default" is library-level (only one agent holds it), so the editor toggle
   // tracks a local intent until save rather than patching the draft.
@@ -291,6 +308,7 @@ export function AgentLibrary({
           folders={folders}
           contextFiles={contextFiles.data ?? []}
           mcpServers={mcpServers.data ?? []}
+          skills={skills.data ?? []}
           peers={all.filter((a) => a.path !== working.path)}
         />
       ) : (

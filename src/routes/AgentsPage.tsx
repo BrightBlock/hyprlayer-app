@@ -2,8 +2,9 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 
 import { PageError, PageSpinner } from "@/components/ui";
 import { AgentLibrary } from "@/features/agents/AgentLibrary";
-import { EDITOR_TABS, type EditorTab } from "@/features/agents/agents";
+import { editorTabs, type EditorTab } from "@/features/agents/agents";
 import { useLibraryScope } from "@/features/library/libraryScope";
+import { useSignedIn } from "@/lib/account";
 import { useBootstrap } from "@/lib/queries";
 
 /**
@@ -18,6 +19,7 @@ export function AgentsPage() {
   // Agents is a global surface, so "this project" means the last one selected —
   // the same signal the Library seeds its scope from.
   const lastProject = useLibraryScope((s) => s.lastProject);
+  const tabs = editorTabs(useSignedIn());
 
   if (bootstrap.isLoading) return <PageSpinner />;
   if (bootstrap.isError) return <PageError error={bootstrap.error} />;
@@ -25,7 +27,7 @@ export function AgentsPage() {
   const projects = bootstrap.data!.projects;
   const projectPath =
     projects.find((p) => p.thoughtsProject === lastProject)?.path ?? projects[0]?.path ?? null;
-  const tab = EDITOR_TABS.some((t) => t.key === search.tab) ? (search.tab as EditorTab) : "setup";
+  const tab = tabs.some((t) => t.key === search.tab) ? (search.tab as EditorTab) : "setup";
 
   return (
     <AgentLibrary

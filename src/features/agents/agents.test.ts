@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentFile, AgentLibrarySettings } from "@/lib/bindings";
+import type { AgentFile, AgentLibrarySettings, AgentRule, AgentSkill } from "@/lib/bindings";
 import {
   AGENT_TOOLS,
   agentRows,
@@ -8,6 +8,8 @@ import {
   DEFAULT_OVERLAY,
   dotColor,
   duplicateAgent,
+  editorTabs,
+  extraSkills,
   extraTools,
   initialsOf,
   inheritsAllTools,
@@ -26,9 +28,14 @@ import {
   memoryLabel,
   MEMORY_SCOPES,
   setMcp,
+  setSkill,
   setTool,
   shortDescription,
+  skillEnabled,
+  skillsRestricted,
+  skillSummary,
   statusOf,
+  syncSkillRules,
   toolEnabled,
   toolSummary,
   visibleAgents,
@@ -41,6 +48,7 @@ const agent = (over: Partial<AgentFile>): AgentFile => ({
   name: "a",
   description: "",
   tools: [],
+  skills: [],
   model: null,
   color: null,
   memory: null,
@@ -55,6 +63,16 @@ const library = (over: Partial<AgentLibrarySettings> = {}): AgentLibrarySettings
   folders: [],
   overlays: {},
   defaultAgent: null,
+  ...over,
+});
+
+const skill = (over: Partial<AgentSkill> = {}): AgentSkill => ({
+  name: "research-codebase",
+  description: "",
+  source: "project",
+  plugin: null,
+  chars: 3800,
+  userOnly: false,
   ...over,
 });
 
@@ -116,6 +134,84 @@ describe("mcp", () => {
     const on = setMcp(a, "github", true);
     expect(on).toEqual(["Read", "mcp__github__*"]);
     expect(setMcp({ ...a, tools: on }, "github", false)).toEqual(["Read"]);
+  });
+});
+
+describe("skills", () => {
+  it("treats absence from the list as off", () => {
+    expect(skillEnabled(agent({ skills: [] }), "research-codebase")).toBe(false);
+    expect(skillEnabled(agent({ skills: ["research-codebase"] }), "research-codebase")).toBe(true);
+  });
+
+  it("adds bare Skill once — never Skill(<name>) — to a pinned tool list", () => {
+    const a = agent({ tools: ["Read"], skills: [] });
+    const on = setSkill(a, "research-codebase", true);
+    expect(on.skills).toEqual(["research-codebase"]);
+    expect(on.tools).toEqual(["Read", "Skill"]);
+
+    const second = setSkill({ ...a, tools: on.tools, skills: on.skills }, "create-plan", true);
+    expect(second.tools.filter((t) => t === "Skill")).toHaveLength(1);
+  });
+
+  it("leaves Skill in place when the last skill is turned off — an explicit list is the user's", () => {
+    const a = agent({ tools: ["Read", "Skill"], skills: ["research-codebase"] });
+    const off = setSkill(a, "research-codebase", false);
+    expect(off.skills).toEqual([]);
+    expect(off.tools).toContain("Skill");
+  });
+
+  it("leaves an inherit-all agent's tools empty", () => {
+    const a = agent({ tools: [], skills: [] });
+    expect(setSkill(a, "research-codebase", true).tools).toEqual([]);
+  });
+
+  it("reports names discovery didn't match", () => {
+    expect(extraSkills(["a", "b"], [skill({ name: "a" })])).toEqual(["b"]);
+  });
+
+  it("summarizes the preloaded count and its token cost", () => {
+    const a = agent({ skills: ["a"] });
+    const known = [skill({ name: "a", chars: 3800 }), skill({ name: "b" })];
+    expect(skillSummary(a, known)).toBe("1 of 2 preloaded · ~1.0k tokens added per spawn");
+  });
+});
+
+describe("syncSkillRules", () => {
+  const rule = (over: Partial<AgentRule>): AgentRule => ({
+    id: "r1",
+    action: "allow",
+    pattern: "Bash",
+    ...over,
+  });
+
+  it("replaces a previous Skill(...) block, keeping other rules and their order", () => {
+    const rules = [
+      rule({ id: "r1", pattern: "Bash(git diff:*)" }),
+      rule({ id: "r2", pattern: "Skill(old-skill)" }),
+      rule({ id: "r3", action: "deny", pattern: "Skill" }),
+      rule({ id: "r4", action: "deny", pattern: "Bash(git push:*)" }),
+    ];
+    const next = syncSkillRules(rules, ["a", "b"], false);
+    expect(next.map((r) => r.pattern)).toEqual([
+      "Bash(git diff:*)",
+      "Bash(git push:*)",
+      "Skill(a)",
+      "Skill(b)",
+    ]);
+  });
+
+  it("appends a trailing deny only when restricted, round-tripping through skillsRestricted", () => {
+    const restricted = syncSkillRules([], ["a"], true);
+    expect(restricted[restricted.length - 1]).toMatchObject({ action: "deny", pattern: "Skill" });
+    expect(skillsRestricted(restricted)).toBe(true);
+
+    const open = syncSkillRules([], ["a"], false);
+    expect(skillsRestricted(open)).toBe(false);
+  });
+
+  it("numbers new ids past the highest surviving one", () => {
+    const rules = [rule({ id: "r5" })];
+    expect(syncSkillRules(rules, ["a"], true).map((r) => r.id)).toEqual(["r5", "r6", "r7"]);
   });
 });
 
@@ -261,6 +357,13 @@ describe("status and scope", () => {
   it("dots a draft amber and otherwise follows the frontmatter colour", () => {
     expect(dotColor(agent({}), { ...DEFAULT_OVERLAY, status: "draft" })).toBe("var(--color-warn)");
     expect(dotColor(agent({ color: "Green" }), DEFAULT_OVERLAY)).toBe("var(--color-ok)");
+  });
+});
+
+describe("editorTabs", () => {
+  it("hides Collaborators until there's an account behind it", () => {
+    expect(editorTabs(false).map((t) => t.key)).not.toContain("collaborators");
+    expect(editorTabs(true).map((t) => t.key)).toContain("collaborators");
   });
 });
 

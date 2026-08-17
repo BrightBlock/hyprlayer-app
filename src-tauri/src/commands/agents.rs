@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use hyprlayer_core::agents::{self, AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay};
+use hyprlayer_core::skills::AgentSkill;
 
 use crate::commands::blocking;
 use crate::error::{AppError, CmdResult};
@@ -77,6 +78,18 @@ pub async fn agent_context_files(project_path: Option<String>) -> CmdResult<Vec<
 pub async fn agent_mcp_servers(project_path: Option<String>) -> CmdResult<Vec<AgentMcpServer>> {
     blocking("agent_mcp_servers", move || {
         Ok(agents::mcp_servers(project_path.as_deref().map(Path::new)))
+    })
+    .await?
+}
+
+/// Skills an agent's `skills:` key can name, for the Capabilities tab.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_skills(project_path: Option<String>) -> CmdResult<Vec<AgentSkill>> {
+    blocking("agent_skills", move || {
+        Ok(hyprlayer_core::skills::list_skills(
+            project_path.as_deref().map(Path::new),
+        ))
     })
     .await?
 }

@@ -10,7 +10,13 @@
  * `lib/domain`, never re-declared here.
  */
 
-import type { AgentFile, AgentLibrarySettings, AgentOverlay } from "@/lib/bindings";
+import type {
+  AgentFile,
+  AgentLibrarySettings,
+  AgentOverlay,
+  AgentRule,
+  AgentSkill,
+} from "@/lib/bindings";
 import { MODELS } from "@/lib/domain/models";
 
 /** The frontmatter `model` value for "whatever spawned me" — claude's own
@@ -84,6 +90,11 @@ export const EDITOR_TABS: ReadonlyArray<{ key: EditorTab; label: string }> = [
   { key: "collaborators", label: "Collaborators" },
 ];
 
+/** Sharing an agent needs a Hyprlayer account, so that tab is sign-in gated. */
+export function editorTabs(signedIn: boolean): ReadonlyArray<{ key: EditorTab; label: string }> {
+  return signedIn ? EDITOR_TABS : EDITOR_TABS.filter((t) => t.key !== "collaborators");
+}
+
 /**
  * The built-in tools an agent's frontmatter can name. Claude Code accepts any
  * tool id — MCP globs included — so this is the set the editor offers as
@@ -102,6 +113,7 @@ export const AGENT_TOOLS: ReadonlyArray<{ key: string; desc: string }> = [
   { key: "TodoWrite", desc: "Keep a visible task list" },
   { key: "NotebookEdit", desc: "Edit Jupyter notebooks" },
   { key: "SlashCommand", desc: "Run a saved prompt" },
+  { key: "Skill", desc: "Invoke a skill" },
 ];
 
 /** The tools a read-only agent keeps. */
@@ -164,6 +176,69 @@ export function setMcp(agent: AgentFile, server: string, on: boolean): string[] 
   return on ? [...without, `mcp__${server}__*`] : without;
 }
 
+export function skillEnabled(agent: AgentFile, name: string): boolean {
+  return agent.skills.includes(name);
+}
+
+/** Turning a skill on also has to leave the agent able to invoke skills. An
+ *  agent inheriting every tool already can, so its `tools` stays empty. */
+export function setSkill(
+  agent: AgentFile,
+  name: string,
+  on: boolean,
+): { skills: string[]; tools: string[] } {
+  const skills = on
+    ? agent.skills.includes(name)
+      ? [...agent.skills]
+      : [...agent.skills, name]
+    : agent.skills.filter((s) => s !== name);
+  const tools = on && !inheritsAllTools(agent) ? setTool(agent, "Skill", true) : [...agent.tools];
+  return { skills, tools };
+}
+
+/** Names the file lists that discovery didn't match — a newer claude, a plugin
+ *  that isn't installed here, or a typo. Shown rather than silently dropped. */
+export function extraSkills(skills: readonly string[], known: readonly AgentSkill[]): string[] {
+  return skills.filter((s) => !known.some((k) => k.name === s));
+}
+
+/** "2 of 9 preloaded · ~7.0k tokens added per spawn" for the card header.
+ *  Uses the same ~3.8 chars/token ratio as `promptStats` (agents.ts:311). */
+export function skillSummary(agent: AgentFile, known: readonly AgentSkill[]): string {
+  const enabled = known.filter((k) => agent.skills.includes(k.name));
+  const chars = enabled.reduce((sum, k) => sum + k.chars, 0);
+  const tokensK = chars / 3.8 / 1000;
+  return `${enabled.length} of ${known.length} preloaded · ~${tokensK.toFixed(1)}k tokens added per spawn`;
+}
+
+/** True when a `deny Skill` catch-all is present — the rules are the source of
+ *  truth for "only these skills", so there is no separate overlay field. */
+export function skillsRestricted(rules: readonly AgentRule[]): boolean {
+  return rules.some((r) => r.action === "deny" && r.pattern === "Skill");
+}
+
+/** Matches the managed block: bare `Skill` or a single `Skill(<name>)` entry. */
+const SKILL_RULE_PATTERN = /^Skill(\([^)]*\))?$/;
+
+/** Rewrites only the rules whose pattern is `Skill` or `Skill(<name>)`: one
+ *  `allow Skill(<name>)` per enabled skill, then `deny Skill` when restricted.
+ *  User rules keep their content and relative order. */
+export function syncSkillRules(
+  rules: readonly AgentRule[],
+  skills: readonly string[],
+  restrict: boolean,
+): AgentRule[] {
+  const survivors = rules.filter((r) => !SKILL_RULE_PATTERN.test(r.pattern));
+  let nextId = survivors.reduce((max, r) => Math.max(max, Number(r.id.slice(1)) || 0), 0) + 1;
+  const generated: AgentRule[] = skills.map((name) => ({
+    id: `r${nextId++}`,
+    action: "allow",
+    pattern: `Skill(${name})`,
+  }));
+  if (restrict) generated.push({ id: `r${nextId++}`, action: "deny", pattern: "Skill" });
+  return [...survivors, ...generated];
+}
+
 /** A blank agent for `source`. `path` is assigned by the backend once the name
  *  is known, so an unsaved agent carries an empty one. */
 export function newAgent(source: string): AgentFile {
@@ -174,6 +249,7 @@ export function newAgent(source: string): AgentFile {
     name: "",
     description: "",
     tools: [],
+    skills: [],
     model: null,
     color: null,
     memory: null,
@@ -225,7 +301,8 @@ export function overlayFor(library: AgentLibrarySettings | undefined, path: stri
 }
 
 /** Status badge text and tone. A plugin agent is always live; yours is a draft
- *  until published. */
+ *  until published — and a draft can't be spawned by name in a session, not
+ *  just hidden from the composer (see `agent_deny_rules`, applied at launch). */
 export function statusOf(
   agent: AgentFile,
   overlay: Overlay,

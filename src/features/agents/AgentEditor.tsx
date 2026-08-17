@@ -4,16 +4,20 @@
  * launch settings, saved by the container.
  */
 
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   Badge,
   Button,
+  ContextMenu,
+  ContextMenuItem,
   DropdownSelect,
+  Spinner,
   TextInput,
   Toggle,
 } from "@/components/ui";
 import {
+  CheckIcon,
   ChevronLeftIcon,
   DocIcon,
   ShieldIcon,
@@ -21,7 +25,14 @@ import {
   WrenchIcon,
   XIcon,
 } from "@/components/icons";
-import type { AgentContextFile, AgentFile, AgentMcpServer, AgentRule } from "@/lib/bindings";
+import { useSignedIn } from "@/lib/account";
+import type {
+  AgentContextFile,
+  AgentFile,
+  AgentMcpServer,
+  AgentRule,
+  AgentSkill,
+} from "@/lib/bindings";
 import { HARNESSES } from "@/lib/domain/harnessing";
 import { EFFORTS, MODELS } from "@/lib/domain/models";
 import { PERMISSION_MODES } from "@/lib/domain/permissions";
@@ -29,7 +40,8 @@ import { PROMPT_VARS } from "@/lib/domain/promptVars";
 import {
   AGENT_TOOLS,
   collaboratorFor,
-  EDITOR_TABS,
+  editorTabs,
+  extraSkills,
   extraTools,
   hasUnknownMemoryScope,
   initialsOf,
@@ -45,13 +57,37 @@ import {
   promptStats,
   readOnlyTools,
   setMcp,
+  setSkill,
   setTool,
+  shortDescription,
+  skillEnabled,
+  skillsRestricted,
+  skillSummary,
+  syncSkillRules,
   toolEnabled,
   toolSummary,
   type EditorTab,
   type Overlay,
 } from "./agents";
-import { Callout, EditorCard, RadioRow, Segmented } from "./parts";
+import { Callout, CardGroup, EditorCard, RadioRow, Segmented } from "./parts";
+
+/** The editor reads as a settings page: one centered column, unlike the full-width list. */
+const COLUMN = "mx-auto w-full max-w-5xl";
+
+/** Header glyphs take no fill, so the row reads as one strip of icons rather
+ *  than a cluster of competing buttons — colour alone carries hover and rank.
+ *  Split so the accent variant never fights the dim one over `text-*`, which
+ *  Tailwind resolves by stylesheet order rather than class order. */
+const HEADER_ICON_BASE = "grid h-7 w-7 shrink-0 place-items-center rounded-md";
+const HEADER_ICON = `${HEADER_ICON_BASE} text-ink-dim hover:text-ink disabled:opacity-50`;
+/** The commit action: accent-coloured rather than accent-filled, and visibly
+ *  inert when there is nothing to save. */
+const HEADER_ICON_PRIMARY = `${HEADER_ICON_BASE} text-accent hover:text-accent/80 disabled:text-ink-dim/50`;
+
+/** Description field bounds, in whole 20px lines (`text-sm`) plus 16px of
+ *  `py-2` — a fractional height is what clipped the last line before. */
+const DESC_MIN_H = 3 * 20 + 16;
+const DESC_MAX_H = 10 * 20 + 16;
 
 type Props = {
   draft: AgentFile;
@@ -75,6 +111,7 @@ type Props = {
   folders: string[];
   contextFiles: AgentContextFile[];
   mcpServers: AgentMcpServer[];
+  skills: AgentSkill[];
   /** Everything this agent could delegate to — its own library, minus itself. */
   peers: AgentFile[];
 };
@@ -95,16 +132,18 @@ export function AgentEditor(props: Props) {
   const isNew = isUnsaved(draft);
   const system = isSystem(draft);
   const isDraftStatus = overlay.status === "draft";
+  const tabs = editorTabs(useSignedIn());
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center gap-3 px-7 pb-3 pt-4">
-        <button
-          type="button"
-          onClick={onBack}
-          aria-label="Back to agents"
-          className="grid h-7 w-7 place-items-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
-        >
+      {/* Title, tabs and actions share one row: a 5-tab strip and four text
+          buttons don't fit the column, so the two rare actions (reset,
+          publish) live behind the kebab and Cancel keeps only its glyph.
+          The gap below is here rather than in the scroller's padding, which
+          would scroll away and leave content touching the strip. */}
+      <div className={`${COLUMN} flex shrink-0 items-center gap-3 px-7 pb-8 pt-4`}>
+        <button type="button" onClick={onBack} aria-label="Back to agents" className={HEADER_ICON}>
           <ChevronLeftIcon size={15} />
         </button>
         <div className="min-w-0">
@@ -113,7 +152,11 @@ export function AgentEditor(props: Props) {
               {isNew ? "New Agent" : system ? "Edit System Agent" : "Edit Agent"}
             </h1>
             {system && <Badge tone="dim">System</Badge>}
-            {isDraftStatus && <Badge tone="warn">Draft</Badge>}
+            {isDraftStatus && (
+              <span title="Draft agents can't be spawned by sessions started while they're a draft — publish to make this one available.">
+                <Badge tone="warn">Draft</Badge>
+              </span>
+            )}
           </div>
           <div className="mt-0.5 truncate font-mono text-xs text-ink-dim">
             {`${draft.name || "untitled"} · ${modelLabel(draft.model)} · ${
@@ -122,31 +165,97 @@ export function AgentEditor(props: Props) {
           </div>
         </div>
         <div className="flex-1" />
+        <Segmented aria-label="Agent settings" value={tab} onChange={onTab} options={tabs} />
         {dirty && (
-          <span className="flex items-center gap-1.5 text-xs text-warn">
-            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-warn" />
-            Unsaved changes
-          </span>
+          <span
+            aria-label="Unsaved changes"
+            title="Unsaved changes"
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"
+          />
         )}
-        {system && <Button onClick={onReset}>Reset to default</Button>}
-        {isDraftStatus && <Button onClick={onPublish}>Publish</Button>}
-        <Button onClick={onBack}>Cancel</Button>
-        <Button variant="primary" busy={saving} disabled={!dirty || !draft.name.trim()} onClick={onSave}>
-          Save
-        </Button>
+        {(system || isDraftStatus) && (
+          <button
+            type="button"
+            aria-label="More actions"
+            onClick={(e) => {
+              // The menu closes on any window click, so the opener has to keep
+              // its own click from reaching that listener. Anchor off the
+              // button, not the pointer, so it lands the same place every time.
+              e.stopPropagation();
+              const at = e.currentTarget.getBoundingClientRect();
+              setMenuAt({ x: at.right - 150, y: at.bottom + 6 });
+            }}
+            className={`${HEADER_ICON} tracking-widest`}
+          >
+            ⋮
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Cancel"
+          title="Cancel"
+          className={HEADER_ICON}
+        >
+          <XIcon size={15} />
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!dirty || !draft.name.trim() || saving}
+          aria-label="Save"
+          // The label used to say why it was inert just by being greyed next to
+          // the word "Save"; as a glyph it has to spell that out.
+          title={
+            saving
+              ? "Saving…"
+              : !draft.name.trim()
+                ? "Name the agent to save"
+                : !dirty
+                  ? "No changes to save"
+                  : "Save"
+          }
+          className={HEADER_ICON_PRIMARY}
+        >
+          {saving ? <Spinner size={15} /> : <CheckIcon size={16} strokeWidth={2.2} />}
+        </button>
       </div>
 
-      <div className="px-7">
-        <Segmented aria-label="Agent settings" value={tab} onChange={onTab} options={EDITOR_TABS} />
-      </div>
+      {menuAt && (
+        <ContextMenu position={menuAt} onClose={() => setMenuAt(null)}>
+          {system && (
+            <ContextMenuItem
+              onClick={() => {
+                setMenuAt(null);
+                onReset();
+              }}
+            >
+              Reset to default
+            </ContextMenuItem>
+          )}
+          {isDraftStatus && (
+            <ContextMenuItem
+              onClick={() => {
+                setMenuAt(null);
+                onPublish();
+              }}
+            >
+              Publish
+            </ContextMenuItem>
+          )}
+        </ContextMenu>
+      )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8 pt-4">
-        <div className="flex max-w-5xl flex-col gap-3.5">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-8 pt-2">
+        {/* min-h-full so a tab can hand its tall control the leftover height. */}
+        <div className={`${COLUMN} flex min-h-full flex-col gap-3.5 px-7`}>
           {tab === "setup" && <SetupTab {...props} />}
           {tab === "prompt" && <PromptTab {...props} />}
           {tab === "capabilities" && <CapabilitiesTab {...props} />}
           {tab === "permissions" && <PermissionsTab {...props} />}
-          {tab === "collaborators" && <CollaboratorsTab {...props} />}
+          {tab === "collaborators" && tabs.some((t) => t.key === tab) && (
+            <CollaboratorsTab {...props} />
+          )}
         </div>
       </div>
     </div>
@@ -167,6 +276,22 @@ function SetupTab({
     { value: "", label: "No folder" },
     ...folders.map((f) => ({ value: f, label: f })),
   ];
+
+  // Descriptions run to whole paragraphs (that's why the list elides them), so
+  // the field grows to its content instead of clipping at a fixed height that
+  // wasn't even a whole number of lines. Past the cap it scrolls.
+  const descRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = descRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    // `height` sets the border box here but scrollHeight measures the padding
+    // box, so the borders have to be added back or the last line stays clipped.
+    const borders = el.offsetHeight - el.clientHeight;
+    const fit = el.scrollHeight + borders;
+    el.style.height = `${Math.min(Math.max(fit, DESC_MIN_H), DESC_MAX_H)}px`;
+  }, [draft.description]);
+
   return (
     <>
       {isSystem(draft) && (
@@ -188,10 +313,11 @@ function SetupTab({
         </Labeled>
         <Labeled label="Description">
           <textarea
+            ref={descRef}
             value={draft.description}
             onChange={(e) => patch({ description: e.target.value })}
             placeholder="When should this agent be used? Claude reads this to decide."
-            className="selectable min-h-16 w-full resize-y rounded-md border border-edge bg-panel-2 px-2.5 py-2 text-sm text-ink placeholder:text-ink-dim/70 focus:border-ink-dim/70 focus:outline-none"
+            className="selectable w-full resize-none rounded-md border border-edge bg-panel-2 px-2.5 py-2 text-sm text-ink placeholder:text-ink-dim/70 focus:border-ink-dim/70 focus:outline-none"
           />
         </Labeled>
 
@@ -336,14 +462,15 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
         action={
           <span className="font-mono text-[11px] text-ink-dim">{promptStats(draft.prompt)}</span>
         }
+        className="flex min-h-0 flex-1 flex-col"
       >
         <textarea
           value={draft.prompt}
           spellCheck={false}
           onChange={(e) => patch({ prompt: e.target.value })}
-          className="selectable min-h-75 w-full resize-y rounded-lg border border-edge bg-panel-2 p-3.5 font-mono text-xs leading-relaxed text-ink focus:border-ink-dim/70 focus:outline-none"
+          className="selectable min-h-75 w-full flex-1 resize-y rounded-lg border border-edge bg-panel-2 p-3.5 font-mono text-xs leading-relaxed text-ink focus:border-ink-dim/70 focus:outline-none"
         />
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
           <span className="text-[11px] text-ink-dim">Insert variable</span>
           {PROMPT_VARS.map((v) => (
             <button
@@ -409,155 +536,257 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
   );
 }
 
-function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, peers }: Props) {
+function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skills, peers }: Props) {
   const extras = extraTools(draft.tools);
+  const extraSkillNames = extraSkills(draft.skills, skills);
   return (
-    <>
-      <EditorCard
-        title="Built-in tools"
-        description={toolSummary(draft)}
-        action={
-          <>
-            <MiniButton onClick={() => patch({ tools: [] })}>Enable all</MiniButton>
-            <MiniButton onClick={() => patch({ tools: readOnlyTools(draft) })}>
-              Read-only preset
-            </MiniButton>
-          </>
-        }
-      >
-        <div className="grid grid-cols-2 gap-x-5">
-          {AGENT_TOOLS.map((t) => {
-            const on = toolEnabled(draft, t.key);
-            return (
-              <div
-                key={t.key}
-                className="flex items-center gap-3 border-b border-edge/45 py-2.5"
-              >
-                <span className={`grid shrink-0 ${on ? "text-accent" : "text-ink-dim/55"}`}>
-                  <WrenchIcon size={13} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="font-mono text-xs text-ink">{t.key}</div>
-                  <div className="truncate text-[11px] text-ink-dim">{t.desc}</div>
-                </div>
-                <Toggle
-                  checked={on}
-                  aria-label={t.key}
-                  onChange={(next) => patch({ tools: setTool(draft, t.key, next) })}
-                />
-              </div>
-            );
-          })}
-        </div>
-        {extras.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-ink-dim">Also in the file</span>
-            {extras.map((t) => (
-              <span
-                key={t}
-                className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-ink-dim"
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-        )}
-      </EditorCard>
-
-      <EditorCard
-        title="MCP servers"
-        description="Servers claude is configured with. Turn one on to expose its tools to this agent."
-      >
-        {mcpServers.length === 0 ? (
-          <p className="text-xs text-ink-dim">
-            No MCP servers in <span className="font-mono">~/.claude.json</span> or this project&apos;s{" "}
-            <span className="font-mono">.mcp.json</span>.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2.5">
-            {mcpServers.map((s) => {
-              const on = mcpEnabled(draft, s.name);
-              const chips = mcpTools(draft, s.name);
+    // Wider gap between groups than between the cards inside one, so the
+    // eyebrows read as section breaks rather than more card titles.
+    <div className="flex flex-col gap-6">
+      <CardGroup label="Tools">
+        <EditorCard
+          title="Built-in tools"
+          description={toolSummary(draft)}
+          action={
+            <>
+              <MiniButton onClick={() => patch({ tools: [] })}>Enable all</MiniButton>
+              <MiniButton onClick={() => patch({ tools: readOnlyTools(draft) })}>
+                Read-only preset
+              </MiniButton>
+            </>
+          }
+        >
+          <div className="grid grid-cols-2 gap-x-5">
+            {AGENT_TOOLS.map((t) => {
+              const on = toolEnabled(draft, t.key);
               return (
-                <div key={s.name} className="rounded-lg border border-edge bg-panel-2 p-3">
-                  <div className="flex items-center gap-2.5">
+                <div
+                  key={t.key}
+                  className="flex items-center gap-3 border-b border-edge/45 py-2.5"
+                >
+                  <span className={`grid shrink-0 ${on ? "text-accent" : "text-ink-dim/55"}`}>
+                    <WrenchIcon size={13} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-xs text-ink">{t.key}</div>
+                    <div className="truncate text-[11px] text-ink-dim">{t.desc}</div>
+                  </div>
+                  <Toggle
+                    checked={on}
+                    aria-label={t.key}
+                    onChange={(next) => patch({ tools: setTool(draft, t.key, next) })}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {extras.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-ink-dim">Also in the file</span>
+              {extras.map((t) => (
+                <span
+                  key={t}
+                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-ink-dim"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+        </EditorCard>
+
+        <EditorCard
+          title="MCP servers"
+          description="Servers claude is configured with. Turn one on to expose its tools to this agent."
+        >
+          {mcpServers.length === 0 ? (
+            <p className="text-xs text-ink-dim">
+              No MCP servers in <span className="font-mono">~/.claude.json</span> or this project&apos;s{" "}
+              <span className="font-mono">.mcp.json</span>.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              {mcpServers.map((s) => {
+                const on = mcpEnabled(draft, s.name);
+                const chips = mcpTools(draft, s.name);
+                return (
+                  <div key={s.name} className="rounded-lg border border-edge bg-panel-2 p-3">
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        aria-hidden="true"
+                        className={`h-[7px] w-[7px] rounded-full ${on ? "bg-ok" : "bg-ink-dim/55"}`}
+                      />
+                      <span className="font-mono text-xs text-ink">{s.name}</span>
+                      <span className="text-[11px] text-ink-dim">
+                        {s.transport} · {s.scope}
+                      </span>
+                      <div className="flex-1" />
+                      <Toggle
+                        checked={on}
+                        aria-label={s.name}
+                        onChange={(next) => patch({ tools: setMcp(draft, s.name, next) })}
+                      />
+                    </div>
+                    {chips.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {chips.map((t) => (
+                          <span
+                            key={t}
+                            className="rounded-md border border-edge bg-panel px-1.5 py-0.5 font-mono text-[11px] text-ink"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </EditorCard>
+      </CardGroup>
+
+      <CardGroup label="Knowledge">
+        <EditorCard
+          title="Skills"
+          description="Preloaded into this agent when it runs, and matched by the rules below."
+          action={
+            <>
+              <span className="font-mono text-[11px] text-ink-dim">{skillSummary(draft, skills)}</span>
+              <label className="flex items-center gap-2 text-[11px] text-ink-dim">
+                Only these skills
+                <Toggle
+                  checked={skillsRestricted(overlay.rules)}
+                  aria-label="Only these skills"
+                  onChange={(next) =>
+                    patchOverlay({ rules: syncSkillRules(overlay.rules, draft.skills, next) })
+                  }
+                />
+              </label>
+            </>
+          }
+        >
+          {skills.length === 0 ? (
+            <p className="text-xs text-ink-dim">
+              No skills found in <span className="font-mono">.claude/skills</span> or{" "}
+              <span className="font-mono">~/.claude/skills</span>.
+            </p>
+          ) : (
+            <div className="flex flex-col">
+              {skills.map((s, i) => {
+                const on = skillEnabled(draft, s.name);
+                return (
+                  <div
+                    key={s.name}
+                    className={`flex items-center gap-3 py-2.5 ${
+                      i === skills.length - 1 ? "" : "border-b border-edge/45"
+                    }`}
+                  >
                     <span
                       aria-hidden="true"
-                      className={`h-[7px] w-[7px] rounded-full ${on ? "bg-ok" : "bg-ink-dim/55"}`}
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? "bg-accent" : "bg-ink-dim/55"}`}
                     />
-                    <span className="font-mono text-xs text-ink">{s.name}</span>
-                    <span className="text-[11px] text-ink-dim">
-                      {s.transport} · {s.scope}
-                    </span>
-                    <div className="flex-1" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-xs text-ink">{s.name}</span>
+                        {s.userOnly && (
+                          <span title="Reserved for direct user invocation — still preloaded into this agent">
+                            <Badge tone="dim">user-only</Badge>
+                          </span>
+                        )}
+                      </div>
+                      <div className="truncate text-[11px] text-ink-dim">
+                        {shortDescription(s.description)}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right text-[11px] text-ink-dim">
+                      <div>{s.source}</div>
+                      <div className="font-mono">~{(s.chars / 3.8 / 1000).toFixed(1)}k tokens</div>
+                    </div>
                     <Toggle
                       checked={on}
                       aria-label={s.name}
-                      onChange={(next) => patch({ tools: setMcp(draft, s.name, next) })}
+                      onChange={(next) => {
+                        const { skills: nextSkills, tools } = setSkill(draft, s.name, next);
+                        patch({ skills: nextSkills, tools });
+                        patchOverlay({
+                          rules: syncSkillRules(overlay.rules, nextSkills, skillsRestricted(overlay.rules)),
+                        });
+                      }}
                     />
                   </div>
-                  {chips.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      {chips.map((t) => (
-                        <span
-                          key={t}
-                          className="rounded-md border border-edge bg-panel px-1.5 py-0.5 font-mono text-[11px] text-ink"
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </EditorCard>
-
-      <EditorCard
-        title="Can delegate to"
-        description={
-          <>
-            Agents this one may spawn with the <span className="font-mono">Task</span> tool.
-          </>
-        }
-      >
-        {peers.length === 0 ? (
-          <p className="text-xs text-ink-dim">No other agents to delegate to yet.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {peers.map((p) => {
-              const on = overlay.delegates.includes(p.path);
-              return (
-                <button
-                  key={p.path}
-                  type="button"
-                  onClick={() =>
-                    patchOverlay({
-                      delegates: on
-                        ? overlay.delegates.filter((d) => d !== p.path)
-                        : [...overlay.delegates, p.path],
-                    })
-                  }
-                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
-                    on
-                      ? "border-accent/40 bg-accent/15 text-ink"
-                      : "border-edge bg-panel-2 text-ink-dim hover:text-ink"
-                  }`}
+                );
+              })}
+            </div>
+          )}
+          {extraSkillNames.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-ink-dim">Also in the file</span>
+              {extraSkillNames.map((name) => (
+                <span
+                  key={name}
+                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-ink-dim"
                 >
-                  <span
-                    aria-hidden="true"
-                    className={`h-1.5 w-1.5 rounded-full ${on ? "bg-accent" : "bg-ink-dim/55"}`}
-                  />
-                  {p.name}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </EditorCard>
-    </>
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
+        </EditorCard>
+      </CardGroup>
+
+      <CardGroup label="Delegation">
+        <EditorCard
+          title="Can delegate to"
+          description={
+            <>
+              Agents this one may spawn with the <span className="font-mono">Task</span> tool.
+            </>
+          }
+        >
+          {peers.length === 0 ? (
+            <p className="text-xs text-ink-dim">No other agents to delegate to yet.</p>
+          ) : (
+            <div className="flex flex-col">
+              {peers.map((p, i) => {
+                const on = overlay.delegates.includes(p.path);
+                return (
+                  <div
+                    key={p.path}
+                    className={`flex items-center gap-3 py-2.5 ${
+                      i === peers.length - 1 ? "" : "border-b border-edge/45"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? "bg-accent" : "bg-ink-dim/55"}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs text-ink">{p.name}</div>
+                      <div className="truncate text-[11px] text-ink-dim">
+                        {shortDescription(p.description)}
+                      </div>
+                    </div>
+                    <Toggle
+                      checked={on}
+                      aria-label={p.name}
+                      onChange={(next) =>
+                        patchOverlay({
+                          delegates: next
+                            ? [...overlay.delegates, p.path]
+                            : overlay.delegates.filter((d) => d !== p.path),
+                        })
+                      }
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </EditorCard>
+      </CardGroup>
+    </div>
   );
 }
 

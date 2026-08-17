@@ -116,6 +116,20 @@ export function RadioRow({
   );
 }
 
+/**
+ * A labelled run of [`EditorCard`]s. The eyebrow names the concern the cards
+ * share; the caller's wider gap between groups is what separates them, so a
+ * tab of otherwise-identical cards reads as sections rather than one stack.
+ */
+export function CardGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2.5">
+      <h2 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">{label}</h2>
+      <div className="flex flex-col gap-3.5">{children}</div>
+    </section>
+  );
+}
+
 /** A titled panel in the editor body. */
 export function EditorCard({
   title,
