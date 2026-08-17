@@ -165,20 +165,68 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
         },
         // Ship and Revise both push to the branch and talk to `gh`; Revise
         // addresses PR feedback (CI failures, review comments) on a branch that
-        // already has a PR, so it shares Ship's posture.
-        Stage::Ship | Stage::Revise => StagePolicy {
+        // already has a PR, so it shares Ship's tool posture.
+        //
+        // Ship additionally denies `Skill` outright. Both skills it needs arrive
+        // as leading slash commands, which claude expands client-side without
+        // the tool, so the deny costs nothing and makes "only /commit and
+        // /describe_pr" enforced rather than merely asked for. A bare `Skill`
+        // deny is the only shape that works: there is no allowlist, and
+        // `allowedTools` is auto-approval, not restriction.
+        Stage::Ship => StagePolicy {
             permission_mode: PermissionMode::Default,
-            allowed_tools: allow(&[
-                "Write",
-                "Edit",
-                "Bash(git add:*)",
-                "Bash(git commit:*)",
-                "Bash(git push:*)",
-                "Bash(gh pr:*)",
-                "Bash(gh:*)",
-            ]),
+            allowed_tools: allow(&SHIP_TOOLS),
+            disallowed_tools: deny(&["Skill"]),
+        },
+        Stage::Revise => StagePolicy {
+            permission_mode: PermissionMode::Default,
+            allowed_tools: allow(&SHIP_TOOLS),
             disallowed_tools: deny(&[]),
         },
+    }
+}
+
+/// Pre-approved tools for the branch-publishing stages (Ship, Revise).
+const SHIP_TOOLS: [&str; 7] = [
+    "Write",
+    "Edit",
+    "Bash(git add:*)",
+    "Bash(git commit:*)",
+    "Bash(git push:*)",
+    "Bash(gh pr:*)",
+    "Bash(gh:*)",
+];
+
+/// A custom agent a stage runs as, passed inline at spawn (`--agents` JSON plus
+/// `--agent <name>`) so nothing has to be installed into the user's repo.
+///
+/// `tools` is deliberately not modelled: restricting an agent's tool list would
+/// also cut the Task delegation the `/commit` skill relies on, and the skill
+/// lockdown is the stage policy's `Skill` deny instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionAgent {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub prompt: &'static str,
+}
+
+/// Ship's agent: a system prompt scoped to publishing one branch. The stage
+/// prompt still carries the steps; this narrows the persona around them.
+pub const SHIP_AGENT: SessionAgent = SessionAgent {
+    name: "hyprlayer-ship",
+    description: "Commits, pushes, and opens the pull request for one workstream branch.",
+    prompt: "You publish one branch: commit the worktree, push it, open the pull request, \
+then write its description. Nothing else — do not review, refactor, or fix code on the way \
+through, and do not improvise a PR body when a later step will write it.\n\n\
+The two skills you need (`/commit`, `/describe_pr`) are handed to you as slash commands \
+already expanded into the conversation. You cannot invoke skills yourself and never need to.",
+};
+
+/// The agent a stage runs as, if any. Only Ship has one today.
+pub fn agent_for(stage: Stage) -> Option<SessionAgent> {
+    match stage {
+        Stage::Ship => Some(SHIP_AGENT),
+        _ => None,
     }
 }
 
@@ -192,11 +240,25 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
 /// workstream open its PR against e.g. `develop`. Users can override this body
 /// in Settings → Prompts; the stock text is also surfaced there via the
 /// bootstrap's `promptDefaults`.
-pub const SHIP_PROMPT_TEMPLATE: &str =
-    "First run the /commit skill to commit all changes in this worktree, then push the branch \
-to its remote. Only after the commit and push succeed, open a pull request against \
-`{{base_branch}}` with a clear title and run the /describe_pr skill to write the PR \
-description from the repository's template and update the PR.";
+///
+/// The leading bare `/commit` is load-bearing: claude expands a leading slash
+/// command client-side, so the turn opens *inside* the skill without the `Skill`
+/// tool (which Ship's policy denies). Phrased as prose ("first run the /commit
+/// skill") the model has to pick a skill itself, and Sonnet reliably misfired
+/// that first call into an unrelated one.
+///
+/// Only a *leading* slash command expands, so `/describe_pr` cannot ride along
+/// here — it is sent as its own turn ([`SHIP_DESCRIBE_PROMPT`]) once the PR
+/// exists.
+pub const SHIP_PROMPT_TEMPLATE: &str = "/commit\n\nOnce the commit lands, push the branch to \
+its remote. Only after the commit and push succeed, open a pull request against \
+`{{base_branch}}` with a clear title. Leave the body as a short placeholder — the description \
+is written for you in a follow-up step, so do not improvise one.";
+
+/// Ship's second turn: the PR description. Sent on its own so the leading slash
+/// command expands client-side; `/describe_pr` edits an existing PR, so this
+/// only goes out once the first turn has actually opened one.
+pub const SHIP_DESCRIBE_PROMPT: &str = "/describe_pr";
 
 /// The stock Commit body: the `/commit` skill invocation, followed by an
 /// explicit ask-before-push step (the AskUserQuestion tool renders as the app's
@@ -294,9 +356,9 @@ pub struct ActionPromptBodies {
 }
 
 /// Join an action-prompt body with the user's extra input. A single-line
-/// slash-command body keeps skill-argument form (`/commit split it` — the stock
-/// Commit shape); a prose body gets the input as a trailing paragraph (the
-/// stock Ship/Revise shape).
+/// slash-command body keeps skill-argument form (`/commit split it`); anything
+/// multi-line or prose gets the input as a trailing paragraph — the shape every
+/// stock body (Commit/Ship/Revise) takes.
 fn action_prompt(body: &str, input: &str) -> String {
     if input.is_empty() {
         body.to_string()
@@ -459,10 +521,10 @@ mod tests {
         // the /commit skill so Ship's commits follow the same conventions.
         assert_eq!(
             ship_prompt("main"),
-            "First run the /commit skill to commit all changes in this worktree, then push \
-the branch to its remote. Only after the commit and push succeed, open a pull request \
-against `main` with a clear title and run the /describe_pr skill to write the PR \
-description from the repository's template and update the PR."
+            "/commit\n\nOnce the commit lands, push the branch to its remote. Only after the \
+commit and push succeed, open a pull request against `main` with a clear title. Leave the body \
+as a short placeholder — the description is written for you in a follow-up step, so do not \
+improvise one."
         );
         // Extra context is appended below the directive.
         assert_eq!(
@@ -474,10 +536,41 @@ description from the repository's template and update the PR."
             ),
             format!("{}\n\nskip the changelog", ship_prompt("main")),
         );
-        // Ship is a prose directive (commit via the /commit skill, then push,
-        // then PR) — not itself a bare slash-command invocation.
-        assert!(!compose_prompt(Stage::Ship, "", "main", &Default::default()).starts_with('/'));
-        assert!(ship_prompt("main").contains("/commit skill"));
+        // Ship opens with a bare `/commit` so claude expands it client-side and
+        // the model never picks the first skill itself (the misfire this fixes).
+        assert!(ship_prompt("main").starts_with("/commit\n"));
+        // Multi-line, so extra input appends as a paragraph rather than turning
+        // into `/commit <input>` skill-arguments.
+        assert!(ship_prompt("main").contains('\n'));
+        // `/describe_pr` is a SEPARATE turn: only a leading slash command
+        // expands, and Ship denies the Skill tool, so it can't ride along here.
+        assert!(!ship_prompt("main").contains("/describe_pr"));
+        assert_eq!(SHIP_DESCRIBE_PROMPT, "/describe_pr");
+        assert!(SHIP_DESCRIBE_PROMPT.starts_with('/'));
+        assert!(!SHIP_DESCRIBE_PROMPT.contains('\n'));
+    }
+
+    #[test]
+    fn ship_runs_as_an_agent_that_cannot_invoke_skills() {
+        // Both skills arrive as leading slash commands, so denying the tool
+        // outright costs nothing and makes the restriction real. A bare `Skill`
+        // deny is the only shape that works: there is no skill allowlist, and
+        // `allowedTools` is auto-approval rather than restriction.
+        let ship = policy_for(Stage::Ship);
+        assert!(ship.disallowed_tools.iter().any(|t| t == "Skill"));
+        // Revise shares Ship's tool posture but keeps skills — it isn't driven
+        // by slash-command turns.
+        let revise = policy_for(Stage::Revise);
+        assert!(revise.disallowed_tools.is_empty());
+        assert_eq!(ship.allowed_tools, revise.allowed_tools);
+
+        // Ship is the only stage with an agent, and it names no tools: an
+        // agent's roster grants rather than scopes.
+        assert_eq!(agent_for(Stage::Ship), Some(SHIP_AGENT));
+        assert_eq!(agent_for(Stage::Commit), None);
+        assert_eq!(agent_for(Stage::General), None);
+        assert!(!SHIP_AGENT.name.is_empty());
+        assert!(!SHIP_AGENT.prompt.is_empty());
     }
 
     #[test]
@@ -642,7 +735,8 @@ description from the repository's template and update the PR."
         let ship = policy_for(Stage::Ship);
         assert!(ship.allowed_tools.iter().any(|t| t.contains("git push")));
         assert!(ship.allowed_tools.iter().any(|t| t.contains("gh pr")));
-        assert!(ship.disallowed_tools.is_empty());
+        // Ship's only deny is the skill lockdown; nothing git/gh is blocked.
+        assert_eq!(ship.disallowed_tools, vec!["Skill".to_string()]);
 
         // Read-only tools are present in every stage.
         for stage in [Stage::General, Stage::Research, Stage::Implement] {

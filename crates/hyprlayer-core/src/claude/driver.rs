@@ -93,6 +93,10 @@ pub struct SpawnConfig {
     pub effort: Option<String>,
     /// Enable the "Claude in Chrome" browser-control feature (`--chrome`).
     pub chrome: bool,
+    /// Custom agent this session runs as, defined inline so nothing has to be
+    /// installed into the user's repo. `--agent` applies to the top-level
+    /// session, so the interactive permission surface is unaffected.
+    pub agent: Option<crate::pipeline::SessionAgent>,
     /// Augmented PATH + any extra env for the child (e.g. `ANTHROPIC_API_KEY`
     /// for enterprise API-key auth).
     pub env: Vec<(String, String)>,
@@ -192,6 +196,19 @@ impl ClaudeDriver {
         }
         if config.chrome {
             cmd.arg("--chrome");
+        }
+        // Inline definition + selection. `tools` is intentionally absent: an
+        // agent's roster grants rather than scopes (a `Skill(name)` entry
+        // unlocks every skill), so restriction lives in --disallowedTools.
+        if let Some(agent) = &config.agent {
+            let defs = serde_json::json!({
+                agent.name: {
+                    "description": agent.description,
+                    "prompt": agent.prompt,
+                }
+            });
+            cmd.args(["--agents", &defs.to_string()])
+                .args(["--agent", agent.name]);
         }
 
         // Before any explicit env, so an AppImage build doesn't hand the harness

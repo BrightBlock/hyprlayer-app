@@ -302,6 +302,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
                 model,
                 effort,
                 chrome: claude_cfg.chrome_enabled,
+                agent: pipeline::agent_for(session.stage),
                 env,
             })
             .map_err(AppError::from)?;
@@ -507,12 +508,17 @@ pub async fn start_stage_session(
         match launch_session(&state, launch).await {
             // Kick off the first turn (the composed skill prompt + attached docs).
             Ok(driver) => {
+                // Subscribe before sending, so Ship's follow-up can't miss the
+                // opening turn's `TurnDone`.
+                let mut turns = (stage_kind == Stage::Ship).then(|| driver.subscribe());
                 if let Err(e) = driver.send_user_turn(
                     &wire_prompt,
                     Some(stage_kind.as_str()),
                     prompt_name.as_deref(),
                 ) {
                     emit_start_failure(&err_channel, &AppError::from(e).message);
+                } else if let Some(rx) = turns.as_mut() {
+                    ship_describe_followup(driver.as_ref(), rx).await;
                 }
             }
             // Launch failed after the row was written (missing binary, logged out,
@@ -522,6 +528,28 @@ pub async fn start_stage_session(
     });
 
     Ok(StartedSession { session, prompt })
+}
+
+/// Ship's second turn: the PR description.
+///
+/// `/describe_pr` expands client-side only as a *leading* slash command, so it
+/// can't ride along in the opening prompt, and Ship's policy denies `Skill`, so
+/// it can't be invoked as a tool either — it has to be its own turn. Waits for
+/// the opening turn to finish, then sends it. A session that dies or is stopped
+/// first simply never fires it; a first turn that failed to open a PR sends it
+/// anyway, and the skill reports there's no PR rather than inventing one.
+async fn ship_describe_followup(
+    driver: &dyn AgentDriver,
+    rx: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+) {
+    loop {
+        match rx.recv().await {
+            Ok(SessionEvent::TurnDone { .. }) => break,
+            Ok(SessionEvent::Exited { .. }) | Err(_) => return,
+            Ok(_) => {}
+        }
+    }
+    let _ = driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None);
 }
 
 /// Report a background launch failure over the session channel: a visible reason

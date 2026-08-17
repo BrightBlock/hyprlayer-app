@@ -29,6 +29,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         model: None,
         effort: None,
         chrome: false,
+        agent: None,
         env: std::env::vars().collect(),
     })
     .expect("spawn claude");
@@ -143,6 +144,7 @@ async fn rewind_to_ordinal_truncates_model_memory() {
         model: Some("haiku".into()),
         effort: None,
         chrome: false,
+        agent: None,
         env: std::env::vars().collect(),
     })
     .expect("spawn claude");
@@ -221,6 +223,7 @@ fn spawn_haiku(
         model: Some("haiku".into()),
         effort: None,
         chrome: false,
+        agent: None,
         env: std::env::vars().collect(),
     })
     .expect("spawn claude")
