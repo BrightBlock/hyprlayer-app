@@ -132,6 +132,25 @@ impl Workstream {
     pub fn app_owns_branch(&self) -> bool {
         self.worktree_mode == WorktreeMode::Isolated
     }
+
+    /// Modes whose branch is the user's, not the app's: the checkout can be
+    /// switched out from under us and the row should follow. `isolated` stays
+    /// pinned to the branch the app created; `folder` has no branch at all.
+    pub fn follows_head(&self) -> bool {
+        self.status == WorkstreamStatus::Active
+            && matches!(
+                self.worktree_mode,
+                WorktreeMode::Inplace | WorktreeMode::Existing
+            )
+    }
+
+    /// The branch this row should adopt given the checkout's live HEAD, or
+    /// `None` when nothing changes. `head` is `None` for a detached or unborn
+    /// HEAD, which must never overwrite a good stored value.
+    pub fn branch_to_adopt<'a>(&self, head: Option<&'a str>) -> Option<&'a str> {
+        let head = head?;
+        (self.follows_head() && !head.is_empty() && head != self.branch).then_some(head)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +330,24 @@ impl Db {
     /// ahead/behind against it; a future Ship opens its PR there.
     pub fn update_workstream_base_branch(&self, id: &str, base: &str) -> Result<()> {
         self.touch(id, "base_branch", base)
+    }
+
+    /// Adopt the branch the checkout is actually on. Only ever called for rows
+    /// whose branch the app does not own (see [`Workstream::follows_head`]).
+    ///
+    /// Clears `pr_number`: an attached PR belongs to the branch we just left, and
+    /// [`Workstream::pr_ref`] prefers it over the branch — leaving it would point
+    /// Merge at the wrong PR. Deliberately not a `touch`: a checkout done out of
+    /// band isn't workstream activity, and stamping `updated_at` would reorder
+    /// the board under the user.
+    pub fn update_workstream_branch(&self, id: &str, branch: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE workstreams SET branch = ?2, pr_number = NULL WHERE id = ?1",
+                params![id, branch],
+            )?;
+            Ok(())
+        })
     }
 
     pub fn set_workstream_pr(&self, id: &str, pr_number: Option<u32>) -> Result<()> {
@@ -522,6 +559,113 @@ mod tests {
         db.set_workstream_pr(&a.id, None).unwrap();
         let detached = db.get_workstream(&a.id).unwrap().unwrap();
         assert_eq!(detached.pr_ref(), detached.branch);
+    }
+
+    /// A row in `mode`, on branch `on`, used by the branch-follow truth table.
+    fn row(db: &Db, title: &str, mode: WorktreeMode, on: &str) -> Workstream {
+        db.insert_workstream(NewWorkstream {
+            project_path: "/repo".into(),
+            title: title.into(),
+            slug: format!("{title}-abcd"),
+            branch: on.into(),
+            worktree_path: "/repo".into(),
+            base_branch: "origin/main".into(),
+            worktree_mode: mode,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn only_user_owned_branch_modes_follow_head() {
+        let db = Db::open_in_memory().unwrap();
+        let inplace = row(&db, "here", WorktreeMode::Inplace, "main");
+        let existing = row(&db, "adopted", WorktreeMode::Existing, "main");
+        let isolated = row(&db, "own", WorktreeMode::Isolated, "main");
+        let folder = row(&db, "notes", WorktreeMode::Folder, "");
+
+        // The modes that adopt a branch the user already owns follow it.
+        assert!(inplace.follows_head());
+        assert!(existing.follows_head());
+        assert_eq!(
+            inplace.branch_to_adopt(Some("feature/x")),
+            Some("feature/x")
+        );
+        assert_eq!(
+            existing.branch_to_adopt(Some("feature/x")),
+            Some("feature/x")
+        );
+
+        // The app owns the isolated branch, so archive may delete it — never
+        // let HEAD repoint the row at a branch the user made.
+        assert!(!isolated.follows_head());
+        assert_eq!(isolated.branch_to_adopt(Some("feature/x")), None);
+        assert!(!folder.follows_head());
+        assert_eq!(folder.branch_to_adopt(Some("feature/x")), None);
+    }
+
+    #[test]
+    fn branch_adoption_ignores_no_ops_and_headless_checkouts() {
+        let db = Db::open_in_memory().unwrap();
+        let a = row(&db, "here", WorktreeMode::Inplace, "main");
+
+        // Already there.
+        assert_eq!(a.branch_to_adopt(Some("main")), None);
+        // Detached or unborn HEAD: keep the last good branch.
+        assert_eq!(a.branch_to_adopt(None), None);
+        assert_eq!(a.branch_to_adopt(Some("")), None);
+
+        // An archived row is a historical record; the checkout moved on without it.
+        db.archive_workstream(&a.id).unwrap();
+        let archived = db.get_workstream(&a.id).unwrap().unwrap();
+        assert!(!archived.follows_head());
+        assert_eq!(archived.branch_to_adopt(Some("feature/x")), None);
+    }
+
+    #[test]
+    fn update_workstream_branch_persists_and_repoints_pr_ref() {
+        let db = Db::open_in_memory().unwrap();
+        let a = row(&db, "here", WorktreeMode::Inplace, "main");
+
+        db.update_workstream_branch(&a.id, "feature/x").unwrap();
+        let got = db.get_workstream(&a.id).unwrap().unwrap();
+        assert_eq!(got.branch, "feature/x");
+        // The whole point: gh now resolves the new branch's PR, not main's.
+        assert_eq!(got.pr_ref(), "feature/x");
+        // Base is deliberately untouched — it's the user-settable merge target.
+        assert_eq!(got.base_branch, "origin/main");
+        assert!(got.updated_at >= got.created_at);
+    }
+
+    /// An attached PR outranks the branch in `pr_ref()`, so adoption has to drop
+    /// it — otherwise Merge acts on the PR of the branch we just left.
+    #[test]
+    fn adopting_a_branch_detaches_the_previous_branchs_pr() {
+        let db = Db::open_in_memory().unwrap();
+        let a = row(&db, "here", WorktreeMode::Inplace, "main");
+        db.set_workstream_pr(&a.id, Some(42)).unwrap();
+
+        db.update_workstream_branch(&a.id, "feature/x").unwrap();
+        let got = db.get_workstream(&a.id).unwrap().unwrap();
+        assert_eq!(got.pr_number, None);
+        assert_eq!(got.pr_ref(), "feature/x");
+    }
+
+    /// Out-of-band checkouts aren't workstream activity: the board sorts columns
+    /// by `updated_at`, so stamping it would jump the card to the top for a
+    /// change the user made in a terminal.
+    #[test]
+    fn adopting_a_branch_leaves_updated_at_alone() {
+        let db = Db::open_in_memory().unwrap();
+        let a = row(&db, "here", WorktreeMode::Inplace, "main");
+        let before = db.get_workstream(&a.id).unwrap().unwrap().updated_at;
+
+        db.update_workstream_branch(&a.id, "feature/x").unwrap();
+        let got = db.get_workstream(&a.id).unwrap().unwrap();
+        assert_eq!(got.updated_at, before);
+
+        // A real edit still stamps it.
+        db.update_workstream_title(&a.id, "renamed").unwrap();
+        assert!(db.get_workstream(&a.id).unwrap().unwrap().updated_at >= before);
     }
 
     #[test]

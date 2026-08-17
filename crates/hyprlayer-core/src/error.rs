@@ -50,6 +50,12 @@ pub enum CoreError {
     #[error("worktree has {0} uncommitted change(s)")]
     WorktreeDirty(u32),
 
+    /// The project's own checkout is dirty, blocking an in-place branch switch.
+    /// Distinct from [`CoreError::WorktreeDirty`]: there is no worktree here to
+    /// commit in or archive, so the remedies are different.
+    #[error("the project checkout has {count} uncommitted change(s)")]
+    CheckoutDirty { count: u32 },
+
     #[error("branch `{branch}` has {count} unpushed/unmerged commit(s)")]
     WorktreeUnpushed { branch: String, count: u32 },
 
@@ -109,6 +115,9 @@ impl CoreError {
             CoreError::WorktreeDirty(_) => Some(
                 "Commit or discard the changes in the worktree first, or archive with 'discard changes'.".into(),
             ),
+            CoreError::CheckoutDirty { .. } => Some(
+                "Commit or discard the changes in the project checkout first, or start this workstream in a dedicated worktree instead.".into(),
+            ),
             CoreError::WorktreeUnpushed { .. } => Some(
                 "Push the branch (or merge it) first, or archive with 'discard changes' to drop the commits.".into(),
             ),
@@ -136,6 +145,7 @@ impl CoreError {
             CoreError::OutputParse { .. } => "output_parse",
             CoreError::Db(_) => "db",
             CoreError::WorktreeDirty(_) => "worktree_dirty",
+            CoreError::CheckoutDirty { .. } => "checkout_dirty",
             CoreError::WorktreeUnpushed { .. } => "worktree_unpushed",
             CoreError::InvalidPath { .. } => "invalid_path",
             CoreError::RepoSettingsParse { .. } => "repo_settings_parse",

@@ -218,7 +218,7 @@ impl WorktreeManager {
                     // files are. Guard on those.
                     let dirty = status(&spec.project_repo, branch, None).dirty;
                     if dirty > 0 {
-                        return Err(CoreError::WorktreeDirty(dirty));
+                        return Err(CoreError::CheckoutDirty { count: dirty });
                     }
                     git_in(git, &spec.project_repo, &["checkout", branch])
                         .timeout(Duration::from_secs(60))
@@ -762,7 +762,13 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     let (additions, deletions) = crate::gitops::worktree_diff_line_counts(&repo);
 
     let head = repo.head().ok();
-    let branch = head.as_ref().and_then(|h| h.shorthand()).map(String::from);
+    // Detached HEAD (rebase, bisect) shorthands to the literal "HEAD" — report
+    // None rather than a branch name nothing can check out.
+    let branch = head
+        .as_ref()
+        .filter(|h| h.is_branch())
+        .and_then(|h| h.shorthand())
+        .map(String::from);
 
     let (ahead, behind) = (|| -> Option<(u32, u32)> {
         let head_ref = head.as_ref()?;
@@ -1207,6 +1213,24 @@ mod tests {
         );
     }
 
+    /// `status().branch` is the checkout's live HEAD, so an out-of-band branch
+    /// switch (an agent running `git checkout -b`) is visible to the caller that
+    /// adopts it. A detached HEAD reports `None`, never the literal "HEAD".
+    #[test]
+    fn status_branch_follows_head_and_reports_none_when_detached() {
+        let (_guard, repo) = fixture_repo();
+        assert_eq!(status(&repo, "main", None).branch.as_deref(), Some("main"));
+
+        sh(&repo, &["checkout", "-b", "feature/x"]);
+        assert_eq!(
+            status(&repo, "main", None).branch.as_deref(),
+            Some("feature/x")
+        );
+
+        sh(&repo, &["checkout", "--detach"]);
+        assert_eq!(status(&repo, "main", None).branch, None);
+    }
+
     /// In-place onto a *different* branch refuses a dirty tree: a plain checkout
     /// would silently carry the user's modified tracked files across, so the
     /// branch + checkout are left exactly as they were.
@@ -1238,7 +1262,19 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, CoreError::WorktreeDirty(_)), "got {err:?}");
+        // Its own variant, not the archive path's `worktree_dirty`: there is no
+        // worktree here, and the remedy is about the project checkout.
+        assert!(
+            matches!(err, CoreError::CheckoutDirty { count: 1 }),
+            "got {err:?}"
+        );
+        assert_eq!(err.code(), "checkout_dirty");
+        // The create dialog reads the count back out of this message to label
+        // its discard button (`dirtyCount` in CreateWorkstreamDialog.tsx).
+        assert_eq!(
+            err.to_string(),
+            "the project checkout has 1 uncommitted change(s)"
+        );
         // Nothing moved: still on main, edit intact.
         assert_eq!(
             crate::gitops::current_branch(&repo).as_deref(),

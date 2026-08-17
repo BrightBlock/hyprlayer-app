@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import type { WorkstreamView } from "@/lib/bindings";
+import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
 import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/components/ui";
-import { PlusIcon, SplitIcon } from "@/components/icons";
+import { ArchiveIcon, PlusIcon, SplitIcon, WarningTriangleIcon } from "@/components/icons";
 import type { WorktreeMode } from "@/lib/bindings";
-import { useCreateWorkstream, useFetchProjectRemote, useWorkstreamBases } from "@/lib/queries";
+import { formatRelativeTime } from "@/lib/format";
+import { isAppError } from "@/lib/ipc";
+import { basename } from "@/lib/path";
+import {
+  useArchivedWorkstreams,
+  useCreateWorkstream,
+  useDiscardProjectChanges,
+  useFetchProjectRemote,
+  useRestoreWorkstream,
+  useWorkstreamBases,
+} from "@/lib/queries";
 
 type Props = {
   projectPath: string;
@@ -99,6 +109,33 @@ export function CreateWorkstreamDialog({
   const remoteSet = useMemo(() => new Set(remoteBranches), [remoteBranches]);
   const filtered = useMemo(() => filterBranches(pickable, query), [pickable, query]);
 
+  // An in-place create refused to switch branches because the project checkout
+  // has uncommitted work. Recoverable in the dialog, so it doesn't render as a
+  // bare error (see CheckoutDirtyNotice).
+  const checkoutDirty = isAppError(create.error) && create.error.code === "checkout_dirty";
+  const dirtyChanges = checkoutDirty && isAppError(create.error)
+    ? dirtyCount(create.error.message)
+    : null;
+  const archived = useArchivedWorkstreams(checkoutDirty);
+  const discard = useDiscardProjectChanges(projectPath);
+  const restore = useRestoreWorkstream();
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Whose changes those are: the most recently archived in-place row still
+  // recording the branch the checkout is on. Branch adoption is what keeps that
+  // match honest — the row follows `git checkout` right up until it's archived.
+  const leftBehind = useMemo(
+    () =>
+      checkoutDirty && currentBranch
+        ? archived.data?.find(
+            (v) =>
+              v.item.projectPath === projectPath &&
+              v.item.worktreeMode === "inplace" &&
+              v.item.branch === currentBranch,
+          )
+        : undefined,
+    [checkoutDirty, currentBranch, archived.data, projectPath],
+  );
+
   const isNew = selectedBranch === null;
   const remoteSelected = !isNew && !!selectedBranch && remoteSet.has(selectedBranch);
   // The current branch is already checked out in the project's own tree, so it
@@ -140,7 +177,10 @@ export function CreateWorkstreamDialog({
     setBase("");
     setUserPickedBase(false);
     setPlace("worktree");
+    setConfirmDiscard(false);
     create.reset();
+    discard.reset();
+    restore.reset();
   };
 
   const close = () => {
@@ -148,6 +188,9 @@ export function CreateWorkstreamDialog({
     reset();
     onClose();
   };
+
+  /** Recovery is in flight — the whole dialog holds still until it settles. */
+  const recovering = discard.isPending || restore.isPending;
 
   // Resolve the combobox state into the backend's (mode, base, branch) shape.
   const resolved = (): { mode: WorktreeMode; base: string | null; branch: string | null } => {
@@ -204,6 +247,7 @@ export function CreateWorkstreamDialog({
           : `Checks ${selectedBranch} out into a dedicated worktree.`;
 
   return (
+    <>
     <Dialog open={open} onClose={close} title="New workstream">
       <form
         className="space-y-3"
@@ -307,17 +351,159 @@ export function CreateWorkstreamDialog({
 
         <p className="text-xs leading-relaxed text-ink-dim">{hint}</p>
         {!folder && bases.isError && <ErrorNote error={bases.error} />}
-        {create.isError && <ErrorNote error={create.error} />}
+        {create.isError &&
+          (checkoutDirty ? (
+            <CheckoutDirtyNotice
+              count={dirtyChanges}
+              onBranch={currentBranch}
+              target={selectedBranch}
+              leftBehind={leftBehind}
+              busy={recovering}
+              onUnarchive={(id) =>
+                restore.mutate(id, {
+                  onSuccess: (view) => {
+                    reset();
+                    onClose();
+                    onCreated(view);
+                  },
+                })
+              }
+            />
+          ) : (
+            <ErrorNote error={create.error} />
+          ))}
+        {discard.isError && <ErrorNote error={discard.error} />}
+        {restore.isError && <ErrorNote error={restore.error} />}
         <div className="flex justify-end gap-2">
-          <Button type="button" onClick={close} disabled={create.isPending}>
+          {checkoutDirty && (
+            <Button
+              type="button"
+              variant="danger"
+              className="mr-auto"
+              disabled={create.isPending || recovering}
+              onClick={() => setConfirmDiscard(true)}
+            >
+              Discard {changeCount(dirtyChanges)}
+            </Button>
+          )}
+          <Button type="button" onClick={close} disabled={create.isPending || recovering}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" busy={create.isPending} disabled={!title.trim()}>
+          <Button
+            type="submit"
+            variant="primary"
+            busy={create.isPending}
+            disabled={!title.trim() || recovering}
+          >
             {create.isPending ? busyLabel : "Create"}
           </Button>
         </div>
       </form>
     </Dialog>
+
+    {/* Sibling, not nested: the panel scrolls and owns a backdrop filter, and
+        `useEscape` stacks so this one takes Escape while it's up. */}
+    <Dialog
+      open={confirmDiscard}
+      onClose={() => setConfirmDiscard(false)}
+      title="Discard changes?"
+    >
+      <p className="text-sm leading-relaxed text-ink-dim">
+        Discard {changeCount(dirtyChanges)} in{" "}
+        <span className="font-mono text-ink">{basename(projectPath)}</span>? Modified files go
+        back to the last commit; untracked files are left alone. This cannot be undone.
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button onClick={() => setConfirmDiscard(false)}>Cancel</Button>
+        <Button
+          variant="danger"
+          busy={discard.isPending}
+          onClick={() => {
+            setConfirmDiscard(false);
+            discard.mutate(undefined, { onSuccess: submit });
+          }}
+        >
+          Discard
+        </Button>
+      </div>
+    </Dialog>
+    </>
+  );
+}
+
+/** Best-effort count from the backend's `checkout_dirty` message. Cosmetic —
+ * the copy degrades to "the changes" if the wording ever drifts. */
+function dirtyCount(message: string): number | null {
+  const m = /(\d+)\s+uncommitted/.exec(message);
+  return m ? Number(m[1]) : null;
+}
+
+function changeCount(count: number | null): string {
+  return count == null ? "the changes" : `${count} change${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Why an in-place create stopped: the project checkout has uncommitted work that
+ * a branch switch would carry across. Not an error note — nothing failed that a
+ * retry would fix, so it reads as a blocked state with the way out attached. The
+ * work is usually an archived in-place workstream's leftovers, and unarchiving is
+ * the only route back to it; discarding lives in the dialog footer beside Create.
+ */
+function CheckoutDirtyNotice({
+  count,
+  onBranch,
+  target,
+  leftBehind,
+  busy,
+  onUnarchive,
+}: {
+  count: number | null;
+  /** Branch the checkout is sitting on. */
+  onBranch: string;
+  /** Branch the create wanted to switch to. */
+  target: string | null;
+  /** The archived workstream the changes belong to, when one is identifiable. */
+  leftBehind: ArchivedWorkstreamView | undefined;
+  busy: boolean;
+  onUnarchive: (id: string) => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-md border border-edge bg-panel-2 text-sm">
+      <div className="flex gap-3 p-3">
+        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-attention/30 bg-attention/15 text-attention">
+          <WarningTriangleIcon size={14} />
+        </span>
+        <div className="min-w-0">
+          <p className="font-medium text-ink">Your checkout has uncommitted work</p>
+          <p className="mt-0.5 truncate font-mono text-xs text-ink-dim">
+            {changeCount(count)} on {onBranch || "this branch"}
+          </p>
+          <p className="mt-2 leading-relaxed text-ink-dim">
+            Switching it to <span className="font-mono text-ink">{target}</span> would carry that
+            work across, so nothing was created.
+          </p>
+        </div>
+      </div>
+      {leftBehind && (
+        <div className="flex items-center gap-3 border-t border-edge px-3 py-2.5">
+          <ArchiveIcon size={15} className="shrink-0 text-ink-dim" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-ink">{leftBehind.item.title}</div>
+            <div className="truncate text-xs text-ink-dim">
+              left it here · archived {formatRelativeTime(leftBehind.item.archivedAt)}
+            </div>
+          </div>
+          <Button
+            type="button"
+            className="shrink-0"
+            disabled={busy}
+            onClick={() => onUnarchive(leftBehind.item.id)}
+          >
+            Unarchive
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 

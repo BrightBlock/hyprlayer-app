@@ -120,6 +120,16 @@ export const commands = {
 	 *  immediately from the refs already on disk, then fills in.
 	 */
 	fetchProjectRemote: (projectPath: string) => typedError<null, AppError>(__TAURI_INVOKE("fetch_project_remote", { projectPath })),
+	/**
+	 *  Restore the project checkout's modified tracked files to HEAD, leaving
+	 *  untracked files alone, and report how many were reverted. Destructive — the
+	 *  new-workstream dialog confirms first.
+	 * 
+	 *  Keyed by project path rather than workstream id: this exists for the
+	 *  `checkout_dirty` create failure, where the leftover changes usually belong to
+	 *  a workstream that was already archived, so there is no live row to hang it off.
+	 */
+	discardProjectChanges: (projectPath: string) => typedError<number, AppError>(__TAURI_INVOKE("discard_project_changes", { projectPath })),
 	createWorkstream: (projectPath: string, title: string, base: string | null, mode: WorktreeMode, branch: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base, mode, branch })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
 	/**
@@ -806,6 +816,7 @@ export const events = {
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
+	workstreamBranchChanged: makeEvent<WorkstreamBranchChanged>("workstream-branch-changed"),
 	worktreeChanged: makeEvent<WorktreeChanged>("worktree-changed"),
 };
 
@@ -2586,6 +2597,18 @@ export type WorkstreamBases = {
 	remoteBranches: string[],
 	defaultBase: string,
 	currentBranch: string | null,
+};
+
+/**
+ *  An in-place / existing workstream's checkout moved onto a different branch
+ *  (`git checkout` inside the working directory, often an agent's). The backend
+ *  adopted it into the row and the list response already carries the new branch,
+ *  so this only tells the frontend to drop the queries keyed off the old one.
+ */
+export type WorkstreamBranchChanged = {
+	workstreamId: string,
+	branch: string,
+	previous: string,
 };
 
 export type WorkstreamDoc = {

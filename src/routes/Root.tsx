@@ -36,7 +36,13 @@ import { triggerActiveFileSave } from "@/lib/fileSave";
 import { docTitle } from "@/features/library/text";
 import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
 import { startEdgeDrag } from "@/lib/resize";
-import { isFolderWorkstream, isGitProject } from "@/lib/domain/projects";
+import {
+  isDetachedHead,
+  isFolderWorkstream,
+  isGitProject,
+  isOffBase,
+  shortBranch,
+} from "@/lib/domain/projects";
 import { GLASS_BAND } from "@/lib/glass";
 import { IS_MACOS } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
@@ -197,10 +203,11 @@ function PanelLeftIcon() {
   );
 }
 
-/** Branch-fork glyph for a worktree-backed workstream — it lives on its own
- *  branch in a dedicated worktree. Paired with `MainCheckoutIcon` so a row's
- *  worktree mode reads at a glance. */
-function GitBranchIcon() {
+/** Branch-fork glyph. One geometry, drawn twice: `limbClass` colours the
+ *  diverged branch, and that colour is the *only* difference between a
+ *  worktree-backed workstream and a main checkout that has branched off its
+ *  base. The limb keeps its original gap before the trunk. */
+function ForkGlyph({ limbClass }: { limbClass?: string }) {
   return (
     <svg
       aria-hidden="true"
@@ -212,16 +219,30 @@ function GitBranchIcon() {
     >
       <circle cx="6" cy="5" r="2.3" stroke="currentColor" strokeWidth="1.8" />
       <circle cx="6" cy="19" r="2.3" stroke="currentColor" strokeWidth="1.8" />
-      <circle cx="18" cy="8" r="2.3" stroke="currentColor" strokeWidth="1.8" />
       <path d="M6 7.5v9" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M18 10.5c0 3-2.5 4.5-5.5 4.5H9.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <g className={limbClass}>
+        <circle cx="18" cy="8" r="2.3" stroke="currentColor" strokeWidth="1.8" />
+        <path
+          d="M18 10.5c0 3-2.5 4.5-5.5 4.5H9.5"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+      </g>
     </svg>
   );
+}
+
+/** A worktree-backed workstream — it lives on its own branch in a dedicated
+ *  worktree. */
+function GitBranchIcon() {
+  return <ForkGlyph />;
+}
+
+/** The project's own checkout, sitting on a branch that isn't its merge base.
+ *  Identical to `GitBranchIcon` but for the accent limb. */
+function BranchedCheckoutIcon() {
+  return <ForkGlyph limbClass="text-accent" />;
 }
 
 /** Glyph for an in-place workstream: it has no dedicated worktree, so it runs in
@@ -1814,6 +1835,11 @@ export function Root() {
                         const inplace = view.item.worktreeMode === "inplace";
                         // A folder workstream has no branch at all.
                         const folder = isFolderWorkstream(view);
+                        const detached = isDetachedHead(view);
+                        // The main checkout sits on a branch other than its merge
+                        // base. Suppressed while detached: the stored branch is
+                        // stale then, so naming it would contradict the tooltip.
+                        const branchedInPlace = inplace && !detached && isOffBase(view);
                         return (
                           <Link
                             key={view.item.id}
@@ -1835,8 +1861,14 @@ export function Root() {
                             title={
                               folder
                                 ? `${view.item.title} · project folder`
-                                : `${view.item.title} · ${view.item.branch}${
-                                    inplace ? " · main checkout (no worktree)" : ""
+                                : `${view.item.title} · ${
+                                    detached ? "detached HEAD" : view.item.branch
+                                  }${
+                                    inplace
+                                      ? ` · main checkout (base: ${shortBranch(
+                                          view.item.baseBranch,
+                                        )})`
+                                      : ""
                                   }`
                             }
                           >
@@ -1856,18 +1888,24 @@ export function Root() {
                             {/* Worktree-mode indicator: branch-fork for a dedicated
                             worktree, house for an in-place (main-checkout) run.
                             Kept on the trailing edge with the git chip so the
-                            leading status dot stays clean (the mock's look). */}
+                            leading status dot stays clean (the mock's look). An
+                            in-place checkout on a branch other than its merge base
+                            takes the fork too, with the limb in accent. */}
                             <span
                               className="flex shrink-0 items-center text-ink-dim/70"
                               title={
                                 folder
                                   ? "Runs in the project folder"
-                                  : inplace
-                                    ? "Runs in the main checkout (no worktree)"
-                                    : "Runs in a dedicated worktree"
+                                  : branchedInPlace
+                                    ? `Runs in the main checkout, branched onto ${view.item.branch}`
+                                    : inplace
+                                      ? "Runs in the main checkout (no worktree)"
+                                      : "Runs in a dedicated worktree"
                               }
                             >
-                              {inplace || folder ? (
+                              {branchedInPlace ? (
+                                <BranchedCheckoutIcon />
+                              ) : inplace || folder ? (
                                 <MainCheckoutIcon />
                               ) : (
                                 <GitBranchIcon />

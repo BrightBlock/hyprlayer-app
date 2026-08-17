@@ -693,6 +693,36 @@ pub fn discard_files(worktree: &Path, rels: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Paths of the modified *tracked* files — the changes a branch switch would
+/// silently carry across. Untracked files are excluded because they ride along
+/// harmlessly; the filter mirrors the `dirty` count in [`crate::worktree::status`]
+/// so this can't disagree with the guard that reports it.
+fn dirty_tracked_paths(repo: &git2::Repository) -> Result<Vec<String>> {
+    let statuses = repo
+        .statuses(Some(&mut status_options()))
+        .map_err(|e| git_err("git2 status", e))?;
+    Ok(statuses
+        .iter()
+        .filter(|e| !e.status().intersects(git2::Status::WT_NEW))
+        .filter_map(|e| e.path().map(String::from))
+        .filter(|p| !crate::worktree::is_thoughts_path(p))
+        .collect())
+}
+
+/// Discard every modified tracked file in `worktree` (restore to HEAD), leaving
+/// untracked files in place, and report how many were reverted. The escape hatch
+/// for an in-place create blocked by [`CoreError::CheckoutDirty`](crate::error::CoreError::CheckoutDirty).
+/// Destructive — callers confirm first.
+pub fn discard_tracked_changes(worktree: &Path) -> Result<u32> {
+    let repo = open_repo(worktree)?;
+    let paths = dirty_tracked_paths(&repo)?;
+    if paths.is_empty() {
+        return Ok(0);
+    }
+    discard_files(worktree, &paths)?;
+    Ok(paths.len() as u32)
+}
+
 /// Content of a path in HEAD's tree, when present.
 fn head_blob_text(repo: &git2::Repository, rel: &Path) -> Option<String> {
     let tree = repo.head().ok()?.peel_to_tree().ok()?;
@@ -1202,6 +1232,28 @@ mod tests {
         );
         assert!(!dir.path().join("b.md").exists());
         assert!(worktree_git_status(dir.path()).unwrap().unstaged.is_empty());
+    }
+
+    /// The in-place create guard counts only modified tracked files, so its
+    /// escape hatch must clear exactly those — an untracked file the user is
+    /// mid-way through writing is not what blocked the branch switch.
+    #[test]
+    fn discard_tracked_changes_spares_untracked_files() {
+        let dir = repo_with_commit();
+        std::fs::write(dir.path().join("a.md"), "two\n").unwrap();
+        std::fs::write(dir.path().join("scratch.md"), "wip\n").unwrap();
+
+        assert_eq!(discard_tracked_changes(dir.path()).unwrap(), 1);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.md")).unwrap(),
+            "one\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("scratch.md")).unwrap(),
+            "wip\n"
+        );
+        // Clean tree is a no-op, not an error.
+        assert_eq!(discard_tracked_changes(dir.path()).unwrap(), 0);
     }
 
     #[test]

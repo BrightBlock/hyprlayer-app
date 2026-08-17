@@ -42,6 +42,18 @@ pub struct WorktreeChanged {
     pub workstream_id: String,
 }
 
+/// An in-place / existing workstream's checkout moved onto a different branch
+/// (`git checkout` inside the working directory, often an agent's). The backend
+/// adopted it into the row and the list response already carries the new branch,
+/// so this only tells the frontend to drop the queries keyed off the old one.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkstreamBranchChanged {
+    pub workstream_id: String,
+    pub branch: String,
+    pub previous: String,
+}
+
 /// Coarse session state change, for board/sidebar badges (the fine-grained
 /// transcript flows over the per-session Channel, not this global event).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]

@@ -24,6 +24,26 @@ export function isFolderWorkstream(view: Pick<WorkstreamView, "item">): boolean 
   return view.item.worktreeMode === "folder";
 }
 
+/** Drop the `origin/` remote prefix: the stored base is a git rev (`origin/main`)
+ *  but users (and GitHub) think in branch names (`main`). */
+export function shortBranch(ref: string): string {
+  return ref.replace(/^origin\//, "");
+}
+
+/** The checkout sits on a branch other than its merge base. True from creation
+ *  for an in-place workstream started off the base branch — the base is detected
+ *  (`origin/main`), not copied from the branch picked. */
+export function isOffBase(view: Pick<WorkstreamView, "item">): boolean {
+  const { branch, baseBranch } = view.item;
+  return branch.length > 0 && branch !== shortBranch(baseBranch);
+}
+
+/** Mid-rebase/bisect: HEAD points at a commit, not a branch. The stored branch
+ *  is the last good one, so surfaces say "detached" rather than showing it. */
+export function isDetachedHead(view: Pick<WorkstreamView, "item" | "git">): boolean {
+  return !isFolderWorkstream(view) && view.git.exists && view.git.branch == null;
+}
+
 /** The project directory is the user's own, not an app-made clone — so
  *  deleting it destroys work the app never created. True for disk and folder. */
 export function isUserDirectory(project: Pick<Project, "source"> | undefined | null): boolean {

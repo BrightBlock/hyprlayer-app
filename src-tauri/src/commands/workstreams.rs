@@ -124,9 +124,78 @@ where
     Ok(views)
 }
 
+/// Adopt live HEAD into the rows whose branch the app doesn't own, so a
+/// `git checkout` inside the checkout (an agent branching mid-turn, say) moves
+/// the workstream with it. `isolated` rows are excluded — their branch is
+/// app-created and archive may delete it.
+///
+/// The views are patched in place, so the caller's response already carries the
+/// new branch and the frontend needs no follow-up list refetch — which is what
+/// keeps this off the watcher's self-refresh treadmill (#221).
+///
+/// Opportunistic: a failed write (a busy database, say) is logged and the
+/// unpatched views returned, because this rides on a read path — failing the
+/// whole list would blank the board and the sidebar over a bookkeeping update
+/// the next sweep retries anyway.
+async fn adopt_head_branches(
+    app: &AppHandle,
+    db: Arc<hyprlayer_core::store::Db>,
+    mut views: Vec<WorkstreamView>,
+) -> Vec<WorkstreamView> {
+    let changes: Vec<(usize, String, String)> = views
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| {
+            let next = v.item.branch_to_adopt(v.git.branch.as_deref())?;
+            Some((i, v.item.branch.clone(), next.to_string()))
+        })
+        .collect();
+    if changes.is_empty() {
+        return views;
+    }
+
+    let writes: Vec<(String, String)> = changes
+        .iter()
+        .map(|(i, _, next)| (views[*i].item.id.clone(), next.clone()))
+        .collect();
+    if let Err(e) = db_task(db, move |db| {
+        for (id, branch) in &writes {
+            db.update_workstream_branch(id, branch)?;
+        }
+        Ok(())
+    })
+    .await
+    {
+        log::warn!(
+            "branch adoption write failed, retrying next sweep: {}",
+            e.message
+        );
+        return views;
+    }
+
+    for (i, previous, next) in changes {
+        log::info!(
+            "workstream {} adopted branch {next} (was {previous})",
+            views[i].item.id
+        );
+        let _ = crate::events::WorkstreamBranchChanged {
+            workstream_id: views[i].item.id.clone(),
+            branch: next.clone(),
+            previous,
+        }
+        .emit(app);
+        views[i].item.branch = next;
+        // The write dropped the attached PR (it was the old branch's); keep the
+        // response from claiming otherwise.
+        views[i].item.pr_number = None;
+    }
+    views
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workstreams(
+    app: AppHandle,
     state: State<'_, AppState>,
     project_path: String,
     include_archived: bool,
@@ -142,20 +211,25 @@ pub async fn list_workstreams(
     } else {
         None
     };
-    status_batch(items, move |item| {
+    let views = status_batch(items, move |item| {
         effective
             .as_ref()
             .map(|eff| thoughts_links::check_thoughts(Path::new(&item.worktree_path), eff))
     })
-    .await
+    .await?;
+    Ok(adopt_head_branches(&app, state.db.clone(), views).await)
 }
 
 /// Active workstreams across every project — feeds the sidebar tree.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_all_workstreams(state: State<'_, AppState>) -> CmdResult<Vec<WorkstreamView>> {
+pub async fn list_all_workstreams(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<WorkstreamView>> {
     let items = db_task(state.db.clone(), |db| db.list_active_workstreams()).await?;
-    status_batch(items, |_| None).await
+    let views = status_batch(items, |_| None).await?;
+    Ok(adopt_head_branches(&app, state.db.clone(), views).await)
 }
 
 /// Point the live worktree watcher at this workstream, so external edits emit
@@ -280,6 +354,36 @@ pub async fn fetch_project_remote(
         .await
         .map_err(AppError::from)?;
     Ok(())
+}
+
+/// Restore the project checkout's modified tracked files to HEAD, leaving
+/// untracked files alone, and report how many were reverted. Destructive — the
+/// new-workstream dialog confirms first.
+///
+/// Keyed by project path rather than workstream id: this exists for the
+/// `checkout_dirty` create failure, where the leftover changes usually belong to
+/// a workstream that was already archived, so there is no live row to hang it off.
+#[tauri::command]
+#[specta::specta]
+pub async fn discard_project_changes(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> CmdResult<u32> {
+    if !super::projects::project_source(&state, &project_path)
+        .await
+        .is_git()
+    {
+        return Err(AppError {
+            code: "invalid_mode".into(),
+            message: "This project is a plain folder — it has no git changes to discard.".into(),
+            remedy: None,
+        });
+    }
+    blocking("discard_project_changes", move || {
+        hyprlayer_core::gitops::discard_tracked_changes(Path::new(&project_path))
+    })
+    .await?
+    .map_err(AppError::from)
 }
 
 /// The local branch an existing/in-place workstream will check out, and whether the

@@ -454,10 +454,15 @@ export function useDefaultUsername() {
 // The gh-backed PR queries deliberately sit OUTSIDE that prefix, under
 // ["workstream-pr", id] — see `invalidateWorkstreamPr`.
 
-function invalidateWorkstream(id: string) {
-  // Whole ["workstreams"] prefix: the project's list AND the sidebar's
-  // cross-project tree both refresh.
+/** Refresh every workstream list: the project's board AND the sidebar's
+ *  cross-project tree. Only one of them performs a given backend-side
+ *  reconciliation, so the other needs telling. */
+export function invalidateWorkstreamLists() {
   void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+}
+
+function invalidateWorkstream(id: string) {
+  invalidateWorkstreamLists();
   void queryClient.invalidateQueries({ queryKey: ["workstream", id] });
 }
 
@@ -617,6 +622,19 @@ export function useArchivedWorkstreams(enabled = true) {
     queryKey: ["workstreams", "@archived"],
     queryFn: () => unwrap(commands.listArchivedWorkstreams()),
     enabled,
+  });
+}
+
+/** Restore the project checkout's modified tracked files to HEAD, resolving to
+ *  how many were reverted. Destructive — the caller confirms first.
+ *
+ *  Deliberately invalidates nothing: no workstream row changes, and the caller
+ *  retries a create straight after. A refetch here would put `useWorkstreams`
+ *  in flight during that create, and ProjectPage swaps to a spinner while it
+ *  is — unmounting the dialog before the create's `onSuccess` can close it. */
+export function useDiscardProjectChanges(projectPath: string) {
+  return useMutation({
+    mutationFn: () => unwrap(commands.discardProjectChanges(projectPath)),
   });
 }
 

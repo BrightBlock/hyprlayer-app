@@ -2,7 +2,7 @@ import type { WorkstreamView } from "@/lib/bindings";
 import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
 import { WorkstreamGitChip } from "@/features/workstreams/WorkstreamGitChip";
 import { Badge } from "@/components/ui";
-import { isFolderWorkstream } from "@/lib/domain/projects";
+import { isDetachedHead, isFolderWorkstream, isOffBase, shortBranch } from "@/lib/domain/projects";
 
 /** A clickable kanban card representing one active workstream. Clicking (or
  *  pressing Enter / Space) calls `onOpen` with the workstream's id; right-click
@@ -22,6 +22,12 @@ export function WorkstreamCard({
   const inplace = item.worktreeMode === "inplace";
   // A folder workstream has no branch to pill at all.
   const folder = isFolderWorkstream(view);
+  const detached = isDetachedHead(view);
+  // The checkout is on a branch other than its merge base. Only flagged for
+  // in-place rows (a worktree-backed one is off its base by construction), and
+  // never while detached — the stored branch is stale then, so it would
+  // contradict the "detached HEAD" chip beside it.
+  const branchedInPlace = inplace && !detached && isOffBase(view);
   return (
     <div
       role="button"
@@ -45,7 +51,9 @@ export function WorkstreamCard({
       title={
         folder
           ? `${item.title} · project folder`
-          : `${item.title} · ${item.branch}${inplace ? " · main checkout (no worktree)" : ""}`
+          : `${item.title} · ${detached ? "detached HEAD" : item.branch}${
+              inplace ? ` · main checkout (base: ${shortBranch(item.baseBranch)})` : ""
+            }`
       }
     >
       <div className="flex items-start gap-2">
@@ -58,9 +66,10 @@ export function WorkstreamCard({
         ) : (
           <>
             <span className="max-w-full truncate rounded bg-edge/60 px-1.5 py-0.5 font-mono text-xs text-ink-dim">
-              {item.branch}
+              {detached ? "detached HEAD" : item.branch}
             </span>
             {inplace && <Badge tone="dim">no worktree</Badge>}
+            {branchedInPlace && <Badge tone="dim">off base</Badge>}
             <WorkstreamGitChip view={view} />
             {item.prNumber != null && <Badge tone="accent">PR #{item.prNumber}</Badge>}
           </>

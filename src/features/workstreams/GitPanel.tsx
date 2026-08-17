@@ -9,6 +9,7 @@ import {
   useUpdateFromBase,
   useWorkstreamBases,
 } from "@/lib/queries";
+import { isDetachedHead, shortBranch } from "@/lib/domain/projects";
 import { IS_MACOS } from "@/lib/platform";
 import { formatChord } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
@@ -61,12 +62,6 @@ function PullIcon({ size = 13 }: { size?: number }) {
   );
 }
 
-/** Drop the `origin/` remote prefix for display — the stored base is a git rev
- *  (`origin/main`) but users (and GitHub) think in branch names (`main`). */
-function shortBranch(ref: string): string {
-  return ref.replace(/^origin\//, "");
-}
-
 /** The branch → base row inside the PULL REQUEST card. The base is a functional
  *  dropdown: picking a branch re-targets the merge destination (and re-points an
  *  open PR via `gh pr edit`), so git-flow teams can merge into `develop`. */
@@ -92,6 +87,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
   // stored (it revparse-resolves locally for ahead/behind and is stripped for
   // gh + the Ship prompt); the menu shows it without the prefix.
   const baseShort = shortBranch(view.item.baseBranch);
+  const detached = isDetachedHead(view);
   const choices = (bases.data?.branches ?? [])
     .filter((b) => b.startsWith("origin/"))
     .map((b) => ({ ref: b, label: shortBranch(b) }))
@@ -100,13 +96,20 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
-        {/* Source branch — fixed, this workstream's own branch. */}
+        {/* Source branch — the checkout's live branch: an in-place workstream
+        follows its checkout, so this tracks a `git checkout` done out of band. */}
         <span
           className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-edge bg-panel px-2 py-1"
-          title={view.item.branch}
+          title={
+            detached
+              ? `${view.item.branch} — HEAD is detached (rebase or bisect in progress)`
+              : `${view.item.branch} → ${baseShort}`
+          }
         >
-          <SplitIcon size={13} className="shrink-0 text-ok" />
-          <span className="min-w-0 truncate font-mono text-xs text-ink">{view.item.branch}</span>
+          <SplitIcon size={13} className={`shrink-0 ${detached ? "text-warn" : "text-ok"}`} />
+          <span className="min-w-0 truncate font-mono text-xs text-ink">
+            {detached ? "detached HEAD" : view.item.branch}
+          </span>
         </span>
         <span className="shrink-0 text-ink-dim">→</span>
         {/* Target (base) branch — the functional picker. */}
