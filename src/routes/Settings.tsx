@@ -49,7 +49,7 @@ import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection";
 import { THEMES, useThemeStore } from "@/lib/theme";
 import { IS_MACOS } from "@/lib/platform";
-import { AnytypeIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PersonIcon, PlusIcon, XIcon } from "@/components/icons";
+import { AgentIcon, AnytypeIcon, BellIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, KeyboardIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PaletteIcon, PersonIcon, PlusIcon, PuzzleIcon, SlidersIcon, TerminalIcon, XIcon } from "@/components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
   switch (kind) {
@@ -1031,16 +1031,26 @@ type SectionId =
   | "advanced"
   | "binaries";
 
-const NAV: Array<{ id: SectionId; label: string }> = [
-  { id: "general", label: "General" },
-  { id: "harnesses", label: "Harnesses" },
-  { id: "git", label: "Git" },
-  { id: "notifications", label: "Notifications" },
-  { id: "keyboard", label: "Keyboard" },
-  { id: "appearance", label: "Appearance" },
-  { id: "advanced", label: "Advanced" },
-  { id: "binaries", label: "Binaries" },
+type NavItem = {
+  id: SectionId;
+  label: string;
+  icon: (props: { size?: number; className?: string }) => React.ReactElement;
+};
+
+const NAV: NavItem[] = [
+  { id: "general", label: "General", icon: SlidersIcon },
+  { id: "harnesses", label: "Harnesses", icon: AgentIcon },
+  { id: "git", label: "Git", icon: GitBranchIcon },
+  { id: "notifications", label: "Notifications", icon: BellIcon },
+  { id: "keyboard", label: "Keyboard", icon: KeyboardIcon },
+  { id: "appearance", label: "Appearance", icon: PaletteIcon },
+  { id: "advanced", label: "Advanced", icon: PuzzleIcon },
+  { id: "binaries", label: "Binaries", icon: TerminalIcon },
 ];
+
+/** Fixed — the labels are short and none of them wrap, so there's nothing to
+ *  drag for (unlike the project / Library panels, whose rows carry paths). */
+const SETTINGS_SIDEBAR_WIDTH = 196;
 
 export function Settings() {
   const bootstrap = useBootstrap();
@@ -1059,65 +1069,89 @@ export function Settings() {
   const data = bootstrap.data!;
 
   return (
-    <div className="mx-auto flex max-w-4xl gap-8 p-8">
-      <nav className="w-40 shrink-0">
-        <h1 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-dim">
-          Settings
-        </h1>
-        <ul className="space-y-0.5">
-          {NAV.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => setActive(item.id)}
-                aria-current={section === item.id}
-                className={`w-full rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ${
-                  section === item.id
-                    ? "bg-edge text-ink"
-                    : "text-ink-dim hover:bg-edge/60 hover:text-ink"
-                }`}
-              >
-                {item.label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </nav>
+    // Settings owns the shell's second column (Root hides the project tree on
+    // this route), so the section list is a real sidebar panel — same bg-panel
+    // and border seam as the project / Library / Prompts panels — and only the
+    // content column scrolls.
+    <div className="flex h-full min-h-0">
+      <aside
+        className="flex shrink-0 flex-col border-r border-edge bg-panel"
+        style={{ width: SETTINGS_SIDEBAR_WIDTH }}
+      >
+        {/* No "Settings" band here: unlike the project / Library panels, this
+            one titles a route the window's own breadcrumb already names, so a
+            header would just print the word twice. The list starts at the top. */}
+        <nav className="flex-1 overflow-y-auto p-2 pt-3" aria-label="Settings sections">
+          <ul className="space-y-0.5">
+            {NAV.map((item) => {
+              const selected = section === item.id;
+              const Icon = item.icon;
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => setActive(item.id)}
+                    aria-current={selected}
+                    className={`relative flex w-full items-center gap-2.5 overflow-hidden rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
+                      selected
+                        ? "bg-accent/15 text-ink"
+                        : "text-ink-dim hover:bg-edge/50 hover:text-ink"
+                    }`}
+                  >
+                    {/* The accent spine every selected row in the shell's
+                        sidebars wears (project tree, pinned list). */}
+                    {selected && (
+                      <span
+                        className="absolute inset-y-0 left-0 w-[3px] bg-accent"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <Icon size={14} className="shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      </aside>
 
-      <div className="min-w-0 flex-1 space-y-4">
-        {section === "general" && (
-          <>
-            {/* macOS checks for updates from the app menu (the only platform
-                that gets one — see macos_menu in src-tauri/src/lib.rs), so
-                Windows and Linux need the manual "Check now" card here or they
-                have no way to ask at all. */}
-            {!IS_MACOS && <UpdatesCard />}
-            <AiToolCard />
-            <DefaultHarnessCard settings={data.settings} />
-            <HyprlayerConfigCard config={data} />
-            <TabTitlesCard settings={data.settings} />
-            <QuitCard settings={data.settings} />
-            <Card>
-              <CardTitle>Setup wizard</CardTitle>
-              <p className="mb-3 text-xs text-ink-dim">
-                Re-run the guided setup to reconfigure your AI tool or change your thoughts
-                repository.
-              </p>
-              <Link to="/onboarding">
-                <Button>Re-run setup</Button>
-              </Link>
-            </Card>
-          </>
-        )}
-        {section === "harnesses" && (
-          <HarnessesSection settings={data.settings} binaries={data.binaries} />
-        )}
-        {section === "git" && <GitSection settings={data.settings} />}
-        {section === "notifications" && <NotificationsSection settings={data.settings} />}
-        {section === "keyboard" && <KeyboardSettings settings={data.settings} />}
-        {section === "appearance" && <AppearanceSection />}
-        {section === "advanced" && <AdvancedSection settings={data.settings} />}
-        {section === "binaries" && <BinariesCard data={data} />}
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl space-y-4 p-8">
+          {section === "general" && (
+            <>
+              {/* macOS checks for updates from the app menu (the only platform
+                  that gets one — see macos_menu in src-tauri/src/lib.rs), so
+                  Windows and Linux need the manual "Check now" card here or they
+                  have no way to ask at all. */}
+              {!IS_MACOS && <UpdatesCard />}
+              <AiToolCard />
+              <DefaultHarnessCard settings={data.settings} />
+              <HyprlayerConfigCard config={data} />
+              <TabTitlesCard settings={data.settings} />
+              <QuitCard settings={data.settings} />
+              <Card>
+                <CardTitle>Setup wizard</CardTitle>
+                <p className="mb-3 text-xs text-ink-dim">
+                  Re-run the guided setup to reconfigure your AI tool or change your thoughts
+                  repository.
+                </p>
+                <Link to="/onboarding">
+                  <Button>Re-run setup</Button>
+                </Link>
+              </Card>
+            </>
+          )}
+          {section === "harnesses" && (
+            <HarnessesSection settings={data.settings} binaries={data.binaries} />
+          )}
+          {section === "git" && <GitSection settings={data.settings} />}
+          {section === "notifications" && <NotificationsSection settings={data.settings} />}
+          {section === "keyboard" && <KeyboardSettings settings={data.settings} />}
+          {section === "appearance" && <AppearanceSection />}
+          {section === "advanced" && <AdvancedSection settings={data.settings} />}
+          {section === "binaries" && <BinariesCard data={data} />}
+        </div>
       </div>
     </div>
   );

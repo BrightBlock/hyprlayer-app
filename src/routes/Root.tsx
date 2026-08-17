@@ -674,6 +674,10 @@ export function Root() {
   // The Prompt library renders its own "Prompts" panel (like the Library's list
   // panel), so the project panel hides there too.
   const onPrompts = pathname.startsWith("/prompts");
+  // Settings owns the second column too — its section list is a real sidebar
+  // panel, and a project tree beside it would be dead weight (nothing in
+  // Settings is project-scoped).
+  const onSettings = pathname.startsWith("/settings");
   // Breadcrumb title for the selected doc — cache-shared with the detail pane's
   // own `useDoc`, so no extra fetch; disabled (empty id) off the library route.
   const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "");
@@ -983,16 +987,16 @@ export function Root() {
   // The header sidebar toggle acts on whichever left panel the route shows: the
   // Library's list panel on /library, the project tree everywhere else. Both
   // collapse the same way, so one button drives both (and reads each one's
-  // shown/hidden state for its label). The Prompt library's panel is fixed
-  // (always shown), so the toggle is inert there rather than silently flipping
-  // the hidden project tree.
+  // shown/hidden state for its label). The Prompt library's and Settings' panels
+  // are fixed (always shown), so the toggle is inert there rather than silently
+  // flipping the hidden project tree.
   const sidebarShown = onLibrary
     ? !libraryCollapsed
-    : onPrompts
+    : onPrompts || onSettings
       ? true
       : !collapsed;
   const toggleSidebar = () => {
-    if (onPrompts) return;
+    if (onPrompts || onSettings) return;
     if (onLibrary) toggleLibrary();
     else toggleProjectSidebar();
   };
@@ -1567,11 +1571,12 @@ export function Root() {
             collapse/expand glides instead of snapping. overflow-hidden clips
             the fixed-width inner shell (pinned to the rail edge) so its content
             never reflows mid-animation; the transition is dropped while the
-            resize handle is dragged so the panel tracks the cursor. The Library
-            route hides it entirely — that route renders its own list panel. The
-            width transition is not reduced-motion-gated — Windows maps that to the
-            often-off "Animation effects" toggle, which would otherwise snap it. */}
-        {!onLibrary && !onPrompts && (
+            resize handle is dragged so the panel tracks the cursor. The Library,
+            Prompts and Settings routes hide it entirely — each renders its own
+            panel in that column. The width transition is not reduced-motion-gated
+            — Windows maps that to the often-off "Animation effects" toggle, which
+            would otherwise snap it. */}
+        {!onLibrary && !onPrompts && !onSettings && (
           <aside
             className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
               resizingSidebar ? "" : "transition-[width] duration-200 ease-out"
@@ -1923,7 +1928,9 @@ export function Root() {
           </aside>
         )}
 
-        {!collapsed && !onLibrary && (
+        {/* Only where the project panel itself renders — the routes that swap it
+            out for their own panel have no project width to drag. */}
+        {!collapsed && !onLibrary && !onPrompts && !onSettings && (
           <div
             role="separator"
             aria-orientation="vertical"

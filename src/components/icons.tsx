@@ -1002,6 +1002,93 @@ export function ScriptPanelIcon({ size = 18, strokeWidth = 1.6, className }: Ico
   );
 }
 
+/** Sliders — general/mixed settings (Settings sidebar). */
+export function SlidersIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      className={className}
+    >
+      <path d="M4 8h10M18 8h2M4 16h4M12 16h8" />
+      <circle cx="16" cy="8" r="2" />
+      <circle cx="10" cy="16" r="2" />
+    </svg>
+  );
+}
+
+/** Bell — OS notifications (Settings sidebar). */
+export function BellIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 13 6 9Z" />
+      <path d="M10.5 18a1.8 1.8 0 0 0 3 0" />
+    </svg>
+  );
+}
+
+/** Keyboard — keybindings (Settings sidebar). */
+export function KeyboardIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="2.5" y="6" width="19" height="12" rx="2" />
+      <path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 13h.01M18 13h.01M9 15.5h6" />
+      <path d="M9.5 13h5" />
+    </svg>
+  );
+}
+
+/** Paint swatch — theme / appearance (Settings sidebar). */
+export function PaletteIcon({ size = 14, strokeWidth = 1.7, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 3a9 9 0 1 0 0 18 1.9 1.9 0 0 0 1.5-3.1 1.9 1.9 0 0 1 1.5-3.1h2A3.5 3.5 0 0 0 20.5 11C20.2 6.5 16.6 3 12 3Z" />
+      <circle cx="7.5" cy="11" r="1" />
+      <circle cx="11" cy="7.5" r="1" />
+      <circle cx="15.5" cy="8.5" r="1" />
+    </svg>
+  );
+}
+
 /** Circular arrows — sync the thoughts repo (Library header). */
 export function SyncIcon({ size = 13, strokeWidth = 1.5, className }: IconProps) {
   return (
