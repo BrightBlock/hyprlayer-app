@@ -8,20 +8,16 @@ export const DIFF_SIDEBAR_WIDTH = 420;
 export const DIFF_SIDEBAR_MIN = 400;
 export const DIFF_SIDEBAR_MAX = 700;
 
-/** Default + drag-resize bounds (px) for the Library's list panel. Default is
- *  the mock's w-72; the bounds keep the switcher/tabs readable at the low end
- *  and stop it crowding the document at the high end. */
-export const LIBRARY_SIDEBAR_WIDTH = 288;
-export const LIBRARY_SIDEBAR_MIN = 220;
-export const LIBRARY_SIDEBAR_MAX = 480;
-
-/** Default + drag-resize bounds (px) for the prompt library's list panel. The
- *  default preserves the previous fixed `w-64`; the bounds keep the header
- *  actions + chord hints readable at the low end and stop it crowding the
- *  editor at the high end. */
-export const PROMPTS_SIDEBAR_WIDTH = 256;
-export const PROMPTS_SIDEBAR_MIN = 200;
-export const PROMPTS_SIDEBAR_MAX = 420;
+/** Default + drag-resize bounds (px) for the panels that replace the project
+ *  tree in the shell's second column — Library, Prompts and Settings. One set of
+ *  numbers for all three so the column doesn't jump width as you navigate
+ *  between those routes. Default is the mock's w-72; the bounds keep each
+ *  panel's rows readable at the low end and stop them crowding the content
+ *  column at the high end. (Settings is fixed at the default — its labels are
+ *  short and none of them wrap, so there's nothing to drag for.) */
+export const SIDE_PANEL_WIDTH = 288;
+export const SIDE_PANEL_MIN = 220;
+export const SIDE_PANEL_MAX = 480;
 
 type UiStore = {
   /**
@@ -86,9 +82,9 @@ export const useUiStore = create<UiStore>()(
       setDiffWidth: (width) => set({ diffWidth: width }),
       tasksCollapsed: false,
       toggleTasks: () => set((state) => ({ tasksCollapsed: !state.tasksCollapsed })),
-      libraryWidth: LIBRARY_SIDEBAR_WIDTH,
+      libraryWidth: SIDE_PANEL_WIDTH,
       setLibraryWidth: (width) => set({ libraryWidth: width }),
-      promptsWidth: PROMPTS_SIDEBAR_WIDTH,
+      promptsWidth: SIDE_PANEL_WIDTH,
       setPromptsWidth: (width) => set({ promptsWidth: width }),
       libraryCollapsed: false,
       toggleLibrary: () => set((state) => ({ libraryCollapsed: !state.libraryCollapsed })),

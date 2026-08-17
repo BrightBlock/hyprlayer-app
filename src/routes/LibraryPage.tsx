@@ -10,7 +10,7 @@ import { resolveSyncProjectPath } from "@/features/library/thoughtsSync";
 import { useThoughtsSync } from "@/features/library/useThoughtsSync";
 import { useBootstrap, useDocs } from "@/lib/queries";
 import { useLibraryScope } from "@/features/library/libraryScope";
-import { LIBRARY_SIDEBAR_MAX, LIBRARY_SIDEBAR_MIN, useUiStore } from "@/lib/uiStore";
+import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
 import { startEdgeDrag } from "@/lib/resize";
 import { useCommand } from "@/lib/keybindings/registry";
 import type { LibrarySearch } from "@/features/library/librarySearch";
@@ -101,8 +101,8 @@ export function LibraryPage() {
           onPointerDown={(e) =>
             startEdgeDrag(e, {
               startWidth: libraryWidth,
-              min: LIBRARY_SIDEBAR_MIN,
-              max: LIBRARY_SIDEBAR_MAX,
+              min: SIDE_PANEL_MIN,
+              max: SIDE_PANEL_MAX,
               direction: 1,
               onResize: setLibraryWidth,
               onStart: () => setResizingLibrary(true),

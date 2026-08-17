@@ -7,7 +7,7 @@ import { useBootstrap, useSetAppSettings } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
 import { useToast } from "@/lib/toast";
 import { startEdgeDrag } from "@/lib/resize";
-import { PROMPTS_SIDEBAR_MAX, PROMPTS_SIDEBAR_MIN, useUiStore } from "@/lib/uiStore";
+import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
 import { Badge, Button, Card, ChordHint, ErrorNote, TextInput, Toggle } from "@/components/ui";
 import {
   BracesIcon,
@@ -714,8 +714,8 @@ export function PromptLibrary({
         onPointerDown={(e) =>
           startEdgeDrag(e, {
             startWidth: promptsWidth,
-            min: PROMPTS_SIDEBAR_MIN,
-            max: PROMPTS_SIDEBAR_MAX,
+            min: SIDE_PANEL_MIN,
+            max: SIDE_PANEL_MAX,
             direction: 1,
             onResize: setPromptsWidth,
           })

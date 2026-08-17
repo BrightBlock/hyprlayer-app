@@ -49,6 +49,7 @@ import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection";
 import { THEMES, useThemeStore } from "@/lib/theme";
 import { IS_MACOS } from "@/lib/platform";
+import { SIDE_PANEL_WIDTH } from "@/lib/uiStore";
 import { AgentIcon, AnytypeIcon, BellIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, KeyboardIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PaletteIcon, PersonIcon, PlusIcon, PuzzleIcon, SlidersIcon, TerminalIcon, XIcon } from "@/components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
@@ -1048,10 +1049,6 @@ const NAV: NavItem[] = [
   { id: "binaries", label: "Binaries", icon: TerminalIcon },
 ];
 
-/** Fixed — the labels are short and none of them wrap, so there's nothing to
- *  drag for (unlike the project / Library panels, whose rows carry paths). */
-const SETTINGS_SIDEBAR_WIDTH = 196;
-
 export function Settings() {
   const bootstrap = useBootstrap();
   // A `?section=` deep-link (e.g. the composer's "Harnesses →" footer) sets the
@@ -1070,19 +1067,28 @@ export function Settings() {
 
   return (
     // Settings owns the shell's second column (Root hides the project tree on
-    // this route), so the section list is a real sidebar panel — same bg-panel
-    // and border seam as the project / Library / Prompts panels — and only the
-    // content column scrolls.
+    // this route), so the section list is a real sidebar panel — same bg-panel,
+    // border seam and width as the Library / Prompts panels, so the column
+    // doesn't jump as you navigate between them. Fixed rather than drag-resizable:
+    // the labels are short and none of them wrap, so there's nothing to drag for.
+    // Only the content column scrolls.
     <div className="flex h-full min-h-0">
       <aside
         className="flex shrink-0 flex-col border-r border-edge bg-panel"
-        style={{ width: SETTINGS_SIDEBAR_WIDTH }}
+        style={{ width: SIDE_PANEL_WIDTH }}
       >
         {/* No "Settings" band here: unlike the project / Library panels, this
             one titles a route the window's own breadcrumb already names, so a
             header would just print the word twice. The list starts at the top. */}
-        <nav className="flex-1 overflow-y-auto p-2 pt-3" aria-label="Settings sections">
-          <ul className="space-y-0.5">
+        {/* p-3 matches the Library panel's gutter — at this width a tighter one
+            leaves the rows hugging the left edge. pt-2 is the one number that
+            isn't free: it lines the first row up with the rail's Home/dashboard
+            square, which centers 26px down (the rail's py-2.5 + half its h-8).
+            A row is 36px tall (py-2 + text-sm's 20px line box), so 8px of top
+            padding puts its center on the same line. Keep the two in step if
+            either the rail's inset or this row's padding changes. */}
+        <nav className="flex-1 overflow-y-auto p-3 pt-2" aria-label="Settings sections">
+          <ul className="space-y-1">
             {NAV.map((item) => {
               const selected = section === item.id;
               const Icon = item.icon;
@@ -1092,7 +1098,7 @@ export function Settings() {
                     type="button"
                     onClick={() => setActive(item.id)}
                     aria-current={selected}
-                    className={`relative flex w-full items-center gap-2.5 overflow-hidden rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
+                    className={`relative flex w-full items-center gap-2.5 overflow-hidden rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                       selected
                         ? "bg-accent/15 text-ink"
                         : "text-ink-dim hover:bg-edge/50 hover:text-ink"
