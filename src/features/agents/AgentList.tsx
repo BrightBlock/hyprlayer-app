@@ -8,6 +8,8 @@ import type { ReactNode } from "react";
 import { Badge, Button, EmptyState, TextInput } from "@/components/ui";
 import { FolderIcon, PlusIcon, SearchIcon } from "@/components/icons";
 import { formatRelativeTime } from "@/lib/format";
+import { isContentCompact, isContentNarrow } from "@/lib/layout";
+import { useElementWidth } from "@/lib/useElementWidth";
 import type { AgentFile, AgentLibrarySettings } from "@/lib/bindings";
 import {
   dotColor,
@@ -53,7 +55,23 @@ type Props = {
   };
 };
 
-const GRID = "grid grid-cols-[34px_minmax(0,1fr)_150px_130px_130px_36px] items-center";
+/** The list is one CSS grid, shared by the header and every row so the two can
+ *  never drift. Its fixed tracks (model 150 + status 130 + updated 130 + the
+ *  34px check and 36px kebab) total 480px, which is more than this pane has to
+ *  give on the narrow content tier (see lib/layout's CONTENT_NARROW_WIDTH):
+ *  below it `minmax(0,1fr)` collapses to zero and the name — whose children are
+ *  deliberately `shrink-0` so badges never squash — overflows its track and
+ *  paints across the columns to its right. So secondary columns are dropped
+ *  rather than squeezed, least-informative first: Model and Updated at narrow,
+ *  Status as well at compact, leaving name + actions.
+ *
+ *  Written out as three literal strings, not interpolated: Tailwind scans
+ *  source for complete class names, so a computed `grid-cols-[${...}]` would
+ *  generate no CSS at all. */
+const GRID_BASE = "items-center";
+const GRID_WIDE = `grid grid-cols-[34px_minmax(0,1fr)_150px_130px_130px_36px] ${GRID_BASE}`;
+const GRID_NARROW = `grid grid-cols-[34px_minmax(0,1fr)_130px_36px] ${GRID_BASE}`;
+const GRID_COMPACT = `grid grid-cols-[34px_minmax(0,1fr)_36px] ${GRID_BASE}`;
 
 export function AgentList({
   rows,
@@ -81,9 +99,20 @@ export function AgentList({
 }: Props) {
   const allOn = agents.length > 0 && agents.every((a) => selected.has(a.path));
   const selCount = selected.size;
+  // Which columns THIS LIST can afford (see GRID_* above) — measured, not taken
+  // from the window: the list is the last column in the row, so the nav rail and
+  // the project sidebar (which /agents does render) come off the top of the
+  // window width first. A 950px window with a 360px sidebar leaves the list 542,
+  // and reading the window would call that wide and overflow the grid — the
+  // exact failure the tiers exist to prevent. Width is 0 only if the pane has
+  // never been observed; treat that as wide so the first frame cannot shear.
+  const { ref: paneRef, width: paneWidth } = useElementWidth<HTMLDivElement>();
+  const narrow = paneWidth > 0 && isContentNarrow(paneWidth);
+  const compact = paneWidth > 0 && isContentCompact(paneWidth);
+  const grid = compact ? GRID_COMPACT : narrow ? GRID_NARROW : GRID_WIDE;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <div ref={paneRef} className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-start justify-between gap-5 px-7 pb-3.5 pt-5">
         <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight text-ink">Agents</h1>
         <div className="flex shrink-0 items-center gap-2">
@@ -98,7 +127,11 @@ export function AgentList({
         </div>
       </div>
 
-      <div className="flex items-center gap-3 px-7 pb-3.5">
+      {/* Wraps rather than clipping: the segmented controls are fixed-width, so
+          below the narrow tier the search box would otherwise be pushed past
+          the right edge (it is the only flexible item). On narrow it takes a
+          full row of its own instead. */}
+      <div className="flex flex-wrap items-center gap-3 px-7 pb-3.5">
         <Segmented
           aria-label="Agent library"
           value={tab}
@@ -130,7 +163,7 @@ export function AgentList({
         )}
 
         <div className="flex-1" />
-        <div className="relative w-58">
+        <div className={`relative ${narrow ? "w-full" : "w-58"}`}>
           <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim">
             <SearchIcon size={13} />
           </span>
@@ -169,13 +202,13 @@ export function AgentList({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-7">
         <div
-          className={`${GRID} border-b border-edge px-2 pb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-dim`}
+          className={`${grid} border-b border-edge px-2 pb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-dim`}
         >
           <Check checked={allOn} onChange={onToggleAll} label="Select all agents" />
           <div>Name</div>
-          <div>Model</div>
-          <div>Status</div>
-          <div>Updated</div>
+          {!narrow && <div>Model</div>}
+          {!compact && <div>Status</div>}
+          {!narrow && <div>Updated</div>}
           <div />
         </div>
 
@@ -210,6 +243,9 @@ export function AgentList({
               onToggleSelect={() => onToggleSelect(row.agent.path)}
               onOpen={() => onOpen(row.agent)}
               onMenu={(at) => onMenu(row.agent, at)}
+              grid={grid}
+              narrow={narrow}
+              compact={compact}
             />
           ),
         )}
@@ -302,6 +338,9 @@ function AgentRowView({
   onToggleSelect,
   onOpen,
   onMenu,
+  grid,
+  narrow,
+  compact,
 }: {
   agent: AgentFile;
   indent: number;
@@ -311,6 +350,11 @@ function AgentRowView({
   onToggleSelect: () => void;
   onOpen: () => void;
   onMenu: (at: { x: number; y: number }) => void;
+  /** Passed down (not recomputed) so a row's cells always match the header's
+   *  track count — the two must agree or the grid shears. */
+  grid: string;
+  narrow: boolean;
+  compact: boolean;
 }) {
   const overlay = overlayFor(library, agent.path);
   const status = statusOf(agent, overlay);
@@ -329,7 +373,7 @@ function AgentRowView({
         e.preventDefault();
         onMenu({ x: e.clientX, y: e.clientY });
       }}
-      className={`${GRID} h-13 cursor-pointer rounded-lg border-b border-edge/60 px-2 hover:bg-panel-2 ${
+      className={`${grid} h-13 cursor-pointer rounded-lg border-b border-edge/60 px-2 hover:bg-panel-2 ${
         selected ? "bg-accent/10" : ""
       }`}
     >
@@ -362,13 +406,19 @@ function AgentRowView({
           {shortDescription(agent.description)}
         </span>
       </div>
-      <div className="truncate font-mono text-xs text-ink-dim">{modelLabel(agent.model)}</div>
-      <div>
-        <Badge tone={status.tone}>{status.label}</Badge>
-      </div>
-      <div className="text-xs text-ink-dim">
-        {agent.updatedAt ? formatRelativeTime(agent.updatedAt) : "—"}
-      </div>
+      {!narrow && (
+        <div className="truncate font-mono text-xs text-ink-dim">{modelLabel(agent.model)}</div>
+      )}
+      {!compact && (
+        <div>
+          <Badge tone={status.tone}>{status.label}</Badge>
+        </div>
+      )}
+      {!narrow && (
+        <div className="text-xs text-ink-dim">
+          {agent.updatedAt ? formatRelativeTime(agent.updatedAt) : "—"}
+        </div>
+      )}
       <button
         type="button"
         aria-label={`Actions for ${agent.name}`}

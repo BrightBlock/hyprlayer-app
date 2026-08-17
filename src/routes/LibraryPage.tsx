@@ -12,6 +12,7 @@ import { useBootstrap, useDocs } from "@/lib/queries";
 import { useLibraryScope } from "@/features/library/libraryScope";
 import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
 import { startEdgeDrag } from "@/lib/resize";
+import { useViewport } from "@/lib/useViewport";
 import { useCommand } from "@/lib/keybindings/registry";
 import type { LibrarySearch } from "@/features/library/librarySearch";
 
@@ -68,6 +69,10 @@ export function LibraryPage() {
   const setLibraryWidth = useUiStore((s) => s.setLibraryWidth);
   const libraryCollapsed = useUiStore((s) => s.libraryCollapsed);
   const [resizingLibrary, setResizingLibrary] = useState(false);
+  // On the narrow tier (see lib/layout) the dragged width can reach
+  // SIDE_PANEL_MAX (480), which with the rail is 528px and won't fit a 640px
+  // viewport — so it's clamped to the minimum there rather than dragged.
+  const { narrow } = useViewport();
 
   const query = useMemo(() => docQueryFromSearch(search), [search]);
   const docs = useDocs(query);
@@ -87,12 +92,12 @@ export function LibraryPage() {
         error={docs.error}
         onNewDoc={() => setCreateOpen(true)}
         sync={thoughtsSync}
-        width={libraryWidth}
+        width={narrow ? SIDE_PANEL_MIN : libraryWidth}
         collapsed={libraryCollapsed}
         resizing={resizingLibrary}
       />
 
-      {!libraryCollapsed && (
+      {!libraryCollapsed && !narrow && (
         <div
           role="separator"
           aria-orientation="vertical"

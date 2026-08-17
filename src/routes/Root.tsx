@@ -44,8 +44,16 @@ import {
   shortBranch,
 } from "@/lib/domain/projects";
 import { GLASS_BAND } from "@/lib/glass";
+import {
+  drawerWidth,
+  NAV_RAIL_WIDTH,
+  projectSidebarWidth,
+  PROJECT_SIDEBAR_MAX,
+  PROJECT_SIDEBAR_MIN,
+} from "@/lib/layout";
 import { IS_MACOS } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
+import { useViewport } from "@/lib/useViewport";
 import { useUiStore } from "@/lib/uiStore";
 import {
   selectPinnedViews,
@@ -63,6 +71,7 @@ import { ContextMenu, ContextMenuItem, Spinner } from "@/components/ui";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { HyprlayerMark } from "@/components/Logo";
 import { WindowControls } from "@/components/WindowControls";
+import { ResizeGrips } from "@/components/ResizeGrips";
 import {
   AgentIcon,
   BookIcon,
@@ -124,12 +133,6 @@ import { useLastRoute } from "@/lib/lastRoute";
 // churn on every Root render before settings have loaded a keybindings section.
 const EMPTY_OVERRIDES: Overrides = {};
 
-const PROJECT_SIDEBAR_MIN = 180;
-const PROJECT_SIDEBAR_MAX = 360;
-// The activity-bar nav rail that sits left of the project panel (fixed width).
-// 48 holds the 32px icon squares with 8px of breathing room each side — the
-// same ratio VSCode's activity bar uses, and 8px tighter than the original 56.
-const NAV_RAIL_WIDTH = 48;
 // The header's left controls (sidebar toggle, dashboard, and — on a project —
 // docs) live in an absolutely-positioned cluster, so they're out of flow: the
 // header content must be inset past the cluster's right edge or the breadcrumb
@@ -651,6 +654,30 @@ export function Root() {
   const toggleProjectSidebar = useUiStore(
     (state) => state.toggleProjectSidebar,
   );
+  // The narrow layout tier (see lib/layout): below NARROW_WIDTH the project
+  // sidebar clamps to its minimum; below COMPACT_WIDTH it becomes an overlay
+  // drawer. `narrowDrawer` is the ephemeral (non-persisted) slot that tracks
+  // which panel is currently open as that overlay.
+  const { width, narrow, compact } = useViewport();
+  const narrowDrawer = useUiStore((state) => state.narrowDrawer);
+  const setNarrowDrawer = useUiStore((state) => state.setNarrowDrawer);
+  // Tier-exit cleanup: a drawer left open at a narrow/compact width must not
+  // silently reopen after the window widens and re-tiles. Nothing else clears
+  // `narrowDrawer`. Leaving the narrow tier entirely (diff drawer or project
+  // drawer) clears it outright; leaving just the compact tier (the project
+  // drawer's only home — it returns to an in-flow clamped column) clears it
+  // only when it holds "project".
+  const prevNarrowRef = useRef(narrow);
+  const prevCompactRef = useRef(compact);
+  useEffect(() => {
+    if (prevNarrowRef.current && !narrow) {
+      setNarrowDrawer(null);
+    } else if (prevCompactRef.current && !compact) {
+      if (useUiStore.getState().narrowDrawer === "project") setNarrowDrawer(null);
+    }
+    prevNarrowRef.current = narrow;
+    prevCompactRef.current = compact;
+  }, [narrow, compact, setNarrowDrawer]);
   // Default to the widest we allow; the user can drag it narrower if desired.
   const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
   // True only while the resize handle is being dragged. The panel's width
@@ -678,6 +705,28 @@ export function Root() {
   // panel, and a project tree beside it would be dead weight (nothing in
   // Settings is project-scoped).
   const onSettings = pathname.startsWith("/settings");
+  // Route-exit cleanup, the companion to the tier-exit cleanup above: neither
+  // drawer renders on every route, and navigating away does not clear the slot.
+  // An "open" drawer on a route that cannot paint it is not merely invisible —
+  // it shadows Escape (which prioritises the drawer), so the first Escape on
+  // Settings would do nothing at all. Each drawer is cleared by its own owner's
+  // reach: the project drawer is Root's, hidden wherever a route swaps the
+  // column out for its own panel; the changes drawer is ProjectPage's.
+  //
+  // Deliberately a reaction to the route transition, not to the slot: the open
+  // drawer is read through `getState()` and left out of the deps, so only a
+  // change of route category can run this. Subscribing instead would let it
+  // fire on the render between "open the drawer" and "the router commits the
+  // new path" — which is exactly the order the rail's Projects button uses to
+  // open a project with its panel showing, and it would close it again.
+  const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings;
+  const diffDrawerRoutable = pathname.startsWith("/projects");
+  useEffect(() => {
+    const open = useUiStore.getState().narrowDrawer;
+    if (!open) return;
+    const routable = open === "project" ? projectDrawerRoutable : diffDrawerRoutable;
+    if (!routable) setNarrowDrawer(null);
+  }, [projectDrawerRoutable, diffDrawerRoutable, setNarrowDrawer]);
   // Breadcrumb title for the selected doc — cache-shared with the detail pane's
   // own `useDoc`, so no extra fetch; disabled (empty id) off the library route.
   const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "");
@@ -960,20 +1009,32 @@ export function Root() {
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
+  // On the narrow tier the changes sidebar is an overlay drawer (see
+  // lib/layout), so its effective visibility is the drawer slot, not the
+  // persisted `diffHidden` preference — which is restored untouched the
+  // moment the window widens.
+  const diffShown = narrow ? narrowDrawer === "diff" : !diffHidden;
+  const toggleDiffOrDrawer = () => {
+    if (narrow) setNarrowDrawer(narrowDrawer === "diff" ? null : "diff");
+    else toggleDiff();
+  };
   // Multiplexer mode indicator (set in Settings, not a toggle).
   const mux = useMultiplexer();
   // Toggle the scripts dock's visibility from the rail. When it's docked in the
   // right sidebar, "showing" it also reveals that sidebar (the panel lives in it);
   // "hiding" just closes the dock without collapsing the sidebar.
+  // Reads `diffShown`, not the persisted `diffHidden`: on the narrow tier the
+  // sidebar's visibility is the drawer slot, so gating on the preference would
+  // both mis-read "is it visible" and reveal the dock into an off-screen panel.
   const toggleScriptsDock = () => {
     if (!scriptsActiveWs) return;
     const inSidebar = scriptsPosition === "right";
-    const visible = scriptsDockOpen && (!inSidebar || !diffHidden);
+    const visible = scriptsDockOpen && (!inSidebar || diffShown);
     if (visible) {
       toggleScriptDock(scriptsActiveWs);
     } else {
       if (!scriptsDockOpen) toggleScriptDock(scriptsActiveWs);
-      if (inSidebar && diffHidden) toggleDiff();
+      if (inSidebar && !diffShown) toggleDiffOrDrawer();
     }
   };
   // ⌘⇧F: expand the dock to its full height (or restore it). Per-workstream, so
@@ -984,6 +1045,22 @@ export function Root() {
   const libraryCollapsed = useUiStore((state) => state.libraryCollapsed);
   const toggleLibrary = useUiStore((state) => state.toggleLibrary);
 
+  // On the compact tier the project panel is an overlay drawer (see
+  // lib/layout): its persisted `collapsed` flag is ignored and left untouched
+  // — shown iff the drawer slot holds "project" instead.
+  const projectSidebarShown = compact ? narrowDrawer === "project" : !collapsed;
+  // The drawer overlays the shell row from the rail's right edge, so the room
+  // it has is the row less the rail — passing the raw viewport would size it
+  // one rail wider than the box it sits in.
+  const projectDrawerWidth = drawerWidth(PROJECT_SIDEBAR_MIN, width - NAV_RAIL_WIDTH);
+  // Room the project column actually takes in flow: none while collapsed, on a
+  // route that swaps it out for its own panel, or on the compact tier where it
+  // has lifted out into a drawer. This is what separates the two drawers'
+  // territory — the changes drawer overlays only what starts past this column.
+  const projectColumnWidth =
+    compact || collapsed || !projectDrawerRoutable
+      ? 0
+      : projectSidebarWidth(sidebarWidth, width);
   // The header sidebar toggle acts on whichever left panel the route shows: the
   // Library's list panel on /library, the project tree everywhere else. Both
   // collapse the same way, so one button drives both (and reads each one's
@@ -994,10 +1071,11 @@ export function Root() {
     ? !libraryCollapsed
     : onPrompts || onSettings
       ? true
-      : !collapsed;
+      : projectSidebarShown;
   const toggleSidebar = () => {
     if (onPrompts || onSettings) return;
     if (onLibrary) toggleLibrary();
+    else if (compact) setNarrowDrawer(narrowDrawer === "project" ? null : "project");
     else toggleProjectSidebar();
   };
 
@@ -1096,7 +1174,7 @@ export function Root() {
   );
   useCommand(
     "view.toggleChangesSidebar",
-    currentSection === "Agent" ? () => toggleDiff() : null,
+    currentSection === "Agent" ? toggleDiffOrDrawer : null,
   );
   useCommand(
     "ws.commit",
@@ -1110,12 +1188,17 @@ export function Root() {
   useCommand("prompts.palette", () => togglePromptPalette());
   // Custom prompt shortcuts (built-ins ride ws.commit / ws.ship above).
   usePromptHotkeys(activeWorkstream ?? null);
-  // Escape closes Settings, mirroring how ⌘, toggles it shut. A dialog/menu open
-  // over it shadows this on the shared Escape stack, so it closes first.
+  // Escape closes an open narrow-tier drawer first (see lib/layout), else
+  // closes Settings, mirroring how ⌘, toggles it shut. A dialog/menu open over
+  // either shadows this on the shared Escape stack, so it closes first. A
+  // second `useEscape` call here would itself shadow the Settings handler
+  // below it — both priorities live in this one registration.
   useEscape(
-    pathname.startsWith("/settings")
-      ? () => closeOrBack(() => void navigate({ to: "/" }))
-      : null,
+    narrowDrawer
+      ? () => setNarrowDrawer(null)
+      : pathname.startsWith("/settings")
+        ? () => closeOrBack(() => void navigate({ to: "/" }))
+        : null,
   );
 
   const checkNow = useUpdate((s) => s.checkNow);
@@ -1344,8 +1427,10 @@ export function Root() {
                     GIT panel header, shown ONLY while the changes sidebar is
                     collapsed (otherwise the panel already shows it, so mirroring it
                     here would just duplicate). Gated on a diverged branch so it
-                    stays out of the way when there's nothing to report. */}
-                {diffHidden &&
+                    stays out of the way when there's nothing to report. Keyed to
+                    `diffShown` rather than the persisted preference so the narrow
+                    tier's drawer counts as shown. */}
+                {!diffShown &&
                   activeWorkstream &&
                   (activeWorkstream.git.ahead > 0 ||
                     activeWorkstream.git.behind > 0) && (
@@ -1398,17 +1483,17 @@ export function Root() {
                 {currentSection === "Agent" && !onBoard && (
                   <button
                     type="button"
-                    onClick={toggleDiff}
+                    onClick={toggleDiffOrDrawer}
                     className={topIconClass}
                     title={
-                      diffHidden
-                        ? "Show changes sidebar"
-                        : "Hide changes sidebar"
+                      diffShown
+                        ? "Hide changes sidebar"
+                        : "Show changes sidebar"
                     }
                     aria-label={
-                      diffHidden
-                        ? "Show changes sidebar"
-                        : "Hide changes sidebar"
+                      diffShown
+                        ? "Hide changes sidebar"
+                        : "Show changes sidebar"
                     }
                   >
                     <PanelRightIcon />
@@ -1426,7 +1511,7 @@ export function Root() {
         <WindowControls />
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1" data-shell-row>
         {/* Primary nav rail — the activity-bar column from the redesign. Home,
             Projects and Library ride up top; Archive + Settings sit at the
             foot. Always visible, independent of the project panel's collapse. */}
@@ -1464,12 +1549,19 @@ export function Root() {
                 // re-opens the project panel (the nav rail stays). From elsewhere
                 // it opens a project with the panel shown. Inert with no projects.
                 if (pathname.startsWith("/projects")) {
-                  toggleProjectSidebar();
+                  if (compact) setNarrowDrawer(narrowDrawer === "project" ? null : "project");
+                  else toggleProjectSidebar();
                   return;
                 }
                 const target = currentProjectPath ?? projects[0]?.path;
                 if (target) {
+                  // Both, because on the compact tier the persisted flag no
+                  // longer drives visibility — the drawer slot does — but it
+                  // still decides what the user sees the moment the window
+                  // widens back out. Clearing one without the other either
+                  // leaves the panel hidden now or hidden later.
                   setProjectSidebarCollapsed(false);
+                  if (compact) setNarrowDrawer("project");
                   void navigate({
                     to: "/projects/$projectPath",
                     params: { projectPath: target },
@@ -1480,9 +1572,9 @@ export function Root() {
               className={railNavClass(pathname.startsWith("/projects"))}
               title={
                 pathname.startsWith("/projects")
-                  ? collapsed
-                    ? "Show projects panel"
-                    : "Hide projects panel"
+                  ? projectSidebarShown
+                    ? "Hide projects panel"
+                    : "Show projects panel"
                   : "Projects"
               }
               aria-label="Projects"
@@ -1567,6 +1659,24 @@ export function Root() {
             </button>
           </div>
         </nav>
+        {/* Dismiss surface for whichever drawer is open — the thing DRAWER_PEEK
+            reserves room for. Escape closes a drawer too, but that is the only
+            way out otherwise, and an overlay that swallows clicks on the content
+            it covers reads as a freeze. Transparent (the peek strip is a hint,
+            not a modal veil) and z-20: under both drawers (z-30, in this same
+            stacking context — neither `main` nor ProjectPage's root establishes
+            one), over the in-flow content it guards. Starts past the rail and
+            past the project column, so neither of the two things that are still
+            live beside a drawer has its clicks eaten — at compact both of those
+            are zero-width or lifted out, and it starts at the rail's edge. */}
+        {narrowDrawer && (
+          <div
+            role="presentation"
+            className="absolute inset-y-0 right-0 z-20"
+            style={{ left: NAV_RAIL_WIDTH + projectColumnWidth }}
+            onClick={() => setNarrowDrawer(null)}
+          />
+        )}
         {/* Project panel — width-animates between 0 and sidebarWidth so a
             collapse/expand glides instead of snapping. overflow-hidden clips
             the fixed-width inner shell (pinned to the rail edge) so its content
@@ -1575,18 +1685,33 @@ export function Root() {
             Prompts and Settings routes hide it entirely — each renders its own
             panel in that column. The width transition is not reduced-motion-gated
             — Windows maps that to the often-off "Animation effects" toggle, which
-            would otherwise snap it. */}
+            would otherwise snap it. On the compact tier (see lib/layout) this
+            becomes an overlay drawer over the content instead of an in-flow
+            column, driven by `narrowDrawer` rather than the persisted
+            `collapsed` flag — which is left untouched and resumes the moment
+            the window widens back out of compact. */}
         {!onLibrary && !onPrompts && !onSettings && (
           <aside
-            className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
-              resizingSidebar ? "" : "transition-[width] duration-200 ease-out"
-            }`}
-            style={{ width: collapsed ? 0 : sidebarWidth }}
-            inert={collapsed}
+            className={`shrink-0 overflow-hidden border-r border-edge bg-panel ${
+              compact ? "absolute inset-y-0 z-30 shadow-lg" : "relative"
+            } ${resizingSidebar ? "" : "transition-[width] duration-200 ease-out"}`}
+            style={
+              compact
+                ? {
+                    left: NAV_RAIL_WIDTH,
+                    width: narrowDrawer === "project" ? projectDrawerWidth : 0,
+                  }
+                : { width: collapsed ? 0 : projectSidebarWidth(sidebarWidth, width) }
+            }
+            inert={compact ? narrowDrawer !== "project" : collapsed}
           >
             <div
               className="absolute inset-y-0 left-0 flex flex-col"
-              style={{ width: sidebarWidth }}
+              style={{
+                width: compact
+                  ? projectDrawerWidth
+                  : projectSidebarWidth(sidebarWidth, width),
+              }}
             >
               {/* Header band, height-matched to the agent bar (h-9) so the
               "Projects" label + add button sit vertically centered alongside it.
@@ -1929,8 +2054,11 @@ export function Root() {
         )}
 
         {/* Only where the project panel itself renders — the routes that swap it
-            out for their own panel have no project width to drag. */}
-        {!collapsed && !onLibrary && !onPrompts && !onSettings && (
+            out for their own panel have no project width to drag. Gated off
+            the narrow tier too: the sidebar is clamped (or a drawer) there,
+            so there's nothing to drag — this is why the narrow content row is
+            473, not 465 (lib/layout's SPLIT_PANE_MIN comment). */}
+        {!collapsed && !narrow && !onLibrary && !onPrompts && !onSettings && (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -2127,6 +2255,7 @@ export function Root() {
       <Toast />
       <FullDiskAccessNotice />
       <ConfirmQuitDialog />
+      <ResizeGrips />
     </div>
   );
 }

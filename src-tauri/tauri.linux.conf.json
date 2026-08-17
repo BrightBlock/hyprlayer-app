@@ -7,8 +7,8 @@
         "title": "Hyprlayer",
         "width": 1280,
         "height": 800,
-        "minWidth": 1180,
-        "minHeight": 620,
+        "minWidth": 500,
+        "minHeight": 400,
         "center": true,
         "decorations": false,
         "visible": false

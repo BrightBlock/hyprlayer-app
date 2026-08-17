@@ -100,7 +100,10 @@ import { ProjectBoard } from "@/features/board/ProjectBoard";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import { useBootstrap, useDetachPr, useSetWorkstreamStage, useWorkstreams } from "@/lib/queries";
 import { basename } from "@/lib/path";
+import { drawerWidth, splitPaneFloor } from "@/lib/layout";
 import { clamp, startEdgeDrag } from "@/lib/resize";
+import { useElementWidth } from "@/lib/useElementWidth";
+import { useViewport } from "@/lib/useViewport";
 import { DIFF_SIDEBAR_MAX, DIFF_SIDEBAR_MIN, useUiStore } from "@/lib/uiStore";
 
 type ShellMenu = {
@@ -337,11 +340,23 @@ export function ProjectPage() {
   const [renameValue, setRenameValue] = useState("");
   // Which shell's "+" opened the library picker modal (null = closed).
   const [docsModalShellId, setDocsModalShellId] = useState<number | null>(null);
+  // The narrow layout tier (see lib/layout): below NARROW_WIDTH the changes
+  // sidebar becomes an overlay drawer, driven by the shared (non-persisted)
+  // `narrowDrawer` slot rather than the persisted `diffHidden` preference.
+  //
+  // The tier itself is a property of the window (Root and this page must agree
+  // on it, or the shell tiles against one answer and the page against another),
+  // but the drawer's WIDTH is a property of this page's own box: the drawer is
+  // positioned against it, so the nav rail and — at narrow, where it is still an
+  // in-flow column — the project sidebar are already outside it. Sizing off the
+  // viewport there hands a 640px window a 520px drawer inside a 412px pane.
+  const { narrow } = useViewport();
+  const { ref: paneRef, width: paneWidth } = useElementWidth<HTMLDivElement>();
+  const narrowDrawer = useUiStore((state) => state.narrowDrawer);
   // Hidden state lives in a shared store so the top-bar toggle controls it.
   const diffHidden = useUiStore((state) => state.diffHidden);
-  // Width lives in the same store so the Root header can inset its right-side
-  // controls to the agent pane's right margin — and so dragging the divider
-  // updates both the sidebar and the header in one place.
+  // Width lives in the same store so the Root header's toggle and this page's
+  // resize handle stay in sync without either owning the value.
   const diffWidth = useUiStore((state) => state.diffWidth);
   const setDiffWidth = useUiStore((state) => state.setDiffWidth);
   // True only while the diff-sidebar resize handle is dragged — suppresses the
@@ -382,8 +397,13 @@ export function ProjectPage() {
   const rightDock = !!activeView && dockOpen && dockPosition === "right";
   // The right sidebar's visibility is owned by its own toggle. A right-docked
   // scripts panel only renders while that sidebar is shown (the rail icon reveals
-  // it when needed) — so the toggle still collapses the whole sidebar.
-  const showAside = !diffHidden;
+  // it when needed) — so the toggle still collapses the whole sidebar. On the
+  // narrow tier it's an overlay drawer instead: its effective visibility is
+  // the drawer slot, not the persisted preference.
+  const showAside = narrow ? narrowDrawer === "diff" : !diffHidden;
+  // The dragged width off the narrow tier; clamped to this pane (not the
+  // window) once the sidebar is an overlay drawer positioned against it.
+  const asideWidth = narrow ? drawerWidth(diffWidth, paneWidth) : diffWidth;
   // True when no workstream is selected — the project-overview board.
   const showBoard = selectedId === undefined;
 
@@ -1123,13 +1143,18 @@ export function ProjectPage() {
   };
   const startSplitResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     const rowW = splitRowRef.current?.clientWidth ?? 800;
+    // Viewport-relative floor (lib/layout): SPLIT_PANE_MIN normally, half the
+    // row (less the handle) when the row can't hold two SPLIT_PANE_MIN panes —
+    // e.g. the 473px narrow content row, where a hard-coded 280 would pin one
+    // pane at its floor and starve the other.
+    const floor = splitPaneFloor(rowW);
     startEdgeDrag(event, {
       startWidth: rightRatio * rowW,
-      min: 280,
-      max: Math.max(280, rowW - 280),
+      min: floor,
+      max: Math.max(floor, rowW - floor),
       // Dragging the divider left grows the right pane.
       direction: -1,
-      onResize: (width) => setRightRatio(clamp(width / rowW, 0.2, 0.8)),
+      onResize: (paneWidth) => setRightRatio(clamp(paneWidth / rowW, 0.2, 0.8)),
     });
   };
   // The diff sidebar's handle sits on its left edge, so dragging left grows it.
@@ -1364,7 +1389,7 @@ export function ProjectPage() {
   if (selectedId && !activeView && workstreams.isFetching) return <PageSpinner />;
 
   return (
-    <div className="flex h-full min-h-0 bg-surface">
+    <div ref={paneRef} className="relative flex h-full min-h-0 bg-surface">
       <ProjectCommands
         sessionId={focusedShell?.sessionId}
         onNewTab={onNewTabDefault}
@@ -1767,7 +1792,7 @@ export function ProjectPage() {
         </div>
       </section>
 
-      {showAside && (
+      {showAside && !narrow && (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -1781,17 +1806,21 @@ export function ProjectPage() {
           shell (pinned to the window edge) so its content never reflows; the
           transition is dropped while the resize handle is dragged. It is not
           reduced-motion-gated — Windows maps that to the often-off "Animation
-          effects" toggle, which would otherwise snap it. */}
+          effects" toggle, which would otherwise snap it. On the narrow tier
+          (see lib/layout) it becomes an overlay drawer instead of an in-flow
+          column — the agent pane keeps its full width whether or not it's
+          open — so the resize drag above only exists off that tier. */}
       <aside
-        className={`relative shrink-0 overflow-hidden border-l border-edge bg-panel ${
-          resizingDiff
-            ? ""
-            : "transition-[width] duration-200 ease-out"
-        }`}
-        style={{ width: showAside ? diffWidth : 0 }}
+        className={`shrink-0 overflow-hidden border-l border-edge bg-panel ${
+          narrow ? "absolute inset-y-0 right-0 z-30 shadow-lg" : "relative"
+        } ${resizingDiff ? "" : "transition-[width] duration-200 ease-out"}`}
+        style={{ width: showAside ? asideWidth : 0 }}
         inert={!showAside}
       >
-        <div className="absolute inset-y-0 right-0 flex flex-col" style={{ width: diffWidth }}>
+        <div
+          className="absolute inset-y-0 right-0 flex flex-col"
+          style={{ width: asideWidth }}
+        >
           {/* A folder project keeps the file tree (browse + open into editor
               tabs); only the git header and the Changes tab drop away. */}
           {!folderProject && <GitPanel view={activeView ?? null} />}

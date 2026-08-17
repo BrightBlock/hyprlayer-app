@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IS_MACOS } from "@/lib/platform";
+import { useIsMaximized } from "@/lib/useMaximized";
 
 /**
  * VSCode-style caption buttons (minimize / maximize-restore / close) drawn into
@@ -11,22 +12,7 @@ import { IS_MACOS } from "@/lib/platform";
  * is what kills the second top bar Windows used to draw above the header.
  */
 export function WindowControls() {
-  const [maximized, setMaximized] = useState(false);
-
-  useEffect(() => {
-    if (IS_MACOS) return;
-    const win = getCurrentWindow();
-    let unlisten: (() => void) | undefined;
-    void win.isMaximized().then(setMaximized);
-    // Maximize/restore (incl. snap and double-click on the drag region) all
-    // surface as a resize, so one listener keeps the glyph in sync.
-    void win
-      .onResized(() => void win.isMaximized().then(setMaximized))
-      .then((fn) => {
-        unlisten = fn;
-      });
-    return () => unlisten?.();
-  }, []);
+  const maximized = useIsMaximized();
 
   if (IS_MACOS) return null;
 

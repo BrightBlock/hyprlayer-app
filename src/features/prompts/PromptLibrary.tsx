@@ -7,6 +7,7 @@ import { useBootstrap, useSetAppSettings } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
 import { useToast } from "@/lib/toast";
 import { startEdgeDrag } from "@/lib/resize";
+import { useViewport } from "@/lib/useViewport";
 import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
 import { Badge, Button, Card, ChordHint, ErrorNote, TextInput, Toggle } from "@/components/ui";
 import {
@@ -145,6 +146,10 @@ export function PromptLibrary({
   // and re-opening the route (session-only, like the Library's list panel).
   const promptsWidth = useUiStore((s) => s.promptsWidth);
   const setPromptsWidth = useUiStore((s) => s.setPromptsWidth);
+  // On the narrow tier (see lib/layout) the dragged width can reach
+  // SIDE_PANEL_MAX (480), which with the rail is 528px and won't fit a 640px
+  // viewport — so it's clamped to the minimum there rather than dragged.
+  const { narrow } = useViewport();
 
   // ── Draft state: the single source of truth while this page is open. ──────
   const settingsRef = useRef(settings);
@@ -595,7 +600,7 @@ export function PromptLibrary({
              project/Library panels (h-9 header band, bg-panel, border seam). ── */}
       <aside
         className="flex shrink-0 flex-col border-r border-edge bg-panel"
-        style={{ width: promptsWidth }}
+        style={{ width: narrow ? SIDE_PANEL_MIN : promptsWidth }}
       >
         <div className="flex h-9 shrink-0 items-center justify-between border-b border-edge pl-4 pr-3">
           <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Prompts</p>
@@ -706,21 +711,23 @@ export function PromptLibrary({
         </div>
       </aside>
 
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize prompts sidebar"
-        className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
-        onPointerDown={(e) =>
-          startEdgeDrag(e, {
-            startWidth: promptsWidth,
-            min: SIDE_PANEL_MIN,
-            max: SIDE_PANEL_MAX,
-            direction: 1,
-            onResize: setPromptsWidth,
-          })
-        }
-      />
+      {!narrow && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize prompts sidebar"
+          className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+          onPointerDown={(e) =>
+            startEdgeDrag(e, {
+              startWidth: promptsWidth,
+              min: SIDE_PANEL_MIN,
+              max: SIDE_PANEL_MAX,
+              direction: 1,
+              onResize: setPromptsWidth,
+            })
+          }
+        />
+      )}
 
       {/* ── Editor ── */}
       <section className="min-w-0 flex-1 overflow-y-auto">

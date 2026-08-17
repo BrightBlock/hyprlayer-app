@@ -25,7 +25,15 @@ use std::collections::HashMap;
 
 use tauri::{AppHandle, LogicalSize, Manager, Monitor, PhysicalPosition};
 
-// Fallbacks if the "main" window config can't be read. Mirror tauri.conf.json.
+// Fallbacks if the "main" window config can't be read. Mirror the BASE
+// tauri.conf.json (macOS/Windows: 1180×620) — not the platform overlay.
+// `config_dims()` below reads `app.config()`, which is the merged *live*
+// config including `tauri.linux.conf.json`, so on Linux the 500×400 overlay
+// minimum is what actually reaches `decide()` at runtime; these constants are
+// only the "config unreadable" fallback (`config_dims`'s `None` arm). Do not
+// lower them to "fix" the apparent 1180-vs-500 mismatch — that would widen
+// this fallback's blast radius on macOS/Windows, the platforms it exists to
+// protect.
 const DEFAULT_W: f64 = 1280.0;
 const DEFAULT_H: f64 = 800.0;
 const MIN_W: f64 = 1180.0;
@@ -477,6 +485,24 @@ mod tests {
         let m = mon(0, 0, 5120, 2160, 1.0); // fraction ≫ cap
         let (_, _, w, h) = decide_std(None, &[m], m).rect();
         assert_eq!((w, h), (MAX_DEFAULT_W, MAX_DEFAULT_H));
+    }
+
+    /// With Linux's low floor, a window the compositor tiled to 701×852 logical
+    /// (1402×1704 physical on a 2× display) is restored verbatim instead of being
+    /// rejected as sub-minimum — `decide` reads the merged config's min, not MIN_W.
+    #[test]
+    fn low_min_config_restores_a_tiled_sub_1180_window() {
+        let m = mon(0, 0, 2880, 1800, 2.0);
+        let s = saved(0, 0, 1402, 1704);
+        assert_eq!(
+            decide(Some(s), &[m], m, 500.0, 400.0, DEFAULT_W, DEFAULT_H),
+            Plan::RestoreExact {
+                x: 0,
+                y: 0,
+                w: 701.0,
+                h: 852.0
+            }
+        );
     }
 
     #[test]

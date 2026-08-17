@@ -30,11 +30,8 @@ type UiStore = {
   toggleDiff: () => void;
   /**
    * Live width (px) of the right-hand diff sidebar. The single source of truth
-   * for both the sidebar itself and the Root header, which insets its
-   * right-side controls by this amount so they align with the agent pane's
-   * right margin (mirroring how the breadcrumb tracks the left sidebar). If the
-   * sidebar ever becomes drag-resizable, updating this here makes the header
-   * controls follow automatically.
+   * for the sidebar itself, so the Root header's toggle and ProjectPage's
+   * resize handle stay in sync without either owning the value.
    */
   diffWidth: number;
   setDiffWidth: (width: number) => void;
@@ -71,6 +68,15 @@ type UiStore = {
    *  Narrow|Wide segmented control. */
   docWide: boolean;
   setDocWide: (wide: boolean) => void;
+  /** Which side panel is open as an overlay drawer on the narrow layout tier
+   *  (see lib/layout). One at a time — a ~700px window has room for exactly
+   *  one. Deliberately NOT persisted and never auto-set: the narrow tier
+   *  derives its behaviour at render and leaves `diffHidden` /
+   *  `projectSidebarCollapsed` (the user's real preferences, restored the
+   *  moment the window widens) untouched. Cleared by Root when the tier that
+   *  owns it is left. */
+  narrowDrawer: "project" | "diff" | null;
+  setNarrowDrawer: (panel: "project" | "diff" | null) => void;
 };
 
 export const useUiStore = create<UiStore>()(
@@ -94,6 +100,8 @@ export const useUiStore = create<UiStore>()(
         set((state) => ({ projectSidebarCollapsed: !state.projectSidebarCollapsed })),
       docWide: false,
       setDocWide: (wide) => set({ docWide: wide }),
+      narrowDrawer: null,
+      setNarrowDrawer: (panel) => set({ narrowDrawer: panel }),
     }),
     {
       name: "hyprlayer:ui",

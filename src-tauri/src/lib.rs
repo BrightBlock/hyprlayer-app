@@ -765,4 +765,27 @@ mod tests {
             .expect("linux config pins bundle.targets");
         assert_eq!(targets, &[Value::from("deb"), Value::from("rpm")]);
     }
+
+    /// A tiling WM (Hyprland/sway) ignores GTK's minimum-size request but GTK still
+    /// allocates the webview at it, so the page renders at `minWidth` and is scaled
+    /// into the smaller surface — a horizontal squeeze with no media query able to
+    /// fire. (The value really does reach GTK: tauri-runtime-wry copies
+    /// `WindowConfig.min_width` into tao's size constraints, and tao's Linux backend
+    /// applies them via `gtk_window_set_geometry_hints`.) Linux therefore floors far
+    /// below the shell's comfortable width; macOS and Windows keep 1180×620, where
+    /// the hint is honoured and the floor stops a drag into a broken layout.
+    #[test]
+    fn linux_min_size_stays_below_the_tiling_squeeze_threshold() {
+        let overlay: Value =
+            serde_json::from_str(include_str!("../tauri.linux.conf.json")).unwrap();
+        let windows = overlay["app"]["windows"]
+            .as_array()
+            .expect("linux config declares app.windows");
+        let main = windows
+            .iter()
+            .find(|w| w["label"] == "main")
+            .expect("linux config declares the main window");
+        assert!(main["minWidth"].as_f64().unwrap() <= 500.0);
+        assert!(main["minHeight"].as_f64().unwrap() <= 400.0);
+    }
 }
