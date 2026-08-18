@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAllWorkstreams, useActiveSessions, useDocs } from "@/lib/queries";
+import { useAllWorkstreams, useActiveSessions, useDocs, MIN_DOC_TEXT_QUERY } from "@/lib/queries";
 import { commands } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { useDebounced } from "@/lib/useDebounced";
@@ -55,10 +55,13 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
   }, [workstreams.data, query]);
 
   // ── Docs ───────────────────────────────────────────────────────────────────
-  // Reuse the full-text index. Only when a query is present.
+  // Reuse the full-text index. Only once the query clears the minimum length
+  // — below that, a text query is a full-corpus disk scan (see
+  // MIN_DOC_TEXT_QUERY), and this fires on every focus refetch.
+  const hasDocQuery = debounced.length >= MIN_DOC_TEXT_QUERY;
   const docsQuery = useDocs(
-    { text: debounced || null, sort: debounced ? "relevance" : "mtime", limit: 12 },
-    debounced.length > 0,
+    { text: hasDocQuery ? debounced : null, sort: hasDocQuery ? "relevance" : "mtime", limit: 12 },
+    hasDocQuery,
   );
   const docResults = useMemo<SearchResult[]>(() => {
     const items = docsQuery.data?.items ?? [];

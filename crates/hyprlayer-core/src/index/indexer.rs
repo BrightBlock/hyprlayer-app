@@ -16,8 +16,14 @@ use super::roots::ThoughtsRoot;
 use super::search;
 use crate::docs::frontmatter::{self, Frontmatter};
 
-/// Search bodies are capped so a stray huge file cannot bloat the index.
+/// Search bodies are read fresh from disk at query time and capped so one
+/// pathological file cannot stall a query.
 const BODY_SEARCH_CAP: usize = 256 * 1024;
+/// Frontmatter reads (scan-time prefix, query-time body-offset skip) are
+/// capped independently of the body cap so one pathological frontmatter
+/// block cannot force a large read. The largest frontmatter block in the
+/// real corpus is a few hundred bytes.
+const FRONTMATTER_READ_CAP: usize = 64 * 1024;
 /// Defense against symlink cycles when walking with `follow_links(true)`.
 const MAX_SCAN_DEPTH: usize = 12;
 
@@ -124,11 +130,12 @@ pub struct ScanStats {
     pub errors: u32,
 }
 
-/// One indexed document: metadata plus the lowercased body kept for search.
+/// One indexed document: metadata plus the change-detection hash. No body
+/// text is resident — a text query reads and scores bodies fresh from disk
+/// (see `read_body_for_search`), so memory stays flat with corpus size.
 #[derive(Debug)]
 struct DocRecord {
     meta: DocMeta,
-    body_lc: Arc<String>,
     content_hash: u64,
 }
 
@@ -179,13 +186,24 @@ impl ThoughtsIndex {
                     stats.skipped += 1;
                     continue;
                 };
-                match build_record(root, abs, parts) {
-                    Some(record) => {
-                        fresh.insert(record.meta.id.clone(), Arc::new(record));
-                        stats.indexed += 1;
+                // walkdir already stat'd this entry while walking (needed for
+                // `file_type()` under `follow_links`), so this reuses that
+                // rather than issuing a fresh `std::fs::metadata` call.
+                let meta = match entry.metadata() {
+                    Ok(meta) => meta,
+                    Err(err) => {
+                        tracing::warn!(error = %err, path = %abs.display(), "stat error");
+                        stats.errors += 1;
+                        continue;
                     }
-                    None => stats.errors += 1,
-                }
+                };
+                let Some(prefix) = read_capped_prefix(abs, FRONTMATTER_READ_CAP) else {
+                    stats.errors += 1;
+                    continue;
+                };
+                let record = build_record(root, abs, parts, &meta, prefix);
+                fresh.insert(record.meta.id.clone(), Arc::new(record));
+                stats.indexed += 1;
             }
         }
 
@@ -195,23 +213,58 @@ impl ThoughtsIndex {
         stats
     }
 
-    /// (Re)index a single file. Returns `Some(id)` when the index changed,
-    /// `None` when the path is ignored, unreadable, or content-unchanged
-    /// (xxh3 hash short-circuit — a bare mtime touch does not reindex).
+    /// (Re)index a single file. Returns `Some(id)` when consumers should be
+    /// notified of a real change; `None` when the path is ignored,
+    /// unreadable, or the change basis is unchanged.
+    ///
+    /// Change basis: the frontmatter prefix hash plus file size. mtime is
+    /// deliberately excluded — a bare touch that rewrites identical bytes
+    /// (`git checkout`, `hyprlayer thoughts sync`) must not emit an update
+    /// event, which is the property the old whole-file hash provided and
+    /// PR #221 cared about. When only mtime moved, the stored record is
+    /// still refreshed (so mtime-sorted lists and the Dashboard's
+    /// most-recent window stay accurate) but silently — `None` is returned,
+    /// no event fires. Accepted gap: a body edit past the frontmatter prefix
+    /// cap that preserves file size refreshes the record silently too (see
+    /// the plan's accepted divergences).
     pub fn upsert_path(&self, root: &ThoughtsRoot, abs: &Path) -> Option<String> {
         let parts = Self::classify(root, abs)?;
         let id = abs.to_string_lossy().into_owned();
-        let bytes = std::fs::read(abs).ok()?;
-        let hash = xxh3_64(&bytes);
-        {
+        let meta = std::fs::metadata(abs).ok()?;
+        let prefix = read_capped_prefix(abs, FRONTMATTER_READ_CAP)?;
+        let size_bytes = meta.len() as f64;
+        let mtime_ms = mtime_ms_from(&meta);
+        let hash = xxh3_64(&prefix);
+
+        // Both mtime values come from the same `as_millis() as f64`
+        // computation and are integral, so exact float comparison is
+        // correct here.
+        let stored = {
             let map = self.records.read().expect("index lock poisoned");
-            if let Some(existing) = map.get(&id) {
-                if existing.content_hash == hash {
-                    return None;
-                }
+            map.get(&id).map(|r| {
+                let unchanged = r.content_hash == hash && r.meta.size_bytes == size_bytes;
+                (unchanged, r.meta.mtime_ms)
+            })
+        };
+        match stored {
+            // Nothing moved at all — skip without rebuilding.
+            Some((true, stored_mtime)) if stored_mtime == mtime_ms => return None,
+            // Only the mtime moved. Refresh the record so mtime-sorted lists
+            // and the Dashboard's most-recent window stay accurate, but
+            // report no change so no event fires.
+            Some((true, _)) => {
+                let record = build_record(root, abs, parts, &meta, prefix);
+                self.records
+                    .write()
+                    .expect("index lock poisoned")
+                    .insert(id, Arc::new(record));
+                return None;
             }
+            // New, or the frontmatter/size genuinely changed.
+            _ => {}
         }
-        let record = build_record_from_bytes(root, abs, parts, bytes, hash)?;
+
+        let record = build_record(root, abs, parts, &meta, prefix);
         self.records
             .write()
             .expect("index lock poisoned")
@@ -272,26 +325,37 @@ impl ThoughtsIndex {
     /// Filter, search, sort, paginate. `total` counts matches before
     /// limit/offset.
     pub fn query(&self, q: &ThoughtQuery) -> QueryResult {
-        let needles = search::parse_needles(q.text.as_deref());
-        let has_text = !needles.is_empty();
+        let matcher = search::TextMatcher::new(search::parse_needles(q.text.as_deref()));
+        let has_text = matcher.is_some();
 
-        let mut matched: Vec<(Arc<DocRecord>, u32)> = Vec::new();
-        {
+        // Pass 1 — filter under the read lock. No I/O here, matching the
+        // convention `resolve_id` and `remove_missing` already follow.
+        let candidates: Vec<Arc<DocRecord>> = {
             let map = self.records.read().expect("index lock poisoned");
-            for record in map.values() {
-                if !search::passes_filters(q, &record.meta) {
-                    continue;
-                }
-                let score = if has_text {
-                    match search::text_score(&needles, &record.meta, &record.body_lc) {
+            map.values()
+                .filter(|r| search::passes_filters(q, &r.meta))
+                .map(Arc::clone)
+                .collect()
+        };
+
+        // Pass 2 — body I/O and scoring, lock released. Bodies are read only
+        // when the query carries text, so metadata-only queries (the
+        // Dashboard graph, unfiltered library lists) still touch no files.
+        let mut matched: Vec<(Arc<DocRecord>, u32)> = Vec::with_capacity(candidates.len());
+        for record in candidates {
+            let score = match &matcher {
+                Some(m) => {
+                    let Some(body) = read_body_for_search(Path::new(&record.meta.id)) else {
+                        continue;
+                    };
+                    match search::text_score(m, &record.meta, &body) {
                         Some(score) => score,
                         None => continue,
                     }
-                } else {
-                    0
-                };
-                matched.push((Arc::clone(record), score));
-            }
+                }
+                None => 0,
+            };
+            matched.push((record, score));
         }
 
         matched.sort_by(|a, b| {
@@ -416,25 +480,63 @@ fn area_for(seg: &str) -> (Area, &'static str) {
     }
 }
 
+/// Read up to `cap` bytes from the start of a file. `None` when the file is
+/// gone, unreadable, or (on Unix) a directory. Shared by the scan-time
+/// frontmatter-prefix read and the query-time body read.
+fn read_capped_prefix(abs: &Path, cap: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    std::fs::File::open(abs)
+        .ok()?
+        .take(cap as u64)
+        .read_to_end(&mut buf)
+        .ok()?;
+    Some(buf)
+}
+
+/// Frontmatter-stripped body bytes for search, read fresh from disk and
+/// capped so one pathological file cannot stall a query (the disk-side
+/// counterpart of `BODY_SEARCH_CAP`). `None` when the file is gone or
+/// unreadable — a doc removed between the two query passes simply drops
+/// out, consistent with `remove_missing`'s tolerance for vanished files.
+fn read_body_for_search(abs: &Path) -> Option<Vec<u8>> {
+    let mut buf = read_capped_prefix(abs, FRONTMATTER_READ_CAP + BODY_SEARCH_CAP)?;
+    let offset = frontmatter::body_offset_bytes(&buf);
+    if offset >= buf.len() {
+        return Some(Vec::new());
+    }
+    // Shift the body to the front in place rather than reallocating.
+    buf.drain(..offset);
+    buf.truncate(truncate_bytes_at_char_boundary(&buf, BODY_SEARCH_CAP));
+    Some(buf)
+}
+
+/// `mtime_ms` from an already-obtained `Metadata`, tolerant of platforms
+/// without a modified-time (degrades to `0.0`, never fails the caller).
+fn mtime_ms_from(meta: &std::fs::Metadata) -> f64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0.0, |d| d.as_millis() as f64)
+}
+
+/// Build a [`DocRecord`] from the caller's already-obtained `Metadata` and a
+/// (possibly frontmatter-only) prefix of the file's bytes. `size_bytes` and
+/// `mtime_ms` come from `meta` — no separate stat — and `content_hash` is
+/// over `prefix`, not the whole file. `frontmatter::parse` is tolerant by
+/// contract, so a prefix that cuts off before the closing `---` degrades to
+/// `Frontmatter::default()` + path fallbacks + a warning, the same shape as
+/// genuinely unterminated frontmatter.
 fn build_record(
     root: &ThoughtsRoot,
     abs: &Path,
-    parts: (String, Option<String>, Area, String),
-) -> Option<DocRecord> {
-    let bytes = std::fs::read(abs).ok()?;
-    let hash = xxh3_64(&bytes);
-    build_record_from_bytes(root, abs, parts, bytes, hash)
-}
-
-fn build_record_from_bytes(
-    root: &ThoughtsRoot,
-    abs: &Path,
     (rel_path, project, area, path_scope): (String, Option<String>, Area, String),
-    bytes: Vec<u8>,
-    content_hash: u64,
-) -> Option<DocRecord> {
-    let size_bytes = bytes.len() as f64;
-    let content = String::from_utf8_lossy(&bytes);
+    meta: &std::fs::Metadata,
+    prefix: Vec<u8>,
+) -> DocRecord {
+    let size_bytes = meta.len() as f64;
+    let content_hash = xxh3_64(&prefix);
+    let content = String::from_utf8_lossy(&prefix);
     let parsed = frontmatter::parse(&content);
     let mut fm = parsed.fm;
     frontmatter::apply_path_fallbacks(&mut fm, abs);
@@ -448,16 +550,7 @@ fn build_record_from_bytes(
         path_scope
     };
 
-    let body = content.get(parsed.body_offset..).unwrap_or("");
-    let body_lc = truncate_at_char_boundary(body, BODY_SEARCH_CAP).to_lowercase();
-
-    let mtime_ms = std::fs::metadata(abs)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map_or(0.0, |d| d.as_millis() as f64);
-
-    Some(DocRecord {
+    DocRecord {
         meta: DocMeta {
             id: abs.to_string_lossy().into_owned(),
             rel_path,
@@ -468,12 +561,11 @@ fn build_record_from_bytes(
             backend: root.backend.as_str().to_string(),
             fm,
             fm_warnings: parsed.warnings,
-            mtime_ms,
+            mtime_ms: mtime_ms_from(meta),
             size_bytes,
         },
-        body_lc: Arc::new(body_lc),
         content_hash,
-    })
+    }
 }
 
 /// Build a best-effort [`DocMeta`] for a markdown document that is **not** part
@@ -506,10 +598,8 @@ pub fn unindexed_meta(abs: &Path, content: &str) -> DocMeta {
         .to_string();
 
     let mtime_ms = std::fs::metadata(abs)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map_or(0.0, |d| d.as_millis() as f64);
+        .map(|m| mtime_ms_from(&m))
+        .unwrap_or(0.0);
 
     DocMeta {
         id: abs.to_string_lossy().into_owned(),
@@ -526,15 +616,18 @@ pub fn unindexed_meta(abs: &Path, content: &str) -> DocMeta {
     }
 }
 
-fn truncate_at_char_boundary(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
+/// Caps a raw disk read to `max` bytes without splitting a UTF-8 sequence,
+/// backing up while the byte at the cut is a continuation byte
+/// (`b & 0xC0 == 0x80`). Returns the length to truncate to.
+fn truncate_bytes_at_char_boundary(bytes: &[u8], max: usize) -> usize {
+    if bytes.len() <= max {
+        return bytes.len();
     }
     let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
+    while end > 0 && (bytes[end] & 0xC0) == 0x80 {
         end -= 1;
     }
-    &s[..end]
+    end
 }
 
 #[cfg(test)]
@@ -711,10 +804,11 @@ mod tests {
     }
 
     #[test]
-    fn truncation_respects_char_boundaries() {
+    fn byte_truncation_respects_char_boundaries() {
         let s = "aé"; // 'é' is 2 bytes starting at index 1
-        assert_eq!(truncate_at_char_boundary(s, 2), "a");
-        assert_eq!(truncate_at_char_boundary(s, 3), "aé");
-        assert_eq!(truncate_at_char_boundary("", 0), "");
+        assert_eq!(truncate_bytes_at_char_boundary(s.as_bytes(), 2), 1);
+        assert_eq!(truncate_bytes_at_char_boundary(s.as_bytes(), 3), 3);
+        assert_eq!(truncate_bytes_at_char_boundary(b"", 0), 0);
+        assert_eq!(truncate_bytes_at_char_boundary(b"short", 100), 5);
     }
 }

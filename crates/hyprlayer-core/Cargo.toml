@@ -25,6 +25,7 @@ serde_yaml = "0.9"
 # no openssl. Network git stays with the system binary (credential helpers).
 git2 = { version = "0.19", default-features = false }
 memchr = "2"
+aho-corasick = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 walkdir = "2"
 globset = "0.4"

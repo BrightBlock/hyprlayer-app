@@ -202,6 +202,45 @@ pub fn extract_block(content: &str) -> Option<(&str, usize)> {
     None
 }
 
+/// Byte-level, YAML-parse-free sibling of [`extract_block`]'s offset return,
+/// used at query time to strip frontmatter from a raw disk read without
+/// paying for a YAML parse. Semantics mirror `extract_block` exactly: `0`
+/// when there is no opening `---` line, and `0` when no closing `---`/`...`
+/// line is found (matching `extract_block`'s degradation to "whole file is
+/// body" for unterminated frontmatter).
+pub fn body_offset_bytes(content: &[u8]) -> usize {
+    let after_open = if let Some(rest) = content.strip_prefix(b"---\r\n") {
+        rest
+    } else if let Some(rest) = content.strip_prefix(b"---\n") {
+        rest
+    } else {
+        return 0;
+    };
+    let open_len = content.len() - after_open.len();
+
+    let mut offset = 0usize;
+    for line in after_open.split_inclusive(|&b| b == b'\n') {
+        let trimmed = trim_end_cr_lf(line);
+        if trimmed == b"---" || trimmed == b"..." {
+            return open_len + offset + line.len();
+        }
+        offset += line.len();
+    }
+    0
+}
+
+/// Byte sibling of `str::trim_end_matches(['\r', '\n'])`.
+fn trim_end_cr_lf(mut line: &[u8]) -> &[u8] {
+    while let Some((&last, rest)) = line.split_last() {
+        if last == b'\r' || last == b'\n' {
+            line = rest;
+        } else {
+            break;
+        }
+    }
+    line
+}
+
 fn yaml_scalar_to_string(v: &serde_yaml::Value) -> Option<String> {
     match v {
         serde_yaml::Value::String(s) => Some(s.clone()),
@@ -753,6 +792,33 @@ mod stub_tests {
             &"---\n: : : not yaml [\n---\nbody\n"[bad.body_offset..],
             "body\n"
         );
+    }
+
+    #[test]
+    fn body_offset_bytes_matches_extract_block_across_shapes() {
+        let cases = [
+            // Well-formed frontmatter.
+            "---\ntitle: x\nstatus: active\n---\n\nBody here.\n",
+            // CRLF line endings throughout.
+            "---\r\ntitle: x\r\n---\r\nBody.\r\n",
+            // `...` terminator instead of `---`.
+            "---\ntitle: x\n...\nBody.\n",
+            // No frontmatter at all.
+            "just a body\nwith no header\n",
+            // Malformed YAML inside an otherwise well-terminated block.
+            "---\n: : : not yaml [\n---\nbody\n",
+            // Unterminated frontmatter: whole file degrades to body.
+            "---\ntitle: x\nno closing delimiter here\n",
+            // Empty file.
+            "",
+            // Opening delimiter with nothing after it.
+            "---\n",
+        ];
+        for doc in cases {
+            let expected = extract_block(doc).map(|(_, o)| o).unwrap_or(0);
+            let actual = body_offset_bytes(doc.as_bytes());
+            assert_eq!(actual, expected, "mismatch for {doc:?}");
+        }
     }
 
     #[test]

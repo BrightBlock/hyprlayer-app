@@ -136,7 +136,12 @@ async fn write_and_reindex(
             let tmp = abs.with_extension("md.tmp");
             std::fs::write(&tmp, &content)?;
             std::fs::rename(&tmp, &abs)?;
-            Ok(index.upsert_path(&root, &abs))
+            // `upsert_path` returns None when the record needs no change — a
+            // real outcome now that the basis is the frontmatter prefix plus
+            // size rather than whole-file bytes. Fall back to resolving the
+            // id instead of reporting a write that succeeded as a failure.
+            let written = index.upsert_path(&root, &abs);
+            Ok(written.or_else(|| index.resolve_id(&abs.to_string_lossy())))
         })
         .await
         .map_err(|e| AppError::internal(format!("write task: {e}")))?

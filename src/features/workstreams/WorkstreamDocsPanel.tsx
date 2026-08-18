@@ -4,7 +4,7 @@ import { Badge, Button, DropdownSelect, ErrorNote, Spinner, TextInput } from "@/
 import { DOC_TYPES, STATUS_TONE } from "@/features/library/constants";
 import { docTitle } from "@/features/library/text";
 import type { DocMeta, ThoughtQuery } from "@/lib/bindings";
-import { useDocs } from "@/lib/queries";
+import { useDocs, MIN_DOC_TEXT_QUERY } from "@/lib/queries";
 
 /** Attachment role derived from the doc's type. */
 export function roleForDoc(doc: DocMeta): string {
@@ -39,9 +39,13 @@ export function WorkstreamDocsPanel({
   const [text, setText] = useState("");
   const [type, setType] = useState("");
 
-  const query: ThoughtQuery = useMemo(
-    () => ({
-      text: text.trim() ? text.trim() : null,
+  const query: ThoughtQuery = useMemo(() => {
+    const trimmed = text.trim();
+    // Below MIN_DOC_TEXT_QUERY a text query is a full-corpus disk scan, so a
+    // short query leaves the panel unnarrowed rather than firing one.
+    const hasText = trimmed.length >= MIN_DOC_TEXT_QUERY;
+    return {
+      text: hasText ? trimmed : null,
       types: type ? [type] : [],
       statuses: [],
       projects: thoughtsProject ? [thoughtsProject] : [],
@@ -51,12 +55,11 @@ export function WorkstreamDocsPanel({
       tagMode: "or",
       dateFrom: null,
       dateTo: null,
-      sort: text.trim() ? "relevance" : "date",
+      sort: hasText ? "relevance" : "date",
       limit: 50,
       offset: 0,
-    }),
-    [thoughtsProject, text, type],
-  );
+    };
+  }, [thoughtsProject, text, type]);
   const docs = useDocs(query, Boolean(thoughtsProject));
   const attached = new Set(attachedPaths);
 

@@ -114,6 +114,14 @@ export function useThoughtsGitStatus(path: string | undefined) {
   });
 }
 
+/** Minimum `text` length before a doc query is sent to `query_docs`. Below
+ *  this, a text query is a full-corpus disk scan (the index reads a capped
+ *  body per candidate from disk) — amplified by `refetchOnWindowFocus`, a
+ *  single keystroke shouldn't trigger it. Three features gate on this
+ *  (command palette, library sidebar, workstream docs panel), so it lives
+ *  here per CLAUDE.md's "used by two or more features" rule. */
+export const MIN_DOC_TEXT_QUERY = 3;
+
 export function useDocs(query: ThoughtQuery, enabled = true) {
   return useQuery({
     queryKey: ["docs", query],

@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use hyprlayer_core::config::BackendKind;
 use hyprlayer_core::index::{Area, SortKey, TagMode, ThoughtQuery, ThoughtsIndex, ThoughtsRoot};
@@ -263,6 +264,108 @@ fn text_search_ranks_title_hits_above_body_hits() {
     assert_eq!(index.query(&q).total, 0);
 }
 
+/// Bodies are read fresh from disk in query pass 2. A doc whose title and
+/// tags don't contain the needle at all must still be found via its body,
+/// and still rank below a doc whose title matches the same needle.
+#[test]
+fn body_only_match_ranks_below_title_match_and_is_returned() {
+    let (_tmp, root, index) = scanned();
+
+    let rel = "repos/myproj/jt/notes/2026-06-05-body-only.md";
+    let abs = write(
+        &root.root,
+        rel,
+        "---\ntitle: Unrelated Title\ntype: note\ntags: [misc]\n---\n\n\
+         This note only mentions the refactor deep in the body.\n",
+    );
+    assert_eq!(
+        index.upsert_path(&root, &abs),
+        Some(abs.to_string_lossy().into_owned())
+    );
+
+    // "refactor" is in DOC_AUTH_PLAN's title, DOC_CACHE_RESEARCH's body, and
+    // now this new doc's body only (title/tags don't contain it).
+    let q = ThoughtQuery {
+        text: Some("refactor".into()),
+        sort: SortKey::Relevance,
+        ..Default::default()
+    };
+    let result = index.query(&q);
+    assert_eq!(result.total, 3);
+    assert_eq!(result.items[0].rel_path, DOC_AUTH_PLAN);
+    let tail: Vec<&str> = result.items[1..]
+        .iter()
+        .map(|m| m.rel_path.as_str())
+        .collect();
+    assert!(tail.contains(&DOC_CACHE_RESEARCH), "{tail:?}");
+    assert!(tail.contains(&rel), "{tail:?}");
+}
+
+/// A file removed from disk between the filter pass (pass 1, under the read
+/// lock) and the body-read pass (pass 2, unlocked I/O) must drop out of a
+/// text query cleanly rather than panicking. A non-text query never opens
+/// the file, so the (now stale) record it still holds is unaffected.
+#[test]
+fn file_removed_between_query_passes_drops_out_of_text_search_only() {
+    let (_tmp, root, index) = scanned();
+    let abs = root.root.join(DOC_CACHE_RESEARCH);
+    fs::remove_file(&abs).unwrap();
+
+    let q = ThoughtQuery {
+        text: Some("refactor".into()),
+        ..Default::default()
+    };
+    assert_eq!(rel_paths(&index, &q), vec![DOC_AUTH_PLAN]);
+
+    let all = rel_paths(&index, &ThoughtQuery::default());
+    assert!(all.contains(&DOC_CACHE_RESEARCH.to_string()), "{all:?}");
+}
+
+/// No frontmatter block at all means `body_offset_bytes` returns 0 — the
+/// whole file is searched as body, matching `extract_block`'s degradation.
+#[test]
+fn doc_with_no_frontmatter_is_body_searchable_over_whole_content() {
+    let (_tmp, _root, index) = scanned();
+
+    // "describe_pr" only occurs in DOC_NO_FM's body text, never in its
+    // filename-derived title ("pr description").
+    let q = ThoughtQuery {
+        text: Some("describe_pr".into()),
+        ..Default::default()
+    };
+    assert_eq!(rel_paths(&index, &q), vec![DOC_NO_FM]);
+}
+
+/// A frontmatter block too large for the capped reads never shows its
+/// closing delimiter, and both halves of the path then degrade exactly as
+/// they do for genuinely unterminated frontmatter: at query time
+/// `body_offset_bytes` returns 0, so the raw header text is scored as body;
+/// at scan time `frontmatter::parse` falls back to path-derived metadata, so
+/// the title matched here is the filename-derived one (asserted directly in
+/// `scan_time_oversized_frontmatter_degrades_to_path_fallbacks_with_warning`).
+/// The doc stays findable and nothing panics anywhere in the path.
+#[test]
+fn oversized_frontmatter_degrades_at_query_time_without_panic() {
+    let (_tmp, root, index) = scanned();
+
+    let padding = "x".repeat(400 * 1024);
+    let content = format!(
+        "---\ntitle: Huge Frontmatter Doc\ntype: note\npadding: \"{padding}\"\n---\n\nBody text.\n"
+    );
+    let rel = "repos/myproj/jt/notes/2026-06-06-huge-frontmatter.md";
+    let abs = write(&root.root, rel, &content);
+    assert_eq!(
+        index.upsert_path(&root, &abs),
+        Some(abs.to_string_lossy().into_owned())
+    );
+
+    let q = ThoughtQuery {
+        text: Some("huge frontmatter".into()),
+        ..Default::default()
+    };
+    assert_eq!(rel_paths(&index, &q), vec![rel]);
+}
+
 #[test]
 fn date_sort_and_bounds_handle_missing_dates() {
     let (_tmp, _root, index) = scanned();
@@ -360,6 +463,127 @@ fn upsert_hash_short_circuit_and_content_change() {
         index.upsert_path(&root, &root.root.join("repos/myproj/jt/plans/missing.md")),
         None
     );
+}
+
+/// A bare mtime touch (`git checkout`, `hyprlayer thoughts sync` rewriting
+/// identical bytes) must not be reported as a change — but the stored
+/// `mtime_ms` is still refreshed silently, so mtime-sorted lists and the
+/// Dashboard's most-recent window stay accurate.
+#[test]
+fn bare_mtime_touch_returns_none_but_refreshes_stored_mtime() {
+    let (_tmp, root, index) = scanned();
+    let abs = root.root.join(DOC_AUTH_PLAN);
+    let id = id_of(&root, DOC_AUTH_PLAN);
+
+    let before_mtime = index.get(&id).unwrap().mtime_ms;
+
+    // Bump mtime without changing a single byte.
+    let bumped = SystemTime::now() + Duration::from_secs(5);
+    std::fs::File::open(&abs)
+        .unwrap()
+        .set_modified(bumped)
+        .unwrap();
+
+    assert_eq!(index.upsert_path(&root, &abs), None);
+    let after_mtime = index.get(&id).unwrap().mtime_ms;
+    assert!(
+        after_mtime > before_mtime,
+        "{before_mtime} -> {after_mtime}"
+    );
+}
+
+/// A body-only edit that changes the file's total size is a real change
+/// under the new (frontmatter-prefix-hash + size) basis, even though the
+/// frontmatter block itself is untouched.
+#[test]
+fn body_edit_that_changes_size_reindexes() {
+    let (_tmp, root, index) = scanned();
+    let abs = root.root.join(DOC_AUTH_PLAN);
+    let id = id_of(&root, DOC_AUTH_PLAN);
+
+    let original = fs::read_to_string(&abs).unwrap();
+    let updated = original.replace(
+        "Rotate the signing tokens carefully.\n",
+        "Rotate the signing tokens carefully, and audit the logs too.\n",
+    );
+    assert_ne!(original.len(), updated.len());
+    fs::write(&abs, &updated).unwrap();
+
+    assert_eq!(index.upsert_path(&root, &abs), Some(id.clone()));
+    let doc = index.get(&id).unwrap();
+    assert_eq!(doc.size_bytes, updated.len() as f64);
+}
+
+/// Accepted divergence 2: a body edit that lands *past* the scan-time
+/// `FRONTMATTER_READ_CAP` prefix and preserves total file size leaves the
+/// (frontmatter-prefix-hash + size) basis unchanged, so it is treated the
+/// same as a bare mtime touch — refreshed silently, no `Some(id)`.
+#[test]
+fn body_edit_past_frontmatter_cap_that_preserves_size_refreshes_silently() {
+    let (_tmp, root, index) = scanned();
+
+    // Frontmatter is tiny; a long body pushes the file well past the 64 KiB
+    // scan-time prefix cap, so a marker swap deep inside it falls outside
+    // the window the prefix hash covers.
+    let filler = "x".repeat(80 * 1024);
+    let content = format!("---\ntitle: Big Body Doc\ntype: note\n---\n\n{filler}MARKER_A end.\n");
+    let rel = "repos/myproj/jt/notes/2026-06-07-big-body.md";
+    let abs = write(&root.root, rel, &content);
+    let id = abs.to_string_lossy().into_owned();
+    assert_eq!(index.upsert_path(&root, &abs), Some(id.clone()));
+
+    let before_mtime = index.get(&id).unwrap().mtime_ms;
+
+    // Same-length swap, past the prefix cap.
+    let updated = content.replace("MARKER_A", "MARKER_B");
+    assert_eq!(updated.len(), content.len());
+    fs::write(&abs, &updated).unwrap();
+    let bumped = SystemTime::now() + Duration::from_secs(5);
+    std::fs::File::open(&abs)
+        .unwrap()
+        .set_modified(bumped)
+        .unwrap();
+
+    // No event-worthy change is reported...
+    assert_eq!(index.upsert_path(&root, &abs), None);
+    // ...but the stored record is still refreshed (mtime moves).
+    let after_mtime = index.get(&id).unwrap().mtime_ms;
+    assert!(
+        after_mtime > before_mtime,
+        "{before_mtime} -> {after_mtime}"
+    );
+}
+
+/// Accepted divergence 3, scan-time half: a frontmatter block itself larger
+/// than `FRONTMATTER_READ_CAP` never shows its closing delimiter within the
+/// scan-time prefix read, so `frontmatter::parse` degrades to
+/// `Frontmatter::default()` + path fallbacks + a warning — the doc still
+/// indexes (with `size_bytes` from the real, uncapped stat) rather than the
+/// scan erroring.
+#[test]
+fn scan_time_oversized_frontmatter_degrades_to_path_fallbacks_with_warning() {
+    let (_tmp, root, index) = scanned();
+
+    let padding = "x".repeat(70 * 1024);
+    let content = format!("---\ntitle: Should Not Parse\npadding: \"{padding}\"\n---\n\nBody.\n");
+    let rel = "repos/myproj/jt/notes/2026-06-08-huge-frontmatter-scan.md";
+    let abs = write(&root.root, rel, &content);
+    let id = abs.to_string_lossy().into_owned();
+
+    assert_eq!(index.upsert_path(&root, &abs), Some(id.clone()));
+    let doc = index.get(&id).unwrap();
+    // Path fallback fills the title from the filename, not the (unreachable)
+    // frontmatter title.
+    assert_eq!(doc.fm.title.as_deref(), Some("huge frontmatter scan"));
+    assert!(
+        doc.fm_warnings
+            .iter()
+            .any(|w| w.contains("no frontmatter block")),
+        "{:?}",
+        doc.fm_warnings
+    );
+    // size_bytes still reflects the real (uncapped) file size from stat.
+    assert_eq!(doc.size_bytes, content.len() as f64);
 }
 
 #[test]
