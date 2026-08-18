@@ -4,8 +4,8 @@ import { CAN_SELF_INSTALL, useUpdate } from "@/lib/updater";
 import { Badge, Button, Card, CardTitle } from "@/components/ui";
 
 /** How a Linux user actually gets the new version. The app can't tell which one
- *  applies — the AUR package is unpacked from the .deb, so the bundle stamp
- *  can't distinguish them — so list all three. */
+ *  applies, the AUR package is unpacked from the .deb, so the bundle stamp
+ *  can't distinguish them, so list all three. */
 const LINUX_UPDATE_COMMANDS = [
   ["Arch (AUR)", "paru -Syu hyprlayer-desktop-bin"],
   ["Debian / Ubuntu", "sudo apt install ./Hyprlayer_<version>_amd64.deb"],
@@ -13,8 +13,8 @@ const LINUX_UPDATE_COMMANDS = [
 ];
 
 /**
- * Settings → Updates card: current version, a manual "Check now", and — when an
- * update is pending — its release notes plus an install button. On Linux the
+ * Settings → Updates card: current version, a manual "Check now", and, when an
+ * update is pending, its release notes plus an install button. On Linux the
  * button is replaced by the package-manager commands, since distro packages
  * can't be installed over from inside the app.
  */
@@ -92,7 +92,7 @@ export function UpdatesCard() {
           <p className="mt-3">
             {result === "uptodate" && <Badge tone="ok">Up to date</Badge>}
             {result === "available" && <Badge tone="accent">Update found</Badge>}
-            {result === "error" && <Badge tone="warn">Couldn’t check — try again</Badge>}
+            {result === "error" && <Badge tone="warn">Couldn’t check. Try again</Badge>}
           </p>
         )
       )}

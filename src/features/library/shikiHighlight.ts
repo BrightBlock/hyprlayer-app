@@ -161,7 +161,7 @@ async function ensureLang(hl: Highlighter, lang: string): Promise<boolean> {
 
 /** Highlight `code` as `rawLang` and return the resulting HAST tree (for
  *  rendering via hast-util-to-jsx-runtime). Returns null if the language is
- *  unknown or highlighting fails — the caller should render plain text. */
+ *  unknown or highlighting fails, the caller should render plain text. */
 export async function highlightToHast(
   code: string,
   rawLang: string | undefined | null,

@@ -8,8 +8,8 @@ use crate::error::Result;
 /// directory with no git and no thoughts mapping, so every git, PR, and
 /// hyprlayer-CLI surface is skipped for it.
 ///
-/// Tolerance: an unrecognized stored value reads as `Disk` — the in-place,
-/// touch-nothing kind — so a mangled row can never make removal delete files
+/// Tolerance: an unrecognized stored value reads as `Disk`, the in-place,
+/// touch-nothing kind, so a mangled row can never make removal delete files
 /// the app doesn't own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -41,7 +41,7 @@ impl ProjectSource {
         }
     }
 
-    /// Whether the project is backed by git — false only for `Folder`, which
+    /// Whether the project is backed by git, false only for `Folder`, which
     /// has no branches, worktrees, PRs, or thoughts mapping.
     pub fn is_git(self) -> bool {
         self != ProjectSource::Folder
@@ -50,7 +50,7 @@ impl ProjectSource {
 
 /// A registered project: an app-owned clone the user added deliberately, via
 /// cloning a hosted repo, importing one from disk, or opening a plain local
-/// folder. This registry — not the thoughts config's `repoMappings` — is the
+/// folder. This registry, not the thoughts config's `repoMappings`, is the
 /// source of truth for the project list, so the per-worktree `thoughts init`
 /// entries never surface as projects.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,7 +245,7 @@ mod tests {
         assert_eq!(got.source, ProjectSource::Folder);
         assert!(!got.source.is_git());
 
-        // A value from a newer schema must never read as `Folder` — that would
+        // A value from a newer schema must never read as `Folder`, that would
         // silently strip a real repo's git surfaces.
         assert_eq!(ProjectSource::parse("worktree"), ProjectSource::Disk);
         assert!(ProjectSource::parse("worktree").is_git());

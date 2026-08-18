@@ -31,7 +31,7 @@ describe("buildDiffWordDeco", () => {
   });
 
   it("does NOT highlight a wholly-new line (the double-highlight fix)", () => {
-    // A modified word AND a brand-new line — @codemirror/merge lumps them into a
+    // A modified word AND a brand-new line, @codemirror/merge lumps them into a
     // single change; only the word may be tinted, never the whole new line.
     const original = "const a = 1\nconst b = old\ndone()";
     const modified = "const a = 1\nconst b = new\nconst c = 3\ndone()";

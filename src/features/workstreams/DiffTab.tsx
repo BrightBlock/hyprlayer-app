@@ -36,7 +36,7 @@ export function DiffTab({ id, path, staged }: { id: string; path: string; staged
     if (!host || !data) return;
 
     // `diffWordHighlight` replaces @codemirror/merge's `highlightChanges` (kept
-    // off) so only genuinely changed words inside a modified line are tinted —
+    // off) so only genuinely changed words inside a modified line are tinted,
     // wholly-new/removed lines get the line background alone, GitHub-style.
     const readOnly = [readOnlyExtensions(lang), diffWordHighlight];
     const collapseUnchanged = { margin: 3, minSize: 6 };

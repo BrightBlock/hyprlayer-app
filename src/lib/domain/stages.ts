@@ -26,7 +26,7 @@ export const STAGES = [
 ] as const satisfies readonly { key: StageKey; label: string }[];
 
 /** Stages a user can pick as an agent mode. Commit, Ship and Revise are excluded
- *  on purpose — all are driven by header/PR actions (the "Commit" and "Ship"
+ *  on purpose, all are driven by header/PR actions (the "Commit" and "Ship"
  *  buttons and the PR bar's feedback actions), not chosen as a chat mode. They
  *  stay in [`STAGES`] so their icon/colour/label still resolve for their tabs. */
 export const MODE_STAGES = STAGES.filter(
@@ -36,7 +36,7 @@ export const MODE_STAGES = STAGES.filter(
 const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
 
 /**
- * SDLC phases the Agents view folders agents by — a coarser rollup of
+ * SDLC phases the Agents view folders agents by, a coarser rollup of
  * [`Stage`], one folder per phase rather than one per stage (five of the eight
  * stages would otherwise hold a single agent). Display order; "Any stage" is
  * the catch-all a description naming no stage falls into and sorts last.
@@ -49,7 +49,7 @@ export type SdlcPhase = (typeof SDLC_PHASES)[number];
 export const ANY_STAGE: SdlcPhase = "Any stage";
 
 /** Which phase each stage rolls up to. `Record<StageKey, …>` so a stage added
- *  to the Rust enum is a compile error here until it is assigned a phase — the
+ *  to the Rust enum is a compile error here until it is assigned a phase, the
  *  same guard [`MODE_STYLES`] gets. */
 export const STAGE_PHASE: Record<StageKey, SdlcPhase> = {
   general: "Any stage",
@@ -63,7 +63,7 @@ export const STAGE_PHASE: Record<StageKey, SdlcPhase> = {
 };
 
 /**
- * The theme custom-property *name* (never a raw hex — the same rule
+ * The theme custom-property *name* (never a raw hex, the same rule
  * `Engine.accent_token` follows in `settings.rs`) that colours each phase's
  * folder header and agent dots. "Any stage" carries none on purpose: it is a
  * holding pen, not a phase, and renders muted instead (see `dotColor`).
@@ -76,7 +76,7 @@ export const PHASE_COLOR: Record<Exclude<SdlcPhase, "Any stage">, string> = {
   Deliver: "--color-commit",
 };
 
-/** The workstream's stage — already typed by the bindings union. */
+/** The workstream's stage, already typed by the bindings union. */
 export function stageOf(view: WorkstreamView): StageKey {
   return view.item.stage;
 }
@@ -92,14 +92,14 @@ export function stageLabel(stage: string): string {
   return STAGES.find((s) => s.key === asStageKey(stage))!.label;
 }
 
-/** The next selectable agent stage after `stage`, wrapping around — the order
+/** The next selectable agent stage after `stage`, wrapping around, the order
  *  follows [`MODE_STAGES`] (general → research → plan → implement → validate →
  *  general). Drives the "cycle agent stage" keybinding. A stage outside
  *  [`MODE_STAGES`] (commit/ship/revise, or anything unknown) starts the cycle at
  *  the first mode. */
 export function nextModeStage(stage: string): StageKey {
   // Exact match (callers pass a normalized StageKey): a stage outside the cycle
-  // lands at index -1, so (-1 + 1) % n = 0 — the first mode.
+  // lands at index -1, so (-1 + 1) % n = 0, the first mode.
   const i = MODE_STAGES.findIndex((s) => s.key === stage);
   return MODE_STAGES[(i + 1) % MODE_STAGES.length].key;
 }
@@ -122,7 +122,7 @@ export function suggestedDocKind(stage: string): DocKind | null {
  * The skill slash-command a stage invokes, or `null` for stages that send a
  * plain prompt (general chat; ship and revise send prose directives). Mirror of
  * the backend `Stage::command` (crates/hyprlayer-core/src/pipeline.rs) for UI
- * hints only — the backend composes what's actually sent (including any
+ * hints only, the backend composes what's actually sent (including any
  * Settings → Prompts override) and returns it for the transcript echo.
  */
 export function stageCommand(stage: string): string | null {
@@ -145,7 +145,7 @@ export function stageCommand(stage: string): string | null {
 /**
  * Tailwind class fragments per stage: the active mode button, the inline
  * badge, the composer textarea border, and the standalone icon accent (the
- * text-hue alone, for a colored icon on a neutral chip — see the board tiles).
+ * text-hue alone, for a colored icon on a neutral chip, see the board tiles).
  * Each stage binds one themed accent token (research/plan/implement/validate/
  * revise, plus the shared commit/ship tokens) rather than a hardcoded Tailwind
  * shade, so every hue recolors per theme and deepens on the light surface

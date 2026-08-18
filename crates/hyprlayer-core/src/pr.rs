@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CoreError, Result};
 use crate::process::Exec;
 
-/// Open/merged/closed — the PR's lifecycle state from `gh`'s `state` field.
+/// Open/merged/closed, the PR's lifecycle state from `gh`'s `state` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -40,14 +40,14 @@ pub enum ChecksState {
 }
 
 /// GitHub's mergeability verdict for the PR, from `gh`'s `mergeable` field.
-/// Distinguishes a clean merge from a conflicting branch — which we surface as a
-/// row in the checks panel — and from GitHub's transient `UNKNOWN` (still being
+/// Distinguishes a clean merge from a conflicting branch, which we surface as a
+/// row in the checks panel, and from GitHub's transient `UNKNOWN` (still being
 /// computed server-side).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum MergeableState {
-    /// No conflicts — the PR can merge cleanly.
+    /// No conflicts, the PR can merge cleanly.
     Mergeable,
     /// The branch conflicts with its base and must be resolved before merging.
     Conflicting,
@@ -66,23 +66,23 @@ impl MergeableState {
 }
 
 /// GitHub's aggregate review verdict for the PR, from `gh`'s `reviewDecision`
-/// field. The `Option` on [`PrStatus`] is `None` when the PR requires no review —
+/// field. The `Option` on [`PrStatus`] is `None` when the PR requires no review,
 /// then there's nothing to gate on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ReviewDecision {
-    /// A required review is satisfied — approved with no changes outstanding.
+    /// A required review is satisfied, approved with no changes outstanding.
     Approved,
     /// A reviewer requested changes; the author must address them before merging.
     ChangesRequested,
-    /// A required review is still outstanding — the PR is waiting on a reviewer.
+    /// A required review is still outstanding, the PR is waiting on a reviewer.
     ReviewRequired,
 }
 
 impl ReviewDecision {
     /// `None` for an absent/empty decision (no review required) or any value we
-    /// don't recognize — callers treat that as "nothing to gate on".
+    /// don't recognize, callers treat that as "nothing to gate on".
     fn parse(raw: &str) -> Option<Self> {
         match raw {
             s if s.eq_ignore_ascii_case("APPROVED") => Some(ReviewDecision::Approved),
@@ -95,7 +95,7 @@ impl ReviewDecision {
     }
 }
 
-/// How the Merge button merges — picked per-PR by the user.
+/// How the Merge button merges, picked per-PR by the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -121,7 +121,7 @@ impl MergeMethod {
 #[serde(rename_all = "camelCase")]
 pub struct PrCheck {
     pub name: String,
-    /// Per-check outcome — only `Pending`/`Passing`/`Failing` (never `None`).
+    /// Per-check outcome, only `Pending`/`Passing`/`Failing` (never `None`).
     pub state: ChecksState,
     /// Link to the check's run/details page, when GitHub provides one.
     pub url: Option<String>,
@@ -233,7 +233,7 @@ fn build_checks(rollup: Vec<RollupEntry>, pr_url: &str) -> Vec<PrCheck> {
 /// (`…/pull/N/checks?check_run_id=…`) so the row opens that exact check inside
 /// the PR's Checks tab rather than the bare Actions job page. Anything else
 /// (third-party StatusContexts) keeps its own `targetUrl`, which points at the
-/// external CI — the best link GitHub gives us for those.
+/// external CI, the best link GitHub gives us for those.
 fn check_url(pr_url: &str, details_url: Option<&str>, target_url: Option<&str>) -> Option<String> {
     if let Some(details) = details_url {
         return match check_run_id(details) {
@@ -246,7 +246,7 @@ fn check_url(pr_url: &str, details_url: Option<&str>, target_url: Option<&str>) 
 
 /// The check-run id embedded as the `/job/<id>` segment of an Actions
 /// `detailsUrl` (e.g. `…/actions/runs/27760243809/job/82132429491` → 82132429491,
-/// which equals the run's `databaseId` — the id the PR Checks tab anchors on).
+/// which equals the run's `databaseId`, the id the PR Checks tab anchors on).
 /// `None` for non-Actions URLs, which carry no such id.
 fn check_run_id(details_url: &str) -> Option<u64> {
     let (_, rest) = details_url.rsplit_once("/job/")?;
@@ -255,7 +255,7 @@ fn check_run_id(details_url: &str) -> Option<u64> {
 }
 
 /// Normalize one rollup entry to a per-check [`ChecksState`] across both shapes
-/// (never yields `None` — that's reserved for "no checks at all").
+/// (never yields `None`, that's reserved for "no checks at all").
 fn classify_entry(entry: &RollupEntry) -> ChecksState {
     // CheckRun: not COMPLETED → still running; else read `conclusion`.
     if let Some(status) = entry.status.as_deref() {
@@ -338,7 +338,7 @@ fn parse_pr(stdout: &str) -> Result<PrStatus> {
 }
 
 /// The PR identified by `pr_ref`, or `None` when there's no matching pull
-/// request. `pr_ref` is whatever `gh pr view` accepts as its argument — a branch
+/// request. `pr_ref` is whatever `gh pr view` accepts as its argument, a branch
 /// name (the default: the branch's open PR), a PR number (a manually attached
 /// PR), or a URL. Runs `gh pr view <pr_ref> --json …` in `worktree`. A missing
 /// PR is the common, non-error case (`gh` exits non-zero with "no pull requests
@@ -360,7 +360,7 @@ pub async fn pr_status(gh: &Path, worktree: &Path, pr_ref: &str) -> Result<Optio
     if out.exit_code == Some(0) {
         return parse_pr(&out.stdout).map(Some);
     }
-    // No PR for this branch is expected (e.g. before the first ship) — gh says
+    // No PR for this branch is expected (e.g. before the first ship), gh says
     // "no pull requests found for branch". Treat only that as None.
     if out.stderr.to_lowercase().contains("no pull requests found") {
         return Ok(None);
@@ -444,7 +444,7 @@ fn parse_pr_list(stdout: &str) -> Result<Vec<PrSummary>> {
 }
 
 /// A one-line summary of the PR identified by `pr_ref` (number/branch/URL), or
-/// `None` when no such PR exists — the attach picker's live preview when a user
+/// `None` when no such PR exists, the attach picker's live preview when a user
 /// types a number. Like [`pr_status`] but fetches only the fields the row shows.
 /// A missing PR is the common, non-error case: gh reports either "no pull
 /// requests found" (branch) or "Could not resolve to a PullRequest" (number).
@@ -482,7 +482,7 @@ pub async fn pr_summary(gh: &Path, dir: &Path, pr_ref: &str) -> Result<Option<Pr
 }
 
 /// Merge `pr_ref`'s PR with the chosen method (`pr_ref` is a branch, PR number,
-/// or URL — see [`pr_status`]). Does not pass `--delete-branch`: gh would try to
+/// or URL, see [`pr_status`]). Does not pass `--delete-branch`: gh would try to
 /// delete the local branch checked out in this worktree (and switch branches),
 /// which fails. Local branch + worktree teardown is the archive step's job; the
 /// remote branch is dropped when a merged workstream is archived (see
@@ -643,7 +643,7 @@ mod tests {
         assert_eq!(pr.mergeable_state, MergeableState::Conflicting);
         assert_eq!(pr.review_decision, None); // empty string → None (parse rejects it)
 
-        // The per-check breakdown carries each check's name, state, and link —
+        // The per-check breakdown carries each check's name, state, and link,
         // from both the CheckRun (name/detailsUrl) and StatusContext
         // (context/targetUrl) shapes.
         assert_eq!(pr.checks_list.len(), 2);

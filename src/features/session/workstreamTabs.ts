@@ -37,7 +37,7 @@ export type ShellTab = {
    *  lifetime, even if the mode switches back. Also covers auto-captured handoff docs,
    *  so a detached one isn't re-attached by the in-session re-write. */
   dismissedSuggestions?: string[];
-  /** User dismissed the "context is filling up — create a handoff?" nudge for this
+  /** User dismissed the "context is filling up, create a handoff?" nudge for this
    *  tab. Suppresses only that suggestion; an auto-captured handoff doc (into [`docs`])
    *  still surfaces the ready-to-resume banner. */
   handoffNudgeDismissed?: boolean;
@@ -66,7 +66,7 @@ export type ShellTab = {
   codexEffort?: string;
   sessionId?: string;
   /** When set, this tab is a read-only markdown preview of a doc (its path),
-   *  not an agent chat — opened from the diff sidebar, closed when done. */
+   *  not an agent chat, opened from the diff sidebar, closed when done. */
   docPreviewPath?: string;
   /** When set, this tab is a rich diff of a worktree file (its path), against
    *  either its staged or working version. Opened from the Changes panel. */
@@ -92,7 +92,7 @@ export type ShellTab = {
      *  for "assign" engines (Claude, Gemini); learned from disk for "capture" (Codex, Antigravity). */
     sessionId?: string;
     /** Whether a conversation has begun (first keystroke). Persisted so a cold-start relaunch
-     *  resumes by sessionId only when there's something to resume — else an untouched tab is fresh. */
+     *  resumes by sessionId only when there's something to resume, else an untouched tab is fresh. */
     started?: boolean;
   };
   /** Which pane this shell lives in. Absent/"main" → main pane; "right" → the right split. */
@@ -102,7 +102,7 @@ export type ShellTab = {
 /** One workstream's whole tab strip, updated atomically.
  *
  *  A workstream can run a side-by-side split: each shell carries a `panel`
- *  ("main" | "right"), and the two panes track their own active shell —
+ *  ("main" | "right"), and the two panes track their own active shell,
  *  `activeId` for the main pane, `rightActiveId` for the right one. `rightSplit`
  *  is whether the right pane is open; `activePane` is the focused pane (only its
  *  active tab reads as fully selected). */
@@ -117,7 +117,7 @@ export type WsTabState = {
   archived?: ArchivedShell[];
   /** Whether the full-pane "Archived agents" view is showing instead of the
    *  focused tab. Owned by the tab state (not component state) so every tab
-   *  action can leave it in one place — focusing any tab clears it. */
+   *  action can leave it in one place, focusing any tab clears it. */
   archiveOpen?: boolean;
 };
 
@@ -143,14 +143,14 @@ export const defaultTabState = (): WsTabState => ({
   activeId: 1,
 });
 
-/** Next free shell id for a workstream — ids only ever grow, so a tab's id is
+/** Next free shell id for a workstream, ids only ever grow, so a tab's id is
  *  stable for its lifetime even as siblings come and go. Counts archived agents
  *  too: an archived shell keeps its id, so a freshly-minted tab must never reuse
  *  it (else unarchiving would collide with a live tab). */
 export const nextShellId = (shells: ShellTab[], archived: ArchivedShell[] = []): number =>
   Math.max(0, ...shells.map((s) => s.id), ...archived.map((a) => a.shell.id)) + 1;
 
-/** Which pane a tab lives in — `panel` is optional, and absent means "main". */
+/** Which pane a tab lives in, `panel` is optional, and absent means "main". */
 const paneOf = (s: ShellTab): "main" | "right" => (s.panel === "right" ? "right" : "main");
 
 /** The focused pane and its tabs, in on-screen order (so drag-reordering counts). */
@@ -185,7 +185,7 @@ export function cycleActiveTab(state: WsTabState, dir: 1 | -1): WsTabState {
 }
 
 /**
- * Select the `index`-th tab (0-based) of the focused pane — Safari's ⌘1–⌘8. A
+ * Select the `index`-th tab (0-based) of the focused pane, Safari's ⌘1–⌘8. A
  * no-op when the pane has no such tab, as ⌘5 does with four tabs open. Pure.
  */
 export function selectTabAt(state: WsTabState, index: number): WsTabState {
@@ -195,7 +195,7 @@ export function selectTabAt(state: WsTabState, index: number): WsTabState {
 }
 
 /**
- * Select the focused pane's last tab — Safari's ⌘9, which means the rightmost
+ * Select the focused pane's last tab, Safari's ⌘9, which means the rightmost
  * tab, never the ninth. Pure; a no-op on an empty pane.
  */
 export function selectLastTab(state: WsTabState): WsTabState {
@@ -207,7 +207,7 @@ export function selectLastTab(state: WsTabState): WsTabState {
 /**
  * Remove `shellId` from the strip, settling the active id / focused pane onto a
  * neighbour and collapsing the split when its last right-pane shell goes. The
- * shared core of closing and archiving — neither ends the session here, that's
+ * shared core of closing and archiving, neither ends the session here, that's
  * the caller's job. Pure: returns the input unchanged when the shell is missing
  * or is the main pane's last tab (the main pane always keeps one agent).
  *
@@ -261,12 +261,12 @@ export function archiveShellState(
   const shell = state.shells.find((s) => s.id === shellId);
   if (!shell) return state;
   const next = removeShellState(state, shellId);
-  if (next === state) return state; // last main tab — nothing archived
+  if (next === state) return state; // last main tab, nothing archived
   return { ...next, archived: [{ shell, archivedAt, status }, ...(state.archived ?? [])] };
 }
 
 /**
- * Restore an archived agent to the main strip and select it — re-homed into the
+ * Restore an archived agent to the main strip and select it, re-homed into the
  * main pane (its old pane may have since closed) but otherwise verbatim, its
  * `sessionId` intact so the session re-attaches or rehydrates on mount. No-op
  * when no archived entry matches `shellId`.
@@ -288,7 +288,7 @@ export function unarchiveShellState(state: WsTabState, shellId: number): WsTabSt
 /**
  * Close the archived-agents view when `next` refocuses a tab relative to `prev`.
  * A navigation (select/cycle/open a tab) clears it, but a removal (close/archive
- * shrinks the strip) and a background patch (no focus change) leave it open — so
+ * shrinks the strip) and a background patch (no focus change) leave it open, so
  * managing the archive doesn't yank you out of the view. Pure; returns `next`
  * unchanged when the view should stay (or was already closed).
  */
@@ -307,12 +307,12 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
     name: "hyprlayer:workstream-tabs",
     // v2 added `attachments` to every shell.
-    // v3 added `dismissedSuggestions` to every shell — backfill it on rehydrate
+    // v3 added `dismissedSuggestions` to every shell, backfill it on rehydrate
     // so tabs persisted by an older build don't crash on accessing the field.
     // v4 added `titleLocked`: lock every pre-existing tab so auto-titling never
     // rewrites a name the user has already been looking at (custom or default);
     // only tabs created after this build start unlocked and get auto-titled.
-    // v5 added per-workstream `archived` agents — backfill it to an empty list.
+    // v5 added per-workstream `archived` agents, backfill it to an empty list.
     version: 5,
     migrate: (persisted) => {
       const state = persisted as TabsStore | undefined;
@@ -341,7 +341,7 @@ export function updateWorkstreamTabs(
 
 /**
  * A transient, one-shot "focus this shell's composer" signal. An action that
- * swaps which agent is on screen — e.g. toggling the terminal away — sets the
+ * swaps which agent is on screen, e.g. toggling the terminal away, sets the
  * target shell id; that shell's composer consumes it once mounted and focuses
  * its textarea, so the user lands ready to type. Deliberately NOT persisted and
  * NOT part of the tab strip: it's a fire-and-forget signal, cleared the instant
@@ -366,7 +366,7 @@ export function consumeComposerFocus(shellId: number): boolean {
 
 /**
  * Bind a freshly-started session to an existing (unstarted) shell tab and focus
- * it — the module-level twin of SessionChat's `onSessionStarted`, for prompt
+ * it, the module-level twin of SessionChat's `onSessionStarted`, for prompt
  * runs that start a session on the focused tab from outside the component.
  */
 export function bindSessionToShell(
@@ -395,7 +395,7 @@ export function bindSessionToShell(
 }
 
 /**
- * Open a fresh plain-chat tab bound to `sessionId` and select it — the landing
+ * Open a fresh plain-chat tab bound to `sessionId` and select it, the landing
  * spot for a prompt run when the focused tab can't take the session (it's a doc
  * preview, a dead action tab, or already bound). Named after the prompt so the
  * strip reads what's running.
@@ -419,7 +419,7 @@ export function openPromptTab(workstreamId: string, sessionId: string, title: st
             attachments: [],
             sessionId,
             panel: "main",
-            // The prompt's name IS the intended title — don't let auto-titling
+            // The prompt's name IS the intended title, don't let auto-titling
             // overwrite it from the first turn.
             titleLocked: true,
           },
@@ -552,7 +552,7 @@ function openDedicatedTab(
 ): void {
   // Seed the action tab's composer to match what its session launched with, so
   // the model/effort picker reflects the configured Commit/Ship defaults. Empty
-  // when just focusing an existing tab (no fresh launch) — nothing is touched.
+  // when just focusing an existing tab (no fresh launch), nothing is touched.
   const seed = shellSeedFromDefaults(defaults);
   updateWorkstreamTabs((all) => {
     const current = all[workstreamId] ?? defaultTabState();

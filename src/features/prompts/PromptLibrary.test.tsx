@@ -93,7 +93,7 @@ describe("PromptLibrary", () => {
     fireEvent.change(bodyTextarea(), { target: { value: "  " } });
     fireEvent.blur(bodyTextarea());
     const saved = mutate.mock.calls[mutate.mock.calls.length - 1][0] as AppSettings;
-    // A blank override means "stock text" — never persisted as an empty prompt.
+    // A blank override means "stock text", never persisted as an empty prompt.
     expect(saved.prompts?.builtinBodies?.commit).toBeUndefined();
     // The local draft stays as typed so the textarea doesn't snap back mid-rewrite.
     expect(bodyTextarea().value).toBe("  ");

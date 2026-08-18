@@ -77,7 +77,7 @@ pub fn play_sound() -> CmdResult<()> {
 /// macOS never prompts for this grant, so its absence is silent: gated reads
 /// just fail. Meanwhile any CLI the app hosts that reaches another app's
 /// container (`op`, most visibly) trips the *promptable* "access data from
-/// other apps" dialog, which names Hyprlayer — macOS attributes a child's
+/// other apps" dialog, which names Hyprlayer, macOS attributes a child's
 /// access to its responsible process. Holding Full Disk Access supersedes that
 /// check, so the dialog never fires.
 #[tauri::command]
@@ -152,7 +152,7 @@ pub async fn set_app_settings(
 /// the catalog offered this time.
 ///
 /// Without this, a user who ever curated Settings → Models never sees a model
-/// Anthropic ships later — their stored list is an allowlist frozen at the day
+/// Anthropic ships later, their stored list is an allowlist frozen at the day
 /// they edited it, and the only cure is "Reset to default", which also undoes
 /// their removals. `add` is strictly additive and `seen` is the watermark that
 /// keeps it additive: a model the user deliberately removed is in `seen`, so it
@@ -173,7 +173,7 @@ pub async fn claude_sync_models(
         .settings
         .update(|s| {
             let claude = &mut s.providers.claude;
-            // `None` means "show everything" — already current, nothing to add.
+            // `None` means "show everything", already current, nothing to add.
             if let Some(visible) = claude.visible_models.as_mut() {
                 for key in &add {
                     if !visible.contains(key) {
@@ -259,7 +259,7 @@ fn cli_install_candidates() -> &'static [CliCandidate] {
     // Homebrew on macOS, and on Linux too: Homebrew-on-Linux installs the same
     // tap with the same command. `available` gates it on `brew` actually being
     // on PATH, so a Linux box without it still sees the manual instructions
-    // rather than a button that can't work — and without this the Linux
+    // rather than a button that can't work, and without this the Linux
     // onboarding step listed nothing at all, dead-ending on "install one of the
     // options below" with no options below it.
     #[cfg(not(target_os = "windows"))]

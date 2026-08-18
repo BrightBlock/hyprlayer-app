@@ -14,7 +14,7 @@ export function isFolderSource(source: ProjectSource): boolean {
   return source === "folder";
 }
 
-/** True for clone/disk projects — the ones with branches, PRs, and thoughts. */
+/** True for clone/disk projects, the ones with branches, PRs, and thoughts. */
 export function isGitProject(project: Pick<Project, "source"> | undefined | null): boolean {
   return project != null && !isFolderSource(project.source);
 }
@@ -31,7 +31,7 @@ export function shortBranch(ref: string): string {
 }
 
 /** The checkout sits on a branch other than its merge base. True from creation
- *  for an in-place workstream started off the base branch — the base is detected
+ *  for an in-place workstream started off the base branch, the base is detected
  *  (`origin/main`), not copied from the branch picked. */
 export function isOffBase(view: Pick<WorkstreamView, "item">): boolean {
   const { branch, baseBranch } = view.item;
@@ -44,7 +44,7 @@ export function isDetachedHead(view: Pick<WorkstreamView, "item" | "git">): bool
   return !isFolderWorkstream(view) && view.git.exists && view.git.branch == null;
 }
 
-/** The project directory is the user's own, not an app-made clone — so
+/** The project directory is the user's own, not an app-made clone, so
  *  deleting it destroys work the app never created. True for disk and folder. */
 export function isUserDirectory(project: Pick<Project, "source"> | undefined | null): boolean {
   return project != null && project.source !== "clone";

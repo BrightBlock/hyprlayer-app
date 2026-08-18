@@ -6,7 +6,7 @@ import { BoardColumn } from "./BoardColumn";
 import { WorkstreamCard } from "./WorkstreamCard";
 
 /** The project-level kanban board. Shows active workstreams bucketed into
- *  pipeline-stage lanes. The board has no header of its own — the top bar's
+ *  pipeline-stage lanes. The board has no header of its own, the top bar's
  *  breadcrumb already names it and carries the "+" new-workstream button.
  *  Empty projects show a "create your first workstream" CTA. */
 export function ProjectBoard({
@@ -35,7 +35,7 @@ export function ProjectBoard({
               <p className="text-base font-medium text-ink">Create your first workstream</p>
               <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink-dim">
                 {folder
-                  ? "Each workstream is its own conversation, all running in this folder — start as many as you need."
+                  ? "Each workstream is its own conversation, all running in this folder. Start as many as you need."
                   : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}
               </p>
               <Button variant="primary" className="mt-4" onClick={onNewWorkstream}>
@@ -46,7 +46,7 @@ export function ProjectBoard({
           </div>
         </div>
       ) : (
-        /* Grid layout: the 6 stage tiles fill the whole canvas — 3 columns × 2
+        /* Grid layout: the 6 stage tiles fill the whole canvas, 3 columns × 2
            rows on a wide window (dropping to 2 columns on narrower ones), each
            row an equal fraction of the height (auto-rows-fr) so tiles fill the
            vertical space instead of leaving it blank. A busy tile scrolls

@@ -36,7 +36,7 @@ export type Suggestion = {
   label: string;
   /** Secondary detail (description / directory), shown dimmed. */
   detail: string;
-  /** Trailing tag — set for prompt-library entries, which the app expands
+  /** Trailing tag, set for prompt-library entries, which the app expands
    *  itself rather than handing to the harness as a command. */
   badge?: string;
 };
@@ -45,7 +45,7 @@ const FILE_LIMIT = 20;
 const FILE_DEBOUNCE_MS = 100;
 
 /** Detect whether the caret sits inside an autocomplete trigger. Either a `/`
- *  or `@` that opens the current whitespace-delimited token fires — anywhere
+ *  or `@` that opens the current whitespace-delimited token fires, anywhere
  *  in the draft, matching the in-prompt skill highlight. */
 export function detectTrigger(text: string, caret: number): Trigger | null {
   // Walk back to the start of the whitespace-delimited token under the caret.
@@ -91,11 +91,11 @@ export type ComposerAutocomplete = {
   setActiveIndex: (i: number) => void;
   /** A file search is in flight (shows a hint instead of "no matches"). */
   loading: boolean;
-  /** Names of every known command — drives the in-prompt skill highlight. */
+  /** Names of every known command, drives the in-prompt skill highlight. */
   commandNames: Set<string>;
   /** The custom prompt `draft` would expand to when sent, or null. */
   matchPrompt: (draft: string) => ComposerPromptMatch | null;
-  /** The prompts this composer will actually expand, by slug — one that collided
+  /** The prompts this composer will actually expand, by slug, one that collided
    *  with a real command, or came from an unusable name, is absent. */
   offeredPrompts: ReadonlyMap<string, CustomPrompt>;
   /** Apply the suggestion at `index`, splicing it into the draft. */
@@ -119,7 +119,7 @@ export type ComposerAutocomplete = {
  *  handed to the host. Falls back to the inline `@path ` splice when omitted. */
 export function useComposerAutocomplete(opts: {
   workstreamId: string;
-  /** Project the workstream belongs to — picks the right per-project prompt body. */
+  /** Project the workstream belongs to, picks the right per-project prompt body. */
   projectPath: string;
   value: string;
   onChange: (next: string) => void;
@@ -129,7 +129,7 @@ export function useComposerAutocomplete(opts: {
 }): ComposerAutocomplete {
   const { workstreamId, projectPath, value, onChange, textareaRef, enabled, onPickFile } = opts;
 
-  // Null until the harness list lands — the collision rule below can't be
+  // Null until the harness list lands, the collision rule below can't be
   // applied without it, so no prompt is offered while it's in flight.
   const [slashCommands, setSlashCommands] = useState<SlashCommand[] | null>(null);
   const [caret, setCaret] = useState(0);

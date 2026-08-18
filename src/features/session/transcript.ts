@@ -1,25 +1,23 @@
 /**
- * The pure event→transcript reducer for an agent session. Given the ordered
- * stream of `SessionEvent`s the driver emits, it builds the renderable
- * transcript and the derived session state. No React, no IPC, no clocks — so
- * it's fully deterministic and unit-testable, and it runs identically whether
- * events arrive live over a Channel or are replayed from SQLite on re-attach.
+ * The pure event→transcript reducer for an agent session. Turns the driver's
+ * ordered `SessionEvent` stream into the renderable transcript and derived
+ * state. No React, IPC, or clocks, so it is deterministic and testable, and it
+ * behaves the same live over a Channel or replayed from SQLite.
  *
- * Coalescing rules (verified against the claude 2.1.x stream-json protocol):
- *  - `partialText` deltas accumulate into the open streaming assistant block;
- *  - the matching `assistantText` (the completed block) REPLACES that text and
- *    closes the block — it is authoritative, never appended (would double);
- *  - `toolUse` opens a tool block; the later `toolResult` (echoed on a `user`
- *    turn) attaches to it by `toolUseId`;
- *  - `permissionAsk` parks the session in `awaiting_permission`; the answer
- *    (a frontend action, no backend event) is applied via `resolvePermission`.
+ * Coalescing rules, verified against the claude 2.1.x stream-json protocol:
+ *  - `partialText` deltas accumulate into the open assistant block.
+ *  - `assistantText` REPLACES that text and closes the block. It is
+ *    authoritative, never appended, or the text doubles.
+ *  - `toolUse` opens a tool block; a later `toolResult` attaches by `toolUseId`.
+ *  - `permissionAsk` parks the session in `awaiting_permission`. The answer is
+ *    a frontend action with no backend event, applied via `resolvePermission`.
  */
 
 import type { ExitOutcome, SessionEvent, SessionState } from "@/lib/bindings";
 import type { Attachment } from "./attachments";
 import { parseToolInput } from "./toolDisplay";
 
-// The session lifecycle union is generated from core's `SessionState` enum —
+// The session lifecycle union is generated from core's `SessionState` enum,
 // re-exported here so the whole session feature keeps importing it from the
 // transcript module (its long-standing home).
 export type { SessionState };
@@ -37,7 +35,7 @@ export type Question = {
   options: QuestionOption[];
 };
 
-/** The unanswered `AskUserQuestion` prompt the session is parked on — rendered
+/** The unanswered `AskUserQuestion` prompt the session is parked on, rendered
  *  interactively above the composer (not as a transcript card). */
 export type PendingQuestion = { requestId: string; questions: Question[] };
 
@@ -109,8 +107,8 @@ const SKILL_BODY_PREFIX = "Base directory for this skill:";
 
 /**
  * If a completed assistant block is actually a launched skill's injected body
- * (it starts with [`SKILL_BODY_PREFIX`]), return the skill's name — the last
- * segment of the base-directory path on the first line — else null. Matched on
+ * (it starts with [`SKILL_BODY_PREFIX`]), return the skill's name, the last
+ * segment of the base-directory path on the first line, else null. Matched on
  * the *complete* block only: a streamed `partialText` chunk can start with the
  * prefix by coincidence, but a whole assistant turn starting with it is the
  * skill injection, not prose.
@@ -123,7 +121,7 @@ export function skillBodyName(text: string): string | null {
   return name || "skill";
 }
 
-/** The system-injected preamble that opens claude's post-compact summary —
+/** The system-injected preamble that opens claude's post-compact summary,
  *  delivered as one (often 10–20KB) assistant block right after the compact
  *  boundary. Matched to fold that block into the divider instead of dumping it. */
 const COMPACT_SUMMARY_PREFIX = "This session is being continued from a previous conversation";
@@ -138,8 +136,8 @@ export function isCompactSummary(text: string): boolean {
   return text.startsWith(COMPACT_SUMMARY_PREFIX);
 }
 
-/** Matches an opening or closing think tag — `<think>`, `</think>`, and the
- *  `<thinking>`/`</thinking>` spelling — case-insensitively. */
+/** Matches an opening or closing think tag, `<think>`, `</think>`, and the
+ *  `<thinking>`/`</thinking>` spelling, case-insensitively. */
 const THINK_TAG = /<\/?think(?:ing)?>/gi;
 
 /**
@@ -168,7 +166,7 @@ export function splitInlineThinking(text: string): { reasoning: string | null; a
     const isClose = m[0][1] === "/";
     if (isClose) {
       // A close ends the current thought. An orphan close (we weren't in a
-      // think) means everything buffered so far — including prior answer text —
+      // think) means everything buffered so far, including prior answer text,
       // was actually the reasoning whose opener got stripped.
       reasoning.push(inThink ? buf : answer + buf);
       if (!inThink) answer = "";
@@ -196,7 +194,7 @@ export type TranscriptItem =
       id: string;
       text: string;
       stage: string | null;
-      /** Files/screenshots attached to this turn — rendered as pin cards. */
+      /** Files/screenshots attached to this turn, rendered as pin cards. */
       attachments: Attachment[];
       /** Epoch ms the user sent this turn; optimistic via `addUserMessage`, else
        *  backfilled from the event on replay. `null` for legacy rows (UI falls
@@ -210,7 +208,7 @@ export type TranscriptItem =
   | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
   | ({ kind: "thinking"; id: string; text: string } & Parented)
   /** A launched skill's injected SKILL.md body (Claude delivers it as an assistant
-   *  block) — kept as its own collapsed chip, not dumped inline. */
+   *  block), kept as its own collapsed chip, not dumped inline. */
   | ({ kind: "skill"; id: string; name: string; body: string } & Parented)
   | ({
       kind: "tool";
@@ -242,12 +240,12 @@ export type TranscriptItem =
       preTokens: number | null;
       summary?: string;
     }
-  /** The seam where a command queued into a running session took over — a scheduled
+  /** The seam where a command queued into a running session took over, a scheduled
    *  wakeup firing, or a slash command queued behind a busy turn. claude never echoes
    *  the injected prompt to us, so without this row the turn just appears, reading as
    *  the agent spontaneously resuming. Appended on `started` only; the close adds
    *  nothing the turn's own content doesn't show. `detail` is the scheduling call's
-   *  own `reason` — what the wakeup was waiting for — when there is one. */
+   *  own `reason`, what the wakeup was waiting for, when there is one. */
   | {
       kind: "queuedCommand";
       id: string;
@@ -255,7 +253,7 @@ export type TranscriptItem =
       label: string;
       detail: string | null;
     }
-  /** A background shell task (`Bash{run_in_background}`) changed state — claude's
+  /** A background shell task (`Bash{run_in_background}`) changed state, claude's
    *  async completion signal. Non-rendering; consumed only by
    *  `backgroundTasksFromItems` to drop a finished task the agent never polled.
    *  `status` anything but "running" ends the task. `toolUseId` is the spawning
@@ -274,7 +272,7 @@ export type TranscriptItem =
       kind: "relaunched";
       id: string;
     }
-  /** Non-rendering marker for the backend's `rewound` event — a live in-place
+  /** Non-rendering marker for the backend's `rewound` event, a live in-place
    *  rewind (same process). Inert like `relaunched`, but `backgroundTasksFromItems`
    *  must NOT drop tasks here: the process is unchanged, its shells still alive. */
   | {
@@ -363,9 +361,9 @@ export function isBusy(view: SessionView): boolean {
 }
 
 /**
- * Whether claude is actively *computing* — drives the "time working" counter and
+ * Whether claude is actively *computing*, drives the "time working" counter and
  * the tab's breathing glow. Narrower than [`isBusy`]: a session parked on a
- * permission/question is busy (no new turn) but NOT working — it's blocked on you.
+ * permission/question is busy (no new turn) but NOT working, it's blocked on you.
  * Counting "waiting on the user" as working is what made a restored permission-held
  * session look like a running turn after an app restart.
  */
@@ -411,12 +409,12 @@ export function restoredView(view: SessionView): SessionView {
 
 /**
  * Settle the prompt a just-completed main-thread tool was gating. A permission
- * decision and an `AskUserQuestion` answer are frontend-only — neither emits an
- * event — so the tool's persisted *result* is the only proof the user answered;
+ * decision and an `AskUserQuestion` answer are frontend-only, neither emits an
+ * event, so the tool's persisted *result* is the only proof the user answered;
  * without this, replaying the log re-surfaces an answered card and locks the
  * composer on a stale prompt. `AskUserQuestion` finishing drops the pending
  * question; any other tool marks its still-open permission card (matched by tool
- * name) resolved. Idempotent with the live resolvers — on replay it's the clearer.
+ * name) resolved. Idempotent with the live resolvers, on replay it's the clearer.
  */
 function settleAnsweredPrompt(
   view: SessionView,
@@ -456,7 +454,7 @@ function settleAnsweredPrompt(
 /**
  * Index of the open main-thread streaming assistant block, or -1. Scans from
  * the end (not just the last item) so it's still found when subagent steps were
- * appended after it — the main agent streams progress text while parallel
+ * appended after it, the main agent streams progress text while parallel
  * subagents run, interleaving their events with its partials.
  */
 function openAssistantIndex(items: TranscriptItem[]): number {
@@ -522,8 +520,8 @@ function firstCompactAwaitingSummary(items: TranscriptItem[]): number {
 /** How to label a queued-command seam. claude's `command_lifecycle` line carries no
  *  origin, so the only available signal is what preceded it: when the newest tool call
  *  is a `ScheduleWakeup`, the command now starting is that wakeup firing, and that
- *  call's `reason` already says what it was waiting for — so the seam reuses it rather
- *  than inventing copy. Everything else — a slash command queued behind a busy turn —
+ *  call's `reason` already says what it was waiting for, so the seam reuses it rather
+ *  than inventing copy. Everything else, a slash command queued behind a busy turn,
  *  stays generic. */
 function queuedCommandSeam(items: TranscriptItem[]): { label: string; detail: string | null } {
   const generic = { label: "Queued command", detail: null };
@@ -553,7 +551,7 @@ export function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
 
 /**
  * Append a freshly-built item, allocating its deterministic id and advancing the
- * counter — the close/allocate/append/increment plumbing every appending case
+ * counter, the close/allocate/append/increment plumbing every appending case
  * shares. `closeAssistant` first finalizes the open streaming block (main-thread
  * items do this; subagent items just nest). Returns the `items`/`counter` slice
  * to spread; each case keeps its own `streaming`/`state` semantics explicit.
@@ -574,7 +572,7 @@ function appended(
 
 export function reduceEvent(view: SessionView, event: SessionEvent): SessionView {
   const next = reduceEventInner(view, event);
-  // "starting" means: spawned, no output yet — the "Connecting to <harness>…"
+  // "starting" means: spawned, no output yet, the "Connecting to <harness>…"
   // state. The first sign of life (any event that leaves a turn streaming) means
   // the harness is up and producing, so leave the connecting state even if we never
   // saw an `init`: a live session re-tailed after a UI/HMR reload doesn't
@@ -590,7 +588,7 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
 function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
   switch (event.kind) {
     case "init":
-      // "Process is up", not "turn started" — codex/opencode emit it on every
+      // "Process is up", not "turn started", codex/opencode emit it on every
       // spawn, so carrying `streaming` (rather than setting it) is what keeps a
       // bare resume from pulsing on a turn nobody asked for.
       return {
@@ -602,7 +600,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
 
     case "userMessage":
       // Persisted user turn, seen only when replaying the log on restart (the
-      // backend doesn't forward it live — the optimistic `addUserMessage` already
+      // backend doesn't forward it live, the optimistic `addUserMessage` already
       // showed it). Rebuilds the user's side of the conversation. `createdAt` is
       // null here and backfilled by the replay loop from the stored event's
       // `createdAt` column (the reducer is pure and clock-free).
@@ -656,7 +654,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           items[toolIdx] = { ...tool, skillBody: event.text };
           return { ...view, items, streaming: true };
         }
-        // No invocation row to fold into (rare) — keep the body as its own
+        // No invocation row to fold into (rare), keep the body as its own
         // collapsed chip so it's still inspectable but never dumped inline. If it
         // streamed into an open assistant block first, convert that in place.
         const makeSkill = (id: string): TranscriptItem => ({
@@ -680,7 +678,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           streaming: true,
         };
       }
-      // claude's post-compact summary — a single, often 10–20KB assistant block
+      // claude's post-compact summary, a single, often 10–20KB assistant block
       // injected right after the compact boundary. Fold it into that divider
       // (expand to read it) instead of dumping the whole summary inline. Main
       // thread only, like the boundary; and only when a boundary is actually
@@ -699,7 +697,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           return { ...view, items, streaming: true };
         }
       }
-      // Subagent text nests under its Task — append, never touch the main block.
+      // Subagent text nests under its Task, append, never touch the main block.
       if (event.parentId) {
         if (!event.text.length) return view;
         return {
@@ -715,12 +713,12 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
         };
       }
       // Reasoning some OpenCode models emit inline in the text channel (see
-      // `splitInlineThinking`) — route it to a thinking block instead of letting
+      // `splitInlineThinking`), route it to a thinking block instead of letting
       // a raw `</think>` leak into prose.
       const { reasoning, answer } = splitInlineThinking(event.text);
       if (reasoning) {
-        // Replace the streamed block — still open, or already closed by a tool/
-        // thinking step it preceded — with the thought followed by the cleaned
+        // Replace the streamed block, still open, or already closed by a tool/
+        // thinking step it preceded, with the thought followed by the cleaned
         // answer, so the thinking lands where the text streamed (before any such
         // tool) rather than after it. Append when nothing streamed.
         const open = openAssistantIndex(view.items);
@@ -750,7 +748,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       }
       if (!event.text.length) return view; // empty block, nothing open → ignore
       // The streamed block was closed by a tool/thinking step before this final
-      // arrived (OpenCode ends a text part after the tool it precedes) — coalesce
+      // arrived (OpenCode ends a text part after the tool it precedes), coalesce
       // into it rather than appending a duplicate.
       const streamed = streamedAssistantIndex(view.items, event.text);
       if (streamed !== -1) {
@@ -808,7 +806,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           const items = view.items.slice();
           items[i] = { ...item, result: { content: event.content, isError: event.isError } };
           // A finished main-thread tool is our persisted proof that the prompt
-          // gating it was answered — settle it so a replay doesn't re-surface an
+          // gating it was answered, settle it so a replay doesn't re-surface an
           // already-answered card. (Subagent results gate nothing on the main
           // thread.)
           return event.parentId
@@ -860,7 +858,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
     case "questionAsk": {
       // The matching `AskUserQuestion` tool block (its toolUse) is already in the
       // transcript; the questions render interactively above the composer, so we
-      // only park the session and stash them — no transcript item to add here.
+      // only park the session and stash them, no transcript item to add here.
       return {
         ...view,
         items: closeOpenAssistant(view.items),
@@ -874,17 +872,17 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
     }
 
     case "usage":
-      // A live context reading mid-turn — update the meter, touch nothing else.
+      // A live context reading mid-turn, update the meter, touch nothing else.
       return { ...view, contextTokens: event.contextTokens };
 
     case "contextWindow":
-      // The backend told us the model's real window (the meter denominator) —
+      // The backend told us the model's real window (the meter denominator),
       // e.g. an Ollama model's fixed num_ctx. Set it; touch nothing else.
       return { ...view, contextWindow: event.tokens };
 
     case "turnDone": {
       // A turnDone can arrive (e.g. a subagent finishing) while the user still
-      // owes an answer to a question or an outstanding permission ask — the real
+      // owes an answer to a question or an outstanding permission ask, the real
       // turn isn't done. Stay parked rather than dropping to "running" and
       // looking idle.
       return {
@@ -905,7 +903,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       const closed = { ...view, items: closeOpenAssistant(view.items) };
       // A detached exit is the app taking the process down for its own reasons
       // (quit, relaunch under new settings). Nothing ended the conversation, so
-      // it leaves no notice and no terminal state — the session rests idle and
+      // it leaves no notice and no terminal state, the session rests idle and
       // resumes on the next send. Open asks are cancelled: their request ids died
       // with the process, so leaving one would strand the session busy forever.
       if (event.outcome === "detached") {
@@ -939,7 +937,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
 
     case "commandLifecycle":
       // A command queued into the running session took over. Only the opening
-      // bracket is a seam worth drawing — `completed`/`cancelled` close the pair and
+      // bracket is a seam worth drawing, `completed`/`cancelled` close the pair and
       // add nothing the turn's own content doesn't already show. Close any open prose
       // block so the divider doesn't land mid-stream (as `compactBoundary` does).
       if (event.state !== "started") return view;
@@ -984,7 +982,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       };
 
     case "rewound":
-      // Inert boundary for a live in-place rewind. Same process — so, unlike
+      // Inert boundary for a live in-place rewind. Same process, so, unlike
       // `relaunched`, `backgroundTasksFromItems` does NOT clear tasks here (its
       // still-running background shells can still complete-notify).
       return {
@@ -1019,7 +1017,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
 
 /** Append the user's turn optimistically and flag a turn as in flight. The
  *  caller passes `createdAt` (epoch ms) so the reducer stays clock-free and
- *  tests stay deterministic — the live path passes `Date.now()`. */
+ *  tests stay deterministic, the live path passes `Date.now()`. */
 export function addUserMessage(
   view: SessionView,
   text: string,
@@ -1041,7 +1039,7 @@ export function addUserMessage(
 
 /**
  * Apply the user's answer to a permission ask (there's no backend event for
- * this — the driver just resumes). Marks the card resolved and un-parks the
+ * this, the driver just resumes). Marks the card resolved and un-parks the
  * session so the turn can continue.
  */
 export function resolvePermission(
@@ -1055,7 +1053,7 @@ export function resolvePermission(
       : item,
   );
   // A subagent can have several asks open at once; only resume the turn once the
-  // last card is answered (and no question is outstanding) — until then the
+  // last card is answered (and no question is outstanding), until then the
   // session is still parked (see `parkedState`).
   const pendingPermission =
     view.pendingPermission?.requestId === requestId ? null : view.pendingPermission;
@@ -1064,7 +1062,7 @@ export function resolvePermission(
 }
 
 /**
- * Apply the user's answer to an `AskUserQuestion` prompt (no backend event —
+ * Apply the user's answer to an `AskUserQuestion` prompt (no backend event,
  * the driver just resumes once the answer is sent). Clears the pending question
  * and un-parks the session so the turn can continue.
  */
@@ -1075,11 +1073,11 @@ export function resolveQuestion(view: SessionView, requestId: string): SessionVi
 }
 
 /**
- * Cancel every still-open permission card and any pending question — for a turn
+ * Cancel every still-open permission card and any pending question, for a turn
  * that's being *abandoned* wholesale rather than answered (a permission-mode
  * restart kills the asking process; Stop cancels the ask outright). Open cards
  * are marked `deny` (the tool never ran) and both pending prompts cleared, so the
- * session can't stay `isBusy` — composer locked, queue frozen — parked on a
+ * session can't stay `isBusy`, composer locked, queue frozen, parked on a
  * prompt that no live claude will ever resolve (its request id died with the old
  * process, or the user chose to stop instead of answering). The caller settles
  * `state`/`streaming`. Idempotent: a view with nothing parked is returned as-is.
@@ -1128,7 +1126,7 @@ export function describeState(
   }
 }
 
-// `detached` never reaches here — the reducer draws no notice for it — but the
+// `detached` never reaches here, the reducer draws no notice for it, but the
 // map stays total so a new outcome can't slip through unlabelled.
 const EXIT_LABEL: Record<ExitOutcome, string> = {
   completed: "Session completed",

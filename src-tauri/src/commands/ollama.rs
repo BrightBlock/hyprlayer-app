@@ -5,7 +5,7 @@
 //! endpoint for the models it has installed (`GET /api/tags`) and (b) keep the
 //! `provider.ollama` block in OpenCode's `opencode.json` in sync with the user's
 //! endpoint + model selection, recycling the shared `opencode serve` so it picks
-//! up the change. The endpoint may be local or remote — a local install is not
+//! up the change. The endpoint may be local or remote, a local install is not
 //! required, so reachability of `/api/tags` (never a local binary) is the signal
 //! for whether Ollama is usable.
 
@@ -78,7 +78,7 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Probe `<endpoint>/api/tags`. Never errors on an unreachable server — returns
+/// Probe `<endpoint>/api/tags`. Never errors on an unreachable server, returns
 /// an empty, `reachable: false` snapshot so the UI degrades gracefully.
 async fn probe(endpoint: &str) -> OllamaStatus {
     let unreachable = || OllamaStatus {
@@ -98,7 +98,7 @@ async fn probe(endpoint: &str) -> OllamaStatus {
     {
         Ok(r) => r,
         Err(e) => {
-            // Don't swallow the reason — a connect error to a LAN/`.local` host on
+            // Don't swallow the reason, a connect error to a LAN/`.local` host on
             // macOS usually means the app lacks Local Network permission (System
             // Settings ▸ Privacy & Security ▸ Local Network), which otherwise looks
             // identical to "server down".
@@ -180,7 +180,7 @@ pub async fn ollama_set_endpoint(
         .await?;
 
     // Probe the new server first, then drop any selected/default model it doesn't
-    // actually have — otherwise switching endpoints would carry the previous
+    // actually have, otherwise switching endpoints would carry the previous
     // server's selection into the composer and the `provider.ollama` block,
     // pointing at models that don't exist here. If the new endpoint is
     // unreachable we can't enumerate its models, so leave the selection as-is.
@@ -231,7 +231,7 @@ pub async fn ollama_set_selected_models(
 }
 
 /// Set the default Ollama model for the composer, as an `"ollama/<id>"` id
-/// (`None`/empty clears it). Stored in app settings only — it doesn't touch
+/// (`None`/empty clears it). Stored in app settings only. It doesn't touch
 /// `opencode.json`, since the provider block already lists every selected model.
 ///
 /// The command is the state boundary, so it validates rather than trusting the

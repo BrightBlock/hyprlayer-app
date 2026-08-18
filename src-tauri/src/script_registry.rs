@@ -30,7 +30,7 @@ pub struct ScriptStatus {
     pub at: f64,
 }
 
-/// Snapshot of a workstream's script runtime, for UI hydration on (re)mount —
+/// Snapshot of a workstream's script runtime, for UI hydration on (re)mount,
 /// the dock/rail read this to recover the live Run + last-run pills after a
 /// remount or workstream switch.
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -126,7 +126,7 @@ impl ScriptRegistry {
     }
 
     /// Forget one script's captured output (the dock's Clear). Leaves its status
-    /// pill alone — the run still happened, it's only the log that's dismissed.
+    /// pill alone, the run still happened, it's only the log that's dismissed.
     pub async fn clear_output(&self, ws: &str, kind: ScriptKind) {
         self.outputs.lock().await.remove(&(ws.to_string(), kind));
     }
@@ -143,7 +143,7 @@ impl ScriptRegistry {
         );
     }
 
-    /// Attach a detected dev-server port to the live Run — but only if it's still
+    /// Attach a detected dev-server port to the live Run, but only if it's still
     /// the same run that opened (guards against a stale monitor from a prior run).
     pub async fn set_run_port(&self, ws: &str, terminal_id: &str, port: u16) {
         if let Some(h) = self.runs.lock().await.get_mut(ws) {
@@ -173,7 +173,7 @@ impl ScriptRegistry {
         }
     }
 
-    /// Drop the live-run record IF it still names `terminal_id` — called from the
+    /// Drop the live-run record IF it still names `terminal_id`, called from the
     /// monitor on exit so a freshly-started run (restart) isn't clobbered.
     pub async fn clear_run(&self, ws: &str, terminal_id: &str) {
         let mut runs = self.runs.lock().await;
@@ -182,7 +182,7 @@ impl ScriptRegistry {
         }
     }
 
-    /// Workstreams with a live Run — drives the rail's green indicator.
+    /// Workstreams with a live Run, drives the rail's green indicator.
     pub async fn running_ids(&self) -> Vec<String> {
         self.runs.lock().await.keys().cloned().collect()
     }

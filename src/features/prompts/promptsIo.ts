@@ -3,7 +3,7 @@
  * prompt entries) and the merge that folds an import into settings. On import
  * every entry becomes a custom prompt unless its name collides, which the user
  * resolves (keep-both/replace/skip). Overrides travel keyed by project NAME,
- * not path — they only re-attach where a same-named project exists, else drop.
+ * not path. They only re-attach where a same-named project exists, else drop.
  * File I/O lives in Rust (`read_prompts_file`/`write_prompts_file`); this is
  * pure and unit-tested. Chords are the frontend's canonical form.
  */
@@ -101,7 +101,7 @@ export function parsePromptsFile(text: string): ParseResult {
   } catch {
     return {
       ok: false,
-      error: "This file isn't valid JSON — it may be corrupted or not a prompt export.",
+      error: "This file isn't valid JSON. It may be corrupted or not a prompt export.",
     };
   }
   if (typeof raw !== "object" || raw === null) {
@@ -226,7 +226,7 @@ export interface ImportOutcome {
   firstId: string | null;
 }
 
-/** Fold the chosen candidates into a new {@link PromptSettings}. Pure — the
+/** Fold the chosen candidates into a new {@link PromptSettings}. Pure, the
  *  caller persists the result. `newId` mints ids for added prompts (injectable
  *  so tests are deterministic). Rules mirror the design mock:
  *  - no conflict → add as a new custom prompt;
@@ -276,7 +276,7 @@ export function applyImport(
 
     if (c.conflict && resolution === "replace") {
       if (c.conflict.kind === "builtin") {
-        // A built-in's shortcut lives in keybindings, not here — replace only
+        // A built-in's shortcut lives in keybindings, not here, replace only
         // its body (its `builtinBodies` override).
         const id = builtinIdByName.get(c.name);
         if (id) {

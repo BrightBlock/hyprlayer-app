@@ -1,11 +1,11 @@
 /**
- * Chord normalization, parsing, and per-OS display — the OS-agnostic core every
+ * Chord normalization, parsing, and per-OS display, the OS-agnostic core every
  * other keybinding module builds on. No React, no DOM beyond the `KeyboardEvent`
  * shape, so it's exhaustively unit-testable.
  *
  * A `Chord` is a canonical string: lowercase, modifiers first in a fixed order,
  * then the key token, joined by `+` (e.g. `"mod+shift+k"`). `mod` is the
- * abstract primary modifier — ⌘ on macOS, Ctrl elsewhere — so a single catalog
+ * abstract primary modifier, ⌘ on macOS, Ctrl elsewhere, so a single catalog
  * default renders and matches correctly on both platforms.
  */
 
@@ -17,7 +17,7 @@ export type Chord = string;
 const MOD_ORDER = ["mod", "meta", "ctrl", "alt", "shift"] as const;
 const MOD_SET = new Set<string>(MOD_ORDER);
 
-/** Keys that are *only* a modifier — pressing them alone never makes a chord. */
+/** Keys that are *only* a modifier, pressing them alone never makes a chord. */
 const BARE_MODIFIER_KEYS = new Set([
   "Shift",
   "Control",

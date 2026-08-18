@@ -128,8 +128,8 @@ pub fn watch_worktree(
         },
     )
     .map_err(notify_to_core)?;
-    // Keep `.git` — its index/HEAD writes are the signals this watcher exists
-    // for — but never arm build output or anything the repo itself ignores.
+    // Keep `.git`, its index/HEAD writes are the signals this watcher exists
+    // for, but never arm build output or anything the repo itself ignores.
     let repo = git2::Repository::open(worktree).ok();
     let tracked = repo.as_ref().map(tracked_dirs).unwrap_or_default();
     let prune = |dir: &Path| {
@@ -163,28 +163,24 @@ pub fn watch_worktree(
 /// Directories to watch, paired with the mode each is watched in.
 type Watches = Vec<(PathBuf, RecursiveMode)>;
 
-/// The set of watches covering `root` while never arming anything `prune`
-/// claims — the largest recursive watches that fit, plus a non-recursive
-/// "spine" holding them together.
+/// The watches covering `root` without arming anything `prune` claims: the
+/// largest recursive watches that fit, plus a non-recursive "spine" joining
+/// them.
 ///
-/// A blanket `RecursiveMode::Recursive` arms one watch per directory, and on a
-/// working checkout that is overwhelmingly build output: 4046 directories in
-/// this repo, of which 62 are ours — the rest is `node_modules/` and `target/`.
-/// Discarding those events on arrival (`is_relevant_change`) still pays for the
-/// watch and the wakeup, and watches are a finite per-user resource shared with
-/// every other tool on the machine.
+/// A blanket `RecursiveMode::Recursive` arms one watch per directory, and a
+/// working checkout is mostly build output (4046 directories here, 62 ours).
+/// Dropping those events on arrival still pays for the watch and the wakeup,
+/// and watches are a finite per-user resource.
 ///
-/// Arming and then `unwatch`ing the unwanted subtrees would be shorter, but it
-/// only works on inotify: FSEvents keys its watch table by the paths it was
-/// explicitly handed, so unwatching a child misses, and tears down and restarts
-/// the whole event stream on the way to failing. Windows ignores it outright.
-/// Building the set up front is portable, and never transiently holds the
-/// watches we are trying not to hold — which matters when the reason to prune
-/// is a watch limit we would otherwise hit before pruning ran.
+/// Arming everything then `unwatch`ing the unwanted subtrees would be shorter,
+/// but only inotify supports it. FSEvents keys its table by the paths it was
+/// handed, so unwatching a child misses and restarts the whole stream on its
+/// way to failing; Windows ignores it outright. Building the set up front is
+/// portable and never transiently holds the watches we are avoiding, which
+/// matters when the reason to prune is a limit we would otherwise hit first.
 ///
-/// Directories a recursive watch already covers are left out: notify arms new
-/// subdirectories under them by itself, so the plan stays correct as the tree
-/// grows.
+/// Directories already covered by a recursive watch are left out: notify arms
+/// new subdirectories itself, so the plan survives the tree growing.
 fn watch_plan(root: &Path, prune: &dyn Fn(&Path) -> bool) -> Watches {
     let mut plan = Vec::new();
     if plan_dir(root, prune, &mut plan) {
@@ -194,7 +190,7 @@ fn watch_plan(root: &Path, prune: &dyn Fn(&Path) -> bool) -> Watches {
 }
 
 /// Append the watches covering `dir`, returning whether its whole subtree came
-/// out clean — in which case the caller covers it with one recursive watch and
+/// out clean, in which case the caller covers it with one recursive watch and
 /// discards what we appended.
 fn plan_dir(dir: &Path, prune: &dyn Fn(&Path) -> bool, out: &mut Watches) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -204,7 +200,7 @@ fn plan_dir(dir: &Path, prune: &dyn Fn(&Path) -> bool, out: &mut Watches) -> boo
     };
 
     let mut pruned_any = false;
-    // `(path, descend)` — a symlinked directory is opaque: we never walk it
+    // `(path, descend)`, a symlinked directory is opaque: we never walk it
     // (that is how a watcher finds a cycle), but a recursive watch still covers
     // it exactly as a blanket watch would have.
     let mut children: Vec<(PathBuf, bool)> = Vec::new();
@@ -291,12 +287,12 @@ fn tracked_dirs(repo: &git2::Repository) -> HashSet<PathBuf> {
 /// file reports `Access(Open)`. That turns a read into a change signal, and for
 /// the worktree watcher it closes a loop: a git-status refresh opens
 /// `.git/index`, the open fires `WorktreeChanged`, the UI refetches status, and
-/// the next status opens the index again — a self-sustaining spin that costs
+/// the next status opens the index again, a self-sustaining spin that costs
 /// real CPU with the app idle.
 ///
 /// Only *unambiguously* read-only kinds are rejected. `Access` also carries
 /// `Close(Write)` (a completed write) and the `Any` catch-alls, which notify
-/// documents as "kind unknown" — a backend that reports one of those may well
+/// documents as "kind unknown", a backend that reports one of those may well
 /// be reporting a mutation, and dropping a real change is far worse than the
 /// occasional redundant refresh.
 fn signals_change(kind: &EventKind) -> bool {
@@ -317,7 +313,7 @@ fn is_relevant_change(path: &Path) -> bool {
     }
 }
 
-/// A path inside git's metadata (carries a `.git` component) — a primary
+/// A path inside git's metadata (carries a `.git` component), a primary
 /// checkout's `.git` or a linked worktree's `.git/worktrees/<name>/`.
 fn is_git_meta(path: &Path) -> bool {
     path.components()
@@ -526,7 +522,7 @@ mod tests {
     }
 
     // Real notify watcher: a linked-worktree commit writes only the external
-    // git dir — assert we still fire. Ignored: fs timing shouldn't gate releases.
+    // git dir, assert we still fire. Ignored: fs timing shouldn't gate releases.
     #[test]
     #[ignore = "fs-watcher timing; run explicitly with --ignored"]
     fn watches_external_git_dir_and_fires_on_index_write() {
@@ -537,7 +533,7 @@ mod tests {
         let git_dir = tmp.path().join("gitdir");
         std::fs::create_dir_all(&wt).unwrap();
         std::fs::create_dir_all(&git_dir).unwrap();
-        // Linked worktree: `.git` is a gitfile — makes watch_worktree watch git_dir.
+        // Linked worktree: `.git` is a gitfile, makes watch_worktree watch git_dir.
         std::fs::write(wt.join(".git"), "gitdir: ../gitdir\n").unwrap();
         std::fs::write(git_dir.join("index"), b"v0").unwrap();
 
@@ -573,7 +569,7 @@ mod tests {
 
     // The CPU-spin regression, at the real seam: a *read* of the watched git
     // index must not fire. Linux inotify reports `IN_OPEN`, so before the kind
-    // filter a git-status refresh re-armed itself — status opens `.git/index`,
+    // filter a git-status refresh re-armed itself, status opens `.git/index`,
     // the open emits `WorktreeChanged`, the UI refetches status, forever.
     // Ignored: fs timing shouldn't gate releases (`signals_change` covers the
     // logic deterministically).
@@ -659,7 +655,7 @@ mod tests {
         let prune = |p: &Path| p.file_name().is_some_and(|n| n == "node_modules");
 
         // The spine is non-recursive; each clean subtree is one recursive watch.
-        // Crucially `node_modules` appears nowhere — not even to be removed.
+        // Crucially `node_modules` appears nowhere, not even to be removed.
         assert_eq!(
             plan_of(root, &prune),
             vec![
@@ -688,7 +684,7 @@ mod tests {
         let prune = |p: &Path| p.file_name().is_some_and(|n| n == "node_modules");
         let plan = plan_of(root, &prune);
         // Covered by a recursive watch (as a blanket watch would have), but the
-        // walk never descended through it — no `link/deep` entry.
+        // walk never descended through it, no `link/deep` entry.
         assert!(plan.contains(&("link".to_string(), true)), "{plan:?}");
         assert!(
             !plan.iter().any(|(p, _)| p.starts_with("link/")),
@@ -733,7 +729,7 @@ mod tests {
     }
 
     // The gitignore arm, exercised with names `is_build_noise` knows nothing
-    // about — otherwise the hard-coded list would carry the test on its own.
+    // about, otherwise the hard-coded list would carry the test on its own.
     #[test]
     fn gitignore_prunes_names_the_hardcoded_list_does_not_know() {
         let tmp = tempfile::tempdir().unwrap();
@@ -777,13 +773,13 @@ mod tests {
 
     #[test]
     fn relevant_change_fires_on_stage_commit_signals() {
-        // Primary checkout (`.git` is a real dir) — stage/commit/checkout.
+        // Primary checkout (`.git` is a real dir), stage/commit/checkout.
         assert!(is_relevant_change(Path::new("/wt/.git/index")));
         assert!(is_relevant_change(Path::new("/wt/.git/HEAD")));
         assert!(is_relevant_change(Path::new("/wt/.git/logs/HEAD")));
         assert!(is_relevant_change(Path::new("/wt/.git/ORIG_HEAD")));
         assert!(is_relevant_change(Path::new("/wt/.git/MERGE_HEAD")));
-        // Linked worktree — metadata under `.git/worktrees/<name>/`.
+        // Linked worktree, metadata under `.git/worktrees/<name>/`.
         assert!(is_relevant_change(Path::new(
             "/repo/.git/worktrees/feat/index"
         )));
@@ -809,7 +805,7 @@ mod tests {
         ))));
         assert!(!signals_change(&EventKind::Access(AccessKind::Read)));
 
-        // Real mutations still get through — including the `Access` variants
+        // Real mutations still get through, including the `Access` variants
         // that report a completed write. `Any` means "kind unknown", so it is
         // deliberately allowed: a redundant refresh beats a dropped change.
         assert!(signals_change(&EventKind::Access(AccessKind::Close(

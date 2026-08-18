@@ -334,10 +334,10 @@ describe("composer focus signal", () => {
 
   it("only the targeted shell consumes it, and exactly once", () => {
     requestComposerFocus(7);
-    expect(consumeComposerFocus(3)).toBe(false); // wrong shell — left pending
+    expect(consumeComposerFocus(3)).toBe(false); // wrong shell, left pending
     expect(useComposerFocusStore.getState().pendingShellId).toBe(7);
     expect(consumeComposerFocus(7)).toBe(true); // target claims it
     expect(useComposerFocusStore.getState().pendingShellId).toBeNull();
-    expect(consumeComposerFocus(7)).toBe(false); // already consumed — never re-fires
+    expect(consumeComposerFocus(7)).toBe(false); // already consumed, never re-fires
   });
 });

@@ -1,12 +1,12 @@
 /**
- * /onboarding — first-run setup wizard.
+ * /onboarding, first-run setup wizard.
  *
  * Four steps:
- *   1. Welcome + name — required to advance.
- *   2. Hyprlayer CLI — install / locate; gated until detected.
- *   3. AI harness — runs `hyprlayer ai configure` in an embedded PTY; skippable
+ *   1. Welcome + name, required to advance.
+ *   2. Hyprlayer CLI, install / locate; gated until detected.
+ *   3. AI harness, runs `hyprlayer ai configure` in an embedded PTY; skippable
  *      if already installed. Auto-advances on exit 0.
- *   4. Thoughts repo — clone / open / create; "Set up" calls initThoughtsRepo
+ *   4. Thoughts repo, clone / open / create; "Set up" calls initThoughtsRepo
  *      (repointing any existing thoughts config) then lands on the dashboard.
  *
  * Re-enterable from Settings at any time.
@@ -37,7 +37,7 @@ import type { ThoughtsSource } from "@/lib/bindings";
 import { useEscape } from "@/lib/keybindings/registry";
 import { dismissOnboarding } from "./onboardingState";
 
-/** Total wizard steps — bump when adding/removing a step. */
+/** Total wizard steps, bump when adding/removing a step. */
 const TOTAL_STEPS = 4;
 
 // ── Step 1: Welcome + name ────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ function Step1({
 /**
  * A single phase value drives the whole step. Collapsing the booleans into one
  * state is deliberate: `onExit` fires from a Tauri `Channel.onmessage` callback,
- * which React's automatic batching doesn't reliably cover — so multiple
+ * which React's automatic batching doesn't reliably cover, so multiple
  * `setState`s there can land in separate renders, flashing a stale card between
  * them. One `setPhase` per transition makes every transition atomic.
  */
@@ -133,7 +133,7 @@ function Step2({ onNext }: { onNext: () => void }) {
 
   const start = (force: boolean) => setPhase({ kind: "running", force });
 
-  // The interactive process ended — re-check status, then return to idle (which
+  // The interactive process ended, re-check status, then return to idle (which
   // renders the configured card or a retry prompt). A single `setPhase` per step
   // means no stale card can render in between, even though this runs outside
   // React's event-handler batching.
@@ -152,7 +152,7 @@ function Step2({ onNext }: { onNext: () => void }) {
     );
   }
 
-  // The configure process is live — show the terminal; Next stays disabled.
+  // The configure process is live, show the terminal; Next stays disabled.
   if (phase.kind === "running") {
     return (
       <Step
@@ -168,7 +168,7 @@ function Step2({ onNext }: { onNext: () => void }) {
         <div className="space-y-3">
           <Card>
             <p className="text-sm text-ink-dim">
-              Complete the prompts below — arrow keys + Enter to select. This step
+              Complete the prompts below. Arrow keys + Enter to select. This step
               advances automatically when configuration finishes.
             </p>
           </Card>
@@ -207,9 +207,6 @@ function Step2({ onNext }: { onNext: () => void }) {
             <span className="text-lg">✓</span>
             <p className="text-sm font-medium text-ink">{agentTool} is configured</p>
           </div>
-          <p className="text-sm text-ink-dim">
-            Your AI coding assistant is installed and ready.
-          </p>
           <Button type="button" onClick={() => start(true)} className="text-sm">
             Reconfigure
           </Button>
@@ -251,7 +248,7 @@ function Step3({ user }: { user: string }) {
         probe.data.isGitRepo ? { mode: "disk", path } : { mode: "create", path },
       );
     } else if (probe.isError) {
-      // Probe failed — fall back to "create at ~/thoughts" rather than hang.
+      // Probe failed, fall back to "create at ~/thoughts" rather than hang.
       seededRef.current = true;
       setSource({ mode: "create", path: "~/thoughts" });
     }
@@ -328,20 +325,18 @@ function Step3({ user }: { user: string }) {
         <Card>
           <p className="text-sm text-ink-dim">
             Hyprlayer stores your project notes, plans, and research in a git repository.
-            Clone an existing one from GitHub, open a folder you already have, or create a fresh one.
           </p>
           {alreadyConfigured ? (
             <p className="mt-2 text-sm text-ink">
-              ✓ Your thoughts repository is already set up — keep it, or select a
+              ✓ Your thoughts repository is already set up. Keep it, or select a
               different one below and Hyprlayer will switch to it.
             </p>
           ) : (
             foundExisting &&
             source?.mode === "disk" && (
               <p className="mt-2 text-sm text-ink">
-                ✓ Found an existing thoughts repo at{" "}
-                <span className="break-all font-mono text-xs">{defaultLocation}</span> — we'll
-                use it.
+                ✓ Using the existing thoughts repo at{" "}
+                <span className="break-all font-mono text-xs">{defaultLocation}</span>.
               </p>
             )
           )}
@@ -379,7 +374,7 @@ export function Onboarding() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [user, setUser] = useState("");
 
-  // Prefill the name from the shell username ($USER) — the same default the CLI
+  // Prefill the name from the shell username ($USER), the same default the CLI
   // uses. Done once when the query resolves, and never clobbers a value the user
   // has already typed (the `cur || …` keeps any edit).
   const defaultUser = useDefaultUsername();
@@ -402,7 +397,7 @@ export function Onboarding() {
   return (
     <div className="flex min-h-screen items-start justify-center bg-surface px-4 py-12">
       <div className="w-full max-w-xl">
-        {/* Back/close link — only show on steps 2+ */}
+        {/* Back/close link, only show on steps 2+ */}
         {step > 1 && (
           <div className="mb-4 flex items-center justify-between">
             <button

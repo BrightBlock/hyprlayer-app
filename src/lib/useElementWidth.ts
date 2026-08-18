@@ -3,18 +3,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /**
  * The live content-box width (px) of one element, tracked with ResizeObserver.
  *
- * The companion to `useViewport`, and the right tool whenever the question is
- * "how much room does this *pane* have" rather than "how wide is the window".
- * The two answers differ by every in-flow column to the pane's left — the nav
- * rail, the project sidebar — which is precisely the space the narrow tier
- * exists to account for, so measuring the window instead of the pane
- * reintroduces the overflow the tier was added to prevent (see lib/layout).
+ * The companion to `useViewport`. Use this when the question is how much room a
+ * *pane* has, not how wide the window is. The two differ by every in-flow
+ * column to the pane's left (nav rail, project sidebar), which is exactly what
+ * the narrow tier accounts for, so measuring the window reintroduces the
+ * overflow that tier prevents. See lib/layout.
  *
- * Returns a ref callback to attach to the pane and its measured width. The
- * width is seeded from `clientWidth` inside the ref callback — which React runs
- * during commit, when layout is already available — so the first painted frame
- * is measured rather than 0. Attach it to a box with no padding or border, so
- * `clientWidth` and the observed content box agree.
+ * Returns a ref callback for the pane plus its measured width. The width seeds
+ * from `clientWidth` inside the ref callback, which React runs during commit
+ * with layout available, so the first painted frame is measured rather than 0.
+ * Attach it to a box with no padding or border so the two agree.
  */
 export function useElementWidth<T extends HTMLElement>(): {
   ref: (node: T | null) => void;

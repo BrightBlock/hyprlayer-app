@@ -129,7 +129,7 @@ describe("useKeybindings Escape routing", () => {
         <EscapeHost handler={page} />
       </>,
     );
-    // Modal opens on top of the page — it's the latest registrant, so it wins.
+    // Modal opens on top of the page, it's the latest registrant, so it wins.
     rerender(
       <>
         <Dispatcher />

@@ -213,8 +213,8 @@ impl Db {
     }
 
     /// The next free sequence number for this session's log: `MAX(seq)+1`, or 0
-    /// when empty. Unlike the event *count*, this is correct even when the seqs
-    /// are non-contiguous — a live rewind can truncate the tail and then continue
+    /// when empty. Unlike the event *count*. This is correct even when the seqs
+    /// are non-contiguous, a live rewind can truncate the tail and then continue
     /// the log past a gap, so a resumed forwarder must start above the real max,
     /// never at `len()` (which would collide with surviving rows).
     pub fn next_session_seq(&self, session_id: &str) -> Result<i64> {
@@ -285,8 +285,8 @@ impl Db {
         })
     }
 
-    /// Delete every event at `seq >= cutoff` for this session — the rewind
-    /// truncation — and return the removed rows (seq/created_at preserved) so the
+    /// Delete every event at `seq >= cutoff` for this session, the rewind
+    /// truncation, and return the removed rows (seq/created_at preserved) so the
     /// caller can [`restore_session_events`] them if a follow-up step (the
     /// re-spawn) fails. Read + delete run in one transaction so they can't
     /// interleave. The caller is expected to have stopped the live driver first;
@@ -323,7 +323,7 @@ impl Db {
     }
 
     /// Re-insert events removed by [`cut_session_events_from`], verbatim (seq and
-    /// created_at preserved) — the rollback for a rewind whose re-spawn failed,
+    /// created_at preserved), the rollback for a rewind whose re-spawn failed,
     /// so a launch error never costs the conversation tail.
     pub fn restore_session_events(&self, session_id: &str, events: &[StoredEvent]) -> Result<()> {
         self.with(|conn| {
@@ -371,7 +371,7 @@ impl Db {
         })
     }
 
-    /// All recorded orphan (pid, session_id) pairs — read at startup to reap.
+    /// All recorded orphan (pid, session_id) pairs, read at startup to reap.
     pub fn list_orphans(&self) -> Result<Vec<(i64, String)>> {
         self.with(|conn| {
             let mut stmt = conn.prepare("SELECT pid, session_id FROM orphan_pids")?;
@@ -450,7 +450,7 @@ mod tests {
     }
 
     /// Build a small session whose log alternates user/assistant turns. Used
-    /// by the rewind and fork helper tests below — keeps them parallel.
+    /// by the rewind and fork helper tests below, keeps them parallel.
     fn seed_dialog(db: &Db, session_id: &str) {
         db.insert_workstream(crate::store::NewWorkstream {
             project_path: "/p".into(),

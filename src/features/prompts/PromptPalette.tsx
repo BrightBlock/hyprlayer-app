@@ -67,7 +67,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
     const noWs = activeWorkstream ? null : "Open a workstream to run prompts";
 
     const builtinRow = (id: BuiltinPromptId): Row | null => {
-      // Commit/Ship can never apply to a folder workstream — hide, don't gray.
+      // Commit/Ship can never apply to a folder workstream, hide, don't gray.
       if (activeWorkstream && isFolderWorkstream(activeWorkstream)) return null;
       const def = BUILTIN_PROMPTS.find((b) => b.id === id)!;
       const body = effectiveBuiltinBody(settings, defaults, id);

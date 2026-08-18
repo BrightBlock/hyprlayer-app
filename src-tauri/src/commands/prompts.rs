@@ -1,4 +1,4 @@
-//! Reading and writing `.hlprompts` files — the on-disk form of an exported
+//! Reading and writing `.hlprompts` files, the on-disk form of an exported
 //! prompt-library bundle. The webview drives the native file dialog (open for
 //! import, save for export) and hands the chosen path here; these commands only
 //! touch that one path.

@@ -39,7 +39,7 @@ describe("projectSidebarWidth", () => {
     expect(projectSidebarWidth(240, 900)).toBe(240); // pass-through at the boundary
   });
 
-  it("clamps to PROJECT_SIDEBAR_MIN on the narrow tier — a non-default dragged", () => {
+  it("clamps to PROJECT_SIDEBAR_MIN on the narrow tier, a non-default dragged", () => {
     // width so a stub returning `dragged` cannot pass.
     expect(projectSidebarWidth(240, 899)).toBe(PROJECT_SIDEBAR_MIN);
     expect(projectSidebarWidth(360, 701)).toBe(PROJECT_SIDEBAR_MIN);
@@ -59,7 +59,7 @@ describe("isContentNarrow / isContentCompact", () => {
   it("is looser than the shell tier, since the pane excludes the columns left of it", () => {
     // A 950px window with a dragged 360px sidebar leaves the list 542px: wide
     // by the shell tier, compact by its own. Reading the window here is the
-    // bug — GRID_WIDE's 480px of fixed tracks does not fit 542 minus padding.
+    // bug, GRID_WIDE's 480px of fixed tracks does not fit 542 minus padding.
     expect(isNarrow(950)).toBe(false);
     expect(isContentNarrow(950 - 48 - 360)).toBe(true);
   });
@@ -80,7 +80,7 @@ describe("drawerWidth", () => {
   it("measures the containing box, not the viewport", () => {
     // The regression: a 640px window whose ProjectPage pane is 412 (640 - 48
     // rail - 180 clamped sidebar). Sizing the drawer off the window yields 520
-    // inside a 412px box — clipped, with no peek strip left to dismiss it.
+    // inside a 412px box, clipped, with no peek strip left to dismiss it.
     expect(drawerWidth(700, 412)).toBe(340);
     expect(drawerWidth(700, 412)).toBeLessThan(412);
   });

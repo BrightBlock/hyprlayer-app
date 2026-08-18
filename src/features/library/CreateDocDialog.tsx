@@ -25,7 +25,7 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
   const createDoc = useCreateDoc();
   const navigate = useNavigate();
 
-  // Folder projects have no thoughts mapping — docs can't be created in them.
+  // Folder projects have no thoughts mapping, docs can't be created in them.
   const projects = (bootstrap.data?.projects ?? []).filter(isGitProject);
 
   const [title, setTitle] = useState("");

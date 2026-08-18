@@ -104,7 +104,7 @@ export function toolSummary(name: string, input: string): string {
   }
 }
 
-/** Tools whose summary is a single path — shown as a compact basename chip. */
+/** Tools whose summary is a single path, shown as a compact basename chip. */
 const FILE_PATH_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
 /** For a file-targeting tool, the absolute path it acts on (else null). */
@@ -191,7 +191,7 @@ export function prettyToolInput(input: string): string {
 
 /**
  * If a tool wrote/edited a research/plan/handoff `.md` (under `…/research/…`,
- * `…/plans/…`, or `…/handoffs/…`), return its path + kind — to surface
+ * `…/plans/…`, or `…/handoffs/…`), return its path + kind, to surface
  * agent-created docs in the diff sidebar. Other writes return null.
  */
 export function docFromTool(name: string, input: string): { path: string; kind: DocKind } | null {

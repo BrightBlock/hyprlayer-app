@@ -1,10 +1,10 @@
-//! Claude Code agent definitions — the `.claude/agents/*.md` files whose YAML
+//! Claude Code agent definitions, the `.claude/agents/*.md` files whose YAML
 //! frontmatter carries the launch config and whose body is the system prompt.
 //!
 //! Three sources, in claude's own precedence order: project
 //! (`<worktree>/.claude/agents`), user (`~/.claude/agents`), and the agents
 //! contributed by installed plugins. Claude reads these files straight off
-//! disk, so the Agents view edits them in place — a save patches the
+//! disk, so the Agents view edits them in place, a save patches the
 //! frontmatter surgically ([`patch_frontmatter`]) and swaps only the body,
 //! leaving keys this app doesn't model, and the file's own formatting, intact.
 //!
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::docs::frontmatter::{extract_block, patch_frontmatter, FmPatch, FmValue};
 use crate::error::Result;
 
-/// Largest agent file we'll read. These are prompts — a few KB each; past this
+/// Largest agent file we'll read. These are prompts, a few KB each; past this
 /// it is a wrong or hostile file, not an agent.
 const MAX_AGENT_BYTES: u64 = 1024 * 1024;
 
@@ -38,9 +38,9 @@ const KEY_CATEGORY: &str = "category";
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentFile {
-    /// Absolute path to the `.md` file — the identity a save or delete targets.
+    /// Absolute path to the `.md` file, the identity a save or delete targets.
     pub path: String,
-    /// `project` | `user` | `plugin` — which root supplied it.
+    /// `project` | `user` | `plugin`, which root supplied it.
     pub source: String,
     /// The plugin that ships this agent, when `source` is `plugin`.
     pub plugin: Option<String>,
@@ -48,9 +48,9 @@ pub struct AgentFile {
     pub name: String,
     pub description: String,
     /// Frontmatter `tools`, comma-separated in the file. EMPTY MEANS INHERIT
-    /// every tool — it is not the same as an agent with no tools.
+    /// every tool. It is not the same as an agent with no tools.
     pub tools: Vec<String>,
-    /// Frontmatter `skills` — skill names claude preloads into this agent when
+    /// Frontmatter `skills`, skill names claude preloads into this agent when
     /// it runs. Canonical names: the skill's directory, or `plugin:skill`.
     /// Empty means the key is absent; unlike `tools`, that is simply "none".
     pub skills: Vec<String>,
@@ -58,17 +58,17 @@ pub struct AgentFile {
     pub model: Option<String>,
     /// Frontmatter `color`, used by claude's own picker.
     pub color: Option<String>,
-    /// Frontmatter `memory` — the persistent-memory scope claude keeps for this
+    /// Frontmatter `memory`, the persistent-memory scope claude keeps for this
     /// agent between invocations: `user` (every project), `project` (this repo's
     /// `.claude/agent-memory/<name>/`), or `local` (session only). Absent means
     /// the agent remembers nothing across runs. Stored as claude writes it, not
     /// as an enum: an unrecognized scope is preserved rather than dropped.
     pub memory: Option<String>,
-    /// Frontmatter `category` — a display-only grouping label the list folders
+    /// Frontmatter `category`, a display-only grouping label the list folders
     /// agents by. Free text; absent means the folder is derived from the
     /// description's stage phrase (see `phaseFolder` on the frontend).
     pub category: Option<String>,
-    /// Everything after the frontmatter block — the agent's system prompt.
+    /// Everything after the frontmatter block, the agent's system prompt.
     pub prompt: String,
     /// File mtime in epoch milliseconds, for the list's Updated column. `None`
     /// when the file has never been written (a new agent) or the OS withholds it.
@@ -76,7 +76,7 @@ pub struct AgentFile {
     /// For a plugin agent, the file the plugin ships. `path` points at the
     /// user's override instead once one exists.
     pub shipped_path: Option<String>,
-    /// A plugin agent the user has overridden — `path` is the override.
+    /// A plugin agent the user has overridden, `path` is the override.
     pub modified: bool,
 }
 
@@ -101,7 +101,7 @@ pub struct AgentCollaborator {
 }
 
 /// Launch settings the app keeps for an agent that claude's own frontmatter has
-/// no key for — effort, harness, permission posture, folder. Stored app-side
+/// no key for, effort, harness, permission posture, folder. Stored app-side
 /// keyed by the agent's file path so the `.md` stays a plain claude agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -111,7 +111,7 @@ pub struct AgentOverlay {
     pub harness: String,
     /// List-only grouping; `""` is no folder.
     pub folder: String,
-    /// `published` | `draft` — a draft is hidden from the composer.
+    /// `published` | `draft`, a draft is hidden from the composer.
     pub status: String,
     pub permission_mode: String,
     pub rules: Vec<AgentRule>,
@@ -145,7 +145,7 @@ impl Default for AgentOverlay {
 }
 
 /// A doc the editor offers to append to the prompt. Discovered in the worktree,
-/// never invented — an absent file is simply not offered.
+/// never invented, an absent file is simply not offered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -163,7 +163,7 @@ pub struct AgentContextFile {
 #[serde(rename_all = "camelCase")]
 pub struct AgentMcpServer {
     pub name: String,
-    /// `project` | `user` — which config declares it.
+    /// `project` | `user`, which config declares it.
     pub scope: String,
     /// Transport as declared (`stdio`, `http`, `sse`).
     pub transport: String,
@@ -346,7 +346,7 @@ fn collect_plugin_agents(out: &mut Vec<AgentFile>) {
 
 /// Every agent visible from `worktree`: the project's own, the user's, and the
 /// installed plugins', with an earlier source shadowing a later one of the same
-/// name — claude's own precedence. Sorted by name.
+/// name, claude's own precedence. Sorted by name.
 pub fn list_agents(worktree: Option<&Path>) -> Vec<AgentFile> {
     let mut owned: Vec<AgentFile> = Vec::new();
     for (dir, source) in roots(worktree) {
@@ -399,7 +399,7 @@ pub fn render_agent(original: &str, agent: &AgentFile) -> Result<String> {
     // any span it is not asked to touch, so a key whose value is unchanged is
     // left out of the patch entirely rather than re-emitted. Without this, a
     // save that adds `category:` also re-quotes an untouched `description`
-    // through the YAML emitter — a diff on a line the user never edited, in a
+    // through the YAML emitter, a diff on a line the user never edited, in a
     // file that is usually under version control.
     let current = parse_agent(Path::new(&agent.path), &agent.source, original);
     let mut patch = FmPatch::default();
@@ -607,8 +607,8 @@ pub fn mcp_servers(worktree: Option<&Path>) -> Vec<AgentMcpServer> {
 }
 
 /// `Agent(<name>)` deny rules for agents that must not be spawnable. Claude's
-/// rule parser splits on the first `(` and last `)`, so a name carrying either —
-/// or a comma — can't be expressed as a rule and is skipped rather than
+/// rule parser splits on the first `(` and last `)`, so a name carrying either,
+/// or a comma, can't be expressed as a rule and is skipped rather than
 /// silently denying something else.
 pub fn agent_deny_rules(names: &[String]) -> Vec<String> {
     names
@@ -690,8 +690,8 @@ mod tests {
         );
     }
 
-    /// Real claude keys the app doesn't model — the ones an agent author is
-    /// likely to hand-write next — must survive a save byte-identical.
+    /// Real claude keys the app doesn't model, the ones an agent author is
+    /// likely to hand-write next, must survive a save byte-identical.
     #[test]
     fn render_round_trips_and_keeps_specific_claude_keys_the_app_does_not_model() {
         let original = "---\nname: a\ndescription: d\ndisallowedTools: Bash(git push:*)\nmaxTurns: 5\nisolation: strict\nobserver: true\n---\n\nBody.\n";
@@ -754,7 +754,7 @@ mod tests {
 
     /// A YAML flow sequence lands in `extra` pre-rendered as JSON, since the
     /// frontmatter parser doesn't know `tools`/`skills` are lists. Both keys
-    /// must read that form correctly — the pre-existing `tools` bug this fixes.
+    /// must read that form correctly, the pre-existing `tools` bug this fixes.
     #[test]
     fn flow_sequence_values_parse_as_lists() {
         let with_tools_seq = "---\nname: a\ndescription: d\ntools: [Read, Grep]\n---\n\nBody.\n";
@@ -845,7 +845,7 @@ mod tests {
 
     /// `memory` is claude's own key (scopes `user` / `project` / `local`), so a
     /// file that sets it must round-trip, and clearing it must remove the key
-    /// rather than write an empty one — an empty scope is not a legal value.
+    /// rather than write an empty one, an empty scope is not a legal value.
     #[test]
     fn memory_scope_round_trips_and_clears() {
         let with_memory = "---\nname: researcher\ndescription: d\nmemory: project\n---\n\nBody.\n";
@@ -870,7 +870,7 @@ mod tests {
         assert!(out.contains("name: researcher"), "other keys stay: {out}");
     }
 
-    /// An unrecognized scope is claude's business, not ours — preserve it
+    /// An unrecognized scope is claude's business, not ours, preserve it
     /// verbatim instead of dropping a key we failed to understand.
     #[test]
     fn unknown_memory_scope_is_preserved() {

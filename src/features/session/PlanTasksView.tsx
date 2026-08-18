@@ -62,8 +62,8 @@ function TaskRow({ task, working }: { task: PlanTask; working: boolean }) {
 }
 
 /**
- * The Tasks section of the changes sidebar — the focused session's live plan,
- * below the pinned Git + Changes block. Behaves like a VS Code accordion pane:
+ * The Tasks section of the changes sidebar, the focused session's live plan,
+ * below the pinned Git + Changes block. Behaves like an accordion pane:
  * expanded it grows (`flex-1`) to sit directly under Changes and share the
  * vertical space, its list scrolling within; collapsed it drops to a bare `h-9`
  * header (chevron + checklist glyph + "TASKS" + n/total) that sinks to the
@@ -82,7 +82,7 @@ export function SidebarTasksPanel({ sessionId }: { sessionId: string | undefined
   const done = doneCount(tasks);
   const open = !collapsed;
   const active = tasks.find((t) => t.status === "in_progress");
-  const label = `${open ? "Hide" : "Show"} tasks — ${done}/${tasks.length} done${
+  const label = `${open ? "Hide" : "Show"} tasks, ${done}/${tasks.length} done${
     active ? ` · ${active.subject}` : ""
   }`;
 
@@ -99,7 +99,7 @@ export function SidebarTasksPanel({ sessionId }: { sessionId: string | undefined
         <span className="flex w-3 shrink-0 justify-center">
           {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         </span>
-        {/* Pulse only while genuinely working — an ended turn can leave an in_progress task. */}
+        {/* Pulse only while genuinely working, an ended turn can leave an in_progress task. */}
         <ChecklistIcon size={14} className={active && working ? "animate-work-pulse" : undefined} />
         <span className="text-xs font-semibold uppercase tracking-wide">Tasks</span>
         <span className="ml-auto font-mono text-xs">

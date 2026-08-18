@@ -58,7 +58,7 @@ export function Toast() {
   const [exiting, setExiting] = useState(false);
   const [acting, setActing] = useState(false);
 
-  // A toast with an action sticks around — the user has something to do, so we
+  // A toast with an action sticks around, the user has something to do, so we
   // don't yank it out from under them on a countdown.
   const sticky = action !== null;
 
@@ -78,7 +78,7 @@ export function Toast() {
     return () => { if (unmountRef.current) clearTimeout(unmountRef.current); };
   }, [visible]);
 
-  // Countdown + auto-dismiss — skipped for sticky (action) toasts.
+  // Countdown + auto-dismiss, skipped for sticky (action) toasts.
   useEffect(() => {
     if (!visible || sticky) return;
 

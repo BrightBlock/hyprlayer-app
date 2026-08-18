@@ -16,20 +16,20 @@ export const commands = {
 	 */
 	inspectRepoPath: (path: string) => typedError<RepoPathStatus, AppError>(__TAURI_INVOKE("inspect_repo_path", { path })),
 	/**
-	 *  Import a local on-disk folder as a project, registered *in place* — never
+	 *  Import a local on-disk folder as a project, registered *in place*, never
 	 *  re-cloned or copied. Worktrees are cut directly from it via `git worktree
 	 *  add`. Classifies the path and does whatever git setup it needs first:
 	 * 
 	 *  - **non-git folder** → `git init -b <branch>` (default `main`) + an empty
 	 *    initial commit.
-	 *  - **unborn repo** (has `.git`, no commits) → just the initial commit, on its
+	 *  - **unborn repo** (has `.git`: no commits) → just the initial commit, on its
 	 *    existing branch.
 	 *  - **ready repo** → adopted as-is (`branch` ignored).
 	 *  - **bare repo** → refused, since worktrees can't be cut from it.
 	 */
 	importProject: (path: string, branch: string | null, directoryName: string | null, thoughtsDir: string | null, profile: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("import_project", { path, branch, directoryName, thoughtsDir, profile, bootstrapUser })),
 	/**
-	 *  Register a plain local directory as a project — no git, no thoughts, no
+	 *  Register a plain local directory as a project, no git, no thoughts, no
 	 *  hyprlayer CLI, and no config bootstrap. The folder is left exactly as
 	 *  found; workstreams run agent sessions in it directly (see
 	 *  `WorktreeMode::Folder`).
@@ -45,7 +45,7 @@ export const commands = {
 	cloneProject: (url: string, location: string | null, name: string | null, thoughtsDir: string | null, profile: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, location, name, thoughtsDir, profile, bootstrapUser })),
 	/**
 	 *  Remove a project from the registry; with `delete_files`, also delete its
-	 *  directory (clones and in-place imports alike — user opts in per removal).
+	 *  directory (clones and in-place imports alike, user opts in per removal).
 	 *  Refused while active workstreams exist: they own live worktrees cut from this
 	 *  repo, so removal would orphan them.
 	 */
@@ -58,7 +58,7 @@ export const commands = {
 	reorderProjects: (paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("reorder_projects", { paths })),
 	/**
 	 *  The user's GitHub repos for the clone dialog's "Recent repos" list. Returns
-	 *  an empty list (never an error) when gh is missing or unauthenticated — the
+	 *  an empty list (never an error) when gh is missing or unauthenticated, the
 	 *  URL field still works, so recents are purely a convenience.
 	 */
 	listRecentRepos: () => typedError<GithubRepo[], AppError>(__TAURI_INVOKE("list_recent_repos")),
@@ -71,7 +71,7 @@ export const commands = {
 	 */
 	listThoughtsProfiles: () => typedError<ThoughtsProfile[], AppError>(__TAURI_INVOKE("list_thoughts_profiles")),
 	/**
-	 *  Create a named thoughts profile — the dialog's "New profile…". The write
+	 *  Create a named thoughts profile, the dialog's "New profile…". The write
 	 *  goes through the CLI (`thoughts profile create`, ADR-0002's single-writer
 	 *  rule), so the app can never drift from the CLI's config structure. App-side
 	 *  name rules run first (structured codes for what the CLI would accept or
@@ -87,7 +87,7 @@ export const commands = {
 	 *  Dry-run the project's worktree-copy patterns against its checkout so the UI
 	 *  can flag missing copy files (e.g. a `.env` absent on disk) BEFORE a workstream
 	 *  is created. Mirrors `create_workstream`'s seed step, minus the copy. Never
-	 *  errors — an unreadable settings file yields an empty (clean) report.
+	 *  errors, an unreadable settings file yields an empty (clean) report.
 	 */
 	checkWorktreeFiles: (path: string) => typedError<SeedReport, AppError>(__TAURI_INVOKE("check_worktree_files", { path })),
 	queryDocs: (query: ThoughtQuery) => typedError<QueryResult, AppError>(__TAURI_INVOKE("query_docs", { query })),
@@ -99,13 +99,13 @@ export const commands = {
 	/**
 	 *  Best-effort "View on GitHub" URL for a library doc, from its own git repo (the
 	 *  thoughts repo, not the project's) at the current branch. `None` (link hidden) on
-	 *  any miss — unknown id, not a git repo, no GitHub origin, detached HEAD — so it
+	 *  any miss, unknown id, not a git repo, no GitHub origin, detached HEAD, so it
 	 *  never errors.
 	 */
 	docWebUrl: (id: string) => typedError<string | null, AppError>(__TAURI_INVOKE("doc_web_url", { id })),
 	getThoughtsGitStatus: (projectPath: string) => typedError<ThoughtsRepoStatus, AppError>(__TAURI_INVOKE("get_thoughts_git_status", { projectPath })),
 	listWorkstreams: (projectPath: string, includeArchived: boolean) => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_workstreams", { projectPath, includeArchived })),
-	/**  Active workstreams across every project — feeds the sidebar tree. */
+	/**  Active workstreams across every project, feeds the sidebar tree. */
 	listAllWorkstreams: () => typedError<WorkstreamView[], AppError>(__TAURI_INVOKE("list_all_workstreams")),
 	/**
 	 *  Branches the user can base a new workstream on, plus the auto-detected default.
@@ -116,13 +116,13 @@ export const commands = {
 	/**
 	 *  `git fetch --prune origin` in the project's own checkout, so the branch picker
 	 *  sees branches pushed since the app last fetched. The new-workstream dialog fires
-	 *  this on open and refetches the branch list when it lands — the list renders
+	 *  this on open and refetches the branch list when it lands, the list renders
 	 *  immediately from the refs already on disk, then fills in.
 	 */
 	fetchProjectRemote: (projectPath: string) => typedError<null, AppError>(__TAURI_INVOKE("fetch_project_remote", { projectPath })),
 	/**
 	 *  Restore the project checkout's modified tracked files to HEAD, leaving
-	 *  untracked files alone, and report how many were reverted. Destructive — the
+	 *  untracked files alone, and report how many were reverted. Destructive, the
 	 *  new-workstream dialog confirms first.
 	 * 
 	 *  Keyed by project path rather than workstream id: this exists for the
@@ -134,14 +134,14 @@ export const commands = {
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
 	/**
 	 *  Change a workstream's target (base) branch. Re-targets the live PR via
-	 *  `gh pr edit --base` when one is open, then persists the new base — so the
+	 *  `gh pr edit --base` when one is open, then persists the new base, so the
 	 *  next status recompute measures ahead/behind against it and a future Ship
 	 *  opens its PR there. Lets git-flow teams merge into `develop`, not `main`.
 	 */
 	setWorkstreamBaseBranch: (id: string, base: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_base_branch", { id, base })),
 	/**
 	 *  Pull the target (base) branch's new commits into the workstream's worktree
-	 *  (fetch + merge). Deterministic — no agent. On conflicts the merge is left in
+	 *  (fetch + merge). Deterministic, no agent. On conflicts the merge is left in
 	 *  progress so the user resolves the conflicted files (they surface in the
 	 *  Changes panel) and commits; a dirty-tree precondition surfaces git's message.
 	 */
@@ -158,7 +158,7 @@ export const commands = {
 	listWorkstreamDocs: (id: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("list_workstream_docs", { id })),
 	/**
 	 *  Archive a workstream non-destructively: move the worktree to
-	 *  `<project>/archived-contexts/<slug>/` (Conductor-style) and flip the
+	 *  `<project>/archived-contexts/<slug>/` and flip the
 	 *  DB row to `archived`. Branch and every uncommitted file are preserved
 	 *  for [`restore_workstream`]. Husks (worktree dir without `.git`) can't be
 	 *  moved; they're pruned + cleaned, the row still flips to archived, and
@@ -211,7 +211,7 @@ export const commands = {
 	worktreeUnstage: (id: string, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("worktree_unstage", { id, paths })),
 	/**
 	 *  Discard working-tree changes for the given paths (restore tracked to HEAD,
-	 *  delete untracked). Destructive — the UI confirms first.
+	 *  delete untracked). Destructive, the UI confirms first.
 	 */
 	worktreeDiscard: (id: string, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("worktree_discard", { id, paths })),
 	/**
@@ -243,7 +243,7 @@ export const commands = {
 	 *  `WorktreeChanged` and refresh the Changes panel + git status without a focus
 	 *  event. Single-slot: switching replaces the previous watcher; same id is a no-op.
 	 * 
-	 *  `None` clears the slot — the route calls it when no workstream is on screen.
+	 *  `None` clears the slot, the route calls it when no workstream is on screen.
 	 *  That matters beyond the file watcher: `pr_watch` reads this slot to decide
 	 *  which workstream deserves live PR polling, so a slot left pointing at the
 	 *  last-viewed workstream keeps spending GitHub API quota on a branch nobody is
@@ -251,12 +251,12 @@ export const commands = {
 	 */
 	watchWorktree: (workstreamId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("watch_worktree", { workstreamId })),
 	/**
-	 *  The pull request for a workstream — the manually attached PR (by number) when
+	 *  The pull request for a workstream, the manually attached PR (by number) when
 	 *  one is set, otherwise the branch's own PR. Derived live from `gh`.
 	 * 
 	 *  `None` means GitHub answered and this branch has no PR; a gh that's simply
 	 *  absent/unauthenticated says the same thing (no GitHub in play at all), so it
-	 *  degrades to `None` too — matching `list_recent_repos`.
+	 *  degrades to `None` too, matching `list_recent_repos`.
 	 * 
 	 *  A gh that IS there and failed (spent API quota, network, a wedged repo) is an
 	 *  error, deliberately: collapsing that into `None` told the UI "no PR exists",
@@ -369,12 +369,12 @@ export const commands = {
 	 *  Restart a *live* session into a new permission mode and/or model. Claude
 	 *  binds both its permission mode and its model at launch (a running session
 	 *  can't switch into `bypassPermissions`, nor swap models), so the UI applies
-	 *  such a change by relaunching the process. We do it atomically on the backend
-	 *  — kill the live driver, wait for it to actually exit (the forwarder drops it
+	 *  such a change by relaunching the process. We do it atomically on the backend,
+	 *  kill the live driver, wait for it to actually exit (the forwarder drops it
 	 *  from the registry on its `Exited`), then re-spawn with `--resume` and the new
-	 *  settings — so the frontend can't race the resume onto the still-dying old
+	 *  settings, so the frontend can't race the resume onto the still-dying old
 	 *  process (which would keep the old settings). `model`/`effort` are `None` for a
-	 *  mode-only restart — claude keeps the session's original model/effort when
+	 *  mode-only restart. Claude keeps the session's original model/effort when
 	 *  `--model`/`--effort` are omitted on `--resume`; pass them to switch the model
 	 *  mid-conversation. Conversation is preserved; the event log appends after its
 	 *  tail.
@@ -398,8 +398,8 @@ export const commands = {
 	killSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("kill_session", { sessionId })),
 	/**
 	 *  Switch a live session's model so its next turn uses it (OpenCode sends a model
-	 *  per prompt, so it can change mid-session). A no-op when the session isn't live
-	 *  — the tab's selection still rides into a fresh session at launch — and for
+	 *  per prompt, so it can change mid-session). A no-op when the session isn't live,
+	 *  the tab's selection still rides into a fresh session at launch, and for
 	 *  Claude, whose model is fixed at launch (its driver ignores this).
 	 */
 	setSessionModel: (sessionId: string, model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_model", { sessionId, model })),
@@ -485,7 +485,7 @@ export const commands = {
 	 *  macOS never prompts for this grant, so its absence is silent: gated reads
 	 *  just fail. Meanwhile any CLI the app hosts that reaches another app's
 	 *  container (`op`, most visibly) trips the *promptable* "access data from
-	 *  other apps" dialog, which names Hyprlayer — macOS attributes a child's
+	 *  other apps" dialog, which names Hyprlayer, macOS attributes a child's
 	 *  access to its responsible process. Holding Full Disk Access supersedes that
 	 *  check, so the dialog never fires.
 	 */
@@ -517,7 +517,7 @@ export const commands = {
 	 */
 	opencodeSetDefaultModel: (model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("opencode_set_default_model", { model })),
 	/**
-	 *  Install OpenCode in the background — no terminal UI. The frontend shows a
+	 *  Install OpenCode in the background, no terminal UI. The frontend shows a
 	 *  spinner and reacts to ok/err; on success we re-detect binaries so the version
 	 *  badge flips to "Installed". `run()` fails on a non-zero exit, carrying the
 	 *  stderr tail into the error message the UI shows.
@@ -525,8 +525,8 @@ export const commands = {
 	 *  The installer differs by platform: OpenCode's `curl … | bash` one-liner needs
 	 *  a Unix shell, which Windows doesn't have (piping it through PowerShell just
 	 *  fails with "Program 'curl.exe' failed to run: The pipe is being closed"). On
-	 *  Windows we use `npm install -g opencode-ai` instead — OpenCode's documented
-	 *  cross-platform method — and surface an actionable remedy if npm is missing.
+	 *  Windows we use `npm install -g opencode-ai` instead, OpenCode's documented
+	 *  cross-platform method, and surface an actionable remedy if npm is missing.
 	 */
 	installOpencode: () => typedError<null, AppError>(__TAURI_INVOKE("install_opencode")),
 	/**
@@ -534,7 +534,7 @@ export const commands = {
 	 *  the catalog offered this time.
 	 * 
 	 *  Without this, a user who ever curated Settings → Models never sees a model
-	 *  Anthropic ships later — their stored list is an allowlist frozen at the day
+	 *  Anthropic ships later, their stored list is an allowlist frozen at the day
 	 *  they edited it, and the only cure is "Reset to default", which also undoes
 	 *  their removals. `add` is strictly additive and `seen` is the watermark that
 	 *  keeps it additive: a model the user deliberately removed is in `seen`, so it
@@ -548,7 +548,7 @@ export const commands = {
 	claudeSyncModels: (add: string[], seen: string[]) => typedError<AppSettings, AppError>(__TAURI_INVOKE("claude_sync_models", { add, seen })),
 	/**
 	 *  Current Claude authentication, parsed from `claude auth status --json`.
-	 *  Never errors on a logged-out / missing CLI — returns a disconnected status so
+	 *  Never errors on a logged-out / missing CLI, returns a disconnected status so
 	 *  the UI degrades gracefully.
 	 */
 	claudeAuthStatus: () => typedError<ClaudeAuthStatus, AppError>(__TAURI_INVOKE("claude_auth_status")),
@@ -556,8 +556,8 @@ export const commands = {
 	 *  The model catalog the `claude` CLI's own `/model` picker offers, read with a
 	 *  one-shot `list_models` control request.
 	 * 
-	 *  Authoritative for what this install can run — provider, settings cascade, and
-	 *  org policy are already applied — but NARROWER than what `--model` accepts:
+	 *  Authoritative for what this install can run, provider, settings cascade, and
+	 *  org policy are already applied, but NARROWER than what `--model` accepts:
 	 *  legacy ids are absent from it yet still launch. The composer merges these
 	 *  rows over its static table rather than replacing it.
 	 * 
@@ -571,7 +571,7 @@ export const commands = {
 	 * 
 	 *  Deliberately a single command rather than one per question: these used to be
 	 *  two commands the tab fired concurrently, which spawned two app-servers that
-	 *  interfered — the loser answered with a null account or an empty model list, so
+	 *  interfered, the loser answered with a null account or an empty model list, so
 	 *  a working install rendered as "not signed in" or "no models".
 	 * 
 	 *  A missing CLI is still a benign empty probe (the tab renders the install
@@ -583,8 +583,8 @@ export const commands = {
 	 *  Sign Codex in with an API key (the enterprise path, mirroring Claude's
 	 *  "API key" auth mode).
 	 * 
-	 *  Unlike Claude — where the app stores the key in `settings.json` and injects
-	 *  `ANTHROPIC_API_KEY` into every spawn — Codex owns its own credential store:
+	 *  Unlike Claude, where the app stores the key in `settings.json` and injects
+	 *  `ANTHROPIC_API_KEY` into every spawn, Codex owns its own credential store:
 	 *  `codex login --with-api-key` reads the key from stdin and writes
 	 *  `$CODEX_HOME/auth.json`. An env-injected `OPENAI_API_KEY` is IGNORED by the
 	 *  app-server (verified: `account/read` still reports `account: null`), so the
@@ -619,7 +619,7 @@ export const commands = {
 	ollamaSetSelectedModels: (models: string[]) => typedError<null, AppError>(__TAURI_INVOKE("ollama_set_selected_models", { models })),
 	/**
 	 *  Set the default Ollama model for the composer, as an `"ollama/<id>"` id
-	 *  (`None`/empty clears it). Stored in app settings only — it doesn't touch
+	 *  (`None`/empty clears it). Stored in app settings only. It doesn't touch
 	 *  `opencode.json`, since the provider block already lists every selected model.
 	 * 
 	 *  The command is the state boundary, so it validates rather than trusting the
@@ -659,7 +659,7 @@ export const commands = {
 	/**
 	 *  Read back the conversation id a "capture-mode" CLI (Codex/Antigravity, which
 	 *  auto-generate ids unlike Claude/Gemini) assigned itself, by scanning its
-	 *  on-disk store — launched fresh, then resumed by this id.
+	 *  on-disk store, launched fresh, then resumed by this id.
 	 * 
 	 *  Returns the newest session created after `after_ms` (epoch ms, the tab's
 	 *  launch) not already claimed (`exclude`); for Codex it must also match this
@@ -679,15 +679,15 @@ export const commands = {
 	 */
 	mintCodexSession: (workstreamId: string, command: string) => typedError<string | null, AppError>(__TAURI_INVOKE("mint_codex_session", { workstreamId, command })),
 	/**
-	 *  Whether `session_id` is actually persisted in `engine_id`'s on-disk store —
+	 *  Whether `session_id` is actually persisted in `engine_id`'s on-disk store,
 	 *  the authoritative resume gate. A pinned-but-never-used id has no file yet, so
 	 *  resuming would exit "No conversation found"; this lets the caller launch fresh.
-	 *  Unknown engines (Gemini, custom) return false — caller uses its own heuristic.
+	 *  Unknown engines (Gemini, custom) return false, caller uses its own heuristic.
 	 */
 	agentSessionExists: (workstreamId: string, engineId: string, sessionId: string) => typedError<boolean, AppError>(__TAURI_INVOKE("agent_session_exists", { workstreamId, engineId, sessionId })),
 	/**
 	 *  Attach to an existing PTY: replay scrollback then tail live output. Returns
-	 *  `false` if the PTY is gone (e.g. after restart) — caller opens a fresh one.
+	 *  `false` if the PTY is gone (e.g. after restart), caller opens a fresh one.
 	 */
 	terminalAttach: (terminalId: string, onEvent: Channel<TerminalEvent>) => typedError<boolean, AppError>(__TAURI_INVOKE("terminal_attach", { terminalId, onEvent })),
 	/**  Forward base64-encoded keyboard input to the PTY. */
@@ -705,11 +705,11 @@ export const commands = {
 	/**
 	 *  Open a PTY running a single command line through the user's login shell in
 	 *  the home dir. Used by Harnesses settings for interactive non-CLI flows (e.g.
-	 *  `claude auth login`, the OpenCode installer) — run as if the user typed it.
+	 *  `claude auth login`, the OpenCode installer), run as if the user typed it.
 	 */
 	spawnShellTerminal: (command: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_shell_terminal", { command, cols, rows, onEvent })),
 	/**
-	 *  The default shell's display name — its file stem (e.g. "zsh", "bash", "pwsh",
+	 *  The default shell's display name, its file stem (e.g. "zsh", "bash", "pwsh",
 	 *  "powershell", "cmd"). Labels the dock's ad-hoc terminal tabs by the shell they
 	 *  actually spawn, instead of a hardcoded guess.
 	 */
@@ -745,7 +745,7 @@ export const commands = {
 	getScriptOutput: (workstreamId: string, kind: ScriptKind) => typedError<string | null, AppError>(__TAURI_INVOKE("get_script_output", { workstreamId, kind })),
 	/**
 	 *  Clear a script's output (the dock's Clear button). Drops the captured last-run
-	 *  snapshot, and — when the run is still live, `terminal_id` naming its PTY —
+	 *  snapshot, and, when the run is still live, `terminal_id` naming its PTY,
 	 *  wipes that PTY's retained scrollback too. Without the second half a re-attach
 	 *  (tab switch, dock collapse) or the exit snapshot would replay the very text
 	 *  that was just cleared. The process itself keeps running; only the log is gone.
@@ -788,11 +788,11 @@ export const commands = {
 	 *  has already ensured the path ends in `.hlprompts` and built the JSON body.
 	 */
 	writePromptsFile: (path: string, contents: string) => typedError<null, AppError>(__TAURI_INVOKE("write_prompts_file", { path, contents })),
-	/**  Every agent visible from `project_path` — that project's own plus the user's. */
+	/**  Every agent visible from `project_path`, that project's own plus the user's. */
 	listAgentFiles: (projectPath: string | null) => typedError<AgentFile[], AppError>(__TAURI_INVOKE("list_agent_files", { projectPath })),
 	/**  Write `agent` back to its own `.md` file, returning it as re-read from disk. */
 	saveAgentFile: (agent: AgentFile) => typedError<AgentFile, AppError>(__TAURI_INVOKE("save_agent_file", { agent })),
-	/**  Delete an agent definition — the file IS the agent. */
+	/**  Delete an agent definition, the file IS the agent. */
 	deleteAgentFile: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_agent_file", { path })),
 	/**
 	 *  The path a new agent called `name` would occupy in `source`'s directory.
@@ -841,7 +841,7 @@ export type AgentCollaborator = {
 
 /**
  *  A doc the editor offers to append to the prompt. Discovered in the worktree,
- *  never invented — an absent file is simply not offered.
+ *  never invented, an absent file is simply not offered.
  */
 export type AgentContextFile = {
 	/**  Worktree-relative path, which is also the key the overlay enables. */
@@ -850,9 +850,9 @@ export type AgentContextFile = {
 };
 
 export type AgentFile = {
-	/**  Absolute path to the `.md` file — the identity a save or delete targets. */
+	/**  Absolute path to the `.md` file, the identity a save or delete targets. */
 	path: string,
-	/**  `project` | `user` | `plugin` — which root supplied it. */
+	/**  `project` | `user` | `plugin`, which root supplied it. */
 	source: string,
 	/**  The plugin that ships this agent, when `source` is `plugin`. */
 	plugin: string | null,
@@ -861,11 +861,11 @@ export type AgentFile = {
 	description: string,
 	/**
 	 *  Frontmatter `tools`, comma-separated in the file. EMPTY MEANS INHERIT
-	 *  every tool — it is not the same as an agent with no tools.
+	 *  every tool. It is not the same as an agent with no tools.
 	 */
 	tools: string[],
 	/**
-	 *  Frontmatter `skills` — skill names claude preloads into this agent when
+	 *  Frontmatter `skills`, skill names claude preloads into this agent when
 	 *  it runs. Canonical names: the skill's directory, or `plugin:skill`.
 	 *  Empty means the key is absent; unlike `tools`, that is simply "none".
 	 */
@@ -875,7 +875,7 @@ export type AgentFile = {
 	/**  Frontmatter `color`, used by claude's own picker. */
 	color: string | null,
 	/**
-	 *  Frontmatter `memory` — the persistent-memory scope claude keeps for this
+	 *  Frontmatter `memory`, the persistent-memory scope claude keeps for this
 	 *  agent between invocations: `user` (every project), `project` (this repo's
 	 *  `.claude/agent-memory/<name>/`), or `local` (session only). Absent means
 	 *  the agent remembers nothing across runs. Stored as claude writes it, not
@@ -883,12 +883,12 @@ export type AgentFile = {
 	 */
 	memory: string | null,
 	/**
-	 *  Frontmatter `category` — a display-only grouping label the list folders
+	 *  Frontmatter `category`, a display-only grouping label the list folders
 	 *  agents by. Free text; absent means the folder is derived from the
 	 *  description's stage phrase (see `phaseFolder` on the frontend).
 	 */
 	category: string | null,
-	/**  Everything after the frontmatter block — the agent's system prompt. */
+	/**  Everything after the frontmatter block, the agent's system prompt. */
 	prompt: string,
 	/**
 	 *  File mtime in epoch milliseconds, for the list's Updated column. `None`
@@ -900,13 +900,13 @@ export type AgentFile = {
 	 *  user's override instead once one exists.
 	 */
 	shippedPath: string | null,
-	/**  A plugin agent the user has overridden — `path` is the override. */
+	/**  A plugin agent the user has overridden, `path` is the override. */
 	modified: boolean,
 };
 
 /**
  *  The Agents view's app-side state. The agent definitions themselves are the
- *  `.claude/agents/*.md` files — this holds only what those files have no key
+ *  `.claude/agents/*.md` files. This holds only what those files have no key
  *  for, keyed by the agent's absolute path.
  */
 export type AgentLibrarySettings = {
@@ -922,8 +922,8 @@ export type AgentLibrarySettings = {
 	 */
 	groupUncategorized?: boolean,
 	/**
-	 *  Folder names the user has collapsed in the list. A folder absent here —
-	 *  including one that appears later — renders open.
+	 *  Folder names the user has collapsed in the list. A folder absent here,
+	 *  including one that appears later, renders open.
 	 */
 	closedFolders?: string[],
 };
@@ -935,7 +935,7 @@ export type AgentLibrarySettings = {
  */
 export type AgentMcpServer = {
 	name: string,
-	/**  `project` | `user` — which config declares it. */
+	/**  `project` | `user`, which config declares it. */
 	scope: string,
 	/**  Transport as declared (`stdio`, `http`, `sse`). */
 	transport: string,
@@ -943,7 +943,7 @@ export type AgentMcpServer = {
 
 /**
  *  Launch settings the app keeps for an agent that claude's own frontmatter has
- *  no key for — effort, harness, permission posture, folder. Stored app-side
+ *  no key for, effort, harness, permission posture, folder. Stored app-side
  *  keyed by the agent's file path so the `.md` stays a plain claude agent.
  */
 export type AgentOverlay = {
@@ -951,7 +951,7 @@ export type AgentOverlay = {
 	harness?: string,
 	/**  List-only grouping; `""` is no folder. */
 	folder?: string,
-	/**  `published` | `draft` — a draft is hidden from the composer. */
+	/**  `published` | `draft`, a draft is hidden from the composer. */
 	status?: string,
 	permissionMode?: string,
 	rules?: AgentRule[],
@@ -988,12 +988,12 @@ export type AgentSkill = {
 	plugin: string | null,
 	/**
 	 *  Body length in characters. Preloading injects the whole body on every
-	 *  spawn, so this is a recurring context cost, not a one-off — the card
+	 *  spawn, so this is a recurring context cost, not a one-off, the card
 	 *  renders it rather than letting a toggle quietly cost thousands of tokens.
 	 */
 	chars: number,
 	/**
-	 *  The skill sets `disable-model-invocation: true` — its author reserved it
+	 *  The skill sets `disable-model-invocation: true`, its author reserved it
 	 *  for the user to invoke. Preloading injects it anyway, so the card says so.
 	 */
 	userOnly: boolean,
@@ -1037,7 +1037,7 @@ export type AppSettings = {
 	/**  The prompt library: built-in prompt overrides + custom prompts. */
 	prompts?: PromptSettings,
 	/**
-	 *  The agent library's app-side state — folders and the launch settings
+	 *  The agent library's app-side state, folders and the launch settings
 	 *  claude's own agent frontmatter has no key for.
 	 */
 	agents?: AgentLibrarySettings,
@@ -1050,20 +1050,20 @@ export type AppSettings = {
 	/**  Auto-generated agent tab titles (enable + which model). Settings → General. */
 	tabTitles?: TabTitleSettings,
 	/**
-	 *  Multiplexer mode — run agents as native CLIs in persistent PTYs. Off by
+	 *  Multiplexer mode, run agents as native CLIs in persistent PTYs. Off by
 	 *  default; with it off the app behaves exactly as before. Settings → Advanced.
 	 */
 	multiplexer?: MultiplexerSettings,
 	/**
 	 *  Developer tools (web inspector, PTY byte log, IPC trace). A Settings →
-	 *  Advanced sibling row; reserved/off by default — nothing consumes it yet
+	 *  Advanced sibling row; reserved/off by default, nothing consumes it yet
 	 *  (a stub like [`CodexSettings`], so the row can render and gain behaviour
 	 *  later without a settings migration).
 	 */
 	devTools?: boolean,
 	/**
 	 *  The user dismissed the Full Disk Access explainer. macOS can't prompt for
-	 *  that grant, so the notice is the only way to surface it — but once waved
+	 *  that grant, so the notice is the only way to surface it, but once waved
 	 *  off it stays off.
 	 */
 	fullDiskAccessNoticeDismissed?: boolean,
@@ -1085,14 +1085,14 @@ export type ArchiveCleanupReport = {
  */
 export type ArchivedWorkstreamView = {
 	item: Workstream,
-	/**  `<project>/archived-contexts/<slug>` — the on-disk backup path. */
+	/**  `<project>/archived-contexts/<slug>`, the on-disk backup path. */
 	archivePath: string,
 	archiveExists: boolean,
 };
 
 /**  Where a document lives within its root's layout. */
 export type Area = 
-/**  `<repos|global>/<…>/<user>/…` — a specific user's documents. */
+/**  `<repos|global>/<…>/<user>/…`, a specific user's documents. */
 { kind: "user"; name: string } | 
 /**  `<repos|global>/<…>/shared/…`. */
 { kind: "shared" } | 
@@ -1184,7 +1184,7 @@ export type ClaudeModel = {
 	 */
 	supportedEffortLevels: string[],
 	supportsFastMode: boolean,
-	/**  Listed but not selectable — org policy can restrict a model. */
+	/**  Listed but not selectable, org policy can restrict a model. */
 	disabled: boolean,
 };
 
@@ -1200,7 +1200,7 @@ export type ClaudeProbe = {
 /**  Claude provider defaults. */
 export type ClaudeSettings = {
 	/**
-	 *  Default model key for new sessions — one of the composer's model keys
+	 *  Default model key for new sessions, one of the composer's model keys
 	 *  (e.g. `"opus"`, `"sonnet"`) or a custom `--model` value. `None` keeps
 	 *  the built-in default (Opus).
 	 */
@@ -1212,7 +1212,7 @@ export type ClaudeSettings = {
 	defaultEffort?: string | null,
 	/**
 	 *  Model key for the Commit/Ship/Revise action agents when the default
-	 *  harness is Claude — cheaper than the chat default since these stages are
+	 *  harness is Claude, cheaper than the chat default since these stages are
 	 *  mechanical git/PR plumbing. `None` ⇒ `"sonnet"`.
 	 */
 	commitModel?: string | null,
@@ -1231,7 +1231,7 @@ export type ClaudeSettings = {
 	 */
 	visibleModels?: string[] | null,
 	/**
-	 *  Model keys the picker had already offered the last time it was open —
+	 *  Model keys the picker had already offered the last time it was open,
 	 *  the watermark that lets a new model be added to a CURATED
 	 *  [`Self::visible_models`] without resurrecting one the user removed on
 	 *  purpose. `None` on an install that predates the check; the frontend then
@@ -1240,8 +1240,8 @@ export type ClaudeSettings = {
 	seenModelKeys?: string[] | null,
 	/**
 	 *  How `claude` authenticates: `"cli"` (subscription/login, the default and
-	 *  historical behaviour — the spawned process inherits the user's env and
-	 *  `~/.claude` state) or `"apiKey"` (enterprise — the app injects an API key
+	 *  historical behaviour, the spawned process inherits the user's env and
+	 *  `~/.claude` state) or `"apiKey"` (enterprise, the app injects an API key
 	 *  into the spawn env). `None`/absent is treated as `"cli"`.
 	 */
 	authMode?: string | null,
@@ -1258,15 +1258,15 @@ export type ClaudeSettings = {
 	/**  Route through Google Vertex (`CLAUDE_CODE_USE_VERTEX=1`). */
 	useVertex?: boolean,
 	/**
-	 *  Enable the "Claude in Chrome" browser-control feature — adds `--chrome`
+	 *  Enable the "Claude in Chrome" browser-control feature, adds `--chrome`
 	 *  at spawn so sessions can drive the connected Chrome extension.
 	 */
 	chromeEnabled?: boolean,
-	/**  Default model for in-app code reviews. Reserved — no review feature yet. */
+	/**  Default model for in-app code reviews. Reserved, no review feature yet. */
 	reviewModel?: string | null,
 	/**  Default effort for in-app code reviews. Reserved. */
 	reviewEffort?: string | null,
-	/**  Start new sessions in fast mode. Reserved — not a `claude` spawn flag yet. */
+	/**  Start new sessions in fast mode. Reserved, not a `claude` spawn flag yet. */
 	defaultFastMode?: boolean,
 };
 
@@ -1309,7 +1309,7 @@ export type CodexModel = {
 export type CodexProbe = {
 	auth: CodexAuthStatus,
 	/**
-	 *  Empty when Codex is signed out — it answers `model/list` with no rows
+	 *  Empty when Codex is signed out, it answers `model/list` with no rows
 	 *  rather than failing. A probe that could not run at all is an `Err`, so
 	 *  the two cases stay distinguishable.
 	 */
@@ -1318,7 +1318,7 @@ export type CodexProbe = {
 
 /**
  *  Codex harness defaults (Settings → Harnesses → Codex). Auth is NOT stored
- *  here — `codex login` owns it in `~/.codex`, and the app only reads the status.
+ *  here, `codex login` owns it in `~/.codex`, and the app only reads the status.
  */
 export type CodexSettings = {
 	/**
@@ -1333,7 +1333,7 @@ export type CodexSettings = {
 	defaultEffort?: string | null,
 	/**
 	 *  Model for the Commit/Ship/Revise action agents when the default harness is
-	 *  Codex — these stages are mechanical git/PR plumbing, so a cheaper model
+	 *  Codex, these stages are mechanical git/PR plumbing, so a cheaper model
 	 *  than the chat default is usually right. `None` ⇒ falls back to
 	 *  `default_model`, then the first selected model.
 	 */
@@ -1346,7 +1346,7 @@ export type CodexSettings = {
 	 */
 	selectedModels?: string[],
 	/**
-	 *  Personality/style for new Codex chats. Reserved — `thread/start` takes a
+	 *  Personality/style for new Codex chats. Reserved, `thread/start` takes a
 	 *  `personality`, but nothing sets it yet.
 	 */
 	personality?: string | null,
@@ -1359,7 +1359,7 @@ export type CodexSettings = {
 export type ConfigChanged = null;
 
 export type ConfigSummary = 
-/**  No config file: first-run — onboarding should offer bootstrap. */
+/**  No config file: first-run, onboarding should offer bootstrap. */
 { state: "missing"; path: string } | 
 /**  Config exists but can't be used (parse error, future schema, ...). */
 { state: "error"; path: string; code: string; message: string; remedy: string | null } | { state: "ready"; path: string; user: string; backendKind: string; configured: boolean };
@@ -1378,7 +1378,7 @@ export type CreateDocInput = {
 
 /**  One user-defined prompt in the library. */
 export type CustomPrompt = {
-	/**  Stable id (uuid) — referenced by the palette, chips, and shortcuts. */
+	/**  Stable id (uuid), referenced by the palette, chips, and shortcuts. */
 	id?: string,
 	name?: string,
 	/**  The global body. */
@@ -1414,7 +1414,7 @@ export type DocContent = {
 
 /**  Everything the UI needs to list and filter a document, sans body. */
 export type DocMeta = {
-	/**  Absolute path string — the canonical unique id. */
+	/**  Absolute path string, the canonical unique id. */
 	id: string,
 	/**  Path relative to its root, `/`-separated on every platform. */
 	relPath: string,
@@ -1468,7 +1468,7 @@ export type Engine = {
 	glyph?: string,
 	/**
 	 *  Theme custom-property *name* for the engine accent (e.g. `"--color-accent"`).
-	 *  Never a raw hex — the frontend applies it as `var(<token>)` so it stays
+	 *  Never a raw hex, the frontend applies it as `var(<token>)` so it stays
 	 *  theme-aware.
 	 */
 	accentToken?: string,
@@ -1488,13 +1488,13 @@ export type ExitOutcome =
 "completed" | 
 /**  Stopped after an app-initiated interrupt. */
 "interrupted" | 
-/**  Exited without a terminal `result` (or non-zero) — treated as a crash. */
+/**  Exited without a terminal `result` (or non-zero), treated as a crash. */
 "crashed" | 
 /**  We killed the process tree (hard stop / cleanup). */
 "killed" | 
 /**
- *  The app took the process down as part of its own lifecycle — quitting, or
- *  relaunching this session under new settings — not something that happened
+ *  The app took the process down as part of its own lifecycle, quitting, or
+ *  relaunching this session under new settings, not something that happened
  *  to the session. Terminal for the live process only: nothing is persisted,
  *  so the session replays clean and resumable (see the forwarder's `Exited`
  *  arm).
@@ -1546,7 +1546,7 @@ export type Frontmatter = {
 	/**
 	 *  Unknown keys, preserved for display and round-tripping.
 	 *  Unknown keys in display form: strings as-is, everything else compact
-	 *  JSON, null as "". Read-only context for the UI — the line-surgical
+	 *  JSON, null as "". Read-only context for the UI, the line-surgical
 	 *  patcher preserves the underlying bytes regardless. (Stringified
 	 *  because specta forbids serde_json::Value's i64 arm in IPC types.)
 	 */
@@ -1557,7 +1557,7 @@ export type Frontmatter = {
 export type FullDiskAccess = "granted" | 
 /**
  *  The probe returned EPERM. Either the grant was never added, or it was
- *  recorded against a code signature this build no longer matches — in
+ *  recorded against a code signature this build no longer matches, in
  *  which case System Settings still shows the toggle on while every gated
  *  read fails.
  */
@@ -1613,7 +1613,7 @@ export type GithubRepo = {
 };
 
 /**
- *  Which harness backs a session — the vocabulary the store persists
+ *  Which harness backs a session, the vocabulary the store persists
  *  (`sessions.harness`), the IPC surface selects on, and the shell dispatches
  *  drivers by. sqlite stores `as_str` TEXT; read back via the tolerant
  *  [`Harness::parse`].
@@ -1635,7 +1635,7 @@ export type HealthReport = {
 /**
  *  User overrides for keyboard shortcuts. Surfaced in Settings → Keyboard.
  * 
- *  Only *overrides* live here — the per-OS defaults are owned by the frontend
+ *  Only *overrides* live here, the per-OS defaults are owned by the frontend
  *  catalog so they can change without a settings migration. Keys are stable
  *  command ids (e.g. "nav.dashboard"); a `Some(chord)` is a custom binding,
  *  `None` means the command is explicitly unbound, and an absent key means
@@ -1648,22 +1648,22 @@ export type KeybindingSettings = {
 export type LinkStatus = 
 /**  Links exist and resolve. */
 "ok" | 
-/**  Backend has no filesystem tree (notion/anytype) — nothing to link. */
+/**  Backend has no filesystem tree (notion/anytype), nothing to link. */
 "unsupported" | 
 /**  Links missing or broken. */
 "broken";
 
-/**  How the Merge button merges — picked per-PR by the user. */
+/**  How the Merge button merges, picked per-PR by the user. */
 export type MergeMethod = "squash" | "merge" | "rebase";
 
 /**
  *  GitHub's mergeability verdict for the PR, from `gh`'s `mergeable` field.
- *  Distinguishes a clean merge from a conflicting branch — which we surface as a
- *  row in the checks panel — and from GitHub's transient `UNKNOWN` (still being
+ *  Distinguishes a clean merge from a conflicting branch, which we surface as a
+ *  row in the checks panel, and from GitHub's transient `UNKNOWN` (still being
  *  computed server-side).
  */
 export type MergeableState = 
-/**  No conflicts — the PR can merge cleanly. */
+/**  No conflicts, the PR can merge cleanly. */
 "mergeable" | 
 /**  The branch conflicts with its base and must be resolved before merging. */
 "conflicting" | 
@@ -1673,11 +1673,11 @@ export type MergeableState =
 /**  One model's authoritative context window, from `GET /v1/models`. */
 export type ModelWindow = {
 	/**
-	 *  Canonical model id, e.g. `"claude-fable-5"` (`data[].id`). Bare — the API
+	 *  Canonical model id, e.g. `"claude-fable-5"` (`data[].id`). Bare, the API
 	 *  exposes no `[1m]` variants, so the UI strips that suffix before lookup.
 	 */
 	id: string,
-	/**  Context window in tokens (`max_input_tokens`) — the meter's denominator. */
+	/**  Context window in tokens (`max_input_tokens`), the meter's denominator. */
 	contextWindow: number,
 };
 
@@ -1685,7 +1685,7 @@ export type ModelWindow = {
  *  Multiplexer mode (Settings → Advanced). When enabled, a new agent tab
  *  launches a real CLI in a persistent PTY instead of the native chat, and the
  *  `+` on the agent tab strip lets the user pick which engine. The frontend is
- *  the only consumer — the backend just stores the config and (separately)
+ *  the only consumer, the backend just stores the config and (separately)
  *  spawns the chosen command via `agent_open`.
  */
 export type MultiplexerSettings = {
@@ -1749,7 +1749,7 @@ export type OllamaModelInfo = {
  *  Ollama harness defaults (Settings → Harnesses → Ollama). Local models are run
  *  *through* the OpenCode harness: selecting one sets `harness=opencode` with an
  *  `"ollama/<model>"` model id. The provider definition (base URL + model list)
- *  is mirrored into OpenCode's `opencode.json` as a `provider.ollama` block —
+ *  is mirrored into OpenCode's `opencode.json` as a `provider.ollama` block,
  *  see `hyprlayer_core::opencode::config::set_ollama_provider`.
  */
 export type OllamaSettings = {
@@ -1791,7 +1791,7 @@ export type OllamaStatus = {
 
 /**
  *  OpenCode harness defaults (Settings → Harnesses → OpenCode). Provider API
- *  keys themselves are NOT stored here — they live in OpenCode's own
+ *  keys themselves are NOT stored here, they live in OpenCode's own
  *  `auth.json` so the `opencode` CLI uses them natively (see `opencode::config`).
  */
 export type OpenCodeSettings = {
@@ -1817,7 +1817,7 @@ export type OpenCodeSettings = {
 
 /**
  *  One configured provider credential, as surfaced to the UI. The raw key is
- *  deliberately never returned — only that a credential exists and its kind.
+ *  deliberately never returned, only that a credential exists and its kind.
  */
 export type OpencodeAuthEntry = {
 	/**  models.dev provider id (e.g. `"anthropic"`, `"openai"`). */
@@ -1828,7 +1828,7 @@ export type OpencodeAuthEntry = {
 
 export type OpencodeCatalog = {
 	providers: CatalogProvider[],
-	/**  `"network"` | `"cache"` | `"bundled"` — lets the UI show an offline hint. */
+	/**  `"network"` | `"cache"` | `"bundled"`, lets the UI show an offline hint. */
 	source: string,
 };
 
@@ -1842,13 +1842,13 @@ export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermiss
 /**  One CI check on the PR's head commit, for the per-check breakdown popover. */
 export type PrCheck = {
 	name: string,
-	/**  Per-check outcome — only `Pending`/`Passing`/`Failing` (never `None`). */
+	/**  Per-check outcome, only `Pending`/`Passing`/`Failing` (never `None`). */
 	state: ChecksState,
 	/**  Link to the check's run/details page, when GitHub provides one. */
 	url: string | null,
 };
 
-/**  Open/merged/closed — the PR's lifecycle state from `gh`'s `state` field. */
+/**  Open/merged/closed, the PR's lifecycle state from `gh`'s `state` field. */
 export type PrState = "open" | "merged" | "closed";
 
 /**  A branch's pull request as the PR status bar renders it. */
@@ -1882,7 +1882,7 @@ export type PrStatus = {
 };
 
 /**
- *  A workstream's PR status changed server-side — it merged, its checks
+ *  A workstream's PR status changed server-side, it merged, its checks
  *  settled, or a PR appeared/disappeared for the branch. The backend PR watcher
  *  (`crate::pr_watch`) diffs each poll and emits this only on a real change; the
  *  frontend refetches that workstream's PR query so the merge/archive bar stays
@@ -1914,7 +1914,7 @@ export type Project = {
 	/**  Human-facing project name (the app registry name, e.g. `brightblock.ai`). */
 	mappedName: string,
 	/**
-	 *  The thoughts `repoMappings` key this repo resolves to — what docs are
+	 *  The thoughts `repoMappings` key this repo resolves to, what docs are
 	 *  indexed and worktrees created under. CLI-sanitized, so it can differ from
 	 *  `mapped_name` (`brightblock.ai` → `brightblock_ai`). Filter docs by THIS.
 	 */
@@ -1931,7 +1931,7 @@ export type Project = {
 export type ProjectDetail = {
 	project: Project,
 	/**
-	 *  None for `folder` projects — they have no thoughts mapping, so the
+	 *  None for `folder` projects. They have no thoughts mapping, so the
 	 *  `hyprlayer storage info` subprocess is never run for them.
 	 */
 	storage: StorageInfo | null,
@@ -1943,8 +1943,8 @@ export type ProjectDetail = {
  *  directory with no git and no thoughts mapping, so every git, PR, and
  *  hyprlayer-CLI surface is skipped for it.
  * 
- *  Tolerance: an unrecognized stored value reads as `Disk` — the in-place,
- *  touch-nothing kind — so a mangled row can never make removal delete files
+ *  Tolerance: an unrecognized stored value reads as `Disk`, the in-place,
+ *  touch-nothing kind, so a mangled row can never make removal delete files
  *  the app doesn't own.
  */
 export type ProjectSource = 
@@ -1973,13 +1973,13 @@ export type PromptContext = {
 };
 
 /**
- *  The stock bodies of the built-in prompts — what Settings → Prompts shows,
+ *  The stock bodies of the built-in prompts, what Settings → Prompts shows,
  *  edits against, and resets to. Owned by `hyprlayer_core::pipeline` (the
  *  composer), surfaced here so the frontend never mirrors the literals.
  */
 export type PromptDefaults = {
 	commit: string,
-	/**  A template — `{{base_branch}}` resolves at send time. */
+	/**  A template, `{{base_branch}}` resolves at send time. */
 	ship: string,
 };
 
@@ -2011,20 +2011,20 @@ export type ProviderSettings = {
 	defaultHarness?: string | null,
 	/**  Anthropic Claude (the `claude` CLI). */
 	claude?: ClaudeSettings,
-	/**  OpenCode (the `opencode` CLI) — multi-provider harness. */
+	/**  OpenCode (the `opencode` CLI), multi-provider harness. */
 	opencode?: OpenCodeSettings,
-	/**  Ollama — local/remote model server, surfaced through the OpenCode harness. */
+	/**  Ollama, local/remote model server, surfaced through the OpenCode harness. */
 	ollama?: OllamaSettings,
 	/**  OpenAI Codex (the `codex` CLI, driven via its app-server). */
 	codex?: CodexSettings,
 };
 
 /**
- *  What [`pull_base`] did — surfaced to the GIT panel so it can report the
+ *  What [`pull_base`] did, surfaced to the GIT panel so it can report the
  *  result inline (a clean merge vs. conflicts the user must resolve by hand).
  */
 export type PullOutcome = 
-/**  The branch already contains the base's commits — nothing to pull. */
+/**  The branch already contains the base's commits, nothing to pull. */
 { kind: "upToDate" } | 
 /**  The base merged cleanly (fast-forward or a new merge commit). */
 { kind: "merged" } | 
@@ -2044,7 +2044,7 @@ export type QueryResult = {
 /**
  *  A quit was requested (⌘Q or the window's close button) while "Confirm before
  *  quitting" is on. The backend has already cancelled the close by the time this
- *  lands — the frontend raises the confirm dialog, and nothing exits unless the
+ *  lands, the frontend raises the confirm dialog, and nothing exits unless the
  *  user confirms (`quit_app`).
  */
 export type QuitRequested = null;
@@ -2067,9 +2067,9 @@ export type QuitSettings = {
 export type RepoPathStatus = 
 /**  The path doesn't exist or isn't a directory. */
 "missing" | 
-/**  Exists, but isn't a git repo — offer to `git init` it. */
+/**  Exists, but isn't a git repo, offer to `git init` it. */
 "nonGit" | 
-/**  A bare repository — no working tree to cut a worktree from. */
+/**  A bare repository, no working tree to cut a worktree from. */
 "bare" | 
 /**  A git repo whose HEAD is unborn (no commits yet). */
 "unborn" | 
@@ -2078,40 +2078,36 @@ export type RepoPathStatus =
 
 /**
  *  GitHub's aggregate review verdict for the PR, from `gh`'s `reviewDecision`
- *  field. The `Option` on [`PrStatus`] is `None` when the PR requires no review —
+ *  field. The `Option` on [`PrStatus`] is `None` when the PR requires no review,
  *  then there's nothing to gate on.
  */
 export type ReviewDecision = 
-/**  A required review is satisfied — approved with no changes outstanding. */
+/**  A required review is satisfied, approved with no changes outstanding. */
 "approved" | 
 /**  A reviewer requested changes; the author must address them before merging. */
 "changesRequested" | 
-/**  A required review is still outstanding — the PR is waiting on a reviewer. */
+/**  A required review is still outstanding, the PR is waiting on a reviewer. */
 "reviewRequired";
 
 /**
- *  Rewind a session to the N-th (1-based) user turn, discarding that turn and
- *  everything after it. Two paths:
+ *  Rewind a session to the N-th (1-based) user turn, dropping that turn and
+ *  everything after it. `user_turn` counts user bubbles (`userMessage` events).
  * 
- *  * **Live rewind (preferred).** If the session is live and its harness supports
- *    it, we ask the harness to truncate the model's in-memory conversation to this
- *    turn — claude's `rewind_conversation` control request
- *    (see [`ClaudeDriver::rewind_to_ordinal`]), Codex's `thread/rollback` — then
- *    keep that SAME process alive and hand its event stream to the caller's new
- *    channel (see [`live_rewind_handoff`]). The model genuinely forgets the dropped
- *    turns. We must NOT kill + resume here: claude's peel does not truncate its
- *    on-disk transcript, so a resume would reload the un-rewound history.
- *  * **Log-only fallback.** If the model rewind isn't available (session not live,
- *    OpenCode, a turn from before the current generation, the first turn, or a
- *    harness refusal) we kill + cut + resume: the UI/log truncate but the model
- *    keeps its memory. `permission_mode` re-applies the session's posture on this
- *    re-spawn (as [`resume_session`]/[`restart_session`] do) — `None` would drop a
- *    bypass session back to the stage default and start prompting again.
+ *  Two paths:
  * 
- *  `user_turn` is the 1-based ordinal of the clicked user bubble (the N-th
- *  `userMessage` event). Returns the existing [`Session`] plus which path ran, so
- *  the caller can tell a TRUE rewind (the model forgot) from a log-only prune (it
- *  still recalls the dropped turns) instead of assuming success.
+ *  * **Live rewind (preferred).** Ask the harness to truncate its in-memory
+ *    conversation (claude's `rewind_conversation`, Codex's `thread/rollback`),
+ *    then keep that SAME process and hand its stream to the caller's new
+ *    channel. The model genuinely forgets. Do NOT kill + resume: claude leaves
+ *    its on-disk transcript intact, so a resume reloads the dropped turns.
+ *  * **Log-only fallback.** When live rewind isn't available (not live,
+ *    OpenCode, a pre-generation or first turn, a harness refusal), kill + cut +
+ *    resume. The log truncates but the model still remembers. Pass
+ *    `permission_mode` so the re-spawn keeps the session's posture; `None`
+ *    would drop a bypass session back to the stage default.
+ * 
+ *  Returns the [`Session`] plus which path ran, so the caller can tell a true
+ *  rewind from a log-only prune rather than assuming success.
  */
 export type RewindResult = {
 	session: Session,
@@ -2119,7 +2115,7 @@ export type RewindResult = {
 	 *  True when the harness's own conversation was truncated on the live process
 	 *  (the model genuinely forgot the dropped turns); false when we could only
 	 *  prune the app log (not live / OpenCode / a pre-generation or first turn / a
-	 *  harness refusal) — the model still recalls them.
+	 *  harness refusal), the model still recalls them.
 	 */
 	liveRewound: boolean,
 };
@@ -2161,7 +2157,7 @@ export type ScriptRunChanged = {
 };
 
 /**
- *  Snapshot of a workstream's script runtime, for UI hydration on (re)mount —
+ *  Snapshot of a workstream's script runtime, for UI hydration on (re)mount,
  *  the dock/rail read this to recover the live Run + last-run pills after a
  *  remount or workstream switch.
  */
@@ -2177,7 +2173,7 @@ export type ScriptRuntime = {
 /**
  *  Per-project lifecycle scripts, inherited by every workstream. Each value is a
  *  free-form multi-line block of shell commands run in the workstream's worktree
- *  root; an empty string means "unconfigured". Run sequentially — a non-zero
+ *  root; an empty string means "unconfigured". Run sequentially, a non-zero
  *  exit halts the block (see `crate::scripts::build_block`).
  */
 export type ScriptSettings = {
@@ -2246,7 +2242,7 @@ export type SessionEvent =
  *  A user turn the app sent to claude. claude never echoes the human prompt
  *  on stdout (it's input), so the driver emits this itself purely so the turn
  *  is persisted and replays after a restart. It is NOT forwarded to the live
- *  UI (which already shows the message optimistically) — persist-only, so the
+ *  UI (which already shows the message optimistically), persist-only, so the
  *  live transcript isn't double-stamped. `stage` is the stage label for the
  *  session's opening prompt, else null (a follow-up).
  */
@@ -2261,7 +2257,7 @@ export type SessionEvent =
 promptName?: string | null } | 
 /**
  *  Streaming text delta (live typing). Coalesced into `AssistantText` on
- *  turn completion — the UI shows partials, then replaces with the final.
+ *  turn completion, the UI shows partials, then replaces with the final.
  */
 { kind: "partialText"; text: string; parentId: string | null } | 
 /**  A completed assistant text block. */
@@ -2276,13 +2272,13 @@ promptName?: string | null } |
 /**  Result of a tool the agent ran. */
 { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | 
 /**
- *  Permission prompt — the UI renders an Allow/Deny card; reply via the
+ *  Permission prompt, the UI renders an Allow/Deny card; reply via the
  *  driver's `respond_permission` with this `request_id`. `input` is compact
  *  JSON of the tool's arguments.
  */
 { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | 
 /**
- *  The agent invoked `AskUserQuestion` — rather than a yes/no permission
+ *  The agent invoked `AskUserQuestion`, rather than a yes/no permission
  *  gate, the UI renders the questions interactively above the composer and
  *  the user picks answers; reply via the driver's `answer_question` with this
  *  `request_id`. `questions` is compact JSON of the `questions` array (each:
@@ -2291,17 +2287,17 @@ promptName?: string | null } |
 { kind: "questionAsk"; requestId: string; questions: string } | 
 /**
  *  A live context-window reading (input tokens in context), emitted per
- *  assistant message so the meter updates DURING a multi-tool turn — not
+ *  assistant message so the meter updates DURING a multi-tool turn, not
  *  only at `TurnDone`. Persisted (it's tiny) so the meter survives a restart
  *  even when a turn was interrupted before its `TurnDone` ever landed.
  */
 { kind: "usage"; contextTokens: number } | 
 /**
- *  The model's context window in tokens — the meter's DENOMINATOR (`Usage` is
+ *  The model's context window in tokens, the meter's DENOMINATOR (`Usage` is
  *  the numerator). Emitted once at session start when the backend knows the
  *  value authoritatively: an Ollama model is launched with a fixed `num_ctx`
  *  the UI can't infer from the `provider/model` id. Absent for models we
- *  don't pin (Claude, hosted OpenCode providers) — the UI then falls back to
+ *  don't pin (Claude, hosted OpenCode providers), the UI then falls back to
  *  its own per-model table. Persisted so it survives a restart/replay.
  */
 { kind: "contextWindow"; tokens: number } | 
@@ -2318,8 +2314,8 @@ promptName?: string | null } |
  */
 { kind: "compactBoundary"; trigger: string; preTokens: number | null } | 
 /**
- *  A command queued into a running session — a scheduled-wakeup prompt, a slash
- *  command queued behind a busy turn — started or finished. The transcript renders
+ *  A command queued into a running session, a scheduled-wakeup prompt, a slash
+ *  command queued behind a busy turn, started or finished. The transcript renders
  *  a seam on `started`, because claude never echoes the injected prompt to us: the
  *  turn simply begins, and without this marker it reads as the agent spontaneously
  *  resuming. `completed`/`cancelled` close the bracket and render nothing (the
@@ -2330,8 +2326,8 @@ promptName?: string | null } |
 /**
  *  A background shell task (spawned by `Bash{run_in_background:true}`) reached
  *  a terminal state. claude emits the underlying `task_notification`
- *  asynchronously the moment the shell finishes — even if the agent never
- *  polled it — so this is how the UI learns a fire-and-forget background task
+ *  asynchronously the moment the shell finishes, even if the agent never
+ *  polled it, so this is how the UI learns a fire-and-forget background task
  *  is done and drops it from the live "background tasks" indicator (the
  *  poll/stop paths miss the common case where the agent just moves on).
  *  `status` is "completed" or "failed"; `tool_use_id` is the spawning `Bash`
@@ -2341,8 +2337,8 @@ promptName?: string | null } |
 /**
  *  A new `claude` process took over an existing session via `--resume`
  *  (permission/model change, app-restart resume, log-only rewind fallback).
- *  The forwarder emits it once at the start of a relaunch — distinct from
- *  claude's per-turn `init` — so the UI drops background tasks the now-dead
+ *  The forwarder emits it once at the start of a relaunch, distinct from
+ *  claude's per-turn `init`, so the UI drops background tasks the now-dead
  *  prior process owned (their completion notification can never arrive).
  */
 { kind: "relaunched" } | 
@@ -2350,12 +2346,12 @@ promptName?: string | null } |
  *  A LIVE rewind truncated this session's conversation IN PLACE: the same
  *  `claude` process had its model memory peeled by `rewind_conversation` (see
  *  [`ClaudeDriver::rewind_to_ordinal`]). Emitted once, like [`Relaunched`], so
- *  the UI settles the transcript at the new boundary — but the process is
+ *  the UI settles the transcript at the new boundary, but the process is
  *  UNCHANGED, so (unlike a relaunch) its still-running background tasks can
  *  still complete-notify and must NOT be dropped.
  */
 { kind: "rewound" } | 
-/**  An unparseable / unknown stdout line — surfaced, never fatal. */
+/**  An unparseable / unknown stdout line, surfaced, never fatal. */
 { kind: "protocolError"; detail: string; raw: string } | 
 /**  The process ended. Terminal: no further events for this session. */
 { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
@@ -2372,7 +2368,7 @@ export type SessionLifecycle = {
 };
 
 /**
- *  A session's full lifecycle state — persisted in `sessions.state` and carried
+ *  A session's full lifecycle state, persisted in `sessions.state` and carried
  *  by the `session-lifecycle` event. The five terminal variants mirror
  *  [`ExitOutcome`]; `Idle` is a live-but-between-turns session. sqlite stores
  *  `as_str` TEXT; rows read back through the tolerant [`SessionState::parse`]
@@ -2387,7 +2383,7 @@ export type SlashCommand = {
 	name: string,
 	/**  One-line summary from the file's frontmatter (or first prose line). */
 	description: string,
-	/**  `project` | `user` — which `.claude` root supplied it (for the label). */
+	/**  `project` | `user`, which `.claude` root supplied it (for the label). */
 	source: string,
 };
 
@@ -2396,9 +2392,9 @@ export type SortKey =
 "relevance" | "date" | "mtime" | "title";
 
 /**
- *  The pipeline stages — the canonical wire enum for a workstream/session's
+ *  The pipeline stages, the canonical wire enum for a workstream/session's
  *  pipeline position. sqlite still stores its `as_str` TEXT; rows read back
- *  through the tolerant [`Stage::parse`]. Wire deserialization is strict — the
+ *  through the tolerant [`Stage::parse`]. Wire deserialization is strict, the
  *  generated bindings union makes an unknown value a TS type error, and specta
  *  cannot render `#[serde(other)]` on string enums.
  */
@@ -2433,7 +2429,7 @@ export type StartOpts = {
 export type StartedSession = {
 	session: Session,
 	/**
-	 *  The composed first prompt WITHOUT the `Relevant documents:` suffix —
+	 *  The composed first prompt WITHOUT the `Relevant documents:` suffix,
 	 *  attached docs render as pin cards in the echo, not as raw paths.
 	 */
 	prompt: string,
@@ -2485,8 +2481,8 @@ export type SyncReport = {
 /**
  *  Auto-generated agent-tab titles. When enabled, a new agent tab summarizes the
  *  user's first prompt into a short title via a small model. Surfaced in
- *  Settings → General. The model can be a Claude or Codex model, or — so
- *  opencode-only users are covered — one of their configured OpenCode models.
+ *  Settings → General. The model can be a Claude or Codex model, or, so
+ *  opencode-only users are covered, one of their configured OpenCode models.
  */
 export type TabTitleSettings = {
 	/**
@@ -2499,7 +2495,7 @@ export type TabTitleSettings = {
 	 *    `"claude:<flag>"`        → `claude -p --model <flag>` (empty flag = default)
 	 *    `"opencode:<prov>/<id>"` → a one-shot OpenCode turn with that model
 	 *    `"codex:<id>"`           → a one-shot ephemeral Codex turn
-	 *  `None`/absent follows the default harness — see
+	 *  `None`/absent follows the default harness, see
 	 *  [`TabTitleSettings::effective_model`].
 	 */
 	model?: string | null,
@@ -2569,14 +2565,14 @@ export type ThoughtsProfile = {
 	reposDir: string | null,
 	globalDir: string | null,
 	/**
-	 *  Existing folder names under `<root>/<reposDir>` — the "existing folder"
+	 *  Existing folder names under `<root>/<reposDir>`, the "existing folder"
 	 *  choices for the dialog's folder select.
 	 */
 	folders: string[],
 	/**
 	 *  Why `folders` couldn't be read (e.g. permission denied), when the tree
 	 *  exists but is inaccessible. An unreadable tree must not masquerade as
-	 *  an empty one — the dialog surfaces this next to the folder select.
+	 *  an empty one, the dialog surfaces this next to the folder select.
 	 */
 	foldersError: string | null,
 };
@@ -2635,7 +2631,7 @@ export type Workstream = {
  *  existing/in-place picker; `current_branch` is the in-place default.
  * 
  *  `remote_branches` holds only the remote-tracking refs with *no* local branch of
- *  the same name (`origin/feature` when there's no local `feature`) — a branch that
+ *  the same name (`origin/feature` when there's no local `feature`), a branch that
  *  exists locally is already offered as a local row. Adopting one materializes a
  *  local tracking branch first, since a remote ref would detach HEAD.
  */
@@ -2681,7 +2677,7 @@ export type WorkstreamView = {
 };
 
 /**
- *  A workstream's worktree changed on disk — a file edit, or git's index/HEAD
+ *  A workstream's worktree changed on disk, a file edit, or git's index/HEAD
  *  moved (`git add`/`commit`/`checkout`, incl. mid-turn). The backend watches
  *  the active worktree and its git dir (`commands::workstreams::watch_worktree`)
  *  and emits this so the Changes panel + git status refresh live. The frontend
@@ -2710,13 +2706,13 @@ export type WorktreeGitStatus = {
 /**
  *  How a workstream is backed: `isolated` (app-created branch + dedicated
  *  worktree), `existing` (user's local branch in a dedicated worktree),
- *  `inplace` (no worktree — the project's own checkout), or `folder` (a
- *  [`ProjectSource::Folder`](super::ProjectSource) project — the project
+ *  `inplace` (no worktree, the project's own checkout), or `folder` (a
+ *  [`ProjectSource::Folder`](super::ProjectSource) project, the project
  *  directory itself, with no git at all). Governs whether the branch +
  *  directory are app-owned and safe to drop on archive/delete.
  * 
  *  Tolerance: an unrecognized stored value reads (via [`WorktreeMode::parse`])
- *  as `Inplace` — the touch-nothing mode — so a mangled row can never make
+ *  as `Inplace`, the touch-nothing mode, so a mangled row can never make
  *  archive/cleanup delete a branch or checkout the app doesn't own.
  */
 export type WorktreeMode = "isolated" | "existing" | "inplace" | "folder";
@@ -2734,7 +2730,7 @@ export type WorktreeStatus = {
 	untracked: number,
 	/**
 	 *  Commits ahead/behind the upstream once it exists, else the base branch.
-	 *  Drops to 0 the moment the branch is pushed — a sync indicator, not a
+	 *  Drops to 0 the moment the branch is pushed, a sync indicator, not a
 	 *  "has work to ship" signal (see `ahead_of_base`).
 	 */
 	ahead: number,
@@ -2742,8 +2738,8 @@ export type WorktreeStatus = {
 	/**
 	 *  Commits on this branch not yet in the base branch (the PR's merge
 	 *  target), always measured against `base_branch` regardless of the
-	 *  upstream. Unlike `ahead`, this does NOT drop to 0 when the branch is
-	 *  pushed, so it answers "is there anything to open a PR for?" — the signal
+	 *  upstream. Unlike `ahead`. This does NOT drop to 0 when the branch is
+	 *  pushed, so it answers "is there anything to open a PR for?", the signal
 	 *  Ship gates on.
 	 */
 	aheadOfBase: number,

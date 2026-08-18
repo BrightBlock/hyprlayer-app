@@ -1,5 +1,5 @@
-//! Shared terminal "chrome" — font-size zoom, live theme recolor, and the
-//! clipboard chords — used by every mounted terminal (TerminalTab, the
+//! Shared terminal "chrome", font-size zoom, live theme recolor, and the
+//! clipboard chords, used by every mounted terminal (TerminalTab, the
 //! multiplexer AgentPtyTab, the script views, onboarding). These act purely on
 //! the TerminalEngine abstraction (setFontSize / setTheme / selectionText) and
 //! never touch the PTY spawn/attach/resize data flow, so every terminal shares
@@ -21,7 +21,7 @@ import { xtermThemeFromCss } from "./terminalTheme";
  * the engine's font, refit to the new cell size, and tell the PTY its new grid.
  * Returns the live font size so the caller can build its engine at that size.
  *
- * Registering the commands here is the context gate — ⌘+/⌘-/⌘0 are inert when
+ * Registering the commands here is the context gate, ⌘+/⌘-/⌘0 are inert when
  * no terminal is on screen. `appliedFontSizeRef` (which the caller seeds to the
  * current size right after creating the engine at it) skips the no-op first run.
  */
@@ -74,27 +74,23 @@ export function useTerminalThemeSync(engineRef: RefObject<TerminalEngine | null>
 }
 
 /**
- * Give a terminal the clipboard chords its emulator doesn't provide off macOS:
- * Ctrl+Shift+C copies the selection, Ctrl+Shift+V pastes — the convention every
- * Linux/Windows terminal follows, and the only way to move text between a
- * terminal and the composer.
+ * Give a terminal the Ctrl+Shift+C / Ctrl+Shift+V clipboard chords its emulator
+ * doesn't provide off macOS. Every Linux and Windows terminal follows that
+ * convention, and it is the only way to move text to the composer.
  *
- * Without this there is no copy path at all off macOS. xterm rewrites
- * Ctrl+letter to a control byte and preventDefaults it (Ctrl+C is SIGINT,
- * Ctrl+V is ^V), so the webview's native copy never fires and xterm's own
- * `copy` handler — which would have put the selection on the clipboard — is
- * never reached. macOS escapes this because ⌘C/⌘V match none of xterm's key
- * branches and fall through to the webview; that path is left alone, so this is
- * a no-op there.
+ * Without this there is no copy path off macOS at all. xterm rewrites
+ * Ctrl+letter to a control byte and preventDefaults it (Ctrl+C is SIGINT), so
+ * the webview's native copy never fires and xterm's own `copy` handler is never
+ * reached. On macOS ⌘C/⌘V match none of xterm's key branches and fall through
+ * to the webview, so this is a no-op there.
  *
- * Clipboard I/O goes through Tauri rather than `navigator.clipboard`: the async
- * clipboard is exactly the surface WebKitGTK has already been caught lying
- * about (see the image-paste fallback in src-tauri/src/lib.rs). Needs
- * `clipboard-manager:allow-read-text` / `allow-write-text` in the capability
- * file.
+ * Clipboard I/O goes through Tauri, not `navigator.clipboard`: the async
+ * clipboard is the surface WebKitGTK has already been caught lying about (see
+ * the image-paste fallback in src-tauri/src/lib.rs). Needs
+ * `clipboard-manager:allow-read-text` / `allow-write-text` in the capability file.
  *
- * Call once, right after `engine.mount(host)` — an engine holds a single
- * filter, and it is torn down with the engine.
+ * Call once after `engine.mount(host)`. An engine holds a single filter, torn
+ * down with the engine.
  */
 export function attachTerminalClipboard(engine: TerminalEngine): void {
   if (IS_MACOS) return;
@@ -105,7 +101,7 @@ export function attachTerminalClipboard(engine: TerminalEngine): void {
     const key = e.key.toLowerCase();
     if (key !== "c" && key !== "v") return true;
     // Ours: keep it from the emulator, from the webview, and from the
-    // window-level keybinding dispatcher — `mod+shift+v` is Toggle Markdown
+    // window-level keybinding dispatcher, `mod+shift+v` is Toggle Markdown
     // Preview, which is live whenever a markdown file viewer sits beside the
     // terminal. Returning false stops xterm but does NOT preventDefault, so
     // both calls are on us.

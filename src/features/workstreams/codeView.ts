@@ -59,7 +59,7 @@ const themeChrome = EditorView.theme({
     height: "100%",
   },
   ".cm-scroller": {
-    // Bundled first — see the typography block in index.css.
+    // Bundled first, see the typography block in index.css.
     fontFamily:
       '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
     lineHeight: "1.5",
@@ -82,7 +82,7 @@ const themeChrome = EditorView.theme({
   // (--color-ok additions on the `b` side, --color-bad deletions on the `a` side
   // and the unified deleted widget). A stronger word-level tint
   // (.cm-diffChangedText, emitted by `diffWordHighlight`) marks only the
-  // characters that actually changed inside a *modified* line — never a wholly
+  // characters that actually changed inside a *modified* line, never a wholly
   // new or removed line. @codemirror/merge's own `highlightChanges` is turned off
   // in DiffTab because it fills whole inserted lines (the double-highlight that
   // made new code hard to read). !important beats merge's higher-specificity
@@ -181,11 +181,11 @@ export function buildDiffWordDeco(state: EditorState): DecorationSet {
 }
 
 /** GitHub-style word-level diff highlighting for the merge view in `DiffTab`.
- *  @codemirror/merge's built-in `highlightChanges` tints *every* changed span —
- *  including the whole of a brand-new line — which, with a filled highlight,
+ *  @codemirror/merge's built-in `highlightChanges` tints *every* changed span,
+ *  including the whole of a brand-new line, which, with a filled highlight,
  *  double-tints new code and hurts readability. This replaces it: pair with
  *  `highlightChanges: false` and it highlights only the characters that changed
- *  inside a modified line. Safe to include in any read-only view — it no-ops when
+ *  inside a modified line. Safe to include in any read-only view, it no-ops when
  *  the editor has no merge chunks. */
 export const diffWordHighlight: Extension = ViewPlugin.fromClass(
   class {

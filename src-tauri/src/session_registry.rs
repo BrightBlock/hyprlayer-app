@@ -3,7 +3,7 @@
 //! the registry knowing the harness. Session rows and event logs live in SQLite;
 //! this holds only the handles needed to talk to a live session.
 //!
-//! There is no concurrency cap — the number of simultaneous agent sessions is
+//! There is no concurrency cap, the number of simultaneous agent sessions is
 //! bounded only by the host's resources. Sessions across all projects share this
 //! one map, keyed by session id.
 
@@ -16,7 +16,7 @@ use tauri::async_runtime::JoinHandle;
 use tokio::sync::{oneshot, Mutex};
 
 /// A running forwarder task plus the trigger to stop it COOPERATIVELY. Aborting a
-/// forwarder mid-write only detaches the task — an in-flight `spawn_blocking` DB
+/// forwarder mid-write only detaches the task, an in-flight `spawn_blocking` DB
 /// append keeps running and could land after a rewind's cut, re-adding a dropped
 /// row. So a live rewind signals `shutdown` and awaits `join` (see
 /// [`SessionRegistry::stop_forwarder`]), draining any in-flight write first.
@@ -29,7 +29,7 @@ pub struct ForwarderHandle {
 /// actually launched with.
 struct LiveSession {
     driver: Arc<dyn AgentDriver>,
-    /// The mode the running claude process was launched with — `None` for
+    /// The mode the running claude process was launched with, `None` for
     /// OpenCode (which has no permission modes). claude binds its mode at launch
     /// and only changes it by relaunching, so this stays accurate for the life of
     /// the process. `resume_session` consults it to tell a stale re-attach (the
@@ -37,7 +37,7 @@ struct LiveSession {
     permission_mode: Option<PermissionMode>,
     /// The forwarder task draining this session's event stream into the DB + UI
     /// channel. Held so a live rewind can stop it and hand a fresh forwarder to a
-    /// new channel on the SAME process — the process stays alive, so the model's
+    /// new channel on the SAME process, the process stays alive, so the model's
     /// rewound memory survives (a kill + `--resume` would reload it from disk).
     forwarder: Option<ForwarderHandle>,
 }
@@ -76,7 +76,7 @@ impl SessionRegistry {
 
     /// Record (or replace) the forwarder task driving this session, so a later
     /// live rewind can [`stop_forwarder`](Self::stop_forwarder) it. Replacing an
-    /// existing handle aborts the old one — the only callers that replace an
+    /// existing handle aborts the old one, the only callers that replace an
     /// existing forwarder (resume/restart) kill the process first, so its old
     /// forwarder is already ending; a live rewind takes the handle out via
     /// `stop_forwarder` before wiring the new one, so it never hits this path.
@@ -89,7 +89,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Stop this session's forwarder COOPERATIVELY, without touching the driver —
+    /// Stop this session's forwarder COOPERATIVELY, without touching the driver,
     /// the process stays live. Signals shutdown and awaits the task so any
     /// in-flight DB write finishes before the caller mutates the log (e.g. a
     /// rewind's cut). A fresh forwarder is then wired via `set_forwarder`.
@@ -134,7 +134,7 @@ impl SessionRegistry {
 
     pub async fn remove(&self, id: &str) {
         self.live.lock().await.remove(id);
-        // Drop the op lock too — the session is gone, so nothing can still be
+        // Drop the op lock too, the session is gone, so nothing can still be
         // serializing against it (any op holding a clone keeps its own Arc alive).
         self.op_locks.lock().await.remove(id);
     }
@@ -145,8 +145,8 @@ impl SessionRegistry {
     }
 
     /// Best-effort synchronous teardown for app exit: kill every live agent so its
-    /// process tree doesn't outlive us. Mirrors [`TerminalRegistry::kill_all_blocking`]
-    /// — `try_lock` because the `RunEvent` exit handler has no async context, and
+    /// process tree doesn't outlive us. Mirrors [`TerminalRegistry::kill_all_blocking`],
+    /// `try_lock` because the `RunEvent` exit handler has no async context, and
     /// `AgentDriver::kill` is synchronous (SIGTERM to the process group / `taskkill
     /// /T`). On the rare lock miss, Windows still has the drivers' job objects
     /// (`process::spawn_supervised`); Unix has nothing, which is the case this
@@ -154,7 +154,7 @@ impl SessionRegistry {
     ///
     /// Detaching, not killing: quitting is the app's own bookkeeping, so the
     /// exits report `Detached` and persist nothing. Whether a forwarder wins the
-    /// race with the window teardown therefore doesn't matter — either way the
+    /// race with the window teardown therefore doesn't matter, either way the
     /// session replays clean and resumable, exactly as it did back when quitting
     /// orphaned these processes instead of ending them.
     pub fn kill_all_blocking(&self) {
@@ -176,7 +176,7 @@ mod tests {
     use std::time::{Duration, Instant};
     use tokio::sync::broadcast;
 
-    /// Counts each kind of kill separately — app-exit teardown must DETACH, not
+    /// Counts each kind of kill separately, app-exit teardown must DETACH, not
     /// kill, or every session logs a "Session ended" on the next launch.
     #[derive(Default)]
     struct Kills {
@@ -225,7 +225,7 @@ mod tests {
         reg
     }
 
-    /// Every live session goes down — as a DETACH, so quitting leaves the
+    /// Every live session goes down, as a DETACH, so quitting leaves the
     /// transcripts clean and the sessions resumable.
     #[tokio::test]
     async fn kill_all_blocking_detaches_every_live_session() {
@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(kills.hard.load(Ordering::SeqCst), 0);
     }
 
-    /// Runs on the exit path, so it must never block — not even with a wedged
+    /// Runs on the exit path, so it must never block, not even with a wedged
     /// child that will never drain from the registry.
     #[tokio::test]
     async fn kill_all_blocking_returns_promptly() {

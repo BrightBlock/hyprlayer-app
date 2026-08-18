@@ -38,7 +38,7 @@ fn session_not_found(id: &str) -> AppError {
     }
 }
 
-/// Kill a live session (if any) and wait — bounded — until its forwarder
+/// Kill a live session (if any) and wait, bounded, until its forwarder
 /// observes the exit and removes it from the registry. Shared by
 /// [`restart_session`] (so a relaunch can't race the still-dying process) and
 /// [`crate::commands::workstreams::archive_workstream`] (so archiving tears the
@@ -68,7 +68,7 @@ async fn live_driver(state: &AppState, session_id: &str) -> CmdResult<Arc<dyn Ag
         .ok_or_else(|| session_not_found(session_id))
 }
 
-/// Fetch a persisted session by id, or fail with the standard not-found error —
+/// Fetch a persisted session by id, or fail with the standard not-found error,
 /// the DB twin of [`live_driver`], shared by the commands that mutate a session.
 async fn load_session(state: &AppState, id: &str) -> CmdResult<Session> {
     let owned = id.to_string();
@@ -125,7 +125,7 @@ struct LaunchParams {
     channel: Channel<SessionEvent>,
 }
 
-/// Spawn the claude driver for a session and wire up its forwarder — the launch
+/// Spawn the claude driver for a session and wire up its forwarder, the launch
 /// pipeline shared by [`start_stage_session`] and [`resume_session`].
 async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc<dyn AgentDriver>> {
     let LaunchParams {
@@ -199,8 +199,8 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
 
             // Codex resumes by the thread id IT minted (recorded on `Init`),
             // not by our session id the way Claude does. A resume with no
-            // recorded thread id can only start a fresh one — the previous
-            // handshake never completed — but the transcript still replays
+            // recorded thread id can only start a fresh one, the previous
+            // handshake never completed, but the transcript still replays
             // from SQLite, so the UI looks continuous while the model has no
             // memory of it. Say so in the log rather than failing silently.
             let resume_thread = resume.then(|| session.claude_session_id.clone()).flatten();
@@ -213,7 +213,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             }
 
             // Rewind ordinals count every user turn in the session log, so a
-            // resumed driver has to start from that count rather than 0 —
+            // resumed driver has to start from that count rather than 0,
             // otherwise `thread/rollback` drops too few turns and still
             // reports the model forgot them. Only the resume path needs it;
             // a fresh thread genuinely starts at zero.
@@ -278,8 +278,8 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             launched_mode = Some(permission_mode);
 
             // The child inherits our env; we override PATH with the resolver's
-            // augmented PATH so it finds git/gh/etc, and — for enterprise "API
-            // key" auth — inject the Anthropic credentials/routing so the
+            // augmented PATH so it finds git/gh/etc, and, for enterprise "API
+            // key" auth, inject the Anthropic credentials/routing so the
             // spawned `claude` uses them instead of the user's logged-in session.
             let path = state.binaries.augmented_path().await;
             let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
@@ -350,7 +350,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
 #[serde(rename_all = "camelCase")]
 pub struct StartedSession {
     pub session: Session,
-    /// The composed first prompt WITHOUT the `Relevant documents:` suffix —
+    /// The composed first prompt WITHOUT the `Relevant documents:` suffix,
     /// attached docs render as pin cards in the echo, not as raw paths.
     pub prompt: String,
 }
@@ -403,7 +403,7 @@ async fn action_prompt_bodies(
         _ => return Default::default(),
     };
     let prompts = state.settings.get().await.prompts;
-    // A blank/whitespace-only override reads as unset — a user who cleared the
+    // A blank/whitespace-only override reads as unset, a user who cleared the
     // textarea (and navigated away) must still get the stock behaviour, never
     // an empty first turn.
     let Some(template) = prompts
@@ -484,10 +484,10 @@ pub async fn start_stage_session(
     };
 
     // Launch + first turn run in the BACKGROUND so this command returns as soon as
-    // the row and prompt exist — the frontend then paints the echoed prompt and the
+    // the row and prompt exist, the frontend then paints the echoed prompt and the
     // "Connecting to <harness>…" spinner immediately instead of blocking on a slow
     // launch. Codex handshakes (`initialize` + `thread/start`, ~1s) before its first
-    // turn; Claude/OpenCode already return fast. Outcomes — including a failure —
+    // turn; Claude/OpenCode already return fast. Outcomes, including a failure,
     // arrive as events over `on_event`.
     let err_channel = on_event.clone();
     let launch = LaunchParams {
@@ -502,7 +502,7 @@ pub async fn start_stage_session(
         channel: on_event,
     };
     tauri::async_runtime::spawn(async move {
-        // Re-acquire managed state off the command thread — AppState isn't `Clone`
+        // Re-acquire managed state off the command thread, AppState isn't `Clone`
         // (Mutex-guarded watchers), but the AppHandle lends it back.
         let state = app.state::<AppState>();
         match launch_session(&state, launch).await {
@@ -534,7 +534,7 @@ pub async fn start_stage_session(
 ///
 /// `/describe_pr` expands client-side only as a *leading* slash command, so it
 /// can't ride along in the opening prompt, and Ship's policy denies `Skill`, so
-/// it can't be invoked as a tool either — it has to be its own turn. Waits for
+/// it can't be invoked as a tool either. It has to be its own turn. Waits for
 /// the opening turn to finish, then sends it. A session that dies or is stopped
 /// first simply never fires it; a first turn that failed to open a PR sends it
 /// anyway, and the skill reports there's no PR rather than inventing one.
@@ -593,22 +593,22 @@ pub async fn resume_session(
     }
     .ok_or_else(|| session_not_found(&session_id))?;
 
-    // Already live (a race, an HMR/UI reload that dropped the frontend's channel
-    // while the backend process survived, or a session that never actually died).
-    // Normally we don't re-spawn — we just re-wire the caller's new channel to the
-    // running event stream so events flow again (without this the new channel gets
-    // nothing and the UI is pinned on "Connecting to claude…" forever even though
-    // the turn runs fine).
+    // Already live: a race, an HMR reload that dropped the frontend's channel
+    // while the process survived, or a session that never died. Normally we
+    // re-wire the caller's new channel to the running stream rather than
+    // re-spawn. Without that the channel gets nothing and the UI sits on
+    // "Connecting to claude…" while the turn runs fine.
     //
-    // BUT the reload may have outlived a permission-mode change: the tab now wants
-    // (say) bypass, while the survivor process still runs the mode it launched
-    // with. claude binds its mode at launch, so a silent re-attach would leave the
-    // UI badge advertising a mode the process isn't in — and because the frontend
-    // then believes the entry already holds the new mode, it never relaunches to
-    // fix it (the picker no-ops on "same mode"). So when the requested mode is
-    // resolvable AND differs from what's actually running, fall through to the
-    // relaunch path below (kill + `--resume` into the new mode, conversation
-    // preserved). Otherwise just re-wire.
+    // BUT the reload may have outlived a permission-mode change: the tab now
+    // wants bypass while the survivor still runs its launch mode. claude binds
+    // its mode at launch, so a silent re-attach leaves the badge advertising a
+    // mode the process isn't in. The frontend then believes the entry already
+    // holds the new mode and never relaunches, since the picker no-ops on
+    // "same mode".
+    //
+    // So when the requested mode is resolvable and differs from what is
+    // running, fall through to the relaunch path below (kill + `--resume`,
+    // conversation preserved). Otherwise re-wire.
     if let Some(driver) = state.sessions.get(&session_id).await {
         let requested = permission_mode;
         let running = state.sessions.permission_mode(&session_id).await;
@@ -672,12 +672,12 @@ pub async fn resume_session(
 /// Restart a *live* session into a new permission mode and/or model. Claude
 /// binds both its permission mode and its model at launch (a running session
 /// can't switch into `bypassPermissions`, nor swap models), so the UI applies
-/// such a change by relaunching the process. We do it atomically on the backend
-/// — kill the live driver, wait for it to actually exit (the forwarder drops it
+/// such a change by relaunching the process. We do it atomically on the backend,
+/// kill the live driver, wait for it to actually exit (the forwarder drops it
 /// from the registry on its `Exited`), then re-spawn with `--resume` and the new
-/// settings — so the frontend can't race the resume onto the still-dying old
+/// settings, so the frontend can't race the resume onto the still-dying old
 /// process (which would keep the old settings). `model`/`effort` are `None` for a
-/// mode-only restart — claude keeps the session's original model/effort when
+/// mode-only restart. Claude keeps the session's original model/effort when
 /// `--model`/`--effort` are omitted on `--resume`; pass them to switch the model
 /// mid-conversation. Conversation is preserved; the event log appends after its
 /// tail.
@@ -700,7 +700,7 @@ pub async fn restart_session(
     .ok_or_else(|| session_not_found(&session_id))?;
 
     // Kill the live process (if any) and wait until the forwarder removes it from
-    // the registry — i.e. it has truly exited — before we re-spawn, so the
+    // the registry, i.e. it has truly exited, before we re-spawn, so the
     // frontend can't race the resume onto the still-dying old process.
     kill_and_await_exit(&state, &session_id).await;
 
@@ -745,28 +745,24 @@ pub async fn restart_session(
     Ok(session)
 }
 
-/// Rewind a session to the N-th (1-based) user turn, discarding that turn and
-/// everything after it. Two paths:
+/// Rewind a session to the N-th (1-based) user turn, dropping that turn and
+/// everything after it. `user_turn` counts user bubbles (`userMessage` events).
 ///
-/// * **Live rewind (preferred).** If the session is live and its harness supports
-///   it, we ask the harness to truncate the model's in-memory conversation to this
-///   turn — claude's `rewind_conversation` control request
-///   (see [`ClaudeDriver::rewind_to_ordinal`]), Codex's `thread/rollback` — then
-///   keep that SAME process alive and hand its event stream to the caller's new
-///   channel (see [`live_rewind_handoff`]). The model genuinely forgets the dropped
-///   turns. We must NOT kill + resume here: claude's peel does not truncate its
-///   on-disk transcript, so a resume would reload the un-rewound history.
-/// * **Log-only fallback.** If the model rewind isn't available (session not live,
-///   OpenCode, a turn from before the current generation, the first turn, or a
-///   harness refusal) we kill + cut + resume: the UI/log truncate but the model
-///   keeps its memory. `permission_mode` re-applies the session's posture on this
-///   re-spawn (as [`resume_session`]/[`restart_session`] do) — `None` would drop a
-///   bypass session back to the stage default and start prompting again.
+/// Two paths:
 ///
-/// `user_turn` is the 1-based ordinal of the clicked user bubble (the N-th
-/// `userMessage` event). Returns the existing [`Session`] plus which path ran, so
-/// the caller can tell a TRUE rewind (the model forgot) from a log-only prune (it
-/// still recalls the dropped turns) instead of assuming success.
+/// * **Live rewind (preferred).** Ask the harness to truncate its in-memory
+///   conversation (claude's `rewind_conversation`, Codex's `thread/rollback`),
+///   then keep that SAME process and hand its stream to the caller's new
+///   channel. The model genuinely forgets. Do NOT kill + resume: claude leaves
+///   its on-disk transcript intact, so a resume reloads the dropped turns.
+/// * **Log-only fallback.** When live rewind isn't available (not live,
+///   OpenCode, a pre-generation or first turn, a harness refusal), kill + cut +
+///   resume. The log truncates but the model still remembers. Pass
+///   `permission_mode` so the re-spawn keeps the session's posture; `None`
+///   would drop a bypass session back to the stage default.
+///
+/// Returns the [`Session`] plus which path ran, so the caller can tell a true
+/// rewind from a log-only prune rather than assuming success.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RewindResult {
@@ -774,7 +770,7 @@ pub struct RewindResult {
     /// True when the harness's own conversation was truncated on the live process
     /// (the model genuinely forgot the dropped turns); false when we could only
     /// prune the app log (not live / OpenCode / a pre-generation or first turn / a
-    /// harness refusal) — the model still recalls them.
+    /// harness refusal), the model still recalls them.
     pub live_rewound: bool,
 }
 
@@ -791,13 +787,13 @@ pub async fn rewind_session(
     let session = load_session(&state, &session_id).await?;
 
     // Hold the session's op lock for the whole rewind so a concurrent `send_user_message`
-    // can't interleave a new prompt between the peel steps — the model would then
+    // can't interleave a new prompt between the peel steps, the model would then
     // receive a turn the cut below deletes from the log.
     let op = state.sessions.op_lock(&session_id).await;
     let _op_guard = op.lock().await;
 
     // Resolve the cutoff (the seq of the N-th userMessage). Everything at or
-    // after this seq is dropped — the target user turn is removed, so the
+    // after this seq is dropped, the target user turn is removed, so the
     // composer can re-send a (possibly edited) version of it.
     let cutoff = {
         let id = session.id.clone();
@@ -810,12 +806,12 @@ pub async fn rewind_session(
         remedy: None,
     })?;
 
-    // Preferred path: a TRUE rewind on the live process — the harness truncates
+    // Preferred path: a TRUE rewind on the live process, the harness truncates
     // the model's in-memory conversation to this turn and we keep the SAME process
     // alive (a kill + resume would reload its un-truncated transcript). Both
     // harnesses that support it only reach turns from the current live generation
     // (claude needs the turn's uuid, Codex counts the turns it streamed), so any
-    // miss — not live, OpenCode, a pre-resume turn, a refusal — is non-fatal and
+    // miss, not live, OpenCode, a pre-resume turn, a refusal, is non-fatal and
     // drops to the fallback.
     let live_rewound = if let Some(driver) = state.sessions.get(&session_id).await {
         match driver.rewind_to_ordinal(user_turn as usize).await {
@@ -881,7 +877,7 @@ pub async fn rewind_session(
             project_path: ws.project_path,
             model: None,
             effort: None,
-            // Preserve the session's current posture across the rewind relaunch —
+            // Preserve the session's current posture across the rewind relaunch,
             // otherwise `None` resolves to the stage default and a bypass session
             // starts prompting again (see the command doc).
             permission_mode,
@@ -909,15 +905,15 @@ pub async fn rewind_session(
     })
 }
 
-/// Keep the live process — whose model memory the peel already truncated — and
+/// Keep the live process, whose model memory the peel already truncated, and
 /// hand its event stream to the caller's new channel. The ordering is load-bearing:
 ///
-/// 1. **Subscribe the new receiver FIRST**, before stopping the old forwarder, so
+/// 1. **Subscribe the new receiver FIRST**: before stopping the old forwarder, so
 ///    an event the live process emits during the handoff (a final `TurnDone`, a
 ///    background-task update) is buffered for the replacement rather than dropped
-///    into a gap — a `broadcast` send with no receiver is lost.
+///    into a gap, a `broadcast` send with no receiver is lost.
 /// 2. **Stop the old forwarder cooperatively** (signal + join, not abort), so any
-///    in-flight `spawn_blocking` DB append finishes BEFORE the cut — an aborted
+///    in-flight `spawn_blocking` DB append finishes BEFORE the cut, an aborted
 ///    task's write can otherwise land after the cut and re-add a rewound row.
 /// 3. Cut the app log to `cutoff`, then spawn a fresh forwarder on the SAME driver
 ///    at the log's new tail, draining the receiver from step 1.
@@ -938,7 +934,7 @@ async fn live_rewind_handoff(
         .await
         .ok_or_else(|| session_not_found(&session.id))?;
 
-    // (1) Subscribe before we stop the old forwarder — no gap where a live event
+    // (1) Subscribe before we stop the old forwarder, no gap where a live event
     // has no receiver and is lost from both the UI and the log.
     let rx = driver.subscribe();
 
@@ -961,7 +957,7 @@ async fn live_rewind_handoff(
         .await;
     }
 
-    // Continue above whatever survives the cut — robust to any last event the old
+    // Continue above whatever survives the cut, robust to any last event the old
     // forwarder flushed before it stopped (a resumed forwarder must never reuse a
     // live seq). Any such event sits at seq >= cutoff and was just removed, so the
     // replacement re-persists it once from `rx`.
@@ -981,7 +977,7 @@ async fn live_rewind_handoff(
         workstream_id: session.workstream_id.clone(),
         rx,
         start_seq,
-        // Same process — keep its background tasks (see the `Rewound` event doc).
+        // Same process, keep its background tasks (see the `Rewound` event doc).
         boundary: Boundary::Rewound,
     });
     state.sessions.set_forwarder(&session.id, forwarder).await;
@@ -1070,8 +1066,8 @@ pub async fn kill_session(state: State<'_, AppState>, session_id: String) -> Cmd
 }
 
 /// Switch a live session's model so its next turn uses it (OpenCode sends a model
-/// per prompt, so it can change mid-session). A no-op when the session isn't live
-/// — the tab's selection still rides into a fresh session at launch — and for
+/// per prompt, so it can change mid-session). A no-op when the session isn't live,
+/// the tab's selection still rides into a fresh session at launch, and for
 /// Claude, whose model is fixed at launch (its driver ignores this).
 #[tauri::command]
 #[specta::specta]
@@ -1137,7 +1133,7 @@ pub async fn attach_session(
         }
     }
 
-    // Still live? Tail it (forward-only — the original forwarder owns
+    // Still live? Tail it (forward-only, the original forwarder owns
     // persistence and registry bookkeeping).
     if let Some(driver) = state.sessions.get(&session_id).await {
         tail_live(driver, on_event);
@@ -1149,7 +1145,7 @@ pub async fn attach_session(
 /// the owning forwarder still handles persistence, state, and registry
 /// bookkeeping. Stops at the first terminal event or once the UI channel closes.
 /// Shared by [`attach_session`] (after replaying the log) and [`resume_session`]
-/// when the backend session is still live — e.g. an HMR/UI reload dropped the
+/// when the backend session is still live, e.g. an HMR/UI reload dropped the
 /// frontend's channel but the claude process survived, so there's nothing to
 /// re-spawn; we just re-wire the new channel to the running stream.
 fn tail_live(driver: Arc<dyn AgentDriver>, on_event: Channel<SessionEvent>) {
@@ -1159,7 +1155,7 @@ fn tail_live(driver: Arc<dyn AgentDriver>, on_event: Channel<SessionEvent>) {
             match rx.recv().await {
                 Ok(event) => {
                     let terminal = matches!(event, SessionEvent::Exited { .. });
-                    // `UserMessage` is persist-only — the live UI already showed it
+                    // `UserMessage` is persist-only, the live UI already showed it
                     // optimistically when the user sent it, and the replayed log
                     // carries the earlier ones. Forwarding it here (on re-attach to
                     // a still-live session) would double-stamp the next turn, so we
@@ -1187,10 +1183,10 @@ fn tail_live(driver: Arc<dyn AgentDriver>, on_event: Channel<SessionEvent>) {
 /// the new boundary; they differ only in background-task handling.
 #[derive(Clone, Copy)]
 enum Boundary {
-    /// A NEW process took over (resume/restart/log-only rewind) — drop the dead
+    /// A NEW process took over (resume/restart/log-only rewind), drop the dead
     /// prior process's background tasks.
     Relaunched,
-    /// A live rewind truncated the SAME process in place — keep its background
+    /// A live rewind truncated the SAME process in place, keep its background
     /// tasks (they're still running and can still complete-notify).
     Rewound,
 }
@@ -1212,7 +1208,7 @@ struct ForwarderCtx {
     session_id: String,
     workstream_id: String,
     rx: broadcast::Receiver<SessionEvent>,
-    /// First persisted-event sequence number — 0 for a fresh session, or the
+    /// First persisted-event sequence number, 0 for a fresh session, or the
     /// existing event count when resuming (so the log appends, not collides).
     start_seq: i64,
     /// Which boundary marker to emit before the stream when `start_seq > 0`.
@@ -1287,7 +1283,7 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
         loop {
             // Cooperative stop: a signalled (or dropped) `shutdown` breaks the loop
             // at the next poll. Writes below the select are awaited to completion
-            // per iteration, so a stop can only land BETWEEN events — never leaving
+            // per iteration, so a stop can only land BETWEEN events, never leaving
             // a DB append in flight when `stop_forwarder`'s join returns.
             let event = tokio::select! {
                 biased;
@@ -1306,8 +1302,8 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
             // when the user sent it, so forwarding it would double-stamp the turn.
             let is_user_message = matches!(event, SessionEvent::UserMessage { .. });
 
-            // `PartialText` is the streaming live-typing delta; it is ephemeral —
-            // the coalesced `AssistantText` block is the durable record — so it is
+            // `PartialText` is the streaming live-typing delta; it is ephemeral,
+            // the coalesced `AssistantText` block is the durable record, so it is
             // never persisted, only forwarded. Skipping it removes a per-token
             // write storm. Usage pings stay persisted (tiny) so the context meter
             // survives a restart even when a turn was interrupted before its
@@ -1352,7 +1348,7 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                 SessionEvent::TurnDone { cost_usd, .. } => {
                     (RowWrite::TurnDone { cost: *cost_usd }, None, false)
                 }
-                // Terminal either way — the driver is gone, so the forwarder stops
+                // Terminal either way, the driver is gone, so the forwarder stops
                 // and the registry drops it. A detached exit just says so quietly:
                 // no row write, and no lifecycle emit (a relaunch announces its own
                 // `Running`, and a quit has nobody left to tell).
@@ -1377,7 +1373,7 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                 let _ = channel.send(event);
             }
 
-            // Persist + advance the session row off the async runtime — the core
+            // Persist + advance the session row off the async runtime, the core
             // store is blocking and the rest of the app already wraps it in
             // spawn_blocking; the forwarder was the one hot path still writing
             // inline. Awaited (not fire-and-forget) so appends keep their seq

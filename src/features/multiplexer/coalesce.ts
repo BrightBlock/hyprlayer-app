@@ -3,7 +3,7 @@
 //! A PTY can flip working↔blocked↔done several times between paints as chunks
 //! land. Committing each one would repaint the tab dot and recompute the sidebar
 //! rollup mid-frame (visible thrash). Instead we buffer the latest state per
-//! agent and flush once per animation frame — last-write-wins within the frame.
+//! agent and flush once per animation frame, last-write-wins within the frame.
 
 import type { AgentState } from "./engineState";
 

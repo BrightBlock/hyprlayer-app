@@ -4,7 +4,7 @@ import type { ThoughtsSyncState } from "./useThoughtsSync";
 
 /** Library-header mirror of `hyprlayer thoughts sync`; surfaces repo state and
  *  covers the gap between the Library's auto open/re-scope syncs. The icon flashes
- *  the verdict tone after each attempt — a quiet success is otherwise invisible. */
+ *  the verdict tone after each attempt, a quiet success is otherwise invisible. */
 export function ThoughtsSyncButton({ sync }: { sync: ThoughtsSyncState }) {
   if (sync.hidden) return null;
 
@@ -30,8 +30,8 @@ export function ThoughtsSyncButton({ sync }: { sync: ThoughtsSyncState }) {
           : noRemote
             ? "Thoughts repo has no remote to sync with"
             : pendingParts.length > 0
-              ? `${pendingParts.join(" · ")} — click to sync`
-              : "Thoughts synced — click to sync now";
+              ? `${pendingParts.join(" · ")}. Click to sync`
+              : "Thoughts synced. Click to sync now";
 
   const tone = failed ? "text-bad" : flash === "ok" ? "text-ok" : "text-ink-dim";
 

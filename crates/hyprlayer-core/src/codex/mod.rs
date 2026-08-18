@@ -15,7 +15,7 @@ pub use probe::{CodexAuthStatus, CodexModel, CodexProbe};
 ///
 /// Two app-servers starting at the same time interfere: one loses and exits
 /// without answering. Measured on Windows, roughly one collision per three
-/// concurrent pairs — enough that opening the Codex settings tab while a Codex
+/// concurrent pairs, enough that opening the Codex settings tab while a Codex
 /// chat starts would intermittently fail one of them.
 ///
 /// Held only across spawn + handshake, never for a session's lifetime, so a

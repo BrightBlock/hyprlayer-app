@@ -63,7 +63,7 @@ describe("KeyboardSettings", () => {
     const row = rowFor("Go to Library");
 
     fireEvent.click(within(row).getByText("Edit"));
-    // Alt+1 is Go to Dashboard's non-mac default — recording it here conflicts.
+    // Alt+1 is Go to Dashboard's non-mac default, recording it here conflicts.
     fireEvent.keyDown(window, { key: "1", altKey: true });
     expect(within(row).getByText(/Already used by Go to Dashboard/)).toBeTruthy();
   });

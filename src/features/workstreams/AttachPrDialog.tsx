@@ -21,7 +21,7 @@ function parsePrNumber(s: string): number | null {
  * The "Attach PR" picker (from the workstream context menu). Stays empty until
  * the user types: a PR number resolves to a single live preview (confirming it
  * exists before attaching), while free text searches the repo's open PRs. We
- * deliberately don't dump every open PR on open — that list can get long.
+ * deliberately don't dump every open PR on open, that list can get long.
  */
 export function AttachPrDialog({ target, onClose }: Props) {
   const id = target?.item.id ?? "";

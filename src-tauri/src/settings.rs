@@ -16,7 +16,7 @@ use crate::error::{AppError, CmdResult};
 
 /// User overrides for keyboard shortcuts. Surfaced in Settings → Keyboard.
 ///
-/// Only *overrides* live here — the per-OS defaults are owned by the frontend
+/// Only *overrides* live here, the per-OS defaults are owned by the frontend
 /// catalog so they can change without a settings migration. Keys are stable
 /// command ids (e.g. "nav.dashboard"); a `Some(chord)` is a custom binding,
 /// `None` means the command is explicitly unbound, and an absent key means
@@ -45,7 +45,7 @@ pub struct PromptSettings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CustomPrompt {
-    /// Stable id (uuid) — referenced by the palette, chips, and shortcuts.
+    /// Stable id (uuid), referenced by the palette, chips, and shortcuts.
     pub id: String,
     pub name: String,
     /// The global body.
@@ -61,7 +61,7 @@ pub struct CustomPrompt {
 }
 
 /// The Agents view's app-side state. The agent definitions themselves are the
-/// `.claude/agents/*.md` files — this holds only what those files have no key
+/// `.claude/agents/*.md` files. This holds only what those files have no key
 /// for, keyed by the agent's absolute path.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
@@ -75,8 +75,8 @@ pub struct AgentLibrarySettings {
     /// Whether an agent with no `category` and no legacy `overlay.folder`
     /// falls into a derived stage bucket. Off flattens those agents to loose.
     pub group_uncategorized: bool,
-    /// Folder names the user has collapsed in the list. A folder absent here —
-    /// including one that appears later — renders open.
+    /// Folder names the user has collapsed in the list. A folder absent here,
+    /// including one that appears later, renders open.
     pub closed_folders: Vec<String>,
 }
 
@@ -106,7 +106,7 @@ pub struct AppSettings {
     pub keybindings: KeybindingSettings,
     /// The prompt library: built-in prompt overrides + custom prompts.
     pub prompts: PromptSettings,
-    /// The agent library's app-side state — folders and the launch settings
+    /// The agent library's app-side state, folders and the launch settings
     /// claude's own agent frontmatter has no key for.
     pub agents: AgentLibrarySettings,
     /// Per-provider defaults (default model, etc.). Surfaced in Settings → Models.
@@ -117,24 +117,24 @@ pub struct AppSettings {
     pub quit: QuitSettings,
     /// Auto-generated agent tab titles (enable + which model). Settings → General.
     pub tab_titles: TabTitleSettings,
-    /// Multiplexer mode — run agents as native CLIs in persistent PTYs. Off by
+    /// Multiplexer mode, run agents as native CLIs in persistent PTYs. Off by
     /// default; with it off the app behaves exactly as before. Settings → Advanced.
     pub multiplexer: MultiplexerSettings,
     /// Developer tools (web inspector, PTY byte log, IPC trace). A Settings →
-    /// Advanced sibling row; reserved/off by default — nothing consumes it yet
+    /// Advanced sibling row; reserved/off by default, nothing consumes it yet
     /// (a stub like [`CodexSettings`], so the row can render and gain behaviour
     /// later without a settings migration).
     pub dev_tools: bool,
     /// The user dismissed the Full Disk Access explainer. macOS can't prompt for
-    /// that grant, so the notice is the only way to surface it — but once waved
+    /// that grant, so the notice is the only way to surface it, but once waved
     /// off it stays off.
     pub full_disk_access_notice_dismissed: bool,
 }
 
 /// Auto-generated agent-tab titles. When enabled, a new agent tab summarizes the
 /// user's first prompt into a short title via a small model. Surfaced in
-/// Settings → General. The model can be a Claude or Codex model, or — so
-/// opencode-only users are covered — one of their configured OpenCode models.
+/// Settings → General. The model can be a Claude or Codex model, or, so
+/// opencode-only users are covered, one of their configured OpenCode models.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TabTitleSettings {
@@ -145,7 +145,7 @@ pub struct TabTitleSettings {
     ///   `"claude:<flag>"`        → `claude -p --model <flag>` (empty flag = default)
     ///   `"opencode:<prov>/<id>"` → a one-shot OpenCode turn with that model
     ///   `"codex:<id>"`           → a one-shot ephemeral Codex turn
-    /// `None`/absent follows the default harness — see
+    /// `None`/absent follows the default harness, see
     /// [`TabTitleSettings::effective_model`].
     pub model: Option<String>,
 }
@@ -153,7 +153,7 @@ pub struct TabTitleSettings {
 /// Built-in default title model: cheap, fast Claude Haiku.
 pub const DEFAULT_TAB_TITLE_MODEL: &str = "claude:haiku";
 
-/// The Codex analogue of Haiku — its smallest, cheapest model, used when Codex is
+/// The Codex analogue of Haiku, its smallest, cheapest model, used when Codex is
 /// the default harness and the user hasn't picked a title model. Deliberately a
 /// fixed id rather than the user's configured Codex models: titling must work
 /// before anything is configured, and `selectedModels` only gates the composer's
@@ -174,8 +174,8 @@ impl TabTitleSettings {
     /// The effective model tag. An explicit pick always wins; otherwise the
     /// default follows the default harness, so a Codex-only user gets titles
     /// without a `claude` binary (and without being silently billed on Anthropic).
-    /// OpenCode has no equivalent fallback — which model is even available depends
-    /// on which providers the user keyed — so it stays an explicit choice.
+    /// OpenCode has no equivalent fallback, which model is even available depends
+    /// on which providers the user keyed, so it stays an explicit choice.
     pub fn effective_model<'a>(&'a self, providers: &ProviderSettings) -> &'a str {
         if let Some(explicit) = self.model.as_deref().filter(|m| !m.is_empty()) {
             return explicit;
@@ -239,9 +239,9 @@ pub struct ProviderSettings {
     pub default_harness: Option<String>,
     /// Anthropic Claude (the `claude` CLI).
     pub claude: ClaudeSettings,
-    /// OpenCode (the `opencode` CLI) — multi-provider harness.
+    /// OpenCode (the `opencode` CLI), multi-provider harness.
     pub opencode: OpenCodeSettings,
-    /// Ollama — local/remote model server, surfaced through the OpenCode harness.
+    /// Ollama, local/remote model server, surfaced through the OpenCode harness.
     pub ollama: OllamaSettings,
     /// OpenAI Codex (the `codex` CLI, driven via its app-server).
     pub codex: CodexSettings,
@@ -251,7 +251,7 @@ pub struct ProviderSettings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ClaudeSettings {
-    /// Default model key for new sessions — one of the composer's model keys
+    /// Default model key for new sessions, one of the composer's model keys
     /// (e.g. `"opus"`, `"sonnet"`) or a custom `--model` value. `None` keeps
     /// the built-in default (Opus).
     pub default_model: Option<String>,
@@ -259,7 +259,7 @@ pub struct ClaudeSettings {
     /// keeps the built-in default (High).
     pub default_effort: Option<String>,
     /// Model key for the Commit/Ship/Revise action agents when the default
-    /// harness is Claude — cheaper than the chat default since these stages are
+    /// harness is Claude, cheaper than the chat default since these stages are
     /// mechanical git/PR plumbing. `None` ⇒ `"sonnet"`.
     pub commit_model: Option<String>,
     /// Reasoning-effort key for the Commit/Ship/Revise action agents (Claude).
@@ -272,7 +272,7 @@ pub struct ClaudeSettings {
     /// presets, minus org-disabled rows); `Some(list)` shows exactly those keys
     /// (presets plus any custom model ids the user added).
     pub visible_models: Option<Vec<String>>,
-    /// Model keys the picker had already offered the last time it was open —
+    /// Model keys the picker had already offered the last time it was open,
     /// the watermark that lets a new model be added to a CURATED
     /// [`Self::visible_models`] without resurrecting one the user removed on
     /// purpose. `None` on an install that predates the check; the frontend then
@@ -281,8 +281,8 @@ pub struct ClaudeSettings {
 
     // --- Authentication (Settings → Harnesses → Claude Code). ---
     /// How `claude` authenticates: `"cli"` (subscription/login, the default and
-    /// historical behaviour — the spawned process inherits the user's env and
-    /// `~/.claude` state) or `"apiKey"` (enterprise — the app injects an API key
+    /// historical behaviour, the spawned process inherits the user's env and
+    /// `~/.claude` state) or `"apiKey"` (enterprise, the app injects an API key
     /// into the spawn env). `None`/absent is treated as `"cli"`.
     pub auth_mode: Option<String>,
     /// Anthropic API key, injected as `ANTHROPIC_API_KEY` at spawn when
@@ -295,21 +295,21 @@ pub struct ClaudeSettings {
     pub use_bedrock: bool,
     /// Route through Google Vertex (`CLAUDE_CODE_USE_VERTEX=1`).
     pub use_vertex: bool,
-    /// Enable the "Claude in Chrome" browser-control feature — adds `--chrome`
+    /// Enable the "Claude in Chrome" browser-control feature, adds `--chrome`
     /// at spawn so sessions can drive the connected Chrome extension.
     pub chrome_enabled: bool,
 
     // --- Not wired up yet (UI stubs; nothing consumes these). ---
-    /// Default model for in-app code reviews. Reserved — no review feature yet.
+    /// Default model for in-app code reviews. Reserved, no review feature yet.
     pub review_model: Option<String>,
     /// Default effort for in-app code reviews. Reserved.
     pub review_effort: Option<String>,
-    /// Start new sessions in fast mode. Reserved — not a `claude` spawn flag yet.
+    /// Start new sessions in fast mode. Reserved, not a `claude` spawn flag yet.
     pub default_fast_mode: bool,
 }
 
 /// OpenCode harness defaults (Settings → Harnesses → OpenCode). Provider API
-/// keys themselves are NOT stored here — they live in OpenCode's own
+/// keys themselves are NOT stored here, they live in OpenCode's own
 /// `auth.json` so the `opencode` CLI uses them natively (see `opencode::config`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
@@ -329,13 +329,13 @@ pub struct OpenCodeSettings {
 }
 
 /// Default Ollama base URL when none is configured. A local install isn't
-/// required — the endpoint may point at a remote host (e.g. `http://nexus:11434`).
+/// required, the endpoint may point at a remote host (e.g. `http://nexus:11434`).
 pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://localhost:11434";
 
 /// Ollama harness defaults (Settings → Harnesses → Ollama). Local models are run
 /// *through* the OpenCode harness: selecting one sets `harness=opencode` with an
 /// `"ollama/<model>"` model id. The provider definition (base URL + model list)
-/// is mirrored into OpenCode's `opencode.json` as a `provider.ollama` block —
+/// is mirrored into OpenCode's `opencode.json` as a `provider.ollama` block,
 /// see `hyprlayer_core::opencode::config::set_ollama_provider`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
@@ -388,7 +388,7 @@ impl OllamaSettings {
 }
 
 /// Codex harness defaults (Settings → Harnesses → Codex). Auth is NOT stored
-/// here — `codex login` owns it in `~/.codex`, and the app only reads the status.
+/// here, `codex login` owns it in `~/.codex`, and the app only reads the status.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CodexSettings {
@@ -399,7 +399,7 @@ pub struct CodexSettings {
     /// keeps the model's own default effort.
     pub default_effort: Option<String>,
     /// Model for the Commit/Ship/Revise action agents when the default harness is
-    /// Codex — these stages are mechanical git/PR plumbing, so a cheaper model
+    /// Codex, these stages are mechanical git/PR plumbing, so a cheaper model
     /// than the chat default is usually right. `None` ⇒ falls back to
     /// `default_model`, then the first selected model.
     pub commit_model: Option<String>,
@@ -408,7 +408,7 @@ pub struct CodexSettings {
     /// The model ids the user picked to expose in the composer's model picker.
     /// Empty = none chosen yet (the Codex tab prompts the user to add some).
     pub selected_models: Vec<String>,
-    /// Personality/style for new Codex chats. Reserved — `thread/start` takes a
+    /// Personality/style for new Codex chats. Reserved, `thread/start` takes a
     /// `personality`, but nothing sets it yet.
     pub personality: Option<String>,
 }
@@ -463,7 +463,7 @@ impl GitSettings {
 /// Multiplexer mode (Settings → Advanced). When enabled, a new agent tab
 /// launches a real CLI in a persistent PTY instead of the native chat, and the
 /// `+` on the agent tab strip lets the user pick which engine. The frontend is
-/// the only consumer — the backend just stores the config and (separately)
+/// the only consumer, the backend just stores the config and (separately)
 /// spawns the chosen command via `agent_open`.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
@@ -513,7 +513,7 @@ pub struct Engine {
     /// Single-glyph mark shown on the tab + in the menu (e.g. "✻", "◆", "✦").
     pub glyph: String,
     /// Theme custom-property *name* for the engine accent (e.g. `"--color-accent"`).
-    /// Never a raw hex — the frontend applies it as `var(<token>)` so it stays
+    /// Never a raw hex, the frontend applies it as `var(<token>)` so it stays
     /// theme-aware.
     pub accent_token: String,
     /// Executable to run, resolved on the user's login PATH (e.g. `"claude"`).
@@ -653,7 +653,7 @@ mod tests {
         }
     }
 
-    /// An explicit pick is never overridden by the harness default — switching the
+    /// An explicit pick is never overridden by the harness default, switching the
     /// default harness must not silently retarget a model the user chose.
     #[test]
     fn explicit_title_model_wins_over_the_harness_default() {
@@ -718,7 +718,7 @@ mod tests {
     #[test]
     fn settings_default_when_keybindings_absent() {
         // Old settings.json (no `keybindings` key) must deserialize with an
-        // empty overrides map — no migration needed.
+        // empty overrides map, no migration needed.
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(s.keybindings.overrides.is_empty());
     }
@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn notifications_default_on_with_sound() {
         // Old settings.json without the `notifications` key must default to
-        // enabled — the feature is opt-out, not opt-in.
+        // enabled, the feature is opt-out, not opt-in.
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(s.notifications.enabled);
         assert!(s.notifications.sound);
@@ -820,7 +820,7 @@ mod tests {
 
     #[test]
     fn quit_confirmation_defaults_on() {
-        // Old settings.json without the `quit` key must default to asking —
+        // Old settings.json without the `quit` key must default to asking,
         // the prompt is opt-out, and a silent quit kills running agents.
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(s.quit.confirm);
@@ -836,7 +836,7 @@ mod tests {
     #[test]
     fn multiplexer_defaults_off_with_builtins() {
         // Old settings.json without the `multiplexer` key must default OFF with
-        // the built-in engines seeded — the feature is strictly opt-in.
+        // the built-in engines seeded, the feature is strictly opt-in.
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(!s.multiplexer.enabled);
         assert_eq!(s.multiplexer.default_engine_id, "claude-code");
@@ -870,7 +870,7 @@ mod tests {
     #[test]
     fn agent_library_group_uncategorized_defaults_on() {
         // Old settings.json without the `agents` key, and one that has the key
-        // but omits `groupUncategorized`, must both default folders ON — an
+        // but omits `groupUncategorized`, must both default folders ON, an
         // uncategorized agent falls into its derived stage bucket rather than
         // going loose.
         let s: AppSettings = serde_json::from_str("{}").unwrap();
@@ -891,7 +891,7 @@ mod tests {
     #[test]
     fn prompts_default_empty_when_section_absent() {
         // Old settings.json (no `prompts` key) must deserialize with no
-        // overrides and no custom prompts — no migration needed.
+        // overrides and no custom prompts, no migration needed.
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(s.prompts.builtin_bodies.is_empty());
         assert!(s.prompts.custom.is_empty());

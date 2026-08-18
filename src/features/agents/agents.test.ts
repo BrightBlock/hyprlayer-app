@@ -150,7 +150,7 @@ describe("skills", () => {
     expect(skillEnabled(agent({ skills: ["research-codebase"] }), "research-codebase")).toBe(true);
   });
 
-  it("adds bare Skill once — never Skill(<name>) — to a pinned tool list", () => {
+  it("adds bare Skill once, never Skill(<name>), to a pinned tool list", () => {
     const a = agent({ tools: ["Read"], skills: [] });
     const on = setSkill(a, "research-codebase", true);
     expect(on.skills).toEqual(["research-codebase"]);
@@ -160,7 +160,7 @@ describe("skills", () => {
     expect(second.tools.filter((t) => t === "Skill")).toHaveLength(1);
   });
 
-  it("leaves Skill in place when the last skill is turned off — an explicit list is the user's", () => {
+  it("leaves Skill in place when the last skill is turned off, an explicit list is the user's", () => {
     const a = agent({ tools: ["Read", "Skill"], skills: ["research-codebase"] });
     const off = setSkill(a, "research-codebase", false);
     expect(off.skills).toEqual([]);
@@ -305,7 +305,7 @@ describe("visibleAgents", () => {
   });
 });
 
-/** `MUTED_DOT` in agents.ts — the colour a non-phase folder paints with. */
+/** `MUTED_DOT` in agents.ts, the colour a non-phase folder paints with. */
 const MUTED = "color-mix(in oklab, var(--color-ink-dim) 55%, transparent)";
 
 describe("agentRows", () => {
@@ -339,7 +339,7 @@ describe("agentRows", () => {
   });
 
   it("renders a folder absent from closedFolders open, including one that appears later", () => {
-    // Nothing has ever been collapsed (the set is empty) — a brand-new folder
+    // Nothing has ever been collapsed (the set is empty), a brand-new folder
     // must still default open rather than needing to be explicitly listed.
     const rows = rowsOf([loose, filed], new Set());
     const group = rows.find((r) => r.kind === "group");
@@ -439,7 +439,7 @@ describe("folderList", () => {
   });
 
   it("keeps a persisted folder that is named like a phase", () => {
-    // Creating "Build" while nothing is filed in it must still list it —
+    // Creating "Build" while nothing is filed in it must still list it,
     // otherwise the create dialog accepts a name that never appears.
     expect(folderList([], library({ folders: ["Build"] }), true)).toEqual(["Build"]);
   });

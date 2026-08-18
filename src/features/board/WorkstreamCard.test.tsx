@@ -134,7 +134,7 @@ describe("WorkstreamCard", () => {
     expect(screen.queryByText("feature/my-test")).toBeNull();
   });
 
-  it("drops the off-base badge while detached — it reads the stale stored branch", () => {
+  it("drops the off-base badge while detached, it reads the stale stored branch", () => {
     const view = makeView({
       worktreeMode: "inplace",
       branch: "feature/agent-made-this",

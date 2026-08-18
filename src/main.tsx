@@ -40,7 +40,7 @@ setupNotificationActions();
 // Route React Query's focus refetch through Tauri's window-focus signal (the
 // WKWebview doesn't emit the browser focus event on app switches).
 setupQueryFocus();
-// Stop the looping animations while the app is in the background — a WebKitGTK
+// Stop the looping animations while the app is in the background, a WebKitGTK
 // window keeps painting off-screen, and painting one is not cheap.
 setupMotionGate();
 

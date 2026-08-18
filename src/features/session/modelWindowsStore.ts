@@ -7,7 +7,7 @@
  *
  * Best-effort by design: a failed fetch (offline, logged out, no API key, denied
  * Keychain access) leaves the map empty and the meter falls back to the static
- * table — so the app never depends on this succeeding. The fetch fires lazily on
+ * table, so the app never depends on this succeeding. The fetch fires lazily on
  * first use (see [`useModelWindowMap`]) rather than at launch, so the one-time
  * macOS Keychain access prompt lands when a session actually needs the meter, not
  * on every cold start.

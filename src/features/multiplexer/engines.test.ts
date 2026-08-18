@@ -21,7 +21,7 @@ const eng = (id: string, args: string[] = []): ResolvedEngine => ({
 
 const ID = "11111111-1111-4111-8111-111111111111";
 
-describe("relaunchArgs — assign-mode engines (Claude, Gemini)", () => {
+describe("relaunchArgs, assign-mode engines (Claude, Gemini)", () => {
   it("Claude pins the id fresh and resumes it by id", () => {
     const claude = eng("claude-code");
     expect(relaunchArgs(claude, { sessionId: ID, resume: false, bypass: false })).toEqual([
@@ -61,7 +61,7 @@ describe("relaunchArgs — assign-mode engines (Claude, Gemini)", () => {
   });
 });
 
-describe("relaunchArgs — exec-mint (Codex) + capture (Antigravity)", () => {
+describe("relaunchArgs, exec-mint (Codex) + capture (Antigravity)", () => {
   it("Codex resumes its (minted) id via the `resume` subcommand, fresh or resume", () => {
     const codex = eng("codex");
     // The id is minted before launch, so even a "fresh" launch resumes it.
@@ -101,7 +101,7 @@ describe("relaunchArgs — exec-mint (Codex) + capture (Antigravity)", () => {
   });
 });
 
-describe("relaunchArgs — base args + unknown engines", () => {
+describe("relaunchArgs, base args + unknown engines", () => {
   it("prepends the engine's own base args", () => {
     expect(
       relaunchArgs(eng("claude-code", ["--mcp-config", "x"]), { sessionId: ID, resume: true, bypass: false }),

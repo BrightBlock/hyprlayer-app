@@ -1,5 +1,5 @@
 //! In-memory index of every markdown document across the thoughts roots.
-//! PUBLIC API IS FROZEN — the Tauri shell builds against it. Scan/query methods
+//! PUBLIC API IS FROZEN, the Tauri shell builds against it. Scan/query methods
 //! are synchronous; async callers wrap them in `spawn_blocking`. Personal-corpus
 //! scale (see `search.rs`).
 
@@ -36,7 +36,7 @@ const MAX_SCAN_DEPTH: usize = 12;
     rename_all_fields = "camelCase"
 )]
 pub enum Area {
-    /// `<repos|global>/<…>/<user>/…` — a specific user's documents.
+    /// `<repos|global>/<…>/<user>/…`, a specific user's documents.
     User { name: String },
     /// `<repos|global>/<…>/shared/…`.
     Shared,
@@ -49,7 +49,7 @@ pub enum Area {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DocMeta {
-    /// Absolute path string — the canonical unique id.
+    /// Absolute path string, the canonical unique id.
     pub id: String,
     /// Path relative to its root, `/`-separated on every platform.
     pub rel_path: String,
@@ -131,7 +131,7 @@ pub struct ScanStats {
 }
 
 /// One indexed document: metadata plus the change-detection hash. No body
-/// text is resident — a text query reads and scores bodies fresh from disk
+/// text is resident, a text query reads and scores bodies fresh from disk
 /// (see `read_body_for_search`), so memory stays flat with corpus size.
 #[derive(Debug)]
 struct DocRecord {
@@ -151,7 +151,7 @@ impl ThoughtsIndex {
     }
 
     /// Walk every root and rebuild the index entries under them (entries
-    /// belonging to other roots are preserved). Synchronous by design —
+    /// belonging to other roots are preserved). Synchronous by design,
     /// callers use `spawn_blocking`.
     pub fn full_scan(&self, roots: &[ThoughtsRoot]) -> ScanStats {
         let mut stats = ScanStats::default();
@@ -218,12 +218,12 @@ impl ThoughtsIndex {
     /// unreadable, or the change basis is unchanged.
     ///
     /// Change basis: the frontmatter prefix hash plus file size. mtime is
-    /// deliberately excluded — a bare touch that rewrites identical bytes
+    /// deliberately excluded, a bare touch that rewrites identical bytes
     /// (`git checkout`, `hyprlayer thoughts sync`) must not emit an update
     /// event, which is the property the old whole-file hash provided and
     /// PR #221 cared about. When only mtime moved, the stored record is
     /// still refreshed (so mtime-sorted lists and the Dashboard's
-    /// most-recent window stay accurate) but silently — `None` is returned,
+    /// most-recent window stay accurate) but silently, `None` is returned,
     /// no event fires. Accepted gap: a body edit past the frontmatter prefix
     /// cap that preserves file size refreshes the record silently too (see
     /// the plan's accepted divergences).
@@ -247,7 +247,7 @@ impl ThoughtsIndex {
             })
         };
         match stored {
-            // Nothing moved at all — skip without rebuilding.
+            // Nothing moved at all, skip without rebuilding.
             Some((true, stored_mtime)) if stored_mtime == mtime_ms => return None,
             // Only the mtime moved. Refresh the record so mtime-sorted lists
             // and the Dashboard's most-recent window stay accurate, but
@@ -285,7 +285,7 @@ impl ThoughtsIndex {
     /// Drop every indexed document whose file no longer exists on disk.
     /// The watcher runs this on create/rename batches: macOS FSEvents can
     /// replay a stale `Create` flag on a rename source, which makes the
-    /// debouncer swallow the rename-out event entirely — the swept file is
+    /// debouncer swallow the rename-out event entirely, the swept file is
     /// the only trace left. Returns the removed ids.
     pub(crate) fn remove_missing(&self) -> Vec<String> {
         let ids: Vec<String> = {
@@ -328,7 +328,7 @@ impl ThoughtsIndex {
         let matcher = search::TextMatcher::new(search::parse_needles(q.text.as_deref()));
         let has_text = matcher.is_some();
 
-        // Pass 1 — filter under the read lock. No I/O here, matching the
+        // Pass 1, filter under the read lock. No I/O here, matching the
         // convention `resolve_id` and `remove_missing` already follow.
         let candidates: Vec<Arc<DocRecord>> = {
             let map = self.records.read().expect("index lock poisoned");
@@ -338,7 +338,7 @@ impl ThoughtsIndex {
                 .collect()
         };
 
-        // Pass 2 — body I/O and scoring, lock released. Bodies are read only
+        // Pass 2, body I/O and scoring, lock released. Bodies are read only
         // when the query carries text, so metadata-only queries (the
         // Dashboard graph, unfiltered library lists) still touch no files.
         let mut matched: Vec<(Arc<DocRecord>, u32)> = Vec::with_capacity(candidates.len());
@@ -429,7 +429,7 @@ impl ThoughtsIndex {
         for comp in rel.components() {
             match comp {
                 Component::Normal(os) => comps.push(os.to_str()?),
-                // `..`/`/` inside the relative part — refuse to classify.
+                // `..`/`/` inside the relative part, refuse to classify.
                 _ => return None,
             }
         }
@@ -497,7 +497,7 @@ fn read_capped_prefix(abs: &Path, cap: usize) -> Option<Vec<u8>> {
 /// Frontmatter-stripped body bytes for search, read fresh from disk and
 /// capped so one pathological file cannot stall a query (the disk-side
 /// counterpart of `BODY_SEARCH_CAP`). `None` when the file is gone or
-/// unreadable — a doc removed between the two query passes simply drops
+/// unreadable, a doc removed between the two query passes simply drops
 /// out, consistent with `remove_missing`'s tolerance for vanished files.
 fn read_body_for_search(abs: &Path) -> Option<Vec<u8>> {
     let mut buf = read_capped_prefix(abs, FRONTMATTER_READ_CAP + BODY_SEARCH_CAP)?;
@@ -522,7 +522,7 @@ fn mtime_ms_from(meta: &std::fs::Metadata) -> f64 {
 
 /// Build a [`DocRecord`] from the caller's already-obtained `Metadata` and a
 /// (possibly frontmatter-only) prefix of the file's bytes. `size_bytes` and
-/// `mtime_ms` come from `meta` — no separate stat — and `content_hash` is
+/// `mtime_ms` come from `meta`, no separate stat, and `content_hash` is
 /// over `prefix`, not the whole file. `frontmatter::parse` is tolerant by
 /// contract, so a prefix that cuts off before the closing `---` degrades to
 /// `Frontmatter::default()` + path fallbacks + a warning, the same shape as
@@ -569,7 +569,7 @@ fn build_record(
 }
 
 /// Build a best-effort [`DocMeta`] for a markdown document that is **not** part
-/// of any thoughts root — e.g. a plan Claude wrote under `~/.claude/plans/`.
+/// of any thoughts root, e.g. a plan Claude wrote under `~/.claude/plans/`.
 ///
 /// Such docs are surfaced in a workstream's Changes panel (any `.md` an agent
 /// `Write`s under a `plans`/`research`/`handoffs` dir) but live outside the

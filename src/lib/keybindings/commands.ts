@@ -1,11 +1,11 @@
 /**
- * The keyboard-command catalog — the single source of truth for every bindable
+ * The keyboard-command catalog, the single source of truth for every bindable
  * operation, its per-OS default chord, and the context in which it's available.
  *
  * Defaults live here (not in the backend) so they can evolve per-OS without a
  * settings migration: a user who hasn't overridden a command always tracks the
  * catalog. Chords use the abstract `mod` modifier, which formats and matches as
- * ⌘ on macOS and Ctrl elsewhere — so the per-OS pair is usually identical, but
+ * ⌘ on macOS and Ctrl elsewhere, so the per-OS pair is usually identical, but
  * the structure still lets a single command diverge a default later.
  */
 
@@ -19,13 +19,13 @@ export type CommandCategory =
   | "Session"
   | "Library";
 
-/** Where a command is available — informational, and drives UI grouping. It is
+/** Where a command is available, informational, and drives UI grouping. It is
  *  NOT the runtime gate: whether a handler is registered (see `registry.ts`) is
  *  the real context predicate. */
 export type CommandWhen = "always" | "project" | "workstream" | "session";
 
 export type CommandDef = {
-  /** Stable id, persisted in settings overrides — never rename. */
+  /** Stable id, persisted in settings overrides, never rename. */
   id: string;
   label: string;
   category: CommandCategory;
@@ -132,7 +132,7 @@ export const COMMANDS: CommandDef[] = [
     category: "View",
     when: "workstream",
     // Only registered while a markdown file is open in the file viewer (see
-    // FileViewerTab) — inert everywhere else via the registry's context gate.
+    // FileViewerTab), inert everywhere else via the registry's context gate.
     defaults: { mac: "mod+shift+v", other: "mod+shift+v" },
   },
   // Workspace
@@ -170,7 +170,7 @@ export const COMMANDS: CommandDef[] = [
     when: "project",
     // Safari's ⌘⇧T. Restores the most recently archived agent, so it undoes a ⌘W
     // (or an × click) but not a ⌘⇧W, which ended the session for good. Inert with
-    // an empty archive — no handler is registered, so the keystroke passes through.
+    // an empty archive, no handler is registered, so the keystroke passes through.
     defaults: { mac: "mod+shift+t", other: "mod+shift+t" },
   },
   {
@@ -187,8 +187,8 @@ export const COMMANDS: CommandDef[] = [
     when: "project",
     // Cycle agent tabs the way every browser/editor does: the *literal* Control
     // key, not the `mod` abstraction. On macOS that's `ctrl+tab` (⌘Tab is the OS
-    // app switcher — reserved). Elsewhere physical Ctrl maps to `mod`, so Ctrl+Tab
-    // would be `mod+tab` — also reserved — so the non-mac default uses the other
+    // app switcher, reserved). Elsewhere physical Ctrl maps to `mod`, so Ctrl+Tab
+    // would be `mod+tab`, also reserved, so the non-mac default uses the other
     // standard tab-cycle chord, Ctrl+PageDown.
     defaults: { mac: "ctrl+tab", other: "mod+pagedown" },
     // Safari's second spelling. Only matchable because `keyToken` folds the
@@ -250,7 +250,7 @@ export const COMMANDS: CommandDef[] = [
     // Plan → Implement → Validate, wrapping) before it starts; once the session
     // is running the stage is fixed at spawn, so it's inert. Bare Shift+Tab has
     // no primary modifier, so the composer textarea handles it directly (the
-    // global dispatcher's editable-target guard ignores it there) — see
+    // global dispatcher's editable-target guard ignores it there), see
     // SessionChat's onKeyDown.
     defaults: { mac: "shift+tab", other: "shift+tab" },
   },

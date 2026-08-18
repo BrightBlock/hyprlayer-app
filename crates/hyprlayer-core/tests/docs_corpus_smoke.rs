@@ -1,5 +1,5 @@
 //! Smoke test against the real thoughts corpus, when present on this machine.
-//! Skips silently elsewhere (CI) — the in-module unit tests carry coverage.
+//! Skips silently elsewhere (CI), the in-module unit tests carry coverage.
 //!
 //! The corpus location comes from this machine's hyprlayer config (every
 //! filesystem-backed root it configures), falling back to `~/thoughts` when
@@ -72,7 +72,7 @@ async fn corpus_parses_and_noop_patch_is_identity() {
     );
     for path in &files {
         let Ok(content) = std::fs::read_to_string(path) else {
-            continue; // non-UTF8 etc. — out of scope
+            continue; // non-UTF8 etc., out of scope
         };
         let parsed = frontmatter::parse(&content); // must never panic
         let _ = &parsed.fm;

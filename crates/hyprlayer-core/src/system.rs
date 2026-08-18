@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub enum FullDiskAccess {
     Granted,
     /// The probe returned EPERM. Either the grant was never added, or it was
-    /// recorded against a code signature this build no longer matches — in
+    /// recorded against a code signature this build no longer matches, in
     /// which case System Settings still shows the toggle on while every gated
     /// read fails.
     Denied,
@@ -31,7 +31,7 @@ fn classify(path: &Path) -> FullDiskAccess {
 
 /// Probe for Full Disk Access.
 ///
-/// macOS never prompts for this grant — it can only be added by hand in System
+/// macOS never prompts for this grant. It can only be added by hand in System
 /// Settings, and a process without it just gets EPERM. So the app has to detect
 /// the absence itself. Without it, CLIs the app hosts in PTYs (`op`, and
 /// anything else reaching another app's container) trip the promptable
@@ -75,7 +75,7 @@ mod tests {
         );
     }
 
-    /// EPERM — the state a stale or absent grant produces.
+    /// EPERM, the state a stale or absent grant produces.
     #[cfg(unix)]
     #[test]
     fn unreadable_file_is_denied() {

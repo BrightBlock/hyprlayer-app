@@ -1,7 +1,7 @@
 /**
  * The tab pill's title text, with a one-shot typewriter reveal when the title
- * was just auto-generated (see [`generateTabTitle`]). Every other title change —
- * manual rename, switching tabs, restore from the log, reduced-motion users —
+ * was just auto-generated (see [`generateTabTitle`]). Every other title change,
+ * manual rename, switching tabs, restore from the log, reduced-motion users,
  * renders instantly. The "animate" signal is claimed once via
  * [`consumeTabTitleAnimation`], so it never replays on remount.
  */
@@ -41,7 +41,7 @@ export function TabTitle({
     // React StrictMode double-invokes effects (setup→cleanup→setup); a bare
     // consume here would be claimed-then-cancelled on the first pass and the
     // typewriter would never play. Cancelling the frame in cleanup means only the
-    // surviving pass consumes — exactly once. (Mirrors SessionChat's composer-
+    // surviving pass consumes, exactly once. (Mirrors SessionChat's composer-
     // focus effect.)
     const raf = requestAnimationFrame(() => {
       // Consume first (always clears the signal), then decide whether to animate.

@@ -29,10 +29,10 @@ type Props = {
 };
 
 /**
- * Streams one script run into an xterm view — either attaching to a live PTY or
+ * Streams one script run into an xterm view, either attaching to a live PTY or
  * spawning a fresh one via `script_run`. Reuses the same engine as
  * {@link TerminalTab}; trimmed of zoom/live-theme/focus-repaint (the run log
- * self-heals on the next output). Unmounting never kills the PTY — collapsing the
+ * self-heals on the next output). Unmounting never kills the PTY, collapsing the
  * dock keeps a Run alive (the rail's green dot is the signal); teardown is the
  * backend's job (Stop, archive, or app exit).
  */
@@ -65,7 +65,7 @@ export function ScriptRunView({
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engineRef.current = engine;
     engine.mount(host);
-    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS, the emulator has no copy
     // path of its own there (see attachTerminalClipboard).
     attachTerminalClipboard(engine);
     let lastGrid = engine.fit();
@@ -75,7 +75,7 @@ export function ScriptRunView({
     let id: string | undefined = attachRef.current ?? undefined;
     // A non-null attachId means we were handed an existing run to re-attach to
     // (▶ always passes null and spawns fresh). If that PTY is gone the run has
-    // already exited — fall back to its captured output, never spawn a new one.
+    // already exited, fall back to its captured output, never spawn a new one.
     const reattaching = id != null;
 
     const newChannel = (): Channel<TerminalEvent> => {
@@ -84,7 +84,7 @@ export function ScriptRunView({
         if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
         else if (ev.kind === "exited") {
           // `\x1b[?25l` hides the cursor: the finished run is a read-only log, not
-          // a live prompt (the dead PTY ignores input anyway — a blinking cursor
+          // a live prompt (the dead PTY ignores input anyway, a blinking cursor
           // would just imply you can type into it).
           engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n\x1b[?25l");
           onExitRef.current?.();
@@ -122,7 +122,7 @@ export function ScriptRunView({
           id = opened;
           onStartedRef.current?.(opened);
         } catch (e) {
-          // `unwrap` throws the AppError envelope — a plain object, so a bare
+          // `unwrap` throws the AppError envelope, a plain object, so a bare
           // String(e) renders "[object Object]". Read it through the helpers,
           // and surface the backend's remedy when it supplied one.
           const remedy = errorRemedy(e);
@@ -174,8 +174,8 @@ export function ScriptRunView({
   }, [workstreamId, gen]);
 
   // Clear: wipe screen + scrollback, leaving the PTY (and its stream) untouched.
-  // Seeded from the current nonce so neither mount nor a `gen` remount — which
-  // already starts from a blank engine — counts as a clear.
+  // Seeded from the current nonce so neither mount nor a `gen` remount, which
+  // already starts from a blank engine, counts as a clear.
   const appliedClear = useRef(clearNonce);
   useEffect(() => {
     if (clearNonce === appliedClear.current) return;

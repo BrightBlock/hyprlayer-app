@@ -49,7 +49,7 @@ pub async fn terminal_open(
 
     let session = PtySession::spawn(SpawnTerminal {
         shell: default_shell(),
-        // Login shell (like Terminal.app/iTerm): sources the full profile chain
+        // Login shell: sources the full profile chain
         // (`~/.zprofile`/`~/.zlogin`/`~/.zshrc`) so it matches the user's shell.
         args: vec!["-l".to_string()],
         cwd: PathBuf::from(&ws.worktree_path),
@@ -75,7 +75,7 @@ pub async fn terminal_open(
 }
 
 /// Attach to an existing PTY: replay scrollback then tail live output. Returns
-/// `false` if the PTY is gone (e.g. after restart) — caller opens a fresh one.
+/// `false` if the PTY is gone (e.g. after restart), caller opens a fresh one.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_attach(
@@ -180,7 +180,7 @@ pub async fn spawn_cli_terminal(
 
 /// Open a PTY running a single command line through the user's login shell in
 /// the home dir. Used by Harnesses settings for interactive non-CLI flows (e.g.
-/// `claude auth login`, the OpenCode installer) — run as if the user typed it.
+/// `claude auth login`, the OpenCode installer), run as if the user typed it.
 #[tauri::command]
 #[specta::specta]
 pub async fn spawn_shell_terminal(
@@ -306,7 +306,7 @@ pub async fn agent_resize(
 
 /// Read back the conversation id a "capture-mode" CLI (Codex/Antigravity, which
 /// auto-generate ids unlike Claude/Gemini) assigned itself, by scanning its
-/// on-disk store — launched fresh, then resumed by this id.
+/// on-disk store, launched fresh, then resumed by this id.
 ///
 /// Returns the newest session created after `after_ms` (epoch ms, the tab's
 /// launch) not already claimed (`exclude`); for Codex it must also match this
@@ -363,7 +363,7 @@ pub async fn mint_codex_session(
     let path = state.binaries.augmented_path().await;
     let worktree = PathBuf::from(&ws.worktree_path);
     let path = path.to_string_lossy().into_owned();
-    // Bound the probe: a hung CLI (auth/network) must not block the tab forever —
+    // Bound the probe: a hung CLI (auth/network) must not block the tab forever,
     // time out to None and let the caller fall back. The orphaned probe exits on
     // its own once its turn ends.
     let id = tokio::time::timeout(
@@ -377,10 +377,10 @@ pub async fn mint_codex_session(
     Ok(id)
 }
 
-/// Whether `session_id` is actually persisted in `engine_id`'s on-disk store —
+/// Whether `session_id` is actually persisted in `engine_id`'s on-disk store,
 /// the authoritative resume gate. A pinned-but-never-used id has no file yet, so
 /// resuming would exit "No conversation found"; this lets the caller launch fresh.
-/// Unknown engines (Gemini, custom) return false — caller uses its own heuristic.
+/// Unknown engines (Gemini, custom) return false, caller uses its own heuristic.
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_session_exists(
@@ -406,7 +406,7 @@ pub async fn agent_session_exists(
 }
 
 /// Build the single command line handed to [`login_shell_args`] for an engine.
-/// On unix we `exec` the program so the CLI inherits the login shell's PID —
+/// On unix we `exec` the program so the CLI inherits the login shell's PID,
 /// then Ctrl-C and the process-group kill on close hit the CLI directly. Windows
 /// PowerShell has no `exec`; the program runs as a child via the call operator
 /// (`&`), and the registry still tears it down by process group.
@@ -453,7 +453,7 @@ fn mtime_ms(path: &Path) -> Option<f64> {
 
 /// `(path, mtime_ms)` for every `*.jsonl` under `dir` (bounded depth) whose mtime
 /// is at or after `cutoff_ms`. Stats are cheap and the cutoff is recent, so only a
-/// handful survive — the caller reads contents for just those.
+/// handful survive, the caller reads contents for just those.
 fn recent_jsonl(dir: &Path, max_depth: usize, cutoff_ms: f64) -> Vec<(PathBuf, f64)> {
     fn walk(dir: &Path, depth: usize, cutoff: f64, out: &mut Vec<(PathBuf, f64)>) {
         if depth == 0 {
@@ -540,7 +540,7 @@ fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<Str
         .ok()?;
     let mut id = None;
     if let Some(stdout) = child.stdout.take() {
-        // Drain to EOF — let the seed turn finish and the process exit — so the
+        // Drain to EOF, let the seed turn finish and the process exit, so the
         // session is persisted *complete*. Killing mid-turn leaves it "interrupted",
         // which codex then surfaces on resume. The id is the first event.
         for line in std::io::BufReader::new(stdout)
@@ -634,7 +634,7 @@ fn capture_antigravity(after_ms: f64, exclude: &[String]) -> Option<String> {
     best.map(|(_, id)| id)
 }
 
-/// Replay scrollback then forward live output — the shared open/attach path.
+/// Replay scrollback then forward live output, the shared open/attach path.
 /// Snapshots scrollback and subscribes atomically (see
 /// [`PtySession::subscribe_with_scrollback`]) so no output is lost or duplicated
 /// across the handoff, then streams the rest onto the UI channel.
@@ -691,7 +691,7 @@ pub(crate) fn default_shell() -> PathBuf {
 
 #[cfg(windows)]
 pub(crate) fn default_shell() -> PathBuf {
-    // Windows has no `$SHELL`, and the Unix `/bin/sh` fallback doesn't exist —
+    // Windows has no `$SHELL`, and the Unix `/bin/sh` fallback doesn't exist,
     // it would fail to spawn and leave the terminal blank. Prefer PowerShell 7
     // (`pwsh`), fall back to the built-in Windows PowerShell, then `%ComSpec%`
     // (cmd.exe). Resolved to a full path so the PTY's CreateProcess doesn't
@@ -703,7 +703,7 @@ pub(crate) fn default_shell() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("powershell.exe"))
 }
 
-/// The default shell's display name — its file stem (e.g. "zsh", "bash", "pwsh",
+/// The default shell's display name, its file stem (e.g. "zsh", "bash", "pwsh",
 /// "powershell", "cmd"). Labels the dock's ad-hoc terminal tabs by the shell they
 /// actually spawn, instead of a hardcoded guess.
 #[tauri::command]

@@ -1,24 +1,22 @@
-// In-app self-update state. One place that knows whether a newer Hyprlayer
-// exists and how to install it. The Rust updater plugin fetches the
-// ed25519-signed manifest from brightblock.ai/hyprlayer/updates/latest.json,
-// verifies it against the public key baked into the bundle, and
-// downloadAndInstall() swaps the app in place — then relaunch() restarts into
-// the new version.
+// In-app self-update state: whether a newer Hyprlayer exists and how to install
+// it. The Rust updater plugin fetches the ed25519-signed manifest from
+// brightblock.ai/hyprlayer/updates/latest.json and verifies it against the
+// bundled public key. downloadAndInstall() swaps the app in place; relaunch()
+// restarts into the new version.
 //
-// Linux is notify-only. Every Linux install is a distro package (AUR, .deb,
-// .rpm) that pacman/apt/dnf owns, so nothing may write over /usr/bin — the
-// release manifest carries no linux-x86_64 key at all, and version discovery
-// comes from changelog.json instead. See docs/RELEASING.md.
+// Linux is notify-only. Every Linux install is a distro package owned by
+// pacman/apt/dnf, so nothing may write over /usr/bin. The manifest carries no
+// linux-x86_64 key, and version discovery comes from changelog.json instead.
+// See docs/RELEASING.md.
 //
-// Surfaces that consume this store:
-//   - Toast (bottom-right)    — the single update nudge: a "Restart to update"
-//     toast, shown by the background probe and the explicit "Check for Updates".
-//   - Settings → Updates card — current version + manual "Check now".
+// Two surfaces consume this store:
+//   - Toast (bottom-right):    the "Restart to update" nudge, from both the
+//     background probe and an explicit "Check for Updates".
+//   - Settings → Updates card: current version plus a manual "Check now".
 //
-// The changelog is a separate, human-authored file fetched over plain HTTP
-// (CSP is null in tauri.conf.json, so no allow-listing needed). Off Linux it's
-// optional polish: if the fetch fails the updater still works, just without
-// notes.
+// The changelog is a separate human-authored file fetched over plain HTTP (CSP
+// is null in tauri.conf.json). Off Linux it is optional: if the fetch fails the
+// updater still works, without notes.
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -39,7 +37,7 @@ export interface ChangelogEntry {
   version: string;
   /** ISO date (YYYY-MM-DD), stamped by release.sh. */
   date: string;
-  /** One short sentence (≤15 words) — renders in the narrow sidebar. */
+  /** One short sentence (≤15 words), renders in the narrow sidebar. */
   summary: string;
   /** Plain-text bullets describing the changes. */
   notes?: string[];
@@ -49,12 +47,12 @@ type Installing = "downloading" | "installing" | null;
 
 // The live Tauri Update handle, kept OUT of reactive state. It's a stateful SDK
 // object (carries downloadAndInstall() / a resource id) that only install()
-// ever touches, so the store exposes just the version string the UI needs —
+// ever touches, so the store exposes just the version string the UI needs,
 // which also lets the dev mock set a version without faking the whole type.
 let pendingUpdate: Update | null = null;
 
 /** Whether this build can install an update over itself. False on Linux, where
- *  the package manager owns the files — the UI points at it instead of offering
+ *  the package manager owns the files, the UI points at it instead of offering
  *  a button that would fail. */
 export const CAN_SELF_INSTALL = !IS_LINUX;
 
@@ -105,7 +103,7 @@ type Get = () => UpdateState;
  *
  *  Off Linux this is the signed manifest via the updater plugin, and it leaves
  *  `pendingUpdate` armed for install(). On Linux there is no manifest entry to
- *  check, so the changelog's newest entry is the signal — discovery only, since
+ *  check, so the changelog's newest entry is the signal, discovery only, since
  *  the actual install goes through the distro's own verified channel. */
 async function findPending(set: Set, get: Get): Promise<string | null> {
   if (!IS_LINUX) {
@@ -128,7 +126,7 @@ async function fetchChangelog(set: Set) {
     const versions: ChangelogEntry[] = Array.isArray(json?.versions) ? json.versions : [];
     set({ changelog: versions });
   } catch (e) {
-    // No changelog is non-fatal — the update still installs.
+    // No changelog is non-fatal, the update still installs.
     console.warn("[updater] changelog fetch failed:", e);
   }
 }
@@ -153,7 +151,7 @@ export const useUpdate = create<UpdateState>()(
           });
 
         // check() can't verify against a real signed release in dev, and
-        // there's no manifest to hit — skip the network entirely. Set
+        // there's no manifest to hit, skip the network entirely. Set
         // VITE_MOCK_UPDATE to exercise the pill UI without a backend.
         if (import.meta.env.DEV) {
           if (import.meta.env.VITE_MOCK_UPDATE) {
@@ -191,7 +189,7 @@ export const useUpdate = create<UpdateState>()(
               showUpdateToast();
             }
           } catch (e) {
-            // Network down / malformed manifest — no toast, no harm.
+            // Network down / malformed manifest, no toast, no harm.
             console.warn("[updater] check failed:", e);
           }
         };
@@ -204,7 +202,7 @@ export const useUpdate = create<UpdateState>()(
       checkNow: async () => {
         if (import.meta.env.DEV) {
           // Mirror init()'s mock so the "Restart to update" toast is developable
-          // in dev — install() is a safe no-op (there's no real Update handle).
+          // in dev, install() is a safe no-op (there's no real Update handle).
           if (import.meta.env.VITE_MOCK_UPDATE) {
             set({ currentVersion: "0.1.0", pendingVersion: "9.9.9" });
             return "available";
@@ -224,7 +222,7 @@ export const useUpdate = create<UpdateState>()(
 
       install: async () => {
         // No-op on Linux: pacman/apt/dnf own the install, and the UI offers no
-        // button — this is the belt to that suspenders.
+        // button. This is the belt to that suspenders.
         if (!CAN_SELF_INSTALL || !pendingUpdate || get().installing) return;
         set({ installing: "downloading" });
         try {
@@ -253,7 +251,7 @@ export const useUpdate = create<UpdateState>()(
 );
 
 /** Surface the pending update as a sticky bottom-right toast carrying a one-click
- *  "Restart to update" action — the single update surface now that the sidebar
+ *  "Restart to update" action, the single update surface now that the sidebar
  *  pill is gone. Used by the background probe and the explicit "Check for
  *  Updates" menu action. No-op when nothing is pending.
  *
@@ -265,9 +263,9 @@ export function showUpdateToast(): void {
   const summary = changelog?.find((e) => e.version === pendingVersion)?.summary;
   const fallback = CAN_SELF_INSTALL
     ? `Hyprlayer v${pendingVersion} is ready to install.`
-    : `Hyprlayer v${pendingVersion} is out — update it with your package manager.`;
+    : `Hyprlayer v${pendingVersion} is out. Update it with your package manager.`;
   const message = summary
-    ? `v${pendingVersion} — ${summary}${CAN_SELF_INSTALL ? "" : " Update it with your package manager."}`
+    ? `v${pendingVersion}: ${summary}${CAN_SELF_INSTALL ? "" : " Update it with your package manager."}`
     : fallback;
   useToast.getState().show("Update available", message, {
       tone: "ok",

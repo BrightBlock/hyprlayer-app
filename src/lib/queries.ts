@@ -54,7 +54,7 @@ export function useShellName() {
 }
 
 /** Whether the app holds macOS Full Disk Access. The grant only takes effect on
- *  relaunch, so it cannot change mid-session — fetched once. */
+ *  relaunch, so it cannot change mid-session, fetched once. */
 export function useFullDiskAccess() {
   return useQuery({
     queryKey: ["full-disk-access"],
@@ -116,7 +116,7 @@ export function useThoughtsGitStatus(path: string | undefined) {
 
 /** Minimum `text` length before a doc query is sent to `query_docs`. Below
  *  this, a text query is a full-corpus disk scan (the index reads a capped
- *  body per candidate from disk) — amplified by `refetchOnWindowFocus`, a
+ *  body per candidate from disk), amplified by `refetchOnWindowFocus`, a
  *  single keystroke shouldn't trigger it. Three features gate on this
  *  (command palette, library sidebar, workstream docs panel), so it lives
  *  here per CLAUDE.md's "used by two or more features" rule. */
@@ -200,7 +200,7 @@ function invalidateProjects() {
 }
 
 /** Classify a browsed disk path for the Add-project dialog's offer (import,
- *  init, or refuse). Never cached (staleTime 0) — the answer can change the
+ *  init, or refuse). Never cached (staleTime 0), the answer can change the
  *  moment the user runs `git init` on disk. */
 export function useRepoPathInfo(path: string, enabled = true) {
   return useQuery({
@@ -284,7 +284,7 @@ export function useThoughtsProfiles(enabled = true) {
   });
 }
 
-/** Create a named thoughts profile (git backend, standard dirs) — the
+/** Create a named thoughts profile (git backend, standard dirs), the
  *  Add-project dialog's inline "New profile…" form. */
 export function useCreateThoughtsProfile() {
   return useMutation({
@@ -425,7 +425,7 @@ export function useSetAppSettings() {
       // Fold the payload in BEFORE the round-trip, not just on success: a
       // caller builds its next payload by patching the cached settings, so a
       // second click inside one round-trip would otherwise read the pre-first
-      // state and — because the scope runs these serially — land last and
+      // state and, because the scope runs these serially, land last and
       // silently revert the first. Rapid folder collapses hit this directly.
       await queryClient.cancelQueries({ queryKey: ["bootstrap"] });
       const previous = queryClient.getQueryData<Bootstrap>(["bootstrap"]);
@@ -476,7 +476,7 @@ export function useDefaultUsername() {
 // single prefix invalidation refreshes the whole family.
 //
 // The gh-backed PR queries deliberately sit OUTSIDE that prefix, under
-// ["workstream-pr", id] — see `invalidateWorkstreamPr`.
+// ["workstream-pr", id], see `invalidateWorkstreamPr`.
 
 /** Refresh every workstream list: the project's board AND the sidebar's
  *  cross-project tree. Only one of them performs a given backend-side
@@ -497,7 +497,7 @@ export function useWorkstreams(projectPath: string) {
   });
 }
 
-/** Active workstreams across all projects — the sidebar tree. */
+/** Active workstreams across all projects, the sidebar tree. */
 export function useAllWorkstreams(enabled = true) {
   return useQuery({
     queryKey: ["workstreams", "@all"],
@@ -534,7 +534,7 @@ export function useActiveSessions(enabled = true) {
 }
 
 /** Base-branch choices for the new-workstream dialog (local + remote + the
- * detected default). Fetched lazily — only while the dialog is open. Never
+ * detected default). Fetched lazily, only while the dialog is open. Never
  * cached (staleTime 0) so a branch created on disk while the app is open
  * shows up the next time the picker opens. */
 export function useWorkstreamBases(projectPath: string, enabled = true) {
@@ -549,7 +549,7 @@ export function useWorkstreamBases(projectPath: string, enabled = true) {
 /** `git fetch --prune origin` in the project's checkout, so the branch picker sees
  * branches pushed since the app last fetched. Fired when the new-workstream dialog
  * opens; the refreshed branch list arrives via the invalidation below. Failure is
- * the caller's to ignore — an offline fetch just leaves the on-disk refs in place. */
+ * the caller's to ignore, an offline fetch just leaves the on-disk refs in place. */
 export function useFetchProjectRemote(projectPath: string) {
   return useMutation({
     mutationFn: () => unwrap(commands.fetchProjectRemote(projectPath)),
@@ -625,7 +625,7 @@ export function useSetWorkstreamStage(projectPath: string) {
 
 export function useArchiveWorkstream() {
   return useMutation({
-    // `skipScripts` runs the archive without the project's Archive script — used
+    // `skipScripts` runs the archive without the project's Archive script, used
     // by the dialog's "Skip" path after the script failed once.
     mutationFn: ({ id, skipScripts = false }: { id: string; skipScripts?: boolean }) =>
       unwrap(commands.archiveWorkstream(id, skipScripts)),
@@ -638,7 +638,7 @@ export function useArchiveWorkstream() {
   });
 }
 
-/** Archived workstreams across all projects, newest-first — feeds the
+/** Archived workstreams across all projects, newest-first, feeds the
  *  Archive history view. Separate query key from the active lists so
  *  archive/restore mutations invalidate both halves cleanly. */
 export function useArchivedWorkstreams(enabled = true) {
@@ -650,12 +650,12 @@ export function useArchivedWorkstreams(enabled = true) {
 }
 
 /** Restore the project checkout's modified tracked files to HEAD, resolving to
- *  how many were reverted. Destructive — the caller confirms first.
+ *  how many were reverted. Destructive, the caller confirms first.
  *
  *  Deliberately invalidates nothing: no workstream row changes, and the caller
  *  retries a create straight after. A refetch here would put `useWorkstreams`
  *  in flight during that create, and ProjectPage swaps to a spinner while it
- *  is — unmounting the dialog before the create's `onSuccess` can close it. */
+ *  is, unmounting the dialog before the create's `onSuccess` can close it. */
 export function useDiscardProjectChanges(projectPath: string) {
   return useMutation({
     mutationFn: () => unwrap(commands.discardProjectChanges(projectPath)),
@@ -694,21 +694,21 @@ export function useCleanupArchivedWorkstreams() {
 // ── Pull request (derived live from gh) ─────────────────────────────────────
 
 /** How long an errored PR probe waits before trying again. One mounted query,
- *  so ~60 calls/hr worst case — the cost of never getting stuck. */
+ *  so ~60 calls/hr worst case, the cost of never getting stuck. */
 const PR_ERROR_RETRY_MS = 60_000;
 
 /** Refresh a workstream's gh-backed PR queries. They sit under their own root,
  *  outside the `["workstream", id]` prefix `invalidateWorkstream` sweeps: the
  *  rest of that family reads local disk, but these spend a GitHub GraphQL call,
  *  and the worktree watcher sweeps on every file change. Riding the prefix cost
- *  one API call per file an agent wrote — enough to drain the 5000/hr quota,
+ *  one API call per file an agent wrote, enough to drain the 5000/hr quota,
  *  after which every probe fails and a failed probe reads as "no PR". */
 export function invalidateWorkstreamPr(id: string) {
   void queryClient.invalidateQueries({ queryKey: ["workstream-pr", id] });
 }
 
 /** The branch's PR (or null), derived live from `gh`. Fetches once on mount;
- *  liveness is push-based after that — the backend PR watcher diffs each poll
+ *  liveness is push-based after that, the backend PR watcher diffs each poll
  *  and emits `prStatusChanged`, which invalidates this query (see
  *  `src/lib/events.ts`). So the bar advances on its own (checks settling, a
  *  merge landing elsewhere flipping Merge → Archive) without a UI timer.
@@ -730,7 +730,7 @@ export function useWorkstreamPr(id: string, enabled = true, pollMs?: number) {
       // last good data on error, so nothing else would ever correct it: the
       // backend stops polling a PR it has already seen merge, and a stuck error
       // would strand the bar on the pre-merge state. Retrying at `pollMs` here
-      // would be worse than not retrying — the usual cause is a spent API quota,
+      // would be worse than not retrying, the usual cause is a spent API quota,
       // and 10s hammering is what spends it.
       if (query.state.status === "error") return PR_ERROR_RETRY_MS;
       return pollMs && !query.state.data ? pollMs : false;
@@ -762,7 +762,7 @@ export function useWorkstreamOpenPrs(id: string, query: string, enabled = true) 
 }
 
 /** Live preview of the PR a user typed into the attach picker (by number), or
- *  null when no such PR exists — confirms the number before attaching. */
+ *  null when no such PR exists, confirms the number before attaching. */
 export function useWorkstreamPrPreview(id: string, prNumber: number | null, enabled = true) {
   return useQuery({
     queryKey: ["workstream-pr", id, "preview", prNumber],
@@ -787,7 +787,7 @@ export function useAttachPr(id: string) {
 /** Detach a workstream's manually attached PR, reverting to branch detection.
  *  Takes the id as the mutate variable, not a hook arg: this fires from a context
  *  menu that closes on click, so a closed-over id churns to "" (the menu's
- *  fallback) before the async detach resolves — and `onSuccess` would then
+ *  fallback) before the async detach resolves, and `onSuccess` would then
  *  invalidate the empty id's PR key, leaving the PR bar stale until the next
  *  window-focus refetch. Reading `id` from the mutation variable pins it. */
 export function useDetachPr() {
@@ -932,7 +932,7 @@ export function useDiscardFiles(id: string) {
 
 // ── Onboarding ───────────────────────────────────────────────────────────────
 
-/** AI tool install state — gates the AI step in the onboarding wizard.
+/** AI tool install state, gates the AI step in the onboarding wizard.
  *  Cached per session (staleTime: Infinity) since the install state rarely
  *  changes mid-session; `.refetch()` is called explicitly after `ai configure`
  *  exits 0 in the embedded terminal. */
@@ -945,7 +945,7 @@ export function useAiStatus() {
 }
 
 /** Probe `~/thoughts` so the wizard can default to "open from disk" (and prefill
- *  the path) when an existing repo is already there. Re-checked on each mount —
+ *  the path) when an existing repo is already there. Re-checked on each mount,
  *  the user may have just created the dir in another step. */
 export function useProbeDefaultThoughts() {
   return useQuery({
@@ -970,7 +970,7 @@ export function useSetWorktreeFiles(path: string) {
     mutationFn: (patterns: string[]) => unwrap(commands.setWorktreeFiles(path, patterns)),
     onSuccess: (next) => {
       queryClient.setQueryData(["worktreeFiles", path], next);
-      // The copy list changed — re-validate so the project's warning badge
+      // The copy list changed, re-validate so the project's warning badge
       // reflects the new patterns immediately.
       void queryClient.invalidateQueries({ queryKey: ["worktree-files-check", path] });
     },
@@ -982,7 +982,7 @@ export function useSetWorktreeFiles(path: string) {
  *  the sidebar's per-project "copy files not found" warning. Inherits the global
  *  staleTime (5s) + refetchOnWindowFocus, so it re-checks on app start, when the
  *  copy list changes (invalidated by [`useSetWorktreeFiles`]), AND when the
- *  window regains focus — so fixing a file on disk and returning to the app
+ *  window regains focus, so fixing a file on disk and returning to the app
  *  clears the warning without a restart. Focus is driven by Tauri's window
  *  signal (see [`setupQueryFocus`]), since the WKWebview doesn't emit the
  *  browser focus event on app switches. */
@@ -1167,7 +1167,7 @@ export function useClaudeAuthStatus(enabled = true) {
  *  spawn. Deliberately ONE query: as two, the tab fired both on mount and the
  *  concurrent app-servers clobbered each other, so a working install rendered as
  *  "not signed in" or "no models". Spawning a process isn't free, so it's only
- *  fetched where the answer is shown (`enabled`) and cached for a few minutes —
+ *  fetched where the answer is shown (`enabled`) and cached for a few minutes,
  *  `codex login` happens out of band in a terminal, hence the Refresh button. */
 export function useCodexProbe(enabled = true) {
   return useQuery({
@@ -1182,17 +1182,16 @@ export function useCodexProbe(enabled = true) {
  * Fold models the picker has never offered into a curated visible-models list,
  * once per app run, as soon as the catalog is known.
  *
- * Without it a curated list is an allowlist frozen on the day it was edited, and
- * the only way to see a newly-shipped model is Settings → "Reset to default" —
- * which also undoes every deliberate removal. Strictly additive, and a no-op for
- * anyone who never curated. Failures are swallowed: this is a convenience, and a
- * settings write that didn't stick must not surface as an error in the composer.
+ * Without this a curated list is an allowlist frozen on the day it was edited,
+ * and the only way to see a new model is "Reset to default", which also undoes
+ * every deliberate removal. The sync is additive, and a no-op for anyone who
+ * never curated. Failures are swallowed, since a settings write that didn't
+ * stick must not surface as an error in the composer.
  *
- * `catalogSettled` must stay false until the probe has finished (either way):
- * the static fallback is always non-empty, so syncing before the live catalog
- * lands would latch against it and never see the live-only keys. A sync that
- * ran against the static fallback (probe errored) only latches that TIER — if
- * a refetch later lands the live catalog, it still gets one sync of its own.
+ * `catalogSettled` must stay false until the probe finishes either way. The
+ * static fallback is never empty, so syncing early would latch against it and
+ * never see the live-only keys. A sync against the fallback latches only that
+ * tier, so a later refetch of the live catalog still gets its own sync.
  */
 export function useSyncClaudeModels(
   catalog: readonly ModelOption[],
@@ -1219,7 +1218,7 @@ export function useSyncClaudeModels(
 }
 
 /** The `claude` CLI's own model catalog (`list_models`), which reflects this
- *  install's provider, settings and org policy — the authority on what the
+ *  install's provider, settings and org policy, the authority on what the
  *  picker can offer. Deduped by react-query across tabs, so many open composers
  *  cost one ~1s probe; callers fall back to the static table while it loads or
  *  if it fails (no CLI, signed out, older CLI without the control request). */
@@ -1233,7 +1232,7 @@ export function useClaudeProbe(enabled = true) {
 }
 
 /** Sign Codex in with an API key. The key is passed straight through to
- *  `codex login --with-api-key` and never stored by us — Codex owns the
+ *  `codex login --with-api-key` and never stored by us, Codex owns the
  *  credential (`~/.codex/auth.json`). The command returns a full probe (which
  *  models Codex offers depends on who is signed in), so the tab updates without
  *  a second spawn. */

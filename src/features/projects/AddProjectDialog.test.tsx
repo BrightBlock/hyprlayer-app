@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RepoPathStatus, ThoughtsProfile } from "@/lib/bindings";
 import { AddProjectDialog } from "./AddProjectDialog";
 
-// Mock the data hooks so the dialog runs its real logic against plain values —
+// Mock the data hooks so the dialog runs its real logic against plain values,
 // no react-query, no Tauri IPC. `vi.hoisted` lets the hoisted vi.mock factory
 // reach them.
 const q = vi.hoisted(() => ({
@@ -153,7 +153,7 @@ describe("AddProjectDialog disk import", () => {
 
   it("adds a non-git folder as-is, skipping the thoughts step entirely", () => {
     const { importFolder, importProject } = setupDisk("nonGit");
-    // Folder-first: no git setup to configure, no second step — step 1 submits,
+    // Folder-first: no git setup to configure, no second step, step 1 submits,
     // and nothing in the dialog calls the target a repo.
     expect(screen.queryByPlaceholderText("main")).toBeNull();
     expect(screen.queryByText("Repository or folder")).toBeNull();
@@ -167,7 +167,7 @@ describe("AddProjectDialog disk import", () => {
     );
   });
 
-  it("needs no bootstrap username for a folder — it writes no config", () => {
+  it("needs no bootstrap username for a folder, it writes no config", () => {
     // A true first run (no hyprlayer config yet). The repo paths demand a
     // username to bootstrap one; a folder project never touches the config.
     const { importFolder } = setupDisk("nonGit", "missing");
@@ -184,7 +184,7 @@ describe("AddProjectDialog disk import", () => {
   it("drops the folder offer if the path turns out to be a git repo", () => {
     const { importFolder } = setupDisk("nonGit");
     // The debounced probe lands: it's a real repo after all. The choice is gone
-    // and the wizard is back to its two-step self — no stale folder submit.
+    // and the wizard is back to its two-step self, no stale folder submit.
     q.useRepoPathInfo.mockReturnValue({ data: "ready" });
     cleanup();
     render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
@@ -199,7 +199,7 @@ describe("AddProjectDialog disk import", () => {
   });
 
   it("waits for the probe before allowing submit (no blind git init)", () => {
-    // Which command a disk path submits to depends on the classification —
+    // Which command a disk path submits to depends on the classification,
     // folder-first means a pre-probe submit could silently git-init a plain
     // folder, so Next stays gated until the probe lands.
     const { importProject } = setupDisk(undefined);

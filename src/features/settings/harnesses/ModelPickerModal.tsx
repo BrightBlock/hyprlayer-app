@@ -30,7 +30,7 @@ export function ModelPickerModal({
       providers
         .map((p) => {
           const configured = !onlyConfigured || onlyConfigured.has(p.id);
-          // An unconfigured provider still offers its free (keyless) models —
+          // An unconfigured provider still offers its free (keyless) models,
           // OpenCode Zen's `-free` models authenticate without an API key.
           const models = configured ? p.models : p.models.filter((m) => isFreeOpencodeModel(m.id));
           return {

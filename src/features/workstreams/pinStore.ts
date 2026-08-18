@@ -3,7 +3,7 @@
  * dedicated "Pinned" section at the top of the project sidebar, reachable
  * without hunting through its project's tree. This is a per-user *view*
  * preference (not project data), so it lives entirely on the frontend and
- * persists to localStorage — mirroring how the agent-tab strips survive a
+ * persists to localStorage, mirroring how the agent-tab strips survive a
  * restart (see [`workstreamTabs`]).
  *
  * A pin is keyed by the workstream's stable `id`. An id whose workstream is

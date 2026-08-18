@@ -16,7 +16,7 @@ export const STEP_ROW = `${STEP_ROW_BASE} hover:bg-panel-2`;
 export const STEP_ROW_ON_PANEL = `${STEP_ROW_BASE} hover:bg-edge/40`;
 
 /** The row shape with no hover tint, for a row that only reports something and has
- *  nothing to disclose — a hover affordance on it would promise a click that does
+ *  nothing to disclose, a hover affordance on it would promise a click that does
  *  nothing. */
 export const STEP_ROW_STATIC = STEP_ROW_BASE;
 

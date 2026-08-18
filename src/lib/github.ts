@@ -1,5 +1,5 @@
 /**
- * Parsing GitHub identifiers out of clone sources — a URL
+ * Parsing GitHub identifiers out of clone sources, a URL
  * (`https://github.com/acme/repo.git`, `git@github.com:acme/repo.git`,
  * `ssh://git@github.com/acme/repo`) or a bare `owner/repo`.
  *

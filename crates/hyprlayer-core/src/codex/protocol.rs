@@ -2,7 +2,7 @@
 //! translator from Codex notifications to harness-agnostic [`SessionEvent`]s.
 //!
 //! Shapes are generated from the CLI itself (`codex app-server generate-ts`,
-//! codex-cli 0.145.0) — regenerate and re-check them whenever
+//! codex-cli 0.145.0), regenerate and re-check them whenever
 //! [`BinaryKind::Codex`]'s version floor moves. The methods actually handled are
 //! the match arms in [`Translator::notification`] and
 //! [`Translator::server_request`]; that's the list to read, not a copy of it.
@@ -81,7 +81,7 @@ pub fn decode_line(line: &str) -> Option<Incoming> {
 ///
 /// Two independent axes: `approvalPolicy` decides whether Codex *asks*, `sandbox`
 /// decides what a command may do without asking. `default` uses `untrusted` so Codex
-/// asks before each command — the user then permits the host/network access the
+/// asks before each command, the user then permits the host/network access the
 /// sandbox would otherwise deny *silently* (Codex's own escalation is model-driven
 /// and misses cases like a bare `ping`). `acceptEdits` never asks (contained to the
 /// worktree); `plan` is read-only; only `bypass` drops the sandbox. The allow/deny
@@ -98,7 +98,7 @@ pub fn approval_posture(mode: PermissionMode) -> (&'static str, &'static str) {
     }
 }
 
-/// The generated `AskForApproval` / `SandboxMode` unions, minus `granular` —
+/// The generated `AskForApproval` / `SandboxMode` unions, minus `granular`,
 /// a struct variant we don't emit as a bare string.
 #[cfg(test)]
 const VALID_APPROVAL_POLICIES: [&str; 3] = ["untrusted", "on-request", "never"];
@@ -173,7 +173,7 @@ impl Translator {
         }
     }
 
-    /// Translate one notification. Unknown methods yield no events — Codex's
+    /// Translate one notification. Unknown methods yield no events, Codex's
     /// notification surface is far wider than the transcript renders, and a new
     /// one must never be fatal.
     pub fn notification(&mut self, method: &str, p: &Value) -> Vec<SessionEvent> {
@@ -232,7 +232,7 @@ impl Translator {
             }
             // Reasoning streams as deltas too, but there is no partial-thinking
             // event in our model (the UI shows a collapsed block). Drop them and
-            // surface the whole thought once, on `item/completed` — the same
+            // surface the whole thought once, on `item/completed`, the same
             // shape the OpenCode driver settled on. Emitting them as PartialText
             // would leak the model's private reasoning into visible prose.
             "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => Vec::new(),
@@ -244,7 +244,7 @@ impl Translator {
             "turn/plan/updated" => plan_events(p),
             "thread/tokenUsage/updated" => self.token_usage(p),
             "error" => {
-                // A retryable error is noise — Codex is about to try again and the
+                // A retryable error is noise, Codex is about to try again and the
                 // turn hasn't ended. Only surface terminal ones.
                 if p.get("willRetry").and_then(Value::as_bool) == Some(true) {
                     return Vec::new();
@@ -337,7 +337,7 @@ impl Translator {
                     .to_string(),
                 }]
             }
-            // Legacy v1 approval shapes — still emitted by some code paths.
+            // Legacy v1 approval shapes, still emitted by some code paths.
             "execCommandApproval" | "applyPatchApproval" => {
                 let request_id = p
                     .get("callId")
@@ -430,7 +430,7 @@ impl Translator {
                 });
             }
         }
-        // The meter's numerator is how full the context is *now* — Codex's `last`
+        // The meter's numerator is how full the context is *now*, Codex's `last`
         // breakdown (this turn's input), not the cumulative `total`, which counts
         // every token ever sent and would run the meter past 100%.
         if let Some(ctx) = usage
@@ -577,7 +577,7 @@ pub fn question_reply(pending: &PendingQuestion, answers: &Value) -> Value {
                 continue;
             };
             // One answer, taken whole. We surface Codex questions with
-            // `multiSelect: false`, so the UI never comma-joins picks here —
+            // `multiSelect: false`, so the UI never comma-joins picks here,
             // and splitting on ", " would shatter any label that contains one
             // ("Yes, deploy to prod") into two ids Codex doesn't recognize.
             let labels: Vec<String> = chosen
@@ -642,8 +642,8 @@ fn plan_events(p: &Value) -> Vec<SessionEvent> {
 /// vocabulary: `(id, name, input)`, or `None` for items that aren't tools.
 ///
 /// The normalization is load-bearing, for the same reason it is in the OpenCode
-/// driver: the transcript UI keys every display path — per-file chips, the
-/// edit-diff preview, agent-doc detection, argument summaries — on Claude's
+/// driver: the transcript UI keys every display path, per-file chips, the
+/// edit-diff preview, agent-doc detection, argument summaries, on Claude's
 /// PascalCase names and snake_case keys (see `src/features/session/toolDisplay.ts`).
 /// Without it, Codex's shell and patch calls fall through to the generic renderer
 /// and collapse into an anonymous "N tool calls" group.
@@ -908,7 +908,7 @@ mod tests {
                 result: Err("boom".into())
             })
         );
-        // A server request: BOTH method and id — must not be read as a response.
+        // A server request: BOTH method and id, must not be read as a response.
         assert!(matches!(
             decode_line(r#"{"id":"a1","method":"execCommandApproval","params":{}}"#),
             Some(Incoming::ServerRequest { .. })
@@ -946,7 +946,7 @@ mod tests {
     fn reasoning_never_leaks_as_visible_text() {
         // Codex streams reasoning as `field`-less text deltas on their own
         // notification. Emitting those as PartialText would print the model's
-        // private chain-of-thought into the transcript as prose — the same
+        // private chain-of-thought into the transcript as prose, the same
         // regression the OpenCode translator guards against.
         let mut t = Translator::default();
         for method in [
@@ -1038,7 +1038,7 @@ mod tests {
                 is_error, content, ..
             } => {
                 assert!(is_error);
-                // Empty output would render as "(no output)" — say why it failed.
+                // Empty output would render as "(no output)", say why it failed.
                 assert_eq!(content, "exited with 1");
             }
             other => panic!("expected ToolResult, got {other:?}"),
@@ -1047,7 +1047,7 @@ mod tests {
 
     /// Header detection has to be positional. A body line may legitimately start
     /// with `---` (a removed SQL comment or `---` frontmatter delimiter) or `+++`
-    /// (adding `++count;`) — prefix-matching those drops them from the
+    /// (adding `++count;`), prefix-matching those drops them from the
     /// reconstructed side, so the transcript's inline diff shows an edit that
     /// never happened and hides one that did.
     #[test]
@@ -1069,8 +1069,8 @@ mod tests {
     }
 
     /// Header detection has to be positional. Prefix-matching `---`/`+++` on
-    /// every line drops real content — a removed SQL comment or `---` frontmatter
-    /// delimiter, an added `++count;` — so the inline diff would show a change
+    /// every line drops real content, a removed SQL comment or `---` frontmatter
+    /// delimiter, an added `++count;`, so the inline diff would show a change
     /// the user never made and hide one they did.
     #[test]
     fn diff_body_lines_that_look_like_headers_survive() {
@@ -1229,7 +1229,7 @@ mod tests {
             }
             other => panic!("unexpected events {other:?}"),
         }
-        // The denominator never changes — don't re-announce it.
+        // The denominator never changes, don't re-announce it.
         let out = t.notification("thread/tokenUsage/updated", &p);
         assert_eq!(ev_names(&out), ["usage"]);
     }
@@ -1410,7 +1410,7 @@ mod tests {
     }
 
     /// A label is one answer, taken whole. We surface Codex questions with
-    /// `multiSelect: false`, so the UI never comma-joins picks — and splitting on
+    /// `multiSelect: false`, so the UI never comma-joins picks, and splitting on
     /// ", " would shatter a legitimate label into ids Codex doesn't recognize,
     /// either wedging the turn or silently picking a different branch.
     #[test]
@@ -1457,7 +1457,7 @@ mod tests {
         );
     }
 
-    /// A bad mapping doesn't degrade — it makes that permission mode
+    /// A bad mapping doesn't degrade. It makes that permission mode
     /// unlaunchable, since `thread/start` rejects the whole request.
     #[test]
     fn every_posture_uses_a_variant_codex_accepts() {

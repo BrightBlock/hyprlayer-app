@@ -17,22 +17,21 @@ type Dir =
   | "West";
 
 /**
- * Drag-to-resize edges for the undecorated Linux window (`decorations: false`,
- * tauri.linux.conf.json): a floating desktop (GNOME/KDE) draws no resize border
- * of its own, so the app supplies one.
+ * Drag-to-resize edges for the undecorated Linux window (`decorations: false`
+ * in tauri.linux.conf.json). A floating GNOME/KDE desktop draws no resize
+ * border, so the app supplies one.
  *
- * Five hit targets, not eight — the left, right and bottom edges plus the two
- * bottom corners. The top edge and both top corners are omitted deliberately:
- * they would sit over the header's `data-tauri-drag-region` and, at the top
- * right, unavoidably over the `WindowControls` cluster, where a corner grip
- * would eat the Close button's corner. `top-10` is exactly the header's `h-10`,
- * so no grip overlaps the header band; the corners stack above the edges via
- * `z-[1]`. None carry `data-tauri-drag-region`, so a direct hit resizes rather
- * than moves.
+ * Five hit targets, not eight: the left, right and bottom edges plus the two
+ * bottom corners. The top edge and top corners are omitted because they would
+ * sit over the header's `data-tauri-drag-region`, and at the top right over
+ * `WindowControls`, where a grip would eat the Close button's corner. `top-10`
+ * matches the header's `h-10` so nothing overlaps it, and corners stack above
+ * edges via `z-[1]`. None carry `data-tauri-drag-region`, so a direct hit
+ * resizes rather than moves.
  *
- * Accepted cost: a Wayland tiling WM exposes no tiled state to the client, so
- * on Hyprland the grips render permanently and are inert — the outer few pixels
- * of the nav rail and the composer swallow `pointerdown` there.
+ * Accepted cost: a Wayland tiling WM reports no tiled state, so on Hyprland the
+ * grips render permanently and inert, and the outer pixels of the nav rail and
+ * composer swallow `pointerdown`.
  */
 export function ResizeGrips() {
   const maximized = useIsMaximized();

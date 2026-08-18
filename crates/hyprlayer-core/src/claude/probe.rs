@@ -1,7 +1,7 @@
 //! One-shot `list_models` query for the model picker.
 //!
 //! The CLI answers a `list_models` control request with the same catalog its own
-//! `/model` picker renders — provider, settings cascade, and enforcement policy
+//! `/model` picker renders, provider, settings cascade, and enforcement policy
 //! already applied. That makes it the authority on which models this install can
 //! actually run, so the composer prefers it over the static table in
 //! `src/lib/domain/models.ts`.
@@ -49,7 +49,7 @@ pub struct ClaudeModel {
     /// all (Haiku), which is different from "we don't know".
     pub supported_effort_levels: Vec<String>,
     pub supports_fast_mode: bool,
-    /// Listed but not selectable — org policy can restrict a model.
+    /// Listed but not selectable, org policy can restrict a model.
     pub disabled: bool,
 }
 
@@ -67,7 +67,7 @@ pub struct ClaudeProbe {
 ///
 /// `cwd` should be a directory the user already trusts (their home): the CLI
 /// layers project settings from its working directory, and an untrusted repo can
-/// prompt. `env` carries API-key/Bedrock/Vertex auth, which decides the catalog —
+/// prompt. `env` carries API-key/Bedrock/Vertex auth, which decides the catalog,
 /// the same vars a session spawn gets.
 pub async fn probe(
     bin: &Path,
@@ -143,7 +143,7 @@ async fn exchange(
     let line = control_request_json(REQUEST_ID, "list_models", json!({}));
     stdin.write_all(format!("{line}\n").as_bytes()).await?;
     stdin.flush().await?;
-    // stdin stays open until the answer lands — EOF means "shut down", and the
+    // stdin stays open until the answer lands, EOF means "shut down", and the
     // CLI can win that race and exit before replying.
 
     let mut lines = BufReader::new(stdout).lines();
@@ -231,7 +231,7 @@ fn parse_models(body: &Value) -> Vec<ClaudeModel> {
 }
 
 /// Where to run the probe: the user's home, else the system temp dir. Never a
-/// repo — project settings would colour the catalog and can prompt for trust.
+/// repo, project settings would colour the catalog and can prompt for trust.
 pub fn neutral_cwd() -> PathBuf {
     dirs::home_dir().unwrap_or_else(std::env::temp_dir)
 }
@@ -295,7 +295,7 @@ mod tests {
         // Fast mode is Opus-only; an absent flag is false, not unknown.
         assert!(!models[1].supports_fast_mode);
 
-        // Haiku reports no effort support at all — an empty list, which the
+        // Haiku reports no effort support at all, an empty list, which the
         // composer must render as "no effort picker" rather than "all tiers".
         assert!(models[2].supported_effort_levels.is_empty());
     }
@@ -304,7 +304,7 @@ mod tests {
     fn tolerates_a_missing_or_odd_body() {
         assert!(parse_models(&json!({})).is_empty());
         assert!(parse_models(&json!({ "models": [] })).is_empty());
-        // A row with no value can't be launched — drop it rather than emit a blank.
+        // A row with no value can't be launched, drop it rather than emit a blank.
         assert!(parse_models(&json!({ "models": [{ "displayName": "x" }] })).is_empty());
         // No displayName falls back to the value, never an empty label.
         let m = parse_models(&json!({ "models": [{ "value": "sonnet" }] }));

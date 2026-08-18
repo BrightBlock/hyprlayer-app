@@ -20,7 +20,7 @@ function cx(...parts: Array<string | false | null | undefined>): string {
 /**
  * A keyboard-chord hint (⌘⇧P / Ctrl+Shift+P), formatted for the host OS.
  * macOS concatenates the modifier glyphs with no separators, so they're tracked
- * apart to stay legible at hint sizes — the same treatment as Settings →
+ * apart to stay legible at hint sizes, the same treatment as Settings →
  * Keyboard's larger pill, and like it deliberately NOT `font-mono` (monospace
  * renders ⌘/⇧ heavy and oversized). Size, color, and background come from
  * `className` (unsized it inherits the surrounding text) so each surface picks
@@ -134,7 +134,7 @@ const MARGIN = 8;
 export type DropdownOption = {
   value: string;
   label: string;
-  /** Rendered dimmed and unselectable — the `<option disabled>` equivalent. */
+  /** Rendered dimmed and unselectable, the `<option disabled>` equivalent. */
   disabled?: boolean;
   /** Heading to file this option under; runs of equal values share one header
    *  (the `<optgroup>` equivalent). Ungrouped options render bare. */
@@ -149,35 +149,29 @@ type DropdownSelectProps = {
   className?: string;
   /** Names the trigger when no surrounding text does. */
   "aria-label"?: string;
-  /** Trigger text when `value` matches no option — otherwise a stale/unknown
+  /** Trigger text when `value` matches no option, otherwise a stale/unknown
    *  value would leak onto the button as raw text. */
   placeholder?: string;
 };
 
 /**
- * The app's ONLY select control. There is deliberately no `<select>` wrapper
- * in this file: a native select's open menu is drawn by the OS, not the page,
- * so on Linux/WebKitGTK it renders in the GTK theme's colors — a white popup
- * over every dark app theme — and on macOS/Windows it ignores the palette too.
- * This draws the menu in the DOM instead: panel tone, anchored under the
- * trigger at trigger width, themed like everything else on every platform.
+ * The app's ONLY select control. Native `<select>` is deliberately absent: the
+ * OS draws its open menu, so on Linux/WebKitGTK it renders as a white GTK popup
+ * over a dark theme, and macOS/Windows ignore the palette too. This draws the
+ * menu in the DOM, themed like everything else on every platform.
  *
- * The menu is positioned `fixed` off the trigger's rect so overflow containers
- * (dialog panels, sidebars) can't clip it, capped to the viewport and
- * scrollable, flipping upward when there's more room above. Inside a `Field`
- * the wrapping label names the trigger, and Escape closes only the menu (the
- * handler stacks above a dialog's).
+ * Positioning is `fixed` off the trigger's rect, so overflow containers
+ * (dialogs, sidebars) can't clip it. It caps to the viewport, scrolls, and
+ * flips upward when there's more room above.
  *
- * The open menu + backdrop render in a portal on `document.body`, NOT inline:
- * inline they'd be descendants of `Field`'s `<label>`, and WebKit forwards any
- * click on a label descendant to the labeled control — every option/backdrop
- * click would re-toggle the trigger and the menu never closes. The portal also
- * escapes the dialog overlay's `backdrop-blur`, which turns `position: fixed`
- * coordinates relative in WebKit.
+ * The menu and backdrop render in a portal on `document.body`, never inline.
+ * Inline they'd be descendants of `Field`'s `<label>`, and WebKit forwards
+ * label-descendant clicks to the labeled control, so every click would
+ * re-toggle the trigger. The portal also escapes a dialog overlay's
+ * `backdrop-blur`, which makes `position: fixed` behave relatively in WebKit.
  *
- * Keyboard parity with the native control it replaces: ↓/↑ (or Enter/Space) on
- * the trigger opens, ↓/↑/Home/End walk the enabled options, Enter/Space picks
- * the focused one (they're real buttons, so that's free), Escape cancels.
+ * Keyboard: ↓/↑/Enter/Space opens, ↓/↑/Home/End walk the enabled options,
+ * Enter/Space picks, Escape closes only the menu.
  */
 export function DropdownSelect({
   value,
@@ -204,7 +198,7 @@ export function DropdownSelect({
   };
   useEscape(open ? close : null);
 
-  // Focus the current choice when the menu opens — that both scrolls a long
+  // Focus the current choice when the menu opens, that both scrolls a long
   // list to it and puts the arrow keys below on the right starting point.
   // Once, not on every re-render, which would fight the user's own scrolling.
   const listRef = useRef<HTMLDivElement>(null);
@@ -217,7 +211,7 @@ export function DropdownSelect({
       list.querySelector<HTMLButtonElement>('[role="option"]:not([disabled])');
     // preventScroll + an explicit nearest scroll: a bare focus() can jerk the
     // whole page when the portal sits at the document root. Optional-call the
-    // scroll — jsdom doesn't implement it, so tests would throw here.
+    // scroll, jsdom doesn't implement it, so tests would throw here.
     target?.focus({ preventScroll: true });
     target?.scrollIntoView?.({ block: "nearest" });
   }, [open]);
@@ -239,7 +233,7 @@ export function DropdownSelect({
   }, [open]);
 
   // The trigger's width is only a MINIMUM for the menu (see the style below), so
-  // a narrow trigger — "Haiku 4.5" in a settings row — still shows full option
+  // a narrow trigger, "Haiku 4.5" in a settings row, still shows full option
   // labels instead of "Opus 4.…". A menu that grew past the right edge would be
   // clipped, though, so once it has laid out at its content width, pull it back
   // inside the viewport. Second pass on purpose: the width isn't knowable until
@@ -251,14 +245,14 @@ export function DropdownSelect({
     if (!open || !el || !list) return;
     // Anchor off the LIVE trigger rect, not `pos.left`: both layout effects run
     // in the same commit, so on the opening pass `pos` is still its initial
-    // zero — clamping against that pinned every menu to the left viewport edge.
+    // zero, clamping against that pinned every menu to the left viewport edge.
     const desiredLeft = el.getBoundingClientRect().left;
     const width = list.getBoundingClientRect().width;
     const clamped = Math.max(MARGIN, Math.min(desiredLeft, window.innerWidth - width - MARGIN));
     if (Math.abs(clamped - pos.left) > 0.5) setPos((p) => ({ ...p, left: clamped }));
   }, [open, pos.left, options]);
 
-  // Roving focus over the enabled options. Enter/Space need no handling — each
+  // Roving focus over the enabled options. Enter/Space need no handling, each
   // option is a real <button>, so activation is the browser's job.
   const moveFocus = (delta: number | "first" | "last") => {
     const list = listRef.current;
@@ -302,7 +296,7 @@ export function DropdownSelect({
           // `w-full` only when the caller didn't ask for a width. Appending both
           // and hoping the caller's wins doesn't work: Tailwind sorts utilities
           // into the stylesheet itself, so `w-full` beats `w-56` no matter which
-          // is written last — which is how the Title-model picker ended up 101px
+          // is written last, which is how the Title-model picker ended up 101px
           // wide with its options truncated to "Opus 4.…".
           !hasWidthClass && "w-full",
           "focus:border-ink-dim/70 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
@@ -344,7 +338,7 @@ export function DropdownSelect({
                 bottom: pos.bottom,
                 left: pos.left,
                 // Align with the trigger and never be narrower than it, but grow
-                // to fit the longest label rather than truncating it — a native
+                // to fit the longest label rather than truncating it, a native
                 // select's popup sizes to its content too. Capped to the viewport
                 // so a long model id can't run off-screen.
                 minWidth: pos.width,
@@ -424,7 +418,7 @@ export function SettingRow({
 }
 
 /** Labeled form row. NOTE: children render inside a `<label>`, and WebKit
- *  forwards clicks on any label descendant to the first labelable child —
+ *  forwards clicks on any label descendant to the first labelable child,
  *  overlays/menus opened from inside a Field must portal out (see
  *  DropdownSelect) or every click on them re-triggers the control. */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -599,7 +593,7 @@ type RefreshButtonProps = {
   onClick: () => void;
   /** Swaps the icon for a spinner and blocks re-entry while a refetch is in flight. */
   busy?: boolean;
-  /** Accessible name — say what gets refreshed. Wins over any visible `children`. */
+  /** Accessible name, say what gets refreshed. Wins over any visible `children`. */
   label: string;
   title?: string;
   className?: string;
@@ -643,7 +637,7 @@ type ContextMenuProps = {
 };
 
 /** The currently-open menu's closer, so opening a new one (even via right-click,
- *  which doesn't fire a `click`) dismisses any other — only one menu at a time. */
+ *  which doesn't fire a `click`) dismisses any other, only one menu at a time. */
 let closeActiveContextMenu: (() => void) | null = null;
 
 /** Fixed-position right-click menu; any window click or Escape closes it, and
@@ -695,8 +689,8 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
 
 type ContextMenuItemProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   danger?: boolean;
-  /** A second, muted line under the label — typically why the item is disabled
-   *  (e.g. "Agent is still working — stop it first."). Rendered in warn tone. */
+  /** A second, muted line under the label, typically why the item is disabled
+   *  (e.g. "Agent is still working, stop it first."). Rendered in warn tone. */
   hint?: ReactNode;
 };
 

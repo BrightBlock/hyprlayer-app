@@ -43,7 +43,7 @@ describe("fuzzyScore", () => {
   it("word-boundary bonus: 'sp' matches better at word start", () => {
     const wordBoundary = fuzzyScore("spotlight search", "ss")!;
     const noWB = fuzzyScore("express", "ss")!;
-    // 'ss' at the start of two words vs 'ss' mid-word — boundary should win
+    // 'ss' at the start of two words vs 'ss' mid-word, boundary should win
     expect(wordBoundary).toBeGreaterThan(noWB);
   });
 

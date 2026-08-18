@@ -41,7 +41,7 @@ describe("RepoSourcePicker recent repos", () => {
   });
 
   it("keeps refresh reachable when gh returns no repos", () => {
-    // The empty state is exactly when a refresh matters — after `gh auth login`.
+    // The empty state is exactly when a refresh matters, after `gh auth login`.
     const { refetch } = setup({ data: [] });
     expect(screen.getByText(/None found/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Refresh recent repos" }));

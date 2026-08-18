@@ -41,7 +41,7 @@ export function AgentIcon({ size = 19, strokeWidth = 1.8, className }: IconProps
 export function ZapIcon({ size = 14, strokeWidth = 1.7, className }: IconProps) {
   return (
     // The bolt spans the viewBox like its rail siblings (Cube/Book fill ~80% of
-    // theirs) — a narrower path read a size smaller at the same render size.
+    // theirs), a narrower path read a size smaller at the same render size.
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
       <path
         d="M13 2.2 3.6 13.5h8L11 21.8l9.4-11.3h-8L13 2.2Z"
@@ -179,7 +179,7 @@ export function ChevronDownIcon({ size = 14, strokeWidth = 2, className }: IconP
   );
 }
 
-/** Interlocking puzzle piece — a launched skill (a modular, pluggable capability). */
+/** Interlocking puzzle piece, a launched skill (a modular, pluggable capability). */
 export function PuzzleIcon({ size = 13, strokeWidth = 1.6, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -193,7 +193,7 @@ export function PuzzleIcon({ size = 13, strokeWidth = 1.6, className }: IconProp
   );
 }
 
-/** Arrow crossing into a fresh node — hand the session's context off to a new one. */
+/** Arrow crossing into a fresh node, hand the session's context off to a new one. */
 export function HandoffIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -215,7 +215,7 @@ export function HandoffIcon({ size = 14, strokeWidth = 1.8, className }: IconPro
   );
 }
 
-/** Ascending signal bars — the reasoning-effort glyph. */
+/** Ascending signal bars, the reasoning-effort glyph. */
 export function EffortIcon({ size = 14, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
@@ -236,7 +236,7 @@ export function DocIcon({ size = 12, strokeWidth = 2, className }: IconProps) {
   );
 }
 
-/** Pencil — a file edit. */
+/** Pencil, a file edit. */
 export function PencilIcon({ size = 12, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -257,7 +257,7 @@ export function PencilIcon({ size = 12, strokeWidth = 1.8, className }: IconProp
   );
 }
 
-/** Magnifying glass — the document's preview/read mode. */
+/** Magnifying glass, the document's preview/read mode. */
 export function SearchIcon({ size = 14, strokeWidth = 1.9, className }: IconProps) {
   return (
     <svg
@@ -278,7 +278,7 @@ export function SearchIcon({ size = 14, strokeWidth = 1.9, className }: IconProp
   );
 }
 
-/** `< >` — source/code files. */
+/** `< >`, source/code files. */
 export function CodeIcon({ size = 13, strokeWidth = 1.9, className }: IconProps) {
   return (
     <svg
@@ -368,7 +368,7 @@ export function harnessIcon(key: string | null | undefined) {
   }
 }
 
-/** A terminal window: `>_` prompt — terminal emulators. */
+/** A terminal window: `>_` prompt, terminal emulators. */
 export function TerminalIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -391,7 +391,7 @@ export function TerminalIcon({ size = 13, strokeWidth = 1.8, className }: IconPr
   );
 }
 
-/** Checklist — a ticked box over ruled lines. */
+/** Checklist, a ticked box over ruled lines. */
 export function ChecklistIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -416,7 +416,7 @@ export function ChecklistIcon({ size = 14, strokeWidth = 1.8, className }: IconP
   );
 }
 
-/** Two stacked sheets — copy to clipboard. */
+/** Two stacked sheets, copy to clipboard. */
 export function ClipboardIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -439,7 +439,7 @@ export function ClipboardIcon({ size = 13, strokeWidth = 1.8, className }: IconP
   );
 }
 
-/** Curved back-arrow — the "rewind to here" prompt toolbar action. */
+/** Curved back-arrow, the "rewind to here" prompt toolbar action. */
 export function RewindIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -468,7 +468,7 @@ export function RewindIcon({ size = 13, strokeWidth = 1.8, className }: IconProp
   );
 }
 
-/** `{ }` — data/config files (json, yaml, toml…). */
+/** `{ }`, data/config files (json, yaml, toml…). */
 export function BracesIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -490,7 +490,7 @@ export function BracesIcon({ size = 13, strokeWidth = 1.8, className }: IconProp
   );
 }
 
-/** `#` — stylesheet files (css, scss…). */
+/** `#`, stylesheet files (css, scss…). */
 export function HashIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -554,7 +554,7 @@ export function DiffIcon({ size = 13, strokeWidth = 2, className }: IconProps) {
   );
 }
 
-/** Upward arrow — the "send turn" affordance. */
+/** Upward arrow, the "send turn" affordance. */
 export function SendIcon({ size = 16, strokeWidth = 2 }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -563,7 +563,7 @@ export function SendIcon({ size = 16, strokeWidth = 2 }: IconProps) {
   );
 }
 
-/** Down-arrow into a tray — download / install an update. */
+/** Down-arrow into a tray, download / install an update. */
 export function DownloadIcon({ size = 14, strokeWidth = 1.9, className }: IconProps) {
   return (
     <svg
@@ -585,7 +585,7 @@ export function DownloadIcon({ size = 14, strokeWidth = 1.9, className }: IconPr
   );
 }
 
-/** Import — an arrow dropping into a tray. Prompt-library "import a .hlprompts". */
+/** Import, an arrow dropping into a tray. Prompt-library "import a .hlprompts". */
 export function ImportIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
@@ -600,7 +600,7 @@ export function ImportIcon({ size = 14, strokeWidth = 1.6, className }: IconProp
   );
 }
 
-/** Export — an arrow rising out of a tray. Prompt-library "export to share". */
+/** Export, an arrow rising out of a tray. Prompt-library "export to share". */
 export function ExportIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
@@ -615,7 +615,7 @@ export function ExportIcon({ size = 14, strokeWidth = 1.6, className }: IconProp
   );
 }
 
-/** Filled square — interrupt / stop the running turn. */
+/** Filled square, interrupt / stop the running turn. */
 export function EraserIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -640,7 +640,7 @@ export function StopIcon({ size = 14 }: IconProps) {
   );
 }
 
-/** Padlock — a private repository. */
+/** Padlock, a private repository. */
 export function LockIcon({ size = 12, strokeWidth = 2, className }: IconProps) {
   return (
     <svg
@@ -659,7 +659,7 @@ export function LockIcon({ size = 12, strokeWidth = 2, className }: IconProps) {
   );
 }
 
-/** Circular arrow — restart / relaunch an agent, or refresh a list. */
+/** Circular arrow, restart / relaunch an agent, or refresh a list. */
 export function RestartIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -680,7 +680,7 @@ export function RestartIcon({ size = 13, strokeWidth = 1.8, className }: IconPro
   );
 }
 
-/** Four panes — the Multiplexer mode mark (Settings hero + title-bar chip). */
+/** Four panes, the Multiplexer mode mark (Settings hero + title-bar chip). */
 export function MultiplexerIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
   return (
     <svg
@@ -701,7 +701,7 @@ export function MultiplexerIcon({ size = 14, strokeWidth = 1.6, className }: Ico
   );
 }
 
-/** Wrench — a tool invocation. */
+/** Wrench, a tool invocation. */
 export function WrenchIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -715,7 +715,7 @@ export function WrenchIcon({ size = 13, strokeWidth = 1.8, className }: IconProp
   );
 }
 
-/** Shield — a permission gate. */
+/** Shield, a permission gate. */
 export function ShieldIcon({
   size = 14,
   strokeWidth = 1.8,
@@ -736,7 +736,7 @@ export function ShieldIcon({
   );
 }
 
-/** Speech bubble with a question mark — the agent is asking the user something. */
+/** Speech bubble with a question mark, the agent is asking the user something. */
 export function QuestionIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -757,7 +757,7 @@ export function QuestionIcon({ size = 14, strokeWidth = 1.8, className }: IconPr
   );
 }
 
-/** Thumbtack — marks a pinned worktree and the sidebar's "Pinned" section. */
+/** Thumbtack, marks a pinned worktree and the sidebar's "Pinned" section. */
 export function PinIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -825,7 +825,7 @@ export function ModeIcon({ mode, size = 16, strokeWidth = 1.8 }: IconProps & { m
   }
 }
 
-/** Person silhouette — a user/account. */
+/** Person silhouette, a user/account. */
 export function PersonIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -835,7 +835,7 @@ export function PersonIcon({ size = 14, strokeWidth = 1.8, className }: IconProp
   );
 }
 
-/** Git — branch fork with three commit nodes. */
+/** Git, branch fork with three commit nodes. */
 export function GitBranchIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -848,7 +848,7 @@ export function GitBranchIcon({ size = 16, strokeWidth = 1.8, className }: IconP
   );
 }
 
-/** Obsidian — faceted diamond. */
+/** Obsidian, faceted diamond. */
 export function ObsidianIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -859,7 +859,7 @@ export function ObsidianIcon({ size = 16, strokeWidth = 1.8, className }: IconPr
   );
 }
 
-/** Notion — bold N letterform (left stroke, right stroke, diagonal). */
+/** Notion, bold N letterform (left stroke, right stroke, diagonal). */
 export function NotionIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -874,7 +874,7 @@ export function NotionIcon({ size = 16, strokeWidth = 1.8, className }: IconProp
   );
 }
 
-/** Anytype — triangle with crossbar (A-shape). */
+/** Anytype, triangle with crossbar (A-shape). */
 export function AnytypeIcon({ size = 16, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
@@ -884,7 +884,7 @@ export function AnytypeIcon({ size = 16, strokeWidth = 1.8, className }: IconPro
   );
 }
 
-/** Archive box — lid over a body. The archive action + the tab-bar tool button. */
+/** Archive box, lid over a body. The archive action + the tab-bar tool button. */
 export function ArchiveIcon({ size = 16, strokeWidth = 1.5, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
@@ -901,7 +901,7 @@ export function ArchiveIcon({ size = 16, strokeWidth = 1.5, className }: IconPro
   );
 }
 
-/** Archive box with an up-arrow — the unarchive (restore) action. */
+/** Archive box with an up-arrow, the unarchive (restore) action. */
 export function UnarchiveIcon({ size = 16, strokeWidth = 1.5, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
@@ -924,7 +924,7 @@ export function UnarchiveIcon({ size = 16, strokeWidth = 1.5, className }: IconP
   );
 }
 
-/** Filled play triangle — the Run action. */
+/** Filled play triangle, the Run action. */
 export function PlayIcon({ size = 13, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
@@ -933,7 +933,7 @@ export function PlayIcon({ size = 13, className }: IconProps) {
   );
 }
 
-/** Checkmark — a script's last run passed. */
+/** Checkmark, a script's last run passed. */
 export function CheckIcon({ size = 13, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
@@ -948,7 +948,7 @@ export function CheckIcon({ size = 13, strokeWidth = 1.8, className }: IconProps
   );
 }
 
-/** Globe — "Open :PORT" for a detected dev server. */
+/** Globe, "Open :PORT" for a detected dev server. */
 export function GlobeIcon({ size = 13, strokeWidth = 1.5, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
@@ -985,7 +985,7 @@ export function DockBottomIcon({ size = 13, strokeWidth = 1.5, className }: Icon
   );
 }
 
-/** A bordered terminal panel — the rail icon for the script/terminal dock,
+/** A bordered terminal panel, the rail icon for the script/terminal dock,
  *  visually distinct from the Settings gear. */
 export function ScriptPanelIcon({ size = 18, strokeWidth = 1.6, className }: IconProps) {
   return (
@@ -1002,7 +1002,7 @@ export function ScriptPanelIcon({ size = 18, strokeWidth = 1.6, className }: Ico
   );
 }
 
-/** Sliders — general/mixed settings (Settings sidebar). */
+/** Sliders, general/mixed settings (Settings sidebar). */
 export function SlidersIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -1023,7 +1023,7 @@ export function SlidersIcon({ size = 14, strokeWidth = 1.8, className }: IconPro
   );
 }
 
-/** Bell — OS notifications (Settings sidebar). */
+/** Bell, OS notifications (Settings sidebar). */
 export function BellIcon({ size = 14, strokeWidth = 1.8, className }: IconProps) {
   return (
     <svg
@@ -1044,7 +1044,7 @@ export function BellIcon({ size = 14, strokeWidth = 1.8, className }: IconProps)
   );
 }
 
-/** Keyboard — keybindings (Settings sidebar). */
+/** Keyboard, keybindings (Settings sidebar). */
 export function KeyboardIcon({ size = 14, strokeWidth = 1.6, className }: IconProps) {
   return (
     <svg
@@ -1066,7 +1066,7 @@ export function KeyboardIcon({ size = 14, strokeWidth = 1.6, className }: IconPr
   );
 }
 
-/** Paint swatch — theme / appearance (Settings sidebar). */
+/** Paint swatch, theme / appearance (Settings sidebar). */
 export function PaletteIcon({ size = 14, strokeWidth = 1.7, className }: IconProps) {
   return (
     <svg
@@ -1089,7 +1089,7 @@ export function PaletteIcon({ size = 14, strokeWidth = 1.7, className }: IconPro
   );
 }
 
-/** Circular arrows — sync the thoughts repo (Library header). */
+/** Circular arrows, sync the thoughts repo (Library header). */
 export function SyncIcon({ size = 13, strokeWidth = 1.5, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>

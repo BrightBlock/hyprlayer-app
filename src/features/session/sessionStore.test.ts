@@ -16,7 +16,7 @@ const h = vi.hoisted(() => {
     state.lastChannel = args[args.length - 1] as FakeChannel;
     const id = `s${(state.nextId += 1)}`;
     // Mirrors the backend's StartedSession: the row plus the composed prompt
-    // (here just the raw input — composition is the backend's concern).
+    // (here just the raw input, composition is the backend's concern).
     return {
       status: "ok",
       data: {
@@ -129,7 +129,7 @@ describe("dropSession (transcript eviction)", () => {
     dropSession(id);
     expect(useSessionStore.getState().sessions[id]).toBeUndefined();
 
-    // The channel is detached — a straggler event must not rebuild the entry
+    // The channel is detached, a straggler event must not rebuild the entry
     // (that's `restoreSessionIfNeeded`'s job, on remount, from the SQLite log).
     emit(TURN_DONE);
     expect(useSessionStore.getState().sessions[id]).toBeUndefined();
@@ -244,7 +244,7 @@ describe("stopSession (interrupt → kill escalation)", () => {
   it("still kills when the interrupt itself fails to deliver", async () => {
     vi.useFakeTimers();
     try {
-      // A wedged session whose stdin is gone — interrupt rejects, but we still
+      // A wedged session whose stdin is gone, interrupt rejects, but we still
       // want the kill to land so the user isn't stuck.
       h.interruptSession.mockRejectedValueOnce(new Error("stdin closed"));
       const id = await startBusySession();
@@ -282,7 +282,7 @@ const BASH_BG_RESULT = (toolUseId: string, taskId: string): SessionEvent => ({
   parentId: null,
 });
 
-describe("taskStartedAt — per-task elapsed timestamps", () => {
+describe("taskStartedAt, per-task elapsed timestamps", () => {
   it("starts at {} when a session is created", async () => {
     const id = await startBusySession();
     expect(useSessionStore.getState().sessions[id]?.taskStartedAt).toEqual({});
@@ -314,7 +314,7 @@ describe("taskStartedAt — per-task elapsed timestamps", () => {
     const firstStamp = useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"];
     expect(firstStamp).toBeTruthy();
 
-    // A new event arrives — stamp should remain unchanged.
+    // A new event arrives, stamp should remain unchanged.
     emit(TURN_DONE);
     const afterTurnDone = useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"];
     expect(afterTurnDone).toBe(firstStamp);
@@ -328,7 +328,7 @@ describe("taskStartedAt — per-task elapsed timestamps", () => {
     emit(TURN_DONE);
     expect(useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"]).toBeTruthy();
 
-    // claude's async completion notification — the agent never polled the task.
+    // claude's async completion notification, the agent never polled the task.
     emit({ kind: "backgroundTaskUpdate", taskId: "task-a", toolUseId: "tu-1", status: "completed" });
 
     const taskStartedAt = useSessionStore.getState().sessions[id]?.taskStartedAt;
@@ -359,7 +359,7 @@ describe("taskStartedAt — per-task elapsed timestamps", () => {
   });
 });
 
-// ─── classifyEntry — background activity ────────────────────────────────────
+// ─── classifyEntry, background activity ────────────────────────────────────
 
 const entryOf = (id: string) => useSessionStore.getState().sessions[id]!;
 
@@ -446,7 +446,7 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     await stopSession(id);
 
     // The decline goes to the LIVE driver (releases a claude blocked on the ask),
-    // then the interrupt halts the turn. No hard kill — it wasn't wedged-computing.
+    // then the interrupt halts the turn. No hard kill, it wasn't wedged-computing.
     expect(h.respondPermission).toHaveBeenCalledWith(id, "req-1", false, null);
     expect(h.interruptSession).toHaveBeenCalledWith(id);
     expect(h.killSession).not.toHaveBeenCalled();
@@ -530,7 +530,7 @@ describe("resuming a silent process settles out of `starting`", () => {
     expect(queued(id)).toEqual(["follow-up"]);
   });
 
-  // codex/opencode emit `init` on every spawn, claude only with a turn. Reading a
+  // codex/opencode emit `init` on every spawn. Claude only with a turn. Reading a
   // bare one as "a turn started" left a restarted app's codex tabs on a phantom
   // turn: ticking counter, composer stuck on "it'll queue…", Stop button.
   const resumeEmitting = (...burst: SessionEvent[]) =>
@@ -583,7 +583,7 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     await resumeSession(id);
 
-    expect(isWorking(entryOf(id))).toBe(true); // still streaming — not settled to idle
+    expect(isWorking(entryOf(id))).toBe(true); // still streaming, not settled to idle
   });
 });
 
@@ -624,7 +624,7 @@ describe("turn abandonment closes the streaming caret", () => {
   });
 });
 
-describe("classifyEntry — background activity state", () => {
+describe("classifyEntry, background activity state", () => {
   it("returns 'background' for a live resting session with a running background task", async () => {
     const id = await startBusySession();
     emit(INIT);
@@ -686,7 +686,7 @@ describe("classifyEntry — background activity state", () => {
     emit(BASH_BG_SPAWN("tu-1", "task-a"));
     emit(BASH_BG_RESULT("tu-1", "task-a"));
     // The process exits cleanly while the shell is still un-stopped: it died
-    // with the process group, so the dead session reads as review — not a
+    // with the process group, so the dead session reads as review, not a
     // phantom "background" pulse.
     emit({ kind: "exited", outcome: "completed", code: 0, stderrTail: "" });
 
@@ -709,7 +709,7 @@ describe("classifyEntry — background activity state", () => {
 
   it("a DETACHED session drops its live flag but stays non-terminal", async () => {
     // The app quit and took the process with it. The tab must come back to a
-    // clean, resumable session — not a terminal one that auto-resumes on sight.
+    // clean, resumable session, not a terminal one that auto-resumes on sight.
     const id = await startBusySession();
     emit(INIT);
     emit(BASH_BG_SPAWN("tu-1", "task-a"));
@@ -722,7 +722,7 @@ describe("classifyEntry — background activity state", () => {
   });
 });
 
-// ─── workstreamShipBusy — hide Commit while Ship commits ────────────────────
+// ─── workstreamShipBusy, hide Commit while Ship commits ────────────────────
 
 describe("workstreamShipBusy", () => {
   const shipBusy = (ws: string) => workstreamShipBusy(useSessionStore.getState().sessions, ws);

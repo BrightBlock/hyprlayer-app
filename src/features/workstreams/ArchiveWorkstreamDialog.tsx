@@ -15,7 +15,7 @@ type Props = {
 /**
  * Non-destructive archive: the worktree is moved (not deleted) to
  * `<project>/archived-contexts/<slug>/` and the branch is preserved. The
- * Archive view restores from there. No discard branch — uncommitted work
+ * Archive view restores from there. No discard branch, uncommitted work
  * survives by construction.
  */
 export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) {
@@ -45,7 +45,7 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
   // The backend aborts archive (before any teardown) when the project's Archive
   // script fails, so the user can fix it and retry, or skip the script.
   const scriptFailed = isAppError(archive.error) && archive.error.code === "archive_script_failed";
-  // Folder rows archive as a pure status flip — no worktree, no branch.
+  // Folder rows archive as a pure status flip, no worktree, no branch.
   const folder = target !== null && isFolderWorkstream(target);
 
   return (
@@ -61,7 +61,7 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
                   <span className="font-mono text-xs">({target.item.branch})</span>
                 </>
               )}{" "}
-              —{" "}
+              :{" "}
             </>
           )}
           {folder ? (

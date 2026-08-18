@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrStatusBar } from "./PrStatusBar";
 import type { PrStatus, WorkstreamView } from "@/lib/bindings";
 
-// Mock the data hooks so the bar renders off a plain PrStatus — no react-query,
+// Mock the data hooks so the bar renders off a plain PrStatus, no react-query,
 // no gh subprocess. `vi.hoisted` lets the (hoisted) vi.mock factory reach them.
 const q = vi.hoisted(() => ({
   useWorkstreamPr: vi.fn(),
@@ -72,7 +72,7 @@ describe("PrStatusBar merge gate", () => {
     const btn = mergeBtn();
     expect(btn.disabled).toBe(true);
     expect(btn.getAttribute("title")).toBe(
-      "A reviewer requested changes — address them before merging",
+      "A reviewer requested changes. Address them before merging",
     );
     expect(screen.getByText("Address comments")).toBeTruthy();
   });
@@ -85,7 +85,7 @@ describe("PrStatusBar merge gate", () => {
 
   it("does not queue auto-merge for changes-requested (author's turn)", () => {
     renderBar(makePr({ reviewDecision: "changesRequested" }), true);
-    // Stays a plain, disabled Merge — no Auto-merge affordance.
+    // Stays a plain, disabled Merge, no Auto-merge affordance.
     expect(screen.queryByRole("button", { name: "Auto-merge" })).toBeNull();
     expect(mergeBtn().disabled).toBe(true);
   });

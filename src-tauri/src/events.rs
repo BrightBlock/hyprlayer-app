@@ -20,7 +20,7 @@ pub struct ThoughtsIndexUpdated {
     pub ids: Vec<String>,
 }
 
-/// A workstream's PR status changed server-side — it merged, its checks
+/// A workstream's PR status changed server-side, it merged, its checks
 /// settled, or a PR appeared/disappeared for the branch. The backend PR watcher
 /// (`crate::pr_watch`) diffs each poll and emits this only on a real change; the
 /// frontend refetches that workstream's PR query so the merge/archive bar stays
@@ -31,7 +31,7 @@ pub struct PrStatusChanged {
     pub workstream_id: String,
 }
 
-/// A workstream's worktree changed on disk — a file edit, or git's index/HEAD
+/// A workstream's worktree changed on disk, a file edit, or git's index/HEAD
 /// moved (`git add`/`commit`/`checkout`, incl. mid-turn). The backend watches
 /// the active worktree and its git dir (`commands::workstreams::watch_worktree`)
 /// and emits this so the Changes panel + git status refresh live. The frontend
@@ -83,7 +83,7 @@ pub struct ScriptRunChanged {
 
 /// A quit was requested (⌘Q or the window's close button) while "Confirm before
 /// quitting" is on. The backend has already cancelled the close by the time this
-/// lands — the frontend raises the confirm dialog, and nothing exits unless the
+/// lands, the frontend raises the confirm dialog, and nothing exits unless the
 /// user confirms (`quit_app`).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct QuitRequested;

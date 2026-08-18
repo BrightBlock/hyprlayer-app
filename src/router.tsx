@@ -39,7 +39,7 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   // The home dashboard is the landing surface. We deliberately do NOT block in
-  // beforeLoad on a bootstrap IPC — that delayed first paint. The shell renders
+  // beforeLoad on a bootstrap IPC, that delayed first paint. The shell renders
   // instantly. Setup/config lives under Settings now.
   component: Dashboard,
 });
@@ -150,7 +150,7 @@ const routeTree = rootRoute.addChildren([
 // Restore the previous session's view by seeding the URL before the router reads
 // it at construction, so a cold start mounts straight into the last workstream/
 // view instead of flashing the dashboard while a post-mount effect navigates.
-// Only when we actually booted to "/" — a deep link sets its own URL first. A
+// Only when we actually booted to "/", a deep link sets its own URL first. A
 // since-deleted project (→ PageError) or a missing config (→ onboarding gate) is
 // handled downstream once bootstrap resolves; the route is re-persisted by Root.
 const lastHref = useLastRoute.getState().href;

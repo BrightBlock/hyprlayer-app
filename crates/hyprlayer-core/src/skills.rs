@@ -23,7 +23,7 @@ pub struct SlashCommand {
     pub name: String,
     /// One-line summary from the file's frontmatter (or first prose line).
     pub description: String,
-    /// `project` | `user` — which `.claude` root supplied it (for the label).
+    /// `project` | `user`, which `.claude` root supplied it (for the label).
     pub source: String,
 }
 
@@ -40,10 +40,10 @@ pub struct AgentSkill {
     pub source: String,
     pub plugin: Option<String>,
     /// Body length in characters. Preloading injects the whole body on every
-    /// spawn, so this is a recurring context cost, not a one-off — the card
+    /// spawn, so this is a recurring context cost, not a one-off, the card
     /// renders it rather than letting a toggle quietly cost thousands of tokens.
     pub chars: u32,
-    /// The skill sets `disable-model-invocation: true` — its author reserved it
+    /// The skill sets `disable-model-invocation: true`, its author reserved it
     /// for the user to invoke. Preloading injects it anyway, so the card says so.
     pub user_only: bool,
 }
@@ -58,7 +58,7 @@ pub struct AgentSkill {
 pub fn list_slash_commands(worktree: &Path) -> Vec<SlashCommand> {
     let mut found: Vec<SlashCommand> = Vec::new();
 
-    // 1. Project root first, then user — project entries take precedence.
+    // 1. Project root first, then user, project entries take precedence.
     let mut roots: Vec<(PathBuf, &str)> = vec![(worktree.join(".claude"), "project")];
     if let Some(home) = dirs::home_dir() {
         roots.push((home.join(".claude"), "user"));
@@ -82,8 +82,8 @@ pub fn list_slash_commands(worktree: &Path) -> Vec<SlashCommand> {
 }
 
 /// Every skill visible from `worktree`, project first, then user, then plugins.
-/// Sorted by name; a name already claimed by an earlier source is skipped —
-/// claude's own precedence. Prompt commands never appear here — claude's
+/// Sorted by name; a name already claimed by an earlier source is skipped,
+/// claude's own precedence. Prompt commands never appear here, claude's
 /// `skills:` key can't preload them.
 pub fn list_skills(worktree: Option<&Path>) -> Vec<AgentSkill> {
     let mut out: Vec<AgentSkill> = Vec::new();
@@ -121,7 +121,7 @@ pub fn list_skills(worktree: Option<&Path>) -> Vec<AgentSkill> {
             continue;
         }
         for entry in scan_skills(&install.path.join("skills")) {
-            // Plugin skills are qualified `<plugin>:<dir>` — the form claude's
+            // Plugin skills are qualified `<plugin>:<dir>`, the form claude's
             // own resolver matches, and the directory (not the frontmatter
             // name) is the canonical id.
             let name = format!("{}:{}", install.label, entry.dir);
@@ -148,7 +148,7 @@ pub fn list_skills(worktree: Option<&Path>) -> Vec<AgentSkill> {
 struct PluginInstall {
     /// The key `enabledPlugins` uses.
     key: String,
-    /// The key's half before `@` — how claude qualifies this plugin's skills.
+    /// The key's half before `@`, how claude qualifies this plugin's skills.
     label: String,
     path: PathBuf,
 }
@@ -156,7 +156,7 @@ struct PluginInstall {
 /// Every installed plugin, read from claude's
 /// `~/.claude/plugins/installed_plugins.json`. We scan exactly the versions
 /// claude has loaded, not stale copies left in the cache. Installed is not the
-/// same as enabled — see [`enabled_plugins`].
+/// same as enabled, see [`enabled_plugins`].
 fn plugin_installs() -> Vec<PluginInstall> {
     let mut out = Vec::new();
     let Some(home) = dirs::home_dir() else {
@@ -212,8 +212,8 @@ fn settings_chain(worktree: Option<&Path>) -> Vec<PathBuf> {
 }
 
 /// The `<plugin>@<marketplace>` keys enabled for `worktree`. An installed
-/// plugin claude has not been told to enable contributes nothing at runtime —
-/// its skills fail to resolve and warn at every spawn — so absence means off,
+/// plugin claude has not been told to enable contributes nothing at runtime,
+/// its skills fail to resolve and warn at every spawn, so absence means off,
 /// matching what `claude plugin list` reports.
 fn enabled_plugins(worktree: Option<&Path>) -> std::collections::HashSet<String> {
     let mut on = std::collections::HashSet::new();
@@ -240,7 +240,7 @@ fn enabled_plugins(worktree: Option<&Path>) -> std::collections::HashSet<String>
 }
 
 /// Commands and skills contributed by installed plugins. Unlike [`list_skills`]
-/// this does not filter on enablement — the composer's list is out of scope for
+/// this does not filter on enablement, the composer's list is out of scope for
 /// that change and has always offered every install.
 fn collect_plugins(out: &mut Vec<SlashCommand>) {
     for install in plugin_installs() {
@@ -252,7 +252,7 @@ fn collect_plugins(out: &mut Vec<SlashCommand>) {
 /// Curated built-in slash commands that ship inside the claude binary (so they
 /// can't be discovered on disk) and translate to a one-shot worktree task.
 /// Session/control commands (`/clear`, `/config`, `/model`, `/resume`, …) are
-/// intentionally omitted — they don't make sense sent as a programmatic turn.
+/// intentionally omitted, they don't make sense sent as a programmatic turn.
 fn builtin_commands() -> Vec<SlashCommand> {
     const BUILTINS: &[(&str, &str)] = &[
         (
@@ -282,7 +282,7 @@ fn builtin_commands() -> Vec<SlashCommand> {
 /// One `<dir>/skills/<name>/SKILL.md` as found on disk, before either consumer
 /// decides what to call it.
 struct SkillEntry {
-    /// The directory name — claude's canonical name for a non-plugin skill.
+    /// The directory name, claude's canonical name for a non-plugin skill.
     dir: String,
     /// Frontmatter `name`, when the file sets one.
     declared: Option<String>,
@@ -329,7 +329,7 @@ fn scan_skills(dir: &Path) -> Vec<SkillEntry> {
     out
 }
 
-/// `<root>/skills/<name>/SKILL.md` — the command name is the frontmatter `name`
+/// `<root>/skills/<name>/SKILL.md`, the command name is the frontmatter `name`
 /// when present, else the directory name.
 fn collect_skills(dir: &Path, source: &str, out: &mut Vec<SlashCommand>) {
     for entry in scan_skills(dir) {
@@ -342,7 +342,7 @@ fn collect_skills(dir: &Path, source: &str, out: &mut Vec<SlashCommand>) {
     }
 }
 
-/// `<root>/commands/**/*.md` — the name is the path below `commands/` with
+/// `<root>/commands/**/*.md`, the name is the path below `commands/` with
 /// separators turned into `:` and the `.md` dropped, matching claude's
 /// namespacing (e.g. `commands/git/sync.md` → `git:sync`).
 fn collect_commands(dir: &Path, prefix: &str, source: &str, out: &mut Vec<SlashCommand>) {
@@ -398,7 +398,7 @@ fn parse_meta(text: &str) -> (Option<String>, Option<String>) {
     (name, description)
 }
 
-/// First non-empty body line that isn't a markdown heading or list item — used
+/// First non-empty body line that isn't a markdown heading or list item, used
 /// as a description fallback.
 fn first_prose_line(body: &str) -> Option<String> {
     body.lines()
@@ -426,7 +426,7 @@ mod tests {
     impl TmpHome {
         fn new() -> Self {
             // A test that panicked while holding it poisoned nothing we care
-            // about — the lock guards an env var, not shared data.
+            // about, the lock guards an env var, not shared data.
             let guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let dir = tempfile::tempdir().unwrap();
             let prev = std::env::var_os("HOME");

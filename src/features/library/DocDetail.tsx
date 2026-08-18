@@ -33,8 +33,8 @@ type Props = {
 
 /**
  * The library's detail pane. Loads the doc, then hands it to {@link DocBody}
- * keyed on the doc's identity *and* mtime: switching documents — or a refetch
- * after a save/frontmatter patch bumps the mtime — mints a fresh editor buffer
+ * keyed on the doc's identity *and* mtime: switching documents, or a refetch
+ * after a save/frontmatter patch bumps the mtime, mints a fresh editor buffer
  * rather than carrying a stale (possibly dirty) one across, which could
  * otherwise save one document's body over another's.
  */
@@ -58,11 +58,11 @@ type BodyProps = Props & { doc: DocContent };
 
 /**
  * The rendered detail: a path bar (with the edit/preview/save controls), the
- * title, the inline-editable frontmatter card, and the body — rendered prose in
+ * title, the inline-editable frontmatter card, and the body, rendered prose in
  * preview, raw CodeMirror in edit. Folds in the old full-page DocPage's
  * save/patch/reveal machinery; the body's mtime-guarded save still gates
  * frontmatter patches (the card disables while the buffer is dirty). The editor
- * buffer is seeded from `doc` at mount and lives only as long as this instance —
+ * buffer is seeded from `doc` at mount and lives only as long as this instance,
  * see {@link DocDetail} for why that lifetime is tied to the doc's mtime.
  */
 function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
@@ -144,7 +144,7 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
               </button>
             ))}
           </div>
-          {/* Reveal in the OS file manager — icon only to keep the bar light. */}
+          {/* Reveal in the OS file manager, icon only to keep the bar light. */}
           <button
             type="button"
             onClick={() => revealDoc.mutate(meta.id)}

@@ -13,7 +13,7 @@ const WIDTH = 960;
 const HEIGHT = 640;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 6;
-/** Layout margin inside the stage — small, so stars reach near the edges. */
+/** Layout margin inside the stage, small, so stars reach near the edges. */
 const STAGE_PAD = 28;
 /** Radial density equalizer (< 1): the force layout settles into a
  *  center-heavy blob, and raising each star's normalized center distance to
@@ -25,12 +25,12 @@ const SPREAD = 0.68;
 const GLOW_NODES = 12;
 
 type Props = {
-  /** The full graph (built once by the parent — we don't rebuild it here). */
+  /** The full graph (built once by the parent, we don't rebuild it here). */
   graph: Graph;
 };
 
 /**
- * Interactive nebula view of the thoughts index — the Observatory home's
+ * Interactive nebula view of the thoughts index, the Observatory home's
  * full-bleed hero stage. Every doc is a star in the theme's nebula family,
  * every resolved link a curved gradient edge; the most-linked docs wear glow
  * halos and the top hub a pulse ring. Connected docs pull into clusters; node
@@ -44,7 +44,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
   const navigate = useNavigate();
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Show only the *linked* docs — the connection story. Isolated docs (no
+  // Show only the *linked* docs, the connection story. Isolated docs (no
   // resolved link) would otherwise bury the structure in a dot-cloud. If
   // nothing is linked at all, fall back to showing everything.
   const graph = useMemo(() => {
@@ -52,7 +52,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
     return connected.length > 0 ? { nodes: connected, edges: full.edges } : full;
   }, [full]);
 
-  // The force layout is O(n²) — heavy enough to stall first paint if run inline.
+  // The force layout is O(n²), heavy enough to stall first paint if run inline.
   // Defer it to after the shell paints (rAF) so the page is always instant; a
   // spinner shows for the one frame it takes to settle.
   const [layout, setLayout] = useState<Point[] | null>(null);
@@ -75,7 +75,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
     const iterations = graph.nodes.length > 140 ? 220 : 300;
     const run = () =>
       setLayout(spread(simulate(graph, { width: WIDTH, height: HEIGHT, iterations })));
-    // rAF defers the O(n²) pass past first paint — but a hidden webview never
+    // rAF defers the O(n²) pass past first paint, but a hidden webview never
     // ticks rAF (occluded window, app launched minimized), which would leave
     // the hero starless until a repaint. Compute on a timer instead there.
     let raf = 0;
@@ -256,7 +256,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
         {/* Anchored to the WIDTH×HEIGHT stage in user space (the matrix
             reproduces the default objectBoundingBox mapping) so the fill
             looks identical but no longer depends on the backdrop rect's
-            size — letting that rect over-scan without shifting the glow. */}
+            size, letting that rect over-scan without shifting the glow. */}
         <radialGradient
           id="kgf-bg"
           cx="0.58"
@@ -268,7 +268,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
           {/* One cool backdrop, tuned to the 2a mock: a tight nebula bloom
               just right of center (behind the search bar) that falls to the
               plain surface tone within ~a third of the stage, so the outer
-              field and borders read near-black. A single gradient —
+              field and borders read near-black. A single gradient,
               layering a second wash over it reads as a muddy temperature
               clash and multiplies banding. */}
           <stop offset="0" stopColor="var(--color-nebula-bg-0)" />
@@ -312,7 +312,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
             fill="url(#kgf-fade)"
           />
         </mask>
-        {/* Fine monochrome grain — dithers away any residual banding in the
+        {/* Fine monochrome grain, dithers away any residual banding in the
             nebula's own low-contrast radial (a smooth gradient this large
             steps every ~50px on 8-bit displays without it). */}
         <filter id="kgf-grain">
@@ -323,7 +323,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
 
       {/* Nebula backdrop doubles as the pan / reset surface. It over-scans
           the stage (3×, centered) so the anchored gradient bleeds past any
-          xMidYMid-meet letterbox band — the nebula reaches the container's
+          xMidYMid-meet letterbox band, the nebula reaches the container's
           edges with no seam at any aspect ratio. */}
       <rect
         x={-WIDTH}
@@ -339,7 +339,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
       {layout && (
         <g mask="url(#kgf-vignette)">
           <g transform={`translate(${view.tx} ${view.ty}) scale(${scale})`}>
-            {/* Edges first, so nodes sit on top. Curved gradient strands — the
+            {/* Edges first, so nodes sit on top. Curved gradient strands, the
                 bow alternates by index so the mesh weaves instead of fanning. */}
             {graph.edges.map((edge, i) => {
               const a = posOf(edge.source, idToIndex.get(edge.source) ?? 0);
@@ -374,7 +374,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
               const r = 1.4 + Math.min(Math.sqrt(node.degree) * 0.7, 2.8);
               const color = typeColor(node.type);
               const lit = isLit(node.id);
-              // Labels only on hover (the spotlit neighbourhood) — the resting
+              // Labels only on hover (the spotlit neighbourhood), the resting
               // hero stays a clean constellation under the overlaid dashboard.
               const showLabel = active != null && lit;
               return (
@@ -433,7 +433,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
       )}
 
       {/* Grain sits over everything (backdrop, stars, glows) at imperceptible
-          strength — pure dither, not texture. Stage + 25% overscan keeps the
+          strength, pure dither, not texture. Stage + 25% overscan keeps the
           filter raster small; beyond it the field is flat near-black with
           nothing left to band. */}
       <rect
@@ -453,7 +453,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
  * Fan a settled layout out across the whole stage. Two passes: stretch each
  * axis independently to the padded box (the sim's blob rarely matches the
  * stage's aspect), then relax the center-heavy density by raising each
- * point's normalized distance from center to SPREAD — inner points move
+ * point's normalized distance from center to SPREAD, inner points move
  * outward a lot, the rim barely moves, and relative arrangement (clusters,
  * neighbourhoods) survives.
  */

@@ -1,9 +1,9 @@
 //! Persisting prompt attachments (dropped files, pasted screenshots) into the
 //! workstream's worktree, so volatile sources survive long enough for the agent
 //! to read them. The motivating case is a macOS screenshot dragged straight off
-//! the capture thumbnail — its source lives under
+//! the capture thumbnail, its source lives under
 //! `/var/folders/.../TemporaryItems/NSIRD_screencaptureui_*/` and the OS reaps
-//! it moments later — but the same applies to clipboard image bytes (which have
+//! it moments later, but the same applies to clipboard image bytes (which have
 //! no path at all).
 //!
 //! Files land in `<worktree>/.hyprlayer/attachments/`. The worktree is the
@@ -67,7 +67,7 @@ fn sanitize_file_name(name: &str) -> String {
     }
 }
 
-/// A collision-proof destination inside `dir` for `file_name` — a short random
+/// A collision-proof destination inside `dir` for `file_name`, a short random
 /// prefix means re-pasting the same name never clobbers an earlier attachment.
 fn unique_dest(dir: &Path, file_name: &str) -> PathBuf {
     let id = uuid::Uuid::new_v4().simple().to_string();
@@ -119,8 +119,8 @@ pub async fn save_attachment(
     .await
 }
 
-/// Run attachment filesystem work off the async runtime (copies/writes can be
-/// multi-MB — they must not block a runtime worker), flattening the join error.
+/// Run attachment filesystem work off the async runtime, flattening the join
+/// error. Copies and writes can be multi-MB, so they must not block a worker.
 async fn blocking_fs<F>(f: F) -> CmdResult<String>
 where
     F: FnOnce() -> CmdResult<String> + Send + 'static,

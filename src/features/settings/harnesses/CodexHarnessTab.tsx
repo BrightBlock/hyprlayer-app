@@ -48,7 +48,7 @@ export function CodexHarnessTab({
 }) {
   const installed = status?.state.state === "ok";
   // One probe for account + models: it spawns an app-server, so don't even try
-  // without a binary — and never as two concurrent queries (see useCodexProbe).
+  // without a binary, and never as two concurrent queries (see useCodexProbe).
   const probe = useCodexProbe(installed);
   const save = useSetAppSettings();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -72,7 +72,7 @@ export function CodexHarnessTab({
   );
   const usingAllDefault = selectedModels.length === 0 && available.length > 0;
   // Effort tiers differ per model (GPT-5.6-Sol has `ultra`, Luna stops at `max`),
-  // so offer the union across the models actually on offer — these settings apply
+  // so offer the union across the models actually on offer, these settings apply
   // to whichever of them a chat runs on. Falls back to the common core before the
   // list loads.
   const effortChoices = useMemo(
@@ -94,7 +94,7 @@ export function CodexHarnessTab({
   }
 
   function setSelectedModels(next: string[]) {
-    // Drop any default the new selection can no longer honor, in the SAME write —
+    // Drop any default the new selection can no longer honor, in the SAME write,
     // a separate clear could land before this one and be overwritten by the stale
     // value. Efforts go too: tiers are per-model, and Commit/Ship sends its stored
     // effort through unvalidated, so a tier no model offers would fail the turn.
@@ -172,7 +172,7 @@ export function CodexHarnessTab({
             <Spinner size={12} /> Loading models from Codex…
           </p>
         ) : probe.isError ? (
-          // A probe that RAN and failed is an error, not "no models" — showing the
+          // A probe that RAN and failed is an error, not "no models", showing the
           // signed-out hint here would send the user to fix the wrong thing.
           <div className="mt-3">
             <ErrorNote error={probe.error} />
@@ -224,9 +224,7 @@ export function CodexHarnessTab({
                     onChange={(v) => patchCodex({ defaultModel: v })}
                   />
                 }
-              >
-                Model new chats start on.
-              </SettingRow>
+              />
               <SettingRow
                 title="Default reasoning effort"
                 control={
@@ -237,9 +235,7 @@ export function CodexHarnessTab({
                     onChange={(v) => patchCodex({ defaultEffort: v })}
                   />
                 }
-              >
-                Reasoning effort new chats start on.
-              </SettingRow>
+              />
               <SettingRow
                 title="Commit &amp; Ship model"
                 control={
@@ -251,9 +247,7 @@ export function CodexHarnessTab({
                     onChange={(v) => patchCodex({ commitModel: v })}
                   />
                 }
-              >
-                Model the Commit and Ship agents run on.
-              </SettingRow>
+              />
               <SettingRow
                 title="Commit &amp; Ship effort"
                 control={
@@ -265,7 +259,7 @@ export function CodexHarnessTab({
                   />
                 }
               >
-                These stages are mechanical git plumbing — a lower effort is usually enough.
+                Git plumbing, so a low effort is enough.
               </SettingRow>
             </div>
           </>
@@ -276,7 +270,7 @@ export function CodexHarnessTab({
 
       {/* Same picker OpenCode uses. Codex returns one flat model list rather
           than a provider→model catalog, so it's a single unlabelled group.
-          Mounted only while open — that's what re-seeds its draft selection. */}
+          Mounted only while open, that's what re-seeds its draft selection. */}
       {pickerOpen && (
         <ModelMultiSelectDialog
           open
@@ -300,7 +294,7 @@ function keepIfSelected(id: string | null | undefined, selected: string[]): stri
 }
 
 /** Keep a stored effort only while some selected model still offers it. An empty
- *  set means the catalog hasn't loaded — keep the value rather than clearing it
+ *  set means the catalog hasn't loaded, keep the value rather than clearing it
  *  on a probe that simply hasn't answered yet. */
 function keepIfOffered(effort: string | null | undefined, offered: Set<string>): string | null {
   if (!effort) return null;
@@ -308,8 +302,8 @@ function keepIfOffered(effort: string | null | undefined, offered: Set<string>):
 }
 
 /** The one control shape all four Codex defaults use: a fixed-width dropdown
- *  whose empty option means "let Codex decide". The width sets the trigger only
- *  — the open menu grows past it to fit the longest model id. */
+ *  whose empty option means "let Codex decide". The width sets the trigger
+ *  only; the open menu grows past it to fit the longest model id. */
 function DefaultSelect({
   label,
   value,
@@ -378,12 +372,12 @@ function EffortSelect({
 }
 
 /**
- * Codex authentication — the same two-tile shape as the Claude tab: pick a
+ * Codex authentication, the same two-tile shape as the Claude tab: pick a
  * method, configure it below.
  *
  * The tiles are LOCAL UI state, not a stored setting (Claude persists
  * `authMode` because it injects credentials at spawn). Codex owns its own
- * credential store — `$CODEX_HOME/auth.json`, written by `codex login` — so
+ * credential store, `$CODEX_HOME/auth.json`, written by `codex login`, so
  * whichever method you last used is simply what `account/read` reports, and the
  * tiles just choose how you sign in next. Nothing is stored by Hyprlayer: no
  * plaintext key in `settings.json`, and no `OPENAI_API_KEY` at spawn (the
@@ -476,7 +470,7 @@ function ChatgptAuthPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
 }
 
 /** API-key sign-in. Mirrors Claude's ApiKeyAuthPanel, minus the base-URL and
- *  Bedrock rows — those configure env vars Claude's spawn injects, whereas Codex
+ *  Bedrock rows, those configure env vars Claude's spawn injects, whereas Codex
  *  reads neither (its own `config.toml` covers custom providers). */
 function CodexApiKeyPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
   const [key, setKey] = useState("");

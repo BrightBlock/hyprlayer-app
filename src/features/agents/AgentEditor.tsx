@@ -74,7 +74,7 @@ import { Callout, CardGroup, EditorCard, FolderCombo, RadioRow, Segmented } from
 const COLUMN = "mx-auto w-full max-w-5xl";
 
 /** Header glyphs take no fill, so the row reads as one strip of icons rather
- *  than a cluster of competing buttons — colour alone carries hover and rank.
+ *  than a cluster of competing buttons, colour alone carries hover and rank.
  *  Split so the accent variant never fights the dim one over `text-*`, which
  *  Tailwind resolves by stylesheet order rather than class order. */
 const HEADER_ICON_BASE = "grid h-7 w-7 shrink-0 place-items-center rounded-md";
@@ -84,7 +84,7 @@ const HEADER_ICON = `${HEADER_ICON_BASE} text-ink-dim hover:text-ink disabled:op
 const HEADER_ICON_PRIMARY = `${HEADER_ICON_BASE} text-accent hover:text-accent/80 disabled:text-ink-dim/50`;
 
 /** Description field bounds, in whole 20px lines (`text-sm`) plus 16px of
- *  `py-2` — a fractional height is what clipped the last line before. */
+ *  `py-2`, a fractional height is what clipped the last line before. */
 const DESC_MIN_H = 3 * 20 + 16;
 const DESC_MAX_H = 10 * 20 + 16;
 
@@ -111,7 +111,7 @@ type Props = {
   contextFiles: AgentContextFile[];
   mcpServers: AgentMcpServer[];
   skills: AgentSkill[];
-  /** Everything this agent could delegate to — its own library, minus itself. */
+  /** Everything this agent could delegate to, its own library, minus itself. */
   peers: AgentFile[];
 };
 
@@ -152,7 +152,7 @@ export function AgentEditor(props: Props) {
             </h1>
             {system && <Badge tone="dim">System</Badge>}
             {isDraftStatus && (
-              <span title="Draft agents can't be spawned by sessions started while they're a draft — publish to make this one available.">
+              <span title="Draft agents can't be spawned by sessions started while they're a draft. Publish to make this one available.">
                 <Badge tone="warn">Draft</Badge>
               </span>
             )}
@@ -291,7 +291,7 @@ function SetupTab({
       {isSystem(draft) && (
         <Callout tone="warn" icon={<ShieldIcon size={14} />}>
           This agent ships with the <span className="font-mono">{draft.plugin}</span> plugin. Edits
-          are saved as a copy in your own library and take precedence over the shipped file —{" "}
+          are saved as a copy in your own library and take precedence over the shipped file.{" "}
           <strong className="font-semibold text-ink">Reset to default</strong> removes the copy at
           any time.
         </Callout>
@@ -432,7 +432,7 @@ function SetupTab({
           title="Folder"
           hint={
             isSystem(draft)
-              ? "Groups this agent in the list only — the shipped file is untouched."
+              ? "Groups this agent in the list only. The shipped file is untouched."
               : "Groups this agent in the list, and travels with the file wherever it goes."
           }
           control={
@@ -610,7 +610,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
 
         <EditorCard
           title="MCP servers"
-          description="Servers claude is configured with. Turn one on to expose its tools to this agent."
+          description="Servers Claude Code is configured with. Turn one on to expose its tools to this agent."
         >
           {mcpServers.length === 0 ? (
             <p className="text-xs text-ink-dim">
@@ -663,7 +663,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
       <CardGroup label="Knowledge">
         <EditorCard
           title="Skills"
-          description="Preloaded into this agent when it runs, and matched by the rules below."
+          description="Preloaded into this agent when it runs."
           action={
             <>
               <span className="font-mono text-[11px] text-ink-dim">{skillSummary(draft, skills)}</span>
@@ -704,7 +704,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                       <div className="flex items-center gap-1.5">
                         <span className="truncate text-xs text-ink">{s.name}</span>
                         {s.userOnly && (
-                          <span title="Reserved for direct user invocation — still preloaded into this agent">
+                          <span title="Reserved for direct user invocation, but still preloaded into this agent">
                             <Badge tone="dim">user-only</Badge>
                           </span>
                         )}
@@ -858,7 +858,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
       >
         {overlay.rules.length === 0 ? (
           <p className="text-xs text-ink-dim">
-            No rules — every tool call follows the mode above.
+            No rules yet. Every tool call follows the mode above.
           </p>
         ) : (
           <div className="flex flex-col gap-1.5">
@@ -943,7 +943,7 @@ const PERMISSION_DESCRIPTIONS: Record<string, string> = {
   default: "Every tool call outside the allow rules waits for approval.",
   acceptEdits: "File edits apply straight away; commands still ask.",
   plan: "Reads and reasons, but never writes files or runs commands.",
-  bypassPermissions: "No prompts at all — worktree-only, for throwaway runs.",
+  bypassPermissions: "No prompts at all. Worktree-only, for throwaway runs.",
 };
 
 function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props) {

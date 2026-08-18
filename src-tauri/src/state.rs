@@ -40,7 +40,7 @@ pub struct AppState {
     pub worktree_watch:
         tokio::sync::Mutex<Option<(String, hyprlayer_core::index::watcher::WatchHandle)>>,
     /// Whether the main window currently has OS focus. Background pollers (the PR
-    /// watcher) read this to pause work while the app is unfocused — no reason to
+    /// watcher) read this to pause work while the app is unfocused, no reason to
     /// spawn `gh` subprocesses for a merge bar nobody is looking at.
     pub focused: Arc<AtomicBool>,
     /// Notified whenever `focused` flips, so a paused poller wakes promptly on

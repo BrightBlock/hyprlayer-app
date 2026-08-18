@@ -1,7 +1,7 @@
 //! Reading and writing OpenCode's `auth.json` and `opencode.json`.
 //!
-//! OpenCode follows XDG conventions on every platform (including macOS — it does
-//! NOT use `~/Library/Application Support`), so we resolve paths against
+//! OpenCode follows XDG conventions on every platform, macOS included: it does
+//! NOT use `~/Library/Application Support`. So we resolve paths against
 //! `$XDG_*` / `~/.config` / `~/.local/share` explicitly rather than via
 //! `dirs::config_dir()`. Both files are user/CLI-owned: we merge-preserve and
 //! never drop fields or keys we didn't author.
@@ -22,10 +22,10 @@ const CONFIG_SCHEMA_URL: &str = "https://opencode.ai/config.json";
 const OLLAMA_DEFAULT_NUM_CTX: u64 = 32768;
 
 /// The context window (tokens) the app launches a started OpenCode model with,
-/// when *we* pin it — the meter's denominator. We launch every Ollama model with
+/// when *we* pin it, the meter's denominator. We launch every Ollama model with
 /// a fixed `num_ctx` (see [`OLLAMA_DEFAULT_NUM_CTX`]), so that IS its real window
 /// and the UI can't infer it from the id. `None` for models we don't pin (hosted
-/// providers) — the caller falls back to the limit OpenCode itself reports. Takes
+/// providers), the caller falls back to the limit OpenCode itself reports. Takes
 /// a full `provider/model` id (e.g. `ollama/qwen2.5-coder`).
 pub fn opencode_model_context_window(model_id: &str) -> Option<u32> {
     if model_id.starts_with("ollama/") {
@@ -36,7 +36,7 @@ pub fn opencode_model_context_window(model_id: &str) -> Option<u32> {
 }
 
 /// One configured provider credential, as surfaced to the UI. The raw key is
-/// deliberately never returned — only that a credential exists and its kind.
+/// deliberately never returned, only that a credential exists and its kind.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -118,7 +118,7 @@ pub fn remove_provider(provider: &str) -> Result<()> {
 /// Mirror the default model into `opencode.json`'s `model` field
 /// (`"provider/model"`), merge-preserving. Best-effort: if the existing file is
 /// JSONC/commented (not strict-JSON parseable) we leave it untouched rather than
-/// risk dropping the user's comments — the driver still passes the model per
+/// risk dropping the user's comments, the driver still passes the model per
 /// request, so this is only for `opencode` run standalone.
 pub fn set_default_model(model: Option<&str>) -> Result<()> {
     let Some(path) = config_json_path() else {
@@ -127,7 +127,7 @@ pub fn set_default_model(model: Option<&str>) -> Result<()> {
     let mut obj = match std::fs::read_to_string(&path) {
         Ok(s) => match serde_json::from_str::<Value>(&s) {
             Ok(Value::Object(m)) => m,
-            // Non-object or unparseable (JSONC) — don't clobber the user's file.
+            // Non-object or unparseable (JSONC), don't clobber the user's file.
             Ok(_) | Err(_) => return Ok(()),
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Map::new(),
@@ -150,8 +150,8 @@ pub fn set_default_model(model: Option<&str>) -> Result<()> {
 /// Mirror the Ollama provider definition into `opencode.json` as a
 /// `provider.ollama` block so `opencode serve` can route `ollama/<model>` ids to
 /// a local or remote Ollama server (its OpenAI-compatible endpoint). The app owns
-/// this block; other providers and unrelated keys are merge-preserved, and — like
-/// [`set_default_model`] — we bail on a non-strict-JSON (JSONC) file rather than
+/// this block; other providers and unrelated keys are merge-preserved, and, like
+/// [`set_default_model`], we bail on a non-strict-JSON (JSONC) file rather than
 /// risk dropping the user's comments.
 ///
 /// `base_url` is the Ollama base (e.g. `http://localhost:11434` or a remote host);
@@ -168,7 +168,7 @@ pub fn set_ollama_provider(base_url: &str, models: &[String]) -> Result<()> {
         Ok(s) if s.trim().is_empty() => Map::new(),
         Ok(s) => match serde_json::from_str::<Value>(&s) {
             Ok(Value::Object(m)) => m,
-            // Non-object or unparseable (JSONC) — don't clobber the user's file.
+            // Non-object or unparseable (JSONC), don't clobber the user's file.
             // Ollama sessions route through this provider block, so unlike the
             // standalone defaults we leave a breadcrumb: the mirror silently
             // didn't happen and `ollama/*` ids won't resolve until it's fixed.
@@ -258,7 +258,7 @@ fn read_object(path: &Path, label: &str) -> Result<Map<String, Value>> {
     }
 }
 
-/// Like [`read_object`] but tolerates a malformed file by starting fresh — used
+/// Like [`read_object`] but tolerates a malformed file by starting fresh, used
 /// on the write path so a corrupt `auth.json` can be repaired rather than wedge
 /// the user out of adding a key.
 fn read_object_or_empty(path: &Path, label: &str) -> Result<Map<String, Value>> {

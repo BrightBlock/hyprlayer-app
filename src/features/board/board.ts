@@ -15,7 +15,7 @@ export const BOARD_COLUMNS: { key: ColumnKey; label: string; stageKey: StageKey 
   { key: "ship", label: "Ship", stageKey: "ship" },
 ];
 
-/** Which column a workstream belongs in. A live PR trumps the chat stage —
+/** Which column a workstream belongs in. A live PR trumps the chat stage,
  *  once a PR exists the work is shipping/in-review regardless of the last chat
  *  mode. Otherwise the persisted `stage` maps 1:1, with the header/PR-driven
  *  stages (commit/ship/revise) collecting in Ship and anything unknown in

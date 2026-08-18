@@ -3,7 +3,7 @@
  * composer toolbar next to the context meter. Renders nothing when no tasks are
  * running. While tasks run it shows a pulsing terminal icon with a count;
  * clicking opens an upward popover (mirroring `ContextMeter`) that lists each
- * task — spinner, label, elapsed timer, and a running/waiting hint — where a row
+ * task, spinner, label, elapsed timer, and a running/waiting hint, where a row
  * click jumps the transcript to the spawning `Bash` call.
  */
 

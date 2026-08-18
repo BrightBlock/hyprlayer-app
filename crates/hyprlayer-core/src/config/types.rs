@@ -2,7 +2,7 @@
 //!
 //! The CLI is a binary-only crate, so these mirror
 //! `hyprlayer-cli/src/config.rs` field-for-field. The app treats the config
-//! as read-only (the CLI owns mutations); deserialization is tolerant —
+//! as read-only (the CLI owns mutations); deserialization is tolerant,
 //! unknown fields are ignored and everything the app does not strictly need
 //! is defaulted. Fixture round-trip tests guard against upstream drift.
 
@@ -249,7 +249,7 @@ impl ThoughtsConfig {
         }
     }
 
-    /// Repo mapping keys are the repo's absolute path as a display string —
+    /// Repo mapping keys are the repo's absolute path as a display string,
     /// the CLI uses `current_dir().display().to_string()`, no canonicalization.
     pub fn effective_config_for(&self, repo_path: &str) -> EffectiveConfig {
         let mapping = self.repo_mappings.get(repo_path);

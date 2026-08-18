@@ -2,7 +2,7 @@
 //!
 //! The composer's per-model context windows (`src/features/session/models.ts`)
 //! are a hand-maintained table that drifts when Anthropic ships a model or
-//! resizes a window — Fable 5 shipped at 1M but was pinned to 200K, so the meter
+//! resizes a window, Fable 5 shipped at 1M but was pinned to 200K, so the meter
 //! over-read and never lined up with the CLI's real (1M) compaction point. This
 //! command fetches the authoritative windows from the Anthropic Models API
 //! (`GET /v1/models` → `max_input_tokens`), reusing the user's Claude Code login,
@@ -30,10 +30,10 @@ const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelWindow {
-    /// Canonical model id, e.g. `"claude-fable-5"` (`data[].id`). Bare — the API
+    /// Canonical model id, e.g. `"claude-fable-5"` (`data[].id`). Bare, the API
     /// exposes no `[1m]` variants, so the UI strips that suffix before lookup.
     pub id: String,
-    /// Context window in tokens (`max_input_tokens`) — the meter's denominator.
+    /// Context window in tokens (`max_input_tokens`), the meter's denominator.
     pub context_window: u32,
 }
 
@@ -46,7 +46,7 @@ struct RawModels {
 #[derive(Deserialize)]
 struct RawModel {
     id: String,
-    /// Added to the Models API in 2026 — absent on older models, which then fall
+    /// Added to the Models API in 2026, absent on older models, which then fall
     /// back to the static table.
     max_input_tokens: Option<u32>,
 }
@@ -149,7 +149,7 @@ async fn resolve_auth(cfg: &ClaudeSettings) -> Option<Auth> {
 /// just yields a 401 upstream (→ static-table fallback), so we never refresh it
 /// here. Storage differs by OS:
 /// - Windows / Linux: `~/.claude/.credentials.json`.
-/// - macOS: the login lives in the Keychain, which is authoritative — read it
+/// - macOS: the login lives in the Keychain, which is authoritative, read it
 ///   first (via `security`, which may raise a one-time OS access prompt; a denial
 ///   or miss falls through to the file, only ever a rare flat-setup leftover).
 async fn read_cli_oauth_token() -> Option<String> {

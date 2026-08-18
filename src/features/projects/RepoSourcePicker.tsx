@@ -23,7 +23,7 @@ type Props = {
   disabled?: boolean;
   /** Whether to show the GitHub recent repos list (clone mode only). */
   showRecents?: boolean;
-  /** Extra content rendered under the disk path field — e.g. a hint that the
+  /** Extra content rendered under the disk path field, e.g. a hint that the
    *  folder isn't a git repo. Disk mode only. */
   diskFooter?: ReactNode;
   /** Field label for the disk path. Override when the target isn't a repo. */
@@ -91,7 +91,7 @@ export function RepoSourcePicker({
 
   return (
     <div className="space-y-3">
-      {/* Mode toggle — only shown when there are ≥2 modes */}
+      {/* Mode toggle, only shown when there are ≥2 modes */}
       {modes.length > 1 && (
         <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 text-sm">
           {modes.map((m) => (

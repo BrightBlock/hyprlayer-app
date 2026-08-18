@@ -1,4 +1,4 @@
-//! Local-only git operations via git2 (no network — push/pull/fetch go
+//! Local-only git operations via git2 (no network, push/pull/fetch go
 //! through the system git binary so credential helpers keep working).
 
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::error::{CoreError, Result};
 
-/// Cap on files served to the viewer/diff sides — refuse rather than stream
+/// Cap on files served to the viewer/diff sides, refuse rather than stream
 /// megabytes of (likely binary) content into the UI.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -32,7 +32,7 @@ pub(crate) fn open_repo(path: &Path) -> Result<git2::Repository> {
 }
 
 /// The git directory backing `worktree` (`.git/worktrees/<name>/` for a linked
-/// worktree — outside the tree). `None` when not a git worktree.
+/// worktree, outside the tree). `None` when not a git worktree.
 pub fn git_dir(worktree: &Path) -> Option<PathBuf> {
     Some(open_repo(worktree).ok()?.path().to_path_buf())
 }
@@ -78,7 +78,7 @@ pub fn list_branches(repo_path: &Path) -> Result<Vec<String>> {
 }
 
 /// Local branch names only, sorted + deduped. The "existing branch"/"in-place" modes
-/// check a branch out, so a remote ref like `origin/main` would detach HEAD — they must
+/// check a branch out, so a remote ref like `origin/main` would detach HEAD. They must
 /// offer locals only. Cheap git2; run on the blocking pool.
 pub fn list_local_branches(repo_path: &Path) -> Result<Vec<String>> {
     let repo = open_repo(repo_path)?;
@@ -101,7 +101,7 @@ pub fn list_local_branches(repo_path: &Path) -> Result<Vec<String>> {
 
 /// Remote-tracking branch shorthands (`origin/main`), sorted + deduped, skipping the
 /// symbolic `*/HEAD` aliases. The branch picker offers these so a branch that only
-/// exists on the remote can be adopted — the caller materializes a local tracking
+/// exists on the remote can be adopted, the caller materializes a local tracking
 /// branch before any checkout. Cheap git2; run on the blocking pool.
 pub fn list_remote_branches(repo_path: &Path) -> Result<Vec<String>> {
     let repo = open_repo(repo_path)?;
@@ -148,7 +148,7 @@ pub fn current_branch(repo_path: &Path) -> Option<String> {
 /// Map a git remote URL to its https web base (e.g. `git@github.com:acme/repo.git`
 /// → `https://github.com/acme/repo`). Handles `scheme://[user@]host[:port]/path` and
 /// scp-like `[user@]host:path`; `None` for non-web remotes (local paths, `file://`,
-/// dotless hosts). Best-effort — only builds the "View on GitHub" link.
+/// dotless hosts). Best-effort, only builds the "View on GitHub" link.
 fn remote_to_web_url(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let (host, path) = if let Some(rest) = raw
@@ -188,12 +188,12 @@ fn remote_to_web_url(raw: &str) -> Option<String> {
 
 /// Best-effort `origin` web URL for a tracked file at the current branch (e.g.
 /// `https://github.com/acme/thoughts/blob/main/repos/app/research/x.md`). `None`
-/// when not in a repo, no `origin`, detached HEAD, or unmappable remote — which
+/// when not in a repo, no `origin`, detached HEAD, or unmappable remote, which
 /// just hides the "View on GitHub" link.
 pub fn file_web_url(file_abs: &Path) -> Option<String> {
     // Canonicalize both sides before strip_prefix: the caller's path may run through a
     // symlink (thoughts trees are symlinked in; macOS /var/folders → /private/var) while
-    // git2 reports workdir canonically — a raw strip would miss and hide the link.
+    // git2 reports workdir canonically, a raw strip would miss and hide the link.
     let file_abs = file_abs.canonicalize().ok()?;
     let start = file_abs.parent().unwrap_or(&file_abs);
     let repo = git2::Repository::discover(start).ok()?;
@@ -290,7 +290,7 @@ pub fn worktree_diff_line_counts(repo: &git2::Repository) -> (u32, u32) {
         return (0, 0);
     };
     let (mut additions, mut deletions) = (0u32, 0u32);
-    // Stream line-by-line instead of materializing a `Patch` per file — we only need
+    // Stream line-by-line instead of materializing a `Patch` per file. We only need
     // +/- totals. The thoughts/ + .hyprlayer/ filter uses the same predicates as
     // `worktree_diff`, so the counter can't drift from the panel.
     let _ = diff.foreach(
@@ -357,7 +357,7 @@ pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
     Ok(files)
 }
 
-/// Char cap for the `{{diff}}` prompt variable — cut (at a patch boundary where
+/// Char cap for the `{{diff}}` prompt variable, cut (at a patch boundary where
 /// possible) with a truncation note so a huge working tree can't balloon a prompt.
 const MAX_PROMPT_DIFF_CHARS: usize = 12_000;
 
@@ -565,7 +565,7 @@ fn included_paths(rels: &[String]) -> Vec<String> {
 pub fn worktree_git_status(worktree: &Path) -> Result<WorktreeGitStatus> {
     let repo = open_repo(worktree)?;
     // The panel recurses into brand-new (entirely untracked) directories so each
-    // file inside shows up as its own entry — matching how a tracked dir's new
+    // file inside shows up as its own entry, matching how a tracked dir's new
     // files already list, and the line counts we already report from the diff.
     // Collapsed (`recurse_untracked_dirs(false)`) would emit a single `dir/`
     // trailing-slash entry, hiding the nested contents. The count-only surfaces
@@ -650,7 +650,7 @@ pub fn unstage_files(worktree: &Path, rels: &[String]) -> Result<()> {
 
 /// Discard working-tree changes for the given paths: tracked files are restored
 /// to HEAD (index and working tree both), and added/untracked files are deleted
-/// from disk. Destructive — callers confirm first.
+/// from disk. Destructive, callers confirm first.
 pub fn discard_files(worktree: &Path, rels: &[String]) -> Result<()> {
     let repo = open_repo(worktree)?;
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
@@ -693,7 +693,7 @@ pub fn discard_files(worktree: &Path, rels: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Paths of the modified *tracked* files — the changes a branch switch would
+/// Paths of the modified *tracked* files, the changes a branch switch would
 /// silently carry across. Untracked files are excluded because they ride along
 /// harmlessly; the filter mirrors the `dirty` count in [`crate::worktree::status`]
 /// so this can't disagree with the guard that reports it.
@@ -712,7 +712,7 @@ fn dirty_tracked_paths(repo: &git2::Repository) -> Result<Vec<String>> {
 /// Discard every modified tracked file in `worktree` (restore to HEAD), leaving
 /// untracked files in place, and report how many were reverted. The escape hatch
 /// for an in-place create blocked by [`CoreError::CheckoutDirty`](crate::error::CoreError::CheckoutDirty).
-/// Destructive — callers confirm first.
+/// Destructive, callers confirm first.
 pub fn discard_tracked_changes(worktree: &Path) -> Result<u32> {
     let repo = open_repo(worktree)?;
     let paths = dirty_tracked_paths(&repo)?;
@@ -765,7 +765,7 @@ pub fn worktree_file_sides(worktree: &Path, rel: &str, staged: bool) -> Result<F
     })
 }
 
-/// Immediate children of `rel` within the worktree (one level — the tree loads
+/// Immediate children of `rel` within the worktree (one level, the tree loads
 /// lazily). Skips `.git`, the excluded trees, and gitignored entries; lists
 /// directories before files, alphabetically.
 pub fn list_dir(worktree: &Path, rel: &str) -> Result<Vec<DirEntry>> {
@@ -819,8 +819,8 @@ pub fn list_dir(worktree: &Path, rel: &str) -> Result<Vec<DirEntry>> {
 /// skipped. The walk is capped so a giant repo can't stall the keystroke that
 /// triggered it; `limit` bounds the returned set.
 pub fn search_files(worktree: &Path, query: &str, limit: usize) -> Result<Vec<String>> {
-    // Beyond this many filesystem entries we stop walking and rank what we have
-    // — an autocomplete needs to be fast, not exhaustive.
+    // Beyond this many filesystem entries we stop walking and rank what we have,
+    // an autocomplete needs to be fast, not exhaustive.
     const MAX_VISITED: usize = 20_000;
 
     let repo = open_repo(worktree).ok();
@@ -910,7 +910,7 @@ pub fn read_text_file(worktree: &Path, rel: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
-/// Worktree file mtime in ms since the Unix epoch — the editor's save concurrency
+/// Worktree file mtime in ms since the Unix epoch, the editor's save concurrency
 /// token. Path-checked; `0.0` when unavailable.
 pub fn file_mtime_ms(worktree: &Path, rel: &str) -> Result<f64> {
     let abs = safe_join(worktree, rel)?;
@@ -975,7 +975,7 @@ mod tests {
             &origin,
             &["-c", "commit.gpgsign=false", "commit", "-m", "init"],
         );
-        // A branch that exists only on the remote — a colleague's pushed work.
+        // A branch that exists only on the remote, a colleague's pushed work.
         git(&origin, &["branch", "linux-support"]);
         git(
             tmp.path(),
@@ -1235,7 +1235,7 @@ mod tests {
     }
 
     /// The in-place create guard counts only modified tracked files, so its
-    /// escape hatch must clear exactly those — an untracked file the user is
+    /// escape hatch must clear exactly those, an untracked file the user is
     /// mid-way through writing is not what blocked the branch switch.
     #[test]
     fn discard_tracked_changes_spares_untracked_files() {

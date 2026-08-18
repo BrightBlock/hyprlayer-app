@@ -1,11 +1,11 @@
-//! PTY session abstraction for the Ghostty-style terminal panel.
+//! PTY session abstraction for the terminal panel.
 //!
 //! [`PtySession`] spawns the user's shell on a real PTY in the worktree
 //! directory, streams output over a [`tokio::sync::broadcast`] channel with a
 //! bounded scrollback ring, and accepts input / resize / kill.
 //!
 //! The reader loop runs on a dedicated [`std::thread`] because
-//! `portable-pty`'s reader is a blocking `std::io::Read` handle — it must not
+//! `portable-pty`'s reader is a blocking `std::io::Read` handle. It must not
 //! block a tokio task. Everything else (broadcast, scrollback) is shared-safe.
 
 use std::collections::VecDeque;
@@ -21,7 +21,7 @@ use tokio::sync::broadcast;
 /// Max scrollback bytes retained for re-attach replay (drops oldest first).
 const SCROLLBACK_CAP: usize = 256 * 1024;
 /// Upper bound on a single coalesced IPC event. Only a genuine flood (a build,
-/// `cat` of a big file) — where reads queue up faster than we drain them — gets
+/// `cat` of a big file), where reads queue up faster than we drain them, gets
 /// batched this far; interactive output flushes immediately (see the coalescer).
 const FLUSH_BYTES: usize = 64 * 1024;
 const B64: base64::engine::general_purpose::GeneralPurpose =
@@ -57,7 +57,7 @@ pub struct SpawnTerminal {
 /// thread streams output and emits the final `Exited`. We keep only a cloned
 /// [`ChildKiller`] here so `kill()` never contends with that wait.
 pub struct PtySession {
-    /// `Option` so the waiter can drop the master once the child exits — on
+    /// `Option` so the waiter can drop the master once the child exits, on
     /// Windows that tears down the lingering ConPTY conhost, which is the only
     /// thing that unblocks the reader's blocking read (it never sees EOF on its
     /// own there). Shared with the waiter thread.
@@ -68,7 +68,7 @@ pub struct PtySession {
     scrollback: Arc<StdMutex<VecDeque<u8>>>,
     /// The shell's pid, captured at spawn. On Unix the PTY child is a session
     /// leader (portable-pty `setsid`s it), so this doubles as its process-group
-    /// id — `kill()` SIGKILLs the whole group to reap children the shell spawned.
+    /// id, `kill()` SIGKILLs the whole group to reap children the shell spawned.
     #[cfg(unix)]
     pid: Option<u32>,
     pub workstream_id: String,
@@ -134,7 +134,7 @@ impl PtySession {
         // read pipe open after the child exits, so a read-until-EOF loop would
         // block forever and never surface the exit. Instead the waiter reaps the
         // child for its code and the reader emits `Exited` once it has both
-        // drained to EOF and received that code — keeping the final output ahead
+        // drained to EOF and received that code, keeping the final output ahead
         // of the exit event (the property the Unix tests rely on).
         let (code_tx, code_rx) = std::sync::mpsc::channel::<Option<i32>>();
 
@@ -165,7 +165,7 @@ impl PtySession {
         // interactive path. It appends each batch to the scrollback ring and
         // broadcasts it under the same lock, so a concurrent
         // `subscribe_with_scrollback` sees every batch in exactly one of
-        // {snapshot, live stream} — never both (duplicated) nor neither (lost).
+        // {snapshot, live stream}, never both (duplicated) nor neither (lost).
         // It blocks on `recv()` when idle, so an open-but-quiet terminal costs no
         // wakeups.
         let reader_tx = tx.clone();
@@ -182,7 +182,7 @@ impl PtySession {
                 if overflow > 0 {
                     sb.drain(0..overflow);
                 }
-                // send() errs only if there are no receivers — fine. Held under
+                // send() errs only if there are no receivers, fine. Held under
                 // the scrollback lock so it can't interleave with a snapshot.
                 let _ = reader_tx.send(TerminalEvent::Output { data: encoded });
                 drop(sb);
@@ -194,7 +194,7 @@ impl PtySession {
                 pending.extend_from_slice(&first);
                 // Drain whatever ELSE is already queued (a genuine flood, where
                 // reads pile up faster than we encode+broadcast) up to the byte
-                // cap — but DON'T wait for more. Interactive output (a keystroke
+                // cap, but DON'T wait for more. Interactive output (a keystroke
                 // echo, a prompt redraw on wrap) has nothing else queued, so it
                 // flushes on the same tick it arrives.
                 //
@@ -203,7 +203,7 @@ impl PtySession {
                 // and xterm paints once per write. Coalescing a wrap's redraw into
                 // a single delayed write produced a single paint that WKWebView
                 // would leave un-presented until the next "real" event (Enter,
-                // resize) — the terminal went black mid-line. Writing each read
+                // resize), the terminal went black mid-line. Writing each read
                 // through keeps the paint cadence high enough that every update is
                 // presented, matching a no-coalescing reference renderer.
                 let mut disconnected = false;
@@ -250,9 +250,9 @@ impl PtySession {
     }
 
     /// Atomically snapshot the retained scrollback and subscribe to live output,
-    /// returning both. Taken together under the scrollback lock — which the
+    /// returning both. Taken together under the scrollback lock, which the
     /// coalescer thread also holds while appending each output batch to the ring
-    /// and broadcasting it — this closes the gap where a batch emitted between a
+    /// and broadcasting it, this closes the gap where a batch emitted between a
     /// separate snapshot and subscribe would be in neither (lost) or both
     /// (duplicated). The snapshot is the base64 scrollback for replay; live
     /// output follows on the receiver.
@@ -270,8 +270,8 @@ impl PtySession {
     }
 
     /// Drop the retained scrollback, keeping the process alive. Live output keeps
-    /// appending to the now-empty ring, so a later re-attach — and the exit
-    /// snapshot behind [`scrollback_bytes`] — replay only what came after.
+    /// appending to the now-empty ring, so a later re-attach, and the exit
+    /// snapshot behind [`scrollback_bytes`], replay only what came after.
     pub fn clear_scrollback(&self) {
         self.scrollback.lock().unwrap().clear();
     }
@@ -300,7 +300,7 @@ impl PtySession {
     }
 
     /// Kill the shell and everything it spawned. On Unix the child is a session
-    /// leader, so we SIGKILL its whole process group — otherwise a foreground
+    /// leader, so we SIGKILL its whole process group, otherwise a foreground
     /// child (e.g. `npm run dev`) or a `&` job is orphaned and survives Stop /
     /// terminal close / archive teardown, leaking the process and its port. The
     /// waiter thread then reaps the shell, the reader emits the final `Exited`,
@@ -460,7 +460,7 @@ mod tests {
         .expect("spawn pty");
 
         // The markers are split across printf's format + arg, so the tty's echo of
-        // the command line can never spell them — only printf's *output* does.
+        // the command line can never spell them, only printf's *output* does.
         // Otherwise we could clear on the echo and race printf's output into the
         // freshly-emptied ring.
         s.write_input(b"printf 'BEFORE%s\\n' _CLEAR\n").unwrap();

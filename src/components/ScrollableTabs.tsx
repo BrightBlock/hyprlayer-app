@@ -3,22 +3,18 @@ import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "
 import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
 
 /**
- * A horizontally-scrollable tab strip that reveals a chevron at either edge once
- * its tabs overflow that side — the affordance for a strip that has grown past
- * the bar's width. Each chevron both signals "more tabs this way" and nudges the
- * scroll when clicked.
+ * A horizontally-scrollable tab strip. Once tabs overflow an edge, that edge
+ * gets a chevron which signals "more this way" and nudges the scroll on click.
  *
- * The chevrons overlay the scroll area's edges (absolute + a fade to the bar
- * colour) so they never reflow the tabs when toggling on/off, and the strip
- * keeps its hidden native scrollbar so trackpad / shift-wheel scrolling still
- * works underneath. `trailing` (e.g. the new-tab button) is pinned OUTSIDE the
- * scroll area — past the right chevron — so it stays put and reachable however
- * far the tabs scroll.
+ * The chevrons overlay the scroll area (absolute, with a fade to the bar
+ * colour) so toggling them never reflows the tabs, and the hidden native
+ * scrollbar underneath keeps trackpad and shift-wheel scrolling working.
+ * `trailing` (the new-tab button) is pinned OUTSIDE the scroll area so it
+ * stays reachable however far the tabs scroll.
  *
- * Layout note: the wrapper takes the flex role the bare scroller used to have
- * (`min-w-0` so it can shrink and let the inner scroller overflow). `grow` adds
- * `flex-1` for call sites — like the split's right pane — that must fill their
- * strip and push a trailing control to the far edge.
+ * Layout: the wrapper takes the flex role the bare scroller had, with `min-w-0`
+ * so it can shrink and let the inner scroller overflow. `grow` adds `flex-1`
+ * for call sites that must fill their strip, like the split's right pane.
  */
 export function ScrollableTabStrip({
   children,
@@ -28,7 +24,7 @@ export function ScrollableTabStrip({
 }: {
   children: ReactNode;
   /** Always-visible content pinned to the right of the scroll area, past the
-   *  right chevron — so a control like "new tab" never scrolls out of reach. */
+   *  right chevron, so a control like "new tab" never scrolls out of reach. */
   trailing?: ReactNode;
   /** The selected tab's id; when it changes, that tab is scrolled into view so a
    *  freshly-opened (or newly-focused) tab is never left off-screen. Pills must
@@ -64,7 +60,7 @@ export function ScrollableTabStrip({
     return () => ro.disconnect();
   }, [sync]);
 
-  // Reveal the active tab whenever it changes — covers opening a tab (it lands
+  // Reveal the active tab whenever it changes, covers opening a tab (it lands
   // at the far end) and focusing one that's scrolled off either edge.
   useLayoutEffect(() => {
     const el = scrollRef.current;

@@ -61,10 +61,10 @@ function MergeConflictRow({ url }: { url: string }) {
   );
 }
 
-/** A leading row for a PR whose required review isn't satisfied — waiting on a
+/** A leading row for a PR whose required review isn't satisfied, waiting on a
  *  reviewer, or with changes requested. Like the merge-conflict row, GitHub's CI
  *  rollup never reports this, so without it a review-blocked PR looks all-green
- *  here while the Merge button is disabled. Warn (amber) tone — it's a wait on a
+ *  here while the Merge button is disabled. Warn (amber) tone, it's a wait on a
  *  person, not a failed check. Opens the PR on GitHub. */
 function ReviewBlockRow({
   decision,
@@ -98,17 +98,17 @@ function ReviewBlockRow({
 }
 
 /**
- * The CI Checks breakdown at the bottom of the diff sidebar. Always shown for an
- * open PR but minimized to just its header until there's something to show —
- * actual checks, a merge conflict, or an unsatisfied required review. Once there
- * is, the section is collapsable: it leads with the synthetic blocker rows
- * GitHub's CI rollup never reports — a merge-conflict row when the branch
- * conflicts with its base, and a review row while a required review is
- * outstanding or changes were requested — then lists each check line by line
- * (glyph + name), each row opening that check inside the PR's Checks tab (Actions
- * runs) or its external CI page (third-party contexts). An overall status dot in
- * the header reflects the combined result: red on a conflict or failing checks,
- * amber while waiting on a review. Renders nothing when there's no open PR.
+ * The CI Checks breakdown at the bottom of the diff sidebar. Renders nothing
+ * without an open PR, and stays minimized to its header until there are checks,
+ * a merge conflict, or an unsatisfied required review.
+ *
+ * Once expanded it leads with the blocker rows GitHub's CI rollup never
+ * reports: a merge-conflict row, and a review row while a required review is
+ * outstanding or changes were requested. Then each check gets a line, opening
+ * either the PR's Checks tab (Actions runs) or its external CI page.
+ *
+ * The header's status dot combines everything: red on a conflict or a failing
+ * check, amber while waiting on a review.
  */
 export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
   const id = view?.item.id ?? "";
@@ -120,7 +120,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
 
   const isConflicting = data.mergeableState === "conflicting";
   // The review decision when it blocks merging (waiting on a review, or changes
-  // requested), else null — narrowed so it can drive both the row and the header.
+  // requested), else null, narrowed so it can drive both the row and the header.
   const reviewBlock =
     data.reviewDecision === "reviewRequired" || data.reviewDecision === "changesRequested"
       ? data.reviewDecision

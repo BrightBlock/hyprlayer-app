@@ -27,7 +27,7 @@ use crate::error::{AppError, CmdResult};
 use crate::opencode::OpenCodeDriver;
 use crate::state::AppState;
 
-/// Only the start of the prompt is needed to name the task — bound the input so
+/// Only the start of the prompt is needed to name the task, bound the input so
 /// a giant first message can't blow up token cost.
 const MAX_INPUT_CHARS: usize = 1500;
 /// Keep titles short enough for a tab pill (the strip truncates anyway).
@@ -79,7 +79,7 @@ pub async fn suggest_tab_title(
     Ok(title)
 }
 
-/// The prompt sent to the title model — first ~1500 chars of the user's request,
+/// The prompt sent to the title model, first ~1500 chars of the user's request,
 /// with a tight instruction so the reply is just the title.
 fn build_prompt(text: &str) -> String {
     let snippet: String = text.chars().take(MAX_INPUT_CHARS).collect();
@@ -191,7 +191,7 @@ async fn generate_with_opencode(
     let collected = drain_title(&mut rx).await;
     driver.kill();
     // Throwaway session: delete the record so one-shot titling doesn't pollute
-    // the app-owned OpenCode store. Best-effort — failure just leaves it behind.
+    // the app-owned OpenCode store. Best-effort, failure just leaves it behind.
     driver.delete_session().await;
 
     collected.ok_or_else(|| AppError {
@@ -249,13 +249,13 @@ async fn generate_with_codex(state: &AppState, model: &str, prompt: &str) -> Cmd
 /// Assistant text arrives two ways: streamed `PartialText` deltas (always) and a
 /// single finalized `AssistantText` block (only once the harness closes the text
 /// part, which not every provider/build does before the turn ends). We accumulate
-/// both and prefer the finalized block, falling back to the streamed deltas —
+/// both and prefer the finalized block, falling back to the streamed deltas,
 /// collecting only `AssistantText` would silently drop a perfectly good title
 /// whenever the turn ends without a terminal part update.
 ///
 /// Stops on the first `TurnDone` seen after any text arrives (a turn can emit
 /// several), or on `Exited`/timeout. Both drivers report transport and turn
-/// failures as an `AssistantText` starting `⚠ ` — never title from one.
+/// failures as an `AssistantText` starting `⚠ `, never title from one.
 async fn drain_title(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<String> {
     let deadline = tokio::time::sleep(TITLE_TIMEOUT);
     tokio::pin!(deadline);
@@ -392,7 +392,7 @@ mod tests {
 
     // Newer OpenCode builds stream text as PartialText and can end the turn
     // (step-finish/session.idle) without ever emitting a finalized AssistantText
-    // block. The streamed text must still produce a title — the original drain
+    // block. The streamed text must still produce a title, the original drain
     // dropped it, which is why opencode-model tabs silently failed to rename.
     #[tokio::test]
     async fn opencode_title_falls_back_to_streamed_text() {
@@ -420,7 +420,7 @@ mod tests {
     }
 
     // Both the transport-failure and the turn-error sentinels must be rejected,
-    // never persisted as a title — for whichever harness emitted them.
+    // never persisted as a title, for whichever harness emitted them.
     #[tokio::test]
     async fn title_rejects_error_sentinels() {
         for sentinel in [

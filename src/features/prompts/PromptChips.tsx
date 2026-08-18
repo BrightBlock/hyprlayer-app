@@ -22,11 +22,11 @@ export function usePinnedPrompts(projectPath: string): CustomPrompt[] {
 /**
  * Pinned custom prompts as one-click chips. SessionChat anchors this to the
  * composer's top edge (`absolute bottom-full right-*`) so the chips share the
- * strip the task drawer's handle occupies on the left — one line, chips right,
- * TASKS tab left — instead of stacking their own row above it. A chip doesn't
+ * strip the task drawer's handle occupies on the left, one line, chips right,
+ * TASKS tab left, instead of stacking their own row above it. A chip doesn't
  * run anything itself: it hands the prompt to the host, which fills the composer
  * with the matching `/command` so an argument can be typed before sending. No
- * edit affordance here on purpose — the library is already reachable three ways
+ * edit affordance here on purpose, the library is already reachable three ways
  * (nav rail ⚡, agent-bar ⚡, the ⌘K palette's manage row). Renders nothing when
  * no usable prompt is pinned.
  */
@@ -52,7 +52,7 @@ export function PromptChips({
           key={p.id}
           type="button"
           onClick={() => onPick(p)}
-          title="Fills the composer with this prompt's /command — add an argument, then Enter"
+          title="Fills the composer with this prompt's /command. Add an argument, then Enter"
           className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs text-ink hover:border-accent/50 hover:bg-accent/10"
         >
           <span className="shrink-0 text-accent">

@@ -1,4 +1,4 @@
-//! Shared visuals for an agent's semantic state — the tab-strip dot, the status
+//! Shared visuals for an agent's semantic state, the tab-strip dot, the status
 //! bar pill, and the engine glyph. All colors come from theme tokens (no hex).
 
 import type { AgentState } from "./engineState";
@@ -30,7 +30,7 @@ export function PtyTabDot({ workstreamId, shellId }: { workstreamId: string; she
   return <AgentStateDot state={agent?.state ?? "idle"} />;
 }
 
-/** Dot + label, tinted by state — for the agent status bar. */
+/** Dot + label, tinted by state, for the agent status bar. */
 export function AgentStatePill({ state }: { state: AgentState }) {
   const meta = STATE_META[state];
   return (

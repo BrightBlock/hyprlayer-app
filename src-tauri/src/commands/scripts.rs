@@ -7,7 +7,7 @@
 //!   output over a per-invoke `Channel` (like `terminal_open`), tracking the
 //!   live Run so it can be stopped/restarted and the rail can show it's alive.
 //! - [`run_lifecycle_script`] (create/archive hooks): runs the block to
-//!   completion via [`Exec`] and returns pass/fail — no streaming needed (there
+//!   completion via [`Exec`] and returns pass/fail, no streaming needed (there
 //!   is no dock during worktree creation/teardown).
 //!
 //! Both record a last-run status in [`ScriptRegistry`] and emit
@@ -139,7 +139,7 @@ pub async fn get_script_output(
 }
 
 /// Clear a script's output (the dock's Clear button). Drops the captured last-run
-/// snapshot, and — when the run is still live, `terminal_id` naming its PTY —
+/// snapshot, and, when the run is still live, `terminal_id` naming its PTY,
 /// wipes that PTY's retained scrollback too. Without the second half a re-attach
 /// (tab switch, dock collapse) or the exit snapshot would replay the very text
 /// that was just cleared. The process itself keeps running; only the log is gone.
@@ -258,7 +258,7 @@ pub(crate) async fn run_lifecycle_script(
 ) -> Option<RunPhase> {
     let commands = match resolve_script(&item.project_path, kind).await {
         Ok(c) if !c.trim().is_empty() => c,
-        Ok(_) => return None, // unconfigured — nothing to run
+        Ok(_) => return None, // unconfigured, nothing to run
         Err(e) => {
             log::warn!("read {} script: {}", kind.as_str(), e.message);
             return None;
@@ -283,7 +283,7 @@ pub(crate) async fn run_lifecycle_script(
         .args(args)
         .cwd(item.worktree_path.clone())
         // Own process group so the timeout kills the whole tree, not just the
-        // shell — a Setup/Archive script that backgrounds work can't leak it.
+        // shell, a Setup/Archive script that backgrounds work can't leak it.
         .own_process_group()
         .timeout(Duration::from_secs(timeout));
     for (key, value) in script_env(item, port, &augmented) {
@@ -332,7 +332,7 @@ pub(crate) async fn run_lifecycle_script(
 
 /// The `PATH` + injected `$HL_*` environment shared by every script run, so the
 /// blocking [`Exec`] path (create/archive hooks) and the streaming PTY path (the
-/// dock) stay in lockstep — the single place to add or change an injected var.
+/// dock) stay in lockstep, the single place to add or change an injected var.
 fn script_env(item: &Workstream, port: u16, augmented: &OsStr) -> Vec<(String, String)> {
     vec![
         ("PATH".to_string(), augmented.to_string_lossy().into_owned()),

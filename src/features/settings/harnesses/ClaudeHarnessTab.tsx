@@ -141,9 +141,7 @@ export function ClaudeHarnessTab({
                 />
               </div>
             }
-          >
-            Model and reasoning effort for new chats.
-          </SettingRow>
+          />
 
           <SettingRow
             title="Commit & Ship model"
@@ -178,9 +176,7 @@ export function ClaudeHarnessTab({
                 onChange={(v) => patchClaude({ defaultPlanMode: v })}
               />
             }
-          >
-            Start new chats in plan mode.
-          </SettingRow>
+          />
         </div>
       </Card>
 
@@ -391,8 +387,8 @@ function OpenInEditor({ relPath }: { relPath: string }) {
   }
 
   // The w-40 wrapper sets the trigger width (passing `className="w-40"` would
-  // work too — DropdownSelect drops its own `w-full` when the caller sets one).
-  // `value` stays "" — this is an action menu, not a stored choice, so the
+  // work too, DropdownSelect drops its own `w-full` when the caller sets one).
+  // `value` stays "". This is an action menu, not a stored choice, so the
   // trigger always reads "Open in…" and picking never sticks.
   return (
     <div className="w-40 shrink-0">
@@ -420,7 +416,7 @@ function DocLink({ href, children }: { href: string; children: React.ReactNode }
   );
 }
 /**
- * "Models visible in composer" for Claude — the same card + row-list + "Add
+ * "Models visible in composer" for Claude, the same card + row-list + "Add
  * models" dialog every other harness tab uses (see [`ModelMultiSelectDialog`]).
  *
  * Claude's setting is a TRI-state, unlike OpenCode/Codex's plain list:
@@ -444,7 +440,7 @@ function VisibleModelsCard({
   // rows resolve (a curated list can already name one) but aren't offered.
   const catalog = claudeModels(useClaudeProbe().data?.models);
   const catalogKeys = catalog.filter((m) => !m.disabled).map((m) => m.key);
-  // "Custom" means a user-typed id — a preset the catalog happens not to carry
+  // "Custom" means a user-typed id, a preset the catalog happens not to carry
   // is still one of ours, so `knownModelKeys` (not the catalog) draws that line.
   const known = new Set(knownModelKeys(catalog));
 
@@ -482,7 +478,7 @@ function VisibleModelsCard({
 
       {shown.length === 0 ? (
         <p className="mt-3 text-xs text-ink-dim">
-          No models selected — the composer&apos;s Claude group will be empty.
+          No models selected, so the composer&apos;s Claude group is empty.
         </p>
       ) : (
         <div className="mt-3 space-y-1.5">

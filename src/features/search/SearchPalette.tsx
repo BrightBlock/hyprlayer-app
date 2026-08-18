@@ -95,7 +95,7 @@ function dispatchNav(
         params: { projectPath: nav.projectPath },
         search: { item: nav.workstreamId },
       });
-      // Best-effort tab select — no-op if the tab isn't built yet.
+      // Best-effort tab select, no-op if the tab isn't built yet.
       selectAgentTab(nav.workstreamId, nav.sessionId);
       break;
     case "doc":

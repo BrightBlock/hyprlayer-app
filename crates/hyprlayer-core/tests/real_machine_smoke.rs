@@ -1,5 +1,5 @@
 //! Smoke tests against the real machine state (hyprlayer config + binaries).
-//! Ignored by default — they require a configured hyprlayer install. Run with:
+//! Ignored by default, they require a configured hyprlayer install. Run with:
 //!   cargo test -p hyprlayer-core --test real_machine_smoke -- --ignored --nocapture
 
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ use hyprlayer_core::process::spawn_supervised;
 /// cannot execute a batch file, and npm installs a script-`bin` CLI (OpenCode's
 /// and Codex's both are) as `<name>.cmd` with NO `.exe`. But Rust's
 /// `std::process::Command` routes `.bat`/`.cmd` through `cmd.exe` itself, with
-/// better escaping than a hand-rolled wrapper — so the app needs no shim
+/// better escaping than a hand-rolled wrapper, so the app needs no shim
 /// handling of its own. Verified on Windows against `opencode.cmd`.
 #[tokio::test]
 #[ignore = "requires opencode installed; run in the session the app launches from"]
@@ -33,7 +33,7 @@ async fn a_resolved_binary_spawns_directly() {
         .output()
         .await
         .expect(
-            "a resolved binary must be spawnable as-is — if this fails on a \
+            "a resolved binary must be spawnable as-is. If this fails on a \
                  .cmd shim, the app needs its own cmd.exe wrapper again",
         );
     println!(
@@ -48,7 +48,7 @@ async fn a_resolved_binary_spawns_directly() {
 ///
 /// Windows is the case this exists for. npm installs OpenCode as `opencode.cmd`
 /// with no `.exe` on PATH, and `std::process::Command` runs `.cmd` through
-/// `cmd.exe` — so the pid we hold is the wrapper and the server is its child.
+/// `cmd.exe`, so the pid we hold is the wrapper and the server is its child.
 /// Verified on nexus-win: `kill_on_drop` reaped the wrapper and left the server
 /// listening indefinitely, which is why the spawn goes through a job object now.
 /// On Unix the tree is one process deep and this pins the same invariant.
@@ -104,7 +104,7 @@ async fn opencode_serve_dies_with_its_handle() {
     assert!(
         port_settles(port, false, Duration::from_secs(15)).await,
         "`opencode serve` is still listening on {port} after its handle dropped \
-         — the process tree outlived us. On Windows this means the job object \
+         the process tree outlived us. On Windows this means the job object \
          did not take: we killed the `cmd.exe` shim and the server underneath \
          it is still running."
     );
@@ -119,7 +119,7 @@ fn free_port() -> u16 {
 }
 
 /// Poll until `port` is open (`want_open`) or closed, within `budget`.
-/// Blocking connect on purpose — a loopback attempt resolves immediately either
+/// Blocking connect on purpose, a loopback attempt resolves immediately either
 /// way, and `tokio`'s `net` feature is not enabled for this crate on its own.
 async fn port_settles(port: u16, want_open: bool, budget: Duration) -> bool {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
@@ -154,13 +154,13 @@ async fn real_config_parses_and_lists_projects() {
     assert!(thoughts.is_configured());
 }
 
-/// Whether the app would show Codex as installed — the exact resolver the
+/// Whether the app would show Codex as installed, the exact resolver the
 /// Harnesses tab reads, not a `which` approximation.
 ///
 /// Windows is the case worth running: the official installer drops a real
 /// `codex.exe` in a per-user `Programs` dir on the User PATH, while `npm i -g`
 /// drops only a `.cmd` shim (its npm `bin` is a JS wrapper). Those resolve and
-/// spawn differently, so run this from the SAME session the app launches from —
+/// spawn differently, so run this from the SAME session the app launches from,
 /// an SSH logon session has a different view of per-user install dirs and will
 /// report a false negative.
 #[tokio::test]
@@ -229,7 +229,7 @@ async fn real_storage_info_round_trips() {
     assert_eq!(info.schema.len(), 10, "thought schema has 10 fields");
 }
 
-/// A root the app scaffolds must be one the real CLI adopts — the contract
+/// A root the app scaffolds must be one the real CLI adopts, the contract
 /// "Add project" depends on, pinned against the installed binary because the
 /// rule lives in the CLI, not here.
 #[tokio::test]
@@ -328,7 +328,7 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
 /// The model-catalog probe drives a REAL `claude`, end to end.
 ///
 /// The parse is unit-tested off a captured payload; what this pins is the spawn
-/// path — args, neutral cwd, and holding stdin open until the reply lands. Get
+/// path, args, neutral cwd, and holding stdin open until the reply lands. Get
 /// any of those wrong and the probe times out instead of failing loudly, which
 /// unit tests can't catch. Costs no tokens: no user message is ever sent.
 #[tokio::test]

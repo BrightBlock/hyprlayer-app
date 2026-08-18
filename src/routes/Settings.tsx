@@ -96,7 +96,7 @@ function AppearanceSection() {
     <Card>
       <CardTitle>Appearance</CardTitle>
       <p className="mt-1 text-xs text-ink-dim">
-        Color theme for the app. “System” follows your OS light/dark setting.
+        “System” follows your OS light/dark setting.
       </p>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
         {THEMES.map((theme) => {
@@ -205,7 +205,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
     <Card>
       <CardTitle>Git</CardTitle>
       <p className="mt-1 text-xs text-ink-dim">
-        Branch naming and the worktree archive &amp; merge behaviour for new workspaces.
+        Branch naming, and what archiving or merging does to a workstream's worktree.
       </p>
 
       {save.isError && (
@@ -227,7 +227,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
               ) : (
                 <span className="text-ink-dim">
                   GitHub username{" "}
-                  {username.isLoading ? "(detecting…)" : "(unavailable — run gh auth login)"}
+                  {username.isLoading ? "(detecting…)" : "(unavailable, run gh auth login)"}
                 </span>
               ),
             )}
@@ -265,7 +265,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Removes the branch when the workspace is archived. Only branches the app created are affected.
+          Only branches Hyprlayer created.
         </SettingRow>
 
         <SettingRow
@@ -278,7 +278,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Automatically archive a workspace once its pull request is merged.
+          Triggered by the pull request merging, not a local merge.
         </SettingRow>
 
         <SettingRow
@@ -291,7 +291,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Enable GitHub auto-merge when required checks pass. Requires auto-merge enabled in the repo settings.
+          Merges the pull request once required checks pass. The repo must allow auto-merge.
         </SettingRow>
 
         <SettingRow
@@ -327,7 +327,7 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
     sound: raw.sound ?? DEFAULT_NOTIFICATIONS.sound,
   };
   const save = useSetAppSettings();
-  // Inline result of the most recent "Send test" click — surfaces a clear
+  // Inline result of the most recent "Send test" click, surfaces a clear
   // message when the OS rejected the toast (e.g. permission not granted
   // because the app bundle isn't properly registered with macOS).
   const [testStatus, setTestStatus] = useState<
@@ -352,9 +352,7 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
   return (
     <Card>
       <CardTitle>Notifications</CardTitle>
-      <p className="mt-1 text-xs text-ink-dim">
-        Native OS toasts when an agent needs your input.
-      </p>
+      <p className="mt-1 text-xs text-ink-dim">Native OS toasts.</p>
 
       {save.isError && (
         <div className="mt-3">
@@ -385,9 +383,7 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
               onChange={(v) => patch({ sound: v })}
             />
           }
-        >
-          Play the default OS notification sound with the toast.
-        </SettingRow>
+        />
 
         <SettingRow
           title="Test notification"
@@ -395,17 +391,17 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
             <Button onClick={runTest}>Send test</Button>
           }
         >
-          Confirm your OS notification permissions are working.
-          {testStatus?.ok === true && (
-            <span className="ml-2 text-ok">Sent — check the top-right.</span>
-          )}
-          {testStatus?.ok === false && testStatus.reason === "permission_denied" && (
-            <span className="ml-2 text-warn">
-              macOS denied permission — enable it in System Settings → Notifications.
+          {/* A single node, not a run of `&&`s: an all-false children array is
+              still truthy, which would leave SettingRow rendering an empty
+              description line before you ever press Send test. */}
+          {testStatus === null ? undefined : testStatus.ok ? (
+            <span className="text-ok">Sent. Check the top-right.</span>
+          ) : testStatus.reason === "permission_denied" ? (
+            <span className="text-warn">
+              macOS denied permission. Enable it in System Settings → Notifications.
             </span>
-          )}
-          {testStatus?.ok === false && testStatus.reason === "error" && (
-            <span className="ml-2 text-bad">Dispatch failed — see the console.</span>
+          ) : (
+            <span className="text-bad">Dispatch failed. See the console.</span>
           )}
         </SettingRow>
       </div>
@@ -416,18 +412,18 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
 /* ------------------------------- General --------------------------------- */
 
 /** Built-in default title models (mirror the backend's DEFAULT_TAB_TITLE_MODEL /
- *  DEFAULT_CODEX_TAB_TITLE_MODEL — keep in sync with `settings.rs`). */
+ *  DEFAULT_CODEX_TAB_TITLE_MODEL, keep in sync with `settings.rs`). */
 const DEFAULT_TAB_TITLE_MODEL = "claude:haiku";
 const DEFAULT_CODEX_TAB_TITLE_MODEL = "codex:gpt-5.4-mini";
 
-/** The title model used when the user hasn't picked one — Codex-by-default users
+/** The title model used when the user hasn't picked one, Codex-by-default users
  *  get Codex's small model rather than Claude Haiku, which would need a `claude`
  *  binary they may not have. Mirrors `TabTitleSettings::effective_model`. */
 function defaultTitleModel(defaultHarness: string | null | undefined): string {
   return defaultHarness === "codex" ? DEFAULT_CODEX_TAB_TITLE_MODEL : DEFAULT_TAB_TITLE_MODEL;
 }
 
-/** Toggle auto-generated agent-tab titles and pick the model that writes them —
+/** Toggle auto-generated agent-tab titles and pick the model that writes them,
  *  any Claude model, or one of the user's configured OpenCode models so
  *  opencode-only users are covered. The choice is stored as a tagged id
  *  (`claude:<flag>` / `opencode:<provider/model>`) the backend routes on. */
@@ -548,7 +544,7 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
     <Card>
       <CardTitle>Tab titles</CardTitle>
       <p className="mt-1 text-xs text-ink-dim">
-        Automatically name each agent tab from its first prompt. Manual renames are preserved.
+        Names each agent tab from its first prompt. Manual renames stick.
       </p>
 
       {save.isError && (
@@ -608,7 +604,7 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
   );
 }
 
-/** AI tool card — shows current agent-tool status and lets users reconfigure
+/** AI tool card, shows current agent-tool status and lets users reconfigure
  *  via the embedded terminal without leaving Settings. */
 function AiToolCard() {
   const aiStatus = useAiStatus();
@@ -660,9 +656,6 @@ function AiToolCard() {
         title="Configure AI tool"
         className="max-w-2xl"
       >
-        <p className="mb-3 text-xs text-ink-dim">
-          Select and install your AI coding assistant below.
-        </p>
         <div className="relative h-80 rounded-lg border border-edge bg-surface overflow-hidden">
           <SetupTerminal
             args={["ai", "configure", "--force"]}
@@ -851,7 +844,7 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
       <div>
         <h1 className="text-base font-semibold text-ink">Advanced</h1>
         <p className="mt-0.5 text-xs text-ink-dim">
-          Power-user features. Some change how Hyprlayer runs — enable with intent.
+          Power-user features. Some change how Hyprlayer runs.
         </p>
       </div>
 
@@ -872,7 +865,7 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
             </div>
             <p className="mt-1 max-w-xl text-xs leading-relaxed text-ink-dim">
               Run agents as native CLIs in their own persistent PTYs. With this on, a new agent tab
-              launches a CLI instead of the native chat — and the <span className="text-ink">+</span>{" "}
+              launches a CLI instead of the native chat. The <span className="text-ink">+</span>{" "}
               on the agent tab strip lets you choose which.
             </p>
           </div>
@@ -1067,7 +1060,7 @@ export function Settings() {
 
   return (
     // Settings owns the shell's second column (Root hides the project tree on
-    // this route), so the section list is a real sidebar panel — same bg-panel,
+    // this route), so the section list is a real sidebar panel, same bg-panel,
     // border seam and width as the Library / Prompts panels, so the column
     // doesn't jump as you navigate between them. Fixed rather than drag-resizable:
     // the labels are short and none of them wrap, so there's nothing to drag for.
@@ -1080,7 +1073,7 @@ export function Settings() {
         {/* No "Settings" band here: unlike the project / Library panels, this
             one titles a route the window's own breadcrumb already names, so a
             header would just print the word twice. The list starts at the top. */}
-        {/* p-3 matches the Library panel's gutter — at this width a tighter one
+        {/* p-3 matches the Library panel's gutter, at this width a tighter one
             leaves the rows hugging the left edge. pt-2 is the one number that
             isn't free: it lines the first row up with the rail's Home/dashboard
             square, which centers 26px down (the rail's py-2.5 + half its h-8).
@@ -1127,7 +1120,7 @@ export function Settings() {
           {section === "general" && (
             <>
               {/* macOS checks for updates from the app menu (the only platform
-                  that gets one — see macos_menu in src-tauri/src/lib.rs), so
+                  that gets one, see macos_menu in src-tauri/src/lib.rs), so
                   Windows and Linux need the manual "Check now" card here or they
                   have no way to ask at all. */}
               {!IS_MACOS && <UpdatesCard />}

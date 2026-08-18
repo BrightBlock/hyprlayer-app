@@ -76,13 +76,13 @@ export function RemoveProjectDialog({ target, onClose, onRemoved }: Props) {
                 {target?.path}
               </span>
               <span className={`mt-1 block text-xs ${userOwned ? "text-bad" : "text-ink-dim"}`}>
-                {userOwned ? "Your own directory — can't be undone." : "Permanent."}
+                {userOwned ? "Your own directory. Can't be undone." : "Permanent."}
               </span>
             </span>
           </label>
         ) : (
           <p className="text-xs text-ink-dim">
-            This project's directory is already gone from disk — only the hyprlayer entry remains
+            This project's directory is already gone from disk. Only the hyprlayer entry remains
             to remove.
           </p>
         )}

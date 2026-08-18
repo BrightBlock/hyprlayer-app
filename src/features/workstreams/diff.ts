@@ -53,7 +53,7 @@ export function parsePatchLines(patch: string): PatchLine[] {
   return lines.map((text) => ({ kind: classifyPatchLine(text), text }));
 }
 
-/** Tailwind classes per diff-line kind — shared by every diff view so additions,
+/** Tailwind classes per diff-line kind, shared by every diff view so additions,
  *  deletions, and hunk headers read the same everywhere. Additions/deletions/hunks
  *  bind the themed status tokens (ok/bad/brand) rather than fixed emerald/rose/sky
  *  shades, so a diff reads native to the active theme and legible on the light
@@ -72,7 +72,7 @@ const LCS_CELL_LIMIT = 250_000;
 
 /**
  * A line-level diff between two strings (an Edit tool's `old_string` /
- * `new_string`), as classified patch lines with the usual `+`/`-`/` ` prefixes —
+ * `new_string`), as classified patch lines with the usual `+`/`-`/` ` prefixes,
  * so the same renderer that draws a git patch can draw an in-flight edit. Uses an
  * LCS to keep unchanged lines as shared context; the inputs are normally the
  * small surrounding snippet an Edit carries, not whole files.
@@ -121,7 +121,7 @@ export function diffStrings(oldText: string, newText: string): PatchLine[] {
 
 /**
  * Given a document `text` and a changed span `[from, to)` (character offsets),
- * return the sub-ranges that cover only *part* of a line — dropping any segment
+ * return the sub-ranges that cover only *part* of a line, dropping any segment
  * that spans a whole line. This is how GitHub decides what to word-highlight in a
  * diff: it tints the characters that changed *within* a modified line, but leaves
  * a wholly-new or wholly-removed line to its line-level background alone. The

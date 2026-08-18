@@ -33,7 +33,7 @@ export function TerminalTab({
   const idRef = useRef<string | undefined>(terminalId);
   const appliedFontSizeRef = useRef<number>(0);
 
-  // Zoom keybindings + apply, and live theme recolor — shared with AgentPtyTab.
+  // Zoom keybindings + apply, and live theme recolor, shared with AgentPtyTab.
   const fontSize = useTerminalZoom(engineRef, idRef, appliedFontSizeRef);
   useTerminalThemeSync(engineRef);
 
@@ -43,7 +43,7 @@ export function TerminalTab({
 
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engine.mount(host);
-    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS, the emulator has no copy
     // path of its own there (see attachTerminalClipboard).
     attachTerminalClipboard(engine);
     engineRef.current = engine;
@@ -62,7 +62,7 @@ export function TerminalTab({
     // `Channel` drops, it emits an `end` marker, and the frontend `Channel`
     // responds by unregistering its own callback (see `cleanupCallback` in
     // @tauri-apps/api `core`). A failed `terminal_attach` drops its channel the
-    // instant it returns `false` — so reusing that same channel for the
+    // instant it returns `false`, so reusing that same channel for the
     // follow-up `terminal_open` sends the fresh shell's prompt into an already
     // torn-down callback: it's dropped, and the terminal sits blank with only a
     // blinking cursor (the resume-after-restart path, where the persisted id is
@@ -95,10 +95,9 @@ export function TerminalTab({
         // that wrong size makes the shell's line editor (zle) initialise its width
         // at 80; the later resize to the real width doesn't cleanly reflow it, so
         // a command long enough to wrap corrupts the prompt redraw and the line
-        // blanks mid-screen — only fixed by re-execing the shell (`exec zsh -l`).
+        // blanks mid-screen, only fixed by re-execing the shell (`exec zsh -l`).
         // Wait two frames for the renderer, then fit, so the shell starts at the
-        // real width. (termic defers its spawn for exactly this "garbage dims"
-        // reason.)
+        // real width.
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         );
@@ -133,7 +132,7 @@ export function TerminalTab({
 
     // Refit on container resize, but coalesce to a frame and only emit a PTY
     // resize when the grid actually changed. The host is absolutely positioned
-    // (see render) so fitting the terminal cannot grow the layout box — without
+    // (see render) so fitting the terminal cannot grow the layout box, without
     // that decoupling, fit → DOM resize → ResizeObserver → fit oscillates and
     // visibly shakes the surrounding panes.
     let raf = 0;
@@ -152,7 +151,7 @@ export function TerminalTab({
     ro.observe(host);
 
     // xterm paints on requestAnimationFrame, which a WKWebView throttles (and
-    // can drop) while the window is unfocused — so output or a scroll that lands
+    // can drop) while the window is unfocused, so output or a scroll that lands
     // while you're away can leave the terminal stale, and it doesn't self-heal on
     // refocus (the user's workaround was to resize the pane, which forces a
     // repaint via the grid change). On focus-regain, refit (in case the layout
@@ -195,7 +194,7 @@ export function TerminalTab({
   // so the terminal's rendered size never feeds back into the page layout. The
   // 8px breathing room is positional `inset-2`, NOT padding: FitAddon measures
   // the host via getComputedStyle().height, which reports the border-box height
-  // here — so padding would inflate its row count and clip the last line below
+  // here, so padding would inflate its row count and clip the last line below
   // the viewport. With no padding, the measured height matches the content box.
   return (
     <div className="relative min-h-0 min-w-0 flex-1 bg-surface">

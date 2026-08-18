@@ -13,17 +13,17 @@ use serde_json::{json, Value};
 /// acts on; everything else is `Unknown` (kept raw for diagnostics).
 #[derive(Debug, Clone)]
 pub enum ParsedLine {
-    /// `{"type":"system","subtype":"init",...}` — session is up; carries the
+    /// `{"type":"system","subtype":"init",...}`, session is up; carries the
     /// claude-assigned session id, model, and tool/skill inventory.
     Init {
         claude_session_id: Option<String>,
         model: Option<String>,
         tools: Vec<String>,
     },
-    /// Other `system` events (status heartbeats, etc.) — informational.
+    /// Other `system` events (status heartbeats, etc.), informational.
     System { subtype: String },
     /// A completed assistant turn (`type:"assistant"`), already de-chunked.
-    /// `context_tokens` is the per-message context fill (for the live meter —
+    /// `context_tokens` is the per-message context fill (for the live meter,
     /// it updates each step of a multi-tool turn, not just at the final result).
     /// `parent_id` is the `Task` tool-use id when this is a subagent's message.
     Assistant {
@@ -31,14 +31,14 @@ pub enum ParsedLine {
         context_tokens: Option<u32>,
         parent_id: Option<String>,
     },
-    /// A user turn echoed back — in agent runs this carries tool results.
+    /// A user turn echoed back, in agent runs this carries tool results.
     User {
         blocks: Vec<Block>,
         parent_id: Option<String>,
         /// The message's own `uuid`, when present. Maps a human turn to claude's
         /// internal id, which `rewind_conversation` targets.
         uuid: Option<String>,
-        /// `isReplay:true` — a replay echo of a prompt we sent on stdin (emitted
+        /// `isReplay:true`, a replay echo of a prompt we sent on stdin (emitted
         /// under `--replay-user-messages`). Not new transcript content, so the reader
         /// suppresses it; it never renders as assistant text.
         is_replay: bool,
@@ -56,17 +56,17 @@ pub enum ParsedLine {
         tool_name: String,
         input: Value,
     },
-    /// Terminal `{"type":"result",...}` — carries cumulative cost/usage.
+    /// Terminal `{"type":"result",...}`, carries cumulative cost/usage.
     Result {
         is_error: bool,
         total_cost_usd: Option<f64>,
         num_turns: Option<u32>,
         stop_reason: Option<String>,
-        /// Input tokens in context for the final turn (incl. cache) — the
+        /// Input tokens in context for the final turn (incl. cache), the
         /// "context window fill" the UI's context meter shows.
         context_tokens: Option<u32>,
     },
-    /// `{"type":"system","subtype":"compact_boundary",...}` — claude auto- or
+    /// `{"type":"system","subtype":"compact_boundary",...}`, claude auto- or
     /// manually compacted the conversation; the next assistant turn runs on the
     /// post-compact summary. Surfaced so a silent compaction stretch is visible
     /// in the transcript instead of looking like a stuck turn.
@@ -79,7 +79,7 @@ pub enum ParsedLine {
     },
     /// A background shell task (spawned by `Bash{run_in_background:true}`) reached
     /// a terminal state. claude emits this ASYNCHRONOUSLY as the task finishes,
-    /// even when the agent never polled it (the common fire-and-forget case) —
+    /// even when the agent never polled it (the common fire-and-forget case),
     /// realizing the spawn result's promise that "you will be notified when it
     /// completes". It's the authoritative "this background shell is done" signal
     /// the UI needs to drop a finished task from its live indicator. `status` is
@@ -96,15 +96,15 @@ pub enum ParsedLine {
         status: String,
     },
     /// A queued command's lifecycle bracket. claude emits `started` when a command
-    /// queued into a running session — a scheduled-wakeup prompt, a slash command
-    /// queued behind a busy turn — is dequeued and begins, then `completed` when the
+    /// queued into a running session, a scheduled-wakeup prompt, a slash command
+    /// queued behind a busy turn, is dequeued and begins, then `completed` when the
     /// turn it ran in ends (or `cancelled`, if that turn was interrupted). Both lines
     /// share one `command_uuid`.
     ///
     /// This is bookkeeping, not content: the command's own user/assistant lines carry
     /// what it said. It matters because claude never echoes the injected prompt to us
     /// (we don't run with `--replay-user-messages`), so without this the UI has no
-    /// signal that a new turn began at all — a wakeup-driven turn reads as the agent
+    /// signal that a new turn began at all, a wakeup-driven turn reads as the agent
     /// spontaneously picking work back up.
     CommandLifecycle {
         command_uuid: String,
@@ -114,10 +114,10 @@ pub enum ParsedLine {
     },
     /// A reply to one of our own control requests (`interrupt`,
     /// `rewind_conversation`, …). We act only on the ones we're awaiting (keyed by
-    /// `request_id`); the rest — e.g. interrupt acks — are dropped. `payload` is
+    /// `request_id`); the rest, e.g. interrupt acks, are dropped. `payload` is
     /// the innermost result object (for rewind: `{rewound, prefillText, error?}`).
     ControlResponse { request_id: String, payload: Value },
-    /// A line we don't model — kept verbatim so the driver can log it.
+    /// A line we don't model, kept verbatim so the driver can log it.
     Unknown { raw: String },
 }
 
@@ -202,7 +202,7 @@ pub fn parse_line(line: &str) -> ParsedLine {
         // claude 2.1.195+ delivers the background-task completion notification as
         // a `queue-operation` line carrying a `<task-notification>` XML block,
         // instead of the flat `system`/`task_notification` line older builds used
-        // (handled above). Same payload, different envelope — see
+        // (handled above). Same payload, different envelope, see
         // `parse_queue_operation`.
         Some("queue-operation") => parse_queue_operation(&v),
         Some("assistant") => ParsedLine::Assistant {
@@ -230,11 +230,11 @@ pub fn parse_line(line: &str) -> ParsedLine {
         // and are dropped. Not transcript content, so never a transcript event.
         Some("control_response") => parse_control_response(&v),
         // claude withdrawing a `can_use_tool`/`AskUserQuestion` prompt it had
-        // already sent us — the user interrupted the turn the prompt was gating.
+        // already sent us, the user interrupted the turn the prompt was gating.
         // Carries only the `request_id` of that ask. Nothing to do: the cancelled
         // tool's `ToolResult` lands right behind it and settles the open card, and
         // our own outbound control requests are timeout-bounded, so a stray cancel
-        // can't strand a waiter either way. Inert — but not an error.
+        // can't strand a waiter either way. Inert, but not an error.
         Some("control_cancel_request") => ParsedLine::System {
             subtype: "control_cancel_request".into(),
         },
@@ -245,7 +245,7 @@ pub fn parse_line(line: &str) -> ParsedLine {
         // A still-running tool's liveness ping (claude 2.1.21x): every 30s a tool
         // that hasn't returned yet emits `{"type":"tool_progress","heartbeat":true,
         // "tool_use_id":"<parent>-heartbeat-N","elapsed_time_seconds":30,…}`. Pure
-        // liveness, never transcript content — claude's own SDK adapter drops the
+        // liveness, never transcript content, claude's own SDK adapter drops the
         // heartbeat/subagent-retry frames outright and renders the remaining kind
         // as a throwaway "Tool X running for Ns…" status string. The tool's own
         // `ToolUse`/`ToolResult` pair already bounds it for us, so every kind is
@@ -255,8 +255,8 @@ pub fn parse_line(line: &str) -> ParsedLine {
             subtype: "tool_progress".into(),
         },
         // The queued-command bracket (see `CommandLifecycle`). We key on
-        // `command_uuid`; without one the pair can't be correlated, so — like a
-        // task_notification missing its task_id — it degrades to an inert `System`
+        // `command_uuid`; without one the pair can't be correlated, so, like a
+        // task_notification missing its task_id, it degrades to an inert `System`
         // line rather than an unpairable seam.
         Some("command_lifecycle") => match str_field(&v, "command_uuid") {
             Some(command_uuid) => ParsedLine::CommandLifecycle {
@@ -302,8 +302,8 @@ fn request_field<'a>(request: &'a Value, key: &str) -> Option<&'a str> {
 
 /// A `{"type":"queue-operation",…,"content":"<task-notification>…"}` line.
 /// claude 2.1.195 delivers the async background-task completion notification this
-/// way — a queued out-of-band event whose `content` holds a flat
-/// `<task-notification>` XML block — rather than the `system`/`task_notification`
+/// way, a queued out-of-band event whose `content` holds a flat
+/// `<task-notification>` XML block, rather than the `system`/`task_notification`
 /// JSON line earlier builds emitted. When that block is present we pull the same
 /// fields and emit `TaskNotification` (so the UI drops the finished task); any
 /// other queue-operation is a known-but-inert line, kept as informational
@@ -361,8 +361,8 @@ fn parse_control_response(v: &Value) -> ParsedLine {
 }
 
 fn parse_control_request(v: &Value) -> ParsedLine {
-    // Only `can_use_tool` is modelled; anything else — or a malformed line
-    // missing the `request_id`/`tool_name` we'd need to reply — is kept raw so
+    // Only `can_use_tool` is modelled; anything else, or a malformed line
+    // missing the `request_id`/`tool_name` we'd need to reply, is kept raw so
     // it surfaces as a protocol error rather than an unanswerable permission card.
     parse_can_use_tool(v).unwrap_or_else(|| ParsedLine::Unknown { raw: v.to_string() })
 }
@@ -486,7 +486,7 @@ pub fn user_turn_json(session_id: &str, text: &str) -> String {
 
 /// Reply to a `can_use_tool` control request. claude's permission-result schema
 /// requires `updatedInput` on an allow (the tool input to run, which we echo
-/// back unchanged) and a `message` on a deny — omitting either is a ZodError
+/// back unchanged) and a `message` on a deny, omitting either is a ZodError
 /// that fails the tool. `updated_input` falls back to `{}` only if we somehow
 /// lost the cached input.
 pub fn permission_response_json(
@@ -558,7 +558,7 @@ mod tests {
         }
     }
 
-    /// A failed background command reports `status:"failed"` (same shape) — the
+    /// A failed background command reports `status:"failed"` (same shape), the
     /// UI drops it from the live set just the same (it's no longer running).
     #[test]
     fn task_notification_failed_parses() {
@@ -582,8 +582,8 @@ mod tests {
     }
 
     /// The sibling lifecycle lines (`task_started` / `task_updated`) are not
-    /// modelled — the terminal `task_notification` is the single signal we act
-    /// on — so they stay generic `System` lines and drive nothing.
+    /// modelled, the terminal `task_notification` is the single signal we act
+    /// on, so they stay generic `System` lines and drive nothing.
     #[test]
     fn other_task_lifecycle_lines_stay_system() {
         for subtype in ["task_started", "task_updated"] {
@@ -621,7 +621,7 @@ mod tests {
     }
 
     /// A `failed` background command over the queue-operation envelope reports the
-    /// terminal status the same way — the UI still drops it.
+    /// terminal status the same way, the UI still drops it.
     #[test]
     fn task_notification_via_queue_operation_failed_parses() {
         let line = r#"{"type":"queue-operation","content":"<task-notification>\n<task-id>bzx</task-id>\n<tool-use-id>toolu_9</tool-use-id>\n<status>failed</status>\n</task-notification>"}"#;
@@ -632,7 +632,7 @@ mod tests {
     }
 
     /// A queue-operation that isn't a task notification (e.g. a queued user
-    /// message) is a known-but-inert line — informational `System`, not a scary
+    /// message) is a known-but-inert line, informational `System`, not a scary
     /// `Unknown`/protocol error.
     #[test]
     fn non_task_queue_operation_is_system() {
@@ -669,7 +669,7 @@ mod tests {
     }
 
     /// An interrupted turn closes its queued commands with `cancelled` rather than
-    /// `completed` — passed through verbatim, not normalized.
+    /// `completed`, passed through verbatim, not normalized.
     #[test]
     fn command_lifecycle_cancelled_passes_through() {
         let line =
@@ -692,7 +692,7 @@ mod tests {
 
     /// claude 2.1.21x pings every 30s while a tool is still running. Left
     /// unmodelled each ping rendered an "unrecognized stream-json line" error card
-    /// mid-transcript — i.e. one every 30s under any slow Bash call. It carries no
+    /// mid-transcript, i.e. one every 30s under any slow Bash call. It carries no
     /// content (the tool's own use/result pair bounds it), so it's inert `System`.
     /// Line verbatim from a real session (claude 2.1.218).
     #[test]
@@ -705,8 +705,8 @@ mod tests {
     }
 
     /// The non-heartbeat `tool_progress` kinds (`repl_call`, `subagent_retry`) are
-    /// inert too — claude renders them only as a transient status string, never as
-    /// transcript content — so the arm must not key on `heartbeat` being present.
+    /// inert too. Claude renders them only as a transient status string, never as
+    /// transcript content, so the arm must not key on `heartbeat` being present.
     #[test]
     fn tool_progress_without_heartbeat_flag_is_still_system() {
         let line = r#"{"type":"tool_progress","tool_use_id":"toolu_01A","tool_name":"Bash","subagent_retry":{"attempt":1},"elapsed_time_seconds":90,"uuid":"u1"}"#;
@@ -717,7 +717,7 @@ mod tests {
     }
 
     /// claude withdraws a pending permission/question prompt with a
-    /// `control_cancel_request` naming that ask's `request_id` — seen when the user
+    /// `control_cancel_request` naming that ask's `request_id`, seen when the user
     /// interrupts a turn parked on an `AskUserQuestion`. Inert (the cancelled
     /// tool's result settles the card), but it must not surface as a protocol
     /// error. Line verbatim from a real session.
@@ -731,7 +731,7 @@ mod tests {
     }
 
     /// A `--replay-user-messages` echo carries `isReplay:true` and the turn's own
-    /// `uuid` — the id the driver captures to target a later `rewind_conversation`.
+    /// `uuid`, the id the driver captures to target a later `rewind_conversation`.
     #[test]
     fn replay_user_echo_carries_uuid_and_flag() {
         let line = r#"{"type":"user","isReplay":true,"uuid":"d2052f84-2034-4399-81e7-bd28d28bc691","message":{"role":"user","content":"Reply READY"},"parent_tool_use_id":null,"session_id":"s"}"#;
@@ -783,7 +783,7 @@ mod tests {
     }
 
     /// A logical refusal ("stale target") still arrives as outer `subtype:success`
-    /// with the reason in the inner `error` — the driver reads `rewound:false`.
+    /// with the reason in the inner `error`, the driver reads `rewound:false`.
     #[test]
     fn control_response_surfaces_refusal_error() {
         let line = r#"{"type":"control_response","response":{"subtype":"success","request_id":"app-s-4","response":{"rewound":false,"prefillText":null,"error":"stale target"}}}"#;

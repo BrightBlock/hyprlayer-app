@@ -46,7 +46,7 @@ function ChordPill({ chord }: { chord: Chord | null }) {
     // equal controls. No `font-mono`: the system font renders ⌘/⇧ at native size.
     <kbd
       className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm font-medium text-ink"
-      // macOS concatenates modifier glyphs (⌘⇧B) with no separators — track them
+      // macOS concatenates modifier glyphs (⌘⇧B) with no separators, track them
       // apart so each stays legible; the +-joined Windows/Linux form needs none.
       style={IS_MACOS ? { letterSpacing: "0.1em", paddingRight: "calc(0.625rem - 0.1em)" } : undefined}
     >
@@ -147,7 +147,7 @@ function CommandRow({
             )}
             {reserved && (
               <p className="text-right text-xs text-warn">
-                This is a system shortcut — the OS may intercept it.
+                This is a system shortcut, so the OS may intercept it.
               </p>
             )}
           </>

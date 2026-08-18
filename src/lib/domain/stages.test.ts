@@ -75,7 +75,7 @@ describe("nextModeStage", () => {
 
   it("starts at the first mode for stages outside the cycle", () => {
     // commit/ship/revise are real stages but excluded from the mode picker; an
-    // unknown string is treated the same — both start the cycle at general.
+    // unknown string is treated the same, both start the cycle at general.
     for (const stage of ["commit", "ship", "revise", "bogus"]) {
       expect(nextModeStage(stage)).toBe("general");
     }

@@ -9,11 +9,11 @@ export const DIFF_SIDEBAR_MIN = 400;
 export const DIFF_SIDEBAR_MAX = 700;
 
 /** Default + drag-resize bounds (px) for the panels that replace the project
- *  tree in the shell's second column — Library, Prompts and Settings. One set of
+ *  tree in the shell's second column, Library, Prompts and Settings. One set of
  *  numbers for all three so the column doesn't jump width as you navigate
  *  between those routes. Default is the mock's w-72; the bounds keep each
  *  panel's rows readable at the low end and stop them crowding the content
- *  column at the high end. (Settings is fixed at the default — its labels are
+ *  column at the high end. (Settings is fixed at the default, its labels are
  *  short and none of them wrap, so there's nothing to drag for.) */
 export const SIDE_PANEL_WIDTH = 288;
 export const SIDE_PANEL_MIN = 220;
@@ -23,7 +23,7 @@ type UiStore = {
   /**
    * Whether the right-hand diff sidebar is hidden. Shared state so the top-bar
    * toggle (in the Root header) and the sidebar itself (in ProjectPage) stay in
-   * sync — when hidden, ProjectPage drops the aside entirely rather than showing
+   * sync, when hidden, ProjectPage drops the aside entirely rather than showing
    * a collapsed rail.
    */
   diffHidden: boolean;
@@ -35,19 +35,19 @@ type UiStore = {
    */
   diffWidth: number;
   setDiffWidth: (width: number) => void;
-  /** Whether the Tasks section inside the right diff sidebar — the agent's live
-   *  plan/to-do list, docked under the Git section — is collapsed to its header.
+  /** Whether the Tasks section inside the right diff sidebar, the agent's live
+   *  plan/to-do list, docked under the Git section, is collapsed to its header.
    *  A sidebar-level layout preference (not per-session, so it stays put as you
    *  switch agent tabs) persisted like the other collapse flags. */
   tasksCollapsed: boolean;
   toggleTasks: () => void;
   /** Live width (px) of the Library's list panel. Lives here (not in the route
-   *  component) so a drag survives leaving and re-opening the Library — the
+   *  component) so a drag survives leaving and re-opening the Library, the
    *  route unmounts, but this store doesn't. */
   libraryWidth: number;
   setLibraryWidth: (width: number) => void;
   /** Live width (px) of the prompt library's list panel. Session-only like
-   *  `libraryWidth` — survives navigation via the store but resets on restart
+   *  `libraryWidth`, survives navigation via the store but resets on restart
    *  (excluded from `partialize`, so a drag never writes to localStorage). */
   promptsWidth: number;
   setPromptsWidth: (width: number) => void;
@@ -69,7 +69,7 @@ type UiStore = {
   docWide: boolean;
   setDocWide: (wide: boolean) => void;
   /** Which side panel is open as an overlay drawer on the narrow layout tier
-   *  (see lib/layout). One at a time — a ~700px window has room for exactly
+   *  (see lib/layout). One at a time, a ~700px window has room for exactly
    *  one. Deliberately NOT persisted and never auto-set: the narrow tier
    *  derives its behaviour at render and leaves `diffHidden` /
    *  `projectSidebarCollapsed` (the user's real preferences, restored the
@@ -106,7 +106,7 @@ export const useUiStore = create<UiStore>()(
     {
       name: "hyprlayer:ui",
       version: 1,
-      // Persist only the layout/preference flags — NOT the live drag widths,
+      // Persist only the layout/preference flags, NOT the live drag widths,
       // which would otherwise write to localStorage on every resize pointermove.
       partialize: (s) => ({
         diffHidden: s.diffHidden,

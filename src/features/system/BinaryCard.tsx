@@ -8,11 +8,11 @@ import { Badge, Button } from "@/components/ui";
 const DESCRIPTIONS: Record<BinaryStatus["kind"], string> = {
   hyprlayer: "Manages thoughts storage, agent skills, and project mappings.",
   claude: "Runs the AI agent sessions for research, planning, and implementation.",
-  opencode: "Optional — the OpenCode harness for agent sessions across many providers.",
-  codex: "Optional — the Codex harness for agent sessions on OpenAI models.",
-  ollama: "Optional — local Ollama server for running local models (a remote host works too).",
+  opencode: "Optional. The OpenCode harness for agent sessions across many providers.",
+  codex: "Optional. The Codex harness for agent sessions on OpenAI models.",
+  ollama: "Optional. Local Ollama server for running local models (a remote host works too).",
   git: "Required for worktrees, commits, and thoughts syncing.",
-  gh: "Optional — used to create and track pull requests.",
+  gh: "Optional. Used to create and track pull requests.",
 };
 
 export function BinaryCard({ status }: { status: BinaryStatus }) {

@@ -10,7 +10,7 @@ import { PROMPTS_FILE_EXT } from "./promptsIo";
 export const DEFAULT_EXPORT_NAME = `hyprlayer-prompts.${PROMPTS_FILE_EXT}`;
 
 /**
- * The "Export prompts" dialog — opened from the prompt library's sidebar header.
+ * The "Export prompts" dialog, opened from the prompt library's sidebar header.
  * Pick which prompts (built-in and custom) to bundle, whether to carry keyboard
  * shortcuts and project overrides, then hand the selection back to the page,
  * which drives the native save dialog and writes the file.

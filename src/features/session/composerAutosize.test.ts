@@ -41,7 +41,7 @@ describe("fitComposerHeight", () => {
     const ta = fakeTextarea(3);
     fitComposerHeight(ta);
     expect(ta.style.overflowY).toBe("hidden");
-    // Re-running on the settled box is a fixed point — no oscillation.
+    // Re-running on the settled box is a fixed point, no oscillation.
     expect(fitComposerHeight(ta)).toBe(72);
     expect(ta.style.overflowY).toBe("hidden");
   });

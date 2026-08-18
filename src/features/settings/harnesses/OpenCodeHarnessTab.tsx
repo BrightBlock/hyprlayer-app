@@ -67,7 +67,7 @@ export function OpenCodeHarnessTab({
 
   function setSelectedModels(next: string[]) {
     // Drop the default when it's no longer selected. Clear it in the SAME
-    // settings write — otherwise the full-object save (which still carries the
+    // settings write, otherwise the full-object save (which still carries the
     // old defaultModel) can land after a separate setDefault(null) and restore a
     // default that isn't in selectedModels.
     const clearDefault = !!opencode.defaultModel && !next.includes(opencode.defaultModel);
@@ -113,7 +113,7 @@ export function OpenCodeHarnessTab({
 
       {/* Until the binary exists, surface install as the primary CTA up top
           (expanded). Once installed it demotes to the collapsed Advanced card at
-          the bottom — providers/models are the day-to-day controls from then on. */}
+          the bottom, providers/models are the day-to-day controls from then on. */}
       {!installed && <AdvancedCard status={status} installed={installed} defaultOpen />}
 
       {/* Providers */}
@@ -218,9 +218,7 @@ export function OpenCodeHarnessTab({
                     />
                   </div>
                 }
-              >
-                Model new chats start on.
-              </SettingRow>
+              />
               <SettingRow
                 title="Commit & Ship model"
                 control={
@@ -247,9 +245,7 @@ export function OpenCodeHarnessTab({
                     />
                   </div>
                 }
-              >
-                Model the Commit and Ship agents run on.
-              </SettingRow>
+              />
             </div>
           </>
         )}
@@ -353,7 +349,7 @@ function AdvancedCard({
               </Button>
               {install.isPending && (
                 <p className="text-xs text-ink-dim">
-                  Downloading and installing — this can take a minute.
+                  Downloading and installing. This can take a minute.
                 </p>
               )}
               {install.isError && <ErrorNote error={install.error} />}

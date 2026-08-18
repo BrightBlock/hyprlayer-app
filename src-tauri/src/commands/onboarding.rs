@@ -1,7 +1,7 @@
 //! Onboarding-specific IPC commands: AI status and thoughts-repo setup.
 //!
 //! These commands are used exclusively by the `/onboarding` wizard and the AI
-//! reconfigure dialog in Settings. They do not touch the project registry —
+//! reconfigure dialog in Settings. They do not touch the project registry,
 //! that remains in `projects.rs`.
 
 use std::path::{Path, PathBuf};
@@ -109,7 +109,7 @@ pub async fn init_thoughts_repo(
     source: ThoughtsSource,
 ) -> CmdResult<Bootstrap> {
     // 1. Resolve the thoughts-repo path on disk. All user-supplied paths run
-    //    through `expand_path` so a leading `~` becomes the real home dir —
+    //    through `expand_path` so a leading `~` becomes the real home dir,
     //    otherwise the filesystem would create a literal `~` directory.
     let resolved: PathBuf = match &source {
         ThoughtsSource::Clone { url, location } => {
@@ -153,7 +153,7 @@ pub async fn init_thoughts_repo(
                 .require(hyprlayer_core::process::binaries::BinaryKind::Git)
                 .await
                 .map_err(AppError::from)?;
-            // A bare `git init` root is accepted only while it stays empty —
+            // A bare `git init` root is accepted only while it stays empty,
             // one stray file and every later `thoughts init` refuses it.
             thoughts_repo::scaffold(&git, &p, user.trim(), DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
                 .await
@@ -171,13 +171,13 @@ pub async fn init_thoughts_repo(
     state.config.invalidate().await;
 
     // 4. Existing `<checkout>/thoughts/` links are absolute paths into the OLD
-    //    root — a repoint alone would leave every mapped repo and worktree
+    //    root, a repoint alone would leave every mapped repo and worktree
     //    silently writing there. Re-init each live one against the new config.
     relink_mapped_checkouts(&state).await;
 
     // 5. A CLI invocation racing the steps above (e.g. a workstream created
     //    mid-submit runs `thoughts init`, a stale read-modify-write of
-    //    config.json) can clobber the repoint — observed live. Verify the
+    //    config.json) can clobber the repoint, observed live. Verify the
     //    write stuck; re-merge into the latest file (preserving mappings the
     //    racer added) and re-sweep, once.
     state.config.invalidate().await;
@@ -215,14 +215,14 @@ pub async fn init_thoughts_repo(
 /// Re-link `thoughts/` for every mapped checkout that still exists on disk, so
 /// a repoint doesn't leave stale links writing into the old thoughts repo.
 ///
-/// CLI-first per path — `thoughts init --yes` owns the target tree, links, and
-/// mapping (the same pattern as workstream creation) — with manual relinking
+/// CLI-first per path, `thoughts init --yes` owns the target tree, links, and
+/// mapping (the same pattern as workstream creation), with manual relinking
 /// as the fallback. Serial on purpose: every CLI run rewrites config.json, so
 /// concurrent inits would race the tmp+rename. Profile-pinned mappings resolve
 /// their own backend via `effective_config_for` and short-circuit as healthy;
-/// paths that are gone are skipped (relinking would resurrect them — pruning
+/// paths that are gone are skipped (relinking would resurrect them, pruning
 /// belongs to the CLI's orphan cleanup). Best-effort: failures are logged,
-/// never surfaced — one repo on a detached drive must not fail the wizard.
+/// never surfaced, one repo on a detached drive must not fail the wizard.
 async fn relink_mapped_checkouts(state: &AppState) {
     let Ok(loaded) = state.config.load().await else {
         return;
@@ -254,7 +254,7 @@ async fn relink_mapped_checkouts(state: &AppState) {
         }
         // `thoughts init` creates the target tree and any missing links, but
         // leaves resolving-but-stale links in place (verified against CLI
-        // v1.5.8) — exactly the state a repoint produces. Force-replace
+        // v1.5.8), exactly the state a repoint produces. Force-replace
         // whatever it left broken; provisioning is idempotent over its links.
         if !thoughts_links::broken_thoughts_links(path, &effective).is_empty() {
             if let Err(e) = thoughts_links::provision_thoughts(path, &effective) {

@@ -1,8 +1,8 @@
 /**
  * Pointer-drag to reorder the project sidebar. Pointer-based rather than HTML5
  * drag-and-drop (WebKit/Tauri intercept native drags for file drops), and
- * transform-based so the reorder reads smoothly: the grabbed block — a project
- * header together with its nested workstreams — lifts and tracks the cursor,
+ * transform-based so the reorder reads smoothly: the grabbed block, a project
+ * header together with its nested workstreams, lifts and tracks the cursor,
  * while the other blocks slide via CSS transitions to open the gap where it will
  * land. Nothing changes in the DOM order until the drop is committed.
  */
@@ -64,7 +64,7 @@ export function useProjectDrag(handlersRef: RefObject<ProjectDragHandlers>) {
 
   const startDrag = (e: ReactPointerEvent, info: { path: string }) => {
     // Left button only; never start from an inner control (the "+" new-workstream
-    // link, the copy-files warning) — those carry `data-no-drag`.
+    // link, the copy-files warning), those carry `data-no-drag`.
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
     const startX = e.clientX;

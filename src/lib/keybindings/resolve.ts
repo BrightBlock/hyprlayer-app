@@ -12,7 +12,7 @@ import { alternateChords, COMMANDS, commandById, defaultChord, type CommandDef }
  *  key means "use the catalog default". Mirrors the backend `keybindings.overrides`. */
 export type Overrides = Record<string, string | null>;
 
-/** Whether a command id has an explicit override (custom chord or unbound) —
+/** Whether a command id has an explicit override (custom chord or unbound),
  *  vs. tracking the catalog default (absent key). */
 export function hasOverride(overrides: Overrides, id: string): boolean {
   return Object.prototype.hasOwnProperty.call(overrides, id);
@@ -51,7 +51,7 @@ export function effectiveAlternates(overrides: Overrides, id: string, isMac: boo
 
 /** The effective chord for a single command id (an override wins, else the
  *  catalog default), or null if it's unbound or the id is unknown. For callers
- *  that match one specific chord without building the whole index — e.g. a chord
+ *  that match one specific chord without building the whole index, e.g. a chord
  *  the global dispatcher can't see because its editable-target guard swallows it. */
 export function effectiveChord(overrides: Overrides, id: string, isMac: boolean): Chord | null {
   const cmd = commandById(id);
@@ -60,7 +60,7 @@ export function effectiveChord(overrides: Overrides, id: string, isMac: boolean)
 
 /**
  * Reverse index chord → command id, for the dispatcher. Unbound commands are
- * excluded. On a collision the later command in catalog order wins — a conflict
+ * excluded. On a collision the later command in catalog order wins, a conflict
  * the Settings UI should already have flagged via `conflictsFor`. Alternates go
  * in after every primary and never displace one, so an explicit binding wins.
  */
@@ -73,7 +73,7 @@ export function chordToCommand(overrides: Overrides, isMac: boolean): Map<Chord,
   return index;
 }
 
-/** Command ids (other than `selfId`) that `chord` would collide with — whether it
+/** Command ids (other than `selfId`) that `chord` would collide with, whether it
  *  is their primary binding or one of their alternates. */
 export function conflictsFor(
   chord: Chord,

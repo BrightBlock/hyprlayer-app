@@ -1,5 +1,5 @@
 /**
- * The workstream-scoped "Archived agents" view — a full-pane takeover of the
+ * The workstream-scoped "Archived agents" view, a full-pane takeover of the
  * agent area listing agents archived out of this workstream's tab strip, with
  * unarchive (restore + resume) and remove actions. Purely presentational: state
  * lives in the tab store; the actions come from ProjectPage.
@@ -57,7 +57,7 @@ function ArchivedMeta({ shell, branch, archivedAt }: { shell: ShellTab; branch: 
 
 type ArchivedAgentsViewProps = {
   workstreamTitle: string;
-  /** The workstream branch — shared by every agent in this workstream. */
+  /** The workstream branch, shared by every agent in this workstream. */
   branch: string;
   archived: ArchivedShell[];
   onUnarchive: (shellId: number) => void;
@@ -136,8 +136,8 @@ export function ArchivedAgentsView({
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {archived.length === 0 ? (
           <EmptyState title="No archived agents">
-            Close an agent's tab (its ×) to archive it — the agent leaves the strip but keeps its
-            branch, transcript and worktree, ready to unarchive later.
+            Closing an agent&apos;s tab archives it here, with its branch, transcript and worktree
+            intact.
           </EmptyState>
         ) : visible.length === 0 ? (
           <EmptyState title="No matches">No archived agents match “{query}”.</EmptyState>

@@ -1,37 +1,33 @@
 //! DPI-aware restore of the main window's saved geometry.
 //!
-//! `tauri-plugin-window-state` owns SAVING (size/position/maximized on
-//! move/resize/close, written on exit). It's told `skip_initial_state("main")`,
-//! so RESTORE lives here: the plugin re-applies a saved size as raw *physical*
-//! pixels with no scale adjustment, so on a mixed-DPI multi-monitor setup a
-//! window sized on a 1x display reopens half-size (and below the min → OS-clamped
-//! to the minimum) on a 2x display, or oversized the other way.
+//! `tauri-plugin-window-state` owns SAVING. It gets `skip_initial_state("main")`
+//! so RESTORE lives here, because the plugin re-applies a saved size as raw
+//! *physical* pixels: on a mixed-DPI setup a window sized on a 1x display
+//! reopens half-size on a 2x display, or oversized the other way.
 //!
-//! We restore verbatim when the saved rect still lands on a connected monitor at
-//! a compatible DPI, else open a comfortable default sized to the target monitor.
+//! We restore verbatim when the saved rect still lands on a connected monitor
+//! at a compatible DPI, else open a default sized to the target monitor.
 //!
-//! Position is applied in *physical* pixels (absolute virtual-desktop coords, so
-//! it's unambiguous across monitors). Size is reasoned about in physical pixels
-//! for the on-screen/centering math but APPLIED in *logical* points: macOS sets
-//! points directly, so a cross-monitor move can't mis-scale the window — whereas
-//! `set_size(Physical)` converts via the window's current (possibly stale,
-//! mid-move) scale factor and halves/doubles the result.
+//! Position applies in *physical* pixels (absolute virtual-desktop coords, so
+//! it is unambiguous across monitors). Size is computed in physical pixels but
+//! APPLIED in *logical* points: macOS sets points directly, while
+//! `set_size(Physical)` converts through the window's current (possibly stale,
+//! mid-move) scale factor and halves or doubles the result.
 //!
-//! One geometry slot per window (the plugin's model): last-close-wins, so
-//! per-monitor geometry isn't remembered across unplug/replug — a good default
-//! rather than the exact prior size in that case.
+//! The plugin keeps one geometry slot per window, so last close wins and
+//! per-monitor geometry is not remembered across unplug/replug.
 
 use std::collections::HashMap;
 
 use tauri::{AppHandle, LogicalSize, Manager, Monitor, PhysicalPosition};
 
 // Fallbacks if the "main" window config can't be read. Mirror the BASE
-// tauri.conf.json (macOS/Windows: 1180×620) — not the platform overlay.
+// tauri.conf.json (macOS/Windows: 1180×620), not the platform overlay.
 // `config_dims()` below reads `app.config()`, which is the merged *live*
 // config including `tauri.linux.conf.json`, so on Linux the 500×400 overlay
 // minimum is what actually reaches `decide()` at runtime; these constants are
 // only the "config unreadable" fallback (`config_dims`'s `None` arm). Do not
-// lower them to "fix" the apparent 1180-vs-500 mismatch — that would widen
+// lower them to "fix" the apparent 1180-vs-500 mismatch, that would widen
 // this fallback's blast radius on macOS/Windows, the platforms it exists to
 // protect.
 const DEFAULT_W: f64 = 1280.0;
@@ -64,7 +60,7 @@ struct SavedWindow {
     maximized: bool,
 }
 
-/// A monitor reduced to the numbers `decide` needs — full rect + usable work
+/// A monitor reduced to the numbers `decide` needs, full rect + usable work
 /// area (physical, virtual-desktop coords) and the scale factor.
 #[derive(Debug, Clone, Copy)]
 struct MonitorDesc {
@@ -108,9 +104,9 @@ impl MonitorDesc {
 /// variants so tests can assert which path ran; both are applied identically.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Plan {
-    /// Saved monitor still present at a compatible DPI — restore verbatim.
+    /// Saved monitor still present at a compatible DPI, restore verbatim.
     RestoreExact { x: i32, y: i32, w: f64, h: f64 },
-    /// No trustworthy saved geometry — comfortable default, centered.
+    /// No trustworthy saved geometry, comfortable default, centered.
     DefaultCentered { x: i32, y: i32, w: f64, h: f64 },
 }
 
@@ -162,7 +158,7 @@ fn try_restore(app: &AppHandle) -> tauri::Result<()> {
 
     // Position (absolute physical) moves the window onto the target monitor; the
     // size is applied in logical points so it can't be mis-scaled by the current
-    // (possibly mid-move) monitor — see the module docs.
+    // (possibly mid-move) monitor, see the module docs.
     let (x, y, w, h) = plan.rect();
     win.set_position(PhysicalPosition { x, y })?;
     win.set_size(LogicalSize {
@@ -489,7 +485,7 @@ mod tests {
 
     /// With Linux's low floor, a window the compositor tiled to 701×852 logical
     /// (1402×1704 physical on a 2× display) is restored verbatim instead of being
-    /// rejected as sub-minimum — `decide` reads the merged config's min, not MIN_W.
+    /// rejected as sub-minimum, `decide` reads the merged config's min, not MIN_W.
     #[test]
     fn low_min_config_restores_a_tiled_sub_1180_window() {
         let m = mon(0, 0, 2880, 1800, 2.0);

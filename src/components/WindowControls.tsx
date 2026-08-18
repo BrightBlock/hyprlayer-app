@@ -4,9 +4,9 @@ import { IS_LINUX, IS_MACOS } from "@/lib/platform";
 import { useIsMaximized } from "@/lib/useMaximized";
 
 /**
- * VSCode-style caption buttons drawn into the app header. macOS keeps its
+ * Caption buttons drawn into the app header. macOS keeps its
  * native traffic lights overlaid on the header (titleBarStyle: "Overlay"), so
- * this renders only OFF macOS — where the native title bar is removed
+ * this renders only OFF macOS, where the native title bar is removed
  * (`decorations: false`, see tauri.windows.conf.json / tauri.linux.conf.json)
  * and the app must supply its own controls. That removal is what kills the
  * second top bar Windows used to draw above the header.
@@ -63,10 +63,10 @@ export function WindowControls() {
 
 /**
  * w-9 (not the usual caption-button width) so the glyph centre lands 36px from
- * the header's last icon button — the same pitch the bar's own controls sit at.
+ * the header's last icon button, the same pitch the bar's own controls sit at.
  *
  * The hover state is a filled circle behind the glyph rather than a full-height
- * bar, and Close is grey like the rest — no Windows-red wash. That is the
+ * bar, and Close is grey like the rest, no Windows-red wash. That is the
  * GNOME/Brave treatment, and it is what reads correctly next to a lone Close
  * button on Linux, where a full-bleed red block in the corner is the loudest
  * thing in the header.

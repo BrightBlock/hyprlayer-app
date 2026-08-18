@@ -52,12 +52,12 @@ function setup(filesOnly: boolean) {
 describe("ChangesPanel filesOnly (folder projects)", () => {
   it("shows the file tree and never asks git for status", () => {
     setup(true);
-    // The tree is the whole panel — files are browsable/openable.
+    // The tree is the whole panel, files are browsable/openable.
     expect(screen.getByText("todo.md")).toBeDefined();
     expect(screen.getByText("Files")).toBeDefined();
     // No Changes tab to switch to: a folder project has no staged/unstaged.
     expect(screen.queryByRole("button", { name: "changes" })).toBeNull();
-    // The git-status query must be DISABLED, not merely unrendered — a folder
+    // The git-status query must be DISABLED, not merely unrendered, a folder
     // has no repo to answer it.
     expect(q.useWorktreeGitStatus).toHaveBeenCalledWith("ws1", false);
   });

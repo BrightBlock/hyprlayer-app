@@ -116,7 +116,7 @@ export function AgentLibrary({
     overlay: Overlay;
   } | null>(null);
 
-  /** The last settings payload dispatched, until it settles — see `writeLibrary`. */
+  /** The last settings payload dispatched, until it settles, see `writeLibrary`. */
   const queued = useRef<AppSettings | null>(null);
 
   const projectName = projectPath ? basename(projectPath) : null;
@@ -141,7 +141,7 @@ export function AgentLibrary({
     () => folderList(inScope, library, groupUncategorized),
     [inScope, library, groupUncategorized],
   );
-  // A folder absent here — including one that appears later — renders open,
+  // A folder absent here, including one that appears later, renders open,
   // so the list arrives expanded rather than needing every folder clicked
   // open on first visit.
   const closedFolders = useMemo(() => new Set(library?.closedFolders ?? []), [library]);
@@ -172,7 +172,7 @@ export function AgentLibrary({
    * `library` in scope would compute both from the same pre-click state and
    * the second would silently revert the first. The updater reads the query
    * cache at call time, which `useSetAppSettings` keeps current from
-   * `onMutate` — before the round-trip, not after it.
+   * `onMutate`, before the round-trip, not after it.
    */
   // Only `library.folders` is ever written back, so a derived phase name (or a
   // plugin's) never gets baked into settings as if the user had created it.
@@ -180,7 +180,7 @@ export function AgentLibrary({
     patch: LibraryPatch | ((current: AgentLibrarySettings) => LibraryPatch),
   ) => {
     // `queued` is the synchronous part. `useSetAppSettings` is scoped, so its
-    // mutations QUEUE — `onMutate` for the second does not run until the first
+    // mutations QUEUE, `onMutate` for the second does not run until the first
     // has landed, which means neither React state nor the query cache has
     // moved when two clicks arrive in one tick. Both would read the same base
     // and the later would revert the earlier. The ref is the only thing that
@@ -210,7 +210,7 @@ export function AgentLibrary({
 
   const save = useMutation({
     mutationFn: async (next: { agent: AgentFile; overlay: Overlay; isDefault: boolean }) => {
-      // A new agent — or the first edit of a plugin's — has no file of its own
+      // A new agent, or the first edit of a plugin's, has no file of its own
       // yet; ask the backend where its name and scope put it.
       let path = next.agent.path;
       if (!path || (isSystem(next.agent) && !next.agent.modified)) {
@@ -251,7 +251,7 @@ export function AgentLibrary({
   const remove = useMutation({
     mutationFn: async (batch: AgentFile[]) => {
       // Deleting a modified system agent removes the override, not the plugin's
-      // own file — the shipped version comes back.
+      // own file, the shipped version comes back.
       for (const agent of batch) await unwrap(commands.deleteAgentFile(agent.path));
       return batch;
     },
@@ -290,7 +290,7 @@ export function AgentLibrary({
 
   const moveToFolder = useMutation({
     mutationFn: async ({ batch, folder }: { batch: AgentFile[]; folder: string }) => {
-      // An owned agent's folder is its file's own `category` — a real write,
+      // An owned agent's folder is its file's own `category`, a real write,
       // one IPC call per agent. A plugin agent has no file of its own to
       // carry it, so it keeps moving via the overlay, app-side only.
       const overlays = { ...(library?.overlays ?? {}) };
@@ -302,7 +302,7 @@ export function AgentLibrary({
             await unwrap(commands.saveAgentFile({ ...agent, category: folder.trim() || null }));
             // `category` outranks `overlay.folder`, so a stale overlay left
             // behind would silently win back the moment the category is
-            // cleared — and moving to "no folder" clears it. Retire it here,
+            // cleared, and moving to "no folder" clears it. Retire it here,
             // touching settings only for an agent that actually has one.
             const legacy = library?.overlays?.[agent.path];
             if (legacy?.folder) overlays[agent.path] = { ...legacy, folder: "" };
@@ -323,7 +323,7 @@ export function AgentLibrary({
       if (e instanceof MoveFailed) writeLibrary({ overlays: e.overlays });
       fail("Move failed", e instanceof MoveFailed ? e.message : e);
     },
-    // Whether or not the batch finished, some files may already be on disk —
+    // Whether or not the batch finished, some files may already be on disk,
     // the list has to be re-read rather than left showing the old folders.
     onSettled: () => {
       setSelected(new Set());
@@ -569,7 +569,7 @@ export function AgentLibrary({
               disabled={!folderName.trim() || folders.includes(folderName.trim())}
               onClick={() => {
                 const name = folderName.trim();
-                // No need to also touch closedFolders — a folder absent from
+                // No need to also touch closedFolders, a folder absent from
                 // it already renders open, and this one is brand new.
                 writeLibrary((current) => ({ folders: [...(current.folders ?? []), name] }));
                 setDialog(null);

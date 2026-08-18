@@ -17,7 +17,7 @@ describe("shortBranch", () => {
   it("strips the remote prefix so a base compares against a branch name", () => {
     expect(shortBranch("origin/main")).toBe("main");
     expect(shortBranch("main")).toBe("main");
-    // Only the leading prefix — a branch legitimately named `x/origin/y` survives.
+    // Only the leading prefix, a branch legitimately named `x/origin/y` survives.
     expect(shortBranch("feature/origin/thing")).toBe("feature/origin/thing");
   });
 });
@@ -49,7 +49,7 @@ describe("isDetachedHead", () => {
     expect(isDetachedHead(view({ worktreeMode: "folder" }, null))).toBe(false);
   });
 
-  it("is false for a worktree missing on disk — that is a different failure", () => {
+  it("is false for a worktree missing on disk, that is a different failure", () => {
     const missing = view({}, null);
     missing.git.exists = false;
     expect(isDetachedHead(missing)).toBe(false);

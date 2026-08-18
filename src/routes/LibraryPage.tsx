@@ -19,8 +19,8 @@ import type { LibrarySearch } from "@/features/library/librarySearch";
 /**
  * The Library: one master–detail view consolidating the old global browser,
  * per-project docs page, and full-screen doc editor. The "LIBRARY" panel (list +
- * project scope + filters) sits beside the inline document detail; everything —
- * filters, scope, the selected doc, and its body mode — lives in the URL.
+ * project scope + filters) sits beside the inline document detail; everything,
+ * filters, scope, the selected doc, and its body mode, lives in the URL.
  */
 export function LibraryPage() {
   const search = useSearch({ from: "/library" });
@@ -28,18 +28,18 @@ export function LibraryPage() {
   const bootstrap = useBootstrap();
   const [createOpen, setCreateOpen] = useState(false);
 
-  // "New Document" — registered only while the Library is open (its context).
+  // "New Document", registered only while the Library is open (its context).
   useCommand("doc.new", () => setCreateOpen(true));
 
   // Remember a real project scope as the most-recently-used one so the next
   // Library open defaults to it. "All projects" (no param) deliberately doesn't
-  // overwrite it — it's a transient widening, not a new default.
+  // overwrite it, it's a transient widening, not a new default.
   const setLastProject = useLibraryScope((s) => s.setLastProject);
   useEffect(() => {
     if (search.project) setLastProject(search.project);
   }, [search.project, setLastProject]);
 
-  // Remember the whole view — scope, filters, and the open doc + mode — so
+  // Remember the whole view, scope, filters, and the open doc + mode, so
   // re-entering the Library from the nav rail resumes this tab where the user
   // left it instead of re-scoping and dropping the open document. `from` is
   // navigational provenance (which project's "Docs" opened it), not view state.
@@ -47,15 +47,15 @@ export function LibraryPage() {
   const setProjectSearch = useLibraryScope((s) => s.setProjectSearch);
   useEffect(() => {
     const view = { ...search };
-    delete view.from; // provenance, not view state — see the store's doc comment
+    delete view.from; // provenance, not view state, see the store's doc comment
     setLastSearch(view);
     // Also under its project, so that project's "Docs" entry reopens to it.
     if (view.project) setProjectSearch(view.project, view);
   }, [search, setLastSearch, setProjectSearch]);
 
   // Entering the Library (or re-scoping it) opportunistically runs
-  // `hyprlayer thoughts sync` — pull + push, the same command the CLI and
-  // skills use — so docs synced from elsewhere show up without a manual step.
+  // `hyprlayer thoughts sync`, pull + push, the same command the CLI and
+  // skills use, so docs synced from elsewhere show up without a manual step.
   // The sidebar's sync icon surfaces the state and re-triggers on demand.
   const lastProject = useLibraryScope((s) => s.lastProject);
   const thoughtsSync = useThoughtsSync(
@@ -71,7 +71,7 @@ export function LibraryPage() {
   const [resizingLibrary, setResizingLibrary] = useState(false);
   // On the narrow tier (see lib/layout) the dragged width can reach
   // SIDE_PANEL_MAX (480), which with the rail is 528px and won't fit a 640px
-  // viewport — so it's clamped to the minimum there rather than dragged.
+  // viewport, so it's clamped to the minimum there rather than dragged.
   const { narrow } = useViewport();
 
   const query = useMemo(() => docQueryFromSearch(search), [search]);
@@ -125,9 +125,7 @@ export function LibraryPage() {
             onSetMode={(mode) => update({ mode: mode === "edit" ? "edit" : undefined })}
           />
         ) : (
-          <EmptyState title="Select a document">
-            Pick a document from the list to read or edit it.
-          </EmptyState>
+          <EmptyState title="Select a document" />
         )}
       </section>
 

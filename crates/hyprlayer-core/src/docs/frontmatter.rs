@@ -1,4 +1,4 @@
-//! Tolerant frontmatter parsing and line-surgical patching. Parsing never fails —
+//! Tolerant frontmatter parsing and line-surgical patching. Parsing never fails,
 //! anomalies (no/malformed YAML, scalar-vs-list confusion) degrade to warnings with
 //! filename/directory fallbacks. Public API is frozen: indexer + Tauri shell build on it.
 
@@ -26,7 +26,7 @@ pub struct Frontmatter {
     pub related: Vec<String>,
     /// Unknown keys, preserved for display and round-tripping.
     /// Unknown keys in display form: strings as-is, everything else compact
-    /// JSON, null as "". Read-only context for the UI — the line-surgical
+    /// JSON, null as "". Read-only context for the UI, the line-surgical
     /// patcher preserves the underlying bytes regardless. (Stringified
     /// because specta forbids serde_json::Value's i64 arm in IPC types.)
     pub extra: BTreeMap<String, String>,
@@ -164,7 +164,7 @@ fn loose_scalar(s: &str) -> serde_yaml::Value {
     }
 }
 
-/// Byte index of the `:` separating a top-level key from its value — the
+/// Byte index of the `:` separating a top-level key from its value, the
 /// first colon followed by whitespace or end-of-line (YAML mapping syntax).
 fn find_key_colon(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
@@ -384,9 +384,9 @@ fn leading_date(stem: &str) -> Option<&str> {
 // Line-surgical frontmatter patching
 //
 // Agents and humans hand-edit thought files. A patch must therefore touch
-// ONLY the lines of the keys it sets/removes: every other byte of the file —
+// ONLY the lines of the keys it sets/removes: every other byte of the file,
 // comments, quoting style, key order, unknown keys, EOL convention, the
-// entire body — survives verbatim.
+// entire body, survives verbatim.
 // ---------------------------------------------------------------------------
 
 /// Schema key order (hyprlayer-cli/src/backends/schema.rs THOUGHT_SCHEMA).
@@ -524,8 +524,8 @@ fn tokenize_block(block: &str) -> (Vec<Span>, usize) {
             }
         }
 
-        // Continuation (or stray) line: absorb it — and any blank/comment
-        // lines between it and the current span — into the current span.
+        // Continuation (or stray) line: absorb it, and any blank/comment
+        // lines between it and the current span, into the current span.
         if let Some(last) = spans.last_mut() {
             pending_start = None;
             last.end = offset;

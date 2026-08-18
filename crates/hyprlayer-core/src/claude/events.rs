@@ -1,4 +1,4 @@
-//! The app-facing session event stream — what the UI renders and the store
+//! The app-facing session event stream, what the UI renders and the store
 //! persists. The Tauri shell forwards these over a per-session Channel and
 //! writes them to `session_events` for replay.
 
@@ -13,12 +13,12 @@ pub enum ExitOutcome {
     Completed,
     /// Stopped after an app-initiated interrupt.
     Interrupted,
-    /// Exited without a terminal `result` (or non-zero) — treated as a crash.
+    /// Exited without a terminal `result` (or non-zero), treated as a crash.
     Crashed,
     /// We killed the process tree (hard stop / cleanup).
     Killed,
-    /// The app took the process down as part of its own lifecycle — quitting, or
-    /// relaunching this session under new settings — not something that happened
+    /// The app took the process down as part of its own lifecycle, quitting, or
+    /// relaunching this session under new settings, not something that happened
     /// to the session. Terminal for the live process only: nothing is persisted,
     /// so the session replays clean and resumable (see the forwarder's `Exited`
     /// arm).
@@ -27,14 +27,14 @@ pub enum ExitOutcome {
     SpawnFailed,
 }
 
-/// `DBG_TERMINATE_PROCESS` — only ever delivered by an external `TerminateProcess`
+/// `DBG_TERMINATE_PROCESS`, only ever delivered by an external `TerminateProcess`
 /// explicitly passing it: the debug subsystem, or Windows tearing the session down.
 /// No routine kill picks it (measured on Win11: job-object close gives 0, taskkill
 /// 1, `Process::kill` -1) and no program exits with it itself, so it always means
 /// something outside ended the child. Unreachable on Unix, where `code()` is 8-bit.
 const EXTERNALLY_TERMINATED: i32 = 0x4001_0004;
 
-/// SIGHUP/SIGINT/SIGTERM/SIGKILL — something *asked* the process to stop, i.e.
+/// SIGHUP/SIGINT/SIGTERM/SIGKILL, something *asked* the process to stop, i.e.
 /// a kill from outside the app. A fault the process hit itself (SIGSEGV,
 /// SIGABRT, SIGBUS…) is still a crash.
 #[cfg(unix)]
@@ -47,7 +47,7 @@ fn is_stop_signal(signal: i32) -> bool {
 
 #[cfg(not(unix))]
 fn is_stop_signal(_signal: i32) -> bool {
-    false // no signals on Windows — `code` carries the whole story
+    false // no signals on Windows, `code` carries the whole story
 }
 
 /// The `128 + N` exit codes for those same signals. A harness that installs its
@@ -61,8 +61,8 @@ fn is_stop_exit_code(code: i32) -> bool {
 
 impl ExitOutcome {
     /// Classify a process that exited without its driver's clean-finish signal.
-    /// Our own kills never reach here — the driver's `KillFlag` short-circuits
-    /// first — so a stop signal or [`EXTERNALLY_TERMINATED`] means something
+    /// Our own kills never reach here, the driver's `KillFlag` short-circuits
+    /// first, so a stop signal or [`EXTERNALLY_TERMINATED`] means something
     /// outside the app ended the child. That's an ending, not a crash: it's the
     /// "Session crashed (exit 1073807364)" a Windows restart could greet you with.
     pub fn from_unclean_exit(code: Option<i32>, signal: Option<i32>) -> Self {
@@ -80,7 +80,7 @@ impl ExitOutcome {
         }
     }
 
-    /// Same, from a real [`ExitStatus`](std::process::ExitStatus) — the drivers'
+    /// Same, from a real [`ExitStatus`](std::process::ExitStatus), the drivers'
     /// entry point, which keeps the signal read (Unix-only) out of their bodies.
     pub fn from_status(status: &std::process::ExitStatus) -> Self {
         #[cfg(unix)]
@@ -106,14 +106,14 @@ impl ExitOutcome {
     }
 
     /// Whether this outcome is worth a line in the transcript and a terminal row.
-    /// A `Detached` exit is the app's own bookkeeping — the user never asked for
+    /// A `Detached` exit is the app's own bookkeeping, the user never asked for
     /// it, so it leaves no trace.
     pub fn is_reportable(self) -> bool {
         !matches!(self, ExitOutcome::Detached)
     }
 }
 
-/// A session's full lifecycle state — persisted in `sessions.state` and carried
+/// A session's full lifecycle state, persisted in `sessions.state` and carried
 /// by the `session-lifecycle` event. The five terminal variants mirror
 /// [`ExitOutcome`]; `Idle` is a live-but-between-turns session. sqlite stores
 /// `as_str` TEXT; rows read back through the tolerant [`SessionState::parse`]
@@ -194,7 +194,7 @@ pub enum SessionEvent {
     /// A user turn the app sent to claude. claude never echoes the human prompt
     /// on stdout (it's input), so the driver emits this itself purely so the turn
     /// is persisted and replays after a restart. It is NOT forwarded to the live
-    /// UI (which already shows the message optimistically) — persist-only, so the
+    /// UI (which already shows the message optimistically), persist-only, so the
     /// live transcript isn't double-stamped. `stage` is the stage label for the
     /// session's opening prompt, else null (a follow-up).
     UserMessage {
@@ -209,7 +209,7 @@ pub enum SessionEvent {
         prompt_name: Option<String>,
     },
     /// Streaming text delta (live typing). Coalesced into `AssistantText` on
-    /// turn completion — the UI shows partials, then replaces with the final.
+    /// turn completion, the UI shows partials, then replaces with the final.
     PartialText {
         text: String,
         parent_id: Option<String>,
@@ -239,7 +239,7 @@ pub enum SessionEvent {
         is_error: bool,
         parent_id: Option<String>,
     },
-    /// Permission prompt — the UI renders an Allow/Deny card; reply via the
+    /// Permission prompt, the UI renders an Allow/Deny card; reply via the
     /// driver's `respond_permission` with this `request_id`. `input` is compact
     /// JSON of the tool's arguments.
     PermissionAsk {
@@ -247,7 +247,7 @@ pub enum SessionEvent {
         tool_name: String,
         input: String,
     },
-    /// The agent invoked `AskUserQuestion` — rather than a yes/no permission
+    /// The agent invoked `AskUserQuestion`, rather than a yes/no permission
     /// gate, the UI renders the questions interactively above the composer and
     /// the user picks answers; reply via the driver's `answer_question` with this
     /// `request_id`. `questions` is compact JSON of the `questions` array (each:
@@ -257,15 +257,15 @@ pub enum SessionEvent {
         questions: String,
     },
     /// A live context-window reading (input tokens in context), emitted per
-    /// assistant message so the meter updates DURING a multi-tool turn — not
+    /// assistant message so the meter updates DURING a multi-tool turn, not
     /// only at `TurnDone`. Persisted (it's tiny) so the meter survives a restart
     /// even when a turn was interrupted before its `TurnDone` ever landed.
     Usage { context_tokens: u32 },
-    /// The model's context window in tokens — the meter's DENOMINATOR (`Usage` is
+    /// The model's context window in tokens, the meter's DENOMINATOR (`Usage` is
     /// the numerator). Emitted once at session start when the backend knows the
     /// value authoritatively: an Ollama model is launched with a fixed `num_ctx`
     /// the UI can't infer from the `provider/model` id. Absent for models we
-    /// don't pin (Claude, hosted OpenCode providers) — the UI then falls back to
+    /// don't pin (Claude, hosted OpenCode providers), the UI then falls back to
     /// its own per-model table. Persisted so it survives a restart/replay.
     ContextWindow { tokens: u32 },
     /// A turn finished; carries cumulative cost so far and the context-window
@@ -283,8 +283,8 @@ pub enum SessionEvent {
         trigger: String,
         pre_tokens: Option<u32>,
     },
-    /// A command queued into a running session — a scheduled-wakeup prompt, a slash
-    /// command queued behind a busy turn — started or finished. The transcript renders
+    /// A command queued into a running session, a scheduled-wakeup prompt, a slash
+    /// command queued behind a busy turn, started or finished. The transcript renders
     /// a seam on `started`, because claude never echoes the injected prompt to us: the
     /// turn simply begins, and without this marker it reads as the agent spontaneously
     /// resuming. `completed`/`cancelled` close the bracket and render nothing (the
@@ -293,8 +293,8 @@ pub enum SessionEvent {
     CommandLifecycle { command_uuid: String, state: String },
     /// A background shell task (spawned by `Bash{run_in_background:true}`) reached
     /// a terminal state. claude emits the underlying `task_notification`
-    /// asynchronously the moment the shell finishes — even if the agent never
-    /// polled it — so this is how the UI learns a fire-and-forget background task
+    /// asynchronously the moment the shell finishes, even if the agent never
+    /// polled it, so this is how the UI learns a fire-and-forget background task
     /// is done and drops it from the live "background tasks" indicator (the
     /// poll/stop paths miss the common case where the agent just moves on).
     /// `status` is "completed" or "failed"; `tool_use_id` is the spawning `Bash`
@@ -306,18 +306,18 @@ pub enum SessionEvent {
     },
     /// A new `claude` process took over an existing session via `--resume`
     /// (permission/model change, app-restart resume, log-only rewind fallback).
-    /// The forwarder emits it once at the start of a relaunch — distinct from
-    /// claude's per-turn `init` — so the UI drops background tasks the now-dead
+    /// The forwarder emits it once at the start of a relaunch, distinct from
+    /// claude's per-turn `init`, so the UI drops background tasks the now-dead
     /// prior process owned (their completion notification can never arrive).
     Relaunched {},
     /// A LIVE rewind truncated this session's conversation IN PLACE: the same
     /// `claude` process had its model memory peeled by `rewind_conversation` (see
     /// [`ClaudeDriver::rewind_to_ordinal`]). Emitted once, like [`Relaunched`], so
-    /// the UI settles the transcript at the new boundary — but the process is
+    /// the UI settles the transcript at the new boundary, but the process is
     /// UNCHANGED, so (unlike a relaunch) its still-running background tasks can
     /// still complete-notify and must NOT be dropped.
     Rewound {},
-    /// An unparseable / unknown stdout line — surfaced, never fatal.
+    /// An unparseable / unknown stdout line, surfaced, never fatal.
     ProtocolError { detail: String, raw: String },
     /// The process ended. Terminal: no further events for this session.
     Exited {
@@ -328,7 +328,7 @@ pub enum SessionEvent {
 }
 
 impl SessionEvent {
-    /// The stored `kind` tag — identical to this event's serde tag. Lives next to
+    /// The stored `kind` tag, identical to this event's serde tag. Lives next to
     /// the enum so the persisted log can't drift from the wire name.
     pub fn kind(&self) -> &'static str {
         match self {
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(SessionEvent::Relaunched {}.kind(), "relaunched");
     }
 
-    /// The live-rewind boundary is a distinct kind from `relaunched` — the UI
+    /// The live-rewind boundary is a distinct kind from `relaunched`, the UI
     /// settles the transcript at it but must keep the (same-process) background
     /// tasks, so the tag can't collide.
     #[test]
@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(SessionEvent::Rewound {}.kind(), "rewound");
     }
 
-    /// A child the app took down with it on quit reads as ended, not crashed —
+    /// A child the app took down with it on quit reads as ended, not crashed,
     /// the "Session crashed (exit 1073807364)" every Windows restart used to show.
     #[test]
     fn windows_external_termination_is_a_kill_not_a_crash() {
@@ -421,7 +421,7 @@ mod tests {
     }
 
     /// The encoding that actually shows up in practice: a harness that catches
-    /// SIGTERM exits `128 + N` with NO signal on its status. Measured on macOS —
+    /// SIGTERM exits `128 + N` with NO signal on its status. Measured on macOS,
     /// `kill -TERM` on the claude binary lands here as 143, and without this the
     /// external kill read as "Session crashed (exit 143)".
     #[test]

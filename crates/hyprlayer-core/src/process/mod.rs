@@ -95,7 +95,7 @@ impl Exec {
     }
 
     /// Feed `data` to the child on stdin, then close it (EOF). Prefer this over
-    /// [`Exec::arg`] for secrets or user content — argv is visible to any local
+    /// [`Exec::arg`] for secrets or user content, argv is visible to any local
     /// process listing, stdin is not.
     pub fn stdin(mut self, data: impl Into<Vec<u8>>) -> Self {
         self.stdin = Some(data.into());
@@ -239,13 +239,13 @@ pub struct SupervisedChild {
 
 impl SupervisedChild {
     /// The pid we spawned. On Windows this may be a `cmd.exe` wrapper rather
-    /// than the program itself — do not kill it directly, drop `self`.
+    /// than the program itself, do not kill it directly, drop `self`.
     pub fn id(&self) -> Option<u32> {
         self.child.id()
     }
 
     /// The piped stdio handles, taken once each (as on [`tokio::process::Child`]).
-    /// The child itself stays owned here so the job handle outlives it — handing
+    /// The child itself stays owned here so the job handle outlives it, handing
     /// out the `Child` would let a caller drop the supervision and keep the pipes.
     pub fn take_stdin(&mut self) -> Option<tokio::process::ChildStdin> {
         self.child.stdin.take()
@@ -266,7 +266,7 @@ impl SupervisedChild {
     /// Kill the child's process tree synchronously, for the app-exit path: `Drop`
     /// never runs under `process::exit`, and on Unix there's no job object to fall
     /// back on (that's how an `opencode serve` outlived its app by two weeks).
-    /// Windows needs nothing — the kernel closes the job handle for us.
+    /// Windows needs nothing, the kernel closes the job handle for us.
     /// Assumes the child leads its own group, as `process_group(0)` spawns do.
     pub fn kill_blocking(&self) {
         let Some(pid) = self.child.id() else { return };
@@ -285,8 +285,8 @@ impl SupervisedChild {
 /// Windows needs a job object: a resolved CLI is often an npm `.cmd` shim, which
 /// `std::process::Command` runs through `cmd.exe`, so the pid we hold is the
 /// wrapper and `kill_on_drop` alone leaves the real program running (see
-/// [`job`]). The job also covers the routes where destructors never run —
-/// `process::exit`, a panic, `TerminateProcess` — because the kernel closes our
+/// [`job`]). The job also covers the routes where destructors never run,
+/// `process::exit`, a panic, `TerminateProcess`, because the kernel closes our
 /// handle regardless.
 ///
 /// Unix needs nothing extra: a script bin is exec'd in place rather than wrapped,
@@ -343,7 +343,7 @@ fn tail(s: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
 
-    /// With `own_process_group()`, a timeout must SIGKILL the whole group — a
+    /// With `own_process_group()`, a timeout must SIGKILL the whole group, a
     /// child the command backgrounded must not outlive it.
     #[tokio::test]
     async fn timeout_kills_process_group() {

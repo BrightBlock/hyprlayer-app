@@ -56,12 +56,12 @@ const components: Components = {
   blockquote: ({ children }) => (
     <blockquote className="my-3 border-l-2 border-edge pl-3 text-ink-dim">{children}</blockquote>
   ),
-  // Inline code only — fenced blocks are caught in the `pre` slot below.
+  // Inline code only, fenced blocks are caught in the `pre` slot below.
   code: ({ children }) => (
     <code className="rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.85em]">{children}</code>
   ),
   // Fenced code block. The HAST emitted by react-markdown for ``` blocks is
-  // <pre><code class="language-xyz">text</code></pre> — we pull lang + raw text
+  // <pre><code class="language-xyz">text</code></pre>, we pull lang + raw text
   // off the inner <code> and hand it to ShikiCodeBlock. Any non-code <pre>
   // (rare in markdown output) falls back to a styled container.
   pre: ({ children, node }) => {

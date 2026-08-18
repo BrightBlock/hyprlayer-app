@@ -124,8 +124,8 @@ describe("resolvePromptBody", () => {
 
   it("never expands an argument token that came out of a variable value", () => {
     const tricky = { ...CTX, diff: "+ ask({{input}})" };
-    expect(resolvePromptBody("{{diff}} — {{input}}", tricky, { "{{input}}": "GO" })).toBe(
-      "+ ask({{input}}) — GO",
+    expect(resolvePromptBody("{{diff}}, {{input}}", tricky, { "{{input}}": "GO" })).toBe(
+      "+ ask({{input}}), GO",
     );
   });
 });

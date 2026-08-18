@@ -239,9 +239,9 @@ describe("backgroundTasksFromItems", () => {
 
   // ── completion notification (the fire-and-forget path) ─────────────────────
 
-  it("removes a task on a terminal completion notification — agent never polled", () => {
+  it("removes a task on a terminal completion notification, agent never polled", () => {
     // The screenshot bug: a `sleep`-style task the agent fires and forgets. No
-    // TaskOutput poll, no TaskStop — only claude's async notification clears it.
+    // TaskOutput poll, no TaskStop, only claude's async notification clears it.
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
       taskUpdate("task-a", "t1", "completed"),
@@ -296,7 +296,7 @@ describe("backgroundTasksFromItems", () => {
     expect(backgroundTasksFromItems(items)).toHaveLength(1);
   });
 
-  // ── errored spawn (denied / hook-blocked) — no phantom ─────────────────────
+  // ── errored spawn (denied / hook-blocked), no phantom ─────────────────────
 
   it("does not track a background spawn whose result is an error", () => {
     const items: TranscriptItem[] = [
@@ -330,9 +330,9 @@ describe("backgroundTasksFromItems", () => {
     expect(tasks[0].label).toBe("New gen");
   });
 
-  it("KEEPS tracked tasks at a rewound boundary (live rewind — same process)", () => {
+  it("KEEPS tracked tasks at a rewound boundary (live rewind, same process)", () => {
     // A live rewind peels the conversation but leaves the process (and its
-    // background shells) running, so the task must survive the boundary — unlike
+    // background shells) running, so the task must survive the boundary, unlike
     // a relaunch, which kills the process.
     const items: TranscriptItem[] = [
       bgBash("t1", { description: "Long build", result: SPAWN_RESULT("task-a") }),
@@ -497,7 +497,7 @@ describe("backgroundTasksFromItems", () => {
 
 // ─── fixture replay ──────────────────────────────────────────────────────────
 
-describe("backgroundTasksFromItems — fixture replay", () => {
+describe("backgroundTasksFromItems, fixture replay", () => {
   it("ends up with zero live tasks after the full fixture sequence", () => {
     const items = replayFixture(fixture);
     // The fixture goes: spawn → poll-timeout → poll-completed → turnDone

@@ -115,7 +115,7 @@ describe("launched skill bodies", () => {
     });
     view = reduceEvent(view, { kind: "assistantText", text: SKILL_BODY, parentId: null });
 
-    // One prose block + one tool row — the body folds into the row, no extra block.
+    // One prose block + one tool row, the body folds into the row, no extra block.
     expect(kinds(view)).toEqual(["assistant", "tool"]);
     expect(view.items[1]).toMatchObject({ kind: "tool", name: "Skill", skillBody: SKILL_BODY });
   });
@@ -143,7 +143,7 @@ describe("launched skill bodies", () => {
 
   it("leaves ordinary prose that merely mentions the prefix as an assistant block", () => {
     let view = initialSessionView("running");
-    const prose = 'A skill body starts with `Base directory for this skill:` — note that.';
+    const prose = 'A skill body starts with `Base directory for this skill:`, note that.';
     view = reduceEvent(view, { kind: "assistantText", text: prose, parentId: null });
     expect(kinds(view)).toEqual(["assistant"]);
   });
@@ -229,7 +229,7 @@ describe("OpenCode: late final text coalesces (no duplicate around tools)", () =
   it("does not duplicate the intro when its text part ends after the tool starts", () => {
     // From a live `opencode serve` trace: the intro's text part gets its `time.end`
     // only *after* the tool, so `toolUse` closes the streamed block and the final
-    // `assistantText` lands with nothing open — it must reunite, not duplicate it.
+    // `assistantText` lands with nothing open. It must reunite, not duplicate it.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "partialText", text: "I'm going to run the echo command.", parentId: null });
     view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: '{"command":"echo hi"}', parentId: null });
@@ -285,7 +285,7 @@ describe("OpenCode: inline <think> reasoning is split out of prose", () => {
     expect(viewToText(view)).not.toContain("</think>");
   });
 
-  it("places the thought where the text streamed — before a tool it preceded", () => {
+  it("places the thought where the text streamed, before a tool it preceded", () => {
     // Reasoning leaked inline, the block was closed by a tool, then the final lands.
     let view = initialSessionView("running");
     const raw = "<think>Plan the edit.</think>Editing now.";
@@ -543,7 +543,7 @@ describe("question flow", () => {
     // Single-select via a preset pick.
     expect(buildQuestionAnswers([single], { "Color?": ["Red"] }, {})).toEqual({ "Color?": "Red" });
 
-    // Single-select via "Other" only (no pick) — the custom text is the answer.
+    // Single-select via "Other" only (no pick), the custom text is the answer.
     expect(buildQuestionAnswers([single], {}, { "Color?": "Chartreuse" })).toEqual({
       "Color?": "Chartreuse",
     });
@@ -616,7 +616,7 @@ describe("turn + exit lifecycle", () => {
 
   it("a detached exit leaves no notice and stays resumable", () => {
     // Quitting the app (or relaunching a session under a new model/mode) kills
-    // the process, but the user never ended the conversation — so the transcript
+    // the process, but the user never ended the conversation, so the transcript
     // stays exactly as it was and the session rests idle, not terminal.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "assistantText", text: "hi", parentId: null });
@@ -663,7 +663,7 @@ describe("turn + exit lifecycle", () => {
       commandUuid: "cd3eda46",
       state: "started",
     });
-    // The seam says what the wakeup was for, rather than inventing copy — the detail
+    // The seam says what the wakeup was for, rather than inventing copy, the detail
     // is the scheduling call's own `reason`.
     expect(view.items[view.items.length - 1]).toMatchObject({
       kind: "queuedCommand",
@@ -707,7 +707,7 @@ describe("turn + exit lifecycle", () => {
     });
   });
 
-  it("commandLifecycle close brackets render nothing — only the opening seam is drawn", () => {
+  it("commandLifecycle close brackets render nothing, only the opening seam is drawn", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "commandLifecycle", commandUuid: "c1", state: "started" });
     const afterStart = view.items.length;
@@ -724,7 +724,7 @@ describe("turn + exit lifecycle", () => {
     expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: true });
     view = reduceEvent(view, { kind: "compactBoundary", trigger: "auto", preTokens: 182_431 });
     // The open assistant block is closed so the divider doesn't land mid-stream,
-    // but a turn that was in flight (`streaming: true`) stays in flight — the
+    // but a turn that was in flight (`streaming: true`) stays in flight, the
     // post-compact turn keeps the spinner alive until its own `turnDone`.
     expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: false });
     expect(view.items[1]).toMatchObject({ kind: "compact", trigger: "auto", preTokens: 182_431 });
@@ -751,7 +751,7 @@ describe("post-compact summary", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "compactBoundary", trigger: "auto", preTokens: 167_335 });
     view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
-    // Just the divider — the 12–18KB summary folds into it, never dumped inline.
+    // Just the divider, the 12–18KB summary folds into it, never dumped inline.
     expect(kinds(view)).toEqual(["compact"]);
     expect(view.items[0]).toMatchObject({ kind: "compact", trigger: "auto", summary: SUMMARY });
     // The turn is still in flight; its real continuation renders as normal prose.
@@ -764,7 +764,7 @@ describe("post-compact summary", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "compactBoundary", trigger: "manual", preTokens: null });
     // If the summary streamed as partials first, an open assistant block holds
-    // them — folding the completed summary in must remove that partial block.
+    // them, folding the completed summary in must remove that partial block.
     view = reduceEvent(view, { kind: "partialText", text: SUMMARY.slice(0, 40), parentId: null });
     expect(kinds(view)).toEqual(["compact", "assistant"]);
     view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
@@ -822,7 +822,7 @@ describe("connecting state (leaves 'starting' on first sign of life)", () => {
   });
 
   it("a fresh 'starting' view with no events stays connecting", () => {
-    // Nothing has streamed yet — the spinner should still show.
+    // Nothing has streamed yet, the spinner should still show.
     expect(initialSessionView("starting").state).toBe("starting");
     expect(initialSessionView("starting").streaming).toBe(false);
   });
@@ -889,7 +889,7 @@ describe("derived helpers", () => {
     expect(isBusy(view)).toBe(true);
   });
 
-  it("isWorking is true only while computing — not while parked on the user", () => {
+  it("isWorking is true only while computing, not while parked on the user", () => {
     expect(isWorking({ ...initialSessionView("starting") })).toBe(true);
     expect(isWorking({ ...initialSessionView("running"), streaming: true })).toBe(true);
     expect(isWorking({ ...initialSessionView("running"), streaming: false })).toBe(false);
@@ -925,7 +925,7 @@ describe("restoredView (rebuild after an app restart)", () => {
     expect(hasPendingPermission(restored)).toBe(true);
     expect(restored.pendingPermission?.requestId).toBe("req-1");
     expect(isBusy(restored)).toBe(true);
-    // …but it is NOT shown as a running turn — this is the restart bug.
+    // …but it is NOT shown as a running turn. This is the restart bug.
     expect(restored.streaming).toBe(false);
     expect(isWorking(restored)).toBe(false);
   });
@@ -1025,7 +1025,7 @@ describe("restoredView (rebuild after an app restart)", () => {
   });
 
   it("replays a prompt run as a named card, keeping the body the agent got", () => {
-    // The card is reconstructed from the persisted event, not from live state —
+    // The card is reconstructed from the persisted event, not from live state,
     // otherwise a restart would dump the whole prompt body back into the chat.
     let view = initialSessionView("starting");
     view = reduceEvent(view, {

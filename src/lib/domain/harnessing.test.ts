@@ -24,7 +24,7 @@ describe("modelProvider", () => {
 
   it("treats every Claude model as the single `claude` provider", () => {
     // All Anthropic models share one endpoint, so switching among them mid-session
-    // never crosses a provider — that's why Claude switching is seamless.
+    // never crosses a provider, that's why Claude switching is seamless.
     expect(modelProvider("claude", null)).toBe("claude");
     expect(modelProvider("claude", "ignored")).toBe("claude");
   });
@@ -217,8 +217,8 @@ describe("actionLaunchArgs", () => {
   });
 
   it("passes a Codex model id through AND keeps its effort", () => {
-    // Codex ids need no translation (unlike Claude's keys), but — unlike
-    // OpenCode — Codex does take a reasoning effort, so it must not be dropped.
+    // Codex ids need no translation (unlike Claude's keys), but, unlike
+    // OpenCode, Codex does take a reasoning effort, so it must not be dropped.
     expect(
       actionLaunchArgs({ harness: "codex", model: "gpt-5.4-codex", effort: "low" }),
     ).toEqual({ harness: "codex", model: "gpt-5.4-codex", effort: "low" });
@@ -228,7 +228,7 @@ describe("actionLaunchArgs", () => {
 describe("Codex defaults", () => {
   it("locks a started Codex session to the single `codex` provider", () => {
     // All Codex models share one endpoint, so model switching mid-session is
-    // always safe — the lock only has to keep it from jumping to another harness.
+    // always safe, the lock only has to keep it from jumping to another harness.
     expect(modelProvider("codex", null)).toBe("codex");
     expect(lockedSessionProvider(true, "codex", null)).toBe("codex");
   });
@@ -268,7 +268,7 @@ describe("Codex defaults", () => {
       ),
     ).toEqual({ harness: "codex", model: "a", effort: "medium" });
 
-    // Nothing configured at all still names the harness — the backend then lets
+    // Nothing configured at all still names the harness, the backend then lets
     // Codex pick its own default model.
     expect(
       actionAgentDefaults(
@@ -308,7 +308,7 @@ describe("Codex defaults", () => {
   });
 
   it("falls back to Codex's middle effort tier, never a Claude-only level", () => {
-    // `max`/`ultracode` exist on Claude but not Codex — sending one would be
+    // `max`/`ultracode` exist on Claude but not Codex, sending one would be
     // rejected by the app-server, so an unrecognized value resolves to `medium`.
     const settings = withProviders({
       defaultHarness: "codex",

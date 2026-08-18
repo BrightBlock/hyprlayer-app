@@ -6,7 +6,7 @@ import { useReprovisionWorkstream } from "@/lib/queries";
 /**
  * Compact git status for the active workstream: branch name, change counters
  * ("●n ↑n ↓n", each only when non-zero), and a thoughts-broken warning with
- * an inline Fix (reprovision) action. A folder workstream has none of these —
+ * an inline Fix (reprovision) action. A folder workstream has none of these,
  * it shows only a missing-folder warning.
  */
 export function WorkstreamChips({ view }: { view: WorkstreamView }) {
@@ -30,7 +30,7 @@ export function WorkstreamChips({ view }: { view: WorkstreamView }) {
     <div className="flex min-w-0 items-center gap-2">
       <span
         className="max-w-48 truncate rounded bg-edge/60 px-1.5 py-0.5 font-mono text-xs text-ink-dim"
-        title={git.exists ? item.branch : `${item.branch} — worktree missing on disk`}
+        title={git.exists ? item.branch : `${item.branch} , worktree missing on disk`}
       >
         {item.branch}
       </span>

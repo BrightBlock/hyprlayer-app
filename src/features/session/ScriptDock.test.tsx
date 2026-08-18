@@ -22,7 +22,7 @@ vi.hoisted(() => {
 import { ScriptDock } from "./ScriptDock";
 import { requestRun, useScriptsStore } from "./scriptsStore";
 
-// Mock the data hooks so the dock renders off plain values — no react-query, no IPC.
+// Mock the data hooks so the dock renders off plain values, no react-query, no IPC.
 const q = vi.hoisted(() => ({
   useBootstrap: vi.fn(),
   useScriptOutput: vi.fn(),
@@ -40,7 +40,7 @@ const b = vi.hoisted(() => ({
 vi.mock("@/lib/bindings", () => b);
 
 // Stub the terminal-backed bodies: this suite is about which body the dock picks
-// and whether a run is spawned at all — not about xterm.
+// and whether a run is spawned at all, not about xterm.
 vi.mock("./ScriptRunView", () => ({ ScriptRunView: () => <div data-testid="run-view" /> }));
 vi.mock("./ScriptOutputView", () => ({
   ScriptOutputView: ({ output }: { output: string }) => <div data-testid="output-view">{output}</div>,
@@ -97,7 +97,7 @@ describe("ScriptDock ⌘R", () => {
   });
 
   it("waits for the project's scripts to load before deciding", () => {
-    // An unresolved query reads as "no run script" — deciding now would swallow
+    // An unresolved query reads as "no run script", deciding now would swallow
     // a legitimate ⌘R against a project that does have one.
     q.useScripts.mockReturnValue({ data: undefined, isPending: true });
     requestRun(WS);

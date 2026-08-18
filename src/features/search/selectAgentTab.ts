@@ -2,7 +2,7 @@ import { updateWorkstreamTabs } from "@/features/session/workstreamTabs";
 
 /**
  * After navigating to a workstream, best-effort select the tab bound to
- * `sessionId`. A no-op if the tab doesn't exist yet — opening the workstream
+ * `sessionId`. A no-op if the tab doesn't exist yet, opening the workstream
  * is enough to see the session.
  */
 export function selectAgentTab(workstreamId: string, sessionId: string): void {

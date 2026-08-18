@@ -119,14 +119,14 @@ mod tests {
             backend: git_backend("/tmp/hyprlayer-test-thoughts"),
             ..Default::default()
         };
-        // Duplicate of the default root — dropped.
+        // Duplicate of the default root, dropped.
         thoughts.profiles.insert(
             "dup".into(),
             ProfileConfig {
                 backend: git_backend("/tmp/hyprlayer-test-thoughts"),
             },
         );
-        // Non-filesystem backend — skipped.
+        // Non-filesystem backend, skipped.
         thoughts.profiles.insert(
             "cloud".into(),
             ProfileConfig {

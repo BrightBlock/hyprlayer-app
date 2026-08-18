@@ -2,8 +2,8 @@
  * Global dispatcher for CUSTOM prompt shortcuts. Custom prompts aren't catalog
  * commands (they're user data, not stable ids), so they can't ride
  * `useKeybindings`; this hook installs a sibling `window` listener with the
- * same rules — bubble phase, editable-target guard, `preventDefault` only when
- * something ran — and defers to the catalog on any collision (a chord that maps
+ * same rules, bubble phase, editable-target guard, `preventDefault` only when
+ * something ran, and defers to the catalog on any collision (a chord that maps
  * to an app command never fires a prompt). Built-in prompts need none of this:
  * Commit/Ship already dispatch through `ws.commit` / `ws.ship`.
  */
@@ -39,7 +39,7 @@ export function usePromptHotkeys(activeWorkstream: WorkstreamView | null): void 
       if (!hasPrimaryModifier(chord) && isEditableTarget(e.target)) return;
       const prompt = prompts.find((p) => p.chord && normalizeChord(p.chord) === chord);
       if (!prompt || !activeWorkstream) return;
-      // An empty body for this project sends nothing — leave the chord to the
+      // An empty body for this project sends nothing, leave the chord to the
       // browser rather than swallowing it for a no-op run.
       if (!isRunnablePrompt(prompt, activeWorkstream.item.projectPath)) return;
       e.preventDefault();

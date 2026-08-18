@@ -161,7 +161,7 @@ export function Archive() {
           <TextInput
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter archived workstreams..."
+            placeholder="Filter by name, branch, or project…"
             aria-label="Filter archived workstreams"
           />
         </div>
@@ -174,9 +174,7 @@ export function Archive() {
 
       <div className="min-w-0 flex-1 overflow-y-auto px-6 py-4">
         {total === 0 ? (
-          <EmptyState title="No archived workstreams yet">
-            Archived workstreams live here. You can restore them or delete them permanently.
-          </EmptyState>
+          <EmptyState title="No archived workstreams yet" />
         ) : shown === 0 ? (
           <EmptyState title="No matches">
             Nothing in the archive matches{" "}
@@ -357,8 +355,8 @@ function CleanupDialog({ open, archived, busy, onClose, onConfirm, error }: Clea
     <Dialog open={open} onClose={onClose} title="Clean up archives">
       <div className="space-y-4">
         <p className="text-sm text-ink-dim">
-          Choose which archived workstreams to delete. This removes them from disk along with their
-          local branches (per your Git settings) and cannot be undone.
+          Deletes them from disk, along with their local branches if your Git settings say so.
+          This cannot be undone.
         </p>
 
         <div className="space-y-1.5" role="radiogroup" aria-label="Cleanup scope">

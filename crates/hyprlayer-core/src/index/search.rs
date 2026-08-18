@@ -2,7 +2,7 @@
 //! Trait-free and linear by design: for a small personal corpus (<= 5k docs)
 //! every query full-scans (Unicode-exact lowercase title/tags per candidate,
 //! an `aho-corasick` multi-needle search over a size-capped body read fresh
-//! from disk at query time — no body text is cached), with no inverted index
+//! from disk at query time, no body text is cached), with no inverted index
 //! or caching (< 1 ms per 1000 docs plus one bounded read per candidate with
 //! text). Body matching is ASCII-case-insensitive only: a needle that is the
 //! lowercase form of a *cased non-ASCII* letter (e.g. `"δ"` vs body `"Δ"`)

@@ -10,7 +10,7 @@
  * ancestor); `pointer-events-none` on the container with `pointer-events-auto`
  * on the lines lets clicks fall through the gaps to the transcript underneath.
  *
- * Purely presentational — holds no history state. Parent supplies `prompts`,
+ * Purely presentational, holds no history state. Parent supplies `prompts`,
  * `activeIndex`, and `onRecall`.
  */
 import { useState } from "react";

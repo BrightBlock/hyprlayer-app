@@ -1,16 +1,16 @@
-//! Windows job objects — tie a spawned process *tree* to a handle we hold.
+//! Windows job objects, tie a spawned process *tree* to a handle we hold.
 //!
 //! Needed because on Windows the pid we get back from a spawn is often not the
 //! process we care about. A resolved CLI is frequently an npm `.cmd` shim
 //! (OpenCode installs `opencode.cmd`, no `.exe` on PATH), and
-//! `std::process::Command` runs `.cmd`/`.bat` through `cmd.exe` — so our child
+//! `std::process::Command` runs `.cmd`/`.bat` through `cmd.exe`, so our child
 //! is the wrapper and the real program is *its* child. Killing our child, by
 //! `kill_on_drop` or otherwise, reaps the wrapper and leaves the program running.
 //!
 //! `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` fixes that at the kernel level: every
 //! process in the job dies when the last handle to it closes. The kernel closes
-//! our handle however we go away — clean exit, `process::exit`, panic,
-//! `TerminateProcess` — so teardown does not depend on a destructor running.
+//! our handle however we go away, clean exit, `process::exit`, panic,
+//! `TerminateProcess`, so teardown does not depend on a destructor running.
 
 use std::io;
 

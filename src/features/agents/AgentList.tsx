@@ -25,7 +25,7 @@ import { Segmented } from "./parts";
 
 type Props = {
   rows: AgentRow[];
-  /** Everything the current filter admits — what "select all" covers. */
+  /** Everything the current filter admits, what "select all" covers. */
   agents: AgentFile[];
   library: AgentLibrarySettings | undefined;
   defaultAgent: string | null;
@@ -48,7 +48,7 @@ type Props = {
   onNewFolder: () => void;
   loading: boolean;
   /** The dot beside each agent's name, already resolved: the list renders the
-   *  colour, it does not decide it. */
+   *  colour. It does not decide it. */
   dotColorOf: (agent: AgentFile) => string;
   /** State of the "Group uncategorized" switch in the toolbar. */
   groupUncategorized: boolean;
@@ -61,19 +61,17 @@ type Props = {
   };
 };
 
-/** The list is one CSS grid, shared by the header and every row so the two can
- *  never drift. Its fixed tracks (model 150 + status 130 + updated 130 + the
- *  34px check and 36px kebab) total 480px, which is more than this pane has to
- *  give on the narrow content tier (see lib/layout's CONTENT_NARROW_WIDTH):
- *  below it `minmax(0,1fr)` collapses to zero and the name — whose children are
- *  deliberately `shrink-0` so badges never squash — overflows its track and
- *  paints across the columns to its right. So secondary columns are dropped
- *  rather than squeezed, least-informative first: Model and Updated at narrow,
- *  Status as well at compact, leaving name + actions.
+/** One CSS grid shared by the header and every row, so the two can't drift.
  *
- *  Written out as three literal strings, not interpolated: Tailwind scans
- *  source for complete class names, so a computed `grid-cols-[${...}]` would
- *  generate no CSS at all. */
+ *  The fixed tracks total 480px, more than the pane has on the narrow content
+ *  tier (lib/layout's CONTENT_NARROW_WIDTH). Below that `minmax(0,1fr)`
+ *  collapses to zero and the name column, whose children are `shrink-0` so
+ *  badges never squash, paints across the columns to its right. So we drop
+ *  secondary columns rather than squeeze them, least informative first: Model
+ *  and Updated at narrow, Status too at compact.
+ *
+ *  Three literal strings, not interpolated: Tailwind scans source for complete
+ *  class names, so a computed `grid-cols-[${...}]` emits no CSS. */
 const GRID_BASE = "items-center";
 const GRID_WIDE = `grid grid-cols-[34px_minmax(0,1fr)_150px_130px_130px_36px] ${GRID_BASE}`;
 const GRID_NARROW = `grid grid-cols-[34px_minmax(0,1fr)_130px_36px] ${GRID_BASE}`;
@@ -108,11 +106,11 @@ export function AgentList({
 }: Props) {
   const allOn = agents.length > 0 && agents.every((a) => selected.has(a.path));
   const selCount = selected.size;
-  // Which columns THIS LIST can afford (see GRID_* above) — measured, not taken
+  // Which columns THIS LIST can afford (see GRID_* above), measured, not taken
   // from the window: the list is the last column in the row, so the nav rail and
   // the project sidebar (which /agents does render) come off the top of the
   // window width first. A 950px window with a 360px sidebar leaves the list 542,
-  // and reading the window would call that wide and overflow the grid — the
+  // and reading the window would call that wide and overflow the grid, the
   // exact failure the tiers exist to prevent. Width is 0 only if the pane has
   // never been observed; treat that as wide so the first frame cannot shear.
   const { ref: paneRef, width: paneWidth } = useElementWidth<HTMLDivElement>();
@@ -174,8 +172,8 @@ export function AgentList({
         <div className="flex-1" />
         {/* Search and the two add-actions travel as one group so they sit with
             the table rather than beside the page title. Below the narrow tier
-            the group takes a row of its own — search flexes, the icon buttons
-            keep their square footprint — instead of wrapping to a third line
+            the group takes a row of its own, search flexes, the icon buttons
+            keep their square footprint, instead of wrapping to a third line
             under a full-width search box. Icon-only, matching the Prompts
             panel's header actions; `title`/`aria-label` carry the meaning. */}
         <div className={`flex items-center gap-1 ${narrow ? "w-full" : ""}`}>
@@ -291,7 +289,7 @@ export function AgentList({
                 ? "Try a shorter search, or clear it to see everything in this scope."
                 : tab === "system"
                   ? "System agents come from installed Claude Code plugins. Install one and it shows up here."
-                  : "An agent bundles a prompt, a model, the tools it may use and the permissions it runs under — so a workstream can start the same way every time."}
+                  : "An agent bundles a prompt, a model, the tools it may use and the permissions it runs under, so a workstream can start the same way every time."}
             </EmptyState>
             {!search.trim() && tab === "yours" && (
               <div className="mt-3.5 flex justify-center">
@@ -378,11 +376,11 @@ function AgentRowView({
   onOpen: () => void;
   onMenu: (at: { x: number; y: number }) => void;
   /** Passed down (not recomputed) so a row's cells always match the header's
-   *  track count — the two must agree or the grid shears. */
+   *  track count, the two must agree or the grid shears. */
   grid: string;
   narrow: boolean;
   compact: boolean;
-  /** Already-resolved dot colour — see [`dotColor`]. */
+  /** Already-resolved dot colour, see [`dotColor`]. */
   dot: string;
 }) {
   const overlay = overlayFor(library, agent.path);

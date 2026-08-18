@@ -9,13 +9,13 @@ import { shouldAutoSync } from "./thoughtsSync";
 export type ThoughtsSyncState = {
   /** Local git status of the thoughts repo, once loaded. */
   status: ThoughtsRepoStatus | undefined;
-  /** True when the active backend can't sync through git — render nothing. */
+  /** True when the active backend can't sync through git, render nothing. */
   hidden: boolean;
   syncing: boolean;
   /** Message of the last failed sync; cleared by the next attempt. */
   error: string | null;
   /** Transient verdict of the last sync, shown briefly on the icon before it
-   *  settles back — the only success feedback a quiet sync produces. */
+   *  settles back, the only success feedback a quiet sync produces. */
   flash: "ok" | "bad" | null;
   syncNow: () => void;
 };
@@ -28,12 +28,12 @@ const HIDDEN_CODES = new Set(["backend_not_git", "backend_not_filesystem"]);
 const FLASH_MS = 2_000;
 
 /** Module-level so it survives Library route remounts (the route unmounts on
- *  nav-away) — revisiting within the cooldown doesn't re-sync. Resets with the
+ *  nav-away), revisiting within the cooldown doesn't re-sync. Resets with the
  *  app, which is the point: the first Library open each run pulls fresh. */
 let lastAutoSyncAt = 0;
 
 /**
- * Opportunistic thoughts sync — the Library's half of the sync icon. Entering
+ * Opportunistic thoughts sync, the Library's half of the sync icon. Entering
  * the Library or switching its project scope runs `hyprlayer thoughts sync`
  * (pull + push, the same command skills and the CLI use), so docs written
  * elsewhere appear without a manual step. Pulled files land through the

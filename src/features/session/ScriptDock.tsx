@@ -55,14 +55,14 @@ const cx = (...parts: Array<string | false | null | undefined>): string =>
 
 // Only Setup + Run get dock tabs. Archive runs at teardown when the dock is
 // already gone (nothing to watch), and its commands are visible in Project
-// Settings — so it has no dock tab.
+// Settings, so it has no dock tab.
 const SCRIPTS: { kind: Exclude<ScriptKind, never>; name: string; trigger: string; icon: ReactNode }[] = [
   { kind: "setup", name: "Setup", trigger: "Runs once when this workstream is created.", icon: <WrenchIcon size={13} /> },
   { kind: "run", name: "Run", trigger: "Runs each time you press ▶. The previous process is stopped first.", icon: <PlayIcon size={12} /> },
 ];
 
 /** A mounted run view. `exited` marks the Run whose process is gone but whose
- *  output we keep on screen — a frozen log, not a live terminal. */
+ *  output we keep on screen, a frozen log, not a live terminal. */
 type View = { kind: ScriptKind; gen: number; attachId: string | null; exited: boolean };
 
 export function ScriptDock({
@@ -99,7 +99,7 @@ export function ScriptDock({
   const isRunning = !!running;
   const port = running?.port ?? runtime.data?.port ?? null;
   // Setup's + Run's captured last-run output (fetched only while their tab
-  // shows). Run's backs the read-only view after a Run exits — the output stays
+  // shows). Run's backs the read-only view after a Run exits, the output stays
   // put until the next ▶ instead of snapping back to the idle prompt.
   const setupOutput = useScriptOutput(workstreamId, "setup", tab === "setup");
   const runOutput = useScriptOutput(workstreamId, "run", tab === "run");
@@ -122,7 +122,7 @@ export function ScriptDock({
     selectDockTab(workstreamId, kind);
   };
 
-  // ⌘R / rail elsewhere asked to start the Run — consume the one-shot flag. Wait
+  // ⌘R / rail elsewhere asked to start the Run, consume the one-shot flag. Wait
   // for the project's scripts to load first: deciding against an unresolved query
   // reads every project as unconfigured and would swallow a legitimate ⌘R.
   useEffect(() => {
@@ -210,7 +210,7 @@ export function ScriptDock({
           className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize bg-transparent transition-colors hover:bg-edge/60"
         />
       )}
-      {/* header — single row: the left chrome and right Run button stay pinned,
+      {/* header, single row: the left chrome and right Run button stay pinned,
           and the tab strip scrolls (with edge chevrons) when it gets too narrow.
           Right-docked it matches the other sidebar section headers (`h-9`); the
           bottom dock keeps its taller toolbar. */}
@@ -292,7 +292,7 @@ export function ScriptDock({
         </ScrollableTabStrip>
 
         {/* right-side controls: Open :PORT while running, plus a split Run/Stop
-            button whose chevron opens "Configure scripts". Pinned — never moves. */}
+            button whose chevron opens "Configure scripts". Pinned, never moves. */}
         <div className="flex shrink-0 items-center gap-2">
           {isRunning && port && (
             <button
@@ -329,7 +329,7 @@ export function ScriptDock({
         </div>
       </div>
 
-      {/* body — hidden when collapsed (right-docked); the header stays visible. */}
+      {/* body, hidden when collapsed (right-docked); the header stays visible. */}
       {!collapsed &&
         (typeof tab === "object" ? (
         <TerminalTab
@@ -431,7 +431,7 @@ function Kbd({ children }: { children: ReactNode }) {
 }
 
 /** Combined Run/Stop button + a chevron that drops a "Configure" menu. The menu
- *  is anchored to the button group — opens downward, spans the group's exact
+ *  is anchored to the button group, opens downward, spans the group's exact
  *  width, and shares its panel/border so it reads as an extension of the box. */
 function RunSplit({
   running,
@@ -446,7 +446,7 @@ function RunSplit({
   running: boolean;
   label: string;
   canRun: boolean;
-  /** Icon-only main button (no label/shortcut) — used in the narrow sidebar so
+  /** Icon-only main button (no label/shortcut), used in the narrow sidebar so
    *  the button keeps a fixed, small width and never reflows during resize. */
   compact: boolean;
   /** Run shortcut formatted for the host OS (e.g. "⌘R" / "Ctrl+R"). */
@@ -475,7 +475,7 @@ function RunSplit({
         disabled={!running && !canRun}
         title={
           !running && !canRun
-            ? "No script configured — use Configure to add one"
+            ? "No script configured. Use Configure to add one"
             : compact
               ? `${running ? "Stop" : label}${runKey ? ` (${runKey})` : ""}`
               : undefined

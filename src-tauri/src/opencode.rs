@@ -6,7 +6,7 @@
 //! Wire reference, confirmed against `opencode serve` OpenAPI (v1.17):
 //!   - `GET  /global/health`            → `{ healthy, version }`
 //!   - `GET  /global/event`             → SSE of `{ directory, project, payload:{ id, type, properties } }`
-//!     (the unscoped, all-directories stream — `/event` alone is scoped to the
+//!     (the unscoped, all-directories stream, `/event` alone is scoped to the
 //!     server's cwd, so it misses sessions created in a worktree directory)
 //!   - `POST /session?directory=<cwd>`  → `{ id: "ses_…", … }` (cwd scopes tools)
 //!   - `POST /session/{id}/prompt_async`→ `{ parts:[{type:"text",text}], model:{providerID,modelID} }`
@@ -49,7 +49,7 @@ impl OpenCodeManager {
 
     /// Best-effort synchronous teardown for app exit: stop the shared server so it
     /// doesn't outlive us. Unlike agent sessions this process isn't in the session
-    /// registry — it's held here for the app's lifetime — so nothing else reaps it,
+    /// registry, it's held here for the app's lifetime, so nothing else reaps it,
     /// and on Unix `Drop` never runs under `process::exit`. Observed cost of the
     /// gap: two `opencode serve` processes still running 14 days after their app
     /// died. `try_lock` because the `RunEvent` exit handler has no async context.
@@ -88,8 +88,8 @@ impl OpenCodeManager {
 
     /// Drop the cached server so the next [`ensure`](Self::ensure) spawns a fresh
     /// one. Call this whenever provider credentials change (a key added, updated,
-    /// or removed): OpenCode reads `auth.json` only once, at `serve` startup —
-    /// we inject it via `OPENCODE_AUTH_CONTENT` in [`OpenCodeServer::start`] — and
+    /// or removed): OpenCode reads `auth.json` only once, at `serve` startup,
+    /// we inject it via `OPENCODE_AUTH_CONTENT` in [`OpenCodeServer::start`], and
     /// never re-scans it, so a running server can't see a newly-added provider and
     /// rejects its models with `ProviderModelNotFoundError` until restarted. This
     /// avoids forcing a full app restart for that.
@@ -110,11 +110,11 @@ pub struct OpenCodeServer {
     /// `provider/model` id → context window (tokens), read once from
     /// `GET /config/providers` at startup. This is OpenCode's own resolved limit
     /// for each model (the value it runs the agentic loop against), so it's the
-    /// authoritative meter denominator for hosted providers — the UI can't infer
+    /// authoritative meter denominator for hosted providers, the UI can't infer
     /// it from the id. Empty if the fetch failed (the UI then falls back).
     model_context: std::collections::HashMap<String, u32>,
     /// Kept alive for the app's lifetime. Supervised because on Windows this is
-    /// a `cmd.exe` shim wrapping the real server — killing the pid we hold would
+    /// a `cmd.exe` shim wrapping the real server, killing the pid we hold would
     /// leave the server listening. See `process::spawn_supervised`.
     _child: Mutex<hyprlayer_core::process::SupervisedChild>,
 }
@@ -125,7 +125,7 @@ impl OpenCodeServer {
     /// migrated by us, never sharing the user's global `~/.local/share/opencode`
     /// (which can carry a stale/incompatible schema from another OpenCode build).
     /// Provider credentials still come from the user's real `auth.json`, injected
-    /// via `OPENCODE_AUTH_CONTENT` — OpenCode (1.17) reads auth only from
+    /// via `OPENCODE_AUTH_CONTENT`, OpenCode (1.17) reads auth only from
     /// `$XDG_DATA_HOME/opencode/auth.json` or this env var; it ignores
     /// `OPENCODE_AUTH_JSON`. So keys configured in the OpenCode settings tab keep
     /// working even though the data home is app-owned.
@@ -223,7 +223,7 @@ impl OpenCodeServer {
     }
 
     /// The context window (tokens) OpenCode runs `model_id` (`provider/model`)
-    /// with, when known — the meter's denominator. `None` falls back to the UI's
+    /// with, when known, the meter's denominator. `None` falls back to the UI's
     /// own table.
     fn context_window(&self, model_id: &str) -> Option<u32> {
         self.model_context.get(model_id).copied()
@@ -263,7 +263,7 @@ fn spawn_sse(base_url: String, client: reqwest::Client, tx: broadcast::Sender<Oc
                     }
                 }
             }
-            // Server gone or stream dropped — back off, then retry.
+            // Server gone or stream dropped, back off, then retry.
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
     });
@@ -304,7 +304,7 @@ fn free_port() -> Result<u16, String> {
 /// Read each configured model's context window from `GET /config/providers` and
 /// index it by `provider/model` id (the same id the composer sends). OpenCode
 /// resolves these limits itself (models.dev + any provider config), so this is
-/// the authoritative denominator for hosted providers. Best effort — a transport
+/// the authoritative denominator for hosted providers. Best effort, a transport
 /// or parse failure yields an empty map and the UI falls back to its own table.
 async fn fetch_model_context(
     client: &reqwest::Client,
@@ -439,7 +439,7 @@ impl OpenCodeDriver {
             model: model.as_ref().map(|(p, m)| format!("{p}/{m}")),
         });
 
-        // Tell the UI this model's real context window — the meter's denominator —
+        // Tell the UI this model's real context window, the meter's denominator,
         // so it doesn't fall back to the Claude 1M default. Ollama models run with
         // a fixed `num_ctx` we set ourselves (authoritative, and the UI can't infer
         // it); every other provider uses the limit OpenCode resolved at startup.
@@ -507,7 +507,7 @@ impl OpenCodeDriver {
     }
 
     /// Abort the turn, stop the SSE filter, and emit the terminal event. The
-    /// shared server stays up — only this session is done.
+    /// shared server stays up, only this session is done.
     fn end(&self, outcome: ExitOutcome) {
         self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
         if let Ok(mut guard) = self.filter_task.try_lock() {
@@ -535,7 +535,7 @@ impl OpenCodeDriver {
     }
 
     /// Send a prompt. Unlike [`post_async`], a transport error or non-2xx
-    /// response is surfaced on the session stream and the turn is ended — a
+    /// response is surfaced on the session stream and the turn is ended, a
     /// failed prompt (dead server, bad auth, unknown model, 5xx) otherwise leaves
     /// the UI stuck "running" with no visible failure, since `prompt_async`
     /// returns before the turn produces any `session.*` events.
@@ -570,8 +570,8 @@ impl OpenCodeDriver {
 
     /// Remove this session from the server's store. Throwaway sessions (e.g.
     /// one-shot title generation) call this so they don't accumulate; interactive
-    /// sessions keep theirs for resume and only [`AgentDriver::kill`]. Best-effort
-    /// — a failure just leaves the record behind, so the caller can ignore it.
+    /// sessions keep theirs for resume and only [`AgentDriver::kill`]. Best-effort,
+    /// a failure just leaves the record behind, so the caller can ignore it.
     pub async fn delete_session(&self) {
         let url = format!("{}/session/{}", self.server.base_url, self.session_id);
         if let Err(e) = self
@@ -689,7 +689,7 @@ impl AgentDriver for OpenCodeDriver {
         }
     }
 
-    /// The app's own teardown (quit, relaunch) — same abort, but reported as
+    /// The app's own teardown (quit, relaunch), same abort, but reported as
     /// `Detached` so it leaves no mark on the transcript.
     fn kill_detached(&self) {
         if self.kill_flag.mark_detached() {
@@ -736,7 +736,7 @@ struct Translator {
     text_len: std::collections::HashMap<String, usize>,
     /// text/reasoning part id → final block already emitted.
     text_done: std::collections::HashSet<String>,
-    /// part ids that streamed via `message.part.delta` — their growing
+    /// part ids that streamed via `message.part.delta`, their growing
     /// `message.part.updated` text must NOT be re-emitted as PartialText.
     delta_parts: std::collections::HashSet<String>,
     /// part id → part type ("text" | "reasoning" | "tool" | …), learned from
@@ -780,7 +780,7 @@ impl Translator {
                 }
                 // Reasoning parts stream their text via deltas too (also `field:
                 // "text"`), but should surface only as a Thinking block when the
-                // part completes — never as live assistant text. The owning part's
+                // part completes, never as live assistant text. The owning part's
                 // type was announced before these deltas.
                 if self.part_types.get(pid).map(String::as_str) == Some("reasoning") {
                     return Vec::new();
@@ -817,7 +817,7 @@ impl Translator {
             }],
             // The model called the `question` tool to ask the user something.
             // OpenCode's `questions` array (question/header/options[label,desc])
-            // matches our QuestionAsk shape, so surface it interactively — the
+            // matches our QuestionAsk shape, so surface it interactively, the
             // matching `question` tool part is suppressed in `handle_part`.
             "question.asked" => vec![SessionEvent::QuestionAsk {
                 request_id: str_field(p, "id"),
@@ -840,7 +840,7 @@ impl Translator {
                     .and_then(Value::as_str)
                     .unwrap_or("OpenCode reported an error")
                     .to_string();
-                // A user-initiated stop aborts the turn — that's not an error, so
+                // A user-initiated stop aborts the turn, that's not an error, so
                 // end the turn cleanly (the partial output stays) rather than
                 // surfacing a scary banner.
                 if name == "MessageAbortedError" || msg == "Aborted" {
@@ -875,9 +875,9 @@ impl Translator {
         let ptype = part.get("type").and_then(Value::as_str).unwrap_or_default();
         // Remember this part's type *before* the role gate. A reasoning part can be
         // announced (this `message.part.updated`) before its owning message's role
-        // is known; if we skipped it here, its later `field:"text"` deltas — which
-        // the delta handler suppresses only when the part is known to be reasoning
-        // — would be misclassified as visible assistant text, leaking the thought
+        // is known; if we skipped it here, its later `field:"text"` deltas, which
+        // the delta handler suppresses only when the part is known to be reasoning,
+        // would be misclassified as visible assistant text, leaking the thought
         // into prose. Recording it unconditionally keeps that suppression reliable
         // regardless of message/part event ordering. (Harmless for user parts: the
         // delta handler gates on role before ever consulting this map.)
@@ -1019,8 +1019,8 @@ fn str_field(v: &Value, k: &str) -> String {
 /// Map an OpenCode tool call onto the Claude-Code tool vocabulary the transcript
 /// UI is built around. OpenCode emits lowercase names (`read`, `edit`) with
 /// camelCase input keys (`filePath`, `oldString`); the frontend keys every
-/// display path — standalone per-file chips, edit-diff previews, agent-doc
-/// detection, argument summaries — on Claude's PascalCase names and snake_case
+/// display path, standalone per-file chips, edit-diff previews, agent-doc
+/// detection, argument summaries, on Claude's PascalCase names and snake_case
 /// keys. Normalizing here (the harness-agnostic driver boundary) makes all of
 /// that work for OpenCode unchanged; without it, read/write/edit fall through to
 /// the generic path and collapse into a "N tool calls" group instead of showing
@@ -1058,7 +1058,7 @@ fn normalize_tool(tool: &str, mut input: Value) -> (String, Value) {
         }
         "todowrite" => "TodoWrite",
         // Everything else (list, patch, custom MCP tools, …) keeps OpenCode's
-        // name and input — it renders via the generic summary fallback.
+        // name and input. It renders via the generic summary fallback.
         _ => return (tool.to_string(), input),
     };
     (name.to_string(), input)
@@ -1160,7 +1160,7 @@ mod tests {
 
     #[test]
     fn normalize_renames_non_file_tools_without_touching_input() {
-        // grep/glob/bash already share Claude's key names — only the name maps.
+        // grep/glob/bash already share Claude's key names, only the name maps.
         let (name, input) = normalize_tool("grep", json!({ "pattern": "DONE", "path": "/w" }));
         assert_eq!(name, "Grep");
         assert_eq!(input, json!({ "pattern": "DONE", "path": "/w" }));
@@ -1180,7 +1180,7 @@ mod tests {
     fn reasoning_announced_before_role_is_not_leaked_as_text() {
         // Regression: a reasoning part can be announced before its message's role
         // is known. Its text streams as `field:"text"` deltas under the reasoning
-        // part id, which must be suppressed and surfaced only as a Thinking block —
+        // part id, which must be suppressed and surfaced only as a Thinking block,
         // never as visible assistant text. This works only if the part's type is
         // recorded even while the role is still unknown.
         let mut x = Translator::default();
@@ -1198,7 +1198,7 @@ mod tests {
             json!({ "info": { "id": "m1", "role": "assistant" } }),
         ));
 
-        // 3. Reasoning streams as field:"text" deltas — must be suppressed.
+        // 3. Reasoning streams as field:"text" deltas, must be suppressed.
         let out = x.handle(&oc(
             "message.part.delta",
             json!({ "messageID": "m1", "partID": "r1", "field": "text", "delta": "secret plan" }),

@@ -53,7 +53,7 @@ pub struct CatalogProvider {
 #[serde(rename_all = "camelCase")]
 pub struct OpencodeCatalog {
     pub providers: Vec<CatalogProvider>,
-    /// `"network"` | `"cache"` | `"bundled"` — lets the UI show an offline hint.
+    /// `"network"` | `"cache"` | `"bundled"`, lets the UI show an offline hint.
     pub source: String,
 }
 
@@ -312,7 +312,7 @@ fn title_case(s: &str) -> String {
 }
 
 /// Current Claude authentication, parsed from `claude auth status --json`.
-/// Never errors on a logged-out / missing CLI — returns a disconnected status so
+/// Never errors on a logged-out / missing CLI, returns a disconnected status so
 /// the UI degrades gracefully.
 #[tauri::command]
 #[specta::specta]
@@ -368,8 +368,8 @@ pub async fn claude_auth_status(state: State<'_, AppState>) -> CmdResult<ClaudeA
 /// The model catalog the `claude` CLI's own `/model` picker offers, read with a
 /// one-shot `list_models` control request.
 ///
-/// Authoritative for what this install can run — provider, settings cascade, and
-/// org policy are already applied — but NARROWER than what `--model` accepts:
+/// Authoritative for what this install can run, provider, settings cascade, and
+/// org policy are already applied, but NARROWER than what `--model` accepts:
 /// legacy ids are absent from it yet still launch. The composer merges these
 /// rows over its static table rather than replacing it.
 ///
@@ -395,7 +395,7 @@ pub async fn claude_probe(state: State<'_, AppState>) -> CmdResult<ClaudeProbe> 
 ///
 /// Deliberately a single command rather than one per question: these used to be
 /// two commands the tab fired concurrently, which spawned two app-servers that
-/// interfered — the loser answered with a null account or an empty model list, so
+/// interfered, the loser answered with a null account or an empty model list, so
 /// a working install rendered as "not signed in" or "no models".
 ///
 /// A missing CLI is still a benign empty probe (the tab renders the install
@@ -414,8 +414,8 @@ pub async fn codex_probe(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
 /// Sign Codex in with an API key (the enterprise path, mirroring Claude's
 /// "API key" auth mode).
 ///
-/// Unlike Claude — where the app stores the key in `settings.json` and injects
-/// `ANTHROPIC_API_KEY` into every spawn — Codex owns its own credential store:
+/// Unlike Claude, where the app stores the key in `settings.json` and injects
+/// `ANTHROPIC_API_KEY` into every spawn, Codex owns its own credential store:
 /// `codex login --with-api-key` reads the key from stdin and writes
 /// `$CODEX_HOME/auth.json`. An env-injected `OPENAI_API_KEY` is IGNORED by the
 /// app-server (verified: `account/read` still reports `account: null`), so the
@@ -468,7 +468,7 @@ pub async fn codex_logout(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
         .await
         .map_err(AppError::from)?;
     let path = state.binaries.augmented_path().await;
-    // Already-signed-out is not an error worth surfacing — the status we return
+    // Already-signed-out is not an error worth surfacing, the status we return
     // is the source of truth either way.
     let _ = Exec::new(&bin)
         .arg("logout")
@@ -483,7 +483,7 @@ pub async fn codex_logout(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
 
 /* --------------------------- opencode install -------------------------- */
 
-/// Install OpenCode in the background — no terminal UI. The frontend shows a
+/// Install OpenCode in the background, no terminal UI. The frontend shows a
 /// spinner and reacts to ok/err; on success we re-detect binaries so the version
 /// badge flips to "Installed". `run()` fails on a non-zero exit, carrying the
 /// stderr tail into the error message the UI shows.
@@ -491,15 +491,15 @@ pub async fn codex_logout(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
 /// The installer differs by platform: OpenCode's `curl … | bash` one-liner needs
 /// a Unix shell, which Windows doesn't have (piping it through PowerShell just
 /// fails with "Program 'curl.exe' failed to run: The pipe is being closed"). On
-/// Windows we use `npm install -g opencode-ai` instead — OpenCode's documented
-/// cross-platform method — and surface an actionable remedy if npm is missing.
+/// Windows we use `npm install -g opencode-ai` instead, OpenCode's documented
+/// cross-platform method, and surface an actionable remedy if npm is missing.
 #[tauri::command]
 #[specta::specta]
 pub async fn install_opencode(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
     let path = state.binaries.augmented_path().await;
     let shell = super::terminal::default_shell();
 
-    // Windows installs via npm, which is frequently absent — probe for it first so
+    // Windows installs via npm, which is frequently absent, probe for it first so
     // a missing npm yields a clean "install Node.js" message instead of PowerShell's
     // raw "term 'npm' is not recognized" stderr dump reaching the UI.
     #[cfg(windows)]
@@ -559,7 +559,7 @@ pub async fn install_opencode(app: tauri::AppHandle, state: State<'_, AppState>)
         message: format!("Couldn't install OpenCode via npm. {e}"),
         remedy: Some(
             "Install Node.js/npm, or install OpenCode with Scoop \
-             (scoop install opencode), Chocolatey (choco install opencode), or WSL — \
+             (scoop install opencode), Chocolatey (choco install opencode), or WSL. \
              then click Refresh. You can also use Locate… to point at an existing \
              opencode.exe."
                 .into(),

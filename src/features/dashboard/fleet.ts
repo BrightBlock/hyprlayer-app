@@ -6,7 +6,7 @@
  * Three sources merge per workstream, worst state first:
  *  - the in-memory session store (rich: transcript, pending permission, meter),
  *  - pty agents from multiplexer mode (blocked / working / done),
- *  - the backend session registry (live process states — covers sessions this
+ *  - the backend session registry (live process states, covers sessions this
  *    webview never attached, e.g. right after a reload; push-refreshed by
  *    SessionLifecycle events).
  */
@@ -35,7 +35,7 @@ export type FleetItem = {
   activity: FleetActivity;
   /** The most urgent session (the tab to select on open), when known. */
   sessionId: string | null;
-  /** Mono context line — the tool being run or awaited. */
+  /** Mono context line, the tool being run or awaited. */
   line: string | null;
   /** Context-meter fill for a working session. */
   meter: { tokens: number; fraction: number } | null;

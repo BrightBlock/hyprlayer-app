@@ -7,13 +7,13 @@ use crate::pipeline::Stage;
 
 /// How a workstream is backed: `isolated` (app-created branch + dedicated
 /// worktree), `existing` (user's local branch in a dedicated worktree),
-/// `inplace` (no worktree — the project's own checkout), or `folder` (a
-/// [`ProjectSource::Folder`](super::ProjectSource) project — the project
+/// `inplace` (no worktree, the project's own checkout), or `folder` (a
+/// [`ProjectSource::Folder`](super::ProjectSource) project, the project
 /// directory itself, with no git at all). Governs whether the branch +
 /// directory are app-owned and safe to drop on archive/delete.
 ///
 /// Tolerance: an unrecognized stored value reads (via [`WorktreeMode::parse`])
-/// as `Inplace` — the touch-nothing mode — so a mangled row can never make
+/// as `Inplace`, the touch-nothing mode, so a mangled row can never make
 /// archive/cleanup delete a branch or checkout the app doesn't own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -96,7 +96,7 @@ pub struct Workstream {
 impl Workstream {
     /// The argument to pass `gh pr view`/`gh pr merge` for this workstream's PR:
     /// a manually attached PR number when one is set, otherwise the branch name
-    /// (gh then resolves the branch's own open PR — the default behavior).
+    /// (gh then resolves the branch's own open PR, the default behavior).
     pub fn pr_ref(&self) -> String {
         match self.pr_number {
             Some(n) => n.to_string(),
@@ -105,12 +105,12 @@ impl Workstream {
     }
 
     /// `inplace` workstreams share the project checkout AND adopt one of its
-    /// branches — the case the one-per-project guard exists for.
+    /// branches, the case the one-per-project guard exists for.
     pub fn is_inplace(&self) -> bool {
         self.worktree_mode == WorktreeMode::Inplace
     }
 
-    /// No dedicated worktree — `worktree_path` IS the user's own project
+    /// No dedicated worktree, `worktree_path` IS the user's own project
     /// directory. The archive/restore/delete paths special-case these so they
     /// never move, remove, or re-link it.
     pub fn shares_project_dir(&self) -> bool {
@@ -284,7 +284,7 @@ impl Db {
         })
     }
 
-    /// Worktree paths of EVERY row, archived included — the durable record of
+    /// Worktree paths of EVERY row, archived included, the durable record of
     /// which repo mappings are workstream infrastructure rather than projects.
     pub fn list_worktree_paths(&self) -> Result<Vec<String>> {
         self.with(|conn| {
@@ -305,7 +305,7 @@ impl Db {
         })
     }
 
-    /// All archived items across projects, newest-first — feeds the archive
+    /// All archived items across projects, newest-first, feeds the archive
     /// history view.
     pub fn list_archived_workstreams(&self) -> Result<Vec<Workstream>> {
         self.with(|conn| {
@@ -336,7 +336,7 @@ impl Db {
     /// whose branch the app does not own (see [`Workstream::follows_head`]).
     ///
     /// Clears `pr_number`: an attached PR belongs to the branch we just left, and
-    /// [`Workstream::pr_ref`] prefers it over the branch — leaving it would point
+    /// [`Workstream::pr_ref`] prefers it over the branch, leaving it would point
     /// Merge at the wrong PR. Deliberately not a `touch`: a checkout done out of
     /// band isn't workstream activity, and stamping `updated_at` would reorder
     /// the board under the user.
@@ -595,7 +595,7 @@ mod tests {
             Some("feature/x")
         );
 
-        // The app owns the isolated branch, so archive may delete it — never
+        // The app owns the isolated branch, so archive may delete it, never
         // let HEAD repoint the row at a branch the user made.
         assert!(!isolated.follows_head());
         assert_eq!(isolated.branch_to_adopt(Some("feature/x")), None);
@@ -631,13 +631,13 @@ mod tests {
         assert_eq!(got.branch, "feature/x");
         // The whole point: gh now resolves the new branch's PR, not main's.
         assert_eq!(got.pr_ref(), "feature/x");
-        // Base is deliberately untouched — it's the user-settable merge target.
+        // Base is deliberately untouched, it's the user-settable merge target.
         assert_eq!(got.base_branch, "origin/main");
         assert!(got.updated_at >= got.created_at);
     }
 
     /// An attached PR outranks the branch in `pr_ref()`, so adoption has to drop
-    /// it — otherwise Merge acts on the PR of the branch we just left.
+    /// it, otherwise Merge acts on the PR of the branch we just left.
     #[test]
     fn adopting_a_branch_detaches_the_previous_branchs_pr() {
         let db = Db::open_in_memory().unwrap();

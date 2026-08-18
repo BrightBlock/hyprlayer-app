@@ -1,11 +1,11 @@
 /**
  * App-wide time/duration formatting. Lives in lib (not a feature) because
  * archive rows, dashboards, script docks, and transcripts all render the same
- * labels — one clock vocabulary for the whole app.
+ * labels, one clock vocabulary for the whole app.
  */
 
 /**
- * A live "time working" label for the elapsed counter (Conductor-style): tenths
+ * A live "time working" label for the elapsed counter: tenths
  * of a second under a minute (19.3s), then minutes + zero-padded seconds
  * (1m 23s), then hours + minutes for a rare long run (1h 04m). Negative inputs
  * clamp to zero.
@@ -39,8 +39,8 @@ function ageToken(minutes: number): string {
 }
 
 /**
- * The same clock as `formatRelativeTime`, stripped to a bare token — `4h`,
- * `2d`, `3w`, `1mo` — for dense rows where the column header already says the
+ * The same clock as `formatRelativeTime`, stripped to a bare token, `4h`,
+ * `2d`, `3w`, `1mo`, for dense rows where the column header already says the
  * number is an age. Returns "" for a missing instant so the caller renders
  * nothing rather than a misleading "just now".
  */

@@ -60,7 +60,7 @@ fn parses_a_real_transcript_into_known_events() {
     assert!(saw_assistant_text, "transcript has assistant text");
     assert!(saw_result, "transcript has a terminal result");
     // Every line in a real transcript should map to a known kind (rate-limit
-    // and partial stream events included) — nothing should be Unknown.
+    // and partial stream events included), nothing should be Unknown.
     assert_eq!(
         unknown, 0,
         "every transcript line should parse to a known kind"
@@ -180,7 +180,7 @@ fn parses_compact_boundary_with_metadata() {
     }
 
     // Missing metadata entirely falls back to "auto" with no token count, rather
-    // than dropping the event — the divider still draws, even if unlabelled.
+    // than dropping the event, the divider still draws, even if unlabelled.
     let bare = r#"{"type":"system","subtype":"compact_boundary"}"#;
     match parse_line(bare) {
         ParsedLine::CompactBoundary {

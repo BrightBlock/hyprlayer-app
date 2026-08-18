@@ -1,17 +1,17 @@
 //! Maps a PTY engine's recent output to a semantic agent state. Multiplexer
 //! agents are opaque CLIs (we see only terminal bytes), so state is inferred from
 //! the (ANSI-stripped) output tail plus a caller-supplied "gone quiet?" signal:
-//!   working — output flowing / a spinner is up.
-//!   blocked — a permission gate or question on screen, waiting on the user.
-//!   done    — was working/blocked, then went quiet (turn finished).
-//!   idle    — spawned with no task yet (a REPL/shell at rest).
+//!   working: output flowing, or a spinner is up.
+//!   blocked: a permission gate or question on screen, waiting on the user.
+//!   done:    was working or blocked, then went quiet (turn finished).
+//!   idle:    spawned with no task yet (a REPL or shell at rest).
 //! `blocked` badges the tab + workstream and fires a notification, so its patterns
 //! are engine-specific (+ a generic fallback) to keep false positives low.
 
 export type AgentState = "working" | "blocked" | "done" | "idle";
 
 // ANSI/VT control sequences (CSI, OSC, …), stripped so heuristics run on
-// readable text. Hex escapes only — no raw control bytes in source.
+// readable text. Hex escapes only, no raw control bytes in source.
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /[\x1b\x9b][[\]()#;?]*(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\x07|(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~])/g;
 // Stray C0 controls, minus tab/newline/CR (\x09/\x0a/\x0d), handled separately below.
@@ -28,7 +28,7 @@ export function stripAnsi(input: string): string {
     .replace(OTHER_CTRL_RE, "");
 }
 
-/** The last `lines` non-empty lines of `text` — the visible "foot" of output,
+/** The last `lines` non-empty lines of `text`, the visible "foot" of output,
  *  where any current prompt lives. Avoids matching stale scrollback. */
 export function foot(text: string, lines = 14): string {
   const arr = text.split("\n").map((l) => l.trimEnd());
@@ -100,7 +100,7 @@ export function detectState(
   if (!quiet) return "working";
 
   // Quiet now. A short trailing question (no ready-prompt char) reads as waiting
-  // on an answer — treat as blocked even without an engine pattern. The length
+  // on an answer, treat as blocked even without an engine pattern. The length
   // cap keeps a long done-message that merely ends in "?" from false-blocking.
   const lastLine = footText.split("\n").pop()?.trim() ?? "";
   if (lastLine.length <= 80 && lastLine.endsWith("?") && !READY_PROMPT_RE.test(lastLine)) {

@@ -24,7 +24,7 @@ type Props = {
 };
 
 /**
- * The Docs view: the project's thoughts docs, inline — browse, open, and
+ * The Docs view: the project's thoughts docs, inline, browse, open, and
  * attach/detach them as context for the active agent tab without leaving
  * the workstream.
  */

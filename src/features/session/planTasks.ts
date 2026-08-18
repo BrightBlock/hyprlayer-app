@@ -22,7 +22,7 @@ export type PlanTaskStatus = "pending" | "in_progress" | "completed" | (string &
 
 export type PlanTask = {
   /** The Claude-assigned task id ("1", "2", …), or null for a `TaskCreate` whose
-   *  result (which carries the id) hasn't arrived yet — shown optimistically. */
+   *  result (which carries the id) hasn't arrived yet, shown optimistically. */
   id: string | null;
   /** The task's display text (`subject`, or a TodoWrite todo's `content`). */
   subject: string;
@@ -62,7 +62,7 @@ function todosFromTodoWrite(input: string): IdentifiedTask[] {
   return todos.map((raw, i) => {
     const t = (raw ?? {}) as Record<string, unknown>;
     return {
-      // TodoWrite todos have no stable wire id — synthesize a 1-based index so
+      // TodoWrite todos have no stable wire id, synthesize a 1-based index so
       // the list keys are stable across the wholesale replacements.
       id: String(i + 1),
       subject: str(t.content) || str(t.activeForm),
@@ -74,12 +74,12 @@ function todosFromTodoWrite(input: string): IdentifiedTask[] {
 /**
  * The agent's current plan/to-do list, in task order, folded from the tool items
  * (see the per-case comments below). Pure; safe to call on every render over the
- * live or replayed transcript. The list is conversation-scoped — unlike
- * background shells, it is NOT cleared at a `relaunched`/`exit` boundary.
+ * live or replayed transcript. The list is conversation-scoped, unlike
+ * background shells. It is NOT cleared at a `relaunched`/`exit` boundary.
  */
 export function planTasksFromItems(items: TranscriptItem[]): PlanTask[] {
   // Insertion order tracks task order: creates arrive in id order, updates patch
-  // in place, and snapshot lines are already ordered — so no post-sort needed.
+  // in place, and snapshot lines are already ordered, so no post-sort needed.
   const tasks = new Map<string, PlanTask>(); // keyed by id, or "pending:<toolUseId>"
 
   for (const item of items) {
@@ -88,7 +88,7 @@ export function planTasksFromItems(items: TranscriptItem[]): PlanTask[] {
     switch (item.name) {
       case "TaskCreate": {
         // A create that lands after the whole previous batch finished starts a
-        // NEW plan — drop the completed batch so the list shows only the current
+        // NEW plan, drop the completed batch so the list shows only the current
         // plan, not every plan the conversation ever ran. A create while tasks
         // are still open just extends the current plan.
         if (tasks.size > 0 && [...tasks.values()].every((t) => t.status === "completed")) {
@@ -112,7 +112,7 @@ export function planTasksFromItems(items: TranscriptItem[]): PlanTask[] {
         const id = str(parsed?.taskId);
         if (!id) break;
         const status = str(parsed?.status);
-        // `status:"deleted"` permanently removes a task — drop it from the list
+        // `status:"deleted"` permanently removes a task, drop it from the list
         // rather than retaining it with a phantom "deleted" status, which would
         // otherwise render as a pending row and inflate the n/total count.
         if (status === "deleted") {
@@ -139,7 +139,7 @@ export function planTasksFromItems(items: TranscriptItem[]): PlanTask[] {
       }
 
       case "TodoWrite": {
-        // A wholesale replacement — the latest TodoWrite is the entire list.
+        // A wholesale replacement, the latest TodoWrite is the entire list.
         tasks.clear();
         for (const t of todosFromTodoWrite(item.input)) tasks.set(t.id, t);
         break;

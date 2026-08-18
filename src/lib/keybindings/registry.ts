@@ -2,7 +2,7 @@
  * Command registry: components register a handler for a command id while they're
  * mounted; the global dispatcher (`useKeybindings`) looks the id up and runs it.
  *
- * Whether a handler is currently registered IS the runtime context predicate —
+ * Whether a handler is currently registered IS the runtime context predicate,
  * e.g. *Stop turn* is only registered while a session is running, so the same
  * chord is simply inert elsewhere. A null handler means "not available right
  * now", so the dispatcher lets the keystroke pass through.
@@ -10,7 +10,7 @@
  * Each id holds a *stack* of handlers, not a single slot: if two components
  * register the same command at once (split panes, a modal over a page), the
  * latest mount shadows the earlier one and unmounting it restores the shadowed
- * handler — instead of one overwriting the other and the unmount deleting the
+ * handler, instead of one overwriting the other and the unmount deleting the
  * binding entirely.
  */
 
@@ -42,7 +42,7 @@ function register(id: string, handler: () => void): () => void {
 
 /**
  * Register `handler` for command `id` while mounted; pass `null` to leave the
- * command unbound in this context (the gate). The latest closure always runs —
+ * command unbound in this context (the gate). The latest closure always runs,
  * a ref absorbs render-to-render identity churn, so only `id` or the
  * enabled/disabled transition re-runs the effect.
  */
@@ -56,7 +56,7 @@ export function useCommand(id: string, handler: (() => void) | null): void {
   }, [id, enabled]);
 }
 
-/** Virtual command id for Escape — not user-rebindable, but it rides the same
+/** Virtual command id for Escape, not user-rebindable, but it rides the same
  *  handler stack so a dialog/menu over a page shadows the page's own Escape. */
 export const ESCAPE_COMMAND_ID = "ui.escape";
 

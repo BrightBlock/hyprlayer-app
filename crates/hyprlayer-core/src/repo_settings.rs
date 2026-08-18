@@ -1,5 +1,5 @@
 //! Per-repo hyprlayer settings at `<repo>/.hyprlayer/settings.toml`. App-owned,
-//! repo-local, safe to commit (distinct from the global CLI config — ADR-0002).
+//! repo-local, safe to commit (distinct from the global CLI config, ADR-0002).
 //! Reads use serde; writes use toml_edit so comments + unrelated sections survive.
 
 use std::path::{Path, PathBuf};
@@ -29,7 +29,7 @@ pub struct WorktreeSettings {
 
 /// Per-project lifecycle scripts, inherited by every workstream. Each value is a
 /// free-form multi-line block of shell commands run in the workstream's worktree
-/// root; an empty string means "unconfigured". Run sequentially — a non-zero
+/// root; an empty string means "unconfigured". Run sequentially, a non-zero
 /// exit halts the block (see `crate::scripts::build_block`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -49,7 +49,7 @@ pub fn settings_path(repo: &Path) -> PathBuf {
 
 /// Resolve the settings path, refusing a symlinked `.hyprlayer` directory. The
 /// repo is untrusted input: if it ships `.hyprlayer` as a symlink we refuse to
-/// follow it (it could redirect a read — or our atomic write — to an out-of-tree
+/// follow it (it could redirect a read, or our atomic write, to an out-of-tree
 /// location). A real directory, or none yet, is fine.
 fn checked_settings_path(repo: &Path) -> Result<PathBuf> {
     let dir = repo.join(HYPRLAYER_DIR);
@@ -79,7 +79,7 @@ pub fn read(repo: &Path) -> Result<RepoSettings> {
 
 /// Load `<repo>/.hyprlayer/settings.toml` as an editable document (empty if
 /// absent), apply `edit` (which receives the document + its path, for error
-/// messages), then write it back atomically (tmp + rename) — preserving
+/// messages), then write it back atomically (tmp + rename), preserving
 /// comments, ordering, and unrelated sections. Shared scaffolding behind the
 /// `[worktree]` and `[scripts]` setters.
 fn edit_settings_doc(
@@ -129,7 +129,7 @@ pub fn set_worktree_copy(repo: &Path, patterns: &[String]) -> Result<()> {
 pub fn set_scripts(repo: &Path, scripts: &ScriptSettings) -> Result<()> {
     edit_settings_doc(repo, |doc, path| {
         // Force a real (non-inline) `[scripts]` table so it renders as a section
-        // header — index-assigning a brand-new key on an already-parsed document
+        // header, index-assigning a brand-new key on an already-parsed document
         // yields an inline `scripts = { … }` table otherwise.
         let table = doc
             .entry("scripts")

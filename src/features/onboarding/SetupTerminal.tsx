@@ -20,7 +20,7 @@ type Props = {
    *  `shellCommand` is set. */
   args?: string[];
   /** Run a single command line through the user's login shell instead of the
-   *  hyprlayer CLI — e.g. `"claude auth login"` or an installer one-liner. */
+   *  hyprlayer CLI, e.g. `"claude auth login"` or an installer one-liner. */
   shellCommand?: string;
   /** Called once when the process exits. `code` is null on SIGKILL. */
   onExit?: (code: number | null) => void;
@@ -41,7 +41,7 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
 
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engine.mount(host);
-    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS, the emulator has no copy
     // path of its own there (see attachTerminalClipboard).
     attachTerminalClipboard(engine);
     engine.focus();

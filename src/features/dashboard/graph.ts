@@ -3,7 +3,7 @@ import { docTitle } from "@/features/library/text";
 
 /** A document, as one node in the knowledge graph. */
 export type GraphNode = {
-  /** Doc id (absolute path) — also the key used by edges. */
+  /** Doc id (absolute path), also the key used by edges. */
   id: string;
   title: string;
   /** Frontmatter `type`, lowercased; `"other"` when absent. */
@@ -13,8 +13,8 @@ export type GraphNode = {
 };
 
 /** An undirected link between two docs.
- *  - `ref`   — an explicit `related` reference (a deliberate link).
- *  - `topic` — an inferred link: the two docs share a ticket or a tag. */
+ *  - `ref`  : an explicit `related` reference (a deliberate link).
+ *  - `topic`: an inferred link: the two docs share a ticket or a tag. */
 export type GraphEdge = { source: string; target: string; kind: "ref" | "topic" };
 
 export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
@@ -23,7 +23,7 @@ export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
  *  meaningful pairwise link (they'd create a dense blob), so they're skipped. */
 const TOPIC_GROUP_MAX = 6;
 
-/** The nebula star family — five themed tokens (src/index.css) so each theme
+/** The nebula star family, five themed tokens (src/index.css) so each theme
  *  supplies its own sweep. The edge gradients use stops 1/3/5; stars of
  *  non-canonical doc types pick a stable hue from this family. */
 export const NEBULA_COLORS = [
@@ -34,7 +34,7 @@ export const NEBULA_COLORS = [
   "var(--color-nebula-5)",
 ];
 
-/** Semantic hues for the canonical doc types — the same themed tokens the
+/** Semantic hues for the canonical doc types, the same themed tokens the
  *  library's type chips bind (research/plan/handoff), plus the Ship/Merge
  *  green for `pr` docs and the commit teal for notes, so every theme
  *  recolors them and the light theme deepens them. */
@@ -188,7 +188,7 @@ export type SimulateOptions = {
 };
 
 /**
- * Deterministic Fruchterman–Reingold force layout. No dependencies, no RNG —
+ * Deterministic Fruchterman–Reingold force layout. No dependencies, no RNG,
  * nodes seed onto a circle by index so the same graph always lays out the same
  * way (stable across re-renders and unit-testable). Repulsion pushes every pair
  * apart; edges pull their endpoints together; a per-iteration cooling cap keeps
@@ -286,7 +286,7 @@ export function simulate(graph: Graph, opts: SimulateOptions): Point[] {
 }
 
 /** Scale + translate a settled layout uniformly so its bounding box fills the
- *  viewport (minus padding) and is centered — guarantees the graph uses the
+ *  viewport (minus padding) and is centered, guarantees the graph uses the
  *  whole canvas regardless of the simulation's absolute scale. */
 function fitToBox(pos: Point[], width: number, height: number, pad: number): Point[] {
   let minX = Infinity;

@@ -1,5 +1,5 @@
 /**
- * Onboarding step 2 — install the Hyprlayer CLI. The app needs it, so Next is
+ * Onboarding step 2, install the Hyprlayer CLI. The app needs it, so Next is
  * gated until it resolves. Offers a one-click install per available package
  * manager (run in the background), plus a manual copy/locate fallback.
  */
@@ -73,7 +73,7 @@ export function CliInstallStep({ onNext }: { onNext: () => void }) {
   );
 }
 
-/** Shown when the CLI is missing. Owns its own queries — the parent renders it
+/** Shown when the CLI is missing. Owns its own queries, the parent renders it
  *  only in the not-installed branch. */
 function InstallPicker() {
   const bootstrap = useBootstrap();

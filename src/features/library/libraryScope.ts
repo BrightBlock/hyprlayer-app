@@ -1,21 +1,20 @@
 /**
- * The Library's last-used project scope and last view state. A per-user view
- * preference, so — like [`pinStore`] / the agent-tab strips — it lives on the
+ * The Library's last-used project scope and view state. A per-user view
+ * preference, so like [`pinStore`] and the agent-tab strips it lives on the
  * frontend and persists to localStorage.
  *
- * `lastProject` holds the thoughts-project KEY (what docs are indexed under),
- * updated whenever a project becomes current (a project route) or the Library is
- * scoped to one; it seeds the scope on the first-ever Library open.
+ * `lastProject` holds the thoughts-project KEY that docs are indexed under. It
+ * updates whenever a project becomes current or the Library is scoped to one,
+ * and seeds the scope on the first Library open.
  *
- * `lastSearch` holds the whole Library view — scope, filters, and the open
- * document + body mode — so returning via the nav rail resumes the tab where the
- * user left it instead of resetting to a bare project scope and making them
- * re-find the document. (`from`, which project's "Docs" button opened it, is
- * navigational provenance rather than view state and is deliberately omitted.)
+ * `lastSearch` holds the whole view: scope, filters, and the open document plus
+ * body mode. Returning via the nav rail resumes where you left off instead of
+ * resetting to a bare scope. (`from`, naming which project's "Docs" button
+ * opened it, is provenance rather than view state, so it is omitted.)
  *
- * `lastSearchByProject` holds that same view keyed per project, so each project's
- * "Docs" affordance reopens to the doc last read in *that* project — a single
- * global slot can't remember two projects the user alternates between.
+ * `lastSearchByProject` keys that same view per project, so each project's
+ * "Docs" button reopens the doc last read in *that* project. One global slot
+ * could not remember two projects you alternate between.
  */
 
 import { create } from "zustand";

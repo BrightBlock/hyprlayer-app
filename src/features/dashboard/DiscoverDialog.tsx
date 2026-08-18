@@ -13,7 +13,7 @@ type Props = {
   onClose: () => void;
   /** The repo the user chose to clone. The caller routes it into the Add-project
    *  wizard (URL pre-filled), so every clone goes through the same location +
-   *  thoughts-mapping steps — Discover never clones directly. */
+   *  thoughts-mapping steps, Discover never clones directly. */
   onPick: (repo: GithubRepo) => void;
 };
 
@@ -34,12 +34,12 @@ function ownerOf(repo: GithubRepo): string {
 type Owner = {
   name: string;
   count: number;
-  /** A `owner/repo` from this owner — RepoAvatar resolves the org icon from it. */
+  /** A `owner/repo` from this owner, RepoAvatar resolves the org icon from it. */
   sample: string;
 };
 
 /**
- * "Discover" — a browse-first counterpart to Add. Organizations are the modal's
+ * "Discover", a browse-first counterpart to Add. Organizations are the modal's
  * structure (a left rail), repos a single dense column: name is the only bright
  * thing, owner/description/age step back, and Clone surfaces on row hover.
  * Picking a repo hands it to the Add-project wizard with the URL pre-filled, so
@@ -259,7 +259,7 @@ function OrgRow({
 }
 
 /**
- * One dense repo row. The age gives way to a Clone… affordance on hover — the
+ * One dense repo row. The age gives way to a Clone… affordance on hover, the
  * ellipsis because picking opens the Add-project wizard (location + thoughts)
  * rather than cloning on the spot. Rows already cloned stay inert.
  */

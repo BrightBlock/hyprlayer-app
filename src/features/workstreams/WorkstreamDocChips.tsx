@@ -16,20 +16,20 @@ function RoleIcon({ role }: { role: string }) {
 }
 
 type Props = {
-  /** Context docs of the ACTIVE agent tab — each tab carries its own. */
+  /** Context docs of the ACTIVE agent tab, each tab carries its own. */
   docs: AttachedDoc[];
   /** Open a doc (absolute-path id) in the doc viewer. */
   onOpenDoc: (id: string) => void;
-  /** Remove a doc from this tab — detaches a manual doc, dismisses a suggested one. */
+  /** Remove a doc from this tab, detaches a manual doc, dismisses a suggested one. */
   onDetach: (id: string) => void;
   /** Positioning classes from the host (e.g. the composer-anchored absolute
-   *  strip) — mirrors PromptChips so the host owns placement and spacing. */
+   *  strip), mirrors PromptChips so the host owns placement and spacing. */
   className?: string;
 };
 
 /**
- * The app's *automatic* pre-launch context for one agent tab — the mode's
- * auto-suggested doc (research for plan mode, etc.) and a captured handoff doc —
+ * The app's *automatic* pre-launch context for one agent tab, the mode's
+ * auto-suggested doc (research for plan mode, etc.) and a captured handoff doc,
  * shown as chips inside the composer so it can be reviewed or dismissed before
  * launch. Docs the user picks themselves stage as attachment cards instead (the
  * composer's "+" menu → library, the same per-turn lane as files). Renders

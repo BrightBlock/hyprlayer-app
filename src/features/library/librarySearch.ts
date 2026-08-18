@@ -20,7 +20,7 @@ export type LibrarySearch = {
   doc?: string;
   mode?: "edit" | "preview";
   /** Repo path of the project the user opened the Library from, when they came
-   *  via a project's "Docs" affordance — powers the header's back-to-project
+   *  via a project's "Docs" affordance, powers the header's back-to-project
    *  button. Absent when the Library is opened standalone (the nav rail). */
   from?: string;
 };

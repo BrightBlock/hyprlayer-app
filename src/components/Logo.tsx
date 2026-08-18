@@ -9,7 +9,7 @@ export function HyprlayerLogo({ height = 28 }: { height?: number }) {
   return (
     // The wordmark is the centered anchor; the mark hangs out-of-flow to its
     // left (position: absolute), so when this lockup sits in a centered column
-    // the *text* is what lands on the page's center line — not the icon+text
+    // the *text* is what lands on the page's center line, not the icon+text
     // midpoint, which would push the word off to the right.
     <span className="relative inline-flex select-none items-center" aria-label="Hyprlayer">
       <span className="absolute right-full mr-2.5 flex items-center">
@@ -26,7 +26,7 @@ export function HyprlayerLogo({ height = 28 }: { height?: number }) {
 }
 
 /**
- * Just the glyph — three offset layers fanning up, the "hyper layers" idea.
+ * Just the glyph, three offset layers fanning up, the "hyper layers" idea.
  * Terracotta like hyprlayer.dev's mark: the site fills #d97757 flat; here the
  * accent token supplies that value on the dark themes and each theme's
  * design-system accent elsewhere (deepened on light, green on Matrix, …).
@@ -35,7 +35,7 @@ export function HyprlayerLogo({ height = 28 }: { height?: number }) {
  * resting weight and lights back up in a bottom→top wave, reading as live work
  * without the urgency of a spinner. Each layer's resting opacity is fed to the
  * shared `hl-layer-pulse` keyframes via the `--hl-base` custom property, and the
- * stagger lives in `.hl-layer:nth-child()` delays — both in index.css, which
+ * stagger lives in `.hl-layer:nth-child()` delays, both in index.css, which
  * also pins the layers static under `prefers-reduced-motion`.
  */
 export function HyprlayerMark({ size = 28, animated = false }: { size?: number; animated?: boolean }) {
@@ -48,7 +48,7 @@ export function HyprlayerMark({ size = 28, animated = false }: { size?: number; 
       viewBox="0 0 32 32"
       fill="none"
     >
-      {/* Bottom layer (dimmest), middle, then top — an isometric stack.
+      {/* Bottom layer (dimmest), middle, then top, an isometric stack.
           Centered vertically in the 32×32 box (content spans y 6–26) so the
           glyph's optical center lines up with the wordmark's. When animated, the
           resting opacity moves to `--hl-base` so the keyframes can drive it. */}

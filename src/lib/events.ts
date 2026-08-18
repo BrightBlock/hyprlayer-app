@@ -36,7 +36,7 @@ export function attachEventListeners(): () => void {
       void queryClient.invalidateQueries({ queryKey: ["thoughts-profiles"] });
     }),
     // Binary probes changed (PATH enrichment, overrides, redetect). Project
-    // detail depends on binaries too — it shells out to `hyprlayer`.
+    // detail depends on binaries too, it shells out to `hyprlayer`.
     events.binariesChanged.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -44,20 +44,20 @@ export function attachEventListeners(): () => void {
     }),
     // A workstream's PR status changed server-side (merged, checks settled, a
     // PR appeared/disappeared). The backend watcher already diffed it, so just
-    // refetch that workstream's PR query — only the mounted one (active
+    // refetch that workstream's PR query, only the mounted one (active
     // workstream / archive-on-merge) actually re-runs `gh`.
     events.prStatusChanged.listen((event) => {
       invalidateWorkstreamPr(event.payload.workstreamId);
     }),
     // The active workstream's worktree changed on disk (an external edit, a
     // build, a git checkout). The backend watches it and pushed this, so refresh
-    // that workstream's git status + Changes panel live — no window focus needed.
+    // that workstream's git status + Changes panel live, no window focus needed.
     events.worktreeChanged.listen((event) => {
       invalidateWorktreeGit(event.payload.workstreamId);
     }),
     // The checkout moved onto another branch and the backend adopted it. Only
     // the list that ran the adoption got the new branch in its response, so
-    // refresh both (sidebar + board) — plus the PR queries, which were keyed off
+    // refresh both (sidebar + board), plus the PR queries, which were keyed off
     // the branch we just left. This can't loop: the DB now matches HEAD, so the
     // refetch adopts nothing and emits nothing.
     events.workstreamBranchChanged.listen((event) => {

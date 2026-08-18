@@ -5,13 +5,13 @@ import { Button, Dialog, ErrorNote } from "@/components/ui";
 import { IS_MACOS } from "@/lib/platform";
 
 /**
- * "Quit Hyprlayer?" — raised by the backend on every user-initiated quit (⌘Q,
+ * "Quit Hyprlayer?", raised by the backend on every user-initiated quit (⌘Q,
  * the window's close button) while Settings → General → "Confirm before
  * quitting" is on.
  *
  * The backend has already cancelled that exit before the event lands, so
  * dismissing this just resumes the app; only `quitApp` actually exits. Checking
- * "Don't ask again" rides along with the confirmation — the same command
+ * "Don't ask again" rides along with the confirmation, the same command
  * persists the preference before exiting, so the write can't lose a race with
  * the process going away.
  */
@@ -45,7 +45,7 @@ export function ConfirmQuitDialog() {
     setError(null);
     void commands.quitApp(dontAskAgain).then(
       (res) => {
-        // Only reachable if the exit didn't happen — e.g. persisting
+        // Only reachable if the exit didn't happen, e.g. persisting
         // "Don't ask again" failed, which aborts before `app.exit`.
         if (res.status === "error") {
           setError(res.error);

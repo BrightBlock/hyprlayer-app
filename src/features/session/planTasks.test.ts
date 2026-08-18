@@ -171,7 +171,7 @@ describe("planTasksFromItems", () => {
   it("does not count deleted tasks after a recreate (the 'TASKS 3/6' bug)", () => {
     // Repro of the reported bug: create three, delete all three, then recreate
     // three and mark them completed. The deleted #1–#3 must NOT linger and
-    // inflate the total to six — the list is exactly the three live tasks.
+    // inflate the total to six, the list is exactly the three live tasks.
     const items: TranscriptItem[] = [
       taskCreate("t1", "Design the data model", { id: 1 }),
       taskCreate("t2", "Implement the API endpoints", { id: 2 }),
@@ -246,7 +246,7 @@ describe("planTasksFromItems", () => {
       taskCreate("t2", "Test primes", { id: 2 }),
       taskUpdate("t3", { taskId: "1", status: "completed" }),
       taskUpdate("t4", { taskId: "2", status: "completed" }),
-      // A new plan in a later turn — the old completed batch should drop away.
+      // A new plan in a later turn, the old completed batch should drop away.
       taskCreate("t5", "Build fizzbuzz", { id: 3 }),
       taskCreate("t6", "Test fizzbuzz", { id: 4 }),
     ];
@@ -260,7 +260,7 @@ describe("planTasksFromItems", () => {
     const items: TranscriptItem[] = [
       taskCreate("t1", "First", { id: 1 }),
       taskUpdate("t2", { taskId: "1", status: "in_progress" }),
-      taskCreate("t3", "Second", { id: 2 }), // added mid-plan — First not done
+      taskCreate("t3", "Second", { id: 2 }), // added mid-plan, First not done
     ];
     expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
       { id: "1", subject: "First", status: "in_progress" },

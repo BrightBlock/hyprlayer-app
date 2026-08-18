@@ -68,11 +68,11 @@ function PullIcon({ size = 13 }: { size?: number }) {
 function BranchTargetRow({ view }: { view: WorkstreamView }) {
   const [open, setOpen] = useState(false);
   const setBase = useSetWorkstreamBase(view.item.id);
-  // Branch list fetched lazily — only while the menu is open.
+  // Branch list fetched lazily, only while the menu is open.
   const bases = useWorkstreamBases(view.item.projectPath, open);
   // The list is built from the local repo's remote-tracking refs, so deleting a
   // branch on the remote doesn't change it until a `git fetch --prune`. Refresh
-  // therefore prunes first (network), THEN re-scans — otherwise it just re-reads
+  // therefore prunes first (network), THEN re-scans, otherwise it just re-reads
   // the same stale `origin/*` refs and the deleted branches linger.
   const fetchRemote = useFetchWorkstreamRemote(view.item.id);
   const refreshBranches = async () => {
@@ -81,8 +81,8 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
   };
   const refreshing = fetchRemote.isPending || bases.isFetching;
   // A PR base must exist on the remote, so offer only remote-tracking branches
-  // (`origin/*`). A local-only branch — e.g. another workstream's unpushed
-  // feature branch — isn't on GitHub, so `gh pr edit --base` rejects it with
+  // (`origin/*`). A local-only branch, e.g. another workstream's unpushed
+  // feature branch, isn't on GitHub, so `gh pr edit --base` rejects it with
   // "Proposed base branch … was not found". The full `origin/<name>` ref is
   // stored (it revparse-resolves locally for ahead/behind and is stripped for
   // gh + the Ship prompt); the menu shows it without the prefix.
@@ -96,13 +96,13 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
-        {/* Source branch — the checkout's live branch: an in-place workstream
+        {/* Source branch, the checkout's live branch: an in-place workstream
         follows its checkout, so this tracks a `git checkout` done out of band. */}
         <span
           className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-edge bg-panel px-2 py-1"
           title={
             detached
-              ? `${view.item.branch} — HEAD is detached (rebase or bisect in progress)`
+              ? `${view.item.branch} , HEAD is detached (rebase or bisect in progress)`
               : `${view.item.branch} → ${baseShort}`
           }
         >
@@ -112,14 +112,14 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
           </span>
         </span>
         <span className="shrink-0 text-ink-dim">→</span>
-        {/* Target (base) branch — the functional picker. */}
+        {/* Target (base) branch, the functional picker. */}
         <div className="relative shrink-0">
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
             disabled={setBase.isPending}
             className="inline-flex items-center gap-1 rounded-md border border-edge bg-panel px-2 py-1 font-mono text-xs text-ink hover:bg-edge/50 disabled:opacity-60"
-            title={`Merge target: ${view.item.baseBranch} — click to change`}
+            title={`Merge target: ${view.item.baseBranch} , click to change`}
             aria-label="Change target branch"
           >
             {setBase.isPending && <Spinner size={11} />}
@@ -155,7 +155,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
                     </div>
                   ) : choices.length === 0 ? (
                     <div className="px-2 py-1.5 text-xs text-ink-dim">
-                      No remote branches{refreshing ? "" : " — try refreshing"}.
+                      No remote branches{refreshing ? "" : ", try refreshing"}.
                     </div>
                   ) : (
                     choices.map((c) => (
@@ -199,7 +199,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
 export function GitPanel({ view }: { view: WorkstreamView | null }) {
   const navigate = useNavigate();
   const actions = useWorkstreamGitActions(view);
-  // Effective chords for the button tooltips — these run the same commands.
+  // Effective chords for the button tooltips, these run the same commands.
   const kbOverrides = useBootstrap().data?.settings.keybindings?.overrides ?? {};
   const chordHint = (commandId: string): string => {
     const chord = effectiveChord(kbOverrides, commandId, IS_MACOS);
@@ -231,7 +231,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
               <IconButton
                 onClick={() => refresh.mutate()}
                 disabled={refresh.isPending}
-                title="Fetch remote — refresh ahead/behind and PR status"
+                title="Fetch remote. Refreshes ahead/behind and PR status"
                 aria-label="Fetch remote"
               >
                 {refresh.isPending ? <Spinner size={14} /> : <RefreshIcon size={14} />}
@@ -270,7 +270,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     disabled={pull.isPending}
                     onClick={() => pull.mutate()}
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-edge bg-panel text-ink-dim hover:bg-edge/50 hover:text-ink disabled:opacity-60"
-                    title={`Update from ${view.item.baseBranch} — pull ${behind} new commit${
+                    title={`Update from ${view.item.baseBranch} , pulling ${behind} new commit${
                       behind === 1 ? "" : "s"
                     } in`}
                     aria-label={`Update from ${view.item.baseBranch}`}
@@ -282,7 +282,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
               {conflicts && (
                 <p className="rounded-md border border-bad/40 bg-bad/10 px-2 py-1.5 text-[11px] leading-relaxed text-bad">
                   Merge conflicts in {conflicts.files.length} file
-                  {conflicts.files.length === 1 ? "" : "s"} — resolve them in the Changes panel
+                  {conflicts.files.length === 1 ? "" : "s"} , resolve them in the Changes panel
                   below, then commit.
                 </p>
               )}
@@ -304,7 +304,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     disabled={actions.committing}
                     onClick={actions.doCommit}
                     className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-panel-2 text-sm font-medium text-ink hover:bg-edge/50 disabled:opacity-60"
-                    title={`Runs the Commit prompt — commits locally, then asks whether to push${chordHint("ws.commit")}`}
+                    title={`Runs the Commit prompt. Commits locally, then asks whether to push${chordHint("ws.commit")}`}
                   >
                     <GitCommitIcon size={15} />
                     Commit · {actions.changedCount}
@@ -316,7 +316,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     disabled={actions.shipping}
                     onClick={actions.doShip}
                     className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-accent text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
-                    title={`Runs the Ship prompt — commit, push, and open a pull request${chordHint("ws.ship")}`}
+                    title={`Runs the Ship prompt. Commits, pushes, and opens a pull request${chordHint("ws.ship")}`}
                   >
                     <GitPullRequestIcon size={15} />
                     Ship
@@ -333,7 +333,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
         target={archiveTarget}
         onClose={() => setArchiveTarget(null)}
         onArchived={() => {
-          // Drop back to the project board — the archived worktree is gone.
+          // Drop back to the project board, the archived worktree is gone.
           const archived = archiveTarget;
           setArchiveTarget(null);
           if (archived)

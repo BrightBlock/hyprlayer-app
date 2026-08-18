@@ -62,7 +62,7 @@ function DiffPopover({
 }
 
 /**
- * A pin card for a file-targeting tool call (Read / Write / Edit / …) — the
+ * A pin card for a file-targeting tool call (Read / Write / Edit / …), the
  * filename as a chip (the full path the agent received never shows as text, only
  * in `title` / on open), click the name to open it. When a `diff` is supplied
  * (Edit / MultiEdit), the card shows a pencil glyph and previews the line-level

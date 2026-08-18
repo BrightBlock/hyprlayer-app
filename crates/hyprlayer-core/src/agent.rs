@@ -21,7 +21,7 @@ const KILL_NONE: u8 = 0;
 const KILL_USER: u8 = 1;
 const KILL_DETACH: u8 = 2;
 
-/// Why the app ended a session's process — shared between a driver's kill entry
+/// Why the app ended a session's process, shared between a driver's kill entry
 /// points and the waiter that classifies the exit, so the reason survives the
 /// hop. First writer wins: the request that actually took the process down is
 /// the honest reason, and a later racing call can't relabel it.
@@ -30,13 +30,13 @@ pub struct KillFlag(AtomicU8);
 
 impl KillFlag {
     /// The user ended this session (Stop escalating to a force-stop, clearing
-    /// the context). Returns whether this call is the one that set it — drivers
+    /// the context). Returns whether this call is the one that set it, drivers
     /// use that to stay idempotent.
     pub fn mark_killed(&self) -> bool {
         self.set(KILL_USER)
     }
 
-    /// The app is tearing the process down as its own bookkeeping — quitting, or
+    /// The app is tearing the process down as its own bookkeeping, quitting, or
     /// relaunching the session under new settings. Reported as
     /// [`ExitOutcome::Detached`], which leaves no trace in the transcript.
     pub fn mark_detached(&self) -> bool {
@@ -60,7 +60,7 @@ impl KillFlag {
     }
 }
 
-/// Which harness backs a session — the vocabulary the store persists
+/// Which harness backs a session, the vocabulary the store persists
 /// (`sessions.harness`), the IPC surface selects on, and the shell dispatches
 /// drivers by. sqlite stores `as_str` TEXT; read back via the tolerant
 /// [`Harness::parse`].
@@ -68,7 +68,7 @@ impl KillFlag {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum Harness {
-    // Last-variant #[serde(other)] isn't needed here — Claude is first so a
+    // Last-variant #[serde(other)] isn't needed here, Claude is first so a
     // struct-level default covers it; unknown wire values are a caller bug we
     // want surfaced, while row reads go through `parse`.
     #[default]
@@ -102,7 +102,7 @@ pub trait AgentDriver: Send + Sync {
     /// the persistence layer replays from storage for anything before they join.
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent>;
 
-    /// Send a user turn — the opening prompt (with a `stage` label) or a
+    /// Send a user turn, the opening prompt (with a `stage` label) or a
     /// follow-up (`stage = None`). `prompt_name` names the custom prompt the
     /// turn was run from, else `None` for a turn the user typed.
     fn send_user_turn(
@@ -141,7 +141,7 @@ pub trait AgentDriver: Send + Sync {
     /// Rewind the model's OWN conversation to the 1-based `ordinal` human turn,
     /// truncating that turn and everything after it out of the live session (and
     /// its persisted transcript) so a resume reloads the shortened conversation.
-    /// Default: unsupported — only Claude implements it (OpenCode owns its own
+    /// Default: unsupported, only Claude implements it (OpenCode owns its own
     /// history). Callers fall back to a log-only truncation on `Err`.
     fn rewind_to_ordinal<'a>(
         &'a self,
@@ -159,8 +159,8 @@ pub trait AgentDriver: Send + Sync {
     /// terminal `Exited` event.
     fn kill(&self);
 
-    /// Terminate the session because the APP is tearing it down — quitting, or
-    /// relaunching it under new settings — rather than the user ending it. Same
+    /// Terminate the session because the APP is tearing it down, quitting, or
+    /// relaunching it under new settings, rather than the user ending it. Same
     /// teardown as [`kill`](Self::kill), but the exit reports
     /// [`ExitOutcome::Detached`]: nothing is persisted, so the transcript stays
     /// clean and the session replays resumable.
@@ -203,7 +203,7 @@ impl AgentDriver for ClaudeDriver {
         &'a self,
         ordinal: usize,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        // Inherent async fn of the same name wins resolution — no recursion.
+        // Inherent async fn of the same name wins resolution, no recursion.
         Box::pin(self.rewind_to_ordinal(ordinal))
     }
     fn kill(&self) {
@@ -233,7 +233,7 @@ impl AgentDriver for CodexDriver {
     }
     fn set_model(&self, model: Option<String>) {
         // Codex takes a model per turn, so a mid-session switch just changes what
-        // the next `turn/start` sends — no relaunch (unlike Claude).
+        // the next `turn/start` sends, no relaunch (unlike Claude).
         self.set_model(model)
     }
     fn set_effort(&self, effort: Option<String>) {
@@ -257,7 +257,7 @@ impl AgentDriver for CodexDriver {
         &'a self,
         ordinal: usize,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        // Inherent async fn of the same name wins resolution — no recursion.
+        // Inherent async fn of the same name wins resolution, no recursion.
         Box::pin(self.rewind_to_ordinal(ordinal))
     }
     fn kill(&self) {

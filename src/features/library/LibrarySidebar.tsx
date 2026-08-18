@@ -26,7 +26,7 @@ type Props = {
   sync: ThoughtsSyncState;
   /** Drag-resizable width (px), owned by the route so it survives navigation. */
   width: number;
-  /** Collapsed (hidden) state — toggled from the header, like the project panel. */
+  /** Collapsed (hidden) state, toggled from the header, like the project panel. */
   collapsed: boolean;
   /** True only while the resize handle is dragged, to suppress the width
    *  transition so the panel tracks the cursor instead of trailing it. */
@@ -56,7 +56,7 @@ export function LibrarySidebar({
   // snapping (matching the project + diff panels). overflow-hidden clips the
   // fixed-width inner shell so its content never reflows mid-animation; the
   // transition is dropped while the resize handle is dragged. It is not gated on
-  // reduced motion — Windows maps that to the often-off "Animation effects"
+  // reduced motion, Windows maps that to the often-off "Animation effects"
   // toggle, which would otherwise snap the panel.
   return (
     <aside

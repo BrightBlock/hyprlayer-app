@@ -4,7 +4,7 @@
 //
 // Streaming behavior: during a stream, `code` grows with each token. We
 // debounce the highlight call so Shiki only runs once the stream pauses (or
-// ends) — the user sees plain monospace while tokens are arriving and the
+// ends), the user sees plain monospace while tokens are arriving and the
 // block snaps to highlighted shortly after the stream settles. We also gate
 // the displayed tree on `highlighted.code === code` so a stale highlight from
 // an in-flight call never paints over the current text.
@@ -50,7 +50,7 @@ function ShikiCodeBlockImpl({
   }, [code, rawLang]);
 
   // toJsxRuntime walks the whole hast tree allocating React elements per token,
-  // so we memoize by hast identity — unrelated transcript re-renders cost
+  // so we memoize by hast identity, unrelated transcript re-renders cost
   // nothing once a block is highlighted.
   const tree = useMemo(
     () => (highlighted && highlighted.code === code ? renderHast(highlighted.hast) : null),

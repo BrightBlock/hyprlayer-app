@@ -14,7 +14,7 @@ export type ResolvedEngine = {
   id: string;
   label: string;
   glyph: string;
-  /** A theme custom-property name, applied as `var(<token>)` — never raw hex. */
+  /** A theme custom-property name, applied as `var(<token>)`, never raw hex. */
   accentToken: string;
   command: string;
   args: string[];
@@ -75,7 +75,7 @@ export function resolveMultiplexer(settings?: AppSettings | null): ResolvedMulti
 }
 
 /** A display label for an engine id, from the built-ins (custom engines fall back
- *  to the id). Used where the resolved settings aren't on hand — e.g. labelling an
+ *  to the id). Used where the resolved settings aren't on hand, e.g. labelling an
  *  archived PTY agent row. */
 export const engineLabel = (engineId: string): string =>
   BUILTIN_ENGINES.find((e) => e.id === engineId)?.label ?? engineId;
@@ -104,24 +104,24 @@ export function defaultEngine(cfg: ResolvedMultiplexer): ResolvedEngine | undefi
   return enabledEngines(cfg)[0] ?? cfg.engines[0];
 }
 
-/** How an engine handles conversation identity — so each tab owns a distinct,
+/** How an engine handles conversation identity, so each tab owns a distinct,
  *  resumable conversation instead of all same-dir tabs sharing "most recent":
  *   - "assign": the CLI takes a caller-chosen id, so we mint a UUID per tab and
  *     pin it as `--session-id` (+ `--resume`). Claude & Gemini, verified against
  *     `--help`. (Antigravity's `--project <id>` looks similar but is rejected in
- *     interactive mode — "Project Not Found" — so it can't assign; it captures.)
+ *     interactive mode, "Project Not Found", so it can't assign; it captures.)
  *   - "exec-mint": the CLI auto-assigns the id and can't take ours, but a
- *     `codex exec --json` probe announces it as its first event — so we mint it
+ *     `codex exec --json` probe announces it as its first event, so we mint it
  *     deterministically up front (no disk-attribution race) and launch
  *     `codex resume <id>`. Codex.
  *   - "capture": the CLI auto-assigns the id; launch bare, then read the id back
  *     from its on-disk store and resume by it. Antigravity (`--conversation <id>`).
- *   - "none": custom engines — no per-session resume; most-recent fallback only. */
+ *   - "none": custom engines, no per-session resume; most-recent fallback only. */
 export type SessionMode = "assign" | "exec-mint" | "capture" | "none";
 
 /** Per-engine session + bypass behaviour for (re)launching. `fresh`/`resumeById`/
  *  `resumeLatest` build the session args; `resumeLatest` is the "most recent in
- *  this cwd" fallback used before an id is known. Kept frontend-side — the
+ *  this cwd" fallback used before an id is known. Kept frontend-side, the
  *  backend `agent_open` just runs command + args. */
 type EngineSession = {
   mode: SessionMode;
@@ -153,7 +153,7 @@ const ENGINE_SESSIONS: Record<string, EngineSession> = {
     bypass: ["--yolo"],
   },
   // Codex auto-assigns a UUID (no caller-set id), so we mint it via a
-  // `codex exec` probe and always launch `codex resume <id>` — fresh just resumes
+  // `codex exec` probe and always launch `codex resume <id>`, fresh just resumes
   // the freshly-minted (empty) session. `resume` is a subcommand and accepts the
   // bypass flag after the id (`codex resume <id> --dangerously-…`).
   codex: {
@@ -191,7 +191,7 @@ export const engineBypassArgs = (engineId: string): string[] => engineSession(en
 export const engineMintsViaExec = (engineId: string): boolean =>
   engineSession(engineId).mode === "exec-mint";
 
-/** Whether an engine can resume a specific conversation by id — gates the on-disk
+/** Whether an engine can resume a specific conversation by id, gates the on-disk
  *  capture, which only helps engines we can later resume by id (antigravity, and
  *  codex as a fallback if its exec-mint probe failed). Assign engines also resume
  *  by id but always already have one, so the capture's `!sessionId` guard skips. */
@@ -199,14 +199,14 @@ export const engineResumesById = (engineId: string): boolean =>
   engineSession(engineId).resumeById != null;
 
 /** Whether we can authoritatively check this engine's conversation on disk (the
- *  `agent_session_exists` backend) — Claude, Codex, and Antigravity store under the
+ *  `agent_session_exists` backend), Claude, Codex, and Antigravity store under the
  *  id we hold (Antigravity's captured `--conversation` id maps to its brain dir).
  *  Gemini/custom fall back to the typed-something heuristic for the resume gate. */
 export const engineChecksSessionOnDisk = (engineId: string): boolean =>
   engineId === "claude-code" || engineId === "codex" || engineId === "antigravity";
 
 /** A fresh conversation id for a new tab: a minted UUID for "assign" engines
- *  (which pin it at launch), else undefined — "exec-mint" engines mint via a probe
+ *  (which pin it at launch), else undefined, "exec-mint" engines mint via a probe
  *  after creation, "capture" engines read theirs from disk, "none" can't resume. */
 export function mintPtySessionId(engineId: string): string | undefined {
   return engineSession(engineId).mode === "assign" ? globalThis.crypto?.randomUUID?.() : undefined;

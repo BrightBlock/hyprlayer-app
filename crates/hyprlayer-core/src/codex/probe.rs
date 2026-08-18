@@ -59,7 +59,7 @@ pub struct CodexModel {
 #[serde(rename_all = "camelCase")]
 pub struct CodexProbe {
     pub auth: CodexAuthStatus,
-    /// Empty when Codex is signed out — it answers `model/list` with no rows
+    /// Empty when Codex is signed out, it answers `model/list` with no rows
     /// rather than failing. A probe that could not run at all is an `Err`, so
     /// the two cases stay distinguishable.
     pub models: Vec<CodexModel>,
@@ -69,7 +69,7 @@ pub struct CodexProbe {
 ///
 /// Deliberately one spawn for both questions. Two `codex app-server` processes
 /// starting concurrently interfere with each other, and the loser answers with a
-/// benign-looking default — a null account or an empty `data` array — rather than
+/// benign-looking default, a null account or an empty `data` array, rather than
 /// an error. Asking one server both questions removes the race by construction
 /// (and halves the startup cost).
 pub async fn probe(bin: &Path, path_env: &OsString) -> Result<CodexProbe> {
@@ -175,7 +175,7 @@ async fn ask_inner(bin: &Path, path_env: &OsString, calls: &[(&str, Value)]) -> 
         .stdout(Stdio::piped())
         // Discarded, not piped: nothing here reads stderr, and a chatty
         // app-server (RUST_LOG=debug) would fill the pipe buffer, block on
-        // write, and never answer — the probe would only ever time out.
+        // write, and never answer, the probe would only ever time out.
         .stderr(Stdio::null())
         .kill_on_drop(true);
     #[cfg(windows)]
@@ -200,7 +200,7 @@ async fn ask_inner(bin: &Path, path_env: &OsString, calls: &[(&str, Value)]) -> 
 
     // Reap BEFORE releasing the startup lock. `kill_on_drop` only SIGNALS the
     // child; without waiting, the next app-server can begin while this one is
-    // still tearing down — which is the very interference the lock exists to
+    // still tearing down, which is the very interference the lock exists to
     // prevent, and it still showed up ~1 in 20 under load without this.
     let _ = child.kill().await;
     out
@@ -213,7 +213,7 @@ async fn exchange(
     stdout: tokio::process::ChildStdout,
     calls: &[(&str, Value)],
 ) -> Result<Vec<Value>> {
-    // Write the whole exchange up front — the app-server answers in order, so
+    // Write the whole exchange up front, the app-server answers in order, so
     // there's nothing to interleave. `stdin` is deliberately held open until the
     // replies land: the server treats EOF as "shut down" and races us, exiting
     // before it answers (closing it here loses the responses outright).
@@ -246,7 +246,7 @@ async fn exchange(
     while let Ok(Some(line)) = lines.next_line().await {
         match decode_line(&line) {
             // The handshake failing is the interesting error (bad binary,
-            // incompatible app-server) — surface it instead of timing out.
+            // incompatible app-server), surface it instead of timing out.
             Some(Incoming::Response {
                 id: 1,
                 result: Err(e),
@@ -331,7 +331,7 @@ mod tests {
     fn parse_models_tolerates_a_missing_or_odd_body() {
         assert!(parse_models(&json!({})).is_empty());
         assert!(parse_models(&json!({ "data": [] })).is_empty());
-        // A row with no id can't be launched — drop it rather than emit a blank.
+        // A row with no id can't be launched, drop it rather than emit a blank.
         assert!(parse_models(&json!({ "data": [{ "displayName": "x" }] })).is_empty());
         // A model with no displayName falls back to its id, not an empty label.
         let m = parse_models(&json!({ "data": [{ "id": "gpt-5.4" }] }));
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn auth_status_reports_signed_out_without_erroring() {
-        // A signed-out CLI answers with a null account — that's a state, not a
+        // A signed-out CLI answers with a null account, that's a state, not a
         // failure, so the settings tab can render "Not signed in".
         let status = CodexAuthStatus::default();
         assert!(!status.signed_in());

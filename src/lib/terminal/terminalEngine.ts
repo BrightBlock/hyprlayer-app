@@ -5,14 +5,14 @@ import "@xterm/xterm/css/xterm.css";
 
 /**
  * The seam that lets the terminal UI depend on an abstract emulator instead of
- * `@xterm/xterm` directly. The xterm-backed implementation lives here; a future
- * libghostty `ghostty-web` engine — its `Terminal`/`write`/`onData` API is
- * deliberately xterm-compatible — can implement the same interface and be
- * swapped in via `createTerminalEngine` with no `TerminalTab` churn.
+ * `@xterm/xterm` directly. The xterm-backed implementation lives here. Another
+ * engine exposing an xterm-compatible `Terminal`/`write`/`onData` API can
+ * implement the same interface and be swapped in via `createTerminalEngine`
+ * with no `TerminalTab` churn.
  */
 
-/** The renderer-agnostic theme the app feeds an engine — xterm's `ITheme`
- *  today; a GhosttyWebEngine would map this onto its own palette. */
+/** The renderer-agnostic theme the app feeds an engine, xterm's `ITheme`
+ *  today. Another engine would map this onto its own palette. */
 export type TerminalTheme = ITheme;
 
 export type TerminalGrid = { cols: number; rows: number };
@@ -22,12 +22,12 @@ export interface TerminalEngine {
   mount(host: HTMLElement): void;
   /** Render emulator output: raw PTY bytes, or a UTF-8 control string. */
   write(data: Uint8Array | string): void;
-  /** Subscribe to all input bound for the PTY — keystrokes, paste, AND xterm's
+  /** Subscribe to all input bound for the PTY, keystrokes, paste, AND xterm's
    *  automatic replies to the CLI's capability queries (DSR/DA). Returns an
    *  unsubscribe. Write every byte to the PTY; don't treat it as "the user did
-   *  something" (those auto-replies fire with no user action — use `onKey`). */
+   *  something" (those auto-replies fire with no user action, use `onKey`). */
   onInput(cb: (data: string) => void): () => void;
-  /** Subscribe to real key presses only (not paste or terminal auto-replies) —
+  /** Subscribe to real key presses only (not paste or terminal auto-replies),
    *  the honest "the user is typing" signal. Returns an unsubscribe. */
   onKey(cb: (e: { key: string; domEvent: KeyboardEvent }) => void): () => void;
   /** Refit to the host's current size; returns the resulting grid. */
@@ -44,7 +44,7 @@ export interface TerminalEngine {
   /** Give the emulator keyboard focus. */
   focus(): void;
   /** True when the emulator holds a text selection. This is the emulator's own
-   *  selection model, not a DOM one — the grid is painted to a canvas, so
+   *  selection model, not a DOM one, the grid is painted to a canvas, so
    *  `window.getSelection()` never sees it. */
   hasSelection(): boolean;
   /** The selected text, or `""` when nothing is selected. */
@@ -54,7 +54,7 @@ export interface TerminalEngine {
   paste(text: string): void;
   /** Install a keydown/keypress filter that runs BEFORE the emulator's own
    *  handling. Return true to let the emulator proceed, false to claim the key
-   *  (the emulator then does nothing and does not preventDefault — the filter
+   *  (the emulator then does nothing and does not preventDefault, the filter
    *  owns that). One filter per engine; call after `mount`. */
   interceptKeys(filter: (e: KeyboardEvent) => boolean): void;
   /** Wipe the screen + scrollback to a clean slate (used when restarting an
@@ -70,7 +70,7 @@ class XtermEngine implements TerminalEngine {
   /** The GPU renderer, while it's live. Disposed on context loss (xterm then
    *  falls back to its DOM renderer) and on teardown. */
   private webgl?: WebglAddon;
-  /** Flips true the first time `fit()` reads the renderer without throwing —
+  /** Flips true the first time `fit()` reads the renderer without throwing,
    *  proof the renderer is live. Gates `refresh()`, whose `term.refresh()`
    *  schedules an rAF render that reads renderer dimensions and throws
    *  (uncaught, in the frame callback) if the renderer isn't set up yet. */
@@ -85,8 +85,8 @@ class XtermEngine implements TerminalEngine {
         '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace',
       // Pin the weights to 400 / 700: any other weight makes xterm's WebGL atlas
       // interpolate, which WKWebView rasterizes soft/garbled. lineHeight 1.0 is
-      // what TUIs (claude/codex/gemini) assume — a larger value inflates each
-      // cell and shows "ribbon" gaps between bg-colored rows. (Both per termic.)
+      // what TUIs (claude/codex/gemini) assume, a larger value inflates each
+      // cell and shows "ribbon" gaps between bg-colored rows.
       fontWeight: 400,
       fontWeightBold: 700,
       lineHeight: 1.0,
@@ -116,7 +116,7 @@ class XtermEngine implements TerminalEngine {
     // backgrounded), dispose the addon so xterm reverts to the DOM renderer
     // instead of freezing on a dead canvas. Guarded: if WebGL can't initialise,
     // the DOM renderer remains and the terminal still works. (addon-webgl ≥0.19
-    // manages its own glyph atlas across resizes — no manual clearTextureAtlas.)
+    // manages its own glyph atlas across resizes, no manual clearTextureAtlas.)
     try {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => {
@@ -131,7 +131,7 @@ class XtermEngine implements TerminalEngine {
       this.term.loadAddon(webgl);
       this.webgl = webgl;
     } catch {
-      // WebGL unavailable — keep the DOM renderer.
+      // WebGL unavailable, keep the DOM renderer.
     }
   }
 
@@ -151,7 +151,7 @@ class XtermEngine implements TerminalEngine {
 
   fit(): TerminalGrid {
     // FitAddon.fit() reaches into the render dimensions, which xterm only
-    // computes on its first paint — deferred a frame after open(). A fit() in
+    // computes on its first paint, deferred a frame after open(). A fit() in
     // the same tick as mount therefore throws ("_renderer.value.dimensions").
     // Swallow it and return the current grid; the ResizeObserver's initial
     // callback re-fits once the renderer is live, correcting the PTY size. Left
@@ -162,7 +162,7 @@ class XtermEngine implements TerminalEngine {
       // Reaching here without throwing means the renderer is live.
       this.rendererReady = true;
     } catch {
-      // renderer not ready yet — keep the current (default) grid for now
+      // renderer not ready yet, keep the current (default) grid for now
     }
     return this.grid();
   }
@@ -173,7 +173,7 @@ class XtermEngine implements TerminalEngine {
 
   refresh(): void {
     // xterm flushes paints on requestAnimationFrame, which a WKWebView throttles
-    // (and can drop) while the window is unfocused — so output or a scroll that
+    // (and can drop) while the window is unfocused, so output or a scroll that
     // lands while you're away leaves the screen stale and doesn't self-heal on
     // refocus. Marking all rows dirty re-queues a paint, which fires the instant
     // focus (and a live rAF) is back. Gated on a live renderer: term.refresh()
@@ -235,7 +235,7 @@ class XtermEngine implements TerminalEngine {
 }
 
 /** Build the active terminal engine. Swapping the implementation here migrates
- *  the whole app to a different emulator (e.g. ghostty-web) in one place. */
+ *  the whole app to a different emulator in one place. */
 export function createTerminalEngine(opts: {
   fontSize: number;
   theme: TerminalTheme;

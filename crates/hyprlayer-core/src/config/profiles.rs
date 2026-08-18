@@ -3,7 +3,7 @@
 //! Listing resolves each destination's existing repo folders so the dialog
 //! can offer them. Creation goes through the CLI (`hyprlayer thoughts profile
 //! create`, see `HyprCli::thoughts_profile_create`) per ADR-0002's
-//! single-writer rule — this module only supplies the app-side name rules the
+//! single-writer rule, this module only supplies the app-side name rules the
 //! CLI doesn't enforce, and the read-back of what the CLI wrote.
 
 use serde::Serialize;
@@ -26,12 +26,12 @@ pub struct ThoughtsProfile {
     pub thoughts_repo: Option<String>,
     pub repos_dir: Option<String>,
     pub global_dir: Option<String>,
-    /// Existing folder names under `<root>/<reposDir>` — the "existing folder"
+    /// Existing folder names under `<root>/<reposDir>`, the "existing folder"
     /// choices for the dialog's folder select.
     pub folders: Vec<String>,
     /// Why `folders` couldn't be read (e.g. permission denied), when the tree
     /// exists but is inaccessible. An unreadable tree must not masquerade as
-    /// an empty one — the dialog surfaces this next to the folder select.
+    /// an empty one, the dialog surfaces this next to the folder select.
     pub folders_error: Option<String>,
 }
 
@@ -73,7 +73,7 @@ fn profile_entry(name: Option<String>, backend: &BackendConfig) -> ThoughtsProfi
     }
 }
 
-/// The root as the user wrote it (tilde kept) — preview text, not a real path.
+/// The root as the user wrote it (tilde kept), preview text, not a real path.
 fn display_root(backend: &BackendConfig) -> Option<String> {
     match backend {
         BackendConfig::Git(g) if !g.thoughts_repo.is_empty() => Some(g.thoughts_repo.clone()),
@@ -114,7 +114,7 @@ fn existing_folders(backend: &BackendConfig) -> (Vec<String>, Option<String>) {
     (folders, None)
 }
 
-/// The entry for one named profile — the read-back after the CLI creates it.
+/// The entry for one named profile, the read-back after the CLI creates it.
 pub fn get_profile(thoughts: &ThoughtsConfig, name: &str) -> Option<ThoughtsProfile> {
     thoughts
         .profiles
@@ -126,7 +126,7 @@ pub fn get_profile(thoughts: &ThoughtsConfig, name: &str) -> Option<ThoughtsProf
 /// create`. The CLI is more permissive than the app can represent: it accepts
 /// `default` (collides with the built-in default backend) and `__`-prefixed
 /// names (the dialog's select sentinels), and silently sanitizes other
-/// characters (`bad name` → `bad_name`) — rejecting those up front keeps the
+/// characters (`bad name` → `bad_name`), rejecting those up front keeps the
 /// created name identical to what the user typed.
 pub fn validate_profile_name(name: &str) -> Result<()> {
     let invalid = |detail: String| CoreError::ProfileInvalid { detail };
@@ -135,7 +135,7 @@ pub fn validate_profile_name(name: &str) -> Result<()> {
     }
     if name == "default" {
         return Err(invalid(
-            "\"default\" is the built-in default backend — pick another name".into(),
+            "\"default\" is the built-in default backend. Pick another name".into(),
         ));
     }
     if name.starts_with("__") {

@@ -147,7 +147,7 @@ function KeyEntry({
 
       {hasFreeModels && (
         <p className="mt-3 rounded-md border border-edge bg-panel-2 px-3 py-2 text-xs text-ink-dim">
-          {provider.name}’s <span className="text-ink">free</span> models need no key — pick them
+          {provider.name}’s <span className="text-ink">free</span> models need no key, so pick them
           straight from <span className="text-ink">Add models</span>. A key is only required for its
           paid models.
         </p>

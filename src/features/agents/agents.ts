@@ -1,7 +1,7 @@
 /**
  * Agent-library pure core.
  *
- * An agent IS a `.claude/agents/<name>.md` file — frontmatter for the launch
+ * An agent IS a `.claude/agents/<name>.md` file, frontmatter for the launch
  * config, body for the system prompt. The launch settings claude's frontmatter
  * has no key for (effort, harness, permissions, rules, folder) ride alongside
  * in `AppSettings.agents`, keyed by the file's path.
@@ -20,11 +20,11 @@ import type {
 import { MODELS } from "@/lib/domain/models";
 import { ANY_STAGE, PHASE_COLOR, SDLC_PHASES, STAGE_PHASE, STAGES, type StageKey } from "@/lib/domain/stages";
 
-/** The frontmatter `model` value for "whatever spawned me" — claude's own
+/** The frontmatter `model` value for "whatever spawned me", claude's own
  *  spelling, and what an absent key means. */
 export const INHERIT_MODEL = "inherit";
 
-/** Display name for a frontmatter `model`. An unknown value is shown as-is —
+/** Display name for a frontmatter `model`. An unknown value is shown as-is,
  *  claude accepts full model ids there too. */
 export function modelLabel(model: string | null): string {
   if (!model || model === INHERIT_MODEL) return "Inherit";
@@ -38,7 +38,7 @@ const DESCRIPTION_MAX = 90;
 
 /**
  * The one-line form of an agent's description. Frontmatter descriptions run to
- * whole paragraphs — trigger lists, examples — so the row shows the first
+ * whole paragraphs, trigger lists, examples, so the row shows the first
  * sentence, capped, rather than a wall of text ellipsised by the column width.
  * The full text stays available as the row's tooltip.
  */
@@ -54,8 +54,8 @@ export function shortDescription(description: string): string {
 
 /**
  * Claude's `memory` frontmatter scopes, in the order the editor offers them.
- * An absent key is "off" — the agent starts every invocation with nothing
- * remembered — so "off" is not a scope value, it is the key's absence.
+ * An absent key is "off", the agent starts every invocation with nothing
+ * remembered, so "off" is not a scope value. It is the key's absence.
  */
 export const MEMORY_SCOPES: ReadonlyArray<{ key: string; label: string; hint: string }> = [
   { key: "local", label: "Session", hint: "Remembers within one session, forgotten after" },
@@ -63,8 +63,8 @@ export const MEMORY_SCOPES: ReadonlyArray<{ key: string; label: string; hint: st
   { key: "user", label: "Everywhere", hint: "Follows the agent across every project" },
 ];
 
-/** Display name for a `memory` scope. An unrecognized scope — a newer claude,
- *  or a hand-edited file — is shown as-is rather than silently called "off". */
+/** Display name for a `memory` scope. An unrecognized scope, a newer claude,
+ *  or a hand-edited file, is shown as-is rather than silently called "off". */
 export function memoryLabel(memory: string | null): string {
   if (!memory) return "Off";
   return MEMORY_SCOPES.find((s) => s.key === memory)?.label ?? memory;
@@ -98,7 +98,7 @@ export function editorTabs(signedIn: boolean): ReadonlyArray<{ key: EditorTab; l
 
 /**
  * The built-in tools an agent's frontmatter can name. Claude Code accepts any
- * tool id — MCP globs included — so this is the set the editor offers as
+ * tool id, MCP globs included, so this is the set the editor offers as
  * toggles, not a closed vocabulary: anything else in the file is preserved.
  */
 export const AGENT_TOOLS: ReadonlyArray<{ key: string; desc: string }> = [
@@ -120,7 +120,7 @@ export const AGENT_TOOLS: ReadonlyArray<{ key: string; desc: string }> = [
 /** The tools a read-only agent keeps. */
 const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
 
-/** An empty `tools` list means the agent inherits every tool its parent has —
+/** An empty `tools` list means the agent inherits every tool its parent has,
  *  materially different from an agent with none, so the UI says so. */
 export function inheritsAllTools(agent: AgentFile): boolean {
   return agent.tools.length === 0;
@@ -146,13 +146,13 @@ export function readOnlyTools(agent: AgentFile): string[] {
 /** "5 of 12 enabled …" for the Capabilities header. */
 export function toolSummary(agent: AgentFile): string {
   if (inheritsAllTools(agent)) {
-    return "Inherits every tool from the session that spawns it — turn one off to pin an explicit list";
+    return "Inherits every tool from the session that spawns it. Turn one off to pin an explicit list";
   }
   const known = agent.tools.filter((t) => AGENT_TOOLS.some((x) => x.key === t)).length;
   return `${known} of ${AGENT_TOOLS.length} enabled · disabled tools are hidden from the model entirely`;
 }
 
-/** Tool entries the file names that aren't built-ins or MCP globs — anything
+/** Tool entries the file names that aren't built-ins or MCP globs, anything
  *  from a newer claude. Surfaced so a save can't look like it dropped them. */
 export function extraTools(tools: readonly string[]): string[] {
   return tools.filter(
@@ -197,7 +197,7 @@ export function setSkill(
   return { skills, tools };
 }
 
-/** Names the file lists that discovery didn't match — a newer claude, a plugin
+/** Names the file lists that discovery didn't match, a newer claude, a plugin
  *  that isn't installed here, or a typo. Shown rather than silently dropped. */
 export function extraSkills(skills: readonly string[], known: readonly AgentSkill[]): string[] {
   return skills.filter((s) => !known.some((k) => k.name === s));
@@ -212,7 +212,7 @@ export function skillSummary(agent: AgentFile, known: readonly AgentSkill[]): st
   return `${enabled.length} of ${known.length} preloaded · ~${tokensK.toFixed(1)}k tokens added per spawn`;
 }
 
-/** True when a `deny Skill` catch-all is present — the rules are the source of
+/** True when a `deny Skill` catch-all is present, the rules are the source of
  *  truth for "only these skills", so there is no separate overlay field. */
 export function skillsRestricted(rules: readonly AgentRule[]): boolean {
   return rules.some((r) => r.action === "deny" && r.pattern === "Skill");
@@ -262,7 +262,7 @@ export function newAgent(source: string): AgentFile {
   };
 }
 
-/** True while an agent has never been written — the editor's "new" state. */
+/** True while an agent has never been written, the editor's "new" state. */
 export function isUnsaved(agent: AgentFile): boolean {
   return agent.path === "";
 }
@@ -279,7 +279,7 @@ export function isAllProjects(agent: AgentFile): boolean {
   return agent.source !== "project";
 }
 
-/** An overlay with every field present — what the editor works against. The
+/** An overlay with every field present, what the editor works against. The
  *  generated type has them all optional (serde `default`). */
 export type Overlay = Required<AgentOverlay>;
 
@@ -303,7 +303,7 @@ export function overlayFor(library: AgentLibrarySettings | undefined, path: stri
 }
 
 /** Status badge text and tone. A plugin agent is always live; yours is a draft
- *  until published — and a draft can't be spawned by name in a session, not
+ *  until published, and a draft can't be spawned by name in a session, not
  *  just hidden from the composer (see `agent_deny_rules`, applied at launch). */
 export function statusOf(
   agent: AgentFile,
@@ -317,7 +317,7 @@ export function statusOf(
 
 const MUTED_DOT = "color-mix(in oklab, var(--color-ink-dim) 55%, transparent)";
 
-/** A tight phrase, not a bare keyword — an agent whose description merely
+/** A tight phrase, not a bare keyword, an agent whose description merely
  *  mentions a stage word in passing (e.g. "Drafts an implementation plan
  *  body") must not be filed under that stage's phase. Built from `STAGES` so
  *  a stage added to the Rust enum needs no edit here. */
@@ -339,7 +339,7 @@ export function phaseFolder(agent: AgentFile): string {
  * - plugin agent: `overlay.folder` (non-empty) → its plugin's name
  * - owned agent: `category` (non-empty) → `overlay.folder` (non-empty,
  *   legacy) → the phase for the stage its description names, else
- *   [`ANY_STAGE`] — when `groupUncategorized` is on → loose (`""`)
+ *   [`ANY_STAGE`], when `groupUncategorized` is on → loose (`""`)
  *
  * Prefer [`folderResolver`] at a call site that has a whole list: it binds the
  * library and the flag once instead of threading both through every layer.
@@ -369,8 +369,8 @@ const PHASE_RANK = new Map<string, number>(SDLC_PHASES.map((phase, i) => [phase,
 
 /**
  * Every folder name in play, for the list and both folder pickers: the phases
- * first in phase order, then everything else — occupied `category` values,
- * plugin names, and `library.folders` — alphabetically.
+ * first in phase order, then everything else, occupied `category` values,
+ * plugin names, and `library.folders`, alphabetically.
  *
  * A persisted folder named like a phase sorts with the phases rather than
  * being dropped: it is the same bucket, and omitting it would let the create
@@ -404,7 +404,7 @@ function partition<T>(items: readonly T[], pick: (item: T) => boolean): [T[], T[
  *  `var(function toString() { … })` as a CSS value. */
 const PHASE_TOKEN = new Map<string, string>(Object.entries(PHASE_COLOR));
 
-/** The colour a folder itself paints with — the header icon and, via
+/** The colour a folder itself paints with, the header icon and, via
  *  [`dotColor`], every agent filed under it. `MUTED_DOT` for "Any stage" and
  *  any custom folder that isn't a phase name. */
 export function folderColor(folder: string): string {
@@ -450,10 +450,10 @@ export function agentRows({
   folderOf: folderOfAgent,
 }: {
   agents: readonly AgentFile[];
-  /** Every folder name, in render order — see [`folderList`]. */
+  /** Every folder name, in render order, see [`folderList`]. */
   folders: readonly string[];
-  /** Folders the user has collapsed. Membership means closed; absence — a
-   *  folder never touched, including one that appears later — means open. */
+  /** Folders the user has collapsed. Membership means closed; absence, a
+   *  folder never touched, including one that appears later, means open. */
   closedFolders: ReadonlySet<string>;
   folderOf: FolderOf;
 }): AgentRow[] {

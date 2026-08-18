@@ -13,25 +13,23 @@ import {
 const SHIP_POLL_MS = 10_000;
 
 /**
- * The Commit / Ship gating + actions for a workstream, shared by the GIT panel's
- * buttons and Root's `ws.commit` / `ws.ship` keybindings so the two never
- * disagree. Gates on the live `useWorktreeGitStatus` count (the SAME query the
- * Changes panel renders) — not the sidebar list's `git.dirty` snapshot — so the
- * buttons stay in lockstep with the panel.
+ * Commit and Ship gating for a workstream, shared by the Git panel's buttons and
+ * Root's `ws.commit` / `ws.ship` keybindings so the two never disagree.
  *
- * Ship opens the PR, so it's pointless once one is live: hidden while the branch
- * already has an open or merged PR (the PR bar takes over). Commit is hidden
- * while Ship is mid-turn (`shipBusy`) or just kicked off (`shipping`) — Ship
- * commits these same changes itself, so a manual Commit would race it.
+ * Gates on the live `useWorktreeGitStatus` count, the same query the Changes
+ * panel renders, rather than the sidebar's `git.dirty` snapshot.
  *
- * Ship gates on `aheadOfBase` (commits vs the merge target), NOT `ahead` (commits
- * vs the upstream): `ahead` drops to 0 the moment the branch is pushed, but a
- * pushed-yet-PR-less branch still has something to ship — so pushing must not
- * make the button vanish.
+ * Ship hides once the branch has an open or merged PR, since the PR bar takes
+ * over. Commit hides while Ship is mid-turn or just started, because Ship
+ * commits the same changes and a manual Commit would race it.
+ *
+ * Ship gates on `aheadOfBase` (commits vs the merge target), NOT `ahead`
+ * (commits vs upstream). `ahead` drops to 0 the moment the branch is pushed,
+ * but a pushed branch with no PR still has something to ship.
  */
 export function useWorkstreamGitActions(view: WorkstreamView | null) {
   const id = view?.item.id ?? "";
-  // A folder workstream never gets git/PR queries — not even failing ones.
+  // A folder workstream never gets git/PR queries, not even failing ones.
   const enabled = view !== null && !isFolderWorkstream(view);
   const shipBusy = useWorkstreamShipBusy(view?.item.id ?? null);
   const [committing, setCommitting] = useState(false);
@@ -39,7 +37,7 @@ export function useWorkstreamGitActions(view: WorkstreamView | null) {
   // Poll only while a ship turn runs, and only until a PR resolves. The PR
   // appears MID-turn (the stock Ship prompt opens it, then runs /describe_pr),
   // and the watcher is in its slowest cadence precisely because this branch has
-  // no PR yet — so nothing else notices until the turn finally ends.
+  // no PR yet, so nothing else notices until the turn finally ends.
   const pr = useWorkstreamPr(id, enabled, shipBusy || shipping ? SHIP_POLL_MS : undefined);
   const status = useWorktreeGitStatus(id, enabled);
 

@@ -1,9 +1,9 @@
 /**
  * Collapsed projects in the sidebar tree. A project's workstreams fold away
- * under a disclosure chevron, the way VSCode's explorer folds a folder.
+ * under a disclosure chevron, the way a file explorer folds a folder.
  *
  * This is a per-user *view* preference (not project data), so it lives entirely
- * on the frontend and persists to localStorage — mirroring the Pinned section's
+ * on the frontend and persists to localStorage, mirroring the Pinned section's
  * own collapse flag (see [`pinStore`]).
  *
  * Keyed by project path, and stored as the set of *collapsed* paths rather than

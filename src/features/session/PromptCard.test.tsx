@@ -8,7 +8,7 @@ afterEach(cleanup);
 
 const BODY = "Refactor this module.\nExtract the parser.\nAdd tests.";
 
-/** Match the body verbatim — the default matcher collapses the newlines that
+/** Match the body verbatim, the default matcher collapses the newlines that
  *  make a prompt body worth collapsing in the first place. */
 const revealedBody = () => screen.queryByText(BODY, { normalizer: (text) => text });
 

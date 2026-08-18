@@ -36,12 +36,12 @@ const ACTIVITY_STYLE: Record<
   Exclude<WorkstreamActivity, "idle">,
   { color: string; anim: DotAnim; label: string }
 > = {
-  // Radar ping reads as "alert" — fits a session blocked on you.
+  // Radar ping reads as "alert", fits a session blocked on you.
   "needs-you": { color: "bg-warn", anim: "ping", label: "Waiting on you" },
-  // Soft breathing reads as "live, ongoing work" — same language as the tab glow.
+  // Soft breathing reads as "live, ongoing work", same language as the tab glow.
   working: { color: "bg-working text-working", anim: "work", label: "Working" },
   error: { color: "bg-bad", anim: "none", label: "Errored" },
-  review: { color: "bg-ok", anim: "none", label: "Turn done — ready for review" },
+  review: { color: "bg-ok", anim: "none", label: "Turn done, ready for review" },
   // Violet breathing = "passive background work" (turn done, but shells running).
   // Distinct hue from blue "working" so the two are visually separable.
   background: { color: "bg-background text-background", anim: "work", label: "Background tasks running" },
@@ -50,7 +50,7 @@ const ACTIVITY_STYLE: Record<
 /**
  * Leading/trailing status dot for a workstream row. Idle is invisible by default
  * (`idle="hide"`); pass `idle="dot"` to render a muted placeholder dot instead,
- * so a list reads as an even column of status dots — the sidebar tree's look.
+ * so a list reads as an even column of status dots, the sidebar tree's look.
  */
 export function WorkstreamActivityDot({
   workstreamId,

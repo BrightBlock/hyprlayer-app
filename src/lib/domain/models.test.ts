@@ -112,7 +112,7 @@ describe("Claude model presets", () => {
     });
   });
 
-  it("keys every preset uniquely — stored settings resolve by key", () => {
+  it("keys every preset uniquely, stored settings resolve by key", () => {
     expect(new Set(MODELS.map((m) => m.key)).size).toBe(MODELS.length);
   });
 });
@@ -166,7 +166,7 @@ describe("live catalog merge", () => {
     expect(merged.slice(0, 3).map((m) => m.label)).toEqual(["Opus 5", "Sonnet 5", "Haiku 4.5"]);
     // The no-`--model` row says which model it resolves to AND that it's default.
     expect(merged[0].hint).toBe("1M · default");
-    // Unlisted ids still launch (`--model` is validated lazily), so they stay —
+    // Unlisted ids still launch (`--model` is validated lazily), so they stay,
     // flagged, not hidden.
     const legacy = merged.find((m) => m.key === "opus-4-7");
     expect(legacy).toMatchObject({ flag: "claude-opus-4-7", unlisted: true });
@@ -191,7 +191,7 @@ describe("live catalog merge", () => {
 
   it("keeps org-disabled models, marked, so stored keys can't resurrect them", () => {
     // Filtering them out entirely let `modelOption` fall through to a LAUNCHABLE
-    // static row for the same model — the catalog said no, the app said yes.
+    // static row for the same model, the catalog said no, the app said yes.
     const merged = claudeModels([...live, row({ flag: "locked", disabled: true })]);
     const locked = merged.find((m) => m.flag === "locked");
     expect(locked).toMatchObject({ disabled: true });
@@ -233,7 +233,7 @@ describe("live catalog merge", () => {
   });
 
   it("does not resurrect a disabled listed model as a legacy pin", () => {
-    // A disabled row's flag still counts as "listed" — the legacy tail must not
+    // A disabled row's flag still counts as "listed", the legacy tail must not
     // re-offer the same model unmarked.
     const merged = claudeModels([
       row({ flag: null, resolvedModel: "claude-opus-5[1m]" }),
@@ -270,7 +270,7 @@ describe("live catalog canonical keys", () => {
 
   it("keys an alias and its pinned id independently, in either order", () => {
     // Flag identity outranks a name match, so a pinned-id row listed FIRST
-    // must not rob the alias row of its own key — stored settings resolve by key.
+    // must not rob the alias row of its own key, stored settings resolve by key.
     const aliasFirst = claudeModels([
       row({ flag: "sonnet", resolvedModel: "claude-sonnet-5" }),
       row({ flag: "claude-sonnet-5", resolvedModel: "claude-sonnet-5" }),
@@ -296,7 +296,7 @@ describe("live catalog canonical keys", () => {
 
   it("keys a row whose flag the default claimed by its resolved id", () => {
     // A literal "opus" alias row is a REAL offering when the default resolves
-    // elsewhere — it must survive under its resolved id, still selectable.
+    // elsewhere. It must survive under its resolved id, still selectable.
     const merged = claudeModels([
       row({ flag: null, resolvedModel: "claude-sonnet-5" }),
       row({ flag: "opus", resolvedModel: "claude-opus-5[1m]" }),
@@ -380,7 +380,7 @@ describe("pendingModelSync", () => {
   it("adds models the user was never offered, on a pre-watermark install", () => {
     const sync = pendingModelSync(curated, null, catalog);
     // New since they curated: the explicit 1M Opus row and the Opus 4.8 pins.
-    // The live Fable row canonical-keys to "fable" — already theirs, NOT
+    // The live Fable row canonical-keys to "fable", already theirs, NOT
     // re-added under its new flag spelling; `opus`/`sonnet`/`haiku` likewise.
     expect(sync?.add).toEqual(["opus[1m]", "opus-4-8", "opus-4-8-1m"]);
   });
@@ -405,7 +405,7 @@ describe("pendingModelSync", () => {
   it("is a no-op once the watermark covers everything on offer", () => {
     const seen = pendingModelSync(curated, null, catalog)!.seen;
     expect(pendingModelSync(curated, seen, catalog)).toBeNull();
-    // And so stays a no-op on every later launch — no write, no churn.
+    // And so stays a no-op on every later launch, no write, no churn.
     expect(pendingModelSync(null, seen, catalog)).toBeNull();
   });
 
@@ -451,7 +451,7 @@ describe("effortsForModel", () => {
   });
 
   it("offers nothing for a model that takes no --effort", () => {
-    // Haiku reports an empty tier list — different from "we don't know", and the
+    // Haiku reports an empty tier list, different from "we don't know", and the
     // reason the composer hides the picker entirely rather than offering tiers
     // the CLI ignores.
     const [haiku] = claudeModels([row({ flag: "haiku", supportedEffortLevels: [] })]);
@@ -533,7 +533,7 @@ describe("effectiveEffort against a live tier list", () => {
     claudeModels([row({ flag: "m", supportedEffortLevels: levels })])[0];
 
   it("sends no --effort at all to a model that takes none", () => {
-    // Live Haiku: the picker is hidden AND the launch flag must be omitted —
+    // Live Haiku: the picker is hidden AND the launch flag must be omitted,
     // hiding the menu while still sending the stale stored tier was the bug.
     expect(effectiveEffort("high", liveRow([]))).toBeNull();
     expect(effectiveEffort(undefined, liveRow([]))).toBeNull();

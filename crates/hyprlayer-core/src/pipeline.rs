@@ -3,14 +3,14 @@
 //! Each spec-driven stage maps to (1) a first-prompt that invokes the matching
 //! hyprlayer skill and (2) a permission posture: which tools are pre-approved,
 //! which are hard-denied, and the claude `--permission-mode`. Anything not
-//! pre-approved still works — it just routes through a `can_use_tool` prompt the
+//! pre-approved still works, it just routes through a `can_use_tool` prompt the
 //! UI renders. The table is a reviewable starting policy, tightened over time.
 
 use crate::claude::PermissionMode;
 
-/// The pipeline stages — the canonical wire enum for a workstream/session's
+/// The pipeline stages, the canonical wire enum for a workstream/session's
 /// pipeline position. sqlite still stores its `as_str` TEXT; rows read back
-/// through the tolerant [`Stage::parse`]. Wire deserialization is strict — the
+/// through the tolerant [`Stage::parse`]. Wire deserialization is strict, the
 /// generated bindings union makes an unknown value a TS type error, and specta
 /// cannot render `#[serde(other)]` on string enums.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -151,7 +151,7 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
             allowed_tools: allow(&[]),
             disallowed_tools: deny(&["Write", "Edit", "Bash(git commit:*)"]),
         },
-        // Commit checkpoints the worktree — stage + commit — then the stock
+        // Commit checkpoints the worktree, stage + commit, then the stock
         // prompt asks the user whether to also push. Push is deliberately
         // NEITHER pre-approved NOR denied: it routes through the normal
         // permission ask, so nothing pushes without explicit consent (even if
@@ -216,7 +216,7 @@ pub const SHIP_AGENT: SessionAgent = SessionAgent {
     name: "hyprlayer-ship",
     description: "Commits, pushes, and opens the pull request for one workstream branch.",
     prompt: "You publish one branch: commit the worktree, push it, open the pull request, \
-then write its description. Nothing else — do not review, refactor, or fix code on the way \
+then write its description. Nothing else. Do not review, refactor, or fix code on the way \
 through, and do not improvise a PR body when a later step will write it.\n\n\
 The two skills you need (`/commit`, `/describe_pr`) are handed to you as slash commands \
 already expanded into the conversation. You cannot invoke skills yourself and never need to.",
@@ -230,29 +230,25 @@ pub fn agent_for(stage: Stage) -> Option<SessionAgent> {
     }
 }
 
-/// The stock Ship body — a prompt template with `{{base_branch}}` resolved at
-/// send time. Run in order: commit first, then (only once that succeeds) push,
-/// open the PR against the workstream's target branch, and hand the description
-/// off to the `/describe_pr` skill so every shipped PR follows the repo's
-/// template instead of a free-improvised body. `/describe_pr` edits an existing
-/// PR, so the PR must be opened before it runs. The policy pre-approves push +
-/// `gh`. Naming the base (rather than "the default branch") lets a re-targeted
-/// workstream open its PR against e.g. `develop`. Users can override this body
-/// in Settings → Prompts; the stock text is also surfaced there via the
-/// bootstrap's `promptDefaults`.
+/// The stock Ship body, with `{{base_branch}}` resolved at send time.
 ///
-/// The leading bare `/commit` is load-bearing: claude expands a leading slash
+/// Order matters: commit, then push only once that succeeds, then open the PR
+/// against the workstream's target branch. The description is handed to the
+/// `/describe_pr` skill so every PR follows the repo's template, and since that
+/// skill edits an existing PR, the PR must exist first. The policy pre-approves
+/// push and `gh`. Naming the base explicitly lets a re-targeted workstream open
+/// against e.g. `develop`. Users can override this body in Settings → Prompts.
+///
+/// The leading bare `/commit` is load-bearing. claude expands a leading slash
 /// command client-side, so the turn opens *inside* the skill without the `Skill`
-/// tool (which Ship's policy denies). Phrased as prose ("first run the /commit
-/// skill") the model has to pick a skill itself, and Sonnet reliably misfired
-/// that first call into an unrelated one.
+/// tool, which Ship's policy denies. Phrased as prose the model picks the skill
+/// itself, and Sonnet reliably misfired that first call.
 ///
-/// Only a *leading* slash command expands, so `/describe_pr` cannot ride along
-/// here — it is sent as its own turn ([`SHIP_DESCRIBE_PROMPT`]) once the PR
-/// exists.
+/// Only a *leading* slash command expands, so `/describe_pr` can't ride along.
+/// It goes out as its own turn ([`SHIP_DESCRIBE_PROMPT`]) once the PR exists.
 pub const SHIP_PROMPT_TEMPLATE: &str = "/commit\n\nOnce the commit lands, push the branch to \
 its remote. Only after the commit and push succeed, open a pull request against \
-`{{base_branch}}` with a clear title. Leave the body as a short placeholder — the description \
+`{{base_branch}}` with a clear title. Leave the body as a short placeholder, since the description \
 is written for you in a follow-up step, so do not improvise one.";
 
 /// Ship's second turn: the PR description. Sent on its own so the leading slash
@@ -263,12 +259,12 @@ pub const SHIP_DESCRIBE_PROMPT: &str = "/describe_pr";
 /// The stock Commit body: the `/commit` skill invocation, followed by an
 /// explicit ask-before-push step (the AskUserQuestion tool renders as the app's
 /// question UI). The stage policy leaves `git push` to the normal permission
-/// ask — never silent, never blocked — while `gh` stays denied so a commit
+/// ask, never silent, never blocked, while `gh` stays denied so a commit
 /// never becomes a PR. Overridable in the Prompt library like
 /// [`SHIP_PROMPT_TEMPLATE`].
 pub const COMMIT_PROMPT_DEFAULT: &str = "/commit\n\nAfter the commit lands, use the \
 AskUserQuestion tool to ask whether to also push the branch and its new commits to the \
-remote, and push only if the user confirms. Never open a pull request from here — that's \
+remote, and push only if the user confirms. Never open a pull request from here. That's \
 Ship.";
 
 /// The stock Ship directive with the target branch resolved.
@@ -298,7 +294,7 @@ pub struct PromptVars {
 /// Replace the known `{{variable}}` tokens in a prompt body. Deliberately a
 /// fixed token set (not a general template engine): unknown tokens stay
 /// verbatim so a body that happens to contain `{{...}}` isn't mangled.
-/// Single-pass over the ORIGINAL body — substituted values are never rescanned,
+/// Single-pass over the ORIGINAL body, substituted values are never rescanned,
 /// so token-shaped text inside a value (e.g. a `{{diff}}` hunk touching a file
 /// that itself contains `{{last_commit}}`) survives verbatim. Mirrored by the
 /// frontend `substitutePromptVars` (src/features/prompts/prompts.ts).
@@ -357,7 +353,7 @@ pub struct ActionPromptBodies {
 
 /// Join an action-prompt body with the user's extra input. A single-line
 /// slash-command body keeps skill-argument form (`/commit split it`); anything
-/// multi-line or prose gets the input as a trailing paragraph — the shape every
+/// multi-line or prose gets the input as a trailing paragraph, the shape every
 /// stock body (Commit/Ship/Revise) takes.
 fn action_prompt(body: &str, input: &str) -> String {
     if input.is_empty() {
@@ -371,7 +367,7 @@ fn action_prompt(body: &str, input: &str) -> String {
 
 /// Compose the first prompt for a stage: the matching skill invocation plus the
 /// user's input. General is pure passthrough (plain chat); Ship, Revise and
-/// Commit send their action bodies — the user's override from `bodies` when set
+/// Commit send their action bodies, the user's override from `bodies` when set
 /// (Settings → Prompts), else the stock [`ship_prompt`] / [`REVISE_PROMPT`] /
 /// [`COMMIT_PROMPT_DEFAULT`]. Ship names `base_branch` as the PR target; other
 /// stages ignore it. Attached docs are appended separately via [`append_docs`]
@@ -384,7 +380,7 @@ pub fn compose_prompt(
 ) -> String {
     let input = input.trim();
     match stage {
-        // Plain chat: the input verbatim — no skill prefix.
+        // Plain chat: the input verbatim, no skill prefix.
         Stage::General => input.to_string(),
         Stage::Ship => {
             let body = bodies
@@ -407,7 +403,7 @@ pub fn compose_prompt(
 }
 
 /// Append the `Relevant documents:` block listing `attached_docs` (a no-op when
-/// empty). The single source of truth for that wire format — shared by the
+/// empty). The single source of truth for that wire format, shared by the
 /// session-start [`compose_prompt`] and the follow-up turn path
 /// (`send_user_message`), so a screenshot dropped mid-conversation reaches the
 /// agent the same way one attached at spawn does.
@@ -513,17 +509,17 @@ mod tests {
             compose_prompt(Stage::Ship, "", "develop", &Default::default()).contains("`develop`")
         );
         // The stored base is a git rev; the PR targets the branch, so `origin/`
-        // is stripped — and the frontend `shipPrompt` mirrors this.
+        // is stripped, and the frontend `shipPrompt` mirrors this.
         assert_eq!(ship_prompt("origin/develop"), ship_prompt("develop"));
         assert!(ship_prompt("origin/main").contains("`main`"));
-        // Golden literal — the stock directive users see in the Prompt library
+        // Golden literal, the stock directive users see in the Prompt library
         // and the wire text when no override is set. Committing goes through
         // the /commit skill so Ship's commits follow the same conventions.
         assert_eq!(
             ship_prompt("main"),
             "/commit\n\nOnce the commit lands, push the branch to its remote. Only after the \
 commit and push succeed, open a pull request against `main` with a clear title. Leave the body \
-as a short placeholder — the description is written for you in a follow-up step, so do not \
+as a short placeholder, since the description is written for you in a follow-up step, so do not \
 improvise one."
         );
         // Extra context is appended below the directive.
@@ -558,7 +554,7 @@ improvise one."
         // `allowedTools` is auto-approval rather than restriction.
         let ship = policy_for(Stage::Ship);
         assert!(ship.disallowed_tools.iter().any(|t| t == "Skill"));
-        // Revise shares Ship's tool posture but keeps skills — it isn't driven
+        // Revise shares Ship's tool posture but keeps skills. It isn't driven
         // by slash-command turns.
         let revise = policy_for(Stage::Revise);
         assert!(revise.disallowed_tools.is_empty());
@@ -597,9 +593,9 @@ improvise one."
             ),
             format!("{COMMIT_PROMPT_DEFAULT}\n\nsplit into two commits"),
         );
-        // Push is neither pre-approved nor denied — it must route through the
+        // Push is neither pre-approved nor denied. It must route through the
         // permission ask, so a push always needs explicit user consent. `gh`
-        // stays hard-denied — a commit can never open a PR, that's Ship.
+        // stays hard-denied, a commit can never open a PR, that's Ship.
         let commit = policy_for(Stage::Commit);
         assert!(commit
             .allowed_tools

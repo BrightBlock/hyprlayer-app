@@ -11,7 +11,7 @@ export interface ToastAction {
 
 interface ShowOptions {
   tone?: ToastTone;
-  /** Optional primary action button. A toast with an action is sticky — it
+  /** Optional primary action button. A toast with an action is sticky, it
    *  stays until the user acts on or dismisses it (no countdown auto-dismiss). */
   action?: ToastAction;
   /** Fired when the user dismisses the toast (×). Lets the update toast mark

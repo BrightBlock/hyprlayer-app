@@ -16,7 +16,7 @@ export function AgentsPage() {
   const search = useSearch({ from: "/agents" });
   const navigate = useNavigate({ from: "/agents" });
   const bootstrap = useBootstrap();
-  // Agents is a global surface, so "this project" means the last one selected —
+  // Agents is a global surface, so "this project" means the last one selected,
   // the same signal the Library seeds its scope from.
   const lastProject = useLibraryScope((s) => s.lastProject);
   const tabs = editorTabs(useSignedIn());

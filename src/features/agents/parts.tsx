@@ -7,7 +7,7 @@ import { TextInput } from "@/components/ui";
 export type SegmentedOption<T extends string> = {
   key: T;
   label: ReactNode;
-  /** Renders the label monospaced — used for the project-scoped segment. */
+  /** Renders the label monospaced, used for the project-scoped segment. */
   mono?: boolean;
 };
 
@@ -60,8 +60,8 @@ export function Segmented<T extends string>({
 
 /**
  * A free-text folder field with autocomplete suggestions. `category` (and a
- * plugin's `overlay.folder`) is free text — a user or plugin author can file
- * an agent under a folder that isn't a derived phase — so this is a text
+ * plugin's `overlay.folder`) is free text, a user or plugin author can file
+ * an agent under a folder that isn't a derived phase, so this is a text
  * input offering the known folders as a `<datalist>`, not a closed
  * `DropdownSelect`. Used by both the editor's Folder field and the bulk move
  * dialog's target picker.
@@ -74,7 +74,7 @@ export function FolderCombo({
   placeholder,
   "aria-label": ariaLabel,
 }: {
-  /** Unique per instance — backs the `<datalist>` id the input points at. */
+  /** Unique per instance, backs the `<datalist>` id the input points at. */
   id: string;
   value: string;
   onChange: (value: string) => void;
@@ -211,7 +211,7 @@ export function EditorCard({
   );
 }
 
-/** An inline note — the system-agent explainer and the bypass-permissions
+/** An inline note, the system-agent explainer and the bypass-permissions
  *  warning. `tone` picks the tint. */
 export function Callout({
   tone,

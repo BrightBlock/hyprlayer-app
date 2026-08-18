@@ -2,7 +2,7 @@
 //!
 //! A *project* is a real git repo the app drives worktrees from. It comes from
 //! one of two paths: cloning a hosted repo (a GitHub URL) into
-//! `~/hyprlayer/repos`, or importing an existing repo from disk — which is
+//! `~/hyprlayer/repos`, or importing an existing repo from disk, which is
 //! registered *in place*, never copied, so the app shares the user's working
 //! copy instead of duplicating it. Worktrees are always cut from the project
 //! repo, never from another worktree, so a project never breaks when a worktree
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CoreError, Result};
 use crate::process::Exec;
 
-/// `~/hyprlayer/repos` — sibling of the worktree root; the app-owned canonical
+/// `~/hyprlayer/repos`, sibling of the worktree root; the app-owned canonical
 /// clones live here, one directory per project.
 pub fn default_repos_root() -> PathBuf {
     dirs::home_dir()
@@ -25,7 +25,7 @@ pub fn default_repos_root() -> PathBuf {
         .join("repos")
 }
 
-/// Derive a filesystem-safe project directory name from a clone source — the
+/// Derive a filesystem-safe project directory name from a clone source, the
 /// final path segment with any `.git` suffix and surrounding slashes stripped.
 /// `https://github.com/acme/Cloud-Director.git` → `Cloud-Director`,
 /// `git@github.com:acme/cloud-director.git` → `cloud-director`,
@@ -37,7 +37,7 @@ pub fn repo_name_from_url(source: &str) -> Option<String> {
     // after the final `/` or `:`.
     let last = trimmed.rsplit(['/', ':']).next().unwrap_or(trimmed);
     let name = last.strip_suffix(".git").unwrap_or(last).trim();
-    // Keep it to a single safe path component — never one that could escape
+    // Keep it to a single safe path component, never one that could escape
     // the repos root.
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
         return None;
@@ -85,7 +85,7 @@ pub async fn clone_repo(git: &Path, source: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `git init -b main <path>` — creates the directory if needed, then initialises
+/// `git init -b main <path>`, creates the directory if needed, then initialises
 /// a new empty git repository. Used by onboarding's "create new thoughts repo"
 /// path so users don't have to leave the app.
 pub async fn init_repo(git: &Path, dest: &Path) -> Result<()> {
@@ -172,7 +172,7 @@ pub async fn commit_empty_initial(git: &Path, repo: &Path) -> Result<()> {
 }
 
 /// Returns `true` when `path` is a git repository root (i.e. `<path>/.git`
-/// exists as a directory or a file). Does not verify that it's a valid repo —
+/// exists as a directory or a file). Does not verify that it's a valid repo,
 /// just the cheapest possible "this looks like git" check.
 pub fn is_git_repo(path: &Path) -> bool {
     path.join(".git").exists()
@@ -186,9 +186,9 @@ pub fn is_git_repo(path: &Path) -> bool {
 pub enum RepoPathStatus {
     /// The path doesn't exist or isn't a directory.
     Missing,
-    /// Exists, but isn't a git repo — offer to `git init` it.
+    /// Exists, but isn't a git repo, offer to `git init` it.
     NonGit,
-    /// A bare repository — no working tree to cut a worktree from.
+    /// A bare repository, no working tree to cut a worktree from.
     Bare,
     /// A git repo whose HEAD is unborn (no commits yet).
     Unborn,
@@ -232,16 +232,16 @@ pub struct GithubRepo {
     pub private: bool,
 }
 
-/// The user's GitHub repos — personal AND org-member — most-recently-pushed
+/// The user's GitHub repos, personal AND org-member, most-recently-pushed
 /// first, for the clone dialog's "Recent repos" list. Uses `gh api /user/repos`
 /// rather than `gh repo list`: the latter only returns the user's *personal*
 /// repos, so org repos (e.g. an employer's) never appear. Errors if gh is
-/// missing/unauthenticated — the caller degrades that to an empty list, since
+/// missing/unauthenticated, the caller degrades that to an empty list, since
 /// recents are a convenience atop the always-present URL field.
 pub async fn github_repos(gh: &Path, limit: u32) -> Result<Vec<GithubRepo>> {
     // `/user/repos` defaults to affiliation=owner,collaborator,organization_member,
     // so it spans every repo the user can reach, across personal and orgs.
-    // Sort on `pushed`, the same clock the UI renders as each row's age — with
+    // Sort on `pushed`, the same clock the UI renders as each row's age, with
     // `updated` a description edit floats a long-stale repo to the top.
     let endpoint = format!("user/repos?per_page={}&sort=pushed", limit.min(100));
     let out = Exec::new(gh)
@@ -345,13 +345,13 @@ mod tests {
 
         let r = git2::Repository::open(&repo).unwrap();
         let head = r.head().unwrap();
-        // The chosen branch name is what HEAD points at — and it's *born* (has a
+        // The chosen branch name is what HEAD points at, and it's *born* (has a
         // commit), so a worktree can be cut from it immediately.
         assert!(head.is_branch());
         assert_eq!(head.shorthand(), Some("trunk"));
         let commit = head.peel_to_commit().unwrap();
         assert!(commit.parents().next().is_none(), "it's the initial commit");
-        // The initial commit is empty — we didn't stage the user's files.
+        // The initial commit is empty, we didn't stage the user's files.
         assert_eq!(commit.tree().unwrap().len(), 0, "initial commit is empty");
 
         // The pre-existing file is present but untracked, left for the user to
@@ -419,7 +419,7 @@ mod tests {
         let repo = dir.path().join("proj");
         std::fs::create_dir(&repo).unwrap();
         // A fresh `git init` with no commits → Unborn (has `.git`, but nothing to
-        // cut a worktree from — the exact case `is_git_repo` misses).
+        // cut a worktree from, the exact case `is_git_repo` misses).
         sh(&repo, &["init", "-b", "main"]);
         assert_eq!(classify_repo_path(&repo), RepoPathStatus::Unborn);
 
@@ -435,7 +435,7 @@ mod tests {
         let bare = dir.path().join("bare.git");
         std::fs::create_dir(&bare).unwrap();
         // A bare repo has no child `.git`, so the old `.git`-existence check read
-        // it as a plain folder and would `git init` inside it — corrupting it.
+        // it as a plain folder and would `git init` inside it, corrupting it.
         sh(&bare, &["init", "--bare", "-b", "main"]);
         assert!(!is_git_repo(&bare), "bare repo has no child .git");
         assert_eq!(classify_repo_path(&bare), RepoPathStatus::Bare);

@@ -1,11 +1,11 @@
 //! End-to-end driver smoke test against the REAL `codex` binary. Ignored by
-//! default — needs a logged-in codex and makes a (tiny) billed API call. Run:
+//! default, needs a logged-in codex and makes a (tiny) billed API call. Run:
 //!   cargo test -p hyprlayer-core --test codex_driver_smoke -- --ignored --nocapture
 //!
 //! This is the one place the app-server's actual wire shapes are exercised
 //! (`thread/start` params, `turn/start` input items, the notification names the
 //! translator switches on). The unit tests in `codex::protocol` pin the
-//! translation; this pins that Codex really speaks what they assume — so run it
+//! translation; this pins that Codex really speaks what they assume, so run it
 //! whenever `BinaryKind::Codex`'s version floor moves.
 
 use std::time::Duration;
@@ -15,7 +15,7 @@ use hyprlayer_core::codex::{CodexDriver, SpawnConfig};
 
 fn spawn_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> SpawnConfig {
     // Don't leave test threads in the user's ~/.codex/sessions history. Note this
-    // is the *titling* posture, not what a real session uses — see
+    // is the *titling* posture, not what a real session uses, see
     // `persisted_config` for the cases that need a materialized thread.
     SpawnConfig {
         ephemeral: true,
@@ -44,7 +44,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     let codex = which::which("codex").expect("codex on PATH");
     // Read-only: a summarization turn must not be able to touch the disk. An
     // explicit model + effort also pins that `thread/start`'s `model` and
-    // `turn/start`'s `effort` are still spelled the way the driver sends them —
+    // `turn/start`'s `effort` are still spelled the way the driver sends them,
     // a rejected value fails the turn rather than silently downgrading.
     let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
         model: Some("gpt-5.4".into()),
@@ -55,7 +55,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     .expect("spawn codex app-server");
 
     // `Init` is emitted by `spawn` itself (from the thread/start reply), so it's
-    // already waiting on the channel — the receiver subscribes before the reader
+    // already waiting on the channel, the receiver subscribes before the reader
     // task can broadcast.
     let thread_id = match tokio::time::timeout(Duration::from_secs(5), events.recv()).await {
         Ok(Ok(SessionEvent::Init {
@@ -67,7 +67,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
                 !claude_session_id.is_empty(),
                 "codex should mint a thread id"
             );
-            // The thread must actually be on the model we asked for — this is what
+            // The thread must actually be on the model we asked for. This is what
             // the composer's picker promises.
             assert_eq!(model.as_deref(), Some("gpt-5.4"));
             claude_session_id
@@ -114,7 +114,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     assert!(turn_done, "the turn should have completed");
     assert!(
         streamed,
-        "agentMessage deltas should have streamed — if this fails the \
+        "agentMessage deltas should have streamed. If this fails the \
          `item/agentMessage/delta` notification was renamed"
     );
     assert!(
@@ -195,7 +195,7 @@ async fn tool_calls_and_usage_reach_the_transcript() {
             Ok(Ok(SessionEvent::Usage { context_tokens })) => {
                 saw_usage = true;
                 // The numerator must be this turn's fill, never the cumulative
-                // total — that would run the meter past its denominator.
+                // total, that would run the meter past its denominator.
                 assert!(
                     !saw_window || context_tokens > 0,
                     "usage should report a real reading"
@@ -233,7 +233,7 @@ async fn tool_calls_and_usage_reach_the_transcript() {
 ///
 /// Runs on a PERSISTED thread on purpose: Codex refuses to roll back an ephemeral
 /// one ("thread rollback requires persisted thread history"). Real sessions are
-/// persisted, so this matches production; a refusal is non-fatal anyway — the
+/// persisted, so this matches production; a refusal is non-fatal anyway, the
 /// driver returns Err and `rewind_session` drops to its log-only path.
 #[tokio::test]
 #[ignore = "requires a logged-in codex; makes real API calls"]
@@ -282,7 +282,7 @@ async fn rewind_to_ordinal_truncates_model_memory() {
 /// request on an unrecognized `approvalPolicy`/`sandbox` (this caught a real bug:
 /// `acceptEdits` mapped to `on-failure`, which is not an `AskForApproval`
 /// variant, so that mode failed with "unknown variant" instead of degrading).
-/// Cheap — starting a thread makes no model call.
+/// Cheap, starting a thread makes no model call.
 #[tokio::test]
 #[ignore = "requires a logged-in codex; starts threads but makes no model call"]
 async fn every_permission_mode_starts_a_thread() {
@@ -305,7 +305,7 @@ async fn every_permission_mode_starts_a_thread() {
     }
 }
 
-/// The probe the Codex settings tab runs. Must answer against a real install —
+/// The probe the Codex settings tab runs. Must answer against a real install,
 /// a signed-out one included, since "not signed in" is a state the tab renders,
 /// not an error it surfaces.
 #[tokio::test]
@@ -321,7 +321,7 @@ async fn probes_report_account_and_models() {
     println!("{} models", probe.models.len());
     for m in &probe.models {
         println!(
-            "  {} — {} (efforts: {:?})",
+            "  {}: {} (efforts: {:?})",
             m.id, m.display_name, m.supported_efforts
         );
     }
@@ -343,8 +343,8 @@ async fn probes_report_account_and_models() {
 /// The regression this probe design exists for: the settings tab used to run
 /// `account/read` and `model/list` as two SEPARATE app-server spawns, fired
 /// concurrently on mount. Two servers starting at once interfere, and the loser
-/// answers with a benign-looking default — a null account or an empty model list
-/// — so the tab showed "not signed in" or "no models" for a working install,
+/// answers with a benign-looking default, a null account or an empty model list,
+/// so the tab showed "not signed in" or "no models" for a working install,
 /// then cached it. Hammering the combined probe must never produce that.
 #[tokio::test]
 #[ignore = "requires a signed-in codex; spawns several app-servers"]

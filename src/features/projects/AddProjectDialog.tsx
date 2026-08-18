@@ -34,7 +34,7 @@ import { RepoSourcePicker, type RepoSource } from "./RepoSourcePicker";
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** Seed the clone URL when opening — how a repo picked in Discover enters
+  /** Seed the clone URL when opening, how a repo picked in Discover enters
    *  this wizard instead of being cloned directly. */
   initialUrl?: string | null;
   /** The freshly added project, so the caller can navigate to it. */
@@ -51,7 +51,7 @@ const NEW_PROFILE = "__new";
 
 /** Mirrors the CLI's `--directory` sanitization for the auto-folder preview:
  *  last path segment, `.git` stripped, unsafe chars → `_`
- *  (`brightblock.ai` → `brightblock_ai`). Advisory — the CLI recomputes. */
+ *  (`brightblock.ai` → `brightblock_ai`). Advisory, the CLI recomputes. */
 function autoFolderName(source: RepoSource): string {
   const raw = source.mode === "clone" ? source.url : source.path;
   const seg = basename(
@@ -75,14 +75,14 @@ function repoLabel(source: RepoSource): string {
 }
 
 /**
- * Add a project in two steps. Step 1 — the repository: clone a hosted repo
+ * Add a project in two steps. Step 1, the repository: clone a hosted repo
  * into the repos root, or import a local repo from disk (registered in place,
- * never copied, so worktrees branch off the user's existing repo). Step 2 —
+ * never copied, so worktrees branch off the user's existing repo). Step 2,
  * thoughts: pick the profile and folder the repo's research/plans/notes map
  * into, with a live preview of the resulting path.
  *
  * A non-git folder can skip both: "Add as local folder" registers the
- * directory as-is and submits from step 1 — no git, no thoughts, no CLI.
+ * directory as-is and submits from step 1, no git, no thoughts, no CLI.
  */
 export function AddProjectDialog(props: Props) {
   // Unmount when closed: every piece of wizard state resets for free, so
@@ -105,10 +105,10 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const [user, setUser] = useState("");
   const [initBranch, setInitBranch] = useState("main");
   // Only consulted for a non-git folder. Off (the default) adds it as a plain
-  // folder — the non-mutating choice; git init is the opt-in.
+  // folder, the non-mutating choice; git init is the opt-in.
   const [setUpGit, setSetUpGit] = useState(false);
 
-  // Step 2 — where the repo maps into thoughts.
+  // Step 2, where the repo maps into thoughts.
   const [profileName, setProfileName] = useState<string | null>(null);
   const [folder, setFolder] = useState(AUTO_FOLDER);
   const [customFolder, setCustomFolder] = useState("");
@@ -179,7 +179,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const selectedProfile = profileList.find((p) => p.name === profileName) ?? profileList[0];
   const folders = selectedProfile?.folders ?? [];
   const repoName = autoFolderName(source);
-  // A stale pick (a folder from another repo/profile) self-heals to Auto —
+  // A stale pick (a folder from another repo/profile) self-heals to Auto,
   // derived, so no reset bookkeeping when the URL or profile changes.
   const folderChoice =
     folder === AUTO_FOLDER || folder === NEW_FOLDER || folders.includes(folder)
@@ -225,7 +225,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const step1Ok =
     Boolean(primaryInput) &&
     // Whether a disk path submits as folder or repo depends on the probe, so
-    // wait for it — a pre-probe submit would silently git-init a plain folder.
+    // wait for it, a pre-probe submit would silently git-init a plain folder.
     (source.mode !== "disk" || status !== undefined || pathInfo.isError) &&
     // A folder project writes no config, so it needs no username.
     (!configMissing || asFolder || Boolean(user.trim())) &&
@@ -319,7 +319,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
       });
       if (typeof picked === "string") setNpRepo(picked);
     } catch {
-      // Native picker unavailable or dismissed — the field stays hand-editable.
+      // Native picker unavailable or dismissed, the field stays hand-editable.
     }
   };
 
@@ -345,7 +345,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
         className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
-          // A folder has no thoughts step — step 1 IS the whole dialog.
+          // A folder has no thoughts step, step 1 IS the whole dialog.
           if (step === 1 && !asFolder) {
             if (step1Ok) setStep(2);
           } else {
@@ -367,12 +367,12 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                 needsInit ? (
                   <p className="mt-1 text-xs text-ink-dim">
                     {asFolder
-                      ? "Added as a plain folder — no git, no thoughts."
-                      : "Not a git repository — one will be initialized here."}
+                      ? "Added as a plain folder. No git, no thoughts."
+                      : "Not a git repository. One will be initialized here."}
                   </p>
                 ) : isBare ? (
                   <p className="mt-1 text-xs text-bad">
-                    This is a bare repository — choose a normal working copy instead.
+                    This is a bare repository. Choose a normal working copy instead.
                   </p>
                 ) : undefined
               }
@@ -506,7 +506,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                   />
                   {selectedProfile?.foldersError && (
                     <p className="mt-1 text-xs text-warn">
-                      Couldn't read existing folders — {selectedProfile.foldersError}
+                      Couldn't read existing folders: {selectedProfile.foldersError}
                     </p>
                   )}
                 </Field>

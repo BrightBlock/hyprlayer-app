@@ -89,7 +89,7 @@ impl CoreError {
                 Some("Update the Hyprlayer app to a newer version.".into())
             }
             CoreError::ConfigNeedsMigration { .. } => Some(
-                "Run any hyprlayer command in a terminal (e.g. `hyprlayer storage info`) to upgrade the config file — the app picks it up automatically.".into(),
+                "Run any hyprlayer command in a terminal (e.g. `hyprlayer storage info`) to upgrade the config file. The app picks it up on the next launch.".into(),
             ),
             CoreError::BinaryMissing { name } => Some(match name.as_str() {
                 "hyprlayer" => {

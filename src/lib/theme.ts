@@ -4,8 +4,8 @@
  * A theme is just a set of CSS variables (defined in index.css under either
  * `@theme` for the default Dark+ palette or an `html.<name>` block). This
  * module owns the *choice* of theme: it persists the user's selection and
- * toggles the matching class on <html> so the variables — and therefore every
- * `bg-surface` / `text-ink` / `border-edge` utility — re-resolve.
+ * toggles the matching class on <html> so the variables, and therefore every
+ * `bg-surface` / `text-ink` / `border-edge` utility, re-resolve.
  */
 
 import { create } from "zustand";
@@ -32,7 +32,7 @@ export const THEMES: ReadonlyArray<{ id: ThemeMode; label: string }> = [
 // adding a theme is a one-line change.
 const VALID_MODES: ReadonlyArray<ThemeMode> = THEMES.map((t) => t.id);
 /** Palettes that need a class on <html>. "system" resolves elsewhere and "dark"
- *  is the bare `@theme` default (no class) — selecting it just clears the rest. */
+ *  is the bare `@theme` default (no class), selecting it just clears the rest. */
 const THEME_CLASSES = VALID_MODES.filter(
   (id): id is ResolvedTheme => id !== "system" && id !== "dark",
 );

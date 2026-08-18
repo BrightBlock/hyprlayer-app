@@ -83,11 +83,11 @@ describe("columnOf", () => {
     expect(columnOf(makeView({ stage: "unknown_future_stage" as Stage }))).toBe("backlog");
   });
 
-  it("prNumber overrides stage — non-ship stage lands in ship", () => {
+  it("prNumber overrides stage, non-ship stage lands in ship", () => {
     expect(columnOf(makeView({ stage: "plan", prNumber: 42 }))).toBe("ship");
   });
 
-  it("prNumber overrides stage — general/backlog stage lands in ship", () => {
+  it("prNumber overrides stage, general/backlog stage lands in ship", () => {
     expect(columnOf(makeView({ stage: "general", prNumber: 1 }))).toBe("ship");
   });
 

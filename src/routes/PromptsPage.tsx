@@ -5,7 +5,7 @@ import { PromptLibrary } from "@/features/prompts/PromptLibrary";
 import { useBootstrap } from "@/lib/queries";
 
 /**
- * The Prompt library route (`/prompts`), opened from the nav rail's ⚡ entry —
+ * The Prompt library route (`/prompts`), opened from the nav rail's ⚡ entry,
  * a master–detail view like the Library: the prompts panel beside the selected
  * prompt's editor. The selected prompt id lives in the URL (`?prompt=`) so a
  * view is shareable/restorable; the default selection (Commit) keeps a bare

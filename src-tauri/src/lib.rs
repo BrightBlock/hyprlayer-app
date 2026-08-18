@@ -196,7 +196,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
 pub fn run() {
     let builder = specta_builder();
 
-    // Dev convenience only — cargo test regenerates bindings authoritatively.
+    // Dev convenience only, cargo test regenerates bindings authoritatively.
     // Anchored to the crate dir (not cwd: a Finder-launched debug bundle runs
     // with cwd=/) and non-fatal so a read-only checkout can't kill startup.
     #[cfg(debug_assertions)]
@@ -221,8 +221,8 @@ pub fn run() {
         // size as raw physical pixels, so the window reopens at the wrong size
         // across a DPI/monitor change. We still never track FULLSCREEN (no
         // full-screen boot flash), VISIBLE (the window starts hidden off-macOS and
-        // the frontend reveals it after first paint — see main.tsx), or
-        // DECORATIONS (config owns that — frameless off-macOS).
+        // the frontend reveals it after first paint, see main.tsx), or
+        // DECORATIONS (config owns that, frameless off-macOS).
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(
@@ -299,7 +299,7 @@ pub fn run() {
                 .unwrap_or_else(hyprlayer_core::worktree::default_worktree_root);
 
             // Reap any orphan claude PIDs a previous crash left in the ledger,
-            // then clear it. (We log rather than blind-kill stale PIDs — a PID
+            // then clear it. (We log rather than blind-kill stale PIDs, a PID
             // may have been reused; verified-kill is a follow-up.)
             if let Ok(orphans) = db.list_orphans() {
                 if !orphans.is_empty() {
@@ -338,8 +338,8 @@ pub fn run() {
                         focus_changed.notify_waiters();
                     }
                     // Closing the only window IS quitting (macOS red light,
-                    // Windows ✕ / Alt+F4). Cancel it unconditionally — whether
-                    // to prompt needs an await we can't do on the UI thread —
+                    // Windows ✕ / Alt+F4). Cancel it unconditionally, whether
+                    // to prompt needs an await we can't do on the UI thread,
                     // and let `request_quit` either exit or raise the dialog.
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
@@ -370,7 +370,7 @@ pub fn run() {
 
             // 1. Fold the login-shell PATH in (GUI apps start with launchd's
             //    bare PATH), THEN nudge the CLI to migrate a pre-v4 config,
-            //    THEN build the thoughts index — chained, so each step sees
+            //    THEN build the thoughts index, chained, so each step sees
             //    the previous one's effects and never races it.
             let handle = app.handle().clone();
             let binaries_bg = binaries.clone();
@@ -384,7 +384,7 @@ pub fn run() {
             });
 
             // 2. Watch the config file for changes (the CLI owns writes); a
-            //    cheap (mtime, len) poll is plenty at this cadence — length
+            //    cheap (mtime, len) poll is plenty at this cadence, length
             //    catches same-tick rewrites on coarse-mtime filesystems.
             //    Config changes can move the thoughts roots → rebuild.
             let handle = app.handle().clone();
@@ -441,7 +441,7 @@ pub fn run() {
             // leaves claude/codex/opencode running indefinitely (observed: an
             // `opencode serve` still alive 14 days after its app died); Windows
             // has `spawn_supervised`'s job as a second line. Both calls are sync
-            // and best-effort — this runs on the exit path, so it must not block.
+            // and best-effort. This runs on the exit path, so it must not block.
             // `Exit` as well as `ExitRequested`: not every quit path raises the
             // latter, and a second pass over a drained registry is a no-op.
             if matches!(
@@ -452,8 +452,8 @@ pub fn run() {
                 let state = app.state::<AppState>();
                 state.terminals.kill_all_blocking();
                 state.sessions.kill_all_blocking();
-                // The shared `opencode serve` isn't in the session registry — it's
-                // held for the app's lifetime — so it needs its own nudge.
+                // The shared `opencode serve` isn't in the session registry, it's
+                // held for the app's lifetime, so it needs its own nudge.
                 state.opencode.kill_blocking();
             }
         });
@@ -470,7 +470,7 @@ fn request_quit(handle: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let confirm = match handle.try_state::<AppState>() {
             Some(state) => state.settings.get().await.quit.confirm,
-            // Setup hasn't finished — there's nothing running to lose yet.
+            // Setup hasn't finished, there's nothing running to lose yet.
             None => false,
         };
         // Nothing to ask, or nobody to ask it: exit straight away. (A missing
@@ -490,13 +490,13 @@ fn request_quit(handle: &tauri::AppHandle) {
     });
 }
 
-/// The macOS application menu: tauri's standard default, faithfully — clipboard
-/// (Edit), Hide, fullscreen, minimize all unchanged — but with the "Close
+/// The macOS application menu: tauri's standard default, faithfully, clipboard
+/// (Edit), Hide, fullscreen, minimize all unchanged, but with the "Close
 /// Window" item dropped so ⌘W is inert (see the call site for why). The default
 /// binds Close Window in both a File submenu and the Window submenu, so both
 /// drop it: the File submenu keeps only Save (⌘S), and the Window submenu keeps
 /// only Minimize/Zoom. Quit (⌘Q) keeps its usual place but is a custom item so
-/// it can be confirmed — see `quit` below.
+/// it can be confirmed, see `quit` below.
 #[cfg(target_os = "macos")]
 fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
@@ -532,7 +532,7 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         tauri::menu::MenuItem::with_id(handle, "save-file", "Save", true, Some("CmdOrCtrl+S"))?;
     // Quit (⌘Q) as a custom item, NOT `.quit()`: the predefined one sends
     // `terminate:` straight to AppKit, which nothing on the Rust side can
-    // cancel — and the confirm-on-quit prompt has to be able to cancel it.
+    // cancel, and the confirm-on-quit prompt has to be able to cancel it.
     // `request_quit` decides; see the menu-event relay in `run`.
     let quit = tauri::menu::MenuItem::with_id(
         handle,
@@ -556,7 +556,7 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         .item(&quit)
         .build()?;
 
-    // No Close Window here — leaving ⌘W to the frontend is why this menu is custom
+    // No Close Window here, leaving ⌘W to the frontend is why this menu is custom
     // (see call site).
     let file_menu = SubmenuBuilder::new(handle, "File")
         .item(&save_file)
@@ -580,7 +580,7 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         .maximize()
         .build()?;
 
-    // Empty on macOS by default — the OS injects its own Help search field.
+    // Empty on macOS by default, the OS injects its own Help search field.
     let help_menu = SubmenuBuilder::new(handle, "Help").build()?;
 
     MenuBuilder::new(handle)
@@ -597,8 +597,8 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
 
 /// (Re)build the thoughts index and its filesystem watcher from the current
 /// config. Called at startup, after config changes (roots may move), and
-/// after adding a project. Replacing the stored WatchHandle drops — and
-/// thereby stops — the previous watcher.
+/// after adding a project. Replacing the stored WatchHandle drops, and
+/// thereby stops, the previous watcher.
 pub(crate) async fn rebuild_thoughts_index(app: tauri::AppHandle) {
     use tauri::Manager;
 
@@ -644,7 +644,7 @@ pub(crate) async fn rebuild_thoughts_index(app: tauri::AppHandle) {
             let _ = payload.emit(&emit_handle);
         });
         // Arming walks the roots to plan the watch set (skipping `.git`), so it
-        // belongs off the async workers for the same reason `full_scan` does —
+        // belongs off the async workers for the same reason `full_scan` does,
         // a cold or network-mounted root would stall unrelated work.
         let watch_index = state.index.clone();
         let armed = tauri::async_runtime::spawn_blocking(move || {
@@ -673,8 +673,8 @@ pub(crate) async fn rebuild_thoughts_index(app: tauri::AppHandle) {
 }
 
 /// If a direct config read fails because the file is pre-v4, run one cheap
-/// `hyprlayer storage info` (cwd irrelevant) — the CLI's load path migrates
-/// and rewrites the file — then re-read and tell the UI. No-op on v4 configs,
+/// `hyprlayer storage info` (cwd irrelevant), the CLI's load path migrates
+/// and rewrites the file, then re-read and tell the UI. No-op on v4 configs,
 /// missing configs, or when the hyprlayer binary can't be found (logged).
 pub(crate) async fn migrate_config_if_needed(
     binaries: &BinaryResolver,
@@ -721,7 +721,7 @@ mod tests {
             .expect("bindings must export cleanly");
     }
 
-    /// RFC 7386 merge — what Tauri applies to `tauri.<platform>.conf.json`.
+    /// RFC 7386 merge, what Tauri applies to `tauri.<platform>.conf.json`.
     fn merge(base: &mut Value, overlay: &Value) {
         match (base, overlay) {
             (Value::Object(base), Value::Object(overlay)) => {
@@ -734,7 +734,7 @@ mod tests {
     }
 
     /// The platform overlays only ever load on their own platform, so a typo in
-    /// one is otherwise invisible until a release build on that box — and
+    /// one is otherwise invisible until a release build on that box, and
     /// `DebConfig`/`RpmConfig` are `deny_unknown_fields`, so it would be fatal
     /// there. Parse all three here instead, on whatever host runs the tests.
     #[test]
@@ -768,7 +768,7 @@ mod tests {
 
     /// A tiling WM (Hyprland/sway) ignores GTK's minimum-size request but GTK still
     /// allocates the webview at it, so the page renders at `minWidth` and is scaled
-    /// into the smaller surface — a horizontal squeeze with no media query able to
+    /// into the smaller surface, a horizontal squeeze with no media query able to
     /// fire. (The value really does reach GTK: tauri-runtime-wry copies
     /// `WindowConfig.min_width` into tao's size constraints, and tao's Linux backend
     /// applies them via `gtk_window_set_geometry_hints`.) Linux therefore floors far

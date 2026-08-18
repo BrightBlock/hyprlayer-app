@@ -1,5 +1,5 @@
 //! End-to-end driver smoke test against the REAL `claude` binary. Ignored by
-//! default — needs a logged-in claude and makes a (tiny) billed API call. Run:
+//! default, needs a logged-in claude and makes a (tiny) billed API call. Run:
 //!   cargo test -p hyprlayer-core --test claude_driver_smoke -- --ignored --nocapture
 
 use std::time::Duration;
@@ -234,14 +234,14 @@ fn spawn_haiku(
 /// not the live process's replay echoes, so a resumed session can still
 /// truly-rewind its earlier turns. Every app restart resumes sessions, so before
 /// this fix a rewind of any pre-restart turn silently fell back to a log-only prune
-/// ("the agent still remembers the removed turns") — now the model actually forgets.
+/// ("the agent still remembers the removed turns"), now the model actually forgets.
 #[tokio::test]
 #[ignore = "requires a logged-in claude; makes real API calls"]
 async fn rewind_across_resume_truncates_pre_resume_turns() {
     let cwd = std::env::temp_dir();
     let session_id = uuid::Uuid::new_v4().to_string();
 
-    // Generation 1: three turns, then kill the process — i.e. an app restart.
+    // Generation 1: three turns, then kill the process, i.e. an app restart.
     {
         let (driver, mut events) = spawn_haiku(&cwd, &session_id, false);
         run_turn(
@@ -276,14 +276,14 @@ async fn rewind_across_resume_truncates_pre_resume_turns() {
     }
 
     // Generation 2: `--resume` the SAME session id. One neutral turn first, exactly
-    // as the app does — a resumed session is re-attached and interacted with (so
+    // as the app does, a resumed session is re-attached and interacted with (so
     // claude has fully loaded `z`) well before the user clicks rewind. (Rewinding in
     // the very first millisecond after `--resume`, mid-load, is racy on claude's
     // side and never happens in the human-driven UI.)
     let (driver, mut events) = spawn_haiku(&cwd, &session_id, true);
     run_turn(&driver, &mut events, "Reply READY.").await;
 
-    // Rewind to turn 2 — turns 2 and 3 are from the PREVIOUS generation, whose uuids
+    // Rewind to turn 2, turns 2 and 3 are from the PREVIOUS generation, whose uuids
     // this process never saw echoed; the driver reads them from claude's transcript.
     driver
         .rewind_to_ordinal(2)

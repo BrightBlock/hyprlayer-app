@@ -4,7 +4,7 @@
 //! The watcher only polls *active* workstreams, so records whose workstream was
 //! archived long ago can never self-heal. This walks a `prs/` directory and runs
 //! the same `pr_record::promote_merged_record` the watcher calls, for exactly
-//! the PR numbers fed on stdin (one per line — the caller decides which PRs are
+//! the PR numbers fed on stdin (one per line, the caller decides which PRs are
 //! merged; this does not talk to GitHub).
 //!
 //! Usage:

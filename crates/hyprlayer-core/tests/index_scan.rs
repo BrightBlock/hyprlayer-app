@@ -200,7 +200,7 @@ fn query_filters_combine_with_and() {
         ..Default::default()
     };
     // malformed (title "malformed"), pr_description ("pr description"),
-    // stray ("stray") — title sort ascending.
+    // stray ("stray"), title sort ascending.
     assert_eq!(
         rel_paths(&index, &q),
         vec![DOC_MALFORMED, DOC_NO_FM, DOC_STRAY]
@@ -321,7 +321,7 @@ fn file_removed_between_query_passes_drops_out_of_text_search_only() {
     assert!(all.contains(&DOC_CACHE_RESEARCH.to_string()), "{all:?}");
 }
 
-/// No frontmatter block at all means `body_offset_bytes` returns 0 — the
+/// No frontmatter block at all means `body_offset_bytes` returns 0, the
 /// whole file is searched as body, matching `extract_block`'s degradation.
 #[test]
 fn doc_with_no_frontmatter_is_body_searchable_over_whole_content() {
@@ -466,7 +466,7 @@ fn upsert_hash_short_circuit_and_content_change() {
 }
 
 /// A bare mtime touch (`git checkout`, `hyprlayer thoughts sync` rewriting
-/// identical bytes) must not be reported as a change — but the stored
+/// identical bytes) must not be reported as a change, but the stored
 /// `mtime_ms` is still refreshed silently, so mtime-sorted lists and the
 /// Dashboard's most-recent window stay accurate.
 #[test]
@@ -517,7 +517,7 @@ fn body_edit_that_changes_size_reindexes() {
 /// Accepted divergence 2: a body edit that lands *past* the scan-time
 /// `FRONTMATTER_READ_CAP` prefix and preserves total file size leaves the
 /// (frontmatter-prefix-hash + size) basis unchanged, so it is treated the
-/// same as a bare mtime touch — refreshed silently, no `Some(id)`.
+/// same as a bare mtime touch, refreshed silently, no `Some(id)`.
 #[test]
 fn body_edit_past_frontmatter_cap_that_preserves_size_refreshes_silently() {
     let (_tmp, root, index) = scanned();
@@ -557,7 +557,7 @@ fn body_edit_past_frontmatter_cap_that_preserves_size_refreshes_silently() {
 /// Accepted divergence 3, scan-time half: a frontmatter block itself larger
 /// than `FRONTMATTER_READ_CAP` never shows its closing delimiter within the
 /// scan-time prefix read, so `frontmatter::parse` degrades to
-/// `Frontmatter::default()` + path fallbacks + a warning — the doc still
+/// `Frontmatter::default()` + path fallbacks + a warning, the doc still
 /// indexes (with `size_bytes` from the real, uncapped stat) rather than the
 /// scan erroring.
 #[test]

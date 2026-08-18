@@ -10,7 +10,7 @@ import { permissionModeOption } from "./permissions";
 
 /**
  * The agent harnesses a session can run on. `key` is typed by the bindings'
- * [`Harness`] union (generated from core's enum) — what `start_stage_session`
+ * [`Harness`] union (generated from core's enum), what `start_stage_session`
  * expects in `opts.harness` and what the session row stores.
  */
 export type HarnessOption = { key: Harness; label: string };
@@ -25,7 +25,7 @@ export const DEFAULT_HARNESS_KEY = "claude";
 
 /** The harnesses selectable as the app-wide default (Settings → General). Unlike
  *  [`HARNESSES`], this lists Ollama as its own choice even though it runs on the
- *  OpenCode harness (mapped by [`effectiveHarnessKey`]) — so users pick it the way
+ *  OpenCode harness (mapped by [`effectiveHarnessKey`]), so users pick it the way
  *  they think of it. */
 export const DEFAULT_HARNESS_OPTIONS: { key: string; label: string }[] = [
   { key: "claude", label: "Claude Code" },
@@ -62,7 +62,7 @@ export type ActionAgentDefaults = {
 };
 
 /** Resolve the Commit/Ship/Revise agents' defaults from settings: the default
- *  harness (Claude / Codex / OpenCode / Ollama), and — within it — the cheaper
+ *  harness (Claude / Codex / OpenCode / Ollama), and, within it, the cheaper
  *  model + reasoning configured on that harness's Settings tab. Each harness owns
  *  its own commit model, so switching the default never leaves an unrunnable model
  *  behind; each falls back sensibly (Sonnet/medium for Claude, the harness's
@@ -90,7 +90,7 @@ export function actionAgentDefaults(
     const codex = providers?.codex;
     const model =
       codex?.commitModel ?? codex?.defaultModel ?? codex?.selectedModels?.[0] ?? null;
-    // Codex's effort ladder, not Claude's — `medium` is the shared middle tier.
+    // Codex's effort ladder, not Claude's, `medium` is the shared middle tier.
     return { harness: "codex", model, effort: codex?.commitEffort ?? "medium" };
   }
   const claude = providers?.claude;
@@ -101,8 +101,8 @@ export function actionAgentDefaults(
   };
 }
 
-/** A model that can actually launch: the pick itself, or — when org policy has
- *  disabled it — the catalog's default row. These are the headless launch paths
+/** A model that can actually launch: the pick itself, or, when org policy has
+ *  disabled it, the catalog's default row. These are the headless launch paths
  *  (Commit/Ship, prompt runs); unlike the composer there is nowhere to show
  *  "disabled by org policy", and a substituted default beats a crashed agent. */
 function launchableModel(model: ModelOption, catalog: readonly ModelOption[]): ModelOption {
@@ -112,7 +112,7 @@ function launchableModel(model: ModelOption, catalog: readonly ModelOption[]): M
 /** The `startSession` model/effort args for resolved [`ActionAgentDefaults`]:
  *  Claude translates its model KEY to the `--model` flag (Sonnet's key and flag
  *  coincide; `"opus"` → the null default; a custom id → itself) and clamps the
- *  effort to what that model accepts — pass the live catalog so the clamp knows
+ *  effort to what that model accepts, pass the live catalog so the clamp knows
  *  (a Haiku commit model must not get `--effort medium`); Codex and OpenCode
  *  pass their model id through as-is, and only OpenCode drops effort. */
 export function actionLaunchArgs(
@@ -136,7 +136,7 @@ export function actionLaunchArgs(
 
 /** A shell tab's persisted composer picks, when starting a session on its
  *  behalf from outside SessionChat (e.g. running a prompt into an unstarted
- *  tab). All optional — absent fields fall back to the settings defaults. */
+ *  tab). All optional, absent fields fall back to the settings defaults. */
 export type ShellLaunchPicks = {
   harness?: string;
   model?: string;
@@ -152,11 +152,11 @@ export type ShellLaunchPicks = {
  *  picks first, then the configured defaults (Settings → Harnesses, Claude's
  *  `defaultPlanMode`), then the built-ins. The prompt-run path uses this so a
  *  prompt fired at an unstarted tab launches on the same config pressing Enter
- *  there would — including the permission mode. */
+ *  there would, including the permission mode. */
 export function newChatLaunchArgs(
   settings: AppSettings | null | undefined,
   shell: ShellLaunchPicks | null | undefined,
-  /** The live Claude catalog when the caller has one — resolves stored keys to
+  /** The live Claude catalog when the caller has one, resolves stored keys to
    *  live rows and clamps effort the same way the composer would. */
   catalog: readonly ModelOption[] = MODELS,
 ): {
@@ -189,7 +189,7 @@ export function newChatLaunchArgs(
     // Codex maps our permission mode onto its approval-policy/sandbox pair, so
     // the composer's picker applies here exactly as it does for Claude.
     // The model's own supported tiers aren't known here (that needs the live
-    // model list), so this resolves against the common core — enough to reject a
+    // model list), so this resolves against the common core, enough to reject a
     // Claude-only level carried over from another harness.
     return {
       harness: "codex",
@@ -241,7 +241,7 @@ export function opencodeModelLabel(
 }
 
 /**
- * The underlying provider behind a model pick — what the upstream API endpoint is
+ * The underlying provider behind a model pick, what the upstream API endpoint is
  * keyed on. OpenCode model ids are `provider/model…`, so the provider is the first
  * segment (`openrouter`, `opencode`, `ollama`, …); every Claude model shares the
  * single `claude` provider, and every Codex model the single `codex` one (both
@@ -266,7 +266,7 @@ export function modelProvider(
  * different endpoint, and a stricter provider (e.g. OpenCode Zen / DeepSeek)
  * rejects OpenCode's synthesized `functions.{tool}:{n}` ids as duplicates
  * ("Duplicate value for 'tool_call_id'…"), hard-failing the turn. Claude and Codex
- * are immune because all their models are one provider — so model switching there
+ * are immune because all their models are one provider, so model switching there
  * is seamless; this keeps OpenCode to the same rule (same-provider switches only).
  */
 export function lockedSessionProvider(

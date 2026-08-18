@@ -60,7 +60,7 @@ describe("BackgroundTasksIndicator", () => {
     expect(svg?.classList.contains("animate-work-pulse")).toBe(true);
   });
 
-  it("keeps the popover closed by default — task rows are not visible", () => {
+  it("keeps the popover closed by default, task rows are not visible", () => {
     render(<BackgroundTasksIndicator tasks={[running()]} onJumpTo={vi.fn()} />);
     expect(screen.queryByText(/sleep 999/)).toBeNull();
   });

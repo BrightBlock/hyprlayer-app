@@ -7,7 +7,7 @@ function initial(name: string): string {
 }
 
 /**
- * A repo's owner avatar — the GitHub org/user icon, served from
+ * A repo's owner avatar, the GitHub org/user icon, served from
  * `github.com/<owner>.png` (no API call, no auth). Falls back to a letter tile
  * when the source isn't a GitHub repo (a local import) or the image can't load
  * (offline, etc.).

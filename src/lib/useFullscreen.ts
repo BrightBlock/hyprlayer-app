@@ -10,8 +10,8 @@ import { IS_MACOS } from "./platform";
  * and hides them on fullscreen, so the chrome insets that reserve space for the
  * traffic lights must collapse there. Off macOS this stays `false` and the hook
  * does no work (Windows/Linux put their controls elsewhere). Re-reads
- * `isFullscreen()` on every window resize — the signal a fullscreen toggle fires
- * — mirroring the Tauri-window-event pattern in `queryFocus.ts`.
+ * `isFullscreen()` on every window resize, the signal a fullscreen toggle fires,
+ * mirroring the Tauri-window-event pattern in `queryFocus.ts`.
  */
 export function useIsFullscreen(): boolean {
   const [fullscreen, setFullscreen] = useState(false);
@@ -27,9 +27,9 @@ export function useIsFullscreen(): boolean {
         if (!cancelled) setFullscreen(value);
       });
 
-    sync(); // initial read — the window may launch already fullscreen
+    sync(); // initial read, the window may launch already fullscreen
     void win.onResized(sync).then((fn) => {
-      // Cleaned up before the async listener attached — detach immediately.
+      // Cleaned up before the async listener attached, detach immediately.
       if (cancelled) fn();
       else unlisten = fn;
     });

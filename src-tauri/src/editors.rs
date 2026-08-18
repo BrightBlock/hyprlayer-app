@@ -1,28 +1,25 @@
-//! Detecting the editors, terminals, and file managers a user has installed,
-//! so the "Open in…" menu only offers apps that will actually launch — and can
-//! show each app's real icon (Conductor-style) rather than a generic glyph.
+//! Detect the editors, terminals, and file managers a user has installed, so
+//! the "Open in…" menu only offers apps that will launch and can show each
+//! app's real icon rather than a generic glyph.
 //!
 //! Detection is platform-specific:
-//! - **macOS** — locate `<name>.app` bundles, and rasterize each app's `.icns`
-//!   to a small PNG (via the built-in `sips`) handed to the frontend as a
-//!   `data:` URL.
-//! - **Windows** — probe well-known install locations for each editor's `.exe`
-//!   (the full path becomes `openWith`), falling back to a PATHEXT-aware PATH
-//!   lookup so `.cmd` CLI shims like VS Code's `code.cmd` are found.
-//! - **Linux** — PATH lookup of each command name.
+//! - **macOS**: locate `<name>.app` bundles and rasterize each `.icns` to a
+//!   small PNG (via `sips`), handed to the frontend as a `data:` URL.
+//! - **Windows**: probe well-known install locations for each `.exe` (the full
+//!   path becomes `openWith`), falling back to a PATHEXT-aware PATH lookup so
+//!   `.cmd` shims like VS Code's `code.cmd` are found.
+//! - **Linux**: PATH lookup of each command name.
 //!
 //! **Terminals are macOS-only.** `openPath(dir, app)` bottoms out in
-//! `Command::new(app).arg(dir)` — one program, one positional argument. Editors
-//! read that as "open this folder"; terminals don't, and every one of them wants
-//! its own working-directory flag instead (`wt -d`, `kitty --directory`,
-//! `alacritty --working-directory`, `wezterm start --cwd`). There's nowhere to
-//! put a flag in a single `openWith` string, so off macOS — where
-//! `open -a Terminal <dir>` genuinely opens the directory — terminals are left
-//! out rather than listed and silently failing.
+//! `Command::new(app).arg(dir)`: one program, one positional argument. Editors
+//! read that as "open this folder"; terminals want their own flag instead
+//! (`wt -d`, `kitty --directory`, `wezterm start --cwd`), and a single
+//! `openWith` string has nowhere to put one. Only macOS can express it, via
+//! `open -a Terminal <dir>`, so elsewhere terminals are omitted rather than
+//! listed and silently failing.
 //!
-//! The frontend does the actual opening through `@tauri-apps/plugin-opener`,
-//! passing `openWith` for the GUI apps below (Finder/Explorer use the default
-//! handler — `openWith: None`).
+//! The frontend opens through `@tauri-apps/plugin-opener`, passing `openWith`
+//! for the GUI apps below (Finder/Explorer use the default handler).
 
 #[cfg(target_os = "macos")]
 use std::path::Path;
@@ -70,7 +67,7 @@ struct Candidate {
     windows_paths: &'static [&'static str],
     /// Command names to look for on PATH (Linux, and as a PATHEXT-aware Windows
     /// fallback). The matched name is the `openWith` value. Unused on macOS,
-    /// which detects via `.app` bundles instead — and unused for terminals
+    /// which detects via `.app` bundles instead, and unused for terminals
     /// anywhere, since only macOS lists those (see the module docs).
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     bins: &'static [&'static str],
@@ -185,7 +182,7 @@ const CANDIDATES: &[Candidate] = &[
 /// app, so callers should run it off the async runtime (spawn_blocking); the
 /// frontend caches the result for the session.
 pub fn detect() -> Vec<EditorTarget> {
-    // (target, bundle path used for icon extraction — macOS only).
+    // (target, bundle path used for icon extraction, macOS only).
     let mut entries: Vec<(EditorTarget, Option<PathBuf>)> = Vec::new();
 
     // The OS file manager always exists; `openWith: None` opens the directory
@@ -232,7 +229,7 @@ pub fn detect() -> Vec<EditorTarget> {
         ));
     }
 
-    // Rasterize each bundle's icon in parallel — one short-lived `sips` per app.
+    // Rasterize each bundle's icon in parallel, one short-lived `sips` per app.
     #[cfg(target_os = "macos")]
     {
         let icons: Vec<Option<String>> = std::thread::scope(|scope| {
@@ -374,7 +371,7 @@ fn find_app_bundle(app_name: &str) -> Option<PathBuf> {
 
 /// Rasterize a macOS app's icon to a small PNG `data:` URL via the built-in
 /// `sips`. Returns `None` for apps that ship only an asset catalog (no loose
-/// `.icns`) — the UI falls back to a glyph.
+/// `.icns`), the UI falls back to a glyph.
 #[cfg(target_os = "macos")]
 fn icon_data_url(app_path: &Path) -> Option<String> {
     use base64::Engine;

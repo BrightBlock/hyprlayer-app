@@ -447,13 +447,13 @@ type Props = {
   onOpenDoc: (path: string, title: string) => void;
   onOpenDiff: (path: string, staged: boolean) => void;
   onOpenFile: (path: string) => void;
-  /** Folder project: no git, so only the file tree — no Changes tab, no status query. */
+  /** Folder project: no git, so only the file tree, no Changes tab, no status query. */
   filesOnly?: boolean;
 };
 
 /** Right-hand source-control panel: a Changes tab (split staged/unstaged with
  *  stage / unstage / discard actions) and a Files tab (lazy worktree tree).
- *  With `filesOnly` it collapses to just the tree — the browse-and-edit surface
+ *  With `filesOnly` it collapses to just the tree, the browse-and-edit surface
  *  a folder project still needs. */
 export function ChangesPanel({
   workstreamId,
@@ -470,13 +470,13 @@ export function ChangesPanel({
   // Whether the USER asked for this refresh. Deliberately NOT `status.isFetching`:
   // the backend's worktree watcher invalidates git-status on every file change
   // (see lib/events → worktreeChanged), so during an agent turn or a build that
-  // flag strobes true/false several times a second — and the button visibly
+  // flag strobes true/false several times a second, and the button visibly
   // flickered between its glyph and the spinner, dimming on each disabled edge.
   // Background refreshes now update the list silently, as they should.
   const [refreshing, setRefreshing] = useState(false);
 
   const id = workstreamId ?? "";
-  // Never ask git about a folder project — there's no repo to answer.
+  // Never ask git about a folder project, there's no repo to answer.
   const status = useWorktreeGitStatus(id, workstreamId !== null && !filesOnly);
   const stage = useStageFiles(id);
   const unstage = useUnstageFiles(id);
@@ -557,7 +557,7 @@ export function ChangesPanel({
               <div className="rounded-lg border border-edge bg-panel-2 p-3">
                 <p className="text-sm font-medium">No changes yet</p>
                 <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-                  Edits in this workstream&apos;s worktree will show up here.
+                  Edits in this workstream&apos;s worktree show up here.
                 </p>
               </div>
             ) : (

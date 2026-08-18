@@ -54,7 +54,7 @@ pub fn build_block(commands: &str) -> String {
 
 /// Allocate an ephemeral free TCP port on loopback. Best-effort: the port may be
 /// taken again before the user's server binds it (TOCTOU), which is exactly why
-/// the Run output is ALSO scanned for the actual port — see [`detect_port`].
+/// the Run output is ALSO scanned for the actual port, see [`detect_port`].
 pub fn free_port() -> std::io::Result<u16> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     Ok(listener.local_addr()?.port())

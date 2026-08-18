@@ -12,10 +12,10 @@ type EdgeDragOptions = {
   /** +1 when dragging toward the axis-positive direction (right / down) grows
    *  the panel, -1 when it shrinks it. */
   direction: 1 | -1;
-  /** Drag axis — horizontal (width, default) or vertical (height). */
+  /** Drag axis, horizontal (width, default) or vertical (height). */
   axis?: "x" | "y";
   onResize: (size: number) => void;
-  /** Fired on pointer-down / release — e.g. to suppress a transition while
+  /** Fired on pointer-down / release, e.g. to suppress a transition while
    *  dragging so the panel tracks the cursor instead of trailing it. */
   onStart?: () => void;
   onEnd?: () => void;

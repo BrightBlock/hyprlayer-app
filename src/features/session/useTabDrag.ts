@@ -1,12 +1,12 @@
 /**
  * Pointer-drag for agent tabs. Pointer-based rather than HTML5
- * drag-and-drop — WebKit/Tauri intercept native drags for file drops, so
+ * drag-and-drop, WebKit/Tauri intercept native drags for file drops, so
  * they're unreliable for in-app reordering.
  *
  * Two behaviors, both off the same gesture:
- *   • reorder within a pane — while the cursor stays over the tab's own pane,
+ *   • reorder within a pane, while the cursor stays over the tab's own pane,
  *     the tab live-reorders as it passes neighbours' centers.
- *   • move across the split — dropping over the OTHER pane reassigns the tab.
+ *   • move across the split, dropping over the OTHER pane reassigns the tab.
  *
  * The pane under the pointer is found by hit-testing for a `[data-pane]`
  * ancestor (both the tab strips and the content panes carry it), and order is

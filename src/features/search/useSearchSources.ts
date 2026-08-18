@@ -17,7 +17,7 @@ function sessionStateToActivity(state: string): WorkstreamActivity {
   return "idle";
 }
 
-/** Activity urgency rank — higher is more urgent. For empty-query agent sort. */
+/** Activity urgency rank, higher is more urgent. For empty-query agent sort. */
 const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
   idle: 0,
   review: 1,
@@ -55,8 +55,8 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
   }, [workstreams.data, query]);
 
   // ── Docs ───────────────────────────────────────────────────────────────────
-  // Reuse the full-text index. Only once the query clears the minimum length
-  // — below that, a text query is a full-corpus disk scan (see
+  // Reuse the full-text index. Only once the query clears the minimum length,
+  // below that, a text query is a full-corpus disk scan (see
   // MIN_DOC_TEXT_QUERY), and this fires on every focus refetch.
   const hasDocQuery = debounced.length >= MIN_DOC_TEXT_QUERY;
   const docsQuery = useDocs(

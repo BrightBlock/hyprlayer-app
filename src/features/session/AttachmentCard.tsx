@@ -5,11 +5,11 @@ import { DocIcon, ImageIcon, XIcon } from "@/components/icons";
 import { attachmentSrc, type Attachment } from "./attachments";
 
 /**
- * A pin card for one prompt attachment — an image thumbnail or a file glyph plus
+ * A pin card for one prompt attachment, an image thumbnail or a file glyph plus
  * the filename. Used both in the composer (with a remove button) and inline in
  * the conversation, so the full path the agent received never shows as text.
  */
-/** The 22px leading square — an icon glyph for files (and the fallback when an
+/** The 22px leading square, an icon glyph for files (and the fallback when an
  *  image thumbnail can't load). */
 function Glyph({ children }: { children: ReactNode }) {
   return (

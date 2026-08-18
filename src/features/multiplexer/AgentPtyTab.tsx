@@ -37,7 +37,7 @@ const CAPTURE_TRIES = 20;
  * status bar (engine · state · Restart · bypass). The PTY + state detection are
  * owned by `agentRuntime` (so they outlive this component when the tab goes
  * background); here we open a render-only Channel for xterm while on screen, in
- * the same attach-or-spawn shape as `TerminalTab`. The branch is omitted — the
+ * the same attach-or-spawn shape as `TerminalTab`. The branch is omitted, the
  * native CLIs already display it.
  */
 export function AgentPtyTab({
@@ -98,7 +98,7 @@ export function AgentPtyTab({
   // the latest value, not the one captured when the effect first ran.
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
-  // When the engine last launched fresh — the lower bound for capturing the id it
+  // When the engine last launched fresh, the lower bound for capturing the id it
   // auto-assigns (capture-mode engines). Set on each fresh (re)launch.
   const launchedAtRef = useRef(0);
   // Sibling tabs' ids to skip when capturing, read live (changes as tabs come/go).
@@ -109,14 +109,14 @@ export function AgentPtyTab({
   // status-bar Restart / bypass buttons, which live outside that effect.
   const restartRef = useRef<((opts: { resume: boolean; bypass: boolean }) => void) | null>(null);
 
-  // Zoom keybindings + apply, and live theme recolor — shared with TerminalTab.
+  // Zoom keybindings + apply, and live theme recolor, shared with TerminalTab.
   const fontSize = useTerminalZoom(engineRef, idRef, appliedFontSizeRef);
   useTerminalThemeSync(engineRef);
 
   const agent = useAgentState(workstreamId, shellId);
   const state = agent?.state ?? "idle";
   const bypassOn = !!agent?.bypass;
-  // Whether a conversation has begun — gates the Restart/shield resume so a fresh,
+  // Whether a conversation has begun, gates the Restart/shield resume so a fresh,
   // never-typed tab doesn't relaunch into a resume (which exits "No conversation
   // found"). Flips on the first keystroke (eng.onInput below).
   const started = !!agent?.started;
@@ -128,12 +128,12 @@ export function AgentPtyTab({
   // thereafter); seeded true when the tab already had a conversation.
   const markedStartedRef = useRef(startedSeed);
   // Shown while an exec-mint engine (Codex) seeds + names its conversation before
-  // the interactive PTY launches — letting that probe finish keeps the session
+  // the interactive PTY launches, letting that probe finish keeps the session
   // from persisting "interrupted".
   const [minting, setMinting] = useState(false);
   // The scripts dock's open flag. Showing/hiding it resizes the pane instantly,
   // which can land between ResizeObserver ticks and leave the PTY at the old row
-  // count (the CLI's composer then strands mid-screen) — so we refit explicitly
+  // count (the CLI's composer then strands mid-screen), so we refit explicitly
   // when this flips (effect below).
   const dockOpen = useScriptsStore((s) => !!s.dock[workstreamId]?.open);
 
@@ -149,7 +149,7 @@ export function AgentPtyTab({
       cursorBlink: engine.id !== "codex",
     });
     eng.mount(host);
-    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS, the emulator has no copy
     // path of its own there (see attachTerminalClipboard).
     attachTerminalClipboard(eng);
     engineRef.current = eng;
@@ -162,7 +162,7 @@ export function AgentPtyTab({
     // in agentRuntime, so this tab going background never stops state updates.
     // One Tauri Channel backs exactly one invoke (see TerminalTab), so mint a
     // fresh one for every attach. Guard against output that lands during the
-    // unmount frame — it would otherwise write into a disposed terminal.
+    // unmount frame. It would otherwise write into a disposed terminal.
     const newChannel = (): Channel<TerminalEvent> => {
       const channel = new Channel<TerminalEvent>();
       channel.onmessage = (ev) => {
@@ -184,7 +184,7 @@ export function AgentPtyTab({
 
       // Exec-mint engines (Codex) can't take a caller-set id, so before the first
       // launch we mint one deterministically via a `codex exec` probe and then
-      // resume it — no disk-attribution race. Skipped once we already have an id
+      // resume it, no disk-attribution race. Skipped once we already have an id
       // (restore / cold-start); a null result falls through to a bare launch and
       // the on-disk capture below as a backstop.
       if (!sessionIdRef.current && engineMintsViaExec(engine.id)) {
@@ -232,7 +232,7 @@ export function AgentPtyTab({
       await unwrap(commands.terminalAttach(id, newChannel())).catch(() => false);
       if (disposed) return;
       lastGrid = eng.fit();
-      // Nudge on (re)attach — the child's last viewer may have been a different
+      // Nudge on (re)attach, the child's last viewer may have been a different
       // grid, and a single SIGWINCH may not redraw it.
       void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
     })();
@@ -241,7 +241,7 @@ export function AgentPtyTab({
     // (resume continues the prior conversation; bypass adds the skip-permission
     // flags), wipe the screen, and re-attach the render channel. The persisted
     // ShellTab keeps the engine's base args, so resume/bypass apply to this run
-    // only — a plain remount/relaunch goes back to a fresh, normal-permission run.
+    // only, a plain remount/relaunch goes back to a fresh, normal-permission run.
     restartRef.current = (opts: { resume: boolean; bypass: boolean }) => {
       if (disposed) return;
       void (async () => {
@@ -284,7 +284,7 @@ export function AgentPtyTab({
     });
 
     // A real key press (not an auto-reply) is the honest "the user is composing"
-    // signal: the first typed character or Enter marks the conversation as begun —
+    // signal: the first typed character or Enter marks the conversation as begun,
     // so Restart/shield/cold-start resume it. Without this, a fresh agent's startup
     // auto-replies would flip "started" and we'd resume a session that never
     // existed ("No conversation found with session ID …").
@@ -303,7 +303,7 @@ export function AgentPtyTab({
 
     // Refit on container resize, coalesced to a frame; only emit a PTY resize
     // when the grid actually changed (host is absolutely positioned so fitting
-    // can't feed back into layout — see TerminalTab).
+    // can't feed back into layout, see TerminalTab).
     let raf = 0;
     const doFit = () => {
       raf = 0;
@@ -314,7 +314,7 @@ export function AgentPtyTab({
         if (idRef.current) void commands.terminalResize(idRef.current, next.cols, next.rows);
       }
       // The WebGL renderer (addon ≥0.19) re-rasterises its glyph atlas across
-      // resizes on its own — just repaint the newly-exposed rows.
+      // resizes on its own, just repaint the newly-exposed rows.
       eng.refresh();
     };
     const scheduleFit = () => {
@@ -343,7 +343,7 @@ export function AgentPtyTab({
       });
 
     return () => {
-      // Unmount drops the render channel only — the PTY + detection live on in
+      // Unmount drops the render channel only, the PTY + detection live on in
       // agentRuntime (closing the tab is what kills it, via closeAgent).
       disposed = true;
       focusCancelled = true;
@@ -363,7 +363,7 @@ export function AgentPtyTab({
 
   // Refit the PTY whenever the scripts dock shows/hides. The pane resizes
   // instantly (no animation), which the ResizeObserver can miss, leaving the PTY
-  // at the old row count — so the CLI keeps drawing its composer where the dock
+  // at the old row count, so the CLI keeps drawing its composer where the dock
   // used to start. Re-fit + resize + repaint once the new layout has settled.
   useEffect(() => {
     const eng = engineRef.current;
@@ -374,10 +374,10 @@ export function AgentPtyTab({
         if (cancelled) return;
         const g = eng.fit();
         // Nudge-resize (off-by-one then back) so Claude/Codex actually repaint at
-        // the new size — a plain resize leaves the composer stranded mid-pane.
+        // the new size, a plain resize leaves the composer stranded mid-pane.
         if (idRef.current) void commands.agentResize(idRef.current, g.cols, g.rows);
         // A dock toggle never changes cell metrics, so repaint without clearing
-        // the atlas — clearing here is what made the terminals flash.
+        // the atlas, clearing here is what made the terminals flash.
         eng.refresh();
       }),
     );
@@ -388,7 +388,7 @@ export function AgentPtyTab({
   }, [dockOpen]);
 
   // Fallback id capture from disk: for an engine we can resume by id that still
-  // lacks one once its conversation has begun — Antigravity (its normal path) and
+  // lacks one once its conversation has begun, Antigravity (its normal path) and
   // Codex if the exec-mint probe failed. Reads the id from the engine's on-disk
   // store and persists it so Restart / cold-start / unarchive resume THIS tab's
   // thread. Assign engines already hold an id, so the `!sessionId` guard skips
@@ -432,7 +432,7 @@ export function AgentPtyTab({
           </div>
         )}
       </div>
-      {/* Status bar: engine · state · Restart · bypass. Branch is omitted — the
+      {/* Status bar: engine · state · Restart · bypass. Branch is omitted, the
           native CLI already shows it; model/ctx aren't reliably parseable. */}
       <div className="flex h-7 shrink-0 items-center gap-3 border-t border-edge px-3 font-mono text-[11px] text-ink-dim">
         <span className="inline-flex items-center gap-1.5">
@@ -469,8 +469,8 @@ export function AgentPtyTab({
               aria-pressed={bypassOn}
               title={
                 bypassOn
-                  ? "Bypass-permissions mode is ON (auto-approving everything) — click to turn off"
-                  : "Restart in bypass-permissions mode (YOLO) — auto-approves everything"
+                  ? "Bypass-permissions mode is ON (auto-approving everything). Click to turn off"
+                  : "Restart in bypass-permissions mode. Auto-approves every command"
               }
               aria-label="Toggle bypass-permissions mode"
               className={`inline-flex items-center justify-center rounded-md border border-bad/40 px-2 py-0.5 text-bad ${

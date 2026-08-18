@@ -1,10 +1,10 @@
 /**
- * Prompt attachments — screenshots and files the user drops onto, or pastes
+ * Prompt attachments, screenshots and files the user drops onto, or pastes
  * into, an agent composer. Volatile sources (a macOS screenshot dragged off the
  * capture thumbnail lives under `/var/folders/.../TemporaryItems/` and is reaped
  * moments later; clipboard image bytes have no path at all) are persisted into
  * the workstream's `.hyprlayer/attachments/` via the backend so they survive and
- * the agent — whose cwd is the worktree — can `Read` them.
+ * the agent, whose cwd is the worktree, can `Read` them.
  *
  * The path the agent receives is never shown in the transcript: the composer and
  * the conversation render a pin card instead (see AttachmentCard).
@@ -19,7 +19,7 @@ import { baseName } from "./toolDisplay";
 export type AttachmentKind = "image" | "file";
 
 export type Attachment = {
-  /** Stable absolute path the agent reads — for images this is the copy inside
+  /** Stable absolute path the agent reads, for images this is the copy inside
    *  `<worktree>/.hyprlayer/attachments/`, never the volatile source. */
   path: string;
   /** Display filename (the original basename). */
@@ -27,7 +27,7 @@ export type Attachment = {
   kind: AttachmentKind;
 };
 
-/** Image file extensions we treat as screenshots — the single source for both
+/** Image file extensions we treat as screenshots, the single source for both
  *  drop/paste detection and the "Add screenshots" file-dialog filter. */
 export const IMAGE_EXTENSIONS = [
   "png",
@@ -92,7 +92,7 @@ export async function importDroppedPaths(
         const stored = await unwrap(commands.importAttachment(workstreamId, path));
         return { path: stored, name: baseName(path), kind: "image" };
       } catch {
-        return null; // unreadable / vanished source — skip it
+        return null; // unreadable / vanished source, skip it
       }
     }),
   );
@@ -118,13 +118,13 @@ export async function saveClipboardImage(
  * Persist a clipboard image read from the OS rather than from the paste event.
  *
  * The webview's `paste` DataTransfer is the fast path and stays first, but it
- * only carries image bytes on some platforms — WebKitGTK (the Linux Tauri
+ * only carries image bytes on some platforms, WebKitGTK (the Linux Tauri
  * runtime) hands over text and nothing else, which is why pasting a screenshot
  * did nothing on Linux while dragging the same file in worked (drag-drop goes
  * through Tauri's native event, never the webview).
  *
  * `readImage()` returns raw RGBA, not an encoded file, so it goes through a
- * canvas to become a PNG. Returns null whenever the clipboard holds no image —
+ * canvas to become a PNG. Returns null whenever the clipboard holds no image,
  * which is the common case, since this runs on every paste that carried no
  * image in the event.
  */

@@ -1,11 +1,11 @@
 //! The long-lived `codex app-server` session driver.
 //!
 //! Shaped like [`crate::claude::ClaudeDriver`]: one child process per session,
-//! spoken to over stdin/stdout, with three background tasks —
+//! spoken to over stdin/stdout, with three background tasks,
 //!
-//! * **writer** — serializes JSON-RPC lines from every caller onto one stdin.
-//! * **stderr** — drained into a small ring buffer, so a crash can report the tail.
-//! * **reader + waiter** — stdout → [`SessionEvent`]s (and replies to the
+//! * **writer**: serializes JSON-RPC lines from every caller onto one stdin.
+//! * **stderr**: drained into a small ring buffer, so a crash can report the tail.
+//! * **reader + waiter**: stdout → [`SessionEvent`]s (and replies to the
 //!   server's approval requests), then `child.wait()` → the final `Exited`.
 //!
 //! One process per session (rather than the shared-server shape the OpenCode
@@ -47,7 +47,7 @@ const STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 pub struct SpawnConfig {
     /// Absolute path to the resolved `codex` binary.
     pub codex_bin: PathBuf,
-    /// Working directory — the workstream's worktree.
+    /// Working directory, the workstream's worktree.
     pub cwd: PathBuf,
     pub permission_mode: PermissionMode,
     /// Extra writable roots (e.g. the thoughts root outside the worktree).
@@ -56,14 +56,14 @@ pub struct SpawnConfig {
     pub resume: Option<String>,
     /// User turns this thread already logged before this process took over.
     /// Rewind ordinals are session-global, but the translator only counts what
-    /// it streams — so a resume must seed the counter or `thread/rollback` drops
+    /// it streams, so a resume must seed the counter or `thread/rollback` drops
     /// the wrong number of turns while reporting success. 0 for a fresh thread.
     pub prior_user_turns: usize,
     /// Override the model (else Codex's configured default).
     pub model: Option<String>,
     /// Reasoning effort (`minimal|low|medium|high|xhigh`); else Codex's default.
     pub effort: Option<String>,
-    /// Don't persist the thread to `~/.codex/sessions` — used by throwaway
+    /// Don't persist the thread to `~/.codex/sessions`, used by throwaway
     /// one-shot turns (auto-titles) so they don't pollute the user's history.
     pub ephemeral: bool,
     /// Augmented PATH + any extra env for the child.
@@ -77,7 +77,7 @@ type PendingReplies =
 /// A handle to a live Codex session. Dropping it does NOT kill the child (the
 /// waiter task owns it); call [`CodexDriver::kill`] for a hard stop.
 pub struct CodexDriver {
-    /// Codex's own thread id — the resume key, persisted as `claude_session_id`.
+    /// Codex's own thread id, the resume key, persisted as `claude_session_id`.
     thread_id: String,
     /// Serialized writes to the child's stdin.
     stdin_tx: mpsc::UnboundedSender<String>,
@@ -132,7 +132,7 @@ impl CodexDriver {
         }
 
         // Supervised: on Windows the job object kills the app-server (and anything
-        // it spawned) even when our destructors never run — a `process::exit` or a
+        // it spawned) even when our destructors never run, a `process::exit` or a
         // hard kill would otherwise orphan it.
         let mut child = crate::process::spawn_supervised(&mut cmd).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -194,7 +194,7 @@ impl CodexDriver {
         // an incompatible app-server). Fold the stderr tail into the error so
         // the UI can show `codex login` hints rather than a bare timeout.
         let started = driver.handshake(&config).await;
-        // Startup is done either way — let the next app-server begin. (The error
+        // Startup is done either way, let the next app-server begin. (The error
         // path drops it too; this just makes the success path explicit.)
         drop(startup);
         let (thread_id, model) = match started {
@@ -246,7 +246,7 @@ impl CodexDriver {
             params["model"] = json!(model);
         }
         // Configure the workspace-write sandbox: enable network so a *permitted*
-        // command can actually reach it — Codex blocks network here by default, and
+        // command can actually reach it, Codex blocks network here by default, and
         // approving the command (untrusted) doesn't lift that, so without this an
         // allowed `curl` still fails to resolve. Also grant write access to roots
         // outside the worktree (the thoughts tree) so skills can write their docs.
@@ -300,7 +300,7 @@ impl CodexDriver {
     }
 
     /// Send a user turn. Emits [`SessionEvent::UserMessage`] first so the turn is
-    /// persisted and replays after a restart — Codex never echoes the human
+    /// persisted and replays after a restart, Codex never echoes the human
     /// prompt back to us in a form we can distinguish from a replay.
     pub fn send_user_turn(
         &self,
@@ -365,7 +365,7 @@ impl CodexDriver {
     }
 
     /// Switch the model for subsequent turns. Codex takes a model per turn, so
-    /// this applies live — no relaunch (unlike Claude, which binds at spawn).
+    /// this applies live, no relaunch (unlike Claude, which binds at spawn).
     pub fn set_model(&self, model: Option<String>) {
         if let Ok(mut m) = self.model.lock() {
             *m = model;
@@ -411,7 +411,7 @@ impl CodexDriver {
     }
 
     /// Graceful interrupt of the current turn (the session stays alive). A no-op
-    /// between turns — there is nothing to address.
+    /// between turns. There is nothing to address.
     pub fn interrupt(&self) -> Result<()> {
         let turn_id = self
             .state
@@ -422,7 +422,7 @@ impl CodexDriver {
             return Ok(());
         };
         // Fire-and-forget: this is sync, so there is no reply to await. The
-        // receiver is dropped deliberately — the interrupt lands via the write,
+        // receiver is dropped deliberately, the interrupt lands via the write,
         // and the response handler discards the orphaned pending entry.
         drop(self.request_channel(
             "turn/interrupt",
@@ -435,11 +435,11 @@ impl CodexDriver {
     /// dropping that turn and everything after it.
     ///
     /// Codex's `thread/rollback` drops N turns from the END, so the count is
-    /// derived from how many user turns this thread has seen — which is why a
+    /// derived from how many user turns this thread has seen, which is why a
     /// resumed driver seeds its counter with [`SpawnConfig::prior_user_turns`].
     /// Without that seeding the count is short by however many turns predate this
     /// process, and the rollback silently drops the wrong ones. It only rewinds
-    /// conversation history — local file changes the agent already made stay put,
+    /// conversation history, local file changes the agent already made stay put,
     /// which matches the app's log-only fallback semantics.
     pub async fn rewind_to_ordinal(&self, ordinal: usize) -> Result<()> {
         let total = self.state.lock().map(|s| s.user_turns).unwrap_or(0);
@@ -460,7 +460,7 @@ impl CodexDriver {
         self.killer.kill();
     }
 
-    /// Same teardown, but for the app's own bookkeeping (quit, relaunch) — the
+    /// Same teardown, but for the app's own bookkeeping (quit, relaunch), the
     /// exit is classified `Detached` and leaves the transcript untouched.
     pub fn kill_detached(&self) {
         self.kill_flag.mark_detached();
@@ -471,7 +471,7 @@ impl CodexDriver {
         self.killer.pid
     }
 
-    /// Codex's own thread id — the resume key.
+    /// Codex's own thread id, the resume key.
     pub fn thread_id(&self) -> &str {
         &self.thread_id
     }
@@ -665,7 +665,7 @@ async fn read_and_wait(
 
     // An app-initiated kill takes precedence (and carries its reason); otherwise
     // a clean exit code is Completed and anything else is read from the wait
-    // status. Unlike Claude there's no terminal `result` line to key on — the
+    // status. Unlike Claude there's no terminal `result` line to key on, the
     // app-server just exits when its stdin closes.
     let outcome = kill_flag.outcome().unwrap_or_else(|| match &status {
         Ok(s) if s.success() || clean_exit => ExitOutcome::Completed,
@@ -692,7 +692,7 @@ fn auto_decline(stdin_tx: &mpsc::WeakUnboundedSender<String>, id: &Value, method
         _ => json!({}),
     };
     let line = format!("{}\n", json!({ "id": id, "result": result }));
-    // `None` once the driver is gone — the session is being torn down, so there's
+    // `None` once the driver is gone, the session is being torn down, so there's
     // no turn left to unblock.
     if let Some(tx) = stdin_tx.upgrade() {
         let _ = tx.send(line);
@@ -742,7 +742,7 @@ mod tests {
     }
 
     /// The resume case: 2 turns before the restart, 5 streamed after. Rewinding
-    /// to app-turn 3 must drop 5 turns (3..=7), not 3 — the bug seeding fixes.
+    /// to app-turn 3 must drop 5 turns (3..=7), not 3, the bug seeding fixes.
     /// A translator that counted only this generation reports total=5 and would
     /// drop the LAST 3, leaving the model remembering turns the log deleted while
     /// the command still claims `live_rewound`.
@@ -765,7 +765,7 @@ mod tests {
     fn rollback_rejects_unreachable_turns() {
         // Ordinals are 1-based; 0 is a caller bug.
         assert!(rollback_count(0, 5).is_err());
-        // A turn this process never streamed (it predates the live generation) —
+        // A turn this process never streamed (it predates the live generation),
         // the caller falls back to a log-only cut rather than mis-rolling back.
         assert!(rollback_count(6, 5).is_err());
         assert!(rollback_count(1, 0).is_err());

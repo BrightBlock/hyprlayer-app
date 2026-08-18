@@ -27,7 +27,7 @@ export function registerAppNav(impl: {
   workstreamNavigator = impl.goToWorkstream;
 }
 
-/** Null until router.tsx registers — i.e. in jsdom tests, which never wire it. */
+/** Null until router.tsx registers, i.e. in jsdom tests, which never wire it. */
 export function currentAppLocation(): AppLocation | null {
   return locationGetter ? locationGetter() : null;
 }

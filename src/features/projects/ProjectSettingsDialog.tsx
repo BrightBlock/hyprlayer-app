@@ -86,7 +86,7 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
       <CardTitle>Files copied into new worktrees</CardTitle>
       <p className="mb-3 text-xs leading-relaxed text-ink-dim">
         Copied from the main repo into every new worktree.{" "}
-        <code className="font-mono">git worktree add</code> only carries tracked files — list
+        <code className="font-mono">git worktree add</code> only carries tracked files, so list
         untracked ones (e.g. <code className="font-mono">.env</code>) here. Glob patterns
         supported. Saved to{" "}
         <code className="font-mono">.hyprlayer/settings.toml</code> (safe to commit).
@@ -139,7 +139,7 @@ type Props = {
 /**
  * Per-project settings as a dialog opened from the sidebar (right-click a
  * project). Holds the storage summary, backend health checks, and the manual
- * thoughts sync — the actions that used to live on the standalone project
+ * thoughts sync, the actions that used to live on the standalone project
  * settings route, now reachable where the projects themselves live.
  */
 export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
@@ -147,7 +147,7 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
   const health = useBackendHealth(projectPath);
   const sync = useSyncThoughts(projectPath);
 
-  const title = detail.data ? `Project settings — ${detail.data.project.mappedName}` : "Project settings";
+  const title = detail.data ? `Project settings: ${detail.data.project.mappedName}` : "Project settings";
   // A folder project has no thoughts to sync and no worktrees to seed.
   const gitBacked = isGitProject(detail.data?.project);
 
@@ -206,7 +206,7 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
               ) : (
                 !gitBacked && (
                   <p className="text-ink-dim">
-                    Not a git repository — no branches, worktrees or thoughts. Agents run in the
+                    Not a git repository, so no branches, worktrees or thoughts. Agents run in the
                     folder itself.
                   </p>
                 )

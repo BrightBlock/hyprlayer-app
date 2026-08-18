@@ -9,7 +9,7 @@ use hyprlayer_core::skills::AgentSkill;
 use crate::commands::blocking;
 use crate::error::{AppError, CmdResult};
 
-/// Every agent visible from `project_path` — that project's own plus the user's.
+/// Every agent visible from `project_path`, that project's own plus the user's.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_agent_files(project_path: Option<String>) -> CmdResult<Vec<AgentFile>> {
@@ -29,7 +29,7 @@ pub async fn save_agent_file(agent: AgentFile) -> CmdResult<AgentFile> {
     .await?
 }
 
-/// Delete an agent definition — the file IS the agent.
+/// Delete an agent definition, the file IS the agent.
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_agent_file(path: String) -> CmdResult<()> {

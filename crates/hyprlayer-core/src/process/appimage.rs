@@ -1,26 +1,22 @@
 //! Undo the AppImage runtime's environment for children we spawn.
 //!
-//! Linux ships as distro packages now (see docs/RELEASING.md), so nothing we
-//! build sets `APPDIR` and every function here is inert. Kept because it costs
-//! one env lookup per spawn and is the only thing standing between a
-//! reintroduced AppImage and the bug below.
+//! Linux ships as distro packages now (see docs/RELEASING.md), so nothing sets
+//! `APPDIR` and every function here is inert. Kept because it costs one env
+//! lookup per spawn and is all that stands between a reintroduced AppImage and
+//! the bug below.
 //!
-//! The AppImage `AppRun` rewrites the process environment to point at the
-//! mounted AppDir before handing control to the app: `PATH`,
-//! `LD_LIBRARY_PATH`, `XDG_DATA_DIRS`, the GTK/GIO module caches, and — the
-//! one that bites hardest — `PYTHONHOME`/`PYTHONPATH`. We ship no Python, so
-//! `PYTHONHOME=/tmp/.mount_XXXX/usr/` names a tree with no stdlib in it, and
-//! every `python` launched from a hyprlayer terminal dies at interpreter
-//! bootstrap with `ModuleNotFoundError: No module named 'encodings'`. The same
-//! leak makes children resolve our bundled GTK/webkit libs instead of the
-//! system's, and pins `GDK_BACKEND=x11` on a Wayland session.
+//! AppImage's `AppRun` repoints the environment at the mounted AppDir: `PATH`,
+//! `LD_LIBRARY_PATH`, `XDG_DATA_DIRS`, the GTK/GIO caches, and worst of all
+//! `PYTHONHOME`/`PYTHONPATH`. We ship no Python, so `PYTHONHOME` names a tree
+//! with no stdlib and every `python` from a hyprlayer terminal dies with
+//! `ModuleNotFoundError: No module named 'encodings'`. The same leak makes
+//! children load our bundled GTK/webkit libs and pins `GDK_BACKEND=x11` on
+//! Wayland.
 //!
-//! Those variables are correct for *us* — the webview's out-of-process helpers
-//! need them — so we can't scrub them globally at startup. We scrub per-spawn
-//! instead, on the way out to a child that is emphatically not part of the
-//! bundle. This is best-effort restoration: the `AppRun` we ship saves no
-//! `APPIMAGE_ORIGINAL_*` copies, so all we can do is drop AppDir-owned entries
-//! and leave whatever the user's session had underneath.
+//! Those variables are correct for us, since the webview's helper processes
+//! need them, so we scrub per-spawn rather than globally at startup. Recovery
+//! is best-effort: our `AppRun` saves no `APPIMAGE_ORIGINAL_*` copies, so we
+//! drop AppDir-owned entries and leave whatever was underneath.
 
 use std::env;
 use std::path::Path;
@@ -57,7 +53,7 @@ const APPDIR_VALUE_VARS: &[&str] = &[
 
 /// Variables the AppImage runtime owns outright: it either invents them or
 /// overwrites whatever was there, so for a child they are pure noise.
-/// `GDK_BACKEND` is the notable one — `AppRun` forces it to `x11` to dodge a
+/// `GDK_BACKEND` is the notable one, `AppRun` forces it to `x11` to dodge a
 /// Tauri/Wayland crash, and a GUI app launched from a hyprlayer terminal
 /// should not inherit that.
 const ALWAYS_UNSET: &[&str] = &[
@@ -104,7 +100,7 @@ fn overrides_for(
             .filter(|entry| !entry.is_empty() && !is_under(entry, appdir))
             .collect();
         if kept.len() == value.split(':').filter(|e| !e.is_empty()).count() {
-            continue; // nothing of ours in there — leave it untouched
+            continue; // nothing of ours in there, leave it untouched
         }
         out.push((
             (*key).to_string(),
@@ -131,7 +127,7 @@ fn overrides_for(
 /// from an AppImage.
 ///
 /// Used to keep AppDir entries out of the PATH the binary resolver builds and
-/// hands to children — that PATH is applied *after* [`child_env_overrides`],
+/// hands to children, that PATH is applied *after* [`child_env_overrides`],
 /// so without this filter it would put them straight back.
 pub fn is_appdir_path(path: &Path) -> bool {
     env::var_os("APPDIR")

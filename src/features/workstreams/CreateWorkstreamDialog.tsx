@@ -53,19 +53,21 @@ function localNameFor(remoteRef: string): string {
 }
 
 /**
- * New-workstream dialog. A single branch combobox is the heart of it: the
- * pinned "New branch" row (the default) creates a fresh branch + worktree from a
- * base; picking an existing branch instead reveals a Worktree/Here choice
- * — Worktree checks it out into a dedicated worktree, Here switches the
- * project's own checkout to it with no worktree. There is no mode dropdown; the
- * branch you choose determines the shape. The list is local branches plus the
- * remote-only ones (a colleague's pushed branch); picking a remote row creates the
- * local tracking branch first, since checking a remote ref out would detach HEAD.
- * Opening the dialog fires a `git fetch` so a just-pushed branch shows up without
- * a trip to the terminal.
+ * New-workstream dialog, built around one branch combobox. There is no mode
+ * dropdown: the branch you pick determines the shape.
  *
- * A folder project has none of that: the dialog collapses to a title, and the
- * workstream runs in the project folder itself.
+ * The pinned "New branch" row creates a fresh branch and worktree from a base.
+ * Picking an existing branch instead reveals a Worktree/Here choice, where
+ * Worktree checks it out into its own worktree and Here switches the project's
+ * checkout with no worktree.
+ *
+ * The list holds local branches plus remote-only ones. Picking a remote row
+ * creates the local tracking branch first, since checking out a remote ref
+ * would detach HEAD. Opening the dialog fires a `git fetch`, so a just-pushed
+ * branch appears without a trip to the terminal.
+ *
+ * A folder project has none of this: the dialog collapses to a title and the
+ * workstream runs in the project folder.
  */
 export function CreateWorkstreamDialog({
   projectPath,
@@ -83,13 +85,13 @@ export function CreateWorkstreamDialog({
   const [userPickedBase, setUserPickedBase] = useState(false);
   const [place, setPlace] = useState<Place>("worktree");
   const create = useCreateWorkstream(projectPath);
-  // A folder project has no branches to list — don't even ask.
+  // A folder project has no branches to list, don't even ask.
   const bases = useWorkstreamBases(projectPath, open && !folder);
   const refreshRemote = useFetchProjectRemote(projectPath);
 
   const defaultBase = bases.data?.defaultBase ?? "";
   const currentBranch = bases.data?.currentBranch ?? "";
-  // Memoized so identities are stable across renders — otherwise the `?? []`
+  // Memoized so identities are stable across renders, otherwise the `?? []`
   // literals would re-fire the default-selection effect every render.
   const branches = useMemo(() => bases.data?.branches ?? [], [bases.data?.branches]);
   const localBranches = useMemo(
@@ -97,7 +99,7 @@ export function CreateWorkstreamDialog({
     [bases.data?.localBranches],
   );
   // Remote-only branches, already filtered backend-side to those with no local
-  // counterpart — listed after the locals so the branches you have come first.
+  // counterpart, listed after the locals so the branches you have come first.
   const remoteBranches = useMemo(
     () => bases.data?.remoteBranches ?? [],
     [bases.data?.remoteBranches],
@@ -122,7 +124,7 @@ export function CreateWorkstreamDialog({
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   // Whose changes those are: the most recently archived in-place row still
   // recording the branch the checkout is on. Branch adoption is what keeps that
-  // match honest — the row follows `git checkout` right up until it's archived.
+  // match honest, the row follows `git checkout` right up until it's archived.
   const leftBehind = useMemo(
     () =>
       checkoutDirty && currentBranch
@@ -139,11 +141,11 @@ export function CreateWorkstreamDialog({
   const isNew = selectedBranch === null;
   const remoteSelected = !isNew && !!selectedBranch && remoteSet.has(selectedBranch);
   // The current branch is already checked out in the project's own tree, so it
-  // can't also be checked out into a dedicated worktree — git refuses a branch
+  // can't also be checked out into a dedicated worktree, git refuses a branch
   // already checked out elsewhere. Only "My checkout" (in-place) is valid for it.
   const currentSelected = !isNew && !!currentBranch && selectedBranch === currentBranch;
 
-  // Force in-place when the current branch is picked — a new worktree for it
+  // Force in-place when the current branch is picked, a new worktree for it
   // would error. Keyed on the selection so switching to another branch frees the
   // choice again.
   useEffect(() => {
@@ -189,7 +191,7 @@ export function CreateWorkstreamDialog({
     onClose();
   };
 
-  /** Recovery is in flight — the whole dialog holds still until it settles. */
+  /** Recovery is in flight, the whole dialog holds still until it settles. */
   const recovering = discard.isPending || restore.isPending;
 
   // Resolve the combobox state into the backend's (mode, base, branch) shape.
@@ -207,7 +209,7 @@ export function CreateWorkstreamDialog({
       { title: trimmed, ...resolved() },
       {
         onSuccess: (view) => {
-          // Creation succeeded — close and jump straight to the new workstream.
+          // Creation succeeded, close and jump straight to the new workstream.
           // Seed-copy problems (e.g. a missing .env) surface at the project level
           // (the sidebar warning), not here, so the dialog always dismisses.
           reset();
@@ -233,7 +235,7 @@ export function CreateWorkstreamDialog({
   // created rather than naming a branch the user doesn't have yet.
   const localFor = remoteSelected && selectedBranch ? localNameFor(selectedBranch) : selectedBranch;
   const hint = folder
-    ? "Runs in the project folder. No branch, no worktree — add as many as you like."
+    ? "Runs in the project folder. No branch, no worktree. Add as many as you like."
     : isNew
       ? "Creates a new branch named from your title, in a dedicated worktree."
       : remoteSelected
@@ -340,7 +342,7 @@ export function CreateWorkstreamDialog({
                   label: "New worktree",
                   disabled: currentSelected,
                   title: currentSelected
-                    ? `${selectedBranch} is already checked out here — use My checkout.`
+                    ? `${selectedBranch} is already checked out here. Use My checkout.`
                     : undefined,
                 },
                 { value: "here", label: "My checkout" },
@@ -431,7 +433,7 @@ export function CreateWorkstreamDialog({
   );
 }
 
-/** Best-effort count from the backend's `checkout_dirty` message. Cosmetic —
+/** Best-effort count from the backend's `checkout_dirty` message. Cosmetic,
  * the copy degrades to "the changes" if the wording ever drifts. */
 function dirtyCount(message: string): number | null {
   const m = /(\d+)\s+uncommitted/.exec(message);
@@ -444,7 +446,7 @@ function changeCount(count: number | null): string {
 
 /**
  * Why an in-place create stopped: the project checkout has uncommitted work that
- * a branch switch would carry across. Not an error note — nothing failed that a
+ * a branch switch would carry across. Not an error note, nothing failed that a
  * retry would fix, so it reads as a blocked state with the way out attached. The
  * work is usually an archived in-place workstream's leftovers, and unarchiving is
  * the only route back to it; discarding lives in the dialog footer beside Create.
@@ -543,7 +545,7 @@ function BranchRow({
   );
 }
 
-/** A compact two-or-more option segmented control — the lightweight stand-in
+/** A compact two-or-more option segmented control, the lightweight stand-in
  * for a dropdown when the choices are few and worth showing at a glance. */
 function Segmented<T extends string>({
   value,

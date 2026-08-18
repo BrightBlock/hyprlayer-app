@@ -12,7 +12,7 @@ export type DocGroup = {
 
 /**
  * Bucket library docs by frontmatter type for the grouped list. Groups follow
- * first-seen order — i.e. the query's existing sort (date/relevance), so the
+ * first-seen order, i.e. the query's existing sort (date/relevance), so the
  * freshest type leads; docs keep their incoming order within a group.
  */
 export function groupDocsByType(docs: DocMeta[]): DocGroup[] {

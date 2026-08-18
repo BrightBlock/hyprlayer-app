@@ -1,7 +1,7 @@
 /**
  * Pure logic for current-session prompt history: extract the user's submitted
  * prompts from the live transcript, and a shell-style navigation state machine
- * (Alt+↑/↓) over them. No React, no DOM — exhaustively unit-tested.
+ * (Alt+↑/↓) over them. No React, no DOM, exhaustively unit-tested.
  */
 import type { TranscriptItem } from "./transcript";
 

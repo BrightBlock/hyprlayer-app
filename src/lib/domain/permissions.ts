@@ -1,7 +1,7 @@
 /**
  * The permission-mode choices offered in the composer. These mirror the modes
  * the `claude` CLI exposes (its `--permission-mode` flag / in-prompt picker) and
- * map straight to the driver's `--permission-mode` at spawn time — see
+ * map straight to the driver's `--permission-mode` at spawn time, see
  * `SpawnConfig` (crates/hyprlayer-core/src/claude/driver.rs).
  *
  * Like model/effort, the choice is fixed when the session spawns: changing it
@@ -13,7 +13,7 @@ import type { PermissionMode } from "@/lib/bindings";
 
 /** A selectable permission mode. `flag` is the `--permission-mode` value
  *  (typed by the bindings union, generated from core's `PermissionMode`), or
- *  null for "auto" — let the backend stage policy choose. */
+ *  null for "auto", let the backend stage policy choose. */
 export type PermissionModeOption = {
   key: string;
   label: string;

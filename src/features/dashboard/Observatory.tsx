@@ -2,7 +2,7 @@
  * The Observatory home's overlay surfaces (design 2a): the greeting's status
  * line, the centered glass search bar with corpus stat pills, floating pins
  * over the graph naming live agents, and the two glass panels docked at the
- * bottom (Live now + Latest activity). Pure presentation — classification
+ * bottom (Live now + Latest activity). Pure presentation, classification
  * lives in `fleet.ts`, navigation in the parent's callbacks. Everything is
  * built from theme tokens (glass = panel/edge at opacity, stage hues from
  * stages.ts) so all six themes render native.
@@ -19,7 +19,7 @@ import { formatElapsed, formatRelativeTime } from "@/lib/format";
 import { openSearch } from "@/features/search/searchStore";
 import type { FleetActivity, FleetItem } from "./fleet";
 
-/** Coarse elapsed for agent cards ("7m", "1h 04m") — minute-level so the rows
+/** Coarse elapsed for agent cards ("7m", "1h 04m"), minute-level so the rows
  *  don't visibly tick between the dashboard's slow clock beats. */
 function shortElapsed(ms: number): string {
   if (ms < 60_000) return "<1m";
@@ -28,7 +28,7 @@ function shortElapsed(ms: number): string {
   return formatElapsed(ms);
 }
 
-/** Every stage's dot/bar fill — the same themed accent tokens MODE_STYLES
+/** Every stage's dot/bar fill, the same themed accent tokens MODE_STYLES
  *  binds, listed statically so Tailwind sees each class. */
 const STAGE_DOT: Record<StageKey, string> = {
   general: "bg-working",
@@ -53,7 +53,7 @@ const STAGE_PIN_BORDER: Record<StageKey, string> = {
   revise: "border-revise/30",
 };
 
-/** A quiet workstream's stage dot (static — no live pulse). */
+/** A quiet workstream's stage dot (static, no live pulse). */
 export function stageDot(view: WorkstreamView): string {
   return STAGE_DOT[stageOf(view)];
 }
@@ -102,18 +102,18 @@ export function heroStatus(
     return {
       dot: "bg-accent",
       pulse: true,
-      text: [`${agents(counts.running)} running${stages ? ` — ${stages}` : ""}`, ...tail].join(" · "),
+      text: [`${agents(counts.running)} running${stages ? `, ${stages}` : ""}`, ...tail].join(" · "),
     };
   }
   if (tail.length > 0) {
     return { dot: counts.errors > 0 ? "bg-bad" : "bg-ok", pulse: false, text: tail.join(" · ") };
   }
-  return { dot: "bg-ok", pulse: false, text: "All quiet — no agents running" };
+  return { dot: "bg-ok", pulse: false, text: "All quiet. No agents running" };
 }
 
 // ── Centered search + stat pills ─────────────────────────────────────────────
 
-/** The hero's glass search bar — opens the global search palette (⌘P). */
+/** The hero's glass search bar, opens the global search palette (⌘P). */
 export function HeroSearch({ total }: { total: number }) {
   const bootstrap = useBootstrap();
   const chord = effectiveChord(
@@ -192,10 +192,10 @@ export function StatPills({
 
 // ── First-node empty state (design 4b) ──────────────────────────────────────
 
-/** The lone accent star — the workspace itself, already on the canvas —
+/** The lone accent star, the workspace itself, already on the canvas,
  *  with its label pill floating above. Overlaid on the empty knowledge
  *  graph, whose svg supplies the nebula wash (same smoothstep gradient +
- *  grain dither as the populated hero — a separate CSS gradient here would
+ *  grain dither as the populated hero, a separate CSS gradient here would
  *  band into rings). Shown before setup finishes or while no repo is
  *  connected. */
 export function FirstNodeField() {
@@ -213,13 +213,13 @@ export function FirstNodeField() {
         className="absolute left-1/2 top-[36%] flex -translate-x-1/2 -translate-y-[calc(100%+18px)] items-center rounded-full border border-accent/25 bg-panel/70 px-2.5 py-1 text-[10.5px] backdrop-blur-md"
         style={{ color: "color-mix(in srgb, var(--color-accent) 40%, var(--color-ink))" }}
       >
-        hyprlayer — your first node
+        hyprlayer, your first node
       </div>
     </div>
   );
 }
 
-/** Starter stats under the first-node search bar — quieter than the live pills,
+/** Starter stats under the first-node search bar, quieter than the live pills,
  *  but agents already running still get the same live pill the populated
  *  state shows (setup can be unfinished while agents work). */
 export function StarterStats({ agentsLive }: { agentsLive: number }) {
@@ -242,7 +242,7 @@ export function StarterStats({ agentsLive }: { agentsLive: number }) {
   );
 }
 
-/** Quiet "Get set up" pill in the hero's corner — opens the existing setup
+/** Quiet "Get set up" pill in the hero's corner, opens the existing setup
  *  wizard instead of a big onboarding card of its own. */
 export function SetupPill({ onClick }: { onClick: () => void }) {
   return (
@@ -365,7 +365,7 @@ function AgentCard({
             <>
               {project} ·{" "}
               {line ??
-                (activity === "review" ? "turn finished — ready for review" : view.item.branch)}
+                (activity === "review" ? "turn finished, ready for review" : view.item.branch)}
               {queued > 0 && ` · +${queued} queued`}
             </>
           )}
@@ -403,7 +403,7 @@ function AgentCard({
   );
 }
 
-/** LIVE NOW — stage-colored agent cards when busy; when quiet, the
+/** LIVE NOW, stage-colored agent cards when busy; when quiet, the
  *  last-shipped note plus the primary "Start an agent" path (the design's
  *  first-class all-quiet state, not an empty one). */
 export function LiveNowPanel({
@@ -488,7 +488,7 @@ function rowDot(row: RecentRow): string {
   return stageDot(row.view);
 }
 
-/** LATEST ACTIVITY — quiet actives and freshly archived workstreams, newest
+/** LATEST ACTIVITY, quiet actives and freshly archived workstreams, newest
  *  first; the "what was I doing" list beside the live panel. */
 export function ActivityPanel({
   rows,
@@ -517,7 +517,7 @@ export function ActivityPanel({
       <div className="mt-2 flex max-h-[170px] flex-col gap-0.5 overflow-y-auto">
         {rows.length === 0 && (
           <p className="px-1.5 py-2 text-[12.5px] text-ink-dim">
-            Nothing here yet — workstreams you finish or set aside land here.
+            No activity yet.
           </p>
         )}
         {rows.map((row) => (

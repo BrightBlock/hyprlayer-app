@@ -9,7 +9,7 @@ import type { EventBridge } from "@/lib/events";
 export type DockTab = "setup" | "run" | "archive" | { term: number };
 
 type DockState = {
-  /** Whether the bottom dock is expanded for this workstream. Default closed —
+  /** Whether the bottom dock is expanded for this workstream. Default closed,
    *  the chat keeps full height until the user opens it (rail icon / ⌘R). */
   open: boolean;
   /** The selected tab. */
@@ -21,8 +21,8 @@ type DockState = {
   /** Live backend PTY id per ad-hoc terminal shell id, so a collapsed dock
    *  re-attaches its terminals on reopen instead of orphaning them. */
   termIds: Record<number, string>;
-  /** Right-docked: body collapsed in place (header-only). Persisted here — not in
-   *  the component — so it survives the dock unmount/remount when the sidebar is
+  /** Right-docked: body collapsed in place (header-only). Persisted here, not in
+   *  the component, so it survives the dock unmount/remount when the sidebar is
    *  toggled. Ignored while bottom-docked. */
   collapsed: boolean;
 };
@@ -39,7 +39,7 @@ type ScriptsState = {
   /** One-shot "start the Run now" flag, set by ▶ / ⌘R and consumed by the dock
    *  (which owns the run view). Lets ⌘R start a run even when the dock is closed. */
   pendingRun: Record<string, boolean>;
-  /** The workstream currently on screen, published by ProjectPage — the rail's
+  /** The workstream currently on screen, published by ProjectPage, the rail's
    *  dock toggle acts on it. Null when no workstream is open. */
   activeWorkstream: string | null;
   /** Where the dock lives: "bottom" (under the agent view) or "right" (stacked
@@ -47,7 +47,7 @@ type ScriptsState = {
   dockPosition: DockPosition;
   /** Dock height (px), drag-resizable from its top edge. Global preference. */
   dockHeight: number;
-  /** ⌘⇧F: dock body expanded to its full height. A transient view state — it
+  /** ⌘⇧F: dock body expanded to its full height. A transient view state, it
    *  restores to `dockHeight` when toggled off, and is not persisted. */
   dockMaximized: boolean;
 };
@@ -61,7 +61,7 @@ export type DockPosition = "bottom" | "right";
 const DEFAULT_DOCK: DockState = {
   open: false,
   tab: "run",
-  // Seed one ad-hoc terminal so users discover that terminals live in the dock —
+  // Seed one ad-hoc terminal so users discover that terminals live in the dock,
   // it shows next to Setup/Run; its PTY spawns lazily when the tab is selected.
   terminals: [1],
   nextTerm: 2,
@@ -70,7 +70,7 @@ const DEFAULT_DOCK: DockState = {
 };
 
 /** The slice we keep across restarts: where the dock lives, how tall it is, and
- *  which workstreams left it collapsed (only the `collapsed` flag — never the
+ *  which workstreams left it collapsed (only the `collapsed` flag, never the
  *  transient open/terminal/PTY state). */
 type PersistedScriptsState = {
   dockPosition: DockPosition;

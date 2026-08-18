@@ -57,7 +57,7 @@ export type PromptHandlers = {
 
 /**
  * Re-render a relative-time label on a widening cadence (10s→30s→5m as it ages)
- * instead of a 1s tick — avoids waking the React tree for a "2w ago" label.
+ * instead of a 1s tick, avoids waking the React tree for a "2w ago" label.
  */
 function useTickingNow(epochMs: number | null): number {
   const [now, setNow] = useState(() => Date.now());
@@ -149,7 +149,7 @@ const UserMessage = memo(function UserMessage({
           </span>
         )}
         {/* A library prompt collapses to a card. `text` is still the body the
-            agent received — expanding the card reveals it. */}
+            agent received, expanding the card reveals it. */}
         {text &&
           (promptName ? (
             <PromptCard name={promptName} body={text} />
@@ -217,7 +217,7 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const shown = useSmoothText(text, streaming);
 
-  // Render markdown live while streaming — react-markdown handles partial/
+  // Render markdown live while streaming, react-markdown handles partial/
   // unterminated structures gracefully, so the user sees formatting, not raw md.
   if (streaming) {
     return (
@@ -240,7 +240,7 @@ const AssistantMessage = memo(function AssistantMessage({
 });
 
 
-/** The expanded `<pre>` for a tool/subagent result — shared so error coloring,
+/** The expanded `<pre>` for a tool/subagent result, shared so error coloring,
  *  max-height, and the empty-output fallback stay identical across both. */
 function ToolResultOutput({ result }: { result: { content: string; isError: boolean } }) {
   return (
@@ -285,8 +285,8 @@ function Collapsible({
 
 const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-  // A one-line preview of the thought (Claude-Code / Conductor style), so a
-  // collapsed thinking block still hints at what the agent reasoned about.
+  // A one-line preview of the thought, so a collapsed thinking block still
+  // hints at what the agent reasoned about.
   const preview = text.split("\n").find((line) => line.trim() !== "") ?? "";
   return (
     <div className="text-xs">
@@ -308,7 +308,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   );
 });
 
-/** A launched skill, collapsed to a one-line chip — Claude Code injects the
+/** A launched skill, collapsed to a one-line chip, Claude Code injects the
  *  skill's full SKILL.md as an assistant block; we keep it out of the thread but
  *  expandable so the loaded instructions are still inspectable. */
 const SkillBlock = memo(function SkillBlock({ name, body }: { name: string; body: string }) {
@@ -387,7 +387,7 @@ function ToolArg({ name, input }: { name: string; input: string }) {
 }
 
 /**
- * One tool call as a lightweight action row (not a boxed card) — the thing that
+ * One tool call as a lightweight action row (not a boxed card), the thing that
  * keeps the transcript reading top-to-bottom like Claude Code: a compact
  * `● Name  summary` line with a dimmed `⎿ result` line beneath it. Click to
  * expand the full input/output.
@@ -402,12 +402,12 @@ const ToolBlock = memo(function ToolBlock({
   const [open, setOpen] = useState(false);
   const result = item.result;
   // A file tool already names its target in the chip (and Edit/MultiEdit preview
-  // the diff on hover), so the success result line — the read's `<path>…` echo,
-  // "file updated successfully", etc. — is redundant noise that re-leaks the full
+  // the diff on hover), so the success result line, the read's `<path>…` echo,
+  // "file updated successfully", etc., is redundant noise that re-leaks the full
   // path and clutters the stream. Suppress it on success; keep it on error.
   const isFileTool = toolFilePath(item.name, item.input) !== null;
   // A Skill row already names the skill in its header, so the "Launching skill: X"
-  // result is redundant noise — and its body folds into the expanded view below.
+  // result is redundant noise, and its body folds into the expanded view below.
   const isSkill = item.name === "Skill";
   const preview =
     result && !((isFileTool || isSkill) && !result.isError)
@@ -471,14 +471,14 @@ const PermissionCard = memo(function PermissionCard({
 
   if (item.decision !== null) {
     // An approved permission is immediately followed by the actual tool call row,
-    // so re-showing "Tool — allowed" is redundant. Only a denial (where the tool
+    // so re-showing "Tool, allowed" is redundant. Only a denial (where the tool
     // never runs, so there's no tool row) is worth surfacing.
     if (item.decision === "allow") return null;
     return (
       <div className="flex items-center gap-2 text-xs text-ink-dim">
         <ShieldIcon size={12} />
         <span className="font-mono text-ink">{item.toolName}</span>
-        <span>— denied</span>
+        <span>· denied</span>
       </div>
     );
   }
@@ -544,10 +544,10 @@ function exitRemedy(stderrTail: string): string | null {
 }
 
 /** A thin horizontal divider marking where claude paused to compact the
- *  conversation — auto- or manually. Without this row a long compact looks like
+ *  conversation, auto- or manually. Without this row a long compact looks like
  *  the session went silent (no events fire while the summary is generated). When
  *  claude's post-compact summary is folded in, the label becomes a toggle that
- *  expands it — kept collapsed by default so the 10–20KB summary never floods the
+ *  expands it, kept collapsed by default so the 10–20KB summary never floods the
  *  thread (the same treatment a launched skill's injected body gets). */
 const CompactDivider = memo(function CompactDivider({
   item,
@@ -598,14 +598,14 @@ const CompactDivider = memo(function CompactDivider({
   );
 });
 
-/** Where a command queued into the running session took over — a scheduled wakeup
+/** Where a command queued into the running session took over, a scheduled wakeup
  *  firing, or a slash command queued behind a busy turn. claude never echoes the
  *  injected prompt to us, so without this row the next turn simply appears and reads as
  *  the agent spontaneously picking work back up.
  *
  *  Shaped like the tool row that scheduled it (dot · icon · name · arg) because it is
  *  that call's other half: `ScheduleWakeup` says "I'll be back", this row is the coming
- *  back. It reports rather than discloses, so it takes the static row — a hover tint
+ *  back. It reports rather than discloses, so it takes the static row, a hover tint
  *  would promise a click that does nothing. */
 const QueuedCommandRow = memo(function QueuedCommandRow({
   item,
@@ -657,7 +657,7 @@ const ExitNotice = memo(function ExitNotice({
 
 /**
  * The live "time working" readout pinned to the bottom-left of the transcript
- * (Conductor-style) — it sits at the end of the scrolling content, so it rides
+ * It sits at the end of the scrolling content, so it rides
  * the bottom of the chat. Ticks ~10×/s so the tenths advance smoothly; it
  * unmounts the moment the turn ends (`since` goes null), which clears the timer.
  */
@@ -684,7 +684,7 @@ type ItemKind = TranscriptItem["kind"];
 const isQuiet = (kind: ItemKind) => kind === "tool" || kind === "thinking";
 
 /**
- * Vertical gap before a unit, by what it is and what precedes it — the rhythm
+ * Vertical gap before a unit, by what it is and what precedes it, the rhythm
  * that makes the stream read linearly: working steps pack tightly, while prose
  * and new turns get room to breathe.
  */
@@ -704,7 +704,7 @@ type Unit =
 const unitKind = (u: Unit): ItemKind => (u.type === "group" ? "tool" : u.item.kind);
 
 /** A file-targeting step (Read/Write/Edit/…) renders a per-file chip or card, so
- *  it never folds into a collapsed "N tool calls" group — every file the agent
+ *  it never folds into a collapsed "N tool calls" group, every file the agent
  *  touches stays its own visible row. */
 const isFileUnit = (it: TranscriptItem): boolean =>
   it.kind === "tool" && toolFilePath(it.name, it.input) !== null;
@@ -743,7 +743,7 @@ function toUnits(items: TranscriptItem[], hasChildren: (it: TranscriptItem) => b
 }
 
 /**
- * A collapsed run of working steps — "N tool calls", expand for the detail.
+ * A collapsed run of working steps, "N tool calls", expand for the detail.
  * Collapsed by default so a long research burst reads as one line; while the
  * turn is live the header shows a spinner and the count grows.
  */
@@ -826,7 +826,7 @@ function renderSingle(
 type ChildMap = Map<string, TranscriptItem[]>;
 
 /**
- * A subagent (`Task`) and all of its work, collapsed by default — expand to see
+ * A subagent (`Task`) and all of its work, collapsed by default, expand to see
  * the nested transcript. Keeps subagent activity out of the main thread.
  */
 function SubagentBlock({
@@ -908,7 +908,7 @@ function ItemList({
   const hasChildren = (it: TranscriptItem) =>
     it.kind === "tool" && childrenByParent.has(it.toolUseId);
   // An approved permission renders nothing (the tool row that follows conveys it),
-  // so drop it before layout — otherwise its empty wrapper leaves a phantom gap.
+  // so drop it before layout, otherwise its empty wrapper leaves a phantom gap.
   const visible = items.filter((it) => it.kind !== "permission" || it.decision !== "allow");
   const units = toUnits(visible, hasChildren);
   return (
@@ -949,15 +949,15 @@ function ItemList({
 
 type Props = {
   items: TranscriptItem[];
-  /** claude is actively computing (`isWorking`) — drives the running-tool
+  /** claude is actively computing (`isWorking`), drives the running-tool
    *  spinner and the smooth scroll-to-bottom. False while parked on the user. */
   busy: boolean;
   /** True before the first event lands, to show a connecting spinner. */
   connecting: boolean;
-  /** The harness this session runs on (e.g. "Claude Code" / "OpenCode") — names
+  /** The harness this session runs on (e.g. "Claude Code" / "OpenCode"), names
    *  the connecting spinner so it isn't always "claude". */
   harnessLabel: string;
-  /** Epoch ms when the current working stretch began, or null when idle —
+  /** Epoch ms when the current working stretch began, or null when idle,
    *  drives the bottom-left elapsed counter. */
   workingSince: number | null;
   permission: PermissionHandlers;
@@ -968,11 +968,11 @@ type Props = {
 export type TranscriptHandle = {
   /** Scroll the transcript to the tool row with the given `toolUseId`. */
   scrollToTool: (toolUseId: string) => void;
-  /** Re-stick to the bottom and jump there — for after the user sends a message. */
+  /** Re-stick to the bottom and jump there, for after the user sends a message. */
   scrollToBottom: () => void;
 };
 
-/** How close to the bottom (px) counts as "stuck to the bottom" — the gate for
+/** How close to the bottom (px) counts as "stuck to the bottom", the gate for
  *  *resuming* auto-follow. Forgiving on purpose: while streaming, the bottom
  *  keeps growing, so a too-tight gate means scrolling "to the bottom" lands a few
  *  px short and never re-locks. The matching re-lock is eased (see RELOCK_MS), so
@@ -980,11 +980,11 @@ export type TranscriptHandle = {
 const RESTICK_PX = 24;
 
 /** When the view re-sticks from a gap, ease the catch-up to the exact bottom
- *  shut over roughly this long instead of jumping — keeps the re-lock smooth. */
+ *  shut over roughly this long instead of jumping, keeps the re-lock smooth. */
 const RELOCK_MS = 200;
 
 /** The post-send glide to the bottom is intentionally gentler than the mid-stream
- *  re-lock — a smaller per-frame step over a slightly longer window — so it reads
+ *  re-lock, a smaller per-frame step over a slightly longer window, so it reads
  *  as a deliberate scroll rather than a snap. */
 const SEND_GLIDE_FACTOR = 0.12;
 const SEND_GLIDE_MS = 600;
@@ -992,7 +992,7 @@ const SEND_GLIDE_MS = 600;
 /** Decide whether the view is stuck to the bottom after a scroll event, from the
  *  previous scrollTop, the current scrollTop, and the current gap to the bottom
  *  (`scrollHeight - clientHeight - scrollTop`). Releases only on a genuine
- *  scroll-up — scrollTop dropped *and* a real gap opened. A drop that keeps the
+ *  scroll-up, scrollTop dropped *and* a real gap opened. A drop that keeps the
  *  gap ~0 is the browser clamping scrollTop after the viewport grew (e.g. the
  *  composer shrank) or the content shrank, not a gesture, so it holds the stick.
  *  Re-sticks once back within RESTICK_PX of the bottom; otherwise unchanged. */
@@ -1006,7 +1006,7 @@ export function stickAfterScroll(prevTop: number, top: number, gap: number, wasS
  *  up, from its deltas, modifier, and the transcript's scrollTop. Filters out
  *  pinch-zoom (ctrl+wheel), mostly-horizontal pans (which leak a few negative
  *  deltaY px while panning a wide code block), and wheels with no scrollback
- *  above (scrollTop 0) — none of those can scroll the view up, so none may
+ *  above (scrollTop 0), none of those can scroll the view up, so none may
  *  unpin. The last one matters most: on a not-yet-overflowing transcript no
  *  scroll event ever fires, so a dropped pin could never re-stick. */
 export function releaseOnWheel(deltaX: number, deltaY: number, ctrlKey: boolean, scrollTop: number): boolean {
@@ -1016,7 +1016,7 @@ export function releaseOnWheel(deltaX: number, deltaY: number, ctrlKey: boolean,
 }
 
 /** True when `target` sits inside a nested scroller (expanded tool output,
- *  thinking block) that scrolls vertically itself — its wheel-ups stay local,
+ *  thinking block) that scrolls vertically itself, its wheel-ups stay local,
  *  so the pin must hold. When one chains to the transcript after all (inner
  *  scroller already at its top), the onScroll drop-release catches it. */
 export function insideNestedScroller(target: EventTarget | null, root: HTMLElement): boolean {
@@ -1078,7 +1078,7 @@ export const TranscriptView = memo(
         const el = scrollRef.current;
         if (!el || el.scrollHeight - el.clientHeight - el.scrollTop <= 0) return;
         relockUntil.current = performance.now() + SEND_GLIDE_MS;
-        if (easeFrame.current) return; // an ease is already gliding — it'll see the refreshed window
+        if (easeFrame.current) return; // an ease is already gliding, it'll see the refreshed window
         const tick = () => {
           pin(SEND_GLIDE_FACTOR);
           if (performance.now() < relockUntil.current) {
@@ -1105,7 +1105,7 @@ export const TranscriptView = memo(
     };
 
     // A wheel/trackpad scroll-up releases synchronously, before the next frame's
-    // pin can fire — the scroll event alone can land after that frame's rAF.
+    // pin can fire, the scroll event alone can land after that frame's rAF.
     // Gated to wheels that can genuinely scroll the transcript up (see
     // releaseOnWheel / insideNestedScroller) so nothing else drops the pin.
     const onWheel = (e: WheelEvent<HTMLDivElement>) => {
@@ -1121,7 +1121,7 @@ export const TranscriptView = memo(
       if (busy) return;
       const el = scrollRef.current;
       if (!el || !atBottom.current) return;
-      // A send-ease is gliding to the bottom — let it animate, don't snap past it.
+      // A send-ease is gliding to the bottom, let it animate, don't snap past it.
       if (easeFrame.current && performance.now() < relockUntil.current) return;
       el.scrollTop = el.scrollHeight;
     }, [items, busy]);
@@ -1141,9 +1141,9 @@ export const TranscriptView = memo(
     // the handlers above notice: shrinking the window drops clientHeight and
     // opens a gap under a stuck view, and changing the width re-wraps the rows
     // into a different scrollHeight. Either way the transcript slides out of its
-    // pin and the content appears to scroll with the window. Observe both boxes
-    // — the scroller for its own size, the content for reflow and for late
-    // growth while idle (an image settling) — and re-pin. `pin` no-ops once the
+    // pin and the content appears to scroll with the window. Observe both boxes,
+    // the scroller for its own size, the content for reflow and for late
+    // growth while idle (an image settling), and re-pin. `pin` no-ops once the
     // user has scrolled up, so a resize never yanks them back to the bottom.
     useEffect(() => {
       const el = scrollRef.current;
@@ -1180,22 +1180,18 @@ export const TranscriptView = memo(
         ref={scrollRef}
         onScroll={onScroll}
         onWheel={onWheel}
-        // `overscroll-contain`: keep the wheel inside the transcript. Without it,
-        // scrolling past the top/bottom edge chains to the app-level <main>
-        // scroller and drags the whole window — the agent pane must own its
-        // scroll. (Newly reachable now that scroll-up isn't pinned mid-stream.)
-        // `overflow-anchor:none`: this component owns bottom-pinning; engine
-        // scroll anchoring would counter-adjust scrollTop when rows above
-        // reflow, which reads as a phantom scroll-up and drops the pin.
-        // `-mt-9` lifts this scroller up behind the pane's h-9 tab strip so rows
+        // `overscroll-contain` keeps the wheel inside the transcript. Without
+        // it, scrolling past an edge chains to the app-level <main> scroller and
+        // drags the whole window.
+        // `overflow-anchor:none` because this component owns bottom-pinning.
+        // Engine scroll anchoring would counter-adjust scrollTop when rows above
+        // reflow, reading as a phantom scroll-up that drops the pin.
+        // `-mt-9` lifts the scroller behind the pane's h-9 tab strip so rows
         // slide under it and its backdrop-blur has content to sample (see
-        // lib/glass.ts); `pt-14` (h-9 + the p-5 this overrides on top) keeps the
-        // first row where it was at rest. Bottom padding is untouched, so the
-        // bottom-pin math below — which compares scrollTop against
-        // scrollHeight - clientHeight — is unaffected: both grow by the same 36px.
-        // Unconditional, unlike the band's glass: against a solid tab strip
-        // (Windows/Linux) rows just scroll under an opaque bar, which is exactly
-        // what they did before.
+        // lib/glass.ts). `pt-14` keeps the first row at rest. Bottom padding is
+        // untouched, so the bottom-pin math below is unaffected: both sides grow
+        // by the same 36px. Unconditional, unlike the band's glass, since
+        // against a solid tab strip rows just scroll under an opaque bar.
         className="-mt-9 min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pt-14 [overflow-anchor:none]"
       >
         <div ref={contentRef} className="mx-auto w-[90%]">

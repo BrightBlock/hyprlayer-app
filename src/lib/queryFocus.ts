@@ -6,8 +6,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
  *
  * React Query's default focus listener uses the browser `visibilitychange`
  * event, which a macOS WKWebview does NOT emit on app-to-app focus switches
- * (only on minimize/occlusion). So `refetchOnWindowFocus` — which the app opts
- * into globally — silently misses the common "tab away, change something on
+ * (only on minimize/occlusion). So `refetchOnWindowFocus`, which the app opts
+ * into globally, silently misses the common "tab away, change something on
  * disk, tab back" case. Tauri's `onFocusChanged` fires on every focus edge (the
  * same reliable signal the notification router uses), so wiring it here makes
  * focus refetch actually work. Concretely: create a missing worktree-copy file
@@ -24,7 +24,7 @@ export function setupQueryFocus(): void {
     void getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => onFocus(focused))
       .then((fn) => {
-        // Cleaned up before the async listener attached — detach immediately.
+        // Cleaned up before the async listener attached, detach immediately.
         if (cancelled) fn();
         else unlisten = fn;
       });

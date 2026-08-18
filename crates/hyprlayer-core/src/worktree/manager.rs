@@ -1,6 +1,6 @@
 //! Worktree lifecycle. Hybrid git strategy (mirrors the hyprlayer CLI):
-//! `git worktree add/remove/prune` via subprocess — the porcelain handles
-//! branch-from-base creation, sparse checkout, and hooks correctly — while
+//! `git worktree add/remove/prune` via subprocess, the porcelain handles
+//! branch-from-base creation, sparse checkout, and hooks correctly, while
 //! status polling uses git2 so it never forks.
 
 use std::ffi::OsString;
@@ -14,9 +14,8 @@ use crate::process::Exec;
 
 use super::thoughts_links::LinkStatus;
 
-/// `~/hyprlayer/worktrees` — user-visible (like Conductor's workspaces),
-/// short (Windows path budgets), and outside any repo (no gitignore or
-/// watcher interplay).
+/// `~/hyprlayer/worktrees`: user-visible, short (Windows path budgets), and
+/// outside any repo (no gitignore or watcher interplay).
 pub fn default_worktree_root() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -24,8 +23,8 @@ pub fn default_worktree_root() -> PathBuf {
         .join("worktrees")
 }
 
-/// `<project>/archived-contexts` — Conductor-style: archived worktrees live
-/// alongside their source repo so the relationship is visible in Finder.
+/// `<project>/archived-contexts`: archived worktrees live alongside their
+/// source repo so the relationship is visible in a file manager.
 /// `.git/info/exclude` keeps them out of the user's `git status`.
 pub const ARCHIVE_SUBDIR: &str = "archived-contexts";
 
@@ -73,8 +72,8 @@ pub struct CreateSpec {
     pub mode: CreateMode,
 }
 
-/// The three ways to back a new workstream. The default — [`CreateMode::Isolated`]
-/// — is the original behavior; the other two adopt a branch the user already has.
+/// The three ways to back a new workstream. The default, [`CreateMode::Isolated`],
+/// is the original behavior; the other two adopt a branch the user already has.
 #[derive(Debug, Clone)]
 pub enum CreateMode {
     /// Create branch `<prefix><slug>` and a dedicated worktree from the base.
@@ -113,14 +112,14 @@ pub struct WorktreeStatus {
     /// Untracked files, excluding thoughts/ (informational only).
     pub untracked: u32,
     /// Commits ahead/behind the upstream once it exists, else the base branch.
-    /// Drops to 0 the moment the branch is pushed — a sync indicator, not a
+    /// Drops to 0 the moment the branch is pushed, a sync indicator, not a
     /// "has work to ship" signal (see `ahead_of_base`).
     pub ahead: u32,
     pub behind: u32,
     /// Commits on this branch not yet in the base branch (the PR's merge
     /// target), always measured against `base_branch` regardless of the
-    /// upstream. Unlike `ahead`, this does NOT drop to 0 when the branch is
-    /// pushed, so it answers "is there anything to open a PR for?" — the signal
+    /// upstream. Unlike `ahead`. This does NOT drop to 0 when the branch is
+    /// pushed, so it answers "is there anything to open a PR for?", the signal
     /// Ship gates on.
     pub ahead_of_base: u32,
     pub thoughts: LinkStatus,
@@ -153,7 +152,7 @@ impl WorktreeManager {
 
     /// Provision the worktree for a workstream per its [`CreateMode`]. Thoughts
     /// provisioning is the caller's next step (it needs config context this
-    /// module doesn't own) — except in [`CreateMode::InPlace`], where the target
+    /// module doesn't own), except in [`CreateMode::InPlace`], where the target
     /// is the already-provisioned project checkout.
     pub async fn create(&self, git: &Path, spec: &CreateSpec) -> Result<CreatedWorktree> {
         let slug = unique_slug(&spec.title);
@@ -204,12 +203,12 @@ impl WorktreeManager {
             }
             CreateMode::InPlace { branch } => {
                 // No worktree: switch the project's own checkout onto `branch`.
-                // On checkout git refuses only *conflicting* dirty changes —
+                // On checkout git refuses only *conflicting* dirty changes,
                 // non-conflicting modified files silently follow the switch onto
                 // the new branch. To avoid carrying a user's in-progress work
                 // across branches, refuse a dirty tree up front. Exception: when
                 // we're already on `branch` the switch is a no-op, and the dirty
-                // tree is that branch's own work — leave it untouched.
+                // tree is that branch's own work, leave it untouched.
                 let already_here = crate::gitops::current_branch(&spec.project_repo).as_deref()
                     == Some(branch.as_str());
                 if !already_here {
@@ -322,7 +321,7 @@ impl WorktreeManager {
             // Husk or fully gone: git's `worktree remove` would fail (the path
             // isn't in its registry anymore, or has no `.git` to read), and
             // ensure_removable can't even read status. Prune the registration
-            // and best-effort delete the leftover directory — anything still
+            // and best-effort delete the leftover directory, anything still
             // in it is post-teardown runtime crud (.vite/, logs/) recreated by
             // a process whose cwd outlived the archive.
             let _ = git_in(git, project_repo, &["worktree", "prune"])
@@ -372,7 +371,7 @@ impl WorktreeManager {
         dest: &Path,
     ) -> Result<bool> {
         if !is_live_worktree(worktree) {
-            // Same husk handling as Self::remove — nothing recoverable here.
+            // Same husk handling as Self::remove, nothing recoverable here.
             let _ = git_in(git, project_repo, &["worktree", "prune"])
                 .run()
                 .await;
@@ -404,7 +403,7 @@ impl WorktreeManager {
     }
 
     /// Move a previously-archived worktree back to its original path. The
-    /// caller must guarantee `target` is free — collision is the one failure
+    /// caller must guarantee `target` is free, collision is the one failure
     /// mode the UI prompts for.
     pub async fn restore(
         &self,
@@ -491,7 +490,7 @@ impl WorktreeManager {
     }
 }
 
-/// True iff `path` is a live git worktree (has a `.git` entry — directory for
+/// True iff `path` is a live git worktree (has a `.git` entry, directory for
 /// the main checkout, regular file with `gitdir:` for a linked worktree). A
 /// path that exists without `.git` is a husk left over from a partial teardown
 /// (e.g. `git worktree remove` succeeded but a process whose cwd was inside
@@ -527,13 +526,13 @@ fn git_in(git: &Path, repo: &Path, args: &[&str]) -> Exec {
         .args(args.iter().copied())
 }
 
-/// What [`pull_base`] did — surfaced to the GIT panel so it can report the
+/// What [`pull_base`] did, surfaced to the GIT panel so it can report the
 /// result inline (a clean merge vs. conflicts the user must resolve by hand).
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PullOutcome {
-    /// The branch already contains the base's commits — nothing to pull.
+    /// The branch already contains the base's commits, nothing to pull.
     UpToDate,
     /// The base merged cleanly (fast-forward or a new merge commit).
     Merged,
@@ -546,7 +545,7 @@ pub enum PullOutcome {
 /// Pull the target (`base`) branch's new commits into `worktree`: fetch the
 /// remote, then merge. The freshest base is its remote-tracking ref, so we merge
 /// `origin/<base>` when it exists (falling back to the base as given for a
-/// purely-local target). Deterministic — no agent. On conflicts the merge is
+/// purely-local target). Deterministic, no agent. On conflicts the merge is
 /// left in progress for manual resolution; a precondition failure (e.g. a dirty
 /// working tree that git refuses to merge over) surfaces git's own message.
 pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOutcome> {
@@ -602,7 +601,7 @@ pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOu
     })
 }
 
-/// `git fetch --prune origin` in the worktree — refreshes remote-tracking refs so
+/// `git fetch --prune origin` in the worktree, refreshes remote-tracking refs so
 /// ahead/behind (and a subsequent `gh pr view`) reflect what's on the remote now.
 /// Used by the GIT panel's refresh; deletes-then-recomputes are the caller's job.
 pub async fn fetch_remote(git: &Path, worktree: &Path) -> Result<()> {
@@ -613,7 +612,7 @@ pub async fn fetch_remote(git: &Path, worktree: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Create local branch `local` tracking `remote_ref` (e.g. `origin/feature`) —
+/// Create local branch `local` tracking `remote_ref` (e.g. `origin/feature`),
 /// `git branch --track <local> <remote_ref>`. The existing/in-place modes check a
 /// *local* branch out (a remote-tracking ref would detach HEAD), so adopting a
 /// branch that only exists on the remote goes through here first. Errors when
@@ -695,7 +694,7 @@ pub async fn detect_base_branch(git: &Path, repo: &Path) -> Result<String> {
     Err(CoreError::OutputParse {
         program: "base detection".into(),
         detail: format!(
-            "no main/master branch found in {} — pass a base branch explicitly",
+            "no main/master branch found in {}, pass a base branch explicitly",
             repo.display()
         ),
     })
@@ -762,7 +761,7 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     let (additions, deletions) = crate::gitops::worktree_diff_line_counts(&repo);
 
     let head = repo.head().ok();
-    // Detached HEAD (rebase, bisect) shorthands to the literal "HEAD" — report
+    // Detached HEAD (rebase, bisect) shorthands to the literal "HEAD", report
     // None rather than a branch name nothing can check out.
     let branch = head
         .as_ref()
@@ -789,7 +788,7 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     .unwrap_or((0, 0));
 
     // Ship gates on this, NOT `ahead`: once the branch is pushed, `ahead` (vs
-    // upstream) is 0, but there's still a PR to open — so measure against the
+    // upstream) is 0, but there's still a PR to open, so measure against the
     // base branch always, ignoring the upstream, so a push never hides Ship.
     let ahead_of_base = (|| -> Option<u32> {
         let head_ref = head.as_ref()?;
@@ -853,8 +852,8 @@ mod tests {
         std::fs::create_dir(&notes).unwrap();
         std::fs::write(notes.join("todo.md"), "hi\n").unwrap();
 
-        // The git reader can't open a plain folder, so it reports `exists: false`
-        // — which the UI renders as "missing on disk". Folder workstreams must
+        // The git reader can't open a plain folder, so it reports `exists: false`,
+        // which the UI renders as "missing on disk". Folder workstreams must
         // not go through it.
         assert!(!status(&notes, "", None).exists);
 
@@ -862,7 +861,7 @@ mod tests {
         assert!(st.exists);
         assert_eq!(st.branch, None);
         assert_eq!((st.dirty, st.untracked, st.ahead, st.behind), (0, 0, 0, 0));
-        // No thoughts links to be broken — the chip must stay quiet.
+        // No thoughts links to be broken, the chip must stay quiet.
         assert_eq!(st.thoughts, LinkStatus::Unsupported);
 
         assert!(!folder_status(&dir.path().join("gone")).exists);
@@ -903,7 +902,7 @@ mod tests {
     }
 
     /// A branch that only exists on the remote (the colleague's-branch case) is
-    /// adopted by first creating a local branch tracking it — `worktree add` on
+    /// adopted by first creating a local branch tracking it, `worktree add` on
     /// `origin/x` would detach HEAD.
     #[tokio::test]
     async fn remote_only_branch_is_adopted_via_a_local_tracking_branch() {
@@ -967,7 +966,7 @@ mod tests {
         );
 
         // A second attempt at the same local name fails rather than silently
-        // adopting an unrelated branch — the caller checks the local list first.
+        // adopting an unrelated branch, the caller checks the local list first.
         assert!(
             create_tracking_branch(&git, &repo, "linux-support", "origin/linux-support")
                 .await
@@ -1096,7 +1095,7 @@ mod tests {
 
     /// Regression: pushing a branch to its remote must not hide Ship. After a
     /// push, `ahead` (vs the upstream) is 0, but the branch still carries commits
-    /// with no PR — so `ahead_of_base` (vs the base branch) must stay > 0.
+    /// with no PR, so `ahead_of_base` (vs the base branch) must stay > 0.
     #[test]
     fn ahead_of_base_survives_push_while_ahead_zeroes() {
         let (guard, repo) = fixture_repo();
@@ -1111,7 +1110,7 @@ mod tests {
         let before = status(&repo, "main", None);
         assert_eq!((before.ahead, before.ahead_of_base), (1, 1));
 
-        // Push to a bare remote and set upstream — the state that hid Ship.
+        // Push to a bare remote and set upstream, the state that hid Ship.
         let remote = guard.path().join("remote.git");
         sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
         sh(
@@ -1124,12 +1123,12 @@ mod tests {
         assert_eq!(after.ahead, 0, "pushed: nothing left to push vs upstream");
         assert_eq!(
             after.ahead_of_base, 1,
-            "pushed: still a commit to ship vs base — Ship must stay visible",
+            "pushed: still a commit to ship vs base, Ship must stay visible",
         );
     }
 
     /// Existing-branch mode checks a branch the user already has out into a
-    /// dedicated worktree — no new branch is created, and the worktree's HEAD is
+    /// dedicated worktree, no new branch is created, and the worktree's HEAD is
     /// that branch (not detached).
     #[tokio::test]
     async fn create_existing_checks_out_user_branch_without_creating_one() {
@@ -1200,7 +1199,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(created.branch, "main");
-        // The path is the project repo itself — no dedicated worktree dir.
+        // The path is the project repo itself, no dedicated worktree dir.
         assert_eq!(PathBuf::from(&created.path), repo);
         assert!(
             std::fs::read_dir(wt_root.path()).unwrap().next().is_none(),
@@ -1287,7 +1286,7 @@ mod tests {
     }
 
     /// In-place onto the branch already checked out is a no-op switch, so a dirty
-    /// tree is fine — that work belongs to the branch being adopted and must be
+    /// tree is fine, that work belongs to the branch being adopted and must be
     /// left untouched.
     #[tokio::test]
     async fn create_inplace_allows_dirty_tree_on_current_branch() {
@@ -1510,7 +1509,7 @@ mod tests {
 
     /// Husk state: the worktree directory exists but its `.git` linkfile is
     /// gone and only post-teardown runtime crud remains. This reproduces
-    /// project-removal-21c6 — a Safe archive there hung because ensure_removable
+    /// project-removal-21c6, a Safe archive there hung because ensure_removable
     /// couldn't open the repo and `git worktree remove --force` rejected a path
     /// no longer in git's registry. `remove` must succeed under Safe and clear
     /// the directory.

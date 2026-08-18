@@ -103,7 +103,7 @@ describe("DiscoverDialog org rail", () => {
     fireEvent.click(org(/^acme\s*2$/));
     rerenderWith({ data: [repo("jane/thoughts")] });
     expect(screen.getByText("thoughts")).toBeDefined();
-    // acme is back, but the user is browsing All now — don't yank the scope.
+    // acme is back, but the user is browsing All now, don't yank the scope.
     rerenderWith({ data: MULTI_ORG });
     expect(screen.getByText("thoughts")).toBeDefined();
     expect(screen.getByText("api")).toBeDefined();
@@ -140,7 +140,7 @@ describe("DiscoverDialog footer and row metadata", () => {
   });
 
   it("hands a picked repo to the Add-project wizard and closes", () => {
-    // Discover never clones directly — the pick routes into the wizard so the
+    // Discover never clones directly, the pick routes into the wizard so the
     // clone reviews the same location + thoughts steps as a pasted URL.
     const { onPick, onClose } = setup({ data: [repo("acme/api")] });
     fireEvent.click(screen.getByRole("button", { name: /acme\/api/ }));
@@ -177,7 +177,7 @@ describe("DiscoverDialog refresh", () => {
   });
 
   it("stays available when gh returns no repos", () => {
-    // The empty state is exactly when a refresh matters — after `gh auth login`.
+    // The empty state is exactly when a refresh matters, after `gh auth login`.
     const { refetch } = setup({ data: [] });
     expect(screen.getByText(/No repositories found/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Refresh repositories" }));

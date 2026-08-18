@@ -6,7 +6,7 @@
  * (one IPC fetch, skipped when the body has none). The prompt library's own
  * surfaces go through `runCustomPrompt`; the composer's `/slug` expansion calls
  * the resolver directly and sends the result itself. Built-in prompts come
- * through neither — Commit/Ship run their stage actions and the backend applies
+ * through neither, Commit/Ship run their stage actions and the backend applies
  * their overrides at launch.
  */
 
@@ -39,8 +39,8 @@ export type ResolvedPrompt = { text: string; title: string };
  * Null when the user cancels the ask.
  *
  * `typed` is what followed `/slug` in the composer: it fills a lone `{{input}}`
- * outright, seeds the first field when the dialog has to open anyway, and — for
- * a body with no slot at all — rides along as a trailing line, so text the user
+ * outright, seeds the first field when the dialog has to open anyway, and, for
+ * a body with no slot at all, rides along as a trailing line, so text the user
  * typed never silently disappears.
  */
 export async function resolveCustomPrompt(
@@ -54,7 +54,7 @@ export async function resolveCustomPrompt(
   const inputs = promptInputs(body);
   const seed = typed && inputs.length > 0 ? { [inputs[0].token]: typed } : {};
 
-  // Ask before the context fetch — that one runs a git diff, wasted if cancelled.
+  // Ask before the context fetch, that one runs a git diff, wasted if cancelled.
   const asked =
     inputs.length > 1 || (inputs.length === 1 && !typed)
       ? await askPromptArgs(name, inputs, seed)

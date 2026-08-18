@@ -2,7 +2,7 @@
 //!
 //! A fresh worktree has no `thoughts/` directory (the links are untracked in
 //! the main checkout), and the hyprlayer CLI resolves a repo's project by
-//! exact cwd path — so each worktree needs (1) the three symlinks re-created
+//! exact cwd path, so each worktree needs (1) the three symlinks re-created
 //! and (2) a `repoMappings` entry. The mapping write is the documented
 //! ADR-0002 exception #2: a Value-preserving, atomic read-modify-rename edit
 //! of the CLI's config that never touches keys the app doesn't own.
@@ -20,7 +20,7 @@ use crate::error::{CoreError, Result};
 pub enum LinkStatus {
     /// Links exist and resolve.
     Ok,
-    /// Backend has no filesystem tree (notion/anytype) — nothing to link.
+    /// Backend has no filesystem tree (notion/anytype), nothing to link.
     Unsupported,
     /// Links missing or broken.
     Broken,
@@ -28,7 +28,7 @@ pub enum LinkStatus {
 
 /// Expected `<repo>/thoughts/` entries and their targets in the thoughts
 /// tree: `<root>/<reposDir>/<mapped>/{<user>,shared}` and `<root>/<globalDir>`.
-/// The single source of the link layout — provisioning creates exactly these
+/// The single source of the link layout, provisioning creates exactly these
 /// and the health check verifies against them. None when the backend has no
 /// filesystem tree or the repo is unmapped.
 fn expected_targets(effective: &EffectiveConfig) -> Option<Vec<(String, PathBuf)>> {
@@ -66,7 +66,7 @@ fn expected_targets(effective: &EffectiveConfig) -> Option<Vec<(String, PathBuf)
 /// `setup_symlinks_into` layout, creating the target directories in the
 /// thoughts tree when absent (`thoughts init` skips mapped checkouts wholesale,
 /// so after a repoint nobody else recreates them). On Windows, falls back to
-/// junctions when real symlinks need privileges. Idempotent — replaces
+/// junctions when real symlinks need privileges. Idempotent, replaces
 /// whatever occupies the link slots, including stale links into a previous
 /// thoughts root.
 pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Result<LinkStatus> {
@@ -100,9 +100,9 @@ pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Resul
 }
 
 /// Expected entries under `<repo>/thoughts/` that are missing, dangling, or
-/// pointing outside the current thoughts tree (stale — e.g. left behind after
+/// pointing outside the current thoughts tree (stale, e.g. left behind after
 /// the config was repointed at a different thoughts repo). The single
-/// definition of link health — status polling and the backend health checks
+/// definition of link health, status polling and the backend health checks
 /// both build on it.
 pub fn broken_thoughts_links(repo: &Path, effective: &EffectiveConfig) -> Vec<String> {
     let thoughts_dir = repo.join(super::THOUGHTS_DIR);
@@ -151,7 +151,7 @@ pub fn check_thoughts(worktree: &Path, effective: &EffectiveConfig) -> LinkStatu
 
 fn link_dir(target: &Path, link: &Path) -> Result<()> {
     match std::fs::symlink_metadata(link) {
-        // Replace whatever is there (broken link, stale dir) — the link
+        // Replace whatever is there (broken link, stale dir), the link
         // location is app-owned inside an app-created worktree.
         Ok(meta) => remove_existing_link(link, &meta)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -180,7 +180,7 @@ fn link_dir(target: &Path, link: &Path) -> Result<()> {
 
 /// Remove whatever occupies a link slot, without ever recursing into a link's
 /// target. Split by platform because a directory symlink/junction must be
-/// removed with `remove_dir` on Windows — `remove_file` there fails with
+/// removed with `remove_dir` on Windows, `remove_file` there fails with
 /// "Access is denied", which broke idempotent re-provisioning.
 #[cfg(unix)]
 fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
@@ -326,7 +326,7 @@ mod tests {
         );
 
         // The links still resolve (the old root exists) but point at the wrong
-        // tree — an exists()-style check would call this healthy.
+        // tree, an exists()-style check would call this healthy.
         assert_eq!(
             check_thoughts(worktree.path(), &new_eff),
             LinkStatus::Broken

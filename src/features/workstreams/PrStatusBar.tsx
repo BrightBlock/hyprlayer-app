@@ -40,7 +40,7 @@ const MERGE_OPTIONS: { method: MergeMethod; label: string }[] = [
 /**
  * Pull-request controls for the header's right action cluster (next to Ship): a
  * PR link that opens in the default browser, agent feedback actions (Fix CI /
- * Address comments), a gated Merge menu, and — once merged — a purple Archive
+ * Address comments), a gated Merge menu, and, once merged, a purple Archive
  * button that hands off to Root's shared archive flow (`onArchive`). Renders
  * nothing until the branch has a PR, so the header is unchanged before shipping.
  */
@@ -78,10 +78,10 @@ export function PrStatusBar({
   // Gate on green CI + a satisfied review + mergeable. A repo with no checks
   // (`none`) has nothing to wait on; `failing` never merges. A required review
   // that's still outstanding (`reviewRequired`) or negative (`changesRequested`)
-  // blocks a direct merge too — GitHub's `mergeable` bool reflects conflicts
+  // blocks a direct merge too, GitHub's `mergeable` bool reflects conflicts
   // only, not branch protection, so without this the button looks enabled and a
   // `gh pr merge` would just error. Auto-merge (when enabled) queues for anything
-  // GitHub clears on its own — pending checks or a pending review — but never a
+  // GitHub clears on its own, pending checks or a pending review, but never a
   // hard failure (won't clear itself) or changes-requested (author's turn).
   const reviewRequired = data.reviewDecision === "reviewRequired";
   const changesRequested = data.reviewDecision === "changesRequested";
@@ -93,12 +93,12 @@ export function PrStatusBar({
   const canMerge = isOpen && data.mergeable && (directOk || queuesAuto) && !merge.isPending;
 
   const mergeTitle = () => {
-    if (queuesAuto) return "Queue auto-merge — GitHub merges once requirements are met";
+    if (queuesAuto) return "Queue auto-merge. GitHub merges once requirements are met";
     if (canMerge) return "Merge this pull request";
     if (data.checks === "pending") return "Waiting for checks to finish";
     if (data.checks === "failing") return "Fix the failing checks before merging";
     if (reviewRequired) return "Waiting for a required review before this can merge";
-    if (changesRequested) return "A reviewer requested changes — address them before merging";
+    if (changesRequested) return "A reviewer requested changes. Address them before merging";
     if (!data.mergeable) return "GitHub reports this PR is not mergeable (conflicts or branch protection)";
     return "Merge unavailable";
   };
@@ -176,7 +176,7 @@ export function PrStatusBar({
         <PillButton
           tint="border-revise/40 bg-revise/10 text-revise hover:bg-revise/20"
           onClick={() => onArchive(view)}
-          title="Merged — remove this workstream's git worktree"
+          title="Merged. Removes this workstream's git worktree"
         >
           Archive
         </PillButton>

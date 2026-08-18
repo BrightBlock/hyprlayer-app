@@ -5,7 +5,7 @@ import { DropdownSelect, TextInput } from "@/components/ui";
 import { DOC_STATUSES, DOC_TYPES } from "./constants";
 
 /** Keep a non-canonical current value selectable instead of silently dropping it,
- *  plus a leading "—" for clearing the field. */
+ *  plus a leading em-dash option for clearing the field. */
 function optionsFor(canonical: readonly string[], current: string) {
   const values = current && !canonical.includes(current) ? [current, ...canonical] : [...canonical];
   return [{ value: "", label: "—" }, ...values.map((v) => ({ value: v, label: v }))];
@@ -24,7 +24,7 @@ function Labeled({ label, children }: { label: string; children: ReactNode }) {
 
 type Props = {
   meta: DocMeta;
-  /** True while the editor buffer is dirty — patching would clobber it. */
+  /** True while the editor buffer is dirty, patching would clobber it. */
   disabled: boolean;
   busy: boolean;
   /** Apply a single-field frontmatter patch (set or remove). */
@@ -34,7 +34,7 @@ type Props = {
 /**
  * Inline frontmatter card; each field applied on change as a one-field FmPatchDto.
  * Patching writes the file (mtime-guarded), so the card is disabled while the body
- * buffer is dirty — parent remounts it (`key`) to reseed values + base mtime.
+ * buffer is dirty, parent remounts it (`key`) to reseed values + base mtime.
  */
 export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
   const fm = meta.fm;

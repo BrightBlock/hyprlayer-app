@@ -6,7 +6,7 @@ import { CreateWorkstreamDialog } from "./CreateWorkstreamDialog";
 import type { ArchivedWorkstreamView, WorkstreamBases } from "@/lib/bindings";
 
 // Mock the data hooks so the dialog runs its real state logic against a plain
-// bases object — no react-query, no git subprocess. `vi.hoisted` lets the
+// bases object, no react-query, no git subprocess. `vi.hoisted` lets the
 // (hoisted) vi.mock factory reach them.
 const q = vi.hoisted(() => ({
   useWorkstreamBases: vi.fn(),
@@ -114,7 +114,7 @@ function renderDialog(open: boolean) {
 // DOM while the menu is open.
 const baseTrigger = () => screen.getByRole("button", { name: "Branched from" });
 const baseValue = () => baseTrigger().textContent;
-/** Open the menu and click one option — the DropdownSelect equivalent of
+/** Open the menu and click one option, the DropdownSelect equivalent of
  *  `fireEvent.change(select, …)`. */
 function pickBase(label: string) {
   fireEvent.click(baseTrigger());
@@ -306,7 +306,7 @@ describe("CreateWorkstreamDialog base detection", () => {
   });
 
   it("adopts a main branch that only appears on the open refetch", () => {
-    // First paint: repo has no main — the base falls back to the first branch.
+    // First paint: repo has no main, the base falls back to the first branch.
     mockBases({
       branches: ["feature-x"],
       localBranches: ["feature-x"],
@@ -317,7 +317,7 @@ describe("CreateWorkstreamDialog base detection", () => {
     expect(baseValue()).toBe("feature-x");
 
     // The open refetch lands: `main` now exists on disk and is the detected
-    // default. The picker must follow it — the whole point of the fix.
+    // default. The picker must follow it, the whole point of the fix.
     mockBases({
       branches: ["main", "feature-x"],
       localBranches: ["main", "feature-x"],
@@ -352,7 +352,7 @@ describe("CreateWorkstreamDialog base detection", () => {
     pickBase("feature-x");
     expect(baseValue()).toBe("feature-x");
 
-    // A later refetch surfaces `main` as the new default — the manual pick wins.
+    // A later refetch surfaces `main` as the new default, the manual pick wins.
     mockBases({
       branches: ["main", "dev", "feature-x"],
       localBranches: ["main", "dev", "feature-x"],

@@ -4,7 +4,7 @@
 //! by `workstreamId:shellId`. Tab pills, the agent status bar, and the sidebar
 //! rollup subscribe here. The imperative side (PTY channels, detection timers)
 //! lives in `agentRuntime.ts`, which writes into this store via the actions
-//! below — state commits are already coalesced per frame by the caller.
+//! below, state commits are already coalesced per frame by the caller.
 
 import { create } from "zustand";
 
@@ -18,7 +18,7 @@ export type AgentRuntimeState = {
   /** Backend PTY id, once spawned/attached. Persisted onto the ShellTab too. */
   terminalId?: string;
   /** This run was (re)started in bypass-permissions mode (the red shield).
-   *  Session-only — never persisted, so a normal relaunch clears it. */
+   *  Session-only, never persisted, so a normal relaunch clears it. */
   bypass?: boolean;
   /** A conversation has begun (first keystroke sent, or cold-started from a prior
    *  session). Gates the Restart/shield resume: without it `claude --continue` has
@@ -141,7 +141,7 @@ export function rollupForWorkstream(
 
 /** Reactive worst-state rollup for a workstream (sidebar dot). Selecting the
  *  derived state (not the whole `agents` map) lets zustand's Object.is bail out,
- *  so a dot only re-renders when its own rollup flips — not on every agent's
+ *  so a dot only re-renders when its own rollup flips, not on every agent's
  *  per-frame output. */
 export function useWorkstreamAgentRollup(workstreamId: string): AgentState | undefined {
   return useMultiplexerStore((s) => rollupForWorkstream(s.agents, workstreamId));

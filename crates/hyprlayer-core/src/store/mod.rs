@@ -18,7 +18,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-/// Connection handle. All access is synchronous behind a Mutex — traffic is
+/// Connection handle. All access is synchronous behind a Mutex, traffic is
 /// tiny (single user, single window); callers wrap calls in spawn_blocking.
 pub struct Db {
     conn: Mutex<Connection>,

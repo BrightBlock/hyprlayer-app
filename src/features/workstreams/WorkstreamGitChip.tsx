@@ -1,4 +1,4 @@
-/** Conductor-style status chip for a workstream: added/deleted line counts
+/** Status chip for a workstream: added/deleted line counts
  *  (matching the diff panel), falling back to an ahead-of-base indicator once
  *  the working tree is clean but commits are unpushed. Used by the sidebar row
  *  and the kanban card so the numbers are visually identical in both places. */

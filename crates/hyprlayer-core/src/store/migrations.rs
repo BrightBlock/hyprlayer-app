@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
 /// Ordered, append-only migrations applied via PRAGMA user_version.
-/// Never edit a shipped step — add a new one.
+/// Never edit a shipped step, add a new one.
 const MIGRATIONS: &[&str] = &[
     // v1: work items + (forward-declared for phase 3) sessions and the
     // orphan-process ledger.
@@ -61,7 +61,7 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (pid, session_id)
     );
     ",
-    // v2: "work items" became "workstreams" — rename tables/columns in
+    // v2: "work items" became "workstreams", rename tables/columns in
     // place; existing rows survive. (v1's SQL text above must never change:
     // fresh installs run v1 then v2 and converge on the same schema.)
     "
@@ -71,7 +71,7 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE sessions RENAME COLUMN work_item_id TO workstream_id;
     ",
     // v3: the project registry. A project is an explicit, app-owned clone the
-    // user added (cloned from a URL or imported from disk) — the source of
+    // user added (cloned from a URL or imported from disk), the source of
     // truth for the project list, replacing the old derive-from-repoMappings
     // approach (which surfaced every worktree's `thoughts init` as a project).
     "
@@ -87,9 +87,9 @@ const MIGRATIONS: &[&str] = &[
     // which, so the archive/delete lifecycle knows whether the branch + dir are
     // app-owned (safe to drop) or the user's. Existing rows are the original
     // behavior: a new branch in a dedicated worktree → 'isolated'.
-    //   isolated — new branch <prefix><slug> in a new worktree (the default)
-    //   existing — a user-chosen local branch checked out into a new worktree
-    //   inplace  — no worktree; the project's own checkout on a chosen branch
+    //   isolated: new branch <prefix><slug> in a new worktree (the default)
+    //   existing: a user-chosen local branch checked out into a new worktree
+    //   inplace:  no worktree; the project's own checkout on a chosen branch
     "
     ALTER TABLE workstreams ADD COLUMN worktree_mode TEXT NOT NULL DEFAULT 'isolated';
     ",
@@ -101,7 +101,7 @@ const MIGRATIONS: &[&str] = &[
     ",
     // v6: user-defined project ordering for the sidebar. `position` is the
     // drag-to-reorder rank; `list_projects` sorts by (position, name). Existing
-    // rows default to 0 and so keep tiebreaking by name — upgrades preserve
+    // rows default to 0 and so keep tiebreaking by name, upgrades preserve
     // today's alphabetical order until the first manual reorder. New projects
     // append at the bottom (position = MAX+1; see `insert_project`).
     "

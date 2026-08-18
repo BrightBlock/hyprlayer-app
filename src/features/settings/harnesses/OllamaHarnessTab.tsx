@@ -36,14 +36,14 @@ function sameSet(a: string[], b: string[]): boolean {
 /** Settings → Harnesses → Ollama. Local (or remote) models are run *through* the
  *  OpenCode harness, so this tab just (a) points at an Ollama server, (b) probes
  *  it for installed models, and (c) picks which to expose. "Usable" is decided by
- *  endpoint reachability, never by a local binary — a remote host has none. */
+ *  endpoint reachability, never by a local binary, a remote host has none. */
 export function OllamaHarnessTab({
   settings,
   status,
   opencodeInstalled,
 }: {
   settings: AppSettings;
-  /** Optional local `ollama` binary status — a convenience for localhost only. */
+  /** Optional local `ollama` binary status, a convenience for localhost only. */
   status?: BinaryStatus;
   /** OpenCode is the engine for local models; warn if it's missing. */
   opencodeInstalled: boolean;
@@ -159,7 +159,7 @@ export function OllamaHarnessTab({
           {probe.isFetching ? (
             <Badge tone="dim">Checking…</Badge>
           ) : reachable ? (
-            <Badge tone="ok">Connected — {installedModels.length} models</Badge>
+            <Badge tone="ok">Connected · {installedModels.length} models</Badge>
           ) : (
             <Badge tone="warn">Not reachable</Badge>
           )}
@@ -234,9 +234,7 @@ export function OllamaHarnessTab({
                         />
                       </div>
                     }
-                  >
-                    Model new chats start on.
-                  </SettingRow>
+                  />
                   <SettingRow
                     title="Commit & Ship model"
                     control={
@@ -260,9 +258,7 @@ export function OllamaHarnessTab({
                         />
                       </div>
                     }
-                  >
-                    Model the Commit and Ship agents run on.
-                  </SettingRow>
+                  />
                 </div>
               )}
             </>
@@ -270,7 +266,7 @@ export function OllamaHarnessTab({
         </Card>
       )}
 
-      {/* Optional local install — only useful for localhost; never gates the feature. */}
+      {/* Optional local install, only useful for localhost; never gates the feature. */}
       {status && (
         <Card>
           <CardTitle>Local install (optional)</CardTitle>

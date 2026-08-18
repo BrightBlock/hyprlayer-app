@@ -1,5 +1,5 @@
 //! Seed a fresh worktree with untracked files from the canonical repo per the
-//! repo's `[worktree].copy` list. Best-effort — callers MUST NOT roll a worktree
+//! repo's `[worktree].copy` list. Best-effort, callers MUST NOT roll a worktree
 //! back when seeding fails.
 
 use std::path::{Path, PathBuf};
@@ -109,7 +109,7 @@ fn copy_tree(repo: &Path, worktree: &Path, dir_rel: &Path, report: &mut SeedRepo
 /// Seed `worktree` from `repo`, copying every file matched by `patterns`.
 /// Literals stat+copy directly; globs drive one bounded `walkdir` (capped at
 /// `MAX_VISITED`, skipping `.git/`/`.hyprlayer/`). Best-effort: never panics or
-/// errors — failures land in `SeedReport::errors`, non-matches in `missing`.
+/// errors, failures land in `SeedReport::errors`, non-matches in `missing`.
 pub fn seed_worktree(repo: &Path, worktree: &Path, patterns: &[String]) -> SeedReport {
     run(repo, Some(worktree), patterns)
 }
@@ -157,7 +157,7 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
                         None => report.copied.push(lit.to_string()),
                     },
                     Ok(_) => match dst {
-                        // File or symlink — copy target content.
+                        // File or symlink, copy target content.
                         Some(worktree) => {
                             let out = worktree.join(rel);
                             match copy_file(&src, &out) {

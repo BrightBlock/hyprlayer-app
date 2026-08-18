@@ -5,7 +5,7 @@
  *
  * Guard rules:
  *  - While focus is in an editable element (input/textarea/contenteditable or a
- *    CodeMirror editor), a chord with NO primary modifier is ignored — so plain
+ *    CodeMirror editor), a chord with NO primary modifier is ignored, so plain
  *    typing (`t`, `1`, …) is never hijacked, but `⌘1` still works mid-compose.
  *  - A chord only fires if a handler is currently registered (the context gate);
  *    otherwise the event passes through untouched.
@@ -18,7 +18,7 @@ import { eventToChord, hasPrimaryModifier } from "./chord";
 import { chordToCommand, type Overrides } from "./resolve";
 import { ESCAPE_COMMAND_ID, runCommand } from "./registry";
 
-/** Whether keyboard focus is in an editable element — the guard that keeps
+/** Whether keyboard focus is in an editable element, the guard that keeps
  *  bare/shift-only chords from hijacking typing. Shared with the prompt-hotkey
  *  dispatcher (`usePromptHotkeys`), which must apply the exact same rule. */
 export function isEditableTarget(target: EventTarget | null): boolean {
@@ -26,7 +26,7 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   const tag = target.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
   if (target.isContentEditable) return true;
-  // CodeMirror (the doc editor + composer) — its content host isn't a textarea.
+  // CodeMirror (the doc editor + composer), its content host isn't a textarea.
   if (target.closest(".cm-editor")) return true;
   return false;
 }
@@ -36,7 +36,7 @@ export function useKeybindings(overrides: Overrides): void {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Bare Escape closes the topmost dismissible surface (no editable guard —
+      // Bare Escape closes the topmost dismissible surface (no editable guard,
       // you must escape a dialog you're typing in); only consumed when handled,
       // so it still reaches the terminal/editor when nothing is open.
       if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {

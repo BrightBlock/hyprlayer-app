@@ -126,7 +126,7 @@ describe("intraLineRanges", () => {
   });
 
   it("drops a span that covers a whole line (a wholly-new/removed line)", () => {
-    // The entire "bbbb" line — no intra-line tint, line background only.
+    // The entire "bbbb" line, no intra-line tint, line background only.
     expect(intraLineRanges(doc, 4, 8)).toEqual([]);
   });
 

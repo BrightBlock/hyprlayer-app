@@ -4,11 +4,11 @@
 //! we talk to over stdin/stdout for its whole life. [`ClaudeDriver::spawn`]
 //! starts the process and three background tasks:
 //!
-//! * **reader** — `claude` stdout NDJSON → [`SessionEvent`]s, broadcast to
+//! * **reader**: `claude` stdout NDJSON → [`SessionEvent`]s, broadcast to
 //!   subscribers (the UI Channel and the persistence writer both attach).
-//! * **stderr** — drained into a small ring buffer, so a crash can report the
+//! * **stderr**: drained into a small ring buffer, so a crash can report the
 //!   tail (e.g. a `/login` hint).
-//! * **waiter** — `child.wait()` → classify the exit → final `Exited` event.
+//! * **waiter**: `child.wait()` → classify the exit → final `Exited` event.
 //!
 //! Turns and control responses are written through an mpsc queue so writes from
 //! different callers serialize onto one stdin without interleaving.
@@ -71,7 +71,7 @@ impl PermissionMode {
 pub struct SpawnConfig {
     /// Absolute path to the resolved `claude` binary.
     pub claude_bin: PathBuf,
-    /// Working directory — the workstream's worktree.
+    /// Working directory, the workstream's worktree.
     pub cwd: PathBuf,
     /// App-generated session id (so resume bookkeeping survives a crash before
     /// the init event lands).
@@ -128,7 +128,7 @@ pub struct ClaudeDriver {
     /// Set when `kill`/`kill_detached` is called, so the waiter classifies the
     /// exit as app-initiated rather than an unexpected `Crashed`.
     kill_flag: Arc<KillFlag>,
-    /// Tool inputs from open `can_use_tool` requests, keyed by request id —
+    /// Tool inputs from open `can_use_tool` requests, keyed by request id,
     /// echoed back as `updatedInput` when allowing (claude's schema requires it).
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
     /// Control requests awaiting a `control_response`, keyed by request id (just
@@ -236,7 +236,7 @@ impl ClaudeDriver {
         }
 
         // Supervised: on Windows the job object kills claude (and anything it
-        // spawned) even when our destructors never run — a `process::exit` or a
+        // spawned) even when our destructors never run, a `process::exit` or a
         // hard kill would otherwise orphan it.
         let mut child = crate::process::spawn_supervised(&mut cmd).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -298,7 +298,7 @@ impl ClaudeDriver {
         ))
     }
 
-    /// Subscribe to the event stream. Late subscribers miss earlier events —
+    /// Subscribe to the event stream. Late subscribers miss earlier events,
     /// the persistence layer attaches immediately and replays from SQLite.
     pub fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
         self.events.subscribe()
@@ -309,7 +309,7 @@ impl ClaudeDriver {
     /// is the stage label for the opening prompt, else `None` for a follow-up.
     ///
     /// Emits a [`SessionEvent::UserMessage`] first so the turn is persisted and
-    /// replays after a restart — claude never echoes the human prompt on stdout,
+    /// replays after a restart. Claude never echoes the human prompt on stdout,
     /// so without this the user's side of the conversation is lost on reload.
     /// `prompt_name` tags the turn as a custom-prompt run so the replayed
     /// transcript collapses the body into a card instead of a wall of text.
@@ -328,7 +328,7 @@ impl ClaudeDriver {
     }
 
     /// Answer a `PermissionAsk`. On allow, claude's schema requires the tool's
-    /// `updatedInput` back — we echo the original input we cached from the
+    /// `updatedInput` back, we echo the original input we cached from the
     /// `can_use_tool` request (unchanged); on deny it requires a message.
     pub fn respond_permission(
         &self,
@@ -395,12 +395,12 @@ impl ClaudeDriver {
     /// peel from the tail down to the target; each step is the current last turn, so
     /// none is "stale".
     ///
-    /// The target uuids come from claude's own on-disk transcript — the SAME record
-    /// it reloads on `--resume` — so `ordinal` maps directly onto index `ordinal - 1`
+    /// The target uuids come from claude's own on-disk transcript, the SAME record
+    /// it reloads on `--resume`, so `ordinal` maps directly onto index `ordinal - 1`
     /// and works across resumes (an app restart, model/permission switch, or a prior
-    /// log-only rewind), not just the current generation. Any miss — the transcript
+    /// log-only rewind), not just the current generation. Any miss, the transcript
     /// isn't found/readable, the first turn (no preceding assistant to land on), a
-    /// running turn that won't interrupt, or a claude refusal — leaves the
+    /// running turn that won't interrupt, or a claude refusal, leaves the
     /// conversation untouched and lets the caller fall back to a log-only rewind.
     pub async fn rewind_to_ordinal(&self, ordinal: usize) -> Result<()> {
         let uuids = self.transcript_user_uuids().await;
@@ -455,7 +455,7 @@ impl ClaudeDriver {
         if let Ok(mut map) = self.pending_controls.lock() {
             map.insert(id.clone(), tx);
         }
-        // Reclaim the pending slot if the write fails (stdin closed) — otherwise the
+        // Reclaim the pending slot if the write fails (stdin closed), otherwise the
         // sender lingers forever, since no reply will ever arrive to remove it.
         if let Err(e) = self.write_line(protocol::control_request_json(
             &id,
@@ -504,7 +504,7 @@ impl ClaudeDriver {
         self.killer.kill();
     }
 
-    /// Same teardown, but for the app's own bookkeeping (quit, relaunch) — the
+    /// Same teardown, but for the app's own bookkeeping (quit, relaunch), the
     /// exit is classified `Detached` and leaves the transcript untouched.
     pub fn kill_detached(&self) {
         self.kill_flag.mark_detached();
@@ -599,13 +599,13 @@ async fn read_and_wait(
                     }
                     // Defensive: suppress any replayed user echo (we no longer run
                     // with `--replay-user-messages`, but a stray echo is a
-                    // re-emission of a prompt we sent, not new content — never render
+                    // re-emission of a prompt we sent, not new content, never render
                     // it as text).
                     ParsedLine::User {
                         is_replay: true, ..
                     } => continue,
                     // A reply to one of our control requests: hand it to the waiter
-                    // keyed by request id (if any), then drop it — not a transcript
+                    // keyed by request id (if any), then drop it, not a transcript
                     // event. Unmatched acks (e.g. interrupt) simply have no waiter.
                     ParsedLine::ControlResponse {
                         request_id,
@@ -671,7 +671,7 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             context_tokens,
             parent_id,
         } => {
-            // A live usage ping (main thread only — subagent usage is separate
+            // A live usage ping (main thread only, subagent usage is separate
             // and shouldn't move the session's context meter), then the blocks.
             context_tokens
                 .filter(|_| parent_id.is_none())
@@ -695,7 +695,7 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             tool_name,
             input,
         } => {
-            // AskUserQuestion isn't a yes/no gate — surface its questions so the
+            // AskUserQuestion isn't a yes/no gate, surface its questions so the
             // UI can render them interactively (answered via `answer_question`).
             // Fall back to a normal permission card if `questions` is missing or
             // not a non-empty array (a malformed shape we can't render as a prompt).
@@ -788,7 +788,7 @@ fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<SessionEvent>
 
 /// Map a 1-based human-turn `ordinal` onto the index in the transcript's `len`
 /// human-turn uuids to begin peeling from (`ordinal - 1`). Pure so the ordinal
-/// arithmetic — the part that silently corrupted a resumed session — is
+/// arithmetic, the part that silently corrupted a resumed session, is
 /// exhaustively unit-tested without a live claude.
 ///
 /// `Err` (target unreachable) is not fatal: the caller falls back to a log-only
@@ -807,7 +807,7 @@ fn rewind_local_start(ordinal: usize, len: usize) -> std::result::Result<usize, 
     Ok(idx)
 }
 
-/// claude's config root — `$CLAUDE_CONFIG_DIR` when set (claude honors it), else
+/// claude's config root, `$CLAUDE_CONFIG_DIR` when set (claude honors it), else
 /// `~/.claude`. Session transcripts live under `<root>/projects/`.
 fn claude_config_dir() -> Option<PathBuf> {
     std::env::var_os("CLAUDE_CONFIG_DIR")
@@ -815,7 +815,7 @@ fn claude_config_dir() -> Option<PathBuf> {
         .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
 }
 
-/// Locate `<config>/projects/*/<session_id>.jsonl` — claude keys each project's
+/// Locate `<config>/projects/*/<session_id>.jsonl`, claude keys each project's
 /// transcript dir off a (lossy) escaping of the cwd, so rather than replicate that
 /// we scan the project dirs for the file named by the (unique) session id.
 fn transcript_path(session_id: &str) -> Option<PathBuf> {
@@ -831,7 +831,7 @@ fn transcript_path(session_id: &str) -> Option<PathBuf> {
 }
 
 /// The uuids of the genuine human turns in a session transcript (`jsonl`), in
-/// order — the same turns claude's own rewind targets. Mirrors claude's filter:
+/// order, the same turns claude's own rewind targets. Mirrors claude's filter:
 /// a `type:"user"` line that isn't a tool-result echo, meta / injected / compaction
 /// line, subagent sidechain, or non-human origin. Pure + unit-tested.
 fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
@@ -913,7 +913,7 @@ mod tests {
 
     /// The index is `ordinal - 1`, so peeling from it keeps turns `1..ordinal` and
     /// drops `ordinal..`. Because the uuids come from the transcript (all turns,
-    /// every generation), a turn from before a resume maps directly — the fix for
+    /// every generation), a turn from before a resume maps directly, the fix for
     /// the "predates this live generation" fall-through.
     #[test]
     fn rewind_maps_ordinal_to_index() {
@@ -921,13 +921,13 @@ mod tests {
         assert_eq!(rewind_local_start(5, 5), Ok(4));
         // A pre-resume turn is now reachable (transcript holds every turn's uuid).
         assert_eq!(rewind_local_start(3, 7), Ok(2));
-        // The first turn has no preceding assistant — unreachable.
+        // The first turn has no preceding assistant, unreachable.
         assert!(rewind_local_start(1, 5).is_err());
-        // Beyond what the transcript holds — unreachable.
+        // Beyond what the transcript holds, unreachable.
         assert!(rewind_local_start(6, 5).is_err());
     }
 
-    /// An empty transcript (not found / unreadable) reaches no turn — every ordinal
+    /// An empty transcript (not found / unreadable) reaches no turn, every ordinal
     /// falls back to a log-only rewind.
     #[test]
     fn rewind_empty_transcript_reaches_nothing() {
@@ -938,7 +938,7 @@ mod tests {
 
     /// The transcript parser keeps genuine human turns in order and drops the rest:
     /// tool-result echoes, meta / compaction / injected lines, subagent sidechains,
-    /// and non-human origins — mirroring what claude's own rewind will accept.
+    /// and non-human origins, mirroring what claude's own rewind will accept.
     #[test]
     fn parse_transcript_keeps_only_human_turns() {
         let jsonl = [

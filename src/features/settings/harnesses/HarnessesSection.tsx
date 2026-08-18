@@ -6,7 +6,7 @@ import { CodexHarnessTab } from "./CodexHarnessTab";
 import { OpenCodeHarnessTab } from "./OpenCodeHarnessTab";
 import { OllamaHarnessTab } from "./OllamaHarnessTab";
 
-// Settings-tab ids — deliberately wider than the wire `Harness` union
+// Settings-tab ids, deliberately wider than the wire `Harness` union
 // (Ollama is configured here but runs through the OpenCode harness).
 type HarnessTabId = "claude" | "codex" | "opencode" | "ollama";
 

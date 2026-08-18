@@ -29,7 +29,7 @@ describe("buildTree", () => {
 
   it("never emits a nameless leaf for a collapsed trailing-slash dir entry", () => {
     // A collapsed untracked-dir entry (`crates/`) must not spawn a phantom
-    // empty-named child — the bug that rendered a `+`/file-icon row with no label.
+    // empty-named child, the bug that rendered a `+`/file-icon row with no label.
     const tree = buildTree([added("crates/")]);
     const names: string[] = [];
     const walk = (n: TreeNode) => {

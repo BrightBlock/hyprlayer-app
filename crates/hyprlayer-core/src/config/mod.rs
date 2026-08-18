@@ -18,7 +18,7 @@ use tokio::sync::RwLock;
 
 use crate::error::{CoreError, Result};
 
-/// `dirs::config_dir()/hyprlayer/config.json` — matches the CLI's
+/// `dirs::config_dir()/hyprlayer/config.json`, matches the CLI's
 /// `get_default_config_path` (`~/Library/Application Support` on macOS,
 /// `%APPDATA%` on Windows, `~/.config` on Linux).
 pub fn default_config_path() -> Option<PathBuf> {
@@ -84,10 +84,10 @@ pub fn write_bootstrap_config(path: &Path, user: &str) -> Result<()> {
 /// - **Missing** → create a fresh v4 config with the `thoughts` section.
 /// - **Exists without `thoughts`** → inject the section, preserving every
 ///   other key (`ai`, `telemetry`, …), then atomic tmp+rename.
-/// - **Exists with `thoughts`** → repoint it: set `user`, point the git
+/// - **Exists with `thoughts`** → repoint it: set `user`: point the git
 ///   backend at `thoughts_repo` (filling empty `reposDir`/`globalDir`), and
 ///   preserve `repoMappings`/`profiles`. Setup is an explicit user action, so
-///   the selected repo wins — a half-written or stale section must not
+///   the selected repo wins, a half-written or stale section must not
 ///   dead-end the wizard with "already configured".
 ///
 /// Never rewrites a config it doesn't understand: newer-than-v4 errors
@@ -191,7 +191,7 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
     write_config_atomic(path, &value)
 }
 
-/// Atomically replace `path` with pretty-printed `value` (tmp + rename) —
+/// Atomically replace `path` with pretty-printed `value` (tmp + rename),
 /// ADR-0002's write discipline, in one place.
 fn write_config_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
@@ -205,7 +205,7 @@ fn write_config_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
 
 /// Shared scaffold for the app's surgical config edits (the ADR-0002
 /// exceptions): read → parse → version guards → `edit` → atomic tmp+rename.
-/// Never rewrites a schema the app doesn't own — a missing file is
+/// Never rewrites a schema the app doesn't own, a missing file is
 /// `config_missing`, newer/older schemas error instead of being clobbered.
 pub(crate) fn edit_config(
     path: &Path,
@@ -394,7 +394,7 @@ mod tests {
     fn pre_v4_configs_require_migration_instead_of_misparsing() {
         // v1 shape: no version field, flat thoughts keys, no backend object.
         // Reading it through v4 structs would "succeed" with an unconfigured
-        // backend — a configured user shown as unconfigured.
+        // backend, a configured user shown as unconfigured.
         let v1 = r#"{"thoughts": {"user": "alice", "thoughtsRepo": "~/thoughts",
                      "reposDir": "repos", "globalDir": "global"}}"#;
         match parse_config(v1, Path::new("test.json")) {

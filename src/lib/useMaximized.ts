@@ -30,7 +30,7 @@ export function useIsMaximized(): boolean {
     // Maximize/restore (incl. snap and double-click on the drag region) all
     // surface as a resize, so one listener keeps the glyph in sync.
     void win.onResized(sync).then((fn) => {
-      // Cleaned up before the async listener attached — detach immediately.
+      // Cleaned up before the async listener attached, detach immediately.
       if (cancelled) fn();
       else unlisten = fn;
     });

@@ -1,5 +1,5 @@
 //! Backend poller that watches each active workstream's PR and pushes a
-//! [`PrStatusChanged`] event when its status actually changes — so the merge
+//! [`PrStatusChanged`] event when its status actually changes, so the merge
 //! bar flips (e.g. Merge → Archive when the PR lands on GitHub, or the agent
 //! actions appear when checks settle) without the frontend polling `gh` on a
 //! timer. Attention follows the UI: the workstream on screen is polled on a live
@@ -34,21 +34,21 @@ const FAST: Duration = Duration::from_secs(8);
 const MEDIUM: Duration = Duration::from_secs(20);
 const SLOW: Duration = Duration::from_secs(60);
 
-/// Cadence for a workstream nobody is looking at. No view reads its PR — the
+/// Cadence for a workstream nobody is looking at. No view reads its PR, the
 /// frontend mounts the PR query for the active workstream alone, and the
-/// board/dashboard render the stored `pr_number`, not this — so the only reason
+/// board/dashboard render the stored `pr_number`, not this, so the only reason
 /// to poll at all is [`promote_record`] noticing a merge that landed outside the
 /// app. An idle branch is checked rarer still: it has no PR to merge, and one
 /// appearing is the ship path, which the frontend polls for itself.
 ///
 /// This is the whole quota story. Every `gh pr view` spends a GitHub GraphQL
 /// call against 5000/hr, and polling every workstream at the active tier cost
-/// 450/hr EACH — a dozen idle branches drained the quota on their own, after
+/// 450/hr EACH, a dozen idle branches drained the quota on their own, after
 /// which every probe fails and a failed probe reads as "no PR".
 const BG_OPEN: Duration = Duration::from_secs(5 * 60);
 const BG_IDLE: Duration = Duration::from_secs(20 * 60);
 
-/// Backoff once GitHub reports the quota spent — retrying at the usual cadence
+/// Backoff once GitHub reports the quota spent, retrying at the usual cadence
 /// just keeps it pinned at zero.
 const RATE_LIMITED: Duration = Duration::from_secs(15 * 60);
 
@@ -138,7 +138,7 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
         return SLOW;
     };
 
-    // Active workstreams across all projects — the same set the sidebar shows.
+    // Active workstreams across all projects, the same set the sidebar shows.
     let db = app_state.db.clone();
     let items =
         match tauri::async_runtime::spawn_blocking(move || db.list_active_workstreams()).await {
@@ -153,7 +153,7 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
             }
         };
 
-    // The workstream the UI is showing — the route points the single-slot
+    // The workstream the UI is showing, the route points the single-slot
     // worktree watcher at it, and clears it when no workstream is on screen
     // (`commands::watch_worktree`). `None` means everything is background.
     let active = app_state
@@ -171,7 +171,7 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
     }
     st.tracked.retain(|id, _| alive.contains(id.as_str()));
 
-    // A workstream that just came on screen polls at once — it may have been
+    // A workstream that just came on screen polls at once, it may have been
     // sitting on a background due time 20 minutes out. On the EDGE only: doing
     // this every tick would also drag the rate-limit backoff forward.
     if active != st.active {
@@ -181,7 +181,7 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
         st.active.clone_from(&active);
     }
 
-    // A merged PR is terminal — its status can't change again, so stop polling
+    // A merged PR is terminal, its status can't change again, so stop polling
     // it (the workstream is usually archived right after anyway). Folder rows
     // have no repo to ask, so gh would fail (or answer for an enclosing repo).
     // Everything else waits for its own `due` time; a workstream first seen this
@@ -217,8 +217,8 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
             Err(e) => {
                 rate_limited |= is_rate_limited(&e.to_string());
                 log::debug!("pr watch: gh status failed for {id}: {e}");
-                // Reschedule anyway — an entry with no due time is polled every
-                // tick — and never at FAST: a probe that just failed is the last
+                // Reschedule anyway, an entry with no due time is polled every
+                // tick, and never at FAST: a probe that just failed is the last
                 // one worth retrying hardest.
                 let is_active = active.as_deref() == Some(id.as_str());
                 let due = polled_at
@@ -239,7 +239,7 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
         let changed = st.tracked.get(&id).map(|t| &t.status) != Some(&status);
         if changed {
             // Merged is terminal and we stop polling it above, so this is the
-            // only tick that ever sees the transition — promote the PR's
+            // only tick that ever sees the transition, promote the PR's
             // thoughts record here or never. First sight counts: it's how a
             // merge that landed while the app was closed gets caught up.
             if let Some(s) = status.as_ref().filter(|s| s.state == PrState::Merged) {
@@ -258,7 +258,7 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
     // One flag for the whole watcher: the quota is per GitHub account, so a
     // refusal on any workstream means every other probe would be refused too.
     st.backoff_until = rate_limited.then(|| {
-        log::warn!("pr watch: GitHub API quota spent — holding off {RATE_LIMITED:?}");
+        log::warn!("pr watch: GitHub API quota spent, holding off {RATE_LIMITED:?}");
         polled_at + RATE_LIMITED
     });
 
@@ -274,7 +274,7 @@ fn is_rate_limited(stderr: &str) -> bool {
 /// Promote PR `number`'s thoughts record now that it has merged.
 ///
 /// The record is where a PR's description survives after the branch is gone,
-/// but nothing outside a `describe_pr` run ever wrote its `status` — so a PR
+/// but nothing outside a `describe_pr` run ever wrote its `status`, so a PR
 /// merged from the GitHub UI, `gh pr merge`, or a queued auto-merge left the
 /// record claiming the PR was still open. This is the callback that closes it.
 ///
@@ -304,7 +304,7 @@ async fn promote_record(app: &tauri::AppHandle, project_path: &str, number: u32)
     match tauri::async_runtime::spawn_blocking(move || pr_record::promote_merged_record(&path))
         .await
     {
-        Ok(Ok(true)) => log::info!("pr watch: PR #{number} merged — record promoted"),
+        Ok(Ok(true)) => log::info!("pr watch: PR #{number} merged, record promoted"),
         // No record, or its status was already terminal.
         Ok(Ok(false)) => {}
         Ok(Err(e)) => log::debug!("pr watch: promoting PR #{number} record failed: {e}"),
@@ -351,7 +351,7 @@ fn cadence(status: &Option<PrStatus>, active: bool) -> Duration {
     }
 }
 
-/// Sleep until the earliest due workstream — never before `backoff_until`,
+/// Sleep until the earliest due workstream, never before `backoff_until`,
 /// floored so a spread of due times can't spin the loop, and capped at `SLOW`
 /// so a workstream switch is noticed promptly. Nothing is due on such a tick,
 /// so the ceiling costs no `gh` calls.
@@ -438,7 +438,7 @@ mod tests {
         );
         assert_eq!(next_tick(&t, now, None), FAST);
 
-        // Merged is terminal — its due time must not drag the loop awake.
+        // Merged is terminal, its due time must not drag the loop awake.
         let mut only_merged = HashMap::new();
         only_merged.insert(
             "done".into(),
@@ -473,7 +473,7 @@ mod tests {
     fn a_backoff_outranks_every_due_time() {
         // The regression that made RATE_LIMITED cosmetic: a due time inside the
         // backoff must not pull the loop forward into polling a spent quota.
-        // The 60s ceiling still applies — that wake polls nothing (`tick`
+        // The 60s ceiling still applies, that wake polls nothing (`tick`
         // returns early while the backoff holds), it just re-checks the clock.
         let now = Instant::now();
         let mut t = HashMap::new();

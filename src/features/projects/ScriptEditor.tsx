@@ -6,7 +6,7 @@ const LINE_PX = 22;
 const ZWSP = "​";
 
 /** Light shell highlighting: comments, the leading command, strings, env vars,
- *  and flags. Deliberately heuristic — enough colour to scan, not a real parser
+ *  and flags. Deliberately heuristic, enough colour to scan, not a real parser
  *  (matches the design mockup). */
 function highlightLine(line: string): ReactNode {
   if (line.replace(/^\s+/, "").startsWith("#")) {
@@ -46,7 +46,7 @@ type Props = {
  * Small multi-line command editor: monospace `<textarea>` with a line-number
  * gutter and a synced highlight overlay. Auto-grows so gutter/overlay/textarea
  * stay aligned without scroll math; long lines scroll horizontally in sync.
- * No deps — the app's CodeMirror is read-only/heavier, not wired for editing.
+ * No deps, the app's CodeMirror is read-only/heavier, not wired for editing.
  */
 export function ScriptEditor({
   value,

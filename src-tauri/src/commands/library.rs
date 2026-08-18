@@ -136,7 +136,7 @@ async fn write_and_reindex(
             let tmp = abs.with_extension("md.tmp");
             std::fs::write(&tmp, &content)?;
             std::fs::rename(&tmp, &abs)?;
-            // `upsert_path` returns None when the record needs no change — a
+            // `upsert_path` returns None when the record needs no change, a
             // real outcome now that the basis is the frontmatter prefix plus
             // size rather than whole-file bytes. Fall back to resolving the
             // id instead of reporting a write that succeeded as a failure.
@@ -369,7 +369,7 @@ pub async fn create_doc(
 #[tauri::command]
 #[specta::specta]
 pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    // Only reveal paths the index knows — the frontend can't point this at
+    // Only reveal paths the index knows, the frontend can't point this at
     // arbitrary filesystem locations. resolve_id also maps a worktree-symlink
     // path back to the canonical indexed id before the index check.
     let id = state
@@ -383,7 +383,7 @@ pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()>
 
 /// Best-effort "View on GitHub" URL for a library doc, from its own git repo (the
 /// thoughts repo, not the project's) at the current branch. `None` (link hidden) on
-/// any miss — unknown id, not a git repo, no GitHub origin, detached HEAD — so it
+/// any miss, unknown id, not a git repo, no GitHub origin, detached HEAD, so it
 /// never errors.
 #[tauri::command]
 #[specta::specta]

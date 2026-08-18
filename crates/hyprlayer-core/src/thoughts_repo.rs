@@ -1,7 +1,7 @@
 //! Thoughts-repository root scaffolding.
 //!
 //! `thoughts init` accepts a git root only when it's already shaped
-//! (`<reposDir>/` + `<globalDir>/`) or effectively empty — anything else is
+//! (`<reposDir>/` + `<globalDir>/`) or effectively empty, anything else is
 //! refused for good without `--force`. So the app shapes a root fully at
 //! creation rather than leaving a bare `git init` that the first stray file
 //! bricks.
@@ -20,7 +20,7 @@ const GITIGNORE: &str = "# OS files\n.DS_Store\nThumbs.db\n\n# Editor files\n\
 /// Without a tracked file the dirs are invisible to a clone.
 const KEEP: &str = ".gitkeep";
 
-/// Whether `root` presents as a thoughts repo — what the CLI adopts.
+/// Whether `root` presents as a thoughts repo, what the CLI adopts.
 pub fn is_thoughts_repo(root: &Path, repos_dir: &str, global_dir: &str) -> bool {
     root.join(dir_or_default(repos_dir, "repos")).is_dir()
         && root.join(dir_or_default(global_dir, "global")).is_dir()
@@ -29,14 +29,14 @@ pub fn is_thoughts_repo(root: &Path, repos_dir: &str, global_dir: &str) -> bool 
 /// How a candidate thoughts root looks to [`scaffold`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootState {
-    /// Already shaped — scaffolding just fills gaps.
+    /// Already shaped, scaffolding just fills gaps.
     Adoptable,
     /// Absent or holding nothing worth preserving.
     Scaffoldable,
-    /// Someone else's populated directory — leave it for the CLI to refuse
+    /// Someone else's populated directory, leave it for the CLI to refuse
     /// rather than restructure a path picked by mistake.
     Occupied,
-    /// Bare repo — no working tree to scaffold into.
+    /// Bare repo, no working tree to scaffold into.
     Bare,
 }
 
@@ -65,7 +65,7 @@ fn is_effectively_empty(root: &Path, also_ignore: &[&str]) -> bool {
                 .chain(also_ignore)
                 .any(|ig| name.eq_ignore_ascii_case(ig))
         }),
-        // Can't enumerate isn't "empty" — don't scaffold blind.
+        // Can't enumerate isn't "empty", don't scaffold blind.
         Err(_) => false,
     }
 }
@@ -265,7 +265,7 @@ mod tests {
         assert!(root.join("projects").is_dir());
         assert!(root.join("shared-notes/shared").is_dir());
         assert!(is_thoughts_repo(&root, "projects", "shared-notes"));
-        // No user — no personal tree.
+        // No user, no personal tree.
         assert_eq!(
             std::fs::read_dir(root.join("shared-notes"))
                 .unwrap()
@@ -319,7 +319,7 @@ mod tests {
             "a half-finished init must be completable, not written off"
         );
 
-        // Someone's notes or a code repo — not ours to restructure.
+        // Someone's notes or a code repo, not ours to restructure.
         let occupied = at("occupied");
         std::fs::create_dir_all(occupied.join("src")).unwrap();
         assert_eq!(

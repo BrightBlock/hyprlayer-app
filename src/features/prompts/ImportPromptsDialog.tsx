@@ -13,19 +13,19 @@ const RESOLUTIONS: { value: ImportResolution; label: string }[] = [
 ];
 
 /** The notes shown under a checked row: a chord we can't honour, and overrides
- *  with no matching project here. Mirrors the mock's rules — the chord note is
+ *  with no matching project here. Mirrors the mock's rules, the chord note is
  *  suppressed on "replace" since replacing keeps the existing prompt's chord. */
 function rowNotes(c: ImportCandidate, resolution: ImportResolution, chordLabel: (c: string) => string): string[] {
   const notes: string[] = [];
   const chordShown = !c.conflict || resolution !== "replace";
   if (c.chordTaken && c.chord && chordShown) {
     notes.push(
-      `${chordLabel(c.chord)} is already assigned in your library — this copy imports without a shortcut.`,
+      `${chordLabel(c.chord)} is already assigned in your library. This copy imports without a shortcut.`,
     );
   }
   if (c.unknownProjects.length > 0) {
     notes.push(
-      `Includes a project override for “${c.unknownProjects.join("”, “")}” — no matching project here, so it will be dropped.`,
+      `Includes a project override for “${c.unknownProjects.join("”, “")}”. No matching project here, so it will be dropped.`,
     );
   }
   return notes;

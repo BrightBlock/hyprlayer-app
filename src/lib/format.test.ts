@@ -29,7 +29,7 @@ describe("formatCompactAge", () => {
   });
 
   it("renders nothing for a missing or invalid instant", () => {
-    // A repo with no commits has no pushed_at — better blank than "just now".
+    // A repo with no commits has no pushed_at, better blank than "just now".
     expect(formatCompactAge(null, NOW)).toBe("");
     expect(formatCompactAge(Number.NaN, NOW)).toBe("");
   });

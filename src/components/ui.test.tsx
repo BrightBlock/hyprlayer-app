@@ -97,7 +97,7 @@ describe("DropdownSelect", () => {
 
   it("treats the trigger width as a floor, so long labels aren't truncated", () => {
     // Regression guard: the menu used to be pinned to `width: <trigger>`, so a
-    // narrow settings-row trigger clipped its options to "Opus 4.…" — something
+    // narrow settings-row trigger clipped its options to "Opus 4.…", something
     // the native <select> it replaced never did, because the OS popup sized to
     // its content. jsdom has no layout, so assert the contract, not the pixels.
     renderSelect();
@@ -110,7 +110,7 @@ describe("DropdownSelect", () => {
 
   it("lets a caller's width class win over the default w-full", () => {
     // Tailwind sorts utilities into the stylesheet, so `w-full` beats a caller's
-    // `w-56` regardless of class order — the component has to drop its own
+    // `w-56` regardless of class order, the component has to drop its own
     // default instead of appending both.
     renderSelect({ className: "w-56" });
     expect(trigger().className).toContain("w-56");

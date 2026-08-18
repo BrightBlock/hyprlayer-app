@@ -23,7 +23,7 @@ export type PromptArgsRequest = {
   id: number;
   name: string;
   inputs: PromptInput[];
-  /** Pre-filled answers — text already typed after the composer's `/slug`. */
+  /** Pre-filled answers, text already typed after the composer's `/slug`. */
   initial: Record<string, string>;
   resolve: (values: Record<string, string> | null) => void;
 };

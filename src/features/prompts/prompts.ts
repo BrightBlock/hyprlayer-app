@@ -19,7 +19,7 @@ import type {
 import { PROMPT_VARS } from "@/lib/domain/promptVars";
 
 /** The overridable built-in action prompts. `commandId` is the keyboard-catalog
- *  command that runs them — a built-in's "shortcut" IS that command's binding,
+ *  command that runs them, a built-in's "shortcut" IS that command's binding,
  *  so recording one from the prompt editor writes the same override Settings →
  *  Keyboard shows. */
 export type BuiltinPromptId = "commit" | "ship";
@@ -34,7 +34,7 @@ export const BUILTIN_PROMPTS: ReadonlyArray<{
     id: "commit",
     name: "Commit",
     commandId: "ws.commit",
-    description: "Checkpoint this worktree's changes locally — no push or PR.",
+    description: "Checkpoint this worktree's changes locally. No push or PR.",
   },
   {
     id: "ship",
@@ -55,7 +55,7 @@ export const PROMPT_INPUT_TOKEN = "{{input}}";
 
 const INPUT_RE = /\{\{input(?::([^}]*))?\}\}/g;
 
-/** True when `body` references at least one known `{{variable}}` — the gate for
+/** True when `body` references at least one known `{{variable}}`, the gate for
  *  fetching the (git-diffing) prompt context before a send. */
 export function bodyHasVars(body: string): boolean {
   return PROMPT_VARS.some((v) => body.includes(v.token));
@@ -77,7 +77,7 @@ export function promptInputs(body: string): PromptInput[] {
 
 /** Single-pass replacement of `pairs`, earliest token first. Mirrors the backend
  *  rule (`pipeline::substitute_vars`): unknown tokens pass through verbatim, and
- *  scanning resumes AFTER each substituted value rather than rescanning it — so
+ *  scanning resumes AFTER each substituted value rather than rescanning it, so
  *  a `{{branch}}` inside a diff hunk, or a `{{diff}}` someone typed into an
  *  argument, survives as literal text. */
 function substituteTokens(
@@ -128,7 +128,7 @@ export function customPrompts(settings: AppSettings | null | undefined): CustomP
   return settings?.prompts?.custom ?? [];
 }
 
-/** A custom prompt's body for `projectPath` — its override there, else global. */
+/** A custom prompt's body for `projectPath`, its override there, else global. */
 export function effectiveCustomBody(prompt: CustomPrompt, projectPath: string | null): string {
   if (projectPath) {
     const override = prompt.overrides?.[projectPath];
@@ -139,7 +139,7 @@ export function effectiveCustomBody(prompt: CustomPrompt, projectPath: string | 
 
 /** Whether this prompt has anything to send for `projectPath`. An empty
  *  effective body would run as a silent no-op, so every surface that offers
- *  prompts — chips, palette, `/slug` autocomplete, chords — gates on this. */
+ *  prompts, chips, palette, `/slug` autocomplete, chords, gates on this. */
 export function isRunnablePrompt(prompt: CustomPrompt, projectPath: string | null): boolean {
   return effectiveCustomBody(prompt, projectPath).trim().length > 0;
 }
@@ -166,7 +166,7 @@ export function isBuiltinModified(
 
 /** The `/token` a custom prompt answers to in the composer: its name lowercased,
  *  with runs of anything else collapsed to `-`. Empty when the name has no usable
- *  character — that prompt simply isn't offered as a command. */
+ *  character, that prompt simply isn't offered as a command. */
 export function promptSlug(name: string): string {
   return name
     .toLowerCase()
@@ -177,7 +177,7 @@ export function promptSlug(name: string): string {
 /** A composer draft that opens with a custom prompt's `/slug`. */
 export type ComposerPromptMatch = {
   prompt: CustomPrompt;
-  /** Everything typed after the slug — the prompt's argument text. */
+  /** Everything typed after the slug, the prompt's argument text. */
   typed: string;
 };
 
@@ -212,7 +212,7 @@ export function matchComposerPrompt(
   return prompt ? { prompt, typed: (m[2] ?? "").trim() } : null;
 }
 
-/** Display name for an argument slot — an unlabelled `{{input}}` still needs
+/** Display name for an argument slot, an unlabelled `{{input}}` still needs
  *  one. Callers style it; the dialog uppercases, the composer ghost doesn't. */
 export function promptInputLabel(input: PromptInput): string {
   return input.label || "argument";

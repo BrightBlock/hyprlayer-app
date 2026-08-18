@@ -1,21 +1,17 @@
 /**
- * Native OS toasts for "agent needs your attention." Caller decides *whether*
- * to fire (based on visibility — is the user looking at this session?); this
- * module decides *how* (settings, OS permission, dispatch).
+ * Native OS toasts for "agent needs your attention". The caller decides
+ * *whether* to fire, based on whether the user is looking at the session. This
+ * module decides *how*: settings, OS permission, dispatch.
  *
- * macOS adaptations (see Termic for prior art):
- *  - The plugin's `sound` rides legacy `NSUserNotification` which Apple
- *    silences on 13+. We play the sound out-of-band through `afplay` via the
- *    `play_sound` Tauri command — the banner stays silent, the sound is
- *    decoupled and reliable.
- *  - `tauri-plugin-notification`'s `onAction` is mobile-only on 2.3.3, so
- *    there's no banner-click event on desktop. Instead we keep a small ring
- *    of recent `(workstreamId, projectPath, firedAt)` intents and route on
- *    the *focus-edge* — when the window regains focus within `ROUTE_WINDOW_MS`
- *    of a fire, we jump to the originating workstream. False positives are
- *    bounded: cmd-tabbing back without clicking the notification still
- *    routes, but only if there's a fresh intent on file (intent usually
- *    matches the user's reason for refocusing).
+ * Two macOS adaptations:
+ *  - The plugin's `sound` rides legacy `NSUserNotification`, which Apple
+ *    silences on 13+. We play it out-of-band via the `play_sound` command
+ *    instead, so the banner stays silent and the sound stays reliable.
+ *  - `onAction` is mobile-only on 2.3.3, so desktop gets no banner-click
+ *    event. We keep a small ring of recent `(workstreamId, projectPath,
+ *    firedAt)` intents and route on the focus edge: regaining focus within
+ *    `ROUTE_WINDOW_MS` of a fire jumps to that workstream. Cmd-tabbing back
+ *    without clicking still routes, but only against a fresh intent.
  */
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -86,7 +82,7 @@ async function playSound(): Promise<void> {
     try {
       await unwrap(commands.playSound());
     } catch {
-      /* afplay failed — swallow, banner already fired */
+      /* afplay failed, swallow, banner already fired */
     }
   }
 }
@@ -140,7 +136,7 @@ export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
 
     sendNotification({
       title: `${args.workstreamTitle} needs you`,
-      body: `Agent paused in ${args.stage} — waiting for your input.`,
+      body: `Agent paused in ${args.stage} . Waiting for your input.`,
       // On non-macOS the plugin delivers the sound reliably; on macOS we
       // play it out-of-band below (the plugin's sound field is silent there).
       sound: !IS_MACOS && (cfg.sound ?? DEFAULT_CONFIG.sound) ? "default" : undefined,
@@ -151,10 +147,10 @@ export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
   }
 }
 
-/** Fire a sample toast on demand — bypasses the enabled/visibility gates so
+/** Fire a sample toast on demand, bypasses the enabled/visibility gates so
  *  the Settings "Send test" button can validate OS-level delivery (signing,
  *  TCC grant, focus mode) independently of the dispatch flow. Still respects
- *  the OS permission grant — requests it if missing. */
+ *  the OS permission grant, requests it if missing. */
 export async function sendTestNotification(): Promise<{
   sent: boolean;
   reason?: "permission_denied" | "error";
