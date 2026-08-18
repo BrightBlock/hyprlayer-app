@@ -58,6 +58,7 @@ import {
 } from "@/features/prompts/prompts";
 import { resolveCustomPrompt, runCustomPrompt } from "@/features/prompts/runPrompt";
 import { AttachmentCards } from "./AttachmentCard";
+import { fitComposerHeight } from "./composerAutosize";
 import {
   importDroppedPaths,
   saveClipboardImage,
@@ -1068,11 +1069,6 @@ type Props = {
   onClearAttachments: () => void;
 };
 
-// The composer grows from one row up to this height, then scrolls. ~14 rows of
-// text-sm — generous enough to keep a whole prompt in view without letting the
-// box crowd out the transcript above it.
-const MAX_COMPOSER_HEIGHT = 320;
-
 export function SessionChat({
   view,
   shell,
@@ -1711,28 +1707,29 @@ export function SessionChat({
   // bottom of the column, so a taller textarea pushes its own top edge up
   // toward the transcript — the box grows *upward*, keeping the whole draft in
   // view. Reset to one row is automatic: send/start clears `draft`, re-running
-  // this. `height:auto` first so the box can shrink as well as grow.
+  // this.
   const autosizeComposer = useCallback(() => {
     const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, MAX_COMPOSER_HEIGHT)}px`;
+    if (ta) fitComposerHeight(ta);
   }, []);
   useLayoutEffect(autosizeComposer, [autosizeComposer, draft]);
   // Re-wrapping on a width change (split-pane drag, toolbar compaction) changes
-  // how tall the text needs to be, so recompute then too. Guarded on width:
-  // our own height mutations don't touch the width, so this can't loop.
+  // how tall the text needs to be, so recompute then too. We watch the wrapper,
+  // not the textarea: at the cap the textarea's own scrollbar eats content
+  // width, and measuring off that width would feed our own sizing back into the
+  // observer. The wrapper's width comes from the pane alone.
+  const composerBoxRef = useRef<HTMLDivElement>(null);
   const composerWidthRef = useRef(0);
   useLayoutEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
+    const box = composerBoxRef.current;
+    if (!box) return;
     const ro = new ResizeObserver((entries) => {
       const w = entries[0].contentRect.width;
       if (w === composerWidthRef.current) return;
       composerWidthRef.current = w;
       autosizeComposer();
     });
-    ro.observe(ta);
+    ro.observe(box);
     return () => ro.disconnect();
   }, [autosizeComposer]);
 
@@ -2168,7 +2165,7 @@ export function SessionChat({
                     <AttachmentCards attachments={attachments} onRemove={onRemoveAttachment} />
                   </div>
                 )}
-                <div className="relative">
+                <div ref={composerBoxRef} className="relative">
                   <HighlightBackdrop
                     value={draft}
                     commandNames={autocomplete.commandNames}

@@ -65,8 +65,6 @@ import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "@/lib/keybindings/registry";
 import { useKeybindings } from "@/lib/keybindings/useKeybindings";
 import type { Overrides } from "@/lib/keybindings/resolve";
-import { effectiveChord } from "@/lib/keybindings/resolve";
-import { formatChord } from "@/lib/keybindings/chord";
 import { ContextMenu, ContextMenuItem, Spinner } from "@/components/ui";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { HyprlayerMark } from "@/components/Logo";
@@ -147,22 +145,52 @@ const LEFT_CLUSTER_WITH_LIGHTS = 92; // left-[92px]: clears the macOS traffic li
 const LEFT_CLUSTER_NO_LIGHTS = 12; // left-3: no lights to clear (Windows/Linux, or fullscreen)
 const LEFT_CLUSTER_ICON = 28; // each control is h-7 w-7
 const LEFT_CLUSTER_GAP = 4; // gap-1 between controls
+/**
+ * Header glyphs are matched on *ink height*, not on `size`.
+ *
+ * `size` scales an icon's viewBox, not its artwork, and the shared icons fill
+ * their 24-unit box by wildly different amounts — the panel rect spans 18/24,
+ * CodeIcon's chevrons only 8/24. One shared `size` therefore renders a 2:1
+ * spread in visible height, which is what made the row look ragged even though
+ * every button was the same 28px square.
+ *
+ * So: pick the target once, then divide by each icon's own fill fraction
+ * (artwork span + stroke, over the viewBox). `HEADER_INK` is 13.2px because
+ * that is what the panel toggles already rendered at — normalizing brings the
+ * undersized glyphs up to them rather than shrinking the row again.
+ *
+ *   panel / book   18+1.8 / 24 = 0.825 → 16
+ *   terminal       16+1.8 / 24 = 0.742 → 18
+ *   folder         14+1.8 / 24 = 0.658 → 20
+ *   app icon (img) full-bleed         → 13
+ *   mark           20 / 32     = 0.625 → 21
+ *
+ * CodeIcon is the exception: at 0.41 it would need a 32px box to reach the
+ * target, wider than the button it sits in, so the header draws its own `<>`
+ * on the panel glyphs' grid (`EditorGlyph`) instead.
+ */
+const HEADER_GLYPH = 16; // panel toggles, book
+const HEADER_TERMINAL = 18;
+const HEADER_FOLDER = 20;
+const HEADER_APP_IMAGE = 13;
+const HEADER_MARK = 21;
+
 const HEADER_CONTENT_PAD = 16; // pl-4 on the content row, before the breadcrumb
 const LEFT_CLUSTER_CLEARANCE = 12; // breathing room between the cluster and the breadcrumb
 
 // Cross-platform vector icons (Lucide family / native-style), currentColor so
 // they theme with the bar and stay pixel-crisp at every DPI on macOS + Windows.
 // A near-square panel glyph — symmetric padding, rect fills 18/24 of the box —
-// rendered at 18 like the editor icon beside it, so both show a ~15px visible
-// square and read as an equal pair. The sidebar is marked by a light divider
+// rendered at HEADER_GLYPH like the editor icon beside it, so both show a
+// ~12px visible square, a hair above the caption X, and read as an equal pair. The sidebar is marked by a light divider
 // line offset to its side (right here), not a filled pane — a quieter glyph
 // that still reads as a panel toggle. The button is a fixed h-7 w-7, glyph-only.
 function PanelRightIcon() {
   return (
     <svg
       aria-hidden="true"
-      width="18"
-      height="18"
+      width={HEADER_GLYPH}
+      height={HEADER_GLYPH}
       viewBox="0 0 24 24"
       fill="none"
     >
@@ -180,6 +208,31 @@ function PanelRightIcon() {
   );
 }
 
+/** The editor trigger's fallback `<>`, drawn on `PanelRightIcon`'s grid (3–21
+ *  of a 24 box, 1.8 stroke) rather than reusing `CodeIcon`, whose chevrons span
+ *  only 8/24 and so render half the ink at the same `size`. Local to the header
+ *  because the shared icon is right for its own call sites (file rows, harness
+ *  badges) at their own scales. */
+function EditorGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      width={HEADER_GLYPH}
+      height={HEADER_GLYPH}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <path
+        d="m8.5 4-5.5 8 5.5 8M15.5 4l5.5 8-5.5 8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Mirror of `PanelRightIcon` with the divider line on the left — the header's
  *  explicit toggle for the left project panel (the diff sidebar's right-panel
  *  toggle uses the un-mirrored one). */
@@ -187,8 +240,8 @@ function PanelLeftIcon() {
   return (
     <svg
       aria-hidden="true"
-      width="18"
-      height="18"
+      width={HEADER_GLYPH}
+      height={HEADER_GLYPH}
       viewBox="0 0 24 24"
       fill="none"
     >
@@ -442,6 +495,18 @@ const railNavClass = (active: boolean): string =>
  *  (VS Code's white square, Terminal's black one); they don't recolor with the
  *  theme — there's no dark VS Code icon to swap to. We keep the real icons for
  *  brand recognition rather than dropping to monochrome glyphs. */
+/** The trigger's icon, sized so each kind lands on `HEADER_INK` — see the
+ *  fill-fraction table above. Separate from `appIcon`, which sizes the dropdown
+ *  rows where one number is fine because they sit in a list, not a tight row of
+ *  matched glyphs. */
+function headerAppIcon(app: EditorTarget | undefined): ReactNode {
+  if (!app) return <EditorGlyph />;
+  if (app.iconDataUrl) return appIcon(app, HEADER_APP_IMAGE);
+  if (app.kind === "terminal") return <TerminalIcon size={HEADER_TERMINAL} />;
+  if (app.kind === "files") return <FolderIcon size={HEADER_FOLDER} />;
+  return <EditorGlyph />;
+}
+
 function appIcon(app: EditorTarget, size = 22): ReactNode {
   if (app.iconDataUrl) {
     return (
@@ -531,7 +596,11 @@ function OpenInMenu({ dir }: { dir: string }) {
   }, [open, items]);
 
   // The trigger wears the default editor's icon (computed above), Conductor-
-  // style, so it reads as "open in editor".
+  // style, so it reads as "open in editor". It is `topIconClass` like every
+  // other bar control — one 28px square with nothing riding outside it. A
+  // chevron sidecar used to, which made this the only control wider than 28px
+  // and opened a 48px gap where every other pair sits at 36px;
+  // `aria-haspopup`/`aria-expanded` still announce it as a menu.
   return (
     // `flex items-center` (not a bare block) so the inline-flex button is a
     // flex item — cleanly cross-axis-centered like its sibling icon buttons in
@@ -541,19 +610,13 @@ function OpenInMenu({ dir }: { dir: string }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-7 items-center rounded-md pr-1 text-ink-dim hover:bg-edge/60 hover:text-ink"
+        className={topIconClass}
         title="Open in editor or terminal"
         aria-label="Open working directory in editor or terminal"
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        {/* Icon sits in the same h-7 w-7 square as the right-sidebar button so
-            the two bar controls share a footprint; the chevron is a tight
-            sidecar that just labels the box as a menu trigger. */}
-        <span className="inline-flex h-7 w-7 items-center justify-center">
-          {defaultApp ? appIcon(defaultApp, 18) : <CodeIcon size={18} />}
-        </span>
-        <ChevronDownIcon size={12} className="-ml-1 text-ink-dim/80" />
+        {headerAppIcon(defaultApp)}
       </button>
       {open && (
         <>
@@ -1148,12 +1211,6 @@ export function Root() {
   useKeybindings(
     bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES,
   );
-  // Effective ⌘K chord for the prompt-library button's tooltip.
-  const promptPaletteChord = effectiveChord(
-    bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES,
-    "prompts.palette",
-    IS_MACOS,
-  );
   useCommand("nav.dashboard", () => void navigate({ to: "/" }));
   useCommand("nav.library", () => toggleNav("/library"));
   useCommand("nav.settings", () => toggleNav("/settings"));
@@ -1262,7 +1319,9 @@ export function Root() {
         data-tauri-drag-region
       >
         <div
-          className="absolute top-1/2 flex -translate-y-1/2 items-center gap-1"
+          // gap-2, not gap-1: the same pitch the right cluster sits at, so the
+          // two ends of the bar share one 36px rhythm (28px box + 8px gap).
+          className="absolute top-1/2 flex -translate-y-1/2 items-center gap-2"
           style={{ left: leftClusterLeft }}
         >
           {/* Off macOS the native title bar is gone (decorations: false), so the
@@ -1279,7 +1338,7 @@ export function Root() {
               data-tauri-drag-region="deep"
               aria-hidden="true"
             >
-              <HyprlayerMark size={20} />
+              <HyprlayerMark size={HEADER_MARK} />
             </span>
           )}
           {/* Explicit sidebar toggle — the discoverable way to collapse or show
@@ -1307,7 +1366,7 @@ export function Root() {
               title="Project docs"
               aria-label="Project docs"
             >
-              <BookIcon size={18} />
+              <BookIcon size={HEADER_GLYPH} />
             </button>
           )}
         </div>
@@ -1320,7 +1379,9 @@ export function Root() {
             Those are instant elsewhere in the bar, and animating just this row
             would drift it out of step with them. */}
         <div
-          className="flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 pr-3"
+          className={`flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 ${
+            IS_MACOS ? "pr-3" : "pr-1"
+          }`}
           style={{ marginLeft: contentOffset }}
           data-tauri-drag-region
         >
@@ -1440,41 +1501,11 @@ export function Root() {
                       className="px-1"
                     />
                   )}
-                {/* New-workstream affordance for the whole project. Preserves the
-                    selected workstream (if any) so opening it from a chat doesn't
-                    yank you to the board; ProjectPage strips `create` once the
-                    dialog has popped. */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    void navigate({
-                      to: "/projects/$projectPath",
-                      params: { projectPath: currentProject.path },
-                      search: { item: activeWorkstreamId, create: true },
-                    })
-                  }
-                  className={topIconClass}
-                  title="New workstream"
-                  aria-label="New workstream"
-                >
-                  <PlusIcon />
-                </button>
-                {/* Prompt library: opens the ⌘K palette over the active
-                    workstream. Accent bolt among the neutral bar controls;
-                    the chord lives in the tooltip. */}
-                <button
-                  type="button"
-                  onClick={() => togglePromptPalette()}
-                  className={topIconClass}
-                  title={`Prompt library${
-                    promptPaletteChord
-                      ? ` (${formatChord(promptPaletteChord, IS_MACOS)})`
-                      : ""
-                  }`}
-                  aria-label="Prompt library"
-                >
-                  <ZapIcon size={16} className="text-accent" />
-                </button>
+                {/* New workstream and the prompt library used to sit here as
+                    their own bar buttons. Both were redundant — the board owns
+                    workstream creation, and the palette has its chord (still
+                    registered below as `prompts.palette`) — so the bar keeps
+                    only what has no other home. */}
                 <OpenInMenu
                   dir={
                     activeWorkstream?.item.worktreePath ?? currentProject.path
@@ -1507,7 +1538,7 @@ export function Root() {
         {/* Off-macOS, the native title bar is removed (decorations: false), so
             we draw our own caption buttons flush in the top-right corner — the
             VSCode look. macOS keeps its overlaid traffic lights, so the
-            component renders nothing there. */}
+            component renders nothing there; Linux draws Close alone. */}
         <WindowControls />
       </header>
 

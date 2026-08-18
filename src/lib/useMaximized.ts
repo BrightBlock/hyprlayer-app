@@ -7,10 +7,10 @@ import { IS_MACOS } from "./platform";
  * Tracks whether the window is maximized.
  *
  * Read off macOS, where the native title bar is removed (`decorations: false`)
- * and the app draws its own chrome: `WindowControls` swaps its maximize glyph
- * for a restore glyph, and `ResizeGrips` unmounts (a maximized window has no
- * edge to drag). macOS keeps its native overlay title bar, so this stays
- * `false` there and the hook does no work.
+ * and the app draws its own chrome: on Windows `WindowControls` swaps its
+ * maximize glyph for a restore glyph, and on Linux `ResizeGrips` unmounts (a
+ * maximized window has no edge to drag). macOS keeps its native overlay title
+ * bar, so this stays `false` there and the hook does no work.
  */
 export function useIsMaximized(): boolean {
   const [maximized, setMaximized] = useState(false);
