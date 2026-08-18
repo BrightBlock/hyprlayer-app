@@ -18,6 +18,7 @@ import type {
   AgentSkill,
 } from "@/lib/bindings";
 import { MODELS } from "@/lib/domain/models";
+import { ANY_STAGE, PHASE_COLOR, SDLC_PHASES, STAGE_PHASE, STAGES, type StageKey } from "@/lib/domain/stages";
 
 /** The frontmatter `model` value for "whatever spawned me" — claude's own
  *  spelling, and what an absent key means. */
@@ -253,6 +254,7 @@ export function newAgent(source: string): AgentFile {
     model: null,
     color: null,
     memory: null,
+    category: null,
     prompt: "",
     updatedAt: null,
     shippedPath: null,
@@ -313,24 +315,108 @@ export function statusOf(
     : { label: "Published", tone: "ok" };
 }
 
-/** claude's frontmatter `color` names one of its own palette entries; map it to
- *  a theme token so the row dot matches the app rather than a raw CSS colour. */
-const DOT_COLORS: Record<string, string> = {
-  red: "var(--color-bad)",
-  orange: "var(--color-accent)",
-  yellow: "var(--color-warn)",
-  green: "var(--color-ok)",
-  blue: "var(--color-research)",
-  purple: "var(--color-validate)",
-  pink: "var(--color-revise)",
-  cyan: "var(--color-implement)",
-};
-
 const MUTED_DOT = "color-mix(in oklab, var(--color-ink-dim) 55%, transparent)";
 
-export function dotColor(agent: AgentFile, overlay: Overlay): string {
+/** A tight phrase, not a bare keyword — an agent whose description merely
+ *  mentions a stage word in passing (e.g. "Drafts an implementation plan
+ *  body") must not be filed under that stage's phase. Built from `STAGES` so
+ *  a stage added to the Rust enum needs no edit here. */
+const STAGE_PHRASE = new RegExp(
+  String.raw`\b(?:during|in)\s+the\s+(${STAGES.map((s) => s.key).join("|")})\s+stage\b`,
+  "i",
+);
+
+/** The phase an agent's description names via the shipped agents' convention
+ *  ("Spawn during the <Stage> stage"), or [`ANY_STAGE`] when it names none. */
+export function phaseFolder(agent: AgentFile): string {
+  const match = agent.description.match(STAGE_PHRASE);
+  if (!match) return ANY_STAGE;
+  return STAGE_PHASE[match[1].toLowerCase() as StageKey] ?? ANY_STAGE;
+}
+
+/**
+ * An agent's folder, highest precedence first:
+ * - plugin agent: `overlay.folder` (non-empty) → its plugin's name
+ * - owned agent: `category` (non-empty) → `overlay.folder` (non-empty,
+ *   legacy) → the phase for the stage its description names, else
+ *   [`ANY_STAGE`] — when `groupUncategorized` is on → loose (`""`)
+ *
+ * Prefer [`folderResolver`] at a call site that has a whole list: it binds the
+ * library and the flag once instead of threading both through every layer.
+ */
+export function folderOf(agent: AgentFile, overlay: Overlay, groupUncategorized: boolean): string {
+  if (isSystem(agent)) return overlay.folder || agent.plugin || "";
+  if (agent.category) return agent.category;
+  if (overlay.folder) return overlay.folder;
+  return groupUncategorized ? phaseFolder(agent) : "";
+}
+
+/** The folder policy as one function of an agent. Everything downstream of the
+ *  library takes this rather than the `(library, groupUncategorized)` pair, so
+ *  the grouping flag stops travelling and `overlayFor` resolves in one place. */
+export type FolderOf = (agent: AgentFile) => string;
+
+export function folderResolver(
+  library: AgentLibrarySettings | undefined,
+  groupUncategorized: boolean,
+): FolderOf {
+  return (agent) => folderOf(agent, overlayFor(library, agent.path), groupUncategorized);
+}
+
+/** Where a folder sorts: phases in [`SDLC_PHASES`] order (which puts
+ *  [`ANY_STAGE`] last among them), then everything else after. */
+const PHASE_RANK = new Map<string, number>(SDLC_PHASES.map((phase, i) => [phase, i]));
+
+/**
+ * Every folder name in play, for the list and both folder pickers: the phases
+ * first in phase order, then everything else — occupied `category` values,
+ * plugin names, and `library.folders` — alphabetically.
+ *
+ * A persisted folder named like a phase sorts with the phases rather than
+ * being dropped: it is the same bucket, and omitting it would let the create
+ * dialog accept a name that then never appeared anywhere.
+ */
+export function folderList(
+  agents: readonly AgentFile[],
+  library: AgentLibrarySettings | undefined,
+  groupUncategorized: boolean,
+): string[] {
+  const folderOfAgent = folderResolver(library, groupUncategorized);
+  const occupied = agents.map(folderOfAgent).filter((folder) => folder !== "");
+  const named = [...new Set([...occupied, ...(library?.folders ?? [])])];
+  const [phases, rest] = partition(named, (folder) => PHASE_RANK.has(folder));
+  return [
+    ...phases.sort((a, b) => (PHASE_RANK.get(a) ?? 0) - (PHASE_RANK.get(b) ?? 0)),
+    ...rest.sort((a, b) => a.localeCompare(b)),
+  ];
+}
+
+function partition<T>(items: readonly T[], pick: (item: T) => boolean): [T[], T[]] {
+  const yes: T[] = [];
+  const no: T[] = [];
+  for (const item of items) (pick(item) ? yes : no).push(item);
+  return [yes, no];
+}
+
+/** A `Map`, not the record itself: a folder name is free text out of a user's
+ *  frontmatter, and indexing an object literal with it would let
+ *  `PHASE_COLOR["toString"]` resolve to `Object.prototype.toString` and emit
+ *  `var(function toString() { … })` as a CSS value. */
+const PHASE_TOKEN = new Map<string, string>(Object.entries(PHASE_COLOR));
+
+/** The colour a folder itself paints with — the header icon and, via
+ *  [`dotColor`], every agent filed under it. `MUTED_DOT` for "Any stage" and
+ *  any custom folder that isn't a phase name. */
+export function folderColor(folder: string): string {
+  const token = PHASE_TOKEN.get(folder);
+  return token ? `var(${token})` : MUTED_DOT;
+}
+
+/** The dot beside an agent's name: amber while it is a draft, otherwise the
+ *  colour of the folder it sits in. */
+export function dotColor(agent: AgentFile, overlay: Overlay, folderOfAgent: FolderOf): string {
   if (!isSystem(agent) && overlay.status === "draft") return "var(--color-warn)";
-  return (agent.color && DOT_COLORS[agent.color.toLowerCase()]) ?? MUTED_DOT;
+  return folderColor(folderOfAgent(agent));
 }
 
 /** The agents a tab + scope + search admits, in the order the list renders. */
@@ -357,25 +443,41 @@ export type AgentRow =
  * folder still renders its header; an empty one is dropped rather than shown
  * as a dead row.
  */
-export function agentRows(
-  agents: readonly AgentFile[],
-  library: AgentLibrarySettings | undefined,
-  folders: readonly string[],
-  openFolders: ReadonlySet<string>,
-): AgentRow[] {
-  const folderOf = (a: AgentFile) => overlayFor(library, a.path).folder;
-  const rows: AgentRow[] = [];
+export function agentRows({
+  agents,
+  folders,
+  closedFolders,
+  folderOf: folderOfAgent,
+}: {
+  agents: readonly AgentFile[];
+  /** Every folder name, in render order — see [`folderList`]. */
+  folders: readonly string[];
+  /** Folders the user has collapsed. Membership means closed; absence — a
+   *  folder never touched, including one that appears later — means open. */
+  closedFolders: ReadonlySet<string>;
+  folderOf: FolderOf;
+}): AgentRow[] {
+  const loose: AgentRow[] = [];
+  const inside = new Map<string, AgentFile[]>();
   for (const agent of agents) {
-    if (!folderOf(agent)) rows.push({ kind: "agent", agent, indent: 0 });
+    const folder = folderOfAgent(agent);
+    if (!folder) {
+      loose.push({ kind: "agent", agent, indent: 0 });
+      continue;
+    }
+    const members = inside.get(folder);
+    if (members) members.push(agent);
+    else inside.set(folder, [agent]);
   }
-  for (const folder of folders) {
-    const inside = agents.filter((a) => folderOf(a) === folder);
-    if (inside.length === 0) continue;
-    const open = openFolders.has(folder);
-    rows.push({ kind: "group", folder, count: inside.length, open });
-    if (open) for (const agent of inside) rows.push({ kind: "agent", agent, indent: 14 });
-  }
-  return rows;
+  const grouped = folders.flatMap((folder): AgentRow[] => {
+    const members = inside.get(folder) ?? [];
+    if (members.length === 0) return [];
+    const open = !closedFolders.has(folder);
+    const header: AgentRow = { kind: "group", folder, count: members.length, open };
+    if (!open) return [header];
+    return [header, ...members.map((agent): AgentRow => ({ kind: "agent", agent, indent: 14 }))];
+  });
+  return [...loose, ...grouped];
 }
 
 /** Length + a rough token count for the prompt editor's counter. ~3.8 chars per

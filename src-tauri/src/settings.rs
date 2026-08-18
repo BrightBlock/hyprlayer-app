@@ -63,7 +63,7 @@ pub struct CustomPrompt {
 /// The Agents view's app-side state. The agent definitions themselves are the
 /// `.claude/agents/*.md` files — this holds only what those files have no key
 /// for, keyed by the agent's absolute path.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentLibrarySettings {
     /// List-only folders, including ones no agent has been moved into yet.
@@ -72,6 +72,24 @@ pub struct AgentLibrarySettings {
     pub overlays: HashMap<String, AgentOverlay>,
     /// Path of the agent the composer opens on. Only one can hold it.
     pub default_agent: Option<String>,
+    /// Whether an agent with no `category` and no legacy `overlay.folder`
+    /// falls into a derived stage bucket. Off flattens those agents to loose.
+    pub group_uncategorized: bool,
+    /// Folder names the user has collapsed in the list. A folder absent here —
+    /// including one that appears later — renders open.
+    pub closed_folders: Vec<String>,
+}
+
+impl Default for AgentLibrarySettings {
+    fn default() -> Self {
+        Self {
+            folders: Vec::new(),
+            overlays: HashMap::new(),
+            default_agent: None,
+            group_uncategorized: true,
+            closed_folders: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
@@ -847,6 +865,27 @@ mod tests {
         assert!(!e.builtin);
         // A field absent from the provided object still falls back to its default.
         assert!(s.multiplexer.notify_on_blocked);
+    }
+
+    #[test]
+    fn agent_library_group_uncategorized_defaults_on() {
+        // Old settings.json without the `agents` key, and one that has the key
+        // but omits `groupUncategorized`, must both default folders ON — an
+        // uncategorized agent falls into its derived stage bucket rather than
+        // going loose.
+        let s: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(s.agents.group_uncategorized);
+        assert!(s.agents.closed_folders.is_empty());
+
+        let s: AppSettings = serde_json::from_str(r#"{"agents":{}}"#).unwrap();
+        assert!(s.agents.group_uncategorized);
+    }
+
+    #[test]
+    fn agent_library_group_uncategorized_round_trips_false() {
+        let raw = r#"{"agents":{"groupUncategorized":false}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert!(!s.agents.group_uncategorized);
     }
 
     #[test]

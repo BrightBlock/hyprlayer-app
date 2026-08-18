@@ -32,6 +32,7 @@ const KEY_MODEL: &str = "model";
 const KEY_COLOR: &str = "color";
 const KEY_MEMORY: &str = "memory";
 const KEY_SKILLS: &str = "skills";
+const KEY_CATEGORY: &str = "category";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -63,6 +64,10 @@ pub struct AgentFile {
     /// the agent remembers nothing across runs. Stored as claude writes it, not
     /// as an enum: an unrecognized scope is preserved rather than dropped.
     pub memory: Option<String>,
+    /// Frontmatter `category` — a display-only grouping label the list folders
+    /// agents by. Free text; absent means the folder is derived from the
+    /// description's stage phrase (see `phaseFolder` on the frontend).
+    pub category: Option<String>,
     /// Everything after the frontmatter block — the agent's system prompt.
     pub prompt: String,
     /// File mtime in epoch milliseconds, for the list's Updated column. `None`
@@ -224,6 +229,7 @@ pub fn parse_agent(path: &Path, source: &str, text: &str) -> AgentFile {
         model: pick(KEY_MODEL),
         color: pick(KEY_COLOR),
         memory: pick(KEY_MEMORY),
+        category: pick(KEY_CATEGORY),
         prompt: text[parsed.body_offset..]
             .trim_start_matches('\n')
             .to_string(),
@@ -389,45 +395,84 @@ pub fn list_agents(worktree: Option<&Path>) -> Vec<AgentFile> {
 /// The file contents for `agent`, patched onto `original` (empty for a new
 /// file): frontmatter keys updated surgically, body replaced wholesale.
 pub fn render_agent(original: &str, agent: &AgentFile) -> Result<String> {
+    // What the file already says. `patch_frontmatter` keeps the exact bytes of
+    // any span it is not asked to touch, so a key whose value is unchanged is
+    // left out of the patch entirely rather than re-emitted. Without this, a
+    // save that adds `category:` also re-quotes an untouched `description`
+    // through the YAML emitter — a diff on a line the user never edited, in a
+    // file that is usually under version control.
+    let current = parse_agent(Path::new(&agent.path), &agent.source, original);
     let mut patch = FmPatch::default();
-    patch
-        .set
-        .push((KEY_NAME.into(), FmValue::Str(agent.name.clone())));
-    patch.set.push((
-        KEY_DESCRIPTION.into(),
-        FmValue::Str(agent.description.clone()),
-    ));
-    // An empty list means the key is absent: for `tools` that reads as "inherit
-    // every tool", for `skills` as "preload none". Neither is an empty string.
-    for (key, list) in [(KEY_TOOLS, &agent.tools), (KEY_SKILLS, &agent.skills)] {
-        if list.is_empty() {
-            patch.remove.push(key.into());
-        } else {
-            patch.set.push((key.into(), FmValue::Str(list.join(", "))));
+    for (key, was, now) in [
+        (KEY_NAME, &current.name, &agent.name),
+        (KEY_DESCRIPTION, &current.description, &agent.description),
+    ] {
+        if was != now {
+            patch.set.push((key.into(), FmValue::Str(now.clone())));
         }
     }
-    for (key, value) in [
-        (KEY_MODEL, &agent.model),
-        (KEY_COLOR, &agent.color),
-        (KEY_MEMORY, &agent.memory),
+    // An empty list means the key is absent: for `tools` that reads as "inherit
+    // every tool", for `skills` as "preload none". Neither is an empty string.
+    for (key, was, now) in [
+        (KEY_TOOLS, &current.tools, &agent.tools),
+        (KEY_SKILLS, &current.skills, &agent.skills),
     ] {
-        match value {
-            Some(v) if !v.is_empty() => patch.set.push((key.into(), FmValue::Str(v.clone()))),
+        if was == now && !now.is_empty() {
+            continue;
+        }
+        if now.is_empty() {
+            patch.remove.push(key.into());
+        } else {
+            patch.set.push((key.into(), FmValue::Str(now.join(", "))));
+        }
+    }
+    for (key, was, now) in [
+        (KEY_MODEL, &current.model, &agent.model),
+        (KEY_COLOR, &current.color, &agent.color),
+        (KEY_MEMORY, &current.memory, &agent.memory),
+        (KEY_CATEGORY, &current.category, &agent.category),
+    ] {
+        match now {
+            Some(v) if !v.is_empty() => {
+                if was.as_deref() != Some(v.as_str()) {
+                    patch.set.push((key.into(), FmValue::Str(v.clone())));
+                }
+            }
             _ => patch.remove.push(key.into()),
         }
     }
 
     let patched = patch_frontmatter(original, &patch)?;
     // The patcher never touches the body, so splice the new prompt in after the
-    // closing `---`.
+    // closing `---`. `parse_agent` strips the newlines that separated the two,
+    // so carry the original's separator across rather than normalizing every
+    // file to exactly one.
     let head_len = extract_block(&patched)
         .map(|(_, offset)| offset)
         .unwrap_or(0);
+    let separator = separator_of(original);
     Ok(format!(
-        "{}\n{}\n",
+        "{}{}{}\n",
         patched[..head_len].trim_end(),
+        separator,
         agent.prompt.trim()
     ))
+}
+
+/// The run of newlines between the closing `---` and the body in `original`,
+/// so a save preserves the blank line an author left there. One newline ends
+/// the `---` line itself (the caller has trimmed it off the head), and each
+/// further one is a blank line the author wrote. Defaults to a single newline
+/// for a new file.
+fn separator_of(original: &str) -> String {
+    let Some((_, body_offset)) = extract_block(original) else {
+        return "\n".to_string();
+    };
+    let blanks = original[body_offset..]
+        .chars()
+        .take_while(|c| *c == '\n')
+        .count();
+    "\n".repeat(blanks + 1)
 }
 
 /// Write `agent` to its own path, creating the agents directory if needed.
@@ -588,6 +633,7 @@ pub fn export_agent(agent: &AgentFile, overlay: &AgentOverlay) -> Result<String>
         "skills": agent.skills,
         "model": agent.model,
         "color": agent.color,
+        "category": agent.category,
         "prompt": agent.prompt,
         "hyprlayer": overlay,
     });
@@ -759,6 +805,7 @@ mod tests {
             model: None,
             color: None,
             memory: None,
+            category: None,
             prompt: "Be helpful.".into(),
             updated_at: None,
             shipped_path: None,
@@ -782,6 +829,7 @@ mod tests {
             model: Some("sonnet".into()),
             color: None,
             memory: Some("project".into()),
+            category: None,
             prompt: "Be helpful.".into(),
             updated_at: None,
             shipped_path: None,
@@ -831,6 +879,80 @@ mod tests {
         assert_eq!(parsed.memory.as_deref(), Some("some-future-scope"));
         let out = render_agent(text, &parsed).unwrap();
         assert!(out.contains("memory: some-future-scope"));
+    }
+
+    /// `category` is the folder-grouping key: it must round-trip like `memory`,
+    /// and clearing it must remove the key rather than write an empty value.
+    #[test]
+    fn category_round_trips_and_clears() {
+        let with_category = "---\nname: a\ndescription: d\ncategory: Research\n---\n\nBody.\n";
+        let parsed = parse_agent(Path::new("/x/a.md"), "user", with_category);
+        assert_eq!(parsed.category.as_deref(), Some("Research"));
+
+        let kept = render_agent(with_category, &parsed).unwrap();
+        assert!(
+            kept.contains("category: Research"),
+            "category should survive: {kept}"
+        );
+        let back = parse_agent(Path::new("/x/a.md"), "user", &kept);
+        assert_eq!(back.category.as_deref(), Some("Research"));
+
+        let cleared = AgentFile {
+            category: None,
+            ..parsed
+        };
+        let out = render_agent(with_category, &cleared).unwrap();
+        assert!(
+            !out.contains("category:"),
+            "cleared category should drop the key rather than write an empty value: {out}"
+        );
+        assert!(out.contains("name: a"), "other keys stay: {out}");
+    }
+
+    /// A save that changes one key must not rewrite the others. The
+    /// description here contains an apostrophe, which the YAML emitter would
+    /// re-quote (`plan's` → `'plan''s'`) if it were re-emitted; the blank line
+    /// after the frontmatter is the other thing a naive render loses. Both are
+    /// spans the user never edited, in a file that is usually in git.
+    #[test]
+    fn adding_a_category_leaves_every_other_line_byte_identical() {
+        let original = concat!(
+            "---\n",
+            "name: inspector\n",
+            "description: Audits a plan's claims. Spawn during the Validate stage.\n",
+            "tools: Read, Grep\n",
+            "model: sonnet\n",
+            "---\n",
+            "\n",
+            "You are the inspector.\n",
+        );
+        let parsed = parse_agent(Path::new("/x/inspector.md"), "user", original);
+        let filed = AgentFile {
+            category: Some("Spike".into()),
+            ..parsed
+        };
+        let out = render_agent(original, &filed).unwrap();
+
+        assert!(
+            out.contains("description: Audits a plan's claims. Spawn during the Validate stage.\n"),
+            "an untouched description must keep its exact bytes: {out}"
+        );
+        assert!(out.contains("category: Spike"), "category is added: {out}");
+        assert!(
+            out.contains("---\n\nYou are the inspector."),
+            "the blank line after the frontmatter survives: {out:?}"
+        );
+
+        // And clearing it again returns the file to exactly what it was.
+        let cleared = AgentFile {
+            category: None,
+            ..parse_agent(Path::new("/x/inspector.md"), "user", &out)
+        };
+        assert_eq!(
+            render_agent(&out, &cleared).unwrap(),
+            original,
+            "set then clear must round-trip to the original bytes"
+        );
     }
 
     #[test]

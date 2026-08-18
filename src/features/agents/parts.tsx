@@ -2,6 +2,8 @@
 
 import type { ReactNode } from "react";
 
+import { TextInput } from "@/components/ui";
+
 export type SegmentedOption<T extends string> = {
   key: T;
   label: ReactNode;
@@ -53,6 +55,49 @@ export function Segmented<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * A free-text folder field with autocomplete suggestions. `category` (and a
+ * plugin's `overlay.folder`) is free text — a user or plugin author can file
+ * an agent under a folder that isn't a derived phase — so this is a text
+ * input offering the known folders as a `<datalist>`, not a closed
+ * `DropdownSelect`. Used by both the editor's Folder field and the bulk move
+ * dialog's target picker.
+ */
+export function FolderCombo({
+  id,
+  value,
+  onChange,
+  folders,
+  placeholder,
+  "aria-label": ariaLabel,
+}: {
+  /** Unique per instance — backs the `<datalist>` id the input points at. */
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  folders: readonly string[];
+  placeholder?: string;
+  "aria-label"?: string;
+}) {
+  const listId = `${id}-folders`;
+  return (
+    <>
+      <TextInput
+        list={listId}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+      />
+      <datalist id={listId}>
+        {folders.map((f) => (
+          <option key={f} value={f} />
+        ))}
+      </datalist>
+    </>
   );
 }
 

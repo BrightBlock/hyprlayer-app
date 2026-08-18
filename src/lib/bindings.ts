@@ -882,6 +882,12 @@ export type AgentFile = {
 	 *  as an enum: an unrecognized scope is preserved rather than dropped.
 	 */
 	memory: string | null,
+	/**
+	 *  Frontmatter `category` — a display-only grouping label the list folders
+	 *  agents by. Free text; absent means the folder is derived from the
+	 *  description's stage phrase (see `phaseFolder` on the frontend).
+	 */
+	category: string | null,
 	/**  Everything after the frontmatter block — the agent's system prompt. */
 	prompt: string,
 	/**
@@ -910,6 +916,16 @@ export type AgentLibrarySettings = {
 	overlays?: { [key in string]: AgentOverlay },
 	/**  Path of the agent the composer opens on. Only one can hold it. */
 	defaultAgent?: string | null,
+	/**
+	 *  Whether an agent with no `category` and no legacy `overlay.folder`
+	 *  falls into a derived stage bucket. Off flattens those agents to loose.
+	 */
+	groupUncategorized?: boolean,
+	/**
+	 *  Folder names the user has collapsed in the list. A folder absent here —
+	 *  including one that appears later — renders open.
+	 */
+	closedFolders?: string[],
 };
 
 /**

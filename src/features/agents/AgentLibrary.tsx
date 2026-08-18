@@ -7,19 +7,17 @@
  * ride in `AppSettings.agents`, keyed by the same path.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { Button, ContextMenu, ContextMenuItem, Dialog, PageSpinner, TextInput } from "@/components/ui";
 import {
-  Button,
-  ContextMenu,
-  ContextMenuItem,
-  Dialog,
-  DropdownSelect,
-  PageSpinner,
-  TextInput,
-} from "@/components/ui";
-import { commands, type AgentFile } from "@/lib/bindings";
+  commands,
+  type AgentFile,
+  type AgentLibrarySettings,
+  type AppSettings,
+  type Bootstrap,
+} from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { basename } from "@/lib/path";
 import { useBootstrap, useSetAppSettings } from "@/lib/queries";
@@ -27,7 +25,10 @@ import { useToast } from "@/lib/toast";
 import {
   agentRows,
   DEFAULT_OVERLAY,
+  dotColor,
   duplicateAgent,
+  folderList,
+  folderResolver,
   isSystem,
   isUnsaved,
   newAgent,
@@ -40,6 +41,22 @@ import {
 } from "./agents";
 import { AgentEditor } from "./AgentEditor";
 import { AgentList } from "./AgentList";
+import { FolderCombo } from "./parts";
+
+/** What `writeLibrary` accepts: any subset of the library's own fields. */
+type LibraryPatch = Partial<AgentLibrarySettings>;
+
+/** A move that gave up partway. Carries the overlay map as far as it got, so
+ *  the plugin agents that did move aren't rolled back with the failure. */
+class MoveFailed extends Error {
+  constructor(
+    message: string,
+    readonly overlays: NonNullable<AgentLibrarySettings["overlays"]>,
+  ) {
+    super(message);
+    this.name = "MoveFailed";
+  }
+}
 
 type Props = {
   /** The project whose `.claude/agents` is in scope, or null. */
@@ -87,7 +104,6 @@ export function AgentLibrary({
   const [tab, setTab] = useState<AgentTab>("yours");
   const [scope, setScope] = useState<AgentScope>("global");
   const [search, setSearch] = useState("");
-  const [openFolders, setOpenFolders] = useState<ReadonlySet<string>>(new Set());
   const [menu, setMenu] = useState<{ agent: AgentFile; x: number; y: number } | null>(null);
   const [dialog, setDialog] = useState<"folder" | "move" | "delete" | null>(null);
   const [folderName, setFolderName] = useState("");
@@ -100,16 +116,38 @@ export function AgentLibrary({
     overlay: Overlay;
   } | null>(null);
 
+  /** The last settings payload dispatched, until it settles — see `writeLibrary`. */
+  const queued = useRef<AppSettings | null>(null);
+
   const projectName = projectPath ? basename(projectPath) : null;
   const all = useMemo(() => agents.data ?? [], [agents.data]);
-  const folders = useMemo(() => library?.folders ?? [], [library]);
-  const visible = useMemo(
-    () => visibleAgents(all, { tab, scope, search }),
-    [all, tab, scope, search],
+  const groupUncategorized = library?.groupUncategorized ?? true;
+  // Everything this tab + scope admits, before the search box narrows it. The
+  // folder pickers list from here: a search filters which ROWS you see, never
+  // which folders you may file into.
+  const inScope = useMemo(
+    () => visibleAgents(all, { tab, scope, search: "" }),
+    [all, tab, scope],
   );
+  const visible = useMemo(
+    () => (search.trim() ? visibleAgents(all, { tab, scope, search }) : inScope),
+    [all, tab, scope, search, inScope],
+  );
+  const folderOf = useMemo(
+    () => folderResolver(library, groupUncategorized),
+    [library, groupUncategorized],
+  );
+  const folders = useMemo(
+    () => folderList(inScope, library, groupUncategorized),
+    [inScope, library, groupUncategorized],
+  );
+  // A folder absent here — including one that appears later — renders open,
+  // so the list arrives expanded rather than needing every folder clicked
+  // open on first visit.
+  const closedFolders = useMemo(() => new Set(library?.closedFolders ?? []), [library]);
   const rows = useMemo(
-    () => agentRows(visible, library, folders, openFolders),
-    [visible, library, folders, openFolders],
+    () => agentRows({ agents: visible, folders, closedFolders, folderOf }),
+    [visible, folders, closedFolders, folderOf],
   );
   const chosen = useMemo(() => visible.filter((a) => selected.has(a.path)), [visible, selected]);
 
@@ -125,16 +163,47 @@ export function AgentLibrary({
     useToast.getState().show(title, String(e), { tone: "bad" });
   const refetch = () => queryClient.invalidateQueries({ queryKey: ["agent-files"] });
 
-  /** Fold a change into the persisted agent-library settings. */
-  const writeLibrary = (patch: Partial<NonNullable<typeof library>>) => {
-    if (!settings) return;
-    setSettings.mutate({
-      ...settings,
-      agents: {
-        folders,
-        overlays: library?.overlays ?? {},
-        defaultAgent: library?.defaultAgent ?? null,
-        ...patch,
+  /**
+   * Fold a change into the persisted agent-library settings.
+   *
+   * `patch` may be a function of the CURRENT library rather than a literal.
+   * Take that form whenever the new value is derived from the old one: two
+   * clicks in one tick share a render, so a literal patch built from the
+   * `library` in scope would compute both from the same pre-click state and
+   * the second would silently revert the first. The updater reads the query
+   * cache at call time, which `useSetAppSettings` keeps current from
+   * `onMutate` — before the round-trip, not after it.
+   */
+  // Only `library.folders` is ever written back, so a derived phase name (or a
+  // plugin's) never gets baked into settings as if the user had created it.
+  const writeLibrary = (
+    patch: LibraryPatch | ((current: AgentLibrarySettings) => LibraryPatch),
+  ) => {
+    // `queued` is the synchronous part. `useSetAppSettings` is scoped, so its
+    // mutations QUEUE — `onMutate` for the second does not run until the first
+    // has landed, which means neither React state nor the query cache has
+    // moved when two clicks arrive in one tick. Both would read the same base
+    // and the later would revert the earlier. The ref is the only thing that
+    // updates in time, so each call folds onto the last payload dispatched.
+    const base = queued.current ?? queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings ?? settings;
+    if (!base) return;
+    const current: AgentLibrarySettings = {
+      folders: base.agents?.folders ?? [],
+      overlays: base.agents?.overlays ?? {},
+      defaultAgent: base.agents?.defaultAgent ?? null,
+      groupUncategorized: base.agents?.groupUncategorized ?? true,
+      closedFolders: base.agents?.closedFolders ?? [],
+    };
+    const next = {
+      ...base,
+      agents: { ...current, ...(typeof patch === "function" ? patch(current) : patch) },
+    };
+    queued.current = next;
+    setSettings.mutate(next, {
+      // Only the last write in a burst clears the baton; an earlier one
+      // settling must not drop a payload still queued behind it.
+      onSettled: () => {
+        if (queued.current === next) queued.current = null;
       },
     });
   };
@@ -217,6 +286,50 @@ export function AgentLibrary({
       flash(`Duplicated ${count} ${count === 1 ? "agent" : "agents"}`);
     },
     onError: (e) => fail("Duplicate failed", e),
+  });
+
+  const moveToFolder = useMutation({
+    mutationFn: async ({ batch, folder }: { batch: AgentFile[]; folder: string }) => {
+      // An owned agent's folder is its file's own `category` — a real write,
+      // one IPC call per agent. A plugin agent has no file of its own to
+      // carry it, so it keeps moving via the overlay, app-side only.
+      const overlays = { ...(library?.overlays ?? {}) };
+      try {
+        for (const agent of batch) {
+          if (isSystem(agent)) {
+            overlays[agent.path] = { ...overlayFor(library, agent.path), folder };
+          } else {
+            await unwrap(commands.saveAgentFile({ ...agent, category: folder.trim() || null }));
+            // `category` outranks `overlay.folder`, so a stale overlay left
+            // behind would silently win back the moment the category is
+            // cleared — and moving to "no folder" clears it. Retire it here,
+            // touching settings only for an agent that actually has one.
+            const legacy = library?.overlays?.[agent.path];
+            if (legacy?.folder) overlays[agent.path] = { ...legacy, folder: "" };
+          }
+        }
+      } catch (e) {
+        // Keep the overlays for whatever already moved: half a batch is on
+        // disk, and dropping the app-side half would desync the two.
+        throw new MoveFailed(String(e), overlays);
+      }
+      return overlays;
+    },
+    onSuccess: (overlays, { folder }) => {
+      writeLibrary({ overlays });
+      flash(`Moved to ${folder.trim() || "no folder"}`);
+    },
+    onError: (e) => {
+      if (e instanceof MoveFailed) writeLibrary({ overlays: e.overlays });
+      fail("Move failed", e instanceof MoveFailed ? e.message : e);
+    },
+    // Whether or not the batch finished, some files may already be on disk —
+    // the list has to be re-read rather than left showing the old folders.
+    onSettled: () => {
+      setSelected(new Set());
+      setDialog(null);
+      void refetch();
+    },
   });
 
   const exportAgents = useMutation({
@@ -344,13 +457,16 @@ export function AgentLibrary({
           }
           onClearSelection={() => setSelected(new Set())}
           onToggleFolder={(folder) =>
-            setOpenFolders((prev) => {
-              const next = new Set(prev);
+            writeLibrary((current) => {
+              const next = new Set(current.closedFolders ?? []);
               if (!next.delete(folder)) next.add(folder);
-              return next;
+              return { closedFolders: [...next] };
             })
           }
           loading={agents.isFetching}
+          dotColorOf={(agent) => dotColor(agent, overlayFor(library, agent.path), folderOf)}
+          groupUncategorized={groupUncategorized}
+          onGroupUncategorized={(on) => writeLibrary({ groupUncategorized: on })}
           onOpen={(agent) => {
             setDefaultIntent(null);
             onSelect(agent.path);
@@ -371,7 +487,7 @@ export function AgentLibrary({
           bulk={{
             duplicate: () => duplicate.mutate(chosen),
             move: () => {
-              setMoveTarget(folders[0] ?? "");
+              setMoveTarget("");
               setDialog("move");
             },
             export: () => exportAgents.mutate(chosen),
@@ -410,7 +526,7 @@ export function AgentLibrary({
           <ContextMenuItem
             onClick={() => {
               setSelected(new Set([menu.agent.path]));
-              setMoveTarget(folders[0] ?? "");
+              setMoveTarget("");
               setMenu(null);
               setDialog("move");
             }}
@@ -453,8 +569,9 @@ export function AgentLibrary({
               disabled={!folderName.trim() || folders.includes(folderName.trim())}
               onClick={() => {
                 const name = folderName.trim();
-                writeLibrary({ folders: [...folders, name] });
-                setOpenFolders((prev) => new Set(prev).add(name));
+                // No need to also touch closedFolders — a folder absent from
+                // it already renders open, and this one is brand new.
+                writeLibrary((current) => ({ folders: [...(current.folders ?? []), name] }));
                 setDialog(null);
                 flash(`Folder “${name}” created`);
               }}
@@ -467,29 +584,20 @@ export function AgentLibrary({
 
       <Dialog open={dialog === "move"} onClose={() => setDialog(null)} title="Move to folder">
         <div className="flex flex-col gap-3">
-          <DropdownSelect
+          <FolderCombo
+            id="move-target"
             value={moveTarget}
-            options={[
-              { value: "", label: "No folder" },
-              ...folders.map((f) => ({ value: f, label: f })),
-            ]}
             onChange={setMoveTarget}
+            folders={folders}
+            placeholder="No folder"
             aria-label="Target folder"
           />
           <div className="flex justify-end gap-2">
             <Button onClick={() => setDialog(null)}>Cancel</Button>
             <Button
               variant="primary"
-              onClick={() => {
-                const overlays = { ...(library?.overlays ?? {}) };
-                for (const a of chosen) {
-                  overlays[a.path] = { ...overlayFor(library, a.path), folder: moveTarget };
-                }
-                writeLibrary({ overlays });
-                setSelected(new Set());
-                setDialog(null);
-                flash(`Moved to ${moveTarget || "no folder"}`);
-              }}
+              busy={moveToFolder.isPending}
+              onClick={() => moveToFolder.mutate({ batch: chosen, folder: moveTarget })}
             >
               Move
             </Button>

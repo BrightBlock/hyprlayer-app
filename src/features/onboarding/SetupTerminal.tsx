@@ -9,6 +9,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { useThemeStore } from "@/lib/theme";
+import { attachTerminalClipboard } from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
@@ -40,6 +41,9 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
 
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engine.mount(host);
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // path of its own there (see attachTerminalClipboard).
+    attachTerminalClipboard(engine);
     engine.focus();
     engineRef.current = engine;
     appliedFontSizeRef.current = fontSize;

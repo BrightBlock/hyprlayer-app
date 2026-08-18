@@ -3,6 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type ScriptKind, type TerminalEvent } from "@/lib/bindings";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
+import { attachTerminalClipboard } from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
@@ -64,6 +65,9 @@ export function ScriptRunView({
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engineRef.current = engine;
     engine.mount(host);
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // path of its own there (see attachTerminalClipboard).
+    attachTerminalClipboard(engine);
     let lastGrid = engine.fit();
     engine.focus();
 

@@ -11,7 +11,6 @@ import {
   Button,
   ContextMenu,
   ContextMenuItem,
-  DropdownSelect,
   Spinner,
   TextInput,
   Toggle,
@@ -69,7 +68,7 @@ import {
   type EditorTab,
   type Overlay,
 } from "./agents";
-import { Callout, CardGroup, EditorCard, RadioRow, Segmented } from "./parts";
+import { Callout, CardGroup, EditorCard, FolderCombo, RadioRow, Segmented } from "./parts";
 
 /** The editor reads as a settings page: one centered column, unlike the full-width list. */
 const COLUMN = "mx-auto w-full max-w-5xl";
@@ -272,11 +271,6 @@ function SetupTab({
   projectName,
   folders,
 }: Props) {
-  const folderOptions = [
-    { value: "", label: "No folder" },
-    ...folders.map((f) => ({ value: f, label: f })),
-  ];
-
   // Descriptions run to whole paragraphs (that's why the list elides them), so
   // the field grows to its content instead of clipping at a fixed height that
   // wasn't even a whole number of lines. Past the cap it scrolls.
@@ -436,13 +430,32 @@ function SetupTab({
         <Row
           last
           title="Folder"
-          hint={folders.length ? "Folders group agents in this list only." : "No folders yet."}
+          hint={
+            isSystem(draft)
+              ? "Groups this agent in the list only — the shipped file is untouched."
+              : "Groups this agent in the list, and travels with the file wherever it goes."
+          }
           control={
             <div className="w-55">
-              <DropdownSelect
-                value={overlay.folder}
-                options={folderOptions}
-                onChange={(folder) => patchOverlay({ folder })}
+              <FolderCombo
+                id="agent-folder"
+                // An owned agent filed before `category` existed still sits in
+                // its overlay folder, so the field has to show that rather
+                // than an empty box the list plainly contradicts.
+                value={isSystem(draft) ? overlay.folder : (draft.category ?? overlay.folder)}
+                onChange={(folder) => {
+                  if (isSystem(draft)) {
+                    patchOverlay({ folder });
+                    return;
+                  }
+                  // `category` outranks `overlay.folder`; retire the legacy
+                  // one in the same edit so clearing the field later doesn't
+                  // snap the agent back into it.
+                  patch({ category: folder.trim() || null });
+                  if (overlay.folder) patchOverlay({ folder: "" });
+                }}
+                folders={folders}
+                placeholder="No folder"
                 aria-label="Folder"
               />
             </div>

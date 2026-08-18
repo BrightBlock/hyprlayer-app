@@ -5,14 +5,14 @@
 
 import type { ReactNode } from "react";
 
-import { Badge, Button, EmptyState, TextInput } from "@/components/ui";
+import { Badge, Button, EmptyState, IconButton, TextInput, Toggle } from "@/components/ui";
 import { FolderIcon, PlusIcon, SearchIcon } from "@/components/icons";
 import { formatRelativeTime } from "@/lib/format";
 import { isContentCompact, isContentNarrow } from "@/lib/layout";
 import { useElementWidth } from "@/lib/useElementWidth";
 import type { AgentFile, AgentLibrarySettings } from "@/lib/bindings";
 import {
-  dotColor,
+  folderColor,
   modelLabel,
   overlayFor,
   shortDescription,
@@ -47,6 +47,12 @@ type Props = {
   onCreate: () => void;
   onNewFolder: () => void;
   loading: boolean;
+  /** The dot beside each agent's name, already resolved: the list renders the
+   *  colour, it does not decide it. */
+  dotColorOf: (agent: AgentFile) => string;
+  /** State of the "Group uncategorized" switch in the toolbar. */
+  groupUncategorized: boolean;
+  onGroupUncategorized: (on: boolean) => void;
   bulk: {
     duplicate: () => void;
     move: () => void;
@@ -95,6 +101,9 @@ export function AgentList({
   onCreate,
   onNewFolder,
   loading,
+  dotColorOf,
+  groupUncategorized,
+  onGroupUncategorized,
   bulk,
 }: Props) {
   const allOn = agents.length > 0 && agents.every((a) => selected.has(a.path));
@@ -113,18 +122,8 @@ export function AgentList({
 
   return (
     <div ref={paneRef} className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-start justify-between gap-5 px-7 pb-3.5 pt-5">
+      <div className="px-7 pb-3.5 pt-5">
         <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight text-ink">Agents</h1>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button onClick={onNewFolder}>
-            <FolderIcon size={14} />
-            New folder
-          </Button>
-          <Button variant="primary" onClick={onCreate}>
-            <PlusIcon size={14} />
-            Create Agent
-          </Button>
-        </div>
       </div>
 
       {/* Wraps rather than clipping: the segmented controls are fixed-width, so
@@ -161,19 +160,43 @@ export function AgentList({
             />
           </div>
         )}
+        {tab === "yours" && (
+          <label className="inline-flex items-center gap-2 text-xs text-ink-dim">
+            <Toggle
+              checked={groupUncategorized}
+              onChange={onGroupUncategorized}
+              aria-label="Group uncategorized agents by lifecycle stage"
+            />
+            <span className="opacity-80">Group uncategorized</span>
+          </label>
+        )}
 
         <div className="flex-1" />
-        <div className={`relative ${narrow ? "w-full" : "w-58"}`}>
-          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim">
-            <SearchIcon size={13} />
-          </span>
-          <TextInput
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder="Search agents…"
-            aria-label="Search agents"
-            className="pl-7"
-          />
+        {/* Search and the two add-actions travel as one group so they sit with
+            the table rather than beside the page title. Below the narrow tier
+            the group takes a row of its own — search flexes, the icon buttons
+            keep their square footprint — instead of wrapping to a third line
+            under a full-width search box. Icon-only, matching the Prompts
+            panel's header actions; `title`/`aria-label` carry the meaning. */}
+        <div className={`flex items-center gap-1 ${narrow ? "w-full" : ""}`}>
+          <div className={`relative ${narrow ? "min-w-0 flex-1" : "w-58"} mr-1`}>
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim">
+              <SearchIcon size={13} />
+            </span>
+            <TextInput
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Search agents…"
+              aria-label="Search agents"
+              className="pl-7"
+            />
+          </div>
+          <IconButton onClick={onNewFolder} title="New folder" aria-label="New folder">
+            <FolderIcon size={15} />
+          </IconButton>
+          <IconButton onClick={onCreate} title="Create agent" aria-label="Create agent">
+            <PlusIcon size={15} />
+          </IconButton>
         </div>
       </div>
 
@@ -226,7 +249,9 @@ export function AgentList({
               >
                 ›
               </span>
-              <FolderIcon size={13} />
+              <span style={{ color: folderColor(row.folder) }}>
+                <FolderIcon size={13} />
+              </span>
               <span className="text-ink">{row.folder}</span>
               <span className="opacity-70">
                 {row.count} {row.count === 1 ? "agent" : "agents"}
@@ -246,6 +271,7 @@ export function AgentList({
               grid={grid}
               narrow={narrow}
               compact={compact}
+              dot={dotColorOf(row.agent)}
             />
           ),
         )}
@@ -341,6 +367,7 @@ function AgentRowView({
   grid,
   narrow,
   compact,
+  dot,
 }: {
   agent: AgentFile;
   indent: number;
@@ -355,6 +382,8 @@ function AgentRowView({
   grid: string;
   narrow: boolean;
   compact: boolean;
+  /** Already-resolved dot colour — see [`dotColor`]. */
+  dot: string;
 }) {
   const overlay = overlayFor(library, agent.path);
   const status = statusOf(agent, overlay);
@@ -382,7 +411,7 @@ function AgentRowView({
         <span
           aria-hidden="true"
           className="h-[7px] w-[7px] shrink-0 rounded-full"
-          style={{ background: dotColor(agent, overlay) }}
+          style={{ background: dot }}
         />
         <span className="shrink-0 whitespace-nowrap text-sm font-medium text-ink">
           {agent.name}

@@ -1,13 +1,16 @@
-//! Shared terminal "chrome" effects — font-size zoom and live theme recolor —
-//! used by every mounted terminal (TerminalTab and the multiplexer AgentPtyTab).
-//! These act purely on the TerminalEngine abstraction (setFontSize / setTheme)
-//! and never touch the PTY spawn/attach/resize data flow, so both terminals
-//! share one implementation instead of copying the effects.
+//! Shared terminal "chrome" — font-size zoom, live theme recolor, and the
+//! clipboard chords — used by every mounted terminal (TerminalTab, the
+//! multiplexer AgentPtyTab, the script views, onboarding). These act purely on
+//! the TerminalEngine abstraction (setFontSize / setTheme / selectionText) and
+//! never touch the PTY spawn/attach/resize data flow, so every terminal shares
+//! one implementation instead of copying the effects.
 
 import { useEffect, type RefObject } from "react";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { commands } from "@/lib/bindings";
 import { useCommand } from "@/lib/keybindings/registry";
+import { IS_MACOS } from "@/lib/platform";
 import { useThemeStore } from "@/lib/theme";
 import type { TerminalEngine } from "./terminalEngine";
 import { useTerminalFontSize } from "./terminalFontSize";
@@ -68,4 +71,59 @@ export function useTerminalThemeSync(engineRef: RefObject<TerminalEngine | null>
       mq?.removeEventListener("change", onMq);
     };
   }, [engineRef]);
+}
+
+/**
+ * Give a terminal the clipboard chords its emulator doesn't provide off macOS:
+ * Ctrl+Shift+C copies the selection, Ctrl+Shift+V pastes — the convention every
+ * Linux/Windows terminal follows, and the only way to move text between a
+ * terminal and the composer.
+ *
+ * Without this there is no copy path at all off macOS. xterm rewrites
+ * Ctrl+letter to a control byte and preventDefaults it (Ctrl+C is SIGINT,
+ * Ctrl+V is ^V), so the webview's native copy never fires and xterm's own
+ * `copy` handler — which would have put the selection on the clipboard — is
+ * never reached. macOS escapes this because ⌘C/⌘V match none of xterm's key
+ * branches and fall through to the webview; that path is left alone, so this is
+ * a no-op there.
+ *
+ * Clipboard I/O goes through Tauri rather than `navigator.clipboard`: the async
+ * clipboard is exactly the surface WebKitGTK has already been caught lying
+ * about (see the image-paste fallback in src-tauri/src/lib.rs). Needs
+ * `clipboard-manager:allow-read-text` / `allow-write-text` in the capability
+ * file.
+ *
+ * Call once, right after `engine.mount(host)` — an engine holds a single
+ * filter, and it is torn down with the engine.
+ */
+export function attachTerminalClipboard(engine: TerminalEngine): void {
+  if (IS_MACOS) return;
+  engine.interceptKeys((e) => {
+    // keypress consults the same filter; only judge the keydown.
+    if (e.type !== "keydown") return true;
+    if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true;
+    const key = e.key.toLowerCase();
+    if (key !== "c" && key !== "v") return true;
+    // Ours: keep it from the emulator, from the webview, and from the
+    // window-level keybinding dispatcher — `mod+shift+v` is Toggle Markdown
+    // Preview, which is live whenever a markdown file viewer sits beside the
+    // terminal. Returning false stops xterm but does NOT preventDefault, so
+    // both calls are on us.
+    e.preventDefault();
+    e.stopPropagation();
+    if (key === "c") {
+      const text = engine.selectionText();
+      // Nothing selected: swallow the chord rather than letting it through as a
+      // control byte. Copying "" would also blank whatever is on the clipboard.
+      if (text) void writeText(text).catch(() => {});
+    } else {
+      void readText().then(
+        (text) => {
+          if (text) engine.paste(text);
+        },
+        () => {},
+      );
+    }
+    return false;
+  });
 }

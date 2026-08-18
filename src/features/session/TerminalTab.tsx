@@ -5,7 +5,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
-import { useTerminalThemeSync, useTerminalZoom } from "@/lib/terminal/terminalChrome";
+import {
+  attachTerminalClipboard,
+  useTerminalThemeSync,
+  useTerminalZoom,
+} from "@/lib/terminal/terminalChrome";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 
@@ -39,6 +43,9 @@ export function TerminalTab({
 
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engine.mount(host);
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // path of its own there (see attachTerminalClipboard).
+    attachTerminalClipboard(engine);
     engineRef.current = engine;
     appliedFontSizeRef.current = fontSize;
     // Effects run after layout, so the host has its real size here; fit once

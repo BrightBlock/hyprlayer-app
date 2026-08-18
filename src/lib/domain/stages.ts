@@ -35,6 +35,47 @@ export const MODE_STAGES = STAGES.filter(
 
 const STAGE_KEYS = new Set<string>(STAGES.map((s) => s.key));
 
+/**
+ * SDLC phases the Agents view folders agents by — a coarser rollup of
+ * [`Stage`], one folder per phase rather than one per stage (five of the eight
+ * stages would otherwise hold a single agent). Display order; "Any stage" is
+ * the catch-all a description naming no stage falls into and sorts last.
+ */
+export const SDLC_PHASES = ["Discover", "Design", "Build", "Verify", "Deliver", "Any stage"] as const;
+
+export type SdlcPhase = (typeof SDLC_PHASES)[number];
+
+/** Catch-all folder for a description that names no stage. */
+export const ANY_STAGE: SdlcPhase = "Any stage";
+
+/** Which phase each stage rolls up to. `Record<StageKey, …>` so a stage added
+ *  to the Rust enum is a compile error here until it is assigned a phase — the
+ *  same guard [`MODE_STYLES`] gets. */
+export const STAGE_PHASE: Record<StageKey, SdlcPhase> = {
+  general: "Any stage",
+  research: "Discover",
+  plan: "Design",
+  implement: "Build",
+  validate: "Verify",
+  commit: "Deliver",
+  ship: "Deliver",
+  revise: "Verify",
+};
+
+/**
+ * The theme custom-property *name* (never a raw hex — the same rule
+ * `Engine.accent_token` follows in `settings.rs`) that colours each phase's
+ * folder header and agent dots. "Any stage" carries none on purpose: it is a
+ * holding pen, not a phase, and renders muted instead (see `dotColor`).
+ */
+export const PHASE_COLOR: Record<Exclude<SdlcPhase, "Any stage">, string> = {
+  Discover: "--color-research",
+  Design: "--color-plan",
+  Build: "--color-implement",
+  Verify: "--color-validate",
+  Deliver: "--color-commit",
+};
+
 /** The workstream's stage — already typed by the bindings union. */
 export function stageOf(view: WorkstreamView): StageKey {
   return view.item.stage;

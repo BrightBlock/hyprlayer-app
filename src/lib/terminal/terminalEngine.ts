@@ -43,6 +43,20 @@ export interface TerminalEngine {
   setTheme(theme: TerminalTheme): void;
   /** Give the emulator keyboard focus. */
   focus(): void;
+  /** True when the emulator holds a text selection. This is the emulator's own
+   *  selection model, not a DOM one — the grid is painted to a canvas, so
+   *  `window.getSelection()` never sees it. */
+  hasSelection(): boolean;
+  /** The selected text, or `""` when nothing is selected. */
+  selectionText(): string;
+  /** Feed text to the PTY exactly as a real paste would: line endings
+   *  normalized, and bracketed-paste wrapped when the running CLI asked for it. */
+  paste(text: string): void;
+  /** Install a keydown/keypress filter that runs BEFORE the emulator's own
+   *  handling. Return true to let the emulator proceed, false to claim the key
+   *  (the emulator then does nothing and does not preventDefault — the filter
+   *  owns that). One filter per engine; call after `mount`. */
+  interceptKeys(filter: (e: KeyboardEvent) => boolean): void;
   /** Wipe the screen + scrollback to a clean slate (used when restarting an
    *  agent so the prior session's output doesn't linger). */
   reset(): void;
@@ -183,6 +197,22 @@ class XtermEngine implements TerminalEngine {
 
   focus(): void {
     this.term.focus();
+  }
+
+  hasSelection(): boolean {
+    return this.term.hasSelection();
+  }
+
+  selectionText(): string {
+    return this.term.getSelection();
+  }
+
+  paste(text: string): void {
+    this.term.paste(text);
+  }
+
+  interceptKeys(filter: (e: KeyboardEvent) => boolean): void {
+    this.term.attachCustomKeyEventHandler(filter);
   }
 
   reset(): void {

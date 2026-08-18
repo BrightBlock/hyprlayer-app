@@ -413,9 +413,25 @@ export function useSetAppSettings() {
     // the last-dispatched payload is also the final on-disk state.
     scope: { id: "app-settings" },
     mutationFn: (settings: AppSettings) => unwrap(commands.setAppSettings(settings)),
+    onMutate: async (settings) => {
+      // Fold the payload in BEFORE the round-trip, not just on success: a
+      // caller builds its next payload by patching the cached settings, so a
+      // second click inside one round-trip would otherwise read the pre-first
+      // state and — because the scope runs these serially — land last and
+      // silently revert the first. Rapid folder collapses hit this directly.
+      await queryClient.cancelQueries({ queryKey: ["bootstrap"] });
+      const previous = queryClient.getQueryData<Bootstrap>(["bootstrap"]);
+      queryClient.setQueryData<Bootstrap>(["bootstrap"], (prev) =>
+        prev ? { ...prev, settings } : prev,
+      );
+      return { previous };
+    },
+    onError: (_error, _settings, context) => {
+      if (context?.previous) queryClient.setQueryData(["bootstrap"], context.previous);
+    },
     onSuccess: (next) => {
-      // Optimistically fold the saved settings into the cached bootstrap so
-      // the toggles don't flicker back while the refetch is in flight.
+      // The saved settings as the backend normalized them, which may differ
+      // from what we optimistically wrote.
       queryClient.setQueryData<Bootstrap>(["bootstrap"], (prev) =>
         prev ? { ...prev, settings: next } : prev,
       );

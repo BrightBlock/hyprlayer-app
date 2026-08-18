@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentFile, AgentLibrarySettings, AgentRule, AgentSkill } from "@/lib/bindings";
+import { ANY_STAGE, PHASE_COLOR, SDLC_PHASES, STAGE_PHASE, STAGES } from "@/lib/domain/stages";
 import {
   AGENT_TOOLS,
   agentRows,
@@ -11,6 +12,10 @@ import {
   editorTabs,
   extraSkills,
   extraTools,
+  folderColor,
+  folderList,
+  folderOf,
+  folderResolver,
   initialsOf,
   inheritsAllTools,
   isAllProjects,
@@ -22,6 +27,7 @@ import {
   newAgent,
   newRule,
   overlayFor,
+  phaseFolder,
   promptStats,
   readOnlyTools,
   hasUnknownMemoryScope,
@@ -52,6 +58,7 @@ const agent = (over: Partial<AgentFile>): AgentFile => ({
   model: null,
   color: null,
   memory: null,
+  category: null,
   prompt: "",
   updatedAt: null,
   shippedPath: null,
@@ -298,6 +305,9 @@ describe("visibleAgents", () => {
   });
 });
 
+/** `MUTED_DOT` in agents.ts — the colour a non-phase folder paints with. */
+const MUTED = "color-mix(in oklab, var(--color-ink-dim) 55%, transparent)";
+
 describe("agentRows", () => {
   const loose = agent({ name: "loose" });
   const filed = agent({ name: "filed" });
@@ -306,8 +316,12 @@ describe("agentRows", () => {
     overlays: { [filed.path]: { folder: "Review" } },
   });
 
+  const folderOf = folderResolver(lib, false);
+  const rowsOf = (agents: AgentFile[], closedFolders: ReadonlySet<string>) =>
+    agentRows({ agents, folders: ["Review"], closedFolders, folderOf });
+
   it("puts loose agents first, then each folder's header", () => {
-    expect(agentRows([loose, filed], lib, ["Review"], new Set(["Review"]))).toEqual([
+    expect(rowsOf([loose, filed], new Set())).toEqual([
       { kind: "agent", agent: loose, indent: 0 },
       { kind: "group", folder: "Review", count: 1, open: true },
       { kind: "agent", agent: filed, indent: 14 },
@@ -315,13 +329,146 @@ describe("agentRows", () => {
   });
 
   it("keeps a collapsed folder's header but hides its agents", () => {
-    const rows = agentRows([loose, filed], lib, ["Review"], new Set());
+    const rows = rowsOf([loose, filed], new Set(["Review"]));
     expect(rows).toHaveLength(2);
     expect(rows[1]).toEqual({ kind: "group", folder: "Review", count: 1, open: false });
   });
 
   it("drops a folder nothing is in rather than rendering a dead header", () => {
-    expect(agentRows([loose], lib, ["Review"], new Set(["Review"]))).toHaveLength(1);
+    expect(rowsOf([loose], new Set())).toHaveLength(1);
+  });
+
+  it("renders a folder absent from closedFolders open, including one that appears later", () => {
+    // Nothing has ever been collapsed (the set is empty) — a brand-new folder
+    // must still default open rather than needing to be explicitly listed.
+    const rows = rowsOf([loose, filed], new Set());
+    const group = rows.find((r) => r.kind === "group");
+    expect(group).toEqual({ kind: "group", folder: "Review", count: 1, open: true });
+  });
+
+  it("keeps every member of a folder, not just the first", () => {
+    const second = agent({ name: "filed-2", path: "/a/filed-2.md" });
+    const many = library({
+      folders: ["Review"],
+      overlays: { [filed.path]: { folder: "Review" }, [second.path]: { folder: "Review" } },
+    });
+    const rows = agentRows({
+      agents: [filed, second],
+      folders: ["Review"],
+      closedFolders: new Set(),
+      folderOf: folderResolver(many, false),
+    });
+    expect(rows[0]).toEqual({ kind: "group", folder: "Review", count: 2, open: true });
+    expect(rows.filter((r) => r.kind === "agent")).toHaveLength(2);
+  });
+});
+
+describe("phaseFolder", () => {
+  it("maps each of the shipped description phrases to its phase", () => {
+    expect(
+      phaseFolder(agent({ description: "Spawn during the Plan stage, after drafting" })),
+    ).toBe("Design");
+    expect(
+      phaseFolder(agent({ description: "Spawn one per area during the Research stage" })),
+    ).toBe("Discover");
+    expect(phaseFolder(agent({ description: "Spawn during the Validate stage" }))).toBe("Verify");
+    expect(phaseFolder(agent({ description: "Spawn during the Revise stage" }))).toBe("Verify");
+  });
+
+  it("does not match a stage word outside the naming phrase", () => {
+    expect(phaseFolder(agent({ description: "Drafts an implementation plan body" }))).toBe(
+      ANY_STAGE,
+    );
+  });
+
+  it("falls to Any stage when the description names no stage", () => {
+    expect(phaseFolder(agent({ description: "Finds files matching a pattern." }))).toBe(
+      ANY_STAGE,
+    );
+  });
+
+  it("covers every stage STAGES names, so a new stage can't silently yield undefined", () => {
+    for (const { key } of STAGES) {
+      expect(STAGE_PHASE[key]).toBeTruthy();
+    }
+  });
+});
+
+describe("folderOf", () => {
+  it("prefers category over a legacy overlay.folder", () => {
+    const a = agent({ category: "Spike" });
+    expect(folderOf(a, { ...DEFAULT_OVERLAY, folder: "Old" }, true)).toBe("Spike");
+  });
+
+  it("falls back to a plugin agent's plugin name when it has no overlay folder", () => {
+    const a = agent({ source: "plugin", plugin: "pr-review-toolkit" });
+    expect(folderOf(a, DEFAULT_OVERLAY, true)).toBe("pr-review-toolkit");
+  });
+
+  it("a plugin agent's own overlay.folder still wins over its plugin name", () => {
+    const a = agent({ source: "plugin", plugin: "pr-review-toolkit" });
+    expect(folderOf(a, { ...DEFAULT_OVERLAY, folder: "Moved" }, true)).toBe("Moved");
+  });
+
+  it("leaves an uncategorized owned agent loose when groupUncategorized is off", () => {
+    const a = agent({ description: "Spawn during the Plan stage" });
+    expect(folderOf(a, DEFAULT_OVERLAY, false)).toBe("");
+    expect(folderOf(a, DEFAULT_OVERLAY, true)).toBe("Design");
+  });
+
+  it("a legacy overlay folder still wins over a derived phase, so clearing it must be deliberate", () => {
+    // The move mutation and the editor both clear `overlay.folder` when they
+    // write `category`. Without that, an agent moved to "no folder" would
+    // land right back here.
+    const a = agent({ description: "Spawn during the Plan stage" });
+    expect(folderOf(a, { ...DEFAULT_OVERLAY, folder: "Old" }, true)).toBe("Old");
+    expect(folderOf({ ...a, category: null }, { ...DEFAULT_OVERLAY, folder: "" }, true)).toBe(
+      "Design",
+    );
+  });
+});
+
+describe("folderList", () => {
+  it("orders phases in SDLC_PHASES order, non-phase folders alphabetically after them, and omits unoccupied phases", () => {
+    const research = agent({ name: "r", description: "Spawn during the Research stage" });
+    const plan = agent({ name: "p", description: "Spawn during the Plan stage" });
+    const spiked = agent({ name: "s", category: "Spike" });
+    const lib = library({});
+    const list = folderList([research, plan, spiked], lib, true);
+    expect(list).toEqual(["Discover", "Design", "Spike"]);
+  });
+
+  it("keeps a persisted folder that is named like a phase", () => {
+    // Creating "Build" while nothing is filed in it must still list it —
+    // otherwise the create dialog accepts a name that never appears.
+    expect(folderList([], library({ folders: ["Build"] }), true)).toEqual(["Build"]);
+  });
+
+  it("lists a persisted folder once even when agents are filed in it", () => {
+    const built = agent({ name: "b", category: "Build" });
+    expect(folderList([built], library({ folders: ["Build"] }), true)).toEqual(["Build"]);
+  });
+
+  it("lists a folder once when a plugin agent is moved into a user-created one", () => {
+    // The overlay-filed plugin agent and `library.folders` name the same
+    // folder; listing it twice renders two identical headers and emits
+    // duplicate React keys for both the group and the agent under it.
+    const plugin = agent({ path: "/p/a.md", source: "plugin", plugin: "pr-toolkit" });
+    const lib = library({ folders: ["Review"], overlays: { "/p/a.md": { folder: "Review" } } });
+    expect(folderList([plugin], lib, true)).toEqual(["Review"]);
+    const rows = agentRows({
+      agents: [plugin],
+      folders: folderList([plugin], lib, true),
+      closedFolders: new Set(),
+      folderOf: folderResolver(lib, true),
+    });
+    expect(rows.filter((r) => r.kind === "group")).toHaveLength(1);
+    expect(rows.filter((r) => r.kind === "agent")).toHaveLength(1);
+  });
+
+  it("does not list a folder for agents left loose by the grouping switch", () => {
+    const plan = agent({ name: "p", description: "Spawn during the Plan stage" });
+    expect(folderList([plan], library({}), false)).toEqual([]);
   });
 });
 
@@ -354,9 +501,49 @@ describe("status and scope", () => {
     expect(isAllProjects(agent({ source: "project" }))).toBe(false);
   });
 
-  it("dots a draft amber and otherwise follows the frontmatter colour", () => {
-    expect(dotColor(agent({}), { ...DEFAULT_OVERLAY, status: "draft" })).toBe("var(--color-warn)");
-    expect(dotColor(agent({ color: "Green" }), DEFAULT_OVERLAY)).toBe("var(--color-ok)");
+  const grouped = folderResolver(undefined, true);
+
+  it("dots a draft amber regardless of phase", () => {
+    const draft = { ...DEFAULT_OVERLAY, status: "draft" };
+    expect(dotColor(agent({ description: "Spawn during the Plan stage" }), draft, grouped)).toBe(
+      "var(--color-warn)",
+    );
+  });
+
+  it("dots each phase with its own token, and Any stage / a custom folder with the muted colour", () => {
+    const phrases: Record<string, string> = {
+      Discover: "Spawn during the Research stage",
+      Design: "Spawn during the Plan stage",
+      Build: "Spawn during the Implement stage",
+      Verify: "Spawn during the Validate stage",
+      Deliver: "Spawn during the Commit stage",
+    };
+    for (const [phase, description] of Object.entries(phrases)) {
+      expect(dotColor(agent({ description }), DEFAULT_OVERLAY, grouped)).toBe(
+        `var(${PHASE_COLOR[phase as keyof typeof PHASE_COLOR]})`,
+      );
+    }
+    expect(dotColor(agent({ description: "No stage named here." }), DEFAULT_OVERLAY, grouped)).toBe(
+      MUTED,
+    );
+    expect(dotColor(agent({ category: "Spike" }), DEFAULT_OVERLAY, grouped)).toBe(MUTED);
+  });
+
+  it("never resolves a folder name through Object.prototype", () => {
+    // `category` is free text from a user's frontmatter: a folder called
+    // "toString" must read as an unknown folder, not as a function.
+    for (const name of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+      expect(folderColor(name)).toBe(MUTED);
+    }
+  });
+});
+
+describe("PHASE_COLOR", () => {
+  it("names a token for every phase SDLC_PHASES can colour (all but the Any stage catch-all)", () => {
+    for (const phase of SDLC_PHASES) {
+      if (phase === ANY_STAGE) continue;
+      expect(PHASE_COLOR[phase as keyof typeof PHASE_COLOR]).toMatch(/^--color-/);
+    }
   });
 });
 

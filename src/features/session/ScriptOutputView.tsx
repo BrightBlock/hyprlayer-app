@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import { attachTerminalClipboard } from "@/lib/terminal/terminalChrome";
 import { createTerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
@@ -18,6 +19,9 @@ export function ScriptOutputView({ output }: { output: string }) {
     if (!host) return;
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engine.mount(host);
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // path of its own there (see attachTerminalClipboard).
+    attachTerminalClipboard(engine);
     engine.fit();
     // xterm needs CRLF; normalize bare \n (captured Exec output) without doubling
     // existing CRLFs (captured PTY scrollback). Trailing `\x1b[?25l` hides the

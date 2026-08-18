@@ -7,7 +7,11 @@ import { Spinner } from "@/components/ui";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
-import { useTerminalThemeSync, useTerminalZoom } from "@/lib/terminal/terminalChrome";
+import {
+  attachTerminalClipboard,
+  useTerminalThemeSync,
+  useTerminalZoom,
+} from "@/lib/terminal/terminalChrome";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 import { useScriptsStore } from "@/features/session/scriptsStore";
@@ -145,6 +149,9 @@ export function AgentPtyTab({
       cursorBlink: engine.id !== "codex",
     });
     eng.mount(host);
+    // Ctrl+Shift+C / Ctrl+Shift+V off macOS — the emulator has no copy
+    // path of its own there (see attachTerminalClipboard).
+    attachTerminalClipboard(eng);
     engineRef.current = eng;
     appliedFontSizeRef.current = fontSize;
     let lastGrid = eng.fit();
