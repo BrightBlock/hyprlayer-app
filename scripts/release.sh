@@ -7,9 +7,12 @@
 # (There is no CI release — GitHub Actions was removed; releases are local-only.)
 #
 # Before bumping versions this script gates on changelog.json: the entry for
-# the new version must exist with a non-empty summary (it's what the in-app
-# Update card renders and what release-local.sh copies to brightblock.ai). A stub is
-# scaffolded if missing — fill it in and re-run.
+# the new version must exist with a non-empty summary and at least one note.
+# That one entry feeds three surfaces — the in-app Update card, the changelog
+# release-local.sh copies to brightblock.ai, and the "What's new" section that
+# heads the GitHub Release body (rendered by scripts/release-notes.mjs) — so
+# it's the only place a release gets described. A stub is scaffolded if
+# missing — fill it in and re-run.
 #
 # Usage:
 #   ./scripts/release.sh patch     0.1.0 → 0.1.1
@@ -94,7 +97,9 @@ if [[ "$CL_STATUS" != "OK" ]]; then
   echo ""
   echo "✗ changelog.json needs the $NEW entry filled in."
   echo "  A stub for $NEW is now at the top of changelog.json — write its short"
-  echo "  \"summary\" (≤15 words) and at least one \"notes\" bullet, then re-run:"
+  echo "  \"summary\" (≤15 words) and at least one \"notes\" bullet. Both are"
+  echo "  user-facing — they head the GitHub Release page and the in-app card."
+  echo "  Then re-run:"
   echo "      ./scripts/release.sh $BUMP"
   exit 1
 fi

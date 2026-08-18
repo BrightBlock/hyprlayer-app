@@ -14,7 +14,8 @@
 #      them back. No ed25519 signature: distro packages are owned by the package
 #      manager, so the app never self-installs on Linux (see step 5).
 #   4. create the GitHub Release on the PUBLIC releases repo (binaries only —
-#      never the source) and upload every platform's assets
+#      never the source), with changelog.json's "what's new" above the install
+#      instructions, and upload every platform's assets
 #   5. write the signed updater manifest (latest.json — darwin-aarch64 +
 #      windows-x86_64) + changelog to brightblock.ai, so running apps update.
 #      Linux is deliberately absent: those installs read the changelog and point
@@ -508,59 +509,9 @@ git push origin "$TAG"
 
 # ─── 3. GitHub Release (binaries only, on the PUBLIC releases repo) ──
 say "Creating GitHub Release on ${RELEASES_REPO}…"
-# Release notes go to a temp file rather than a "$(cat <<EOF …)" capture: the
-# macOS system bash (/bin/bash 3.2, what `env bash` resolves to here) can't
-# parse a heredoc nested inside a double-quoted command substitution, so that
-# form fails with "unexpected EOF". A plain heredoc + --notes-file is portable.
-NOTES_FILE="$(mktemp)"; TMPDIRS+=("$NOTES_FILE")
-cat > "$NOTES_FILE" <<EOF
-## Install
-
-### macOS (Apple Silicon)
-
-Download \`$DMG_NAME\` below and drag it to /Applications. Apple Silicon only.
-Signed with a Developer ID and notarized by Apple, so it launches with no
-Gatekeeper warning.
-EOF
-if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
-cat >> "$NOTES_FILE" <<EOF
-
-### Windows (x64)
-
-Download and run \`$SETUP_NAME\`. It isn't code-signed yet, so SmartScreen shows
-an "unknown publisher" prompt — choose **More info → Run anyway**.
-EOF
-fi
-if [[ "$INCLUDE_LINUX" == "1" ]]; then
-cat >> "$NOTES_FILE" <<EOF
-
-### Linux (x64)
-
-**Arch** — install \`$AUR_PKGNAME\` from the AUR:
-
-\`\`\`sh
-paru -S $AUR_PKGNAME    # or: yay -S $AUR_PKGNAME
-\`\`\`
-
-**Debian / Ubuntu** — \`sudo apt install ./$DEB_NAME\`
-
-**Fedora / RHEL / openSUSE** — \`sudo dnf install ./$RPM_NAME\`
-
-All three pull in WebKitGTK 4.1 and GTK 3 as dependencies. The .deb and .rpm are
-built on Arch, so they want a reasonably current glibc — Ubuntu 24.04, Debian 13
-or Fedora 40 and newer.
-EOF
-fi
-cat >> "$NOTES_FILE" <<EOF
-
-## Updates
-
-On macOS and Windows the app self-updates from the in-app update toast. Linux
-packages belong to your package manager, so the app tells you when a new version
-is out and you install it the usual way (\`paru -Syu\`, \`apt\`, \`dnf\`).
-EOF
-
-# darwin assets always; windows/linux assets when built.
+# darwin assets always; windows/linux assets when built. Built before the notes
+# because the notes are rendered FROM this list — so the install block can only
+# describe files that are actually being uploaded.
 ASSETS=("$DMG" "$TARBALL" "$TARBALL.sig")
 if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   ASSETS+=("$WIN_OUT/$SETUP_NAME" "$WIN_OUT/$SETUP_NAME.sig")
@@ -568,6 +519,23 @@ fi
 if [[ "$INCLUDE_LINUX" == "1" ]]; then
   ASSETS+=("$LINUX_OUT/$DEB_NAME" "$LINUX_OUT/$RPM_NAME")
 fi
+
+# The body is "What's new" (from the same changelog.json entry the in-app Update
+# card and the brightblock.ai changelog render, so the Release page can't drift
+# from what the app tells people shipped) plus a compact install block that
+# links to brightblock.ai for the rest. Step 0 already checked the changelog's
+# top entry is $VERSION, and release.sh gates on it having a summary + notes, so
+# a failure here means the changelog is wrong, not merely absent.
+#
+# Notes go to a temp file rather than a "$(cat <<EOF …)" capture: the macOS
+# system bash (/bin/bash 3.2, what `env bash` resolves to here) can't parse a
+# heredoc nested inside a double-quoted command substitution. --notes-file is
+# portable, and a file also keeps the renderer's exit status meaningful.
+NOTES_FILE="$(mktemp)"; TMPDIRS+=("$NOTES_FILE")
+HYPRLAYER_AUR_PKGNAME="$AUR_PKGNAME" \
+  node scripts/release-notes.mjs "$VERSION" "${ASSETS[@]}" > "$NOTES_FILE" \
+  || die "could not render release notes for $VERSION from changelog.json"
+
 if gh release view "$TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
   say "release $TAG already exists — re-uploading assets (--clobber)"
   gh release upload "$TAG" --repo "$RELEASES_REPO" --clobber "${ASSETS[@]}"
