@@ -23,11 +23,11 @@ type Dir =
  *
  * Five hit targets, not eight: the left, right and bottom edges plus the two
  * bottom corners. The top edge and top corners are omitted because they would
- * sit over the header's `data-tauri-drag-region`, and at the top right over
+ * sit over the header's drag region, and at the top right over
  * `WindowControls`, where a grip would eat the Close button's corner. `top-10`
  * matches the header's `h-10` so nothing overlaps it, and corners stack above
- * edges via `z-[1]`. None carry `data-tauri-drag-region`, so a direct hit
- * resizes rather than moves.
+ * edges via `z-[1]`. None are drag regions (see `lib/dragRegion`), so a direct
+ * hit resizes rather than moves.
  *
  * Accepted cost: a Wayland tiling WM reports no tiled state, so on Hyprland the
  * grips render permanently and inert, and the outer pixels of the nav rail and

@@ -11,6 +11,7 @@ import { removeSessionsForWorkstream } from "./features/session/sessionStore";
 import { unwrap } from "./lib/ipc";
 import { onWorkstreamArchived } from "./lib/queries";
 import { queryClient } from "./lib/queryClient";
+import { setupDragRegion } from "./lib/dragRegion";
 import { setupMotionGate } from "./lib/motion";
 import { setupQueryFocus } from "./lib/queryFocus";
 import { router } from "./router";
@@ -43,6 +44,9 @@ setupQueryFocus();
 // Stop the looping animations while the app is in the background, a WebKitGTK
 // window keeps painting off-screen, and painting one is not cheap.
 setupMotionGate();
+// Linux only: replace Tauri's drag-on-mousedown title bar with one that waits
+// for the pointer to travel first, so a click on the header stays a click.
+setupDragRegion();
 
 // Suppress the webview's native right-click menu app-wide so the app doesn't
 // feel like a web page. Editable surfaces (inputs, textareas, the CodeMirror

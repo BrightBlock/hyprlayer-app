@@ -52,6 +52,7 @@ import {
   PROJECT_SIDEBAR_MIN,
 } from "@/lib/layout";
 import { IS_MACOS } from "@/lib/platform";
+import { dragRegion } from "@/lib/dragRegion";
 import { useIsFullscreen } from "@/lib/useFullscreen";
 import { useViewport } from "@/lib/useViewport";
 import { useUiStore } from "@/lib/uiStore";
@@ -1312,7 +1313,7 @@ export function Root() {
           directly beneath them. */}
       <header
         className="relative flex h-10 shrink-0 items-center border-b border-edge bg-panel"
-        data-tauri-drag-region
+        {...dragRegion()}
       >
         <div
           // gap-2, not gap-1: the same pitch the right cluster sits at, so the
@@ -1331,7 +1332,7 @@ export function Root() {
           {!IS_MACOS && (
             <span
               className="flex h-7 w-7 shrink-0 items-center justify-center"
-              data-tauri-drag-region="deep"
+              {...dragRegion("deep")}
               aria-hidden="true"
             >
               <HyprlayerMark size={HEADER_MARK} />
@@ -1379,11 +1380,11 @@ export function Root() {
             IS_MACOS ? "pr-3" : "pr-1"
           }`}
           style={{ marginLeft: contentOffset }}
-          data-tauri-drag-region
+          {...dragRegion()}
         >
           <div
             className="flex min-w-0 items-center gap-2 text-sm"
-            data-tauri-drag-region
+            {...dragRegion()}
           >
             {currentProject ? (
               <>
