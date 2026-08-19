@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { commands } from "./lib/bindings";
 import { attachEventListeners, registerEventBridge } from "./lib/events";
 import { hydrateRunning, scriptRunBridge } from "./features/session/scriptsStore";
+import { writtenDocsBridge } from "./features/session/writtenDocs";
 import { removeSessionsForWorkstream } from "./features/session/sessionStore";
 import { unwrap } from "./lib/ipc";
 import { onWorkstreamArchived } from "./lib/queries";
@@ -26,6 +27,7 @@ initTheme();
 // Feature-side event/mutation hooks register before the bridge attaches, so
 // lib/{events,queries} stay feature-independent (ADR-0003 import direction).
 registerEventBridge(scriptRunBridge);
+registerEventBridge(writtenDocsBridge);
 onWorkstreamArchived(removeSessionsForWorkstream);
 attachEventListeners();
 // Seed the rail's green "Run alive" indicator from any runs the backend still

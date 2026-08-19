@@ -7,6 +7,8 @@
 import type { DocKind } from "@/lib/domain/docs";
 import { diffStrings, type PatchLine } from "@/features/workstreams/diff";
 
+import type { WrittenDocs } from "./writtenDocs";
+
 // A tool's `input` is re-parsed many times per render; cache by input string
 // (bounded so a long session can't grow it without limit).
 const parsedInputCache = new Map<string, Record<string, unknown> | null>();
@@ -188,20 +190,73 @@ export function prettyToolInput(input: string): string {
   }
 }
 
+/** The doc kind a `.md` path implies from the directory it sits in, else null. */
+export function docKindForPath(path: string): DocKind | null {
+  if (!path.endsWith(".md")) return null;
+  if (path.includes("/research/")) return "research";
+  if (path.includes("/plans/") || path.includes("/plan/")) return "plan";
+  if (path.includes("/handoffs/") || path.includes("/handoff/")) return "handoff";
+  return null;
+}
+
+// Every `.md` path a shell command mentions: bare, single- or double-quoted.
+// Mentions only. Which of them the command *wrote* is deliberately not asked
+// here — see `docFromTool` for why the shell can't answer that.
+const SH_MD_MENTION = /'([^']+\.md)'|"([^"]+\.md)"|([^\s'"<>|;&()]+\.md)/g;
 
 /**
- * If a tool wrote/edited a research/plan/handoff `.md` (under `…/research/…`,
+ * If a tool created a research/plan/handoff `.md` (under `…/research/…`,
  * `…/plans/…`, or `…/handoffs/…`), return its path + kind, to surface
- * agent-created docs in the diff sidebar. Other writes return null.
+ * agent-created docs in the diff sidebar. Anything else returns null.
+ *
+ * `Bash` counts because the doc often doesn't arrive through `Write`: the
+ * plan/research skills delegate the draft to a subagent (`draughtsman`,
+ * `cartographer`) and then persist the returned body with a heredoc, `cp`, or a
+ * script that opens the path itself.
+ *
+ * A shell command is read as a list of *mentions*, not parsed for write
+ * position, because the text cannot settle either question that matters. Which
+ * path got written needs a shell grammar that a regex loses to (a `2>/dev/null`
+ * anywhere makes every other mention look like a target; a heredoc body isn't
+ * shell at all; `cp a.md b.md dir/` writes neither operand it names). And what
+ * the path resolves to is not in the text at all — `"$OUT"`, `~/…`, and the
+ * relative `thoughts/shared/plans/…` the skills are told to use all name a file
+ * no consumer can open.
+ *
+ * `written` settles both: it holds the docs the thoughts index actually saw
+ * written, so a mention absent from it is a read (the archivist `grep`s old
+ * plans constantly, and must not fill the Documents list with them), and a
+ * mention present in it resolves to the canonical absolute path. `Write`/`Edit`
+ * need no such proof — `file_path` is unambiguously the file written, and it may
+ * legitimately sit outside a thoughts root, where the index never sees it.
+ *
+ * `written` is required rather than defaulted: a caller that forgot it would
+ * silently stop detecting every shell-written doc, which is the bug this
+ * function exists to fix.
  */
-export function docFromTool(name: string, input: string): { path: string; kind: DocKind } | null {
-  if (name !== "Write" && name !== "Edit" && name !== "MultiEdit") return null;
+export function docFromTool(
+  name: string,
+  input: string,
+  written: WrittenDocs,
+): { path: string; kind: DocKind } | null {
   const obj = parseToolInput(input);
-  const path = str(obj?.file_path);
-  if (!path.endsWith(".md")) return null;
-  if (path.includes("/research/")) return { path, kind: "research" };
-  if (path.includes("/plans/") || path.includes("/plan/")) return { path, kind: "plan" };
-  if (path.includes("/handoffs/") || path.includes("/handoff/")) return { path, kind: "handoff" };
+  if (!obj) return null;
+  if (name === "Write" || name === "Edit" || name === "MultiEdit") {
+    const path = str(obj.file_path);
+    const kind = docKindForPath(path);
+    return kind ? { path, kind } : null;
+  }
+  if (name !== "Bash") return null;
+  for (const match of str(obj.command).matchAll(SH_MD_MENTION)) {
+    const mention = match[1] ?? match[2] ?? match[3];
+    if (!mention || docKindForPath(mention) === null) continue;
+    const path = written[baseName(mention)];
+    if (!path) continue; // mentioned but never written: a read
+    // Classify from the resolved path, not the mention: on the (unlikely)
+    // filename collision the indexed doc is the one being described.
+    const kind = docKindForPath(path);
+    if (kind) return { path, kind };
+  }
   return null;
 }
 
@@ -230,5 +285,3 @@ export function formatCost(usd: number | null | undefined): string | null {
   // Sub-cent costs still read as $0.0042; round to 4dp and trim nothing.
   return `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
 }
-
-

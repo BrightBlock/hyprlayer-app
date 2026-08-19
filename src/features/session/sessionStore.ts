@@ -40,6 +40,7 @@ import { useToast } from "@/lib/toast";
 import { currentAppLocation } from "@/lib/appNav";
 import type { DocKind } from "@/lib/domain/docs";
 import { docFromTool, docTitle } from "./toolDisplay";
+import { useWrittenDocs } from "./writtenDocs";
 import {
   backgroundTasksFromItems,
   type BackgroundTask,
@@ -1262,10 +1263,13 @@ export type CreatedDoc = { path: string; kind: DocKind; title: string };
 
 /**
  * Research/plan docs the agent created across all of a workstream's sessions,
- * newest last, deduped by path, derived from `Write`/`Edit` tool calls. Used to
- * surface docs for in-app review without leaving the project.
+ * newest last, deduped by path, derived from the `Write`/`Edit`/`Bash` tool
+ * calls that wrote them (see `docFromTool`), with shell writes confirmed and
+ * resolved against the thoughts index (see `writtenDocs`). Used to surface docs
+ * for in-app review without leaving the project.
  */
 export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
+  const written = useWrittenDocs();
   // Select a flat list of "kind\tpath" keys with shallow equality so streaming
   // events don't re-render this unless the set of docs actually changes.
   const keys = useSessionStore(
@@ -1277,7 +1281,7 @@ export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
         if (entry.workstreamId !== workstreamId) continue;
         for (const item of entry.items) {
           if (item.kind !== "tool") continue;
-          const doc = docFromTool(item.name, item.input);
+          const doc = docFromTool(item.name, item.input, written);
           if (doc && !seen.has(doc.path)) {
             seen.add(doc.path);
             out.push(`${doc.kind}\t${doc.path}`);
@@ -1312,6 +1316,7 @@ export function useMostRecentDoc(
   workstreamId: string | null,
   kind: DocKind | null,
 ): CreatedDoc | null {
+  const written = useWrittenDocs();
   const key = useSessionStore(
     useShallow((s) => {
       if (!workstreamId || !kind) return null;
@@ -1321,7 +1326,7 @@ export function useMostRecentDoc(
       const docs = Object.values(s.sessions)
         .filter((entry) => entry.workstreamId === workstreamId)
         .flatMap((entry) => entry.items)
-        .flatMap((item) => (item.kind === "tool" ? [docFromTool(item.name, item.input)] : []))
+        .flatMap((item) => (item.kind === "tool" ? [docFromTool(item.name, item.input, written)] : []))
         .filter((doc) => doc?.kind === kind);
       return docs[docs.length - 1]?.path ?? null;
     }),

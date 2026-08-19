@@ -94,6 +94,7 @@ import {
 } from "@/lib/domain/harnessing";
 import { PERMISSION_MODES, permissionModeOption } from "@/lib/domain/permissions";
 import { docFromTool, formatTokens } from "./toolDisplay";
+import { useWrittenDocs } from "./writtenDocs";
 import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
 import {
   allowForSession,
@@ -1661,16 +1662,17 @@ export function SessionChat({
     () => new Set(shell.dismissedSuggestions ?? []),
     [shell.dismissedSuggestions],
   );
+  const writtenDocs = useWrittenDocs();
   const detectedHandoffPath = useMemo(() => {
     if (!sessionItems) return null;
     for (let i = sessionItems.length - 1; i >= 0; i--) {
       const item = sessionItems[i];
       if (item.kind !== "tool") continue;
-      const doc = docFromTool(item.name, item.input);
+      const doc = docFromTool(item.name, item.input, writtenDocs);
       if (doc?.kind === "handoff" && !dismissedSet.has(doc.path)) return doc.path;
     }
     return null;
-  }, [sessionItems, dismissedSet]);
+  }, [sessionItems, dismissedSet, writtenDocs]);
   // The parent callback's identity churns; a ref keeps the effect deps tight to
   // the input that actually matters (the detected path), so we don't re-fire on
   // every parent render.

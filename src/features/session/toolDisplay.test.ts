@@ -182,23 +182,131 @@ describe("resultPreview", () => {
 describe("docFromTool", () => {
   it("recognises research, plan, and handoff docs written by the agent", () => {
     expect(
-      docFromTool("Write", '{"file_path":"/Users/jt/thoughts/repos/x/shared/research/2026-06-15-auth.md"}'),
-    ).toEqual({ path: "/Users/jt/thoughts/repos/x/shared/research/2026-06-15-auth.md", kind: "research" });
-    expect(docFromTool("Edit", '{"file_path":"/t/shared/plans/big-refactor.md"}')).toEqual({
+      docFromTool(
+        "Write",
+        '{"file_path":"/Users/jt/thoughts/repos/x/shared/research/2026-06-15-auth.md"}',
+        {},
+      ),
+    ).toEqual({
+      path: "/Users/jt/thoughts/repos/x/shared/research/2026-06-15-auth.md",
+      kind: "research",
+    });
+    expect(docFromTool("Edit", '{"file_path":"/t/shared/plans/big-refactor.md"}', {})).toEqual({
       path: "/t/shared/plans/big-refactor.md",
       kind: "plan",
     });
-    expect(docFromTool("Write", '{"file_path":"/t/shared/handoffs/2026-06-19-context.md"}')).toEqual({
+    expect(
+      docFromTool("Write", '{"file_path":"/t/shared/handoffs/2026-06-19-context.md"}', {}),
+    ).toEqual({
       path: "/t/shared/handoffs/2026-06-19-context.md",
       kind: "handoff",
     });
   });
 
   it("ignores non-doc writes and non-write tools", () => {
-    expect(docFromTool("Write", '{"file_path":"/repo/src/main.rs"}')).toBeNull();
-    expect(docFromTool("Write", '{"file_path":"/t/shared/research/notes.txt"}')).toBeNull();
-    expect(docFromTool("Read", '{"file_path":"/t/shared/research/x.md"}')).toBeNull();
-    expect(docFromTool("Bash", '{"command":"ls"}')).toBeNull();
+    expect(docFromTool("Write", '{"file_path":"/repo/src/main.rs"}', {})).toBeNull();
+    expect(docFromTool("Write", '{"file_path":"/t/shared/research/notes.txt"}', {})).toBeNull();
+    expect(docFromTool("Read", '{"file_path":"/t/shared/research/x.md"}', {})).toBeNull();
+    expect(docFromTool("Bash", '{"command":"ls"}', {})).toBeNull();
+  });
+
+  // The plan/research skills delegate the draft to a subagent and then persist
+  // the returned body through the shell, so `Write` never sees the doc. The
+  // shell can't say which mention was written, so the thoughts index does: only
+  // a doc the index saw written (keyed by filename) counts.
+  describe("shell writes", () => {
+    const PLAN = "/t/shared/plans/2026-08-16-skill-bar.md";
+    const RESEARCH = "/t/shared/research/2026-08-16-auth.md";
+    const HANDOFF = "/t/shared/handoffs/ctx.md";
+    const written = {
+      "2026-08-16-skill-bar.md": PLAN,
+      "2026-08-16-auth.md": RESEARCH,
+      "ctx.md": HANDOFF,
+    };
+    const bash = (command: string) => docFromTool("Bash", JSON.stringify({ command }), written);
+
+    it("recognises a doc the index confirms the command wrote", () => {
+      expect(bash(`cat > ${PLAN} <<'EOF'\n# Plan\nEOF`)).toEqual({
+        path: PLAN,
+        kind: "plan",
+      });
+      expect(bash(`cp "$P" ${RESEARCH}`)).toEqual({
+        path: RESEARCH,
+        kind: "research",
+      });
+      expect(bash(`printf '%s' "$BODY" | tee -a '${HANDOFF}'`)).toEqual({
+        path: HANDOFF,
+        kind: "handoff",
+      });
+    });
+
+    // The observed shape: the destination is a shell variable a heredoc script
+    // opens itself, so the path never sits next to a redirect.
+    it("recognises a doc path assigned to a variable a script writes through", () => {
+      expect(
+        bash(
+          `OUT=${PLAN}\npython3 - "$P" "$OUT" <<'PY'\nimport sys\nopen(sys.argv[2],'w').write(open(sys.argv[1]).read())\nPY`,
+        ),
+      ).toEqual({ path: PLAN, kind: "plan" });
+    });
+
+    // The whole point of the index proof: the archivist greps old plans
+    // constantly, and a read must not fill the Documents list with them.
+    it("ignores a doc the command only reads, however it redirects", () => {
+      // Nothing this session wrote, so nothing it names can be a doc it created.
+      const read = (command: string) => docFromTool("Bash", JSON.stringify({ command }), {});
+      expect(read("grep -n '^status:' /t/shared/plans/old-plan.md")).toBeNull();
+      expect(read("cat /t/shared/research/a.md /t/shared/research/b.md | head -40")).toBeNull();
+      // An incidental stderr redirect used to unlock the assigned-path guess and
+      // report the grepped plan as authored.
+      expect(read('P=/t/shared/plans/old-plan.md; grep -c . "$P" 2>/dev/null')).toBeNull();
+      expect(read("git show HEAD:thoughts/shared/plans/old-plan.md > /tmp/old.txt")).toBeNull();
+      // A failed or permission-denied write reaches the index too, so it leaves
+      // no entry and the attempt doesn't register.
+      expect(read(`cat > /t/shared/plans/never-landed.md <<'MD'\nx\nMD`)).toBeNull();
+    });
+
+    it("resolves an unexpanded or relative mention to the indexed absolute path", () => {
+      expect(bash(`cat > "$THOUGHTS/shared/plans/2026-08-16-skill-bar.md" <<'MD'\nx\nMD`)).toEqual({
+        path: PLAN,
+        kind: "plan",
+      });
+      expect(bash("cat > thoughts/shared/plans/2026-08-16-skill-bar.md")).toEqual({
+        path: PLAN,
+        kind: "plan",
+      });
+      expect(bash("cat >> ~/thoughts/shared/handoffs/ctx.md")).toEqual({
+        path: HANDOFF,
+        kind: "handoff",
+      });
+    });
+
+    it("ignores a path no doc was ever written to", () => {
+      // A heredoc body is not shell: the `=>` used to supply the redirect and
+      // conjure a doc out of prose.
+      expect(
+        bash(`cat > /tmp/notes.txt <<'MD'\nplan => /t/shared/plans/phantom.md\nMD`),
+      ).toBeNull();
+      // A source operand `cp` never wrote (the arm used to miscount operands and
+      // capture it), for a doc that doesn't exist.
+      expect(bash("cp /t/shared/plans/absent.md /tmp/dir/")).toBeNull();
+    });
+
+    it("needs the proof map: a bare mention alone is never a doc", () => {
+      expect(docFromTool("Bash", JSON.stringify({ command: `cat > ${PLAN}` }), {})).toBeNull();
+    });
+
+    // The accepted gap. Once a doc is in the index, any mention of it resolves,
+    // so `cp <plan> /tmp/` reports the plan again. Harmless where it matters:
+    // the writing session already listed it and both selectors dedup by path.
+    // It shows a stale doc only if a *different* workstream later names that
+    // exact filename, which needs the write to have happened first.
+    it("re-reports an already-written doc that a later command merely names", () => {
+      expect(bash(`cp ${PLAN} /tmp/dir/`)).toEqual({
+        path: PLAN,
+        kind: "plan",
+      });
+    });
   });
 });
 
