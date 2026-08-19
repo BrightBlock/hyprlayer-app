@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+import { cleanup, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionEvent } from "@/lib/bindings";
 
@@ -78,6 +80,7 @@ const {
   workstreamShipBusy,
   dropSession,
   useSessionStore,
+  useWorkstreamArtifacts,
 } = await import("./sessionStore");
 const { isBusy, isWorking } = await import("./transcript");
 
@@ -119,6 +122,8 @@ beforeEach(() => {
   h.restartSession.mockClear();
   h.state.lastChannel = null;
 });
+
+afterEach(cleanup);
 
 describe("dropSession (transcript eviction)", () => {
   it("releases the entry and a late channel event can't resurrect it", async () => {
@@ -754,5 +759,46 @@ describe("workstreamShipBusy", () => {
     await startSession({ workstreamId: "ws2", stage: "ship", input: "" });
     expect(shipBusy("ws1")).toBe(false);
     expect(shipBusy("ws2")).toBe(true);
+  });
+});
+
+describe("useWorkstreamArtifacts", () => {
+  function publish(toolUseId: string, filePath: string, url: string) {
+    emit({ kind: "toolUse", id: toolUseId, name: "Artifact", input: JSON.stringify({ file_path: filePath }), parentId: null });
+    emit({
+      kind: "toolResult",
+      toolUseId,
+      content: `Published ${filePath} at ${url}`,
+      isError: false,
+      parentId: null,
+    });
+  }
+
+  it("shows an artifact published in a session bound to the workstream", async () => {
+    await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
+    publish("tu1", "/tmp/a.html", "https://claude.ai/code/artifact/abc");
+
+    const { result } = renderHook(() => useWorkstreamArtifacts("ws1"));
+    expect(result.current.map((a) => a.url)).toEqual(["https://claude.ai/code/artifact/abc"]);
+  });
+
+  it("ignores an artifact from a session bound to a different workstream", async () => {
+    await startSession({ workstreamId: "ws2", stage: "general", input: "go" });
+    publish("tu1", "/tmp/a.html", "https://claude.ai/code/artifact/abc");
+
+    const { result } = renderHook(() => useWorkstreamArtifacts("ws1"));
+    expect(result.current).toEqual([]);
+  });
+
+  it("collapses the same URL published from two sessions of the same workstream into one entry", async () => {
+    await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
+    publish("tu1", "/tmp/a.html", "https://claude.ai/code/artifact/abc");
+
+    await startSession({ workstreamId: "ws1", stage: "general", input: "go again" });
+    publish("tu2", "/tmp/a-renamed.html", "https://claude.ai/code/artifact/abc");
+
+    const { result } = renderHook(() => useWorkstreamArtifacts("ws1"));
+    expect(result.current).toHaveLength(1);
+    expect(result.current[0].filePath).toBe("/tmp/a-renamed.html");
   });
 });

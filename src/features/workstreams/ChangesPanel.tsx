@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type { GitFileEntry } from "@/lib/bindings";
 import {
@@ -11,7 +12,7 @@ import {
   IconButton,
   Spinner,
 } from "@/components/ui";
-import { ChevronDownIcon, ChevronRightIcon, DocIcon, FolderIcon } from "@/components/icons";
+import { ChevronDownIcon, ChevronRightIcon, DocIcon, FolderIcon, GlobeIcon } from "@/components/icons";
 import { FileTypeIcon } from "@/components/fileIcon";
 import { basename } from "@/lib/path";
 import { queryClient } from "@/lib/queryClient";
@@ -22,7 +23,7 @@ import {
   useWorktreeDir,
   useWorktreeGitStatus,
 } from "@/lib/queries";
-import { useWorkstreamDocs } from "@/features/session/sessionStore";
+import { useWorkstreamArtifacts, useWorkstreamDocs } from "@/features/session/sessionStore";
 import type { DocKind } from "@/lib/domain/docs";
 
 function RefreshIcon() {
@@ -354,6 +355,40 @@ function DocsSection({
   );
 }
 
+// ── Artifacts section (published claude.ai pages) ─────────────────────────────
+
+/**
+ * Artifacts the workstream's agent published to claude.ai. Clicking opens the
+ * hosted page in the browser: the published page IS the artifact, and its local
+ * source usually lives in a session scratchpad that gets cleaned up.
+ */
+function ArtifactsSection({ workstreamId }: { workstreamId: string }) {
+  const artifacts = useWorkstreamArtifacts(workstreamId);
+  if (artifacts.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-edge bg-panel-2 p-2">
+      <h3 className="px-1 pb-1.5 text-xs font-semibold text-ink-dim">Artifacts</h3>
+      <div className="space-y-0.5">
+        {artifacts.map((a) => (
+          <button
+            key={a.url}
+            type="button"
+            onClick={() => void openUrl(a.url)}
+            title={a.description ? `${a.description}\n${a.url}` : a.url}
+            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
+          >
+            <GlobeIcon size={13} />
+            <span className="min-w-0 flex-1 truncate text-xs text-ink">{a.title}</span>
+            <span className="shrink-0 rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+              artifact
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Files tree tab (lazy, whole worktree) ────────────────────────────────────
 
 function FilesTree({ id, onOpenFile }: { id: string; onOpenFile: (path: string) => void }) {
@@ -546,6 +581,7 @@ export function ChangesPanel({
           <FilesTree id={id} onOpenFile={onOpenFile} />
         ) : (
           <div className="space-y-3">
+            <ArtifactsSection workstreamId={id} />
             <DocsSection workstreamId={id} onOpenDoc={onOpenDoc} />
             {status.isLoading ? (
               <div className="flex justify-center p-6">

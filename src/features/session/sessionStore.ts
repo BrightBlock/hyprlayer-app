@@ -40,6 +40,7 @@ import { useToast } from "@/lib/toast";
 import { currentAppLocation } from "@/lib/appNav";
 import type { DocKind } from "@/lib/domain/docs";
 import { docFromTool, docTitle } from "./toolDisplay";
+import { artifactsFromItems, type SessionArtifact } from "./artifacts";
 import { useWrittenDocs } from "./writtenDocs";
 import {
   backgroundTasksFromItems,
@@ -1334,6 +1335,39 @@ export function useMostRecentDoc(
   return useMemo(
     () => (key ? { kind: kind as DocKind, path: key, title: docTitle(key) } : null),
     [key, kind],
+  );
+}
+
+/**
+ * Artifacts the agent published across all of a workstream's sessions, in
+ * first-published order, deduped by URL. Same `useShallow` string-key pattern as
+ * `useWorkstreamDocs`, so a streaming turn doesn't churn the sidebar.
+ *
+ * Scoped to sessions currently in the store, like `useWorkstreamDocs`: a
+ * workstream's other tabs contribute once they've been mounted and replayed.
+ */
+export function useWorkstreamArtifacts(workstreamId: string | null): SessionArtifact[] {
+  // Key: "url\0title\0description\0filePath"  (\0 is safe, none carry NUL bytes).
+  const keys = useSessionStore(
+    useShallow((s) => {
+      if (!workstreamId) return [] as string[];
+      const byUrl = new Map<string, string>();
+      for (const entry of Object.values(s.sessions)) {
+        if (entry.workstreamId !== workstreamId) continue;
+        for (const a of artifactsFromItems(entry.items)) {
+          byUrl.set(a.url, [a.url, a.title, a.description ?? "", a.filePath].join("\0"));
+        }
+      }
+      return [...byUrl.values()];
+    }),
+  );
+  return useMemo(
+    () =>
+      keys.map((k) => {
+        const [url, title, description, filePath] = k.split("\0");
+        return { url, title, description: description || null, filePath } satisfies SessionArtifact;
+      }),
+    [keys],
   );
 }
 

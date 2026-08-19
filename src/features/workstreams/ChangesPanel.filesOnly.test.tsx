@@ -14,7 +14,10 @@ const q = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/queryClient", () => ({ queryClient: { invalidateQueries: vi.fn() } }));
-vi.mock("@/features/session/sessionStore", () => ({ useWorkstreamDocs: () => [] }));
+vi.mock("@/features/session/sessionStore", () => ({
+  useWorkstreamDocs: () => [],
+  useWorkstreamArtifacts: () => [],
+}));
 
 afterEach(cleanup);
 
