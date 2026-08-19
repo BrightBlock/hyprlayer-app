@@ -5,8 +5,9 @@
 # end to end:
 #   1. build, Developer ID–sign + notarize, and ed25519-sign the arm64 .dmg and
 #      updater .app.tar.gz (locally)
-#   2. build the Windows x64 NSIS installer on a Windows builder — either nexus-win
-#      over SSH (default) or a GitHub Actions windows-latest runner as a fallback
+#   2. build the Windows x64 NSIS installer on a Windows builder — either the
+#      nexus-win guest over SSH (default) or a GitHub Actions windows-latest
+#      runner as a fallback
 #      (HYPRLAYER_WIN_BUILDER=actions, see .github/workflows/windows-build.yml) —
 #      copy it back, and ed25519-sign it HERE — so the signing key never leaves
 #      this Mac and neither builder needs any secrets
@@ -65,7 +66,8 @@
 #     Override the identity / key location via APPLE_SIGNING_IDENTITY and
 #     APPLE_API_KEY_PATH (defaults are wired in the config block below).
 #   * (unless --mac-only/--no-windows) SSH access to the Windows builder. Override
-#     the host with HYPRLAYER_WIN_SSH_HOST (default: nexus-win). Or set
+#     the host with HYPRLAYER_WIN_SSH_HOST (default: nexus-win, a guest on
+#     nexus). Or set
 #     HYPRLAYER_WIN_BUILDER=actions to build on GitHub Actions instead (needs
 #     no SSH — just `gh` auth with push access, already required above).
 #   * (unless --mac-only/--no-linux) SSH access to the Linux builder. Override the
@@ -92,7 +94,8 @@ APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: JON 
 APPLE_API_KEY="${APPLE_API_KEY:-JUMDZ7DQF5}"
 APPLE_API_ISSUER="${APPLE_API_ISSUER:-4724564e-817f-4077-8b88-b4411b7978e9}"
 APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH:-$HOME/.tauri/AuthKey_JUMDZ7DQF5.p8}"
-# Windows builder backend: "ssh" (nexus-win, default) or "actions" (GitHub
+# Windows builder backend: "ssh" (nexus-win, a Windows guest on nexus; default)
+# or "actions" (GitHub
 # Actions windows-latest fallback — see .github/workflows/windows-build.yml).
 # Both are headless compile boxes only; signing/publishing always stay local.
 WIN_BUILDER="${HYPRLAYER_WIN_BUILDER:-ssh}"
@@ -100,6 +103,13 @@ WIN_SSH_HOST="${HYPRLAYER_WIN_SSH_HOST:-nexus-win}"
 WIN_HELPER="scripts/release-win-remote.ps1"
 WIN_ACTIONS_REPO="${HYPRLAYER_WIN_ACTIONS_REPO:-BrightBlock/hyprlayer-app}"
 WIN_ACTIONS_WORKFLOW="windows-build.yml"
+# The Windows builder is a container on this host; the release owns its
+# lifecycle so a 10 GB guest is not resident between releases. The compose
+# path's `~` is expanded by the remote shell, not here.
+WIN_VM_HOST="${HYPRLAYER_WIN_VM_HOST:-nexus}"
+WIN_VM_COMPOSE="${HYPRLAYER_WIN_VM_COMPOSE:-~/.config/hyprlayer-winbuilder/docker-compose.yml}"
+WIN_VM_MANAGE="${HYPRLAYER_WIN_VM_MANAGE:-1}"   # 0 = assume already running
+WIN_VM_STARTED=0                                # set only if this run started it
 # Linux builder: SSH only (nexus). Same contract as the Windows SSH path —
 # headless compile box, no secrets; signing/publishing stay local.
 LINUX_SSH_HOST="${HYPRLAYER_LINUX_SSH_HOST:-nexus}"
@@ -153,7 +163,13 @@ die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 # Temp clones/logs are removed on any exit.
 TMPDIRS=()
-cleanup() { for d in "${TMPDIRS[@]:-}"; do [[ -n "${d:-}" ]] && rm -rf "$d"; done; }
+cleanup() {
+  for d in "${TMPDIRS[@]:-}"; do [[ -n "${d:-}" ]] && rm -rf "$d"; done
+  if [[ "${WIN_VM_STARTED:-0}" == "1" ]]; then
+    ssh "$WIN_VM_HOST" "bash -lc 'docker compose -f $WIN_VM_COMPOSE down'" \
+      || printf 'warning: could not stop the Windows guest on %s\n' "$WIN_VM_HOST" >&2
+  fi
+}
 trap cleanup EXIT
 
 # ─── preflight ──────────────────────────────────────────────────────
@@ -235,9 +251,26 @@ if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" != "1" ]]; then
   case "$WIN_BUILDER" in
     ssh)
       [[ -f "$WIN_HELPER" ]] || die "missing $WIN_HELPER"
+      if [[ "$WIN_VM_MANAGE" == "1" ]]; then
+        # Only claim ownership if it was not already up — an operator may be RDP'd in.
+        if ! ssh "$WIN_VM_HOST" "docker inspect -f '{{.State.Running}}' omarchy-windows 2>/dev/null | grep -q true"; then
+          say "Starting the Windows builder VM on $WIN_VM_HOST…"
+          # `bash -lc` per the precedent below: `docker compose` is a CLI plugin
+          # from ~/.docker/cli-plugins, absent from a bare SSH command's PATH.
+          ssh "$WIN_VM_HOST" "bash -lc 'docker compose -f $WIN_VM_COMPOSE up -d'" \
+            || die "could not start the Windows guest on $WIN_VM_HOST"
+          WIN_VM_STARTED=1
+        fi
+        # Cold boot is ~30-60s. 30 tries x (5s connect + 5s sleep) caps at ~5 min.
+        for i in $(seq 1 30); do
+          ssh -o BatchMode=yes -o ConnectTimeout=5 "$WIN_SSH_HOST" "echo ok" >/dev/null 2>&1 && break
+          [[ $((i % 6)) -eq 0 ]] && say "  …still waiting for the guest ($((i * 10))s)"
+          sleep 5
+        done
+      fi
       say "Checking Windows builder ($WIN_SSH_HOST) is reachable…"
       ssh -o BatchMode=yes -o ConnectTimeout=10 "$WIN_SSH_HOST" "echo ok" >/dev/null 2>&1 \
-        || die "Windows builder '$WIN_SSH_HOST' unreachable over SSH — wake it / check Tailscale, set HYPRLAYER_WIN_SSH_HOST, run with HYPRLAYER_WIN_BUILDER=actions, or run with --mac-only"
+        || die "Windows builder '$WIN_SSH_HOST' unreachable over SSH — check the guest on $WIN_VM_HOST, set HYPRLAYER_WIN_SSH_HOST, run with HYPRLAYER_WIN_BUILDER=actions, or run with --mac-only"
       ;;
     actions)
       say "Checking GitHub Actions Windows builder ($WIN_ACTIONS_REPO) is reachable…"

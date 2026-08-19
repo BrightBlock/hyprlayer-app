@@ -9,7 +9,7 @@ on:
 # Headless compile box only — no secrets here, no signing, no publishing.
 # scripts/release-local.sh drives this: it triggers a run for a release tag,
 # downloads the unsigned installer, and finishes signing + publishing locally
-# (mirrors the nexus-win path in scripts/release-win-remote.ps1 exactly).
+# (mirrors the nexus-win guest's path in scripts/release-win-remote.ps1 exactly).
 jobs:
   build:
     runs-on: windows-latest

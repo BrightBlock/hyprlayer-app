@@ -28,7 +28,7 @@ public:  aur.archlinux.org/hyprlayer-desktop-bin  (PKGBUILD only)
 ./scripts/release-local.sh        # build + sign + publish, all from the Mac
   ├─ mac    (here)      → Hyprlayer_<v>_aarch64.dmg + Hyprlayer.app.tar.gz(.sig)
   │                       Developer ID–signed + notarized during the build
-  ├─ win    (nexus-win) → Hyprlayer_<v>_x64-setup.exe  built unsigned, scp'd
+  ├─ win  (nexus-win VM) → Hyprlayer_<v>_x64-setup.exe  built unsigned, scp'd
   │                                                    back, ed25519-signed here
   ├─ linux  (nexus)     → Hyprlayer_<v>_amd64.deb + Hyprlayer-<v>-1.x86_64.rpm
   │                       + a rendered PKGBUILD/.SRCINFO (no signature — see below)
@@ -204,15 +204,106 @@ nothing on Linux self-installs — see below.
 Both are headless compile boxes reached over SSH. They need no secrets, no Git
 credentials, and no signing key.
 
+`nexus` hosts both legs. The Windows builder used to be its own physical machine;
+it is now a Windows 11 guest running on `nexus` under Docker, so a release drives
+one box twice. To make room, `nexus`'s iGPU carve-out was dropped from 16 GB to
+HP's 512 MB default in the firmware — Ollama still runs models at 100% GPU
+because the iGPU borrows system RAM through GTT on demand, so the large
+dedicated reservation was walling off memory nothing used. That took Linux from
+16 GB to 30 GB.
+
 | Builder | Host (override) | Helper | Produces |
 | --- | --- | --- | --- |
-| Windows | `nexus-win` (`HYPRLAYER_WIN_SSH_HOST`) | `scripts/release-win-remote.ps1` | `*-setup.exe` |
+| Windows | `nexus-win` (`HYPRLAYER_WIN_SSH_HOST`) — a Windows guest **on `nexus`** | `scripts/release-win-remote.ps1` | `*-setup.exe` |
 | Linux | `nexus` (`HYPRLAYER_LINUX_SSH_HOST`) | `scripts/release-linux-remote.sh` | `*.deb`, `*.rpm`, `PKGBUILD` + `.SRCINFO` |
 
 Windows also has a CI fallback: `HYPRLAYER_WIN_BUILDER=actions` runs
 `.github/workflows/windows-build.yml` on a `windows-latest` runner and downloads
 the artifact instead of using SSH. Linux has no such fallback yet — build hosted
 if you need one, or run with `--no-linux`.
+
+**Windows builder prerequisites.** The guest is a `dockurr/windows` container on
+`nexus`, defined by `~/.config/hyprlayer-winbuilder/docker-compose.yml`. That file
+is deliberately *not* `~/.config/windows/docker-compose.yml`, which
+`omarchy-windows-vm` regenerates — an Omarchy update there would restore
+`restart: always` / `RAM_SIZE: 4G` and drop the SSH publish, surfacing later as a
+release that dies in preflight. Both files keep `container_name: omarchy-windows`
+on purpose: they mount the same disk, and the shared name is what stops two QEMU
+processes writing one image.
+
+Key settings: `RAM_SIZE: 10G`, `CPU_CORES: 8`, `DISK_SIZE: 256G`,
+`restart: "no"` (the release script owns the lifecycle), and ports bound to
+loopback only. `GPU: "Y"` is dropped; a headless builder needs no virtio-gpu.
+
+```sh
+# start/stop by hand (release-local.sh does this itself)
+docker compose -f ~/.config/hyprlayer-winbuilder/docker-compose.yml up -d
+docker compose -f ~/.config/hyprlayer-winbuilder/docker-compose.yml down
+# interactive session, replacing `omarchy-windows-vm launch`
+xfreerdp3 /u:jt /p:admin /v:127.0.0.1:3389 /cert:ignore /dynamic-resolution
+```
+
+Inside the guest:
+
+- **OpenSSH Server**: `Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0`,
+  then `Set-Service sshd -StartupType Automatic; Start-Service sshd`.
+- **The public key goes in `C:\ProgramData\ssh\administrators_authorized_keys`**,
+  not `~/.ssh/authorized_keys`, because the build account is an Administrator.
+  Its ACL must grant only `Administrators` and `SYSTEM`
+  (`icacls <file> /inheritance:r /grant Administrators:F /grant SYSTEM:F`).
+  A wrong ACL is a silent auth failure, not an error.
+- **Leave sshd's `DefaultShell` alone — it must stay `cmd.exe`.**
+  `scripts/release-local.sh` invokes the helper via
+  `%USERPROFILE%\release-win-remote.ps1`, and that variable only expands under
+  `cmd`. Switching the default shell to PowerShell is the most commonly applied
+  Windows-OpenSSH tweak and it breaks the build with a literal-path error that
+  looks nothing like its cause.
+- **Rust** via `rustup`, host target `x86_64-pc-windows-msvc`.
+- **VS Build Tools 2022** ("Desktop development with C++") **plus the Windows 11
+  SDK**. The SDK supplies `rc.exe`, which `release-win-remote.ps1` pins into
+  `$env:RC` because an SSH session's PATH does not include the SDK bin dir.
+- **Node + pnpm** via `corepack enable; corepack prepare pnpm@<pinned> --activate`,
+  matching `packageManager` in `package.json`.
+- `tar` ships with Windows 10+ and needs no install.
+
+Two things that bite when rebuilding this guest from scratch:
+
+**The port mapping must be `2222:22`, not `2222:2222`.** The container DNATs
+inbound traffic to the *same* port number inside the VM, so the guest's `sshd`
+has to be on 22.
+
+**Growing `DISK_SIZE` does not grow `C:`.** The image resizes on next boot, but
+Windows leaves the new space unallocated — and a Recovery partition sitting
+after `C:` will cap `Get-PartitionSupportedSize` at the old size, so a plain
+`diskpart extend` silently does nothing. Detach it and remove it first:
+
+```powershell
+reagentc /disable
+Remove-Partition -DiskNumber 0 -PartitionNumber <recovery> -Confirm:$false
+Resize-Partition -DriveLetter C -Size (Get-PartitionSupportedSize -DriveLetter C).SizeMax
+```
+
+On the Mac, `nexus-win` reaches the guest through `nexus` because the container
+binds 2222 to loopback:
+
+```sshconfig
+Host nexus-win
+    HostName 127.0.0.1
+    Port 2222
+    User jt
+    ProxyJump nexus
+    IdentityFile ~/.ssh/nexus-win_ed25519
+    IdentitiesOnly yes
+    HostKeyAlias nexus-win
+```
+
+`IdentitiesOnly` is load-bearing: `Host *` points at the 1Password agent, and a
+vault with more than ~5 keys trips sshd's `MaxAuthTries 6` before the right key
+is offered. `HostKeyAlias` keys `known_hosts` by name rather than
+`[127.0.0.1]:2222`, which any other local forward on that port would collide
+with. If the retired physical `nexus-win`'s keys are still in `known_hosts`, the
+first connection fails as `REMOTE HOST IDENTIFICATION HAS CHANGED` — clear them
+with `ssh-keygen -R nexus-win`.
 
 **Linux builder prerequisites** (Arch package names; the helper resolves
 toolchains through a login shell, so mise/nvm/volta shims are fine):

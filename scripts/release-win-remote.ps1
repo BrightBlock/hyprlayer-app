@@ -1,6 +1,7 @@
 #requires -Version 5
 <#
-  Build the Windows x64 NSIS installer on this machine (the "nexus-win" builder),
+  Build the Windows x64 NSIS installer on this machine (the "nexus-win" builder,
+  a Windows guest hosted on nexus),
   driven over SSH by scripts/release-local.sh on the Mac.
 
   The Mac exports the exact release-tag source with 'git archive' and ships it
