@@ -308,6 +308,37 @@ describe("docFromTool", () => {
       });
     });
   });
+
+  // A worktree's `thoughts/shared` symlinks into the store, so `Write` and the
+  // index name one doc two ways and the sidebar listed it twice.
+  describe("symlinked worktree paths", () => {
+    const INDEXED = "/Users/jt/thoughts/repos/app/shared/plans/2026-08-19-vm.md";
+    const NESTED = "/Users/jt/thoughts/repos/app/shared/handoffs/general/ctx.md";
+    const written = { "2026-08-19-vm.md": INDEXED, "ctx.md": NESTED };
+    const write = (file_path: string) =>
+      docFromTool("Write", JSON.stringify({ file_path }), written);
+
+    it("reports the indexed path a shell mention would resolve to", () => {
+      expect(write("/Users/jt/wt/app/branch/thoughts/shared/plans/2026-08-19-vm.md")).toEqual({
+        path: INDEXED,
+        kind: "plan",
+      });
+      // Deeper than the scope segment: the tail only gets more specific.
+      expect(write("/Users/jt/wt/app/branch/thoughts/shared/handoffs/general/ctx.md")).toEqual({
+        path: NESTED,
+        kind: "handoff",
+      });
+    });
+
+    it("keeps the written path when the tail says it is a different doc", () => {
+      // Same filename under another scope, and outside any thoughts root: both
+      // are their own file, so neither may collapse onto the indexed one.
+      const personal = "/Users/jt/wt/app/branch/thoughts/jt/plans/2026-08-19-vm.md";
+      expect(write(personal)).toEqual({ path: personal, kind: "plan" });
+      const repoDoc = "/Users/jt/wt/app/branch/docs/plans/2026-08-19-vm.md";
+      expect(write(repoDoc)).toEqual({ path: repoDoc, kind: "plan" });
+    });
+  });
 });
 
 describe("docTitle", () => {

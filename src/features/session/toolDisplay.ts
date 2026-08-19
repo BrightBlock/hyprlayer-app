@@ -204,6 +204,31 @@ export function docKindForPath(path: string): DocKind | null {
 // here — see `docFromTool` for why the shell can't answer that.
 const SH_MD_MENTION = /'([^']+\.md)'|"([^"]+\.md)"|([^\s'"<>|;&()]+\.md)/g;
 
+/** Last three path segments, the part a thoughts symlink preserves. */
+function docTail(path: string): string {
+  return path.split(/[/\\]+/).slice(-3).join("/");
+}
+
+/**
+ * The indexed path for a doc `Write` reached by a different route, else the
+ * path as written.
+ *
+ * A worktree's `thoughts/shared` is a symlink into the thoughts store, so one
+ * doc arrives as `<worktree>/thoughts/shared/plans/x.md` from `Write` and as
+ * `<store>/repos/<project>/shared/plans/x.md` from the index — two strings for
+ * one file, which the dedup-by-path selectors listed twice.
+ *
+ * The shared tail is what makes the substitution safe: the symlink sits at the
+ * scope segment, so an alias always spells the same `<scope>/<dir>/<file>.md`,
+ * while a same-named doc under another scope or outside the store does not.
+ * Without that guard this would inherit the Bash arm's filename-collision gap
+ * on a path that is otherwise exact.
+ */
+function canonicalDocPath(path: string, written: WrittenDocs): string {
+  const indexed = written[baseName(path)];
+  return indexed && docTail(indexed) === docTail(path) ? indexed : path;
+}
+
 /**
  * If a tool created a research/plan/handoff `.md` (under `…/research/…`,
  * `…/plans/…`, or `…/handoffs/…`), return its path + kind, to surface
@@ -228,7 +253,9 @@ const SH_MD_MENTION = /'([^']+\.md)'|"([^"]+\.md)"|([^\s'"<>|;&()]+\.md)/g;
  * plans constantly, and must not fill the Documents list with them), and a
  * mention present in it resolves to the canonical absolute path. `Write`/`Edit`
  * need no such proof — `file_path` is unambiguously the file written, and it may
- * legitimately sit outside a thoughts root, where the index never sees it.
+ * legitimately sit outside a thoughts root, where the index never sees it. They
+ * still consult `written` to agree with the shell arm on *which* spelling of a
+ * doc to report (see `canonicalDocPath`).
  *
  * `written` is required rather than defaulted: a caller that forgot it would
  * silently stop detecting every shell-written doc, which is the bug this
@@ -244,7 +271,7 @@ export function docFromTool(
   if (name === "Write" || name === "Edit" || name === "MultiEdit") {
     const path = str(obj.file_path);
     const kind = docKindForPath(path);
-    return kind ? { path, kind } : null;
+    return kind ? { path: canonicalDocPath(path, written), kind } : null;
   }
   if (name !== "Bash") return null;
   for (const match of str(obj.command).matchAll(SH_MD_MENTION)) {
