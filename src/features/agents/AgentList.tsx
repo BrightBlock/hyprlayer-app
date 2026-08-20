@@ -5,9 +5,18 @@
 
 import type { ReactNode } from "react";
 
-import { Badge, Button, EmptyState, IconButton, TextInput, Toggle } from "@/components/ui";
-import { FolderIcon, PlusIcon, SearchIcon } from "@/components/icons";
-import { formatRelativeTime } from "@/lib/format";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  IconButton,
+  RefreshButton,
+  Spinner,
+  TextInput,
+  Toggle,
+} from "@/components/ui";
+import { DownloadIcon, FolderIcon, PlusIcon, SearchIcon } from "@/components/icons";
+import { formatRelativeTime, shortSha } from "@/lib/format";
 import { isContentCompact, isContentNarrow } from "@/lib/layout";
 import { useElementWidth } from "@/lib/useElementWidth";
 import type { AgentFile, AgentLibrarySettings } from "@/lib/bindings";
@@ -20,6 +29,7 @@ import {
   type AgentRow,
   type AgentScope,
   type AgentTab,
+  type BundleChipState,
 } from "./agents";
 import { Segmented } from "./parts";
 
@@ -47,6 +57,19 @@ type Props = {
   onCreate: () => void;
   onNewFolder: () => void;
   loading: boolean;
+  /** The bundle-freshness chip on the title row. The list renders it, it
+   *  does not decide it (same contract as `dotColorOf`, below). */
+  bundle: {
+    state: BundleChipState;
+    /** A `updateAgentBundle` mutation in flight — a transient state
+     *  `BundleChipState` itself doesn't model, see its own doc comment. */
+    updating: boolean;
+    /** A freshness refetch in flight, so the recheck can show a spinner and
+     *  refuse re-entry. */
+    checking: boolean;
+    onRefresh: () => void;
+    onUpdate: () => void;
+  };
   /** The dot beside each agent's name, already resolved: the list renders the
    *  colour. It does not decide it. */
   dotColorOf: (agent: AgentFile) => string;
@@ -99,6 +122,7 @@ export function AgentList({
   onCreate,
   onNewFolder,
   loading,
+  bundle,
   dotColorOf,
   groupUncategorized,
   onGroupUncategorized,
@@ -120,8 +144,10 @@ export function AgentList({
 
   return (
     <div ref={paneRef} className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="px-7 pb-3.5 pt-5">
+      <div className="flex items-center gap-3 px-7 pb-3.5 pt-5">
         <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight text-ink">Agents</h1>
+        <div className="flex-1" />
+        <BundleChip {...bundle} />
       </div>
 
       {/* Wraps rather than clipping: the segmented controls are fixed-width, so
@@ -302,6 +328,111 @@ export function AgentList({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The Agents view's bundle-freshness chip: up to date (with a manual
+ * recheck), an update available (with the trigger), updating, or no verdict
+ * to give. Icon-only for the trigger, not a labelled `Button` — the row's
+ * only other content is the page title, and a primary button would dominate
+ * it. Meaning rides on `title`/`aria-label`, the same convention the New
+ * folder / Create agent buttons use in the toolbar row below.
+ */
+function BundleChip({
+  state,
+  updating,
+  checking,
+  onRefresh,
+  onUpdate,
+}: {
+  state: BundleChipState;
+  updating: boolean;
+  checking: boolean;
+  onRefresh: () => void;
+  onUpdate: () => void;
+}) {
+  if (updating) {
+    return (
+      <div className="flex shrink-0 items-center gap-2 text-xs text-ink-dim">
+        {/* "Updating", not a phase name: the backup is a handful of local
+            copies that finish instantly and the rest of the wait is the CLI's
+            tarball download, so naming a phase here would be a guess that is
+            wrong for almost the whole mutation. */}
+        <span>Updating agents…</span>
+        <IconButton disabled title="Updating agents…" aria-label="Updating agents">
+          <Spinner size={13} />
+        </IconButton>
+      </div>
+    );
+  }
+
+  if (state.kind === "updateAvailable") {
+    const to = shortSha(state.toSha);
+    return (
+      <div className="flex shrink-0 items-center gap-2">
+        <Badge tone="warn">New agents available</Badge>
+        <span className="hidden font-mono text-xs text-ink-dim sm:inline">
+          {state.fromSha ? `${shortSha(state.fromSha)} → ${to}` : to}
+        </span>
+        {/* The accent tint rides on the ICON, not the button: `cx` in
+            components/ui.tsx is a plain join, so a `text-accent` passed as
+            IconButton's className lands beside its own `text-ink-dim` and
+            loses on stylesheet order, painting the trigger plain grey. The
+            svg is a different element, so `currentColor` resolves to the
+            accent with nothing to collide with. */}
+        <IconButton
+          onClick={onUpdate}
+          title={`Update agents to ${to}`}
+          aria-label={`Update agents to ${to}`}
+        >
+          <DownloadIcon size={15} className="text-accent" />
+        </IconButton>
+      </div>
+    );
+  }
+
+  // `busy` on both remaining branches: the recheck behind them spawns a
+  // `hyprlayer ai status` process AND makes an 8s-timeout round trip to
+  // GitHub, so without it the button sits inert long enough that a user
+  // clicks it again and queues a second pair.
+  if (state.kind === "unknown") {
+    return (
+      <RefreshButton
+        onClick={onRefresh}
+        busy={checking}
+        label="Check for agent updates"
+        title={state.detail}
+        className="shrink-0 text-xs"
+      >
+        <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 rounded-full bg-ink-dim/50" />
+        <span className="whitespace-nowrap">Bundle unknown</span>
+      </RefreshButton>
+    );
+  }
+
+  // The steady state, so it stays a bare "Up to date": which SHA is installed
+  // and when it was last looked at are reference details, not something to
+  // read on every visit. They ride on `title` instead, which `RefreshButton`
+  // keeps distinct from the `aria-label` naming the action.
+  const detail = [
+    state.sha ? shortSha(state.sha) : null,
+    state.lastCheckedMs !== null ? `checked ${formatRelativeTime(state.lastCheckedMs)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <RefreshButton
+      onClick={onRefresh}
+      busy={checking}
+      label="Check for agent updates"
+      title={detail ? `Agent bundle ${detail} · click to check for updates` : undefined}
+      className="shrink-0 text-xs"
+    >
+      <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 rounded-full bg-ok" />
+      <span className="whitespace-nowrap">Up to date</span>
+    </RefreshButton>
   );
 }
 

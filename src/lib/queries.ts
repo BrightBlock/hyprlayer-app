@@ -983,6 +983,25 @@ export function useAiStatus() {
   });
 }
 
+/** Agent-bundle freshness for the Agents header chip and Settings' AI tool
+ *  card. Cached for five minutes rather than forever like `useAiStatus`: the
+ *  CLI's own 24h auto-refresh (`hyprlayer-cli/src/version.rs`) can move the
+ *  installed SHA between visits without the app doing anything, and the chip
+ *  carries an explicit recheck for when five minutes is too long to wait.
+ *
+ *  `enabled` because the query is not free — it spawns `hyprlayer ai status`
+ *  and makes an outbound request to github.com. Settings passes `false`
+ *  while its AI tool card has nothing to show, so a user who never
+ *  configured a tool never pays for it. */
+export function useAgentBundle(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ["agent-bundle"],
+    queryFn: () => unwrap(commands.agentBundleStatus()),
+    staleTime: 5 * 60_000,
+    enabled: options.enabled ?? true,
+  });
+}
+
 /** Probe `~/thoughts` so the wizard can default to "open from disk" (and prefill
  *  the path) when an existing repo is already there. Re-checked on each mount,
  *  the user may have just created the dir in another step. */

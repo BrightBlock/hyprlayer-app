@@ -70,8 +70,8 @@ pub struct StorageInfo {
 
 /// Typed response for `hyprlayer ai status --json`.
 ///
-/// The CLI emits additional fields (location, version, …) that we don't need
-/// yet; they are captured by `#[serde(default)]` and ignored.
+/// The CLI emits a per-tool block plus the two bundle-freshness fields below
+/// (`ai/status.rs`); anything else it adds is absorbed by `#[serde(default)]`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
@@ -80,8 +80,17 @@ pub struct AiStatus {
     pub agent_tool: Option<String>,
     /// Whether the agent tool is installed and ready to use.
     pub installed: bool,
-    /// Filesystem path to the agent binary, when installed.
+    /// Where the tool's bundle is installed, tilde-abbreviated for display
+    /// (`~/.claude/`) — `AgentTool::dest_display`, not a binary path and not
+    /// a path to hand to the filesystem.
     pub location: Option<String>,
+    /// `master` HEAD of BrightBlock/hyprlayer-cli that the installed agent
+    /// bundle was pinned to. `None` before the first install, or when ref
+    /// resolution was unreachable at install time (the CLI still installs).
+    pub agents_installed_sha: Option<String>,
+    /// Unix seconds of the CLI's last 24h auto-check. `None` right after an
+    /// explicit install: `record_install` clears it so the next check re-runs.
+    pub last_agent_check: Option<f64>,
 }
 
 pub struct HyprCli<'a> {
@@ -189,8 +198,15 @@ impl<'a> HyprCli<'a> {
         .await
     }
 
-    /// `hyprlayer ai status --json`, typed; only the three fields the
-    /// onboarding step needs; extra CLI fields are silently ignored.
+    /// `hyprlayer ai status --json`, typed into [`AiStatus`]; extra CLI
+    /// fields are silently ignored.
+    ///
+    /// Emits a bare `{}` when no config exists, when `ai` is unset, or when
+    /// `ai.agentTool` is unset (`hyprlayer-cli/src/commands/ai/status.rs`,
+    /// `print_not_configured`), which `#[serde(default)]` turns into
+    /// `AiStatus::default()` — `installed: false`, every option `None`.
+    /// Callers must read `installed` rather than treating a `None`
+    /// `agents_installed_sha` as "a bundle is installed but unpinned".
     pub async fn ai_status(&self, cwd: &Path) -> Result<AiStatus> {
         let stdout = self
             .exec(cwd, &["ai", "status", "--json"], Duration::from_secs(30))
@@ -199,5 +215,20 @@ impl<'a> HyprCli<'a> {
             program: "hyprlayer ai status".into(),
             detail: e.to_string(),
         })
+    }
+
+    /// `hyprlayer ai reinstall`. Fully non-interactive (verified against
+    /// `hyprlayer-cli/src/commands/ai/reinstall.rs` — no dialoguer prompts),
+    /// so it runs headless rather than needing a PTY. Network-bound: a
+    /// tarball download, with a per-file GitHub API walk as the CLI's own
+    /// fallback.
+    ///
+    /// The `Ok` value is the CLI's stdout. A failure does NOT carry it:
+    /// `Exec::run` builds `CoreError::Exec` from `stderr_tail` and drops
+    /// stdout, so a caller wanting the CLI's own words on the error path has
+    /// only stderr.
+    pub async fn ai_reinstall(&self, cwd: &Path) -> Result<String> {
+        self.exec(cwd, &["ai", "reinstall"], Duration::from_secs(300))
+            .await
     }
 }

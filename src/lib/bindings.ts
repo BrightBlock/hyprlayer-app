@@ -820,6 +820,34 @@ export const commands = {
 	agentSkills: (projectPath: string | null) => typedError<AgentSkill[], AppError>(__TAURI_INVOKE("agent_skills", { projectPath })),
 	/**  Write a portable `.agent.json` to Downloads; returns where it landed. */
 	exportAgentFile: (agent: AgentFile, overlay: AgentOverlay) => typedError<string, AppError>(__TAURI_INVOKE("export_agent_file", { agent, overlay })),
+	/**
+	 *  `hyprlayer ai status --json` for the installed SHA, plus a direct probe of
+	 *  GitHub's ref advertisement for the latest one.
+	 * 
+	 *  The two are awaited in order, not joined: the CLI call is local and runs
+	 *  in a millisecond or two against the probe's ~150ms round trip, so joining
+	 *  buys almost nothing and would cost the short-circuit that keeps a machine
+	 *  with no `hyprlayer` binary from reaching for the network at all.
+	 */
+	agentBundleStatus: () => typedError<AgentBundleStatus, AppError>(__TAURI_INVOKE("agent_bundle_status")),
+	/**
+	 *  Run `hyprlayer ai reinstall` and report what changed.
+	 * 
+	 *  Backs the whole bundle up first — `agents`, `skills` and `settings.json`,
+	 *  everything the CLI's `sync_tree` can overwrite — into a STAGING directory,
+	 *  and promotes it to the backup of record only once the reinstall has
+	 *  landed. That ordering is the point: the previous backup is what holds an
+	 *  edit the previous update reverted, so destroying it up front would let a
+	 *  reinstall that dies on a DNS error take the user's last copy with it while
+	 *  changing nothing else. On failure the staged copy is dropped and the
+	 *  previous one still stands.
+	 */
+	updateAgentBundle: () => typedError<AgentBundleReport, AppError>(__TAURI_INVOKE("update_agent_bundle")),
+	/**
+	 *  Put one agent back from the rolling backup, by file stem
+	 *  (`AgentBundleChange::name`).
+	 */
+	restoreAgentFromBackup: (stem: string) => typedError<null, AppError>(__TAURI_INVOKE("restore_agent_from_backup", { stem })),
 };
 
 /** Events */
@@ -845,6 +873,82 @@ export type ActiveSessionView = {
 	workstreamTitle: string,
 	projectPath: string,
 };
+
+/**  One agent the bundle update changed, for the report dialog. */
+export type AgentBundleChange = {
+	/**
+	 *  File stem, e.g. `"cartographer"` for `cartographer.md`. Also what
+	 *  `restore_agent_from_backup` takes.
+	 */
+	name: string,
+	change: AgentChange,
+	/**  Absolute path to the agent's `.md` file, for display. */
+	path: string,
+};
+
+/**  Everything one `update_agent_bundle` run changed, for the report dialog. */
+export type AgentBundleReport = {
+	agents: AgentBundleChange[],
+	/**
+	 *  Whether the reinstall replaced `~/.claude/settings.json`. Reported
+	 *  because it is the user's own global Claude config — `permissions`,
+	 *  `env`, `hooks`, `statusLine` — and `sync_tree` overwrites it wholesale
+	 *  with the bundle's copy.
+	 */
+	settingsChanged: boolean,
+	/**  How many files under `~/.claude/skills` the reinstall replaced. */
+	skillsChanged: number,
+	/**
+	 *  Where the pre-update copy of all of it now lives, for the dialog to
+	 *  name without hardcoding the layout core owns.
+	 */
+	backupPath: string,
+};
+
+/**  The agent bundle's freshness, for the Agents view's header chip. */
+export type AgentBundleStatus = {
+	/**
+	 *  Whether this app can manage the bundle at all: the CLI must report an
+	 *  installed [`MANAGEABLE_AGENT_TOOL`]. False for a user who has never
+	 *  run `hyprlayer ai configure` (the CLI answers `{}`, which deserializes
+	 *  to `installed: false`) and for one configured on another tool. The
+	 *  chip reads this before anything else — without it, a missing
+	 *  `installed_sha` looks exactly like a stale one and every unconfigured
+	 *  machine is told a new bundle is available.
+	 */
+	manageable: boolean,
+	/**  SHA the installed bundle is pinned to, from the CLI's config. */
+	installedSha: string | null,
+	/**
+	 *  `master` HEAD as resolved just now. `None` when the probe failed —
+	 *  offline, or GitHub unreachable — which renders as "up to date" rather
+	 *  than as an error: not knowing is not the same as being behind.
+	 */
+	latestSha: string | null,
+	/**
+	 *  Unix seconds of the CLI's last auto-check — when the bundle was last
+	 *  *looked at*, not when it was last installed. `record_install` clears
+	 *  it, so it is `None` immediately after an update.
+	 */
+	lastChecked: number | null,
+	updateAvailable: boolean,
+};
+
+/**
+ *  One agent the bundle changed, as observed by diffing the library either
+ *  side of an install.
+ * 
+ *  There is deliberately no "the user's own edit was reverted" variant: a
+ *  before/after snapshot cannot tell that apart from an upstream change (both
+ *  are the same backup≠current diff) and the CLI exposes no per-file signal
+ *  that would. Anything not [`Added`](Self::Added) may have been the user's,
+ *  which is what the report's restore affordance keys off.
+ */
+export type AgentChange = 
+/**  Present after the update but not in the backup: new from the bundle. */
+"added" | 
+/**  Present either side, with different bytes. */
+"updated";
 
 export type AgentCollaborator = {
 	name: string,
@@ -1015,16 +1119,31 @@ export type AgentSkill = {
 /**
  *  Typed response for `hyprlayer ai status --json`.
  * 
- *  The CLI emits additional fields (location, version, …) that we don't need
- *  yet; they are captured by `#[serde(default)]` and ignored.
+ *  The CLI emits a per-tool block plus the two bundle-freshness fields below
+ *  (`ai/status.rs`); anything else it adds is absorbed by `#[serde(default)]`.
  */
 export type AiStatus = {
 	/**  The agent tool name as reported by the CLI, e.g. `"Claude Code"`. */
 	agentTool?: string | null,
 	/**  Whether the agent tool is installed and ready to use. */
 	installed?: boolean,
-	/**  Filesystem path to the agent binary, when installed. */
+	/**
+	 *  Where the tool's bundle is installed, tilde-abbreviated for display
+	 *  (`~/.claude/`) — `AgentTool::dest_display`, not a binary path and not
+	 *  a path to hand to the filesystem.
+	 */
 	location?: string | null,
+	/**
+	 *  `master` HEAD of BrightBlock/hyprlayer-cli that the installed agent
+	 *  bundle was pinned to. `None` before the first install, or when ref
+	 *  resolution was unreachable at install time (the CLI still installs).
+	 */
+	agentsInstalledSha?: string | null,
+	/**
+	 *  Unix seconds of the CLI's last 24h auto-check. `None` right after an
+	 *  explicit install: `record_install` clears it so the next check re-runs.
+	 */
+	lastAgentCheck?: number | null,
 };
 
 /**

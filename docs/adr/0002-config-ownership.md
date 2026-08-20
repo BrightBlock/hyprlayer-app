@@ -1,7 +1,8 @@
 # ADR 0002: The CLI owns its config; the app reads and watches
 
 **Status:** accepted · 2026-06-12 · amended 2026-07-14 (profile creation routes through
-`hyprlayer thoughts profile create` — no new exception needed)
+`hyprlayer thoughts profile create` — no new exception needed) · amended 2026-08-20
+(the agent-bundle SHA probe is read-only against GitHub — not a new exception)
 
 ## Decision
 
@@ -32,3 +33,12 @@ sentinels, unsafe charset) and reads the created entry back from the config the 
 - No config lock protocol needed; the CLI's atomic rename keeps reads consistent.
 - CLI-driven changes (user runs `hyprlayer thoughts init` in a terminal) appear in the app
   within ~2s without restart.
+- The Agents view's bundle-freshness chip resolves `BrightBlock/hyprlayer-cli@master`'s current
+  SHA itself (a GitHub ref-advertisement probe, parsed in
+  `crates/hyprlayer-core/src/agent_bundle.rs`, fetched in `src-tauri/src/commands/agents.rs`)
+  rather than reading it from the config, because the CLI has no check-only command to ask "is a
+  newer bundle available" without also installing it. This is not a new exception to the
+  single-writer rule: the probe is read-only against GitHub, writes nothing to `config.json`, and
+  the installed SHA it compares against still comes from the CLI's own
+  `agentsInstalledSha`. Upstream ask: `hyprlayer ai check --json`, which would let the app retire
+  its copy of the SHA-resolution logic.

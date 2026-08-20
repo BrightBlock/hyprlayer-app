@@ -55,6 +55,7 @@ When a shared module needs feature-side behavior, expose a registration seam
 | Is a shared formatting helper | `src/lib/format.ts` |
 | Is a shared path helper | `src/lib/path.ts` |
 | Is a terminal/PTY concern | `src/lib/terminal/` |
+| Is an agent-bundle (`~/.claude`) backup/restore/diff concern | `crates/hyprlayer-core/src/agent_bundle.rs` — pure and filesystem-only; the GitHub probe is in `src-tauri/src/commands/agents.rs`, ADR-0001 keeps core dependency-light |
 | Is used by exactly one feature | that feature's directory |
 | Is used by *two or more* features | graduate to `src/lib/` or `src/components/` |
 | Is a route/page definition | `src/routes/` — keep it dumb: layout, params, pane wiring only. No domain types, no store imports. |

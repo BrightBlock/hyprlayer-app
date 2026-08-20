@@ -18,12 +18,13 @@ import {
   type AppSettings,
   type Bootstrap,
 } from "@/lib/bindings";
-import { unwrap } from "@/lib/ipc";
+import { errorMessage, unwrap } from "@/lib/ipc";
 import { basename } from "@/lib/path";
-import { useBootstrap, useSetAppSettings } from "@/lib/queries";
+import { useAgentBundle, useBootstrap, useSetAppSettings } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
 import {
   agentRows,
+  bundleChipState,
   DEFAULT_OVERLAY,
   dotColor,
   duplicateAgent,
@@ -36,10 +37,13 @@ import {
   visibleAgents,
   type AgentScope,
   type AgentTab,
+  type BundleFailure,
+  type BundleReport,
   type EditorTab,
   type Overlay,
 } from "./agents";
 import { AgentEditor } from "./AgentEditor";
+import { AgentUpdateFailed, AgentUpdateReport } from "./AgentBundleDialogs";
 import { AgentList } from "./AgentList";
 import { FolderCombo } from "./parts";
 
@@ -100,6 +104,7 @@ export function AgentLibrary({
     queryKey: ["agent-skills", projectPath],
     queryFn: () => unwrap(commands.agentSkills(projectPath)),
   });
+  const agentBundle = useAgentBundle();
 
   const [tab, setTab] = useState<AgentTab>("yours");
   const [scope, setScope] = useState<AgentScope>("global");
@@ -108,6 +113,8 @@ export function AgentLibrary({
   const [dialog, setDialog] = useState<"folder" | "move" | "delete" | null>(null);
   const [folderName, setFolderName] = useState("");
   const [moveTarget, setMoveTarget] = useState("");
+  const [bundleReport, setBundleReport] = useState<BundleReport | null>(null);
+  const [bundleFailure, setBundleFailure] = useState<BundleFailure | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   // The editor's working copy plus the baseline it diverged from.
   const [draft, setDraft] = useState<{
@@ -347,6 +354,54 @@ export function AgentLibrary({
     onError: (e) => fail("Export failed", e),
   });
 
+  // `updateAgentBundle` takes no arguments of its own, but the report and
+  // failure dialogs both need the SHA pair as it stood the moment the update
+  // was triggered, `agentBundle.data` has already moved on to the new value
+  // by the time a success/error callback runs (the query invalidates right
+  // alongside). Carrying it through as the mutation's variables, the same
+  // shape `moveToFolder` reads its `folder` from, sidesteps a stale closure.
+  const updateBundle = useMutation({
+    mutationFn: (_vars: { fromSha: string | null; toSha: string | null }) =>
+      unwrap(commands.updateAgentBundle()),
+    onSuccess: (result, { fromSha, toSha }) => {
+      void queryClient.invalidateQueries({ queryKey: ["agent-files"] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-bundle"] });
+      // `skills` too: the reinstall rewrites `~/.claude/skills` alongside the
+      // agents, and the Capabilities tab reads that query.
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+      setBundleReport({ ...result, fromSha, toSha });
+    },
+    onError: (e, { fromSha }) => {
+      // Invalidated on this path too: a 300s timeout can kill the CLI
+      // mid-sync, so "the update failed" does not imply "nothing on disk
+      // moved" and the cached list may already be wrong.
+      void queryClient.invalidateQueries({ queryKey: ["agent-files"] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-bundle"] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+      setBundleFailure({ message: errorMessage(e), stillOnSha: fromSha });
+    },
+  });
+
+  const bundleChip = bundleChipState(agentBundle.data, {
+    loading: agentBundle.isLoading,
+    error: agentBundle.isError,
+  });
+
+  // One definition behind both the chip's trigger and the failure dialog's
+  // "Try again". The SHA pair is bookkeeping for the report, NOT a
+  // precondition: the chip only ever offers the trigger from
+  // `updateAvailable`, but a retry runs after `onError` invalidated the
+  // freshness query, which may since have failed for the same reason the
+  // update did. Refusing to fire without a known SHA pair would make "Try
+  // again" a silent no-op exactly when the user needs it.
+  const startUpdate = () => {
+    updateBundle.mutate(
+      bundleChip.kind === "updateAvailable"
+        ? { fromSha: bundleChip.fromSha, toSha: bundleChip.toSha }
+        : { fromSha: agentBundle.data?.installedSha ?? null, toSha: null },
+    );
+  };
+
   const openDraft = (agent: AgentFile, overlay: Overlay, path: string) => {
     setDraft({ base: { agent, overlay }, agent, overlay });
     onSelect(path);
@@ -464,6 +519,13 @@ export function AgentLibrary({
             })
           }
           loading={agents.isFetching}
+          bundle={{
+            state: bundleChip,
+            updating: updateBundle.isPending,
+            checking: agentBundle.isFetching,
+            onRefresh: () => void agentBundle.refetch(),
+            onUpdate: startUpdate,
+          }}
           dotColorOf={(agent) => dotColor(agent, overlayFor(library, agent.path), folderOf)}
           groupUncategorized={groupUncategorized}
           onGroupUncategorized={(on) => writeLibrary({ groupUncategorized: on })}
@@ -635,6 +697,21 @@ export function AgentLibrary({
           </div>
         </div>
       </Dialog>
+
+      <AgentUpdateReport
+        report={bundleReport}
+        open={bundleReport !== null}
+        onClose={() => setBundleReport(null)}
+      />
+      <AgentUpdateFailed
+        failure={bundleFailure}
+        open={bundleFailure !== null}
+        onClose={() => setBundleFailure(null)}
+        onRetry={() => {
+          setBundleFailure(null);
+          startUpdate();
+        }}
+      />
     </div>
   );
 }

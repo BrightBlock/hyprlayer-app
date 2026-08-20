@@ -181,6 +181,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::agents::agent_mcp_servers,
             commands::agents::agent_skills,
             commands::agents::export_agent_file,
+            commands::agents::agent_bundle_status,
+            commands::agents::update_agent_bundle,
+            commands::agents::restore_agent_from_backup,
         ])
         .events(collect_events![
             events::ConfigChanged,

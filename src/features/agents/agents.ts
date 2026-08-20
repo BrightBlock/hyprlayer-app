@@ -11,6 +11,8 @@
  */
 
 import type {
+  AgentBundleReport,
+  AgentBundleStatus,
   AgentFile,
   AgentLibrarySettings,
   AgentOverlay,
@@ -546,4 +548,70 @@ export function initialsOf(name: string): string {
     .join("")
     .slice(0, 2)
     .toUpperCase();
+}
+
+/** Result of one `updateAgentBundle` run, the data behind `AgentUpdateReport`.
+ *  The SHA pair rides alongside the backend's report because the command
+ *  cannot report it: `ai reinstall` prints no SHA, so the pair is the one the
+ *  chip was showing when the user triggered the update. Either half may be
+ *  `null` — a retry fired from the failure dialog can run after the freshness
+ *  query itself has stopped answering — and the dialog then says nothing
+ *  about SHAs rather than printing a sentinel where one belongs. */
+export type BundleReport = AgentBundleReport & {
+  fromSha: string | null;
+  toSha: string | null;
+};
+
+/** A failed `updateAgentBundle` run, the data behind `AgentUpdateFailed`. */
+export type BundleFailure = {
+  message: string;
+  /** The SHA the library is still on, unchanged, so the dialog can say so. */
+  stillOnSha: string | null;
+};
+
+/** The header chip's states. "Updating" is a mutation in flight, not a shape
+ *  of `AgentBundleStatus`, so it lives at the call site rather than here. */
+export type BundleChipState =
+  /** No verdict to give: still checking, the query failed, or the CLI reports
+   *  a tool whose bundle this app does not manage. */
+  | { kind: "unknown"; detail: string }
+  | { kind: "upToDate"; sha: string | null; lastCheckedMs: number | null }
+  | { kind: "updateAvailable"; fromSha: string | null; toSha: string };
+
+/**
+ * Maps the bundle-freshness probe to the chip's state, so the component only
+ * ever switches on `kind`.
+ *
+ * The `unknown` state is load-bearing, not a placeholder: `agentBundleStatus`
+ * errors outright when the `hyprlayer` binary is missing or its JSON won't
+ * parse, and folding that `undefined` into `upToDate` (as this did) paints a
+ * green dot asserting a bundle is current that the app could not read one
+ * byte of. `manageable: false` lands here for the same reason — the CLI
+ * answers `{}` for an unconfigured machine, which is not a stale bundle.
+ *
+ * A failed *probe* (`manageable`, but `latestSha: null`) still reads as up to
+ * date: not knowing whether a newer bundle exists is not the same as being
+ * unable to look. `lastChecked` arrives in Unix seconds, the CLI's
+ * convention; converted to epoch ms here so `formatRelativeTime` needs no
+ * unit special-casing at the call site.
+ */
+export function bundleChipState(
+  status: AgentBundleStatus | undefined,
+  query: { loading: boolean; error: boolean },
+): BundleChipState {
+  if (query.loading) return { kind: "unknown", detail: "Checking for agent updates…" };
+  if (query.error || !status) {
+    return { kind: "unknown", detail: "Could not check — the hyprlayer CLI did not answer." };
+  }
+  if (!status.manageable) {
+    return { kind: "unknown", detail: "No Claude Code agent bundle is configured." };
+  }
+  const lastCheckedMs = status.lastChecked != null ? status.lastChecked * 1000 : null;
+  // Narrowed on `latestSha` rather than on `updateAvailable`, so `toSha` is a
+  // `string` by control flow and needs no unreachable fallback sentinel.
+  const latest = status.latestSha;
+  if (!status.updateAvailable || latest === null) {
+    return { kind: "upToDate", sha: status.installedSha, lastCheckedMs };
+  }
+  return { kind: "updateAvailable", fromSha: status.installedSha, toSha: latest };
 }

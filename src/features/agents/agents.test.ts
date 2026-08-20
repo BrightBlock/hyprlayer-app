@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentFile, AgentLibrarySettings, AgentRule, AgentSkill } from "@/lib/bindings";
+import type {
+  AgentBundleStatus,
+  AgentFile,
+  AgentLibrarySettings,
+  AgentRule,
+  AgentSkill,
+} from "@/lib/bindings";
 import {
   AGENT_PHASE,
   ANY_STAGE,
@@ -12,6 +18,7 @@ import {
 import {
   AGENT_TOOLS,
   agentRows,
+  bundleChipState,
   collaboratorFor,
   DEFAULT_OVERLAY,
   dotColor,
@@ -659,5 +666,82 @@ describe("labels", () => {
       role: "Editor",
     });
     expect(initialsOf("Maya Ortiz")).toBe("MO");
+  });
+});
+
+describe("bundleChipState", () => {
+  const status = (over: Partial<AgentBundleStatus> = {}): AgentBundleStatus => ({
+    manageable: true,
+    installedSha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+    latestSha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+    lastChecked: 1_700_000_000,
+    updateAvailable: false,
+    ...over,
+  });
+  const settled = { loading: false, error: false };
+
+  it("up to date: installed matches latest", () => {
+    expect(bundleChipState(status(), settled)).toEqual({
+      kind: "upToDate",
+      sha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+      lastCheckedMs: 1_700_000_000_000,
+    });
+  });
+
+  it("update available: carries both SHAs", () => {
+    const s = status({ latestSha: "9a1c2f0aed5fffee3b98f741bd6d911965c9033", updateAvailable: true });
+    expect(bundleChipState(s, settled)).toEqual({
+      kind: "updateAvailable",
+      fromSha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+      toSha: "9a1c2f0aed5fffee3b98f741bd6d911965c9033",
+    });
+  });
+
+  it("unknown latest (a failed probe) reads as up to date, not as an error", () => {
+    // Not knowing whether a newer bundle exists is not the same as being
+    // unable to look: the CLI answered, the network did not.
+    const s = status({ latestSha: null, updateAvailable: false });
+    expect(bundleChipState(s, settled)).toEqual({
+      kind: "upToDate",
+      sha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+      lastCheckedMs: 1_700_000_000_000,
+    });
+  });
+
+  it("a failed query is unknown, NOT a green up-to-date claim", () => {
+    // `agentBundleStatus` errors outright when the hyprlayer binary is
+    // missing or its JSON won't parse. Folding that into `upToDate` asserted
+    // a bundle was current that the app could not read at all.
+    expect(bundleChipState(undefined, { loading: false, error: true }).kind).toBe("unknown");
+    expect(bundleChipState(undefined, settled).kind).toBe("unknown");
+  });
+
+  it("still checking is unknown, so the first render makes no claim either", () => {
+    expect(bundleChipState(undefined, { loading: true, error: false })).toEqual({
+      kind: "unknown",
+      detail: "Checking for agent updates…",
+    });
+  });
+
+  it("a tool this app cannot manage is unknown, not an update prompt", () => {
+    // The CLI prints `{}` for an unconfigured machine and installs into a
+    // different tree entirely for Copilot/OpenCode, so `manageable: false`
+    // must never render the warn badge or the download trigger.
+    const s = status({ manageable: false, installedSha: null, latestSha: null, updateAvailable: false });
+    expect(bundleChipState(s, settled).kind).toBe("unknown");
+  });
+
+  it("never installed but manageable: no SHA, no last-checked time, up to date", () => {
+    const s = status({ installedSha: null, latestSha: null, lastChecked: null, updateAvailable: false });
+    expect(bundleChipState(s, settled)).toEqual({ kind: "upToDate", sha: null, lastCheckedMs: null });
+  });
+
+  it("converts lastChecked from Unix seconds to the epoch-ms formatRelativeTime expects", () => {
+    const at = (over: Partial<AgentBundleStatus>) => {
+      const state = bundleChipState(status(over), settled);
+      return state.kind === "upToDate" ? state.lastCheckedMs : undefined;
+    };
+    expect(at({ lastChecked: 0 })).toBe(0);
+    expect(at({ lastChecked: null })).toBeNull();
   });
 });

@@ -169,7 +169,9 @@ pub struct AgentMcpServer {
     pub transport: String,
 }
 
-fn agents_dir(claude_root: &Path) -> PathBuf {
+/// `<claude_root>/agents`. `pub(crate)` so `agent_bundle` reads the layout
+/// from here rather than keeping a second copy of the same join.
+pub(crate) fn agents_dir(claude_root: &Path) -> PathBuf {
     claude_root.join("agents")
 }
 
