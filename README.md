@@ -98,4 +98,27 @@ brew install brightblock/tap/hyprlayer   # or scoop/winget on Windows
 cd ~/code/your-repo && hyprlayer thoughts init
 ```
 
+### Dogfooding `main`
+
+"Hyprlayer Dev" is a release-profile build of `origin/main` that installs beside
+the released app under its own identifier — its own database, settings and
+launcher entry, so the two never collide. It needs no checkout: anyone with
+access to this repo can run it straight from GitHub, where `gh` supplies the
+auth.
+
+```sh
+bash <(gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-linux.sh \
+         -H 'Accept: application/vnd.github.raw')     # macos: dev-install-macos.sh
+```
+
+```powershell
+& ([scriptblock]::Create((gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-windows.ps1 -H 'Accept: application/vnd.github.raw' | Out-String)))
+```
+
+It builds in a throwaway clone under the cache dir, so it can run while you have
+uncommitted work. Rerun the same command to update (it no-ops if `main` has not
+moved); pass `--uninstall` / `-Uninstall` to remove it, `--help` for the rest of
+the flags. Prerequisites are the full build toolchain above — no signing or
+publish credentials.
+
 See `docs/RELEASING.md` for how releases and in-app updates are published.

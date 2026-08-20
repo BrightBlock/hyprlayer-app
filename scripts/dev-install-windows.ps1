@@ -88,6 +88,13 @@
   Fetch origin/main, build if it moved, install.
 
 .EXAMPLE
+  & ([scriptblock]::Create((gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-windows.ps1 -H 'Accept: application/vnd.github.raw' | Out-String)))
+  Run it with no checkout at all, straight from GitHub -- gh supplies the auth
+  the private repo needs. Standalone it clones the repo itself, and
+  HYPRLAYER_DEV_ORIGIN overrides the clone URL (a fork, or a local mirror).
+  Parameters bind as usual: append -Force or -Ref <ref> after the closing paren.
+
+.EXAMPLE
   .\scripts\dev-install-windows.ps1 -Ref feature/my-branch -Force
   Build a specific ref even if the stamp says it is current.
 #>
@@ -111,7 +118,22 @@ if ($env:OS -ne 'Windows_NT') {
   throw 'this is the Windows installer; use scripts/dev-install-macos.sh or scripts/dev-install-linux.sh'
 }
 
-$Repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
+# Where the build clone comes from. Run from a checkout, that is the working
+# tree beside this script (fast, no network for the object transfer). Run
+# standalone -- created from a script block fetched through 'gh api', where
+# $PSScriptRoot is empty -- there is no tree to clone, and the repo is fetched
+# from GitHub instead.
+$OriginSlug = 'BrightBlock/hyprlayer-app'
+$OriginUrl  = if ($env:HYPRLAYER_DEV_ORIGIN) { $env:HYPRLAYER_DEV_ORIGIN } else { "https://github.com/$OriginSlug.git" }
+$Bootstrap  = "& ([scriptblock]::Create((gh api repos/$OriginSlug/contents/scripts/dev-install-windows.ps1 -H 'Accept: application/vnd.github.raw' | Out-String)))"
+
+$Repo = ''
+if ($PSScriptRoot) {
+  $candidate = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
+  if ((Test-Path (Join-Path $candidate '.git')) -and (Test-Path (Join-Path $candidate 'src-tauri'))) {
+    $Repo = $candidate
+  }
+}
 
 # --- config --------------------------------------------------------
 $CacheDir  = if ($env:HYPRLAYER_DEV_CACHE) { $env:HYPRLAYER_DEV_CACHE } else { Join-Path $env:USERPROFILE '.hyprlayer-dev' }
@@ -256,16 +278,29 @@ foreach ($tool in @('git', 'cargo', 'pnpm', 'node')) {
 }
 
 # --- 1. a throwaway clone that tracks the remote -------------------
-# Cloned from the local repo (fast, no network for the object transfer), then
-# repointed at the real origin so 'origin/main' means the same thing here as it
-# does in the working tree.
+# From a checkout: cloned from the local repo, then repointed at the real origin
+# so 'origin/main' means the same thing here as it does in the working tree.
+# Standalone: cloned from GitHub through 'gh repo clone', which carries the gh
+# token and honours the user's ssh/https preference -- a bare 'git clone' of a
+# private repo only works if they have already run 'gh auth setup-git'. It goes
+# through Run (cmd) because gh narrates on stderr, which $ErrorActionPreference
+# 'Stop' would turn into a terminating error.
 if (-not (Test-Path (Join-Path $SrcDir '.git'))) {
   Step "Creating build clone at $SrcDir"
   New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
   if (Test-Path $SrcDir) { Remove-Item -Recurse -Force $SrcDir }
-  RunGit @('clone', '--quiet', $Repo, $SrcDir) | Out-Null
-  $originUrl = GitLine @('-C', $Repo, 'remote', 'get-url', 'origin')
-  if ($originUrl) { RunGit @('-C', $SrcDir, 'remote', 'set-url', 'origin', $originUrl) | Out-Null }
+  if ($Repo) {
+    RunGit @('clone', '--quiet', $Repo, $SrcDir) | Out-Null
+    $originUrl = GitLine @('-C', $Repo, 'remote', 'get-url', 'origin')
+    if ($originUrl) { RunGit @('-C', $SrcDir, 'remote', 'set-url', 'origin', $originUrl) | Out-Null }
+  } elseif ((-not $env:HYPRLAYER_DEV_ORIGIN) -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+    Info "source: $OriginSlug via gh"
+    try { Run ('gh repo clone ' + $OriginSlug + ' "' + $SrcDir + '" -- --quiet') }
+    catch { throw ("clone failed; is gh authenticated for $OriginSlug? (gh auth status): " + $_.Exception.Message) }
+  } else {
+    Info "source: $OriginUrl"
+    RunGit @('clone', '--quiet', $OriginUrl, $SrcDir) | Out-Null
+  }
 }
 
 if (-not $NoFetch) {
@@ -414,4 +449,5 @@ Info "commit    $Short - $Subject"
 Info "path      $InstalledExe"
 Info "launch    $BinName   (or `"$AppName`" in the Start menu)"
 Info "data      $DataDir  (separate from the released app)"
-Info "refresh   $Repo\scripts\dev-install-windows.ps1"
+if ($Repo) { Info "refresh   $Repo\scripts\dev-install-windows.ps1" }
+else { Info ('refresh   ' + $Bootstrap) }

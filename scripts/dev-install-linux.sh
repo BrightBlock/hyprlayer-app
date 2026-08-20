@@ -50,12 +50,33 @@
 #   ./scripts/dev-install-linux.sh --no-fetch   # use what's already fetched (offline)
 #   ./scripts/dev-install-linux.sh --uninstall  # remove the install (keeps its data dir)
 #
+# It also runs with no checkout at all — anyone with repo access can pull it
+# straight from GitHub, where `gh` supplies the auth the private repo needs:
+#
+#   bash <(gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-linux.sh \
+#            -H 'Accept: application/vnd.github.raw')            # add flags after the `)`
+#
+# Standalone it clones the repo itself; the flags above all still apply, and
+# HYPRLAYER_DEV_ORIGIN overrides the clone URL (a fork, or a local mirror).
+#
 # Prerequisites: the same toolchain the Linux release builder needs, minus every
 # secret — Rust, Node + pnpm, and webkit2gtk-4.1 / gtk3 / librsvg. No signing
 # key, no publish credentials.
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# Where the build clone comes from. Run from a checkout, that's the working tree
+# beside this script (fast — no network for the object transfer). Run standalone
+# — piped from `gh api`, so $0 is "bash" or a /dev/fd pipe — there is no tree to
+# clone, and the repo is fetched from GitHub instead. The `scripts/<self>` probe
+# is what tells the two apart: a real checkout has this file under it.
+SELF="$0"
+ORIGIN_SLUG="BrightBlock/hyprlayer-app"
+BOOTSTRAP="bash <(gh api repos/$ORIGIN_SLUG/contents/scripts/dev-install-linux.sh -H 'Accept: application/vnd.github.raw')"
+REPO=""
+if self_dir="$(cd "$(dirname -- "$SELF")/.." 2>/dev/null && pwd)" \
+  && [[ -e "$self_dir/.git" && -f "$self_dir/scripts/$(basename -- "$SELF")" ]]; then
+  REPO="$self_dir"
+fi
 
 [[ "$(uname -s)" == Linux ]] || {
   printf 'error: this is the Linux installer; on macOS use scripts/dev-install-macos.sh\n' >&2
@@ -97,6 +118,23 @@ step() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# The header doubles as the help text, but standalone there is no file to read
+# it back out of ($SELF is a pipe), so fall back to the flag list.
+usage() {
+  if [[ -f "$SELF" ]]; then
+    sed -n '2,/^set -euo/p' "$SELF" | sed '$d'
+  else
+    printf '%s\n' \
+      'dev-install-linux.sh - build and install "Hyprlayer Dev" from origin/main' \
+      '' \
+      '  --force               rebuild even if the ref has not moved' \
+      '  --ref <ref>           track something else (a branch, tag, SHA)' \
+      '  --no-fetch            use what is already fetched (offline)' \
+      '  --no-version-suffix   build a bare x.y.z' \
+      '  --uninstall           remove the install (keeps its data dir)'
+  fi
+}
+
 refresh_caches() {
   command -v update-desktop-database >/dev/null \
     && update-desktop-database -q "$PREFIX/share/applications" 2>/dev/null || true
@@ -111,7 +149,7 @@ while [[ $# -gt 0 ]]; do
     --uninstall) UNINSTALL=1; shift ;;
     --no-version-suffix) VERSION_SUFFIX=0; shift ;;
     --ref)       REF="${2:?--ref needs a value}"; shift 2 ;;
-    -h|--help)   sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 0 ;;
+    -h|--help)   usage; exit 0 ;;
     *)           die "unknown argument: $1" ;;
   esac
 done
@@ -133,15 +171,26 @@ for tool in git cargo pnpm node install; do
 done
 
 # ─── 1. a throwaway clone that tracks the remote ────────────────────
-# Cloned from the local repo (fast, no network for the object transfer), then
-# repointed at the real origin so `origin/main` means the same thing here as it
-# does in the working tree.
+# From a checkout: cloned from the local repo, then repointed at the real origin
+# so `origin/main` means the same thing here as it does in the working tree.
+# Standalone: cloned from GitHub through `gh repo clone`, which carries the gh
+# token and honours the user's ssh/https preference — a bare `git clone` of a
+# private repo only works if they have already run `gh auth setup-git`.
 if [[ ! -d "$SRC_DIR/.git" ]]; then
   step "Creating build clone at $SRC_DIR"
   mkdir -p "$CACHE_DIR"
   rm -rf "$SRC_DIR"
-  git clone --quiet "$REPO" "$SRC_DIR"
-  git -C "$SRC_DIR" remote set-url origin "$(git -C "$REPO" remote get-url origin)"
+  if [[ -n "$REPO" ]]; then
+    git clone --quiet "$REPO" "$SRC_DIR"
+    git -C "$SRC_DIR" remote set-url origin "$(git -C "$REPO" remote get-url origin)"
+  elif [[ -z "${HYPRLAYER_DEV_ORIGIN:-}" ]] && command -v gh >/dev/null; then
+    info "source: $ORIGIN_SLUG via gh"
+    gh repo clone "$ORIGIN_SLUG" "$SRC_DIR" -- --quiet \
+      || die "clone failed — is gh authenticated for $ORIGIN_SLUG? (gh auth status)"
+  else
+    info "source: ${HYPRLAYER_DEV_ORIGIN:-https://github.com/$ORIGIN_SLUG.git}"
+    git clone --quiet "${HYPRLAYER_DEV_ORIGIN:-https://github.com/$ORIGIN_SLUG.git}" "$SRC_DIR"
+  fi
 fi
 
 if [[ $FETCH -eq 1 ]]; then
@@ -261,4 +310,8 @@ info "commit    $SHORT — $SUBJECT"
 info "path      $INSTALLED_BIN"
 info "launch    $BIN_NAME   (or \"$APP_NAME\" in the app launcher)"
 info "data      $DATA_DIR  (separate from the released app)"
-info "refresh   $REPO/scripts/dev-install-linux.sh"
+if [[ -n "$REPO" ]]; then
+  info "refresh   $REPO/scripts/dev-install-linux.sh"
+else
+  info "refresh   $BOOTSTRAP"
+fi
