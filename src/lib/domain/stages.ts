@@ -63,6 +63,37 @@ export const STAGE_PHASE: Record<StageKey, SdlcPhase> = {
 };
 
 /**
+ * The phase an agent falls into when its description names no stage, keyed by
+ * frontmatter `name`. Organization is presentation, so it lives here rather
+ * than in the agent files: hyprlayer-cli dropped the `category:` key it used
+ * to ship (`feat/named-subagents`), leaving shipped frontmatter to the four
+ * keys Claude Code documents. These eleven predate the "Spawn during the
+ * <Stage> stage" phrasing and would otherwise all land in [`ANY_STAGE`].
+ *
+ * An agent written to the convention needs no entry — the description wins
+ * (see `phaseFolder`), and adding one here would be dead weight. `Discover`
+ * is the rollup for every research/lookup agent, folding in the old Knowledge
+ * Graph and Tools categories.
+ *
+ * `Record<string, …>`, not a closed key union: the name is free text from a
+ * file we do not own. Read it through a `Map` (see `NAME_PHASE`), never by
+ * bare index.
+ */
+export const AGENT_PHASE: Record<string, SdlcPhase> = {
+  "adversarial-reviewer": "Verify",
+  ship: "Deliver",
+  archivist: "Discover",
+  "codebase-analyzer": "Discover",
+  "codebase-locator": "Discover",
+  "codebase-pattern-finder": "Discover",
+  "jira-searcher": "Discover",
+  "jira-ticket-reader": "Discover",
+  "thoughts-analyzer": "Discover",
+  "thoughts-locator": "Discover",
+  "web-search-researcher": "Discover",
+};
+
+/**
  * The theme custom-property *name* (never a raw hex, the same rule
  * `Engine.accent_token` follows in `settings.rs`) that colours each phase's
  * folder header and agent dots. "Any stage" carries none on purpose: it is a

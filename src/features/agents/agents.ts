@@ -18,7 +18,16 @@ import type {
   AgentSkill,
 } from "@/lib/bindings";
 import { MODELS } from "@/lib/domain/models";
-import { ANY_STAGE, PHASE_COLOR, SDLC_PHASES, STAGE_PHASE, STAGES, type StageKey } from "@/lib/domain/stages";
+import {
+  AGENT_PHASE,
+  ANY_STAGE,
+  PHASE_COLOR,
+  SDLC_PHASES,
+  type SdlcPhase,
+  STAGE_PHASE,
+  STAGES,
+  type StageKey,
+} from "@/lib/domain/stages";
 
 /** The frontmatter `model` value for "whatever spawned me", claude's own
  *  spelling, and what an absent key means. */
@@ -326,20 +335,30 @@ const STAGE_PHRASE = new RegExp(
   "i",
 );
 
+/** A `Map`, not [`AGENT_PHASE`] itself: `name` is free text out of a user's
+ *  frontmatter, so `AGENT_PHASE["toString"]` would resolve to
+ *  `Object.prototype.toString` and file the agent under a function. Same
+ *  reason [`PHASE_TOKEN`] below is a `Map`. */
+const NAME_PHASE = new Map<string, SdlcPhase>(Object.entries(AGENT_PHASE));
+
 /** The phase an agent's description names via the shipped agents' convention
- *  ("Spawn during the <Stage> stage"), or [`ANY_STAGE`] when it names none. */
+ *  ("Spawn during the <Stage> stage"), else the one [`AGENT_PHASE`] assigns
+ *  its name, else [`ANY_STAGE`]. The description wins: an agent that states
+ *  its own stage is authoritative over a table it never sees. */
 export function phaseFolder(agent: AgentFile): string {
   const match = agent.description.match(STAGE_PHRASE);
-  if (!match) return ANY_STAGE;
-  return STAGE_PHASE[match[1].toLowerCase() as StageKey] ?? ANY_STAGE;
+  if (match) return STAGE_PHASE[match[1].toLowerCase() as StageKey] ?? ANY_STAGE;
+  return NAME_PHASE.get(agent.name) ?? ANY_STAGE;
 }
 
 /**
  * An agent's folder, highest precedence first:
  * - plugin agent: `overlay.folder` (non-empty) → its plugin's name
  * - owned agent: `category` (non-empty) → `overlay.folder` (non-empty,
- *   legacy) → the phase for the stage its description names, else
- *   [`ANY_STAGE`], when `groupUncategorized` is on → loose (`""`)
+ *   legacy) → [`phaseFolder`], when `groupUncategorized` is on → loose (`""`)
+ *
+ * `category` stays at the top even though we no longer ship it: a
+ * user-authored agent may still set it, and it is theirs to set.
  *
  * Prefer [`folderResolver`] at a call site that has a whole list: it binds the
  * library and the flag once instead of threading both through every layer.

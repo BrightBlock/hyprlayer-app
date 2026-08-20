@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentFile, AgentLibrarySettings, AgentRule, AgentSkill } from "@/lib/bindings";
-import { ANY_STAGE, PHASE_COLOR, SDLC_PHASES, STAGE_PHASE, STAGES } from "@/lib/domain/stages";
+import {
+  AGENT_PHASE,
+  ANY_STAGE,
+  PHASE_COLOR,
+  SDLC_PHASES,
+  STAGE_PHASE,
+  STAGES,
+} from "@/lib/domain/stages";
 import {
   AGENT_TOOLS,
   agentRows,
@@ -392,6 +399,53 @@ describe("phaseFolder", () => {
       expect(STAGE_PHASE[key]).toBeTruthy();
     }
   });
+
+  it("files an agent whose description names no stage by AGENT_PHASE's name entry", () => {
+    // The eleven shipped agents written before the "Spawn during the <Stage>
+    // stage" convention. With `category:` gone from the files they have
+    // nothing else to go on.
+    const expected: Record<string, string> = {
+      "adversarial-reviewer": "Verify",
+      ship: "Deliver",
+      archivist: "Discover",
+      "codebase-analyzer": "Discover",
+      "codebase-locator": "Discover",
+      "codebase-pattern-finder": "Discover",
+      "jira-searcher": "Discover",
+      "jira-ticket-reader": "Discover",
+      "thoughts-analyzer": "Discover",
+      "thoughts-locator": "Discover",
+      "web-search-researcher": "Discover",
+    };
+    for (const [name, phase] of Object.entries(expected)) {
+      expect(phaseFolder(agent({ name, description: "Names no stage." }))).toBe(phase);
+      expect(AGENT_PHASE[name]).toBe(phase);
+    }
+  });
+
+  it("lets a description that names a stage beat the table", () => {
+    expect(
+      phaseFolder(agent({ name: "archivist", description: "Spawn during the Ship stage" })),
+    ).toBe("Deliver");
+    expect(
+      phaseFolder(agent({ name: "ship", description: "Spawn during the Research stage" })),
+    ).toBe("Discover");
+  });
+
+  it("still returns Any stage for an agent in neither the phrase nor the table", () => {
+    expect(phaseFolder(agent({ name: "my-helper", description: "Does a thing." }))).toBe(
+      ANY_STAGE,
+    );
+  });
+
+  it("never resolves a name through Object.prototype", () => {
+    // `name` is free text from a user's frontmatter, so the table has to be
+    // read through a Map: `AGENT_PHASE["toString"]` would otherwise be a
+    // function, and that function would become the folder.
+    for (const name of ["toString", "constructor", "hasOwnProperty", "__proto__", "valueOf"]) {
+      expect(phaseFolder(agent({ name, description: "Names no stage." }))).toBe(ANY_STAGE);
+    }
+  });
 });
 
 describe("folderOf", () => {
@@ -414,6 +468,12 @@ describe("folderOf", () => {
     const a = agent({ description: "Spawn during the Plan stage" });
     expect(folderOf(a, DEFAULT_OVERLAY, false)).toBe("");
     expect(folderOf(a, DEFAULT_OVERLAY, true)).toBe("Design");
+  });
+
+  it("a dragged overlay.folder wins over the AGENT_PHASE table", () => {
+    const a = agent({ name: "codebase-locator", description: "Names no stage." });
+    expect(folderOf(a, DEFAULT_OVERLAY, true)).toBe("Discover");
+    expect(folderOf(a, { ...DEFAULT_OVERLAY, folder: "Scratch" }, true)).toBe("Scratch");
   });
 
   it("a legacy overlay folder still wins over a derived phase, so clearing it must be deliberate", () => {
@@ -527,6 +587,13 @@ describe("status and scope", () => {
       MUTED,
     );
     expect(dotColor(agent({ category: "Spike" }), DEFAULT_OVERLAY, grouped)).toBe(MUTED);
+  });
+
+  it("dots an AGENT_PHASE agent with its phase token rather than the muted colour", () => {
+    for (const [name, phase] of Object.entries(AGENT_PHASE)) {
+      const dot = dotColor(agent({ name, description: "Names no stage." }), DEFAULT_OVERLAY, grouped);
+      expect(dot).toBe(`var(${PHASE_COLOR[phase as keyof typeof PHASE_COLOR]})`);
+    }
   });
 
   it("never resolves a folder name through Object.prototype", () => {
