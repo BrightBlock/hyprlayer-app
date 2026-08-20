@@ -17,6 +17,19 @@ export default defineConfig(async () => ({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
 
+  build: {
+    // Vite's 500 kB warning is a heuristic about download latency on a web
+    // deploy. Nothing here is downloaded: Tauri serves the bundle off local
+    // disk through its custom protocol, and only the entry chunk (~190 kB
+    // gzipped: react-dom, the router, the query client, the app shell) is
+    // fetched at startup. Everything above the old limit is behind a dynamic
+    // import — the CodeMirror core (doc/file/diff panes), the oniguruma WASM
+    // and the C++ grammar (first highlighted chat fence). Left high enough
+    // that a genuinely eager regression — something heavy landing in the
+    // entry chunk — still trips it.
+    chunkSizeWarningLimit: 700,
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
