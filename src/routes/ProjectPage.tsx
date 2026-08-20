@@ -100,6 +100,7 @@ import { ProjectBoard } from "@/features/board/ProjectBoard";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import { useBootstrap, useDetachPr, useSetWorkstreamStage, useWorkstreams } from "@/lib/queries";
 import { basename } from "@/lib/path";
+import { shortSha } from "@/lib/format";
 import { drawerWidth, splitPaneFloor } from "@/lib/layout";
 import { clamp, startEdgeDrag } from "@/lib/resize";
 import { useElementWidth } from "@/lib/useElementWidth";
@@ -859,11 +860,12 @@ export function ProjectPage() {
   };
   const openDocPreview = (path: string, title: string) =>
     openViewerTab((s) => s.docPreviewPath === path, title, { docPreviewPath: path });
-  const openDiff = (path: string, staged: boolean) =>
+  const openDiff = (path: string, staged: boolean, sha?: string) =>
     openViewerTab(
-      (s) => s.diffView?.path === path && s.diffView?.staged === staged,
-      basename(path),
-      { diffView: { path, staged } },
+      (s) =>
+        s.diffView?.path === path && s.diffView?.staged === staged && s.diffView?.sha === sha,
+      sha ? `${basename(path)} @ ${shortSha(sha)}` : basename(path),
+      { diffView: { path, staged, sha } },
     );
   const openFile = (path: string) =>
     openViewerTab((s) => s.filePath === path, basename(path), { filePath: path });
@@ -1284,6 +1286,7 @@ export function ProjectPage() {
           id={activeView.item.id}
           path={shell.diffView.path}
           staged={shell.diffView.staged}
+          sha={shell.diffView.sha}
         />
       );
     }
@@ -1831,6 +1834,7 @@ export function ProjectPage() {
               onOpenDiff={openDiff}
               onOpenFile={openFile}
               filesOnly={folderProject}
+              baseBranch={activeView?.item.baseBranch ?? null}
             />
           </div>
           <SidebarTasksPanel sessionId={focusedShell?.sessionId} />

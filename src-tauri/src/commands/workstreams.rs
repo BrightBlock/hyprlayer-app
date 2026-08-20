@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use hyprlayer_core::gitops::{DirEntry, FileSides, WorktreeGitStatus};
+use hyprlayer_core::gitops::{CommitEntry, DirEntry, FileSides, GitFileEntry, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::pr::{self, MergeMethod, PrStatus, PrSummary};
@@ -1342,10 +1342,52 @@ pub async fn reprovision_workstream(
     Ok(item_view(item, Some(link)))
 }
 
-/// Run a blocking git operation against a workstream's worktree: load the item,
-/// hand its worktree path to `f` on the blocking pool, and map any core error to
-/// an `AppError` tagged with `op` (the stable code the frontend branches on).
-/// Every command below is a one-line call to this.
+/// What a worktree-git failure almost always means: the command resolved a
+/// workstream and then could not read the directory it points at.
+const WORKTREE_GONE: &str = "The worktree may have been deleted; archive this workstream.";
+
+/// Run a blocking git operation against a workstream's worktree AND its base
+/// branch: load the item, hand both to `f` on the blocking pool, and map any
+/// core error to an `AppError` tagged with `op` and carrying `remedy`.
+async fn with_worktree_base_remedy<T, F>(
+    state: &State<'_, AppState>,
+    id: &str,
+    op: &'static str,
+    remedy: &'static str,
+    f: F,
+) -> CmdResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Path, &str) -> Result<T, CoreError> + Send + 'static,
+{
+    let item = load_item(state, id).await?;
+    blocking(op, move || {
+        f(Path::new(&item.worktree_path), &item.base_branch)
+    })
+    .await?
+    .map_err(|e| AppError {
+        code: op.to_string(),
+        message: e.to_string(),
+        remedy: Some(remedy.into()),
+    })
+}
+
+/// [`with_worktree_base_remedy`] with the default worktree-gone remedy.
+async fn with_worktree_base<T, F>(
+    state: &State<'_, AppState>,
+    id: &str,
+    op: &'static str,
+    f: F,
+) -> CmdResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Path, &str) -> Result<T, CoreError> + Send + 'static,
+{
+    with_worktree_base_remedy(state, id, op, WORKTREE_GONE, f).await
+}
+
+/// [`with_worktree_base`] for the commands that only need the worktree path.
+/// Every command that needs only the path is a one-line call to this.
 async fn with_worktree<T, F>(
     state: &State<'_, AppState>,
     id: &str,
@@ -1356,15 +1398,39 @@ where
     T: Send + 'static,
     F: FnOnce(&Path) -> Result<T, CoreError> + Send + 'static,
 {
-    let item = load_item(state, id).await?;
-    blocking(op, move || f(Path::new(&item.worktree_path)))
-        .await?
-        .map_err(|e| AppError {
-            code: op.to_string(),
-            message: e.to_string(),
-            remedy: Some("The worktree may have been deleted; archive this workstream.".into()),
-        })
+    // Both closure params are annotated: rustc infers a higher-ranked signature
+    // here over two elided lifetimes, and an untyped `_` turns a mistake into an
+    // opaque "lifetime may not live long enough" rather than a type error.
+    with_worktree_base(state, id, op, move |p: &Path, _: &str| f(p)).await
 }
+
+/// [`with_worktree`] with a caller-supplied remedy.
+///
+/// [`WORKTREE_GONE`] assumes the only way one of these commands fails is a
+/// worktree that is no longer on disk. The sha-taking reads break that: they
+/// also fail on a commit-ish git cannot resolve, which is what an old
+/// commit-diff tab becomes after a rebase or a squash-merge rewrites the
+/// branch. Telling someone to archive a healthy workstream because a stale tab
+/// was reopened is the same actively-wrong advice `list_commits` routes around
+/// by returning an empty list for an unborn HEAD.
+async fn with_worktree_remedy<T, F>(
+    state: &State<'_, AppState>,
+    id: &str,
+    op: &'static str,
+    remedy: &'static str,
+    f: F,
+) -> CmdResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Path) -> Result<T, CoreError> + Send + 'static,
+{
+    with_worktree_base_remedy(state, id, op, remedy, move |p: &Path, _: &str| f(p)).await
+}
+
+/// Remedy for the two sha-addressed reads. See [`with_worktree_remedy`].
+const COMMIT_GONE: &str =
+    "This commit may no longer be on the branch after a rebase or squash-merge; \
+     reopen the file from the Commits tab.";
 
 /// Split staged/unstaged status for the source-control panel (thoughts/ and
 /// .hyprlayer/ excluded).
@@ -1480,6 +1546,59 @@ pub async fn worktree_file_sides(
     with_worktree(&state, &id, "worktree_file_sides", move |p| {
         hyprlayer_core::gitops::worktree_file_sides(p, &path, staged)
     })
+    .await
+}
+
+/// The commits this workstream added on top of its base branch, newest first
+/// (capped backend-side). Empty — not an error — when the branch has diverged
+/// from nothing yet or HEAD is unborn.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_workstream_commits(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Vec<CommitEntry>> {
+    with_worktree_base(&state, &id, "list_workstream_commits", |p, base| {
+        hyprlayer_core::gitops::list_commits(p, base)
+    })
+    .await
+}
+
+/// Files one commit changed, diffed against its first parent, with renames
+/// detected so the labels match the Changes panel.
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_commit_files(
+    state: State<'_, AppState>,
+    id: String,
+    sha: String,
+) -> CmdResult<Vec<GitFileEntry>> {
+    with_worktree_remedy(
+        &state,
+        &id,
+        "worktree_commit_files",
+        COMMIT_GONE,
+        move |p| hyprlayer_core::gitops::commit_files(p, &sha),
+    )
+    .await
+}
+
+/// The two file texts the diff viewer compares for a commit (first parent vs. commit).
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_commit_file_sides(
+    state: State<'_, AppState>,
+    id: String,
+    sha: String,
+    path: String,
+) -> CmdResult<FileSides> {
+    with_worktree_remedy(
+        &state,
+        &id,
+        "worktree_commit_file_sides",
+        COMMIT_GONE,
+        move |p| hyprlayer_core::gitops::commit_file_sides(p, &sha, &path),
+    )
     .await
 }
 

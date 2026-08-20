@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCompactAge, formatRelativeTime } from "./format";
+import { formatCompactAge, formatRelativeTime, shortSha } from "./format";
 
 const NOW = Date.UTC(2026, 6, 10, 12, 0, 0);
 const ago = (ms: number) => formatCompactAge(NOW - ms, NOW);
@@ -36,5 +36,15 @@ describe("formatCompactAge", () => {
 
   it("clamps a future instant to zero rather than going negative", () => {
     expect(formatCompactAge(NOW + DAY, NOW)).toBe("0m");
+  });
+});
+
+describe("shortSha", () => {
+  it("truncates a full sha to seven characters", () => {
+    expect(shortSha("a1b2c3d4e5f6789012345678901234567890abcd")).toBe("a1b2c3d");
+  });
+
+  it("returns an already-short input unchanged", () => {
+    expect(shortSha("a1b2c3")).toBe("a1b2c3");
   });
 });

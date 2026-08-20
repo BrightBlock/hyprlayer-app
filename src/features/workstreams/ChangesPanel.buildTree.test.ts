@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { GitFileEntry } from "@/lib/bindings";
 import { buildTree, type TreeNode } from "./ChangesPanel";
 
-const added = (path: string): GitFileEntry => ({ path, change: "added" });
+const added = (path: string): GitFileEntry => ({ path, change: "added", oldPath: null });
 
 /** Flatten to `depth:name` rows the way TreeLevel renders them: a node with an
  *  entry and no children is a file leaf; anything else is a folder. */

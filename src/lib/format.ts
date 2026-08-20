@@ -63,3 +63,12 @@ export function formatRelativeTime(epochMs: number | null, from: number = Date.n
   if (seconds < 60) return `${seconds}s ago`;
   return `${ageToken(Math.floor(seconds / 60))} ago`;
 }
+
+/**
+ * A commit sha abbreviated for display. Seven characters, git's own default
+ * abbreviation length; the full sha is what actually addresses a diff, so this
+ * is presentation only and never round-trips.
+ */
+export function shortSha(sha: string): string {
+  return sha.slice(0, 7);
+}

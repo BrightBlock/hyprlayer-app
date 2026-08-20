@@ -239,6 +239,19 @@ export const commands = {
 	 */
 	worktreeSearchFiles: (id: string, query: string, limit: number) => typedError<string[], AppError>(__TAURI_INVOKE("worktree_search_files", { id, query, limit })),
 	/**
+	 *  The commits this workstream added on top of its base branch, newest first
+	 *  (capped backend-side). Empty — not an error — when the branch has diverged
+	 *  from nothing yet or HEAD is unborn.
+	 */
+	listWorkstreamCommits: (id: string) => typedError<CommitEntry[], AppError>(__TAURI_INVOKE("list_workstream_commits", { id })),
+	/**
+	 *  Files one commit changed, diffed against its first parent, with renames
+	 *  detected so the labels match the Changes panel.
+	 */
+	worktreeCommitFiles: (id: string, sha: string) => typedError<GitFileEntry[], AppError>(__TAURI_INVOKE("worktree_commit_files", { id, sha })),
+	/**  The two file texts the diff viewer compares for a commit (first parent vs. commit). */
+	worktreeCommitFileSides: (id: string, sha: string, path: string) => typedError<FileSides, AppError>(__TAURI_INVOKE("worktree_commit_file_sides", { id, sha, path })),
+	/**
 	 *  Point the live worktree watcher at this workstream, so external edits emit
 	 *  `WorktreeChanged` and refresh the Changes panel + git status without a focus
 	 *  event. Single-slot: switching replaces the previous watcher; same id is a no-op.
@@ -1353,6 +1366,19 @@ export type CodexSettings = {
 };
 
 /**
+ *  One commit on a workstream's branch, as the sidebar renders it. `sha` is the
+ *  full 40-char id (the frontend abbreviates for display and addresses diffs by
+ *  the full id); `time_ms` is the AUTHOR time in epoch milliseconds, matching
+ *  what `git log` shows by default.
+ */
+export type CommitEntry = {
+	sha: string,
+	subject: string,
+	author: string,
+	timeMs: number | null,
+};
+
+/**
  *  The hyprlayer CLI config file changed on disk (the CLI rewrote it, or the
  *  user edited it). Frontend should refetch bootstrap/project queries.
  */
@@ -1514,6 +1540,12 @@ export type FileSides = {
 	modified: string,
 	originalExists: boolean,
 	modifiedExists: boolean,
+	/**
+	 *  The path the original side was read from, when it differs from the path
+	 *  asked for — i.e. the pre-rename name. `None` on every other read, so
+	 *  only a rename's header has anything extra to say.
+	 */
+	originalPath: string | null,
 };
 
 export type FmPatchDto = {
@@ -1568,11 +1600,19 @@ export type FullDiskAccess = "granted" |
 /**
  *  One changed file within a worktree, as it appears in the staged or unstaged
  *  list. `change` is one of: added | modified | deleted | renamed | untracked |
- *  typechange | conflict.
+ *  typechange | conflict | other. `other` is the fallback for deltas none of
+ *  the surfaces above have a glyph for (copied, ignored, unreadable, conflicted
+ *  in a tree-to-tree diff).
+ * 
+ *  `path` is always the file's name *after* the change. `old_path` carries the
+ *  name before it, and is `Some` only on a detected rename — the panels render
+ *  `old_path → path` so a rename reads as one file moving rather than as a new
+ *  file appearing at an unfamiliar name.
  */
 export type GitFileEntry = {
 	path: string,
 	change: string,
+	oldPath: string | null,
 };
 
 /**  User-tunable git behaviour. Surfaced in Settings → Git. */

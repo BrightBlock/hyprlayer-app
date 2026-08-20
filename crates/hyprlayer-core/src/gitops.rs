@@ -335,13 +335,6 @@ pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
         if crate::worktree::is_thoughts_path(&path) || is_hyprlayer_internal(&path) {
             continue;
         }
-        let change = match delta.status() {
-            git2::Delta::Added | git2::Delta::Untracked => "added",
-            git2::Delta::Deleted => "deleted",
-            git2::Delta::Renamed => "renamed",
-            git2::Delta::Modified => "modified",
-            _ => "other",
-        };
         let patch = git2::Patch::from_diff(&diff, idx)
             .ok()
             .flatten()
@@ -350,7 +343,7 @@ pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
             .unwrap_or_default();
         files.push(FileDiff {
             path,
-            change: change.to_string(),
+            change: delta_change(delta.status()).to_string(),
             patch,
         });
     }
@@ -437,13 +430,21 @@ pub fn prompt_git_vars(
 
 /// One changed file within a worktree, as it appears in the staged or unstaged
 /// list. `change` is one of: added | modified | deleted | renamed | untracked |
-/// typechange | conflict.
+/// typechange | conflict | other. `other` is the fallback for deltas none of
+/// the surfaces above have a glyph for (copied, ignored, unreadable, conflicted
+/// in a tree-to-tree diff).
+///
+/// `path` is always the file's name *after* the change. `old_path` carries the
+/// name before it, and is `Some` only on a detected rename — the panels render
+/// `old_path → path` so a rename reads as one file moving rather than as a new
+/// file appearing at an unfamiliar name.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct GitFileEntry {
     pub path: String,
     pub change: String,
+    pub old_path: Option<String>,
 }
 
 /// A worktree's working state split the way the panel renders it: what's in the
@@ -469,6 +470,10 @@ pub struct FileSides {
     pub modified: String,
     pub original_exists: bool,
     pub modified_exists: bool,
+    /// The path the original side was read from, when it differs from the path
+    /// asked for — i.e. the pre-rename name. `None` on every other read, so
+    /// only a rename's header has anything extra to say.
+    pub original_path: Option<String>,
 }
 
 /// One immediate child of a directory in the "All Files" tree. `path` is
@@ -481,6 +486,26 @@ pub struct DirEntry {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+}
+
+/// Beyond this many commits we stop walking. A workstream branch is a unit of
+/// work, not a history, so this is a backstop against a pathological branch,
+/// not a page size — the merge-base bound in `list_commits` is what actually
+/// scopes the list, and a workstream that reaches 200 commits is an outlier.
+const MAX_COMMITS: usize = 200;
+
+/// One commit on a workstream's branch, as the sidebar renders it. `sha` is the
+/// full 40-char id (the frontend abbreviates for display and addresses diffs by
+/// the full id); `time_ms` is the AUTHOR time in epoch milliseconds, matching
+/// what `git log` shows by default.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitEntry {
+    pub sha: String,
+    pub subject: String,
+    pub author: String,
+    pub time_ms: f64,
 }
 
 /// Paths the panel never touches: the app-managed `thoughts/` links and the
@@ -555,6 +580,33 @@ fn unstaged_change(s: git2::Status) -> Option<&'static str> {
     )
 }
 
+/// Change label for one diff delta. Shared by the working-tree diff and the
+/// per-commit file list so the two surfaces can't label the same delta
+/// differently. `Typechange` is spelled out because the status classifiers
+/// already emit it and the panel has a glyph for it; everything left over
+/// (Copied, Ignored, Unreadable, Conflicted) falls through to `other`.
+fn delta_change(status: git2::Delta) -> &'static str {
+    match status {
+        git2::Delta::Added | git2::Delta::Untracked => "added",
+        git2::Delta::Deleted => "deleted",
+        git2::Delta::Renamed => "renamed",
+        git2::Delta::Modified => "modified",
+        git2::Delta::Typechange => "typechange",
+        _ => "other",
+    }
+}
+
+/// The pre-rename path of one delta, for `GitFileEntry::old_path`. `None`
+/// unless the delta is a detected rename that actually moved the file, so a
+/// caller can hand this straight to the entry regardless of the change kind.
+fn delta_old_path(delta: &git2::DiffDelta<'_>, new_path: &str) -> Option<String> {
+    if delta.status() != git2::Delta::Renamed {
+        return None;
+    }
+    let old = delta.old_file().path()?.to_string_lossy().to_string();
+    (old != new_path).then_some(old)
+}
+
 /// The subset of `rels` the panel may act on (excluded infrastructure paths
 /// dropped), owned so it can move into a blocking closure.
 fn included_paths(rels: &[String]) -> Vec<String> {
@@ -587,12 +639,26 @@ pub fn worktree_git_status(worktree: &Path) -> Result<WorktreeGitStatus> {
         let s = entry.status();
         if let Some(change) = staged_change(s) {
             staged.push(GitFileEntry {
+                // The status walk's own delta names the rename's old side, so
+                // the Changes panel renders `old → new` exactly as the Commits
+                // panel does. It is `None` in practice today: `status_options`
+                // leaves libgit2's rename detection off, so a staged `git mv`
+                // still arrives as a deleted plus an added entry. Turning it on
+                // is a separate change — the row's stage/unstage/discard
+                // buttons act on one path, and a single `renamed` row would
+                // strand the other half of the move.
+                old_path: entry
+                    .head_to_index()
+                    .and_then(|d| delta_old_path(&d, &path)),
                 path: path.clone(),
                 change: change.to_string(),
             });
         }
         if let Some(change) = unstaged_change(s) {
             unstaged.push(GitFileEntry {
+                old_path: entry
+                    .index_to_workdir()
+                    .and_then(|d| delta_old_path(&d, &path)),
                 path,
                 change: change.to_string(),
             });
@@ -723,12 +789,17 @@ pub fn discard_tracked_changes(worktree: &Path) -> Result<u32> {
     Ok(paths.len() as u32)
 }
 
-/// Content of a path in HEAD's tree, when present.
-fn head_blob_text(repo: &git2::Repository, rel: &Path) -> Option<String> {
-    let tree = repo.head().ok()?.peel_to_tree().ok()?;
+/// Content of a path inside a tree, when present.
+fn tree_blob_text(repo: &git2::Repository, tree: &git2::Tree, rel: &Path) -> Option<String> {
     let entry = tree.get_path(rel).ok()?;
     let blob = repo.find_blob(entry.id()).ok()?;
     Some(String::from_utf8_lossy(blob.content()).to_string())
+}
+
+/// Content of a path in HEAD's tree, when present.
+fn head_blob_text(repo: &git2::Repository, rel: &Path) -> Option<String> {
+    let tree = repo.head().ok()?.peel_to_tree().ok()?;
+    tree_blob_text(repo, &tree, rel)
 }
 
 /// Content of a path in the index (staged), when present.
@@ -762,6 +833,11 @@ pub fn worktree_file_sides(worktree: &Path, rel: &str, staged: bool) -> Result<F
         modified_exists: modified.is_some(),
         original: original.unwrap_or_default(),
         modified: modified.unwrap_or_default(),
+        // Working-tree reads diff a path against itself, so there is never a
+        // second path to name. A staged rename's old side is an accepted gap:
+        // the Changes panel labels the row `old → new` from the status walk,
+        // but the diff still opens against the new name alone.
+        original_path: None,
     })
 }
 
@@ -936,6 +1012,184 @@ pub fn write_text_file(worktree: &Path, rel: &str, content: &str) -> Result<()> 
     std::fs::write(&tmp, content)?;
     std::fs::rename(&tmp, &abs)?;
     Ok(())
+}
+
+/// The commits a workstream added on top of its base: a revwalk from HEAD with
+/// the merge-base of (`base_branch`, HEAD) hidden, newest first, capped at
+/// [`MAX_COMMITS`].
+///
+/// The tab answers "what did this workstream commit", so a commit is only ever
+/// listed when it is provably on this side of the divergence. If the base does
+/// not resolve (it was deleted, or a fresh clone never fetched it) there is no
+/// divergence point to measure from, and the list is empty rather than a walk
+/// of whatever history HEAD happens to sit on — showing the project's commits
+/// as if the workstream had made them is worse than showing none. Resolution
+/// stays best-effort and never errors, the same posture as the ahead/behind
+/// counts in `worktree::status`. An in-place workstream sitting on the base
+/// branch itself has merge-base == HEAD and correctly yields nothing.
+///
+/// An unborn HEAD (a repo initialized but never committed to) yields an empty
+/// list, not an error: it genuinely has no commits, and every command on the
+/// `with_worktree` path carries the "the worktree may have been deleted;
+/// archive this workstream" remedy, which would be actively wrong advice here.
+pub fn list_commits(worktree: &Path, base_branch: &str) -> Result<Vec<CommitEntry>> {
+    let repo = open_repo(worktree)?;
+    let mut walk = repo.revwalk().map_err(|e| git_err("git2 revwalk", e))?;
+    walk.set_sorting(git2::Sort::TIME)
+        .map_err(|e| git_err("git2 revwalk sort", e))?;
+    if walk.push_head().is_err() {
+        return Ok(Vec::new());
+    }
+
+    let Some(base) = (|| -> Option<git2::Oid> {
+        let head = repo.head().ok()?.target()?;
+        let base = repo
+            .revparse_single(base_branch)
+            .ok()?
+            .peel_to_commit()
+            .ok()?
+            .id();
+        repo.merge_base(head, base).ok()
+    })() else {
+        return Ok(Vec::new());
+    };
+    // Hiding the merge-base is the only bound on this walk, so a failure here is
+    // not a detail to shrug off: the walk would run to the root and report the
+    // project's whole history as the workstream's own commits. Same answer as an
+    // unresolvable base above — no bound, no list.
+    if walk.hide(base).is_err() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    for oid in walk.flatten().take(MAX_COMMITS) {
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+        let author = commit.author();
+        out.push(CommitEntry {
+            sha: oid.to_string(),
+            subject: commit.summary().unwrap_or_default().to_string(),
+            author: author.name().unwrap_or_default().to_string(),
+            time_ms: author.when().seconds() as f64 * 1000.0,
+        });
+    }
+    Ok(out)
+}
+
+/// Resolve a commit-ish to a commit. `revparse_single` rather than
+/// `Oid::from_str` so a short sha resolves too; every call site is a read.
+fn commit_at<'r>(repo: &'r git2::Repository, sha: &str) -> Result<git2::Commit<'r>> {
+    repo.revparse_single(sha)
+        .and_then(|o| o.peel_to_commit())
+        .map_err(|e| git_err("git2 commit", e))
+}
+
+/// Files one commit changed, diffed against its FIRST parent. A merge therefore
+/// reports what the merge itself introduced relative to the branch it landed on,
+/// not the union of both sides. A root commit (no parents) diffs against an
+/// empty tree, so everything reads as added.
+///
+/// Applies the same `thoughts/` + `.hyprlayer/` filter as the working-tree
+/// surfaces, so a commit that touched the app's own infra lists the same files
+/// the Changes panel would have listed for it.
+pub fn commit_files(worktree: &Path, sha: &str) -> Result<Vec<GitFileEntry>> {
+    let repo = open_repo(worktree)?;
+    let commit = commit_at(&repo, sha)?;
+    let diff = commit_diff(&repo, &commit)?;
+
+    let mut files = Vec::new();
+    for delta in diff.deltas() {
+        let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if path.is_empty() || is_excluded(&path) {
+            continue;
+        }
+        files.push(GitFileEntry {
+            old_path: delta_old_path(&delta, &path),
+            path,
+            change: delta_change(delta.status()).to_string(),
+        });
+    }
+    Ok(files)
+}
+
+/// One commit's first-parent tree diff, with rename detection already run.
+/// A root commit (no parents) diffs against an empty tree.
+///
+/// Without `find_similar` a tree-to-tree diff never emits `Delta::Renamed` — a
+/// rename arrives as an Added plus a Deleted, while the Changes tab (which
+/// reads git2's status flags, INDEX_RENAMED/WT_RENAMED) calls the same file
+/// renamed. `git show` has `diff.renames` on by default for the same reason.
+fn commit_diff<'r>(
+    repo: &'r git2::Repository,
+    commit: &git2::Commit<'_>,
+) -> Result<git2::Diff<'r>> {
+    let tree = commit.tree().map_err(|e| git_err("git2 commit tree", e))?;
+    let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+    let mut diff = repo
+        .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+        .map_err(|e| git_err("git2 commit diff", e))?;
+    diff.find_similar(None)
+        .map_err(|e| git_err("git2 commit rename detection", e))?;
+    Ok(diff)
+}
+
+/// The path `rel` was renamed from within this diff, if the commit renamed it.
+fn renamed_from(diff: &git2::Diff<'_>, rel: &str) -> Option<String> {
+    diff.deltas().find_map(|delta| {
+        (delta.new_file().path() == Some(Path::new(rel)))
+            .then(|| delta_old_path(&delta, rel))
+            .flatten()
+    })
+}
+
+/// The two file texts the diff viewer compares for a commit: the path's content
+/// in the commit's first parent vs. its content in the commit. A path the commit
+/// renamed reads its original side at the pre-rename name, reported back as
+/// `original_path`, so the edits that came with the move are visible.
+///
+/// No `safe_join` here, unlike the working-tree readers: this touches only git
+/// trees, never the filesystem, and a path that escapes simply misses both trees
+/// and reports absent-on-both.
+pub fn commit_file_sides(worktree: &Path, sha: &str, rel: &str) -> Result<FileSides> {
+    let repo = open_repo(worktree)?;
+    let commit = commit_at(&repo, sha)?;
+    let p = Path::new(rel);
+
+    // A renamed file is asked for under its new name, which the parent tree has
+    // never heard of: reading the original side at `rel` reports absent and the
+    // viewer draws a wholly-added file, hiding whatever edits rode along with
+    // the move. The old name is re-derived from the same diff `commit_files`
+    // already ran rather than threaded down from the row that was clicked —
+    // that would put a second path through the IPC signature, the query key and
+    // the persisted tab model, for one extra tree diff per file opened.
+    let original_path = commit_diff(&repo, &commit)
+        .ok()
+        .and_then(|diff| renamed_from(&diff, rel));
+    let original_p = original_path.as_deref().map_or(p, Path::new);
+
+    let modified = commit
+        .tree()
+        .ok()
+        .and_then(|t| tree_blob_text(&repo, &t, p));
+    let original = commit
+        .parent(0)
+        .ok()
+        .and_then(|parent| parent.tree().ok())
+        .and_then(|t| tree_blob_text(&repo, &t, original_p));
+
+    Ok(FileSides {
+        original_exists: original.is_some(),
+        modified_exists: modified.is_some(),
+        original: original.unwrap_or_default(),
+        modified: modified.unwrap_or_default(),
+        original_path,
+    })
 }
 
 #[cfg(test)]
@@ -1390,5 +1644,330 @@ mod tests {
         // No origin remote → no link.
         let bare = repo_with_commit();
         assert_eq!(file_web_url(&bare.path().join("a.md")), None);
+    }
+
+    // `Signature::now` has one-second resolution, so commits built back to back
+    // share a timestamp and the Sort::TIME walk may emit them in either order.
+    // An explicit clock makes both the order and the asserted `time_ms` exact.
+    const T0: i64 = 1_700_000_000;
+    fn sig_at(n: i64) -> git2::Signature<'static> {
+        git2::Signature::new("t", "t@t", &git2::Time::new(T0 + n, 0)).unwrap()
+    }
+
+    #[test]
+    fn commits_stop_at_the_merge_base_with_the_base_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+
+        // Base commit at sig_at(0), pinned to an explicit `base` branch so the
+        // test doesn't depend on the machine's init.defaultBranch.
+        std::fs::write(dir.path().join("a.md"), "one\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.md")).unwrap();
+        index.write().unwrap();
+        let tree0 = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let base_oid = repo
+            .commit(Some("HEAD"), &sig_at(0), &sig_at(0), "base", &tree0, &[])
+            .unwrap();
+        let base_commit = repo.find_commit(base_oid).unwrap();
+        repo.branch("base", &base_commit, false).unwrap();
+
+        // Two more commits on HEAD, on top of the base.
+        std::fs::write(dir.path().join("a.md"), "two\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.md")).unwrap();
+        index.write().unwrap();
+        let tree1 = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let c1_oid = repo
+            .commit(
+                Some("HEAD"),
+                &sig_at(1),
+                &sig_at(1),
+                "first",
+                &tree1,
+                &[&base_commit],
+            )
+            .unwrap();
+        let c1 = repo.find_commit(c1_oid).unwrap();
+
+        std::fs::write(dir.path().join("a.md"), "three\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.md")).unwrap();
+        index.write().unwrap();
+        let tree2 = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &sig_at(2),
+            &sig_at(2),
+            "second",
+            &tree2,
+            &[&c1],
+        )
+        .unwrap();
+
+        let commits = list_commits(dir.path(), "base").unwrap();
+        assert_eq!(commits.len(), 2, "{commits:?}");
+        assert_eq!(commits[0].subject, "second");
+        assert_eq!(commits[1].subject, "first");
+        assert_eq!(commits[0].sha.len(), 40);
+        assert_eq!(commits[0].author, "t");
+        assert_eq!(commits[0].time_ms, (T0 + 2) as f64 * 1000.0);
+    }
+
+    #[test]
+    fn commits_are_empty_when_the_base_is_unresolvable() {
+        let dir = repo_with_commit();
+        // No divergence point means nothing is provably the workstream's; the
+        // project's own commits must not be listed as if it had made them.
+        assert!(list_commits(dir.path(), "no-such-branch")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn commits_are_empty_when_head_is_the_base() {
+        let dir = repo_with_commit();
+        let repo = open_repo(dir.path()).unwrap();
+        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("base", &head_commit, false).unwrap();
+
+        // An in-place workstream sitting on its own base branch: merge-base ==
+        // HEAD, so nothing is provably on top of it. Accepted gap, pinned here.
+        assert!(list_commits(dir.path(), "base").unwrap().is_empty());
+    }
+
+    #[test]
+    fn commits_are_empty_on_an_unborn_head() {
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        // A repo initialized but never committed to genuinely has no commits;
+        // this must never reach the shared "archive this workstream" remedy.
+        assert!(list_commits(dir.path(), "base").unwrap().is_empty());
+    }
+
+    #[test]
+    fn commit_files_lists_the_first_parent_diff_and_skips_infra() {
+        let dir = repo_with_commit();
+        let repo = open_repo(dir.path()).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+
+        std::fs::write(dir.path().join("real.md"), "keep\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("thoughts/jt")).unwrap();
+        std::fs::write(dir.path().join("thoughts/jt/x.md"), "skip\n").unwrap();
+        std::fs::create_dir_all(dir.path().join(".hyprlayer")).unwrap();
+        std::fs::write(dir.path().join(".hyprlayer/a.png"), "skip\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("real.md")).unwrap();
+        index.add_path(Path::new("thoughts/jt/x.md")).unwrap();
+        index.add_path(Path::new(".hyprlayer/a.png")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let oid = repo
+            .commit(
+                Some("HEAD"),
+                &sig_at(1),
+                &sig_at(1),
+                "add real",
+                &tree,
+                &[&parent],
+            )
+            .unwrap();
+
+        let files = commit_files(dir.path(), &oid.to_string()).unwrap();
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(files[0].path, "real.md");
+        assert_eq!(files[0].change, "added");
+    }
+
+    #[test]
+    fn commit_files_reports_a_rename_as_one_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+
+        let content = "same content, long enough to be detected as similar\n";
+        std::fs::write(dir.path().join("a.md"), content).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.md")).unwrap();
+        index.write().unwrap();
+        let tree0 = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let c0_oid = repo
+            .commit(Some("HEAD"), &sig_at(0), &sig_at(0), "init", &tree0, &[])
+            .unwrap();
+        let c0 = repo.find_commit(c0_oid).unwrap();
+
+        std::fs::remove_file(dir.path().join("a.md")).unwrap();
+        std::fs::write(dir.path().join("b.md"), content).unwrap();
+        let mut index = repo.index().unwrap();
+        index.remove_path(Path::new("a.md")).unwrap();
+        index.add_path(Path::new("b.md")).unwrap();
+        index.write().unwrap();
+        let tree1 = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let c1_oid = repo
+            .commit(
+                Some("HEAD"),
+                &sig_at(1),
+                &sig_at(1),
+                "rename",
+                &tree1,
+                &[&c0],
+            )
+            .unwrap();
+
+        // Without `find_similar` this sees two entries (added b.md + deleted
+        // a.md) and the assertion below fails, which is the point.
+        let files = commit_files(dir.path(), &c1_oid.to_string()).unwrap();
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(files[0].path, "b.md");
+        assert_eq!(files[0].change, "renamed");
+        // The name the panel renders to the left of the arrow.
+        assert_eq!(files[0].old_path.as_deref(), Some("a.md"));
+    }
+
+    #[test]
+    fn commit_file_sides_diffs_a_rename_against_its_old_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+
+        // Similar enough for `find_similar` to call it a rename, but not
+        // identical: the edited line is exactly what a rename read against the
+        // new path in the parent tree would swallow.
+        let before = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n";
+        let after = "one\ntwo\nthree\nFOUR\nfive\nsix\nseven\neight\n";
+
+        std::fs::write(dir.path().join("a.md"), before).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.md")).unwrap();
+        index.write().unwrap();
+        let tree0 = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let c0_oid = repo
+            .commit(Some("HEAD"), &sig_at(0), &sig_at(0), "init", &tree0, &[])
+            .unwrap();
+        let c0 = repo.find_commit(c0_oid).unwrap();
+
+        std::fs::remove_file(dir.path().join("a.md")).unwrap();
+        std::fs::write(dir.path().join("b.md"), after).unwrap();
+        let mut index = repo.index().unwrap();
+        index.remove_path(Path::new("a.md")).unwrap();
+        index.add_path(Path::new("b.md")).unwrap();
+        index.write().unwrap();
+        let tree1 = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let c1_oid = repo
+            .commit(
+                Some("HEAD"),
+                &sig_at(1),
+                &sig_at(1),
+                "rename and edit",
+                &tree1,
+                &[&c0],
+            )
+            .unwrap();
+        let c1_sha = c1_oid.to_string();
+
+        let files = commit_files(dir.path(), &c1_sha).unwrap();
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(files[0].change, "renamed");
+        assert_eq!(files[0].old_path.as_deref(), Some("a.md"));
+
+        // Read against `b.md` alone the parent tree misses, the file reports as
+        // wholly added and the `FOUR` edit is invisible.
+        let sides = commit_file_sides(dir.path(), &c1_sha, "b.md").unwrap();
+        assert!(sides.original_exists && sides.modified_exists, "{sides:?}");
+        assert_eq!(sides.original, before);
+        assert_eq!(sides.modified, after);
+        assert_eq!(sides.original_path.as_deref(), Some("a.md"));
+    }
+
+    #[test]
+    fn commit_files_uses_the_first_parent_for_a_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+
+        // Trees are built directly (no working-directory checkout needed): A is
+        // the common base, B adds b.md on top of A, C adds c.md on top of A on a
+        // divergent side branch.
+        let base_blob = repo.blob(b"base\n").unwrap();
+        let b_blob = repo.blob(b"b\n").unwrap();
+        let c_blob = repo.blob(b"c\n").unwrap();
+
+        let mut tb = repo.treebuilder(None).unwrap();
+        tb.insert("base.md", base_blob, 0o100_644).unwrap();
+        let tree_a = repo.find_tree(tb.write().unwrap()).unwrap();
+        let a_oid = repo
+            .commit(None, &sig_at(0), &sig_at(0), "A", &tree_a, &[])
+            .unwrap();
+        let a = repo.find_commit(a_oid).unwrap();
+
+        let mut tb = repo.treebuilder(Some(&tree_a)).unwrap();
+        tb.insert("b.md", b_blob, 0o100_644).unwrap();
+        let tree_b = repo.find_tree(tb.write().unwrap()).unwrap();
+        let b_oid = repo
+            .commit(None, &sig_at(1), &sig_at(1), "B", &tree_b, &[&a])
+            .unwrap();
+        let b = repo.find_commit(b_oid).unwrap();
+
+        let mut tb = repo.treebuilder(Some(&tree_a)).unwrap();
+        tb.insert("c.md", c_blob, 0o100_644).unwrap();
+        let tree_c = repo.find_tree(tb.write().unwrap()).unwrap();
+        let c_oid = repo
+            .commit(None, &sig_at(2), &sig_at(2), "C", &tree_c, &[&a])
+            .unwrap();
+        let c = repo.find_commit(c_oid).unwrap();
+
+        // Merge commit M, tree == B's tree: M didn't actually merge anything in,
+        // we're only testing which parent `commit_files` diffs against.
+        let m_oid = repo
+            .commit(
+                Some("HEAD"),
+                &sig_at(3),
+                &sig_at(3),
+                "M",
+                &tree_b,
+                &[&b, &c],
+            )
+            .unwrap();
+
+        let files = commit_files(dir.path(), &m_oid.to_string()).unwrap();
+        // M's tree equals B's tree: diffing against B (parent 0) yields nothing.
+        // Diffing against C (parent 1) would show b.md added and c.md deleted.
+        assert!(files.is_empty(), "{files:?}");
+    }
+
+    #[test]
+    fn commit_file_sides_reads_both_trees() {
+        let dir = repo_with_commit();
+        let repo = open_repo(dir.path()).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+
+        std::fs::write(dir.path().join("a.md"), "two\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.md")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let oid = repo
+            .commit(
+                Some("HEAD"),
+                &sig_at(1),
+                &sig_at(1),
+                "modify",
+                &tree,
+                &[&parent],
+            )
+            .unwrap();
+
+        let sides = commit_file_sides(dir.path(), &oid.to_string(), "a.md").unwrap();
+        assert_eq!(sides.original, "one\n");
+        assert_eq!(sides.modified, "two\n");
+        assert!(sides.original_exists && sides.modified_exists);
+        // Not a rename, so nothing extra for the header to say.
+        assert_eq!(sides.original_path, None);
+
+        // The root commit (repo_with_commit's own initial commit) has no
+        // parent, so the original side is absent.
+        let root_sha = parent.id().to_string();
+        let root_sides = commit_file_sides(dir.path(), &root_sha, "a.md").unwrap();
+        assert!(!root_sides.original_exists);
+        assert!(root_sides.modified_exists);
+        assert_eq!(root_sides.modified, "one\n");
     }
 }

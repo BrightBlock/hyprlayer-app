@@ -12,6 +12,8 @@ const q = vi.hoisted(() => ({
   useStageFiles: vi.fn(),
   useUnstageFiles: vi.fn(),
   useDiscardFiles: vi.fn(),
+  useWorkstreamCommits: vi.fn(),
+  useCommitFiles: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/queryClient", () => ({ queryClient: { invalidateQueries: vi.fn() } }));
@@ -51,9 +53,22 @@ function setup() {
   q.useStageFiles.mockReturnValue(mutation());
   q.useUnstageFiles.mockReturnValue(mutation());
   q.useDiscardFiles.mockReturnValue(mutation());
+  q.useWorkstreamCommits.mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  });
 
   render(
-    <ChangesPanel workstreamId="ws1" onOpenDoc={vi.fn()} onOpenDiff={vi.fn()} onOpenFile={vi.fn()} />,
+    <ChangesPanel
+      workstreamId="ws1"
+      onOpenDoc={vi.fn()}
+      onOpenDiff={vi.fn()}
+      onOpenFile={vi.fn()}
+      baseBranch="main"
+    />,
   );
 }
 

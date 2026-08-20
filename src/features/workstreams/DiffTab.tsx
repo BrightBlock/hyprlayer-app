@@ -4,8 +4,10 @@ import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { EditorView } from "@codemirror/view";
 
 import { ErrorNote, Spinner } from "@/components/ui";
-import { useFileSides } from "@/lib/queries";
+import { shortSha } from "@/lib/format";
+import { useCommitFileSides, useFileSides } from "@/lib/queries";
 import { diffWordHighlight, readOnlyExtensions, useLangForPath } from "./codeView";
+import { renamedLabel } from "./renamedLabel";
 
 type DiffMode = "unified" | "split";
 
@@ -17,14 +19,33 @@ function loadMode(): DiffMode {
 
 /** Rich read-only diff of one worktree file, shown as a main-pane tab. Uses
  *  CodeMirror's merge view (the frontend computes the diff from the two file
- *  texts the backend returns). Unified by default; toggles to side-by-side. */
-export function DiffTab({ id, path, staged }: { id: string; path: string; staged: boolean }) {
-  const sides = useFileSides(id, path, staged);
+ *  texts the backend returns). Unified by default; toggles to side-by-side.
+ *  With `sha` this instead renders one commit's diff of the path (first
+ *  parent vs. commit), opened from the Commits tab. */
+export function DiffTab({
+  id,
+  path,
+  staged,
+  sha,
+}: {
+  id: string;
+  path: string;
+  staged: boolean;
+  sha?: string;
+}) {
+  // Both hooks run every render; `enabled` picks which one actually fetches.
+  const working = useFileSides(id, path, staged, !sha);
+  const commit = useCommitFileSides(id, sha ?? "", path);
+  const sides = sha ? commit : working;
   const [mode, setMode] = useState<DiffMode>(loadMode);
   const lang = useLangForPath(path);
   const hostRef = useRef<HTMLDivElement>(null);
 
   const data = sides.data;
+  // A commit that renamed this file diffed it against its old name, so the
+  // header says so; the tab's own title stays the plain basename. `originalPath`
+  // is only ever set when it differs from `path`.
+  const heading = renamedLabel(path, data?.originalPath ?? null);
   // A file that exists on only one side (added/deleted) has nothing to lay out
   // side-by-side, so we pin those to unified and disable the toggle.
   const oneSided = !!data && (!data.originalExists || !data.modifiedExists);
@@ -78,11 +99,16 @@ export function DiffTab({ id, path, staged }: { id: string; path: string; staged
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-edge px-4">
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-dim" title={path}>
-          {path}
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-dim" title={heading}>
+          {heading}
         </span>
-        <span className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-[10px] font-medium text-ink-dim">
-          {staged ? "staged" : "working"}
+        <span
+          className={`shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-[10px] font-medium text-ink-dim ${
+            sha ? "font-mono" : ""
+          }`}
+          title={sha}
+        >
+          {sha ? shortSha(sha) : staged ? "staged" : "working"}
         </span>
         <div className="flex shrink-0 overflow-hidden rounded-md border border-edge">
           {(["unified", "split"] as const).map((m) => (

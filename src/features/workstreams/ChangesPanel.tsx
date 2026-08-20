@@ -20,11 +20,15 @@ import {
   useDiscardFiles,
   useStageFiles,
   useUnstageFiles,
+  useWorkstreamCommits,
   useWorktreeDir,
   useWorktreeGitStatus,
 } from "@/lib/queries";
 import { useWorkstreamArtifacts, useWorkstreamDocs } from "@/features/session/sessionStore";
 import type { DocKind } from "@/lib/domain/docs";
+import { GLYPH } from "./changeGlyph";
+import { CommitsPanel } from "./CommitsPanel";
+import { renamedLabel } from "./renamedLabel";
 
 function RefreshIcon() {
   return (
@@ -54,17 +58,6 @@ function MoveIcon({ dir }: { dir: "down" | "up" }) {
     </svg>
   );
 }
-
-// Status glyph + color per change kind (the colored badge before each path).
-const GLYPH: Record<string, { ch: string; cls: string; label: string }> = {
-  added: { ch: "+", cls: "text-ok", label: "added" },
-  untracked: { ch: "+", cls: "text-ok", label: "untracked" },
-  modified: { ch: "M", cls: "text-accent", label: "modified" },
-  deleted: { ch: "−", cls: "text-bad", label: "deleted" },
-  renamed: { ch: "R", cls: "text-warn", label: "renamed" },
-  typechange: { ch: "T", cls: "text-warn", label: "typechange" },
-  conflict: { ch: "!", cls: "text-bad", label: "conflict" },
-};
 
 type RowMenu = { entry: GitFileEntry; staged: boolean; x: number; y: number };
 
@@ -106,7 +99,10 @@ const FileRow = memo(function FileRow({
         {glyph.ch}
       </span>
       <FileTypeIcon name={entry.path} size={13} />
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink" title={entry.path}>
+      <span
+        className="min-w-0 flex-1 truncate font-mono text-xs text-ink"
+        title={renamedLabel(entry.path, entry.oldPath)}
+      >
         {label}
       </span>
       <button
@@ -190,7 +186,7 @@ function TreeLevel({
             entry={child.entry}
             staged={staged}
             depth={depth}
-            label={child.name}
+            label={renamedLabel(child.entry.path, child.entry.oldPath, true)}
             onOpen={() => onOpen(child.entry!)}
             onToggle={() => onToggle(child.entry!)}
             onMenu={(x, y) => onMenu(child.entry!, x, y)}
@@ -298,7 +294,7 @@ function ChangeSection({
             entry={entry}
             staged={staged}
             depth={0}
-            label={entry.path}
+            label={renamedLabel(entry.path, entry.oldPath)}
             onOpen={() => onOpen(entry)}
             onToggle={() => onToggle(entry)}
             onMenu={(x, y) => onMenu(entry, staged, x, y)}
@@ -480,24 +476,28 @@ function DirNode({
 type Props = {
   workstreamId: string | null;
   onOpenDoc: (path: string, title: string) => void;
-  onOpenDiff: (path: string, staged: boolean) => void;
+  onOpenDiff: (path: string, staged: boolean, sha?: string) => void;
   onOpenFile: (path: string) => void;
   /** Folder project: no git, so only the file tree, no Changes tab, no status query. */
   filesOnly?: boolean;
+  /** Names the workstream's base branch in the Commits tab's empty-state hint. */
+  baseBranch: string | null;
 };
 
 /** Right-hand source-control panel: a Changes tab (split staged/unstaged with
- *  stage / unstage / discard actions) and a Files tab (lazy worktree tree).
- *  With `filesOnly` it collapses to just the tree, the browse-and-edit surface
- *  a folder project still needs. */
+ *  stage / unstage / discard actions), a Commits tab (this workstream's own
+ *  commits, each expanding to the files it touched), and a Files tab (lazy
+ *  worktree tree). With `filesOnly` it collapses to just the tree, the
+ *  browse-and-edit surface a folder project still needs. */
 export function ChangesPanel({
   workstreamId,
   onOpenDoc,
   onOpenDiff,
   onOpenFile,
   filesOnly = false,
+  baseBranch,
 }: Props) {
-  const [rawTab, setTab] = useState<"changes" | "files">("changes");
+  const [rawTab, setTab] = useState<"changes" | "commits" | "files">("changes");
   const tab = filesOnly ? "files" : rawTab;
   const [view, setView] = useState<"list" | "tree">("list");
   const [menu, setMenu] = useState<RowMenu | null>(null);
@@ -516,6 +516,10 @@ export function ChangesPanel({
   const stage = useStageFiles(id);
   const unstage = useUnstageFiles(id);
   const discard = useDiscardFiles(id);
+  // Only while the tab is showing: the whole ["workstream", id] prefix is swept
+  // on every worktree file change, so an always-enabled list would re-walk the
+  // branch during an agent turn for a panel nobody is looking at.
+  const commits = useWorkstreamCommits(id, workstreamId !== null && !filesOnly && tab === "commits");
 
   const staged = status.data?.staged ?? [];
   const unstaged = status.data?.unstaged ?? [];
@@ -531,7 +535,7 @@ export function ChangesPanel({
           {filesOnly ? (
             <span className="px-2 py-1 text-xs font-medium text-ink">Files</span>
           ) : (
-            (["changes", "files"] as const).map((t) => (
+            (["changes", "commits", "files"] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -553,6 +557,9 @@ export function ChangesPanel({
                 if (tab === "changes") {
                   setRefreshing(true);
                   void status.refetch().finally(() => setRefreshing(false));
+                } else if (tab === "commits") {
+                  setRefreshing(true);
+                  void commits.refetch().finally(() => setRefreshing(false));
                 } else {
                   // The tree is lazy per directory level; drop them all so
                   // reopening re-reads from disk.
@@ -577,6 +584,24 @@ export function ChangesPanel({
               Create a workstream to see its changes here.
             </p>
           </div>
+        ) : tab === "commits" ? (
+          commits.isLoading ? (
+            <div className="flex justify-center p-6">
+              <Spinner />
+            </div>
+          ) : commits.isError ? (
+            <ErrorNote error={commits.error} />
+          ) : (commits.data ?? []).length === 0 ? (
+            <div className="rounded-lg border border-edge bg-panel-2 p-3">
+              <p className="text-sm font-medium">No commits yet</p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+                Commits this workstream adds on top of{" "}
+                <span className="font-mono">{baseBranch ?? "its base branch"}</span> show up here.
+              </p>
+            </div>
+          ) : (
+            <CommitsPanel id={id} commits={commits.data ?? []} onOpenDiff={onOpenDiff} />
+          )
         ) : tab === "files" ? (
           <FilesTree id={id} onOpenFile={onOpenFile} />
         ) : (

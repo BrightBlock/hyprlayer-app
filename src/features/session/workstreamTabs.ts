@@ -69,8 +69,10 @@ export type ShellTab = {
    *  not an agent chat, opened from the diff sidebar, closed when done. */
   docPreviewPath?: string;
   /** When set, this tab is a rich diff of a worktree file (its path), against
-   *  either its staged or working version. Opened from the Changes panel. */
-  diffView?: { path: string; staged: boolean };
+   *  either its staged or working version. Opened from the Changes panel.
+   *  With `sha` it is instead that commit's diff of the path (first parent vs.
+   *  commit), opened from the Commits tab, and `staged` is ignored. */
+  diffView?: { path: string; staged: boolean; sha?: string };
   /** When set, this tab is a read-only view of a worktree file (its path).
    *  Opened from the Files tree. */
   filePath?: string;

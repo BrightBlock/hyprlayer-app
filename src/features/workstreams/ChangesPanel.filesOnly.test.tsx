@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChangesPanel } from "./ChangesPanel";
@@ -11,6 +11,8 @@ const q = vi.hoisted(() => ({
   useStageFiles: vi.fn(),
   useUnstageFiles: vi.fn(),
   useDiscardFiles: vi.fn(),
+  useWorkstreamCommits: vi.fn(),
+  useCommitFiles: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/queryClient", () => ({ queryClient: { invalidateQueries: vi.fn() } }));
@@ -40,6 +42,13 @@ function setup(filesOnly: boolean) {
   q.useStageFiles.mockReturnValue(mutation());
   q.useUnstageFiles.mockReturnValue(mutation());
   q.useDiscardFiles.mockReturnValue(mutation());
+  q.useWorkstreamCommits.mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  });
 
   render(
     <ChangesPanel
@@ -48,6 +57,7 @@ function setup(filesOnly: boolean) {
       onOpenDiff={vi.fn()}
       onOpenFile={vi.fn()}
       filesOnly={filesOnly}
+      baseBranch="main"
     />,
   );
 }
@@ -60,15 +70,25 @@ describe("ChangesPanel filesOnly (folder projects)", () => {
     expect(screen.getByText("Files")).toBeDefined();
     // No Changes tab to switch to: a folder project has no staged/unstaged.
     expect(screen.queryByRole("button", { name: "changes" })).toBeNull();
+    // A folder project has no git, so no Commits tab either.
+    expect(screen.queryByRole("button", { name: "commits" })).toBeNull();
     // The git-status query must be DISABLED, not merely unrendered, a folder
     // has no repo to answer it.
     expect(q.useWorktreeGitStatus).toHaveBeenCalledWith("ws1", false);
   });
 
-  it("keeps both tabs and the live status query for a git project", () => {
+  it("keeps all three tabs and the live status query for a git project", () => {
     setup(false);
     expect(screen.getByRole("button", { name: "changes" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "commits" })).toBeDefined();
     expect(screen.getByRole("button", { name: "files" })).toBeDefined();
     expect(q.useWorktreeGitStatus).toHaveBeenCalledWith("ws1", true);
+  });
+
+  it("shows the empty-commits card naming the base branch", () => {
+    setup(false);
+    fireEvent.click(screen.getByRole("button", { name: "commits" }));
+    expect(screen.getByText("No commits yet")).toBeDefined();
+    expect(screen.getByText("main")).toBeDefined();
   });
 });

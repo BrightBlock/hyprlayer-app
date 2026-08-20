@@ -476,7 +476,9 @@ export function useDefaultUsername() {
 // single prefix invalidation refreshes the whole family.
 //
 // The gh-backed PR queries deliberately sit OUTSIDE that prefix, under
-// ["workstream-pr", id], see `invalidateWorkstreamPr`.
+// ["workstream-pr", id], see `invalidateWorkstreamPr`. The per-sha commit
+// queries sit outside it too, under ["commit", id, sha]: a commit is
+// immutable, so they are staleTime: Infinity and are never invalidated.
 
 /** Refresh every workstream list: the project's board AND the sidebar's
  *  cross-project tree. Only one of them performs a given backend-side
@@ -867,11 +869,11 @@ export function useWorktreeGitStatus(id: string, enabled = true) {
 
 /** Two sides of a file for the merge-view diff. Keyed by (id, path, staged) so
  *  the staged and working diffs of the same file cache separately. */
-export function useFileSides(id: string, path: string, staged: boolean) {
+export function useFileSides(id: string, path: string, staged: boolean, enabled = true) {
   return useQuery({
     queryKey: ["workstream", id, "file-sides", path, staged],
     queryFn: () => unwrap(commands.worktreeFileSides(id, path, staged)),
-    enabled: id.length > 0 && path.length > 0,
+    enabled: enabled && id.length > 0 && path.length > 0,
   });
 }
 
@@ -927,6 +929,43 @@ export function useDiscardFiles(id: string) {
   return useMutation({
     mutationFn: (paths: string[]) => unwrap(commands.worktreeDiscard(id, paths)),
     onSettled: () => invalidateWorktreeGit(id),
+  });
+}
+
+// ── Commits ───────────────────────────────────────────────────────────────
+
+/** The workstream's own commits (merge-base(base, HEAD)..HEAD, capped backend-side).
+ *  Under the ["workstream", id] prefix on purpose: `invalidateWorktreeGit` sweeps
+ *  that whole prefix, so an agent turn that commits refreshes this list with no
+ *  extra wiring. */
+export function useWorkstreamCommits(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "commits"],
+    queryFn: () => unwrap(commands.listWorkstreamCommits(id)),
+    enabled: enabled && id.length > 0,
+  });
+}
+
+/** Files one commit changed. A commit is immutable, so this sits OUTSIDE the
+ *  ["workstream", id] prefix — like the PR queries above — and never needs
+ *  invalidating: rewritten history yields a new sha, hence a new key. */
+export function useCommitFiles(id: string, sha: string, enabled = true) {
+  return useQuery({
+    queryKey: ["commit", id, sha, "files"],
+    queryFn: () => unwrap(commands.worktreeCommitFiles(id, sha)),
+    enabled: enabled && id.length > 0 && sha.length > 0,
+    staleTime: Infinity,
+  });
+}
+
+/** Two sides of a file as one commit changed it (first parent vs. commit).
+ *  Immutable, same placement and reasoning as `useCommitFiles`. */
+export function useCommitFileSides(id: string, sha: string, path: string) {
+  return useQuery({
+    queryKey: ["commit", id, sha, "sides", path],
+    queryFn: () => unwrap(commands.worktreeCommitFileSides(id, sha, path)),
+    enabled: id.length > 0 && sha.length > 0 && path.length > 0,
+    staleTime: Infinity,
   });
 }
 
