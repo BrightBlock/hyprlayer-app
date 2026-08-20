@@ -1,6 +1,23 @@
 {
   "versions": [
     {
+      "version": "0.6.0",
+      "date": "2026-08-20",
+      "summary": "New Agents view, Commits tab, and Settings panel; Linux tiling WM support.",
+      "notes": [
+        "A new Agents view manages your .claude/agents/*.md files directly in the app — browse the library, edit frontmatter and body, pick which skills preload, and set per-agent launch settings that the markdown itself has nowhere to store.",
+        "The Agents view now also tells you when your installed agent bundle is behind BrightBlock/hyprlayer-cli, with one-click update and restore-from-backup, so you can see you are stale without having to reinstall to find out.",
+        "A new Commits tab in the right sidebar lists every commit a workstream has ahead of its base branch, with per-commit file diffs — including renames — so you can review what a branch actually did without leaving the app.",
+        "Settings moved into its own sidebar panel instead of sharing the Library surface, and Library, Prompts, and Settings now all open at the same width.",
+        "Linux: the app now works under tiling window managers like Hyprland and sway. The window can shrink to 500x400 and the shell degrades into a narrow layout tier — project and diff panels become overlay drawers, and resize grips return now that the OS chrome is gone at small sizes. Window dragging also no longer fires on a plain click.",
+        "In-place workstreams now follow the branch you are actually on. A `git checkout` run outside the app used to leave the row pinned to a stale branch, which meant wrong PR lookups and wrong base comparisons; the app now adopts the live branch, flags an in-place checkout that has branched away from its base, and shows \"detached HEAD\" during a rebase instead of stale state.",
+        "Ship no longer misfires into an unrelated code-review skill mid-run — it runs as a scoped inline agent, so it does the one job it was asked to do.",
+        "Plan, research, and handoff docs are now detected when an agent writes them through Bash rather than the file tools, and no longer show up twice when a worktree is reached through a symlinked path.",
+        "claude.ai artifacts published during a session are surfaced in the Changes panel, deduped across a workstream, and open the hosted page on click.",
+        "Faster search indexing (lazy body reads plus aho-corasick matching), and syntax highlighting now loads a curated per-language grammar bundle instead of the full set."
+      ]
+    },
+    {
       "version": "0.5.11",
       "date": "2026-08-16",
       "summary": "Fixed idle CPU burn from filesystem watching and background animations.",
