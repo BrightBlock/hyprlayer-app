@@ -212,6 +212,12 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
     setStep(1);
     setNewProfileOpen(false);
     createProfile.reset();
+    // `error` below is a first-wins coalesce of the three, so a clone failure
+    // left un-reset here outranks a later import failure and the user is shown
+    // a message about a source they already backed out of.
+    clone.reset();
+    importProject.reset();
+    importFolder.reset();
   };
 
   const bootstrapUser = configMissing ? user.trim() || null : null;
@@ -588,7 +594,16 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
           </div>
         )}
 
-        {error != null && <ErrorNote error={error} />}
+        {error != null && (
+          <ErrorNote
+            error={error}
+            onDismiss={() => {
+              clone.reset();
+              importProject.reset();
+              importFolder.reset();
+            }}
+          />
+        )}
 
         <div className="flex justify-end gap-2 pt-1">
           {step === 1 ? (

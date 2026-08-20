@@ -167,7 +167,7 @@ export function Archive() {
         </div>
         {restoreError ? (
           <div className="mt-3">
-            <ErrorNote error={restoreError} />
+            <ErrorNote error={restoreError} onDismiss={() => setRestoreError(null)} />
           </div>
         ) : null}
       </div>

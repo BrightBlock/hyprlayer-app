@@ -127,7 +127,9 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
             placeholder="refactor, ipc, phase-1"
           />
         </Field>
-        {createDoc.isError && <ErrorNote error={createDoc.error} />}
+        {createDoc.isError && (
+          <ErrorNote error={createDoc.error} onDismiss={() => createDoc.reset()} />
+        )}
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" onClick={onClose}>
             Cancel

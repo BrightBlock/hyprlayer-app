@@ -46,7 +46,7 @@ export function RenameWorkstreamDialog({ target, onClose }: Props) {
           autoFocus
           disabled={rename.isPending}
         />
-        {rename.isError && <ErrorNote error={rename.error} />}
+        {rename.isError && <ErrorNote error={rename.error} onDismiss={() => rename.reset()} />}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={close} disabled={rename.isPending}>
             Cancel

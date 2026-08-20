@@ -90,9 +90,21 @@ export function OpenCodeHarnessTab({
 
   return (
     <>
-      {(save.isError || auth.isError) && (
-        <ErrorNote error={save.error ?? auth.error} />
+      {/* One note per mutation rather than a coalesced `a.error ?? b.error`:
+          a first-wins coalesce pins the note to whichever failed first, so a
+          later failure never surfaces and a shared dismiss silently discards
+          it. `setDefault` writes opencode.json (the CLI agreement in
+          `setSelectedModels` above); failing it silently is what lets the
+          picker snap back on the bootstrap invalidation with nothing shown. */}
+      {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
+      {setDefault.isError && (
+        <ErrorNote error={setDefault.error} onDismiss={() => setDefault.reset()} />
       )}
+      {/* `auth` is a query, not a mutation — it has no `reset()`, and per the
+          query-error convention (e.g. CodexHarnessTab's `probe`) it stays
+          non-dismissable since dismissing would blank the panel with no way
+          back short of a refetch. */}
+      {auth.isError && <ErrorNote error={auth.error} />}
 
       <Card>
         <div className="flex items-start justify-between">
@@ -352,7 +364,9 @@ function AdvancedCard({
                   Downloading and installing. This can take a minute.
                 </p>
               )}
-              {install.isError && <ErrorNote error={install.error} />}
+              {install.isError && (
+                <ErrorNote error={install.error} onDismiss={() => install.reset()} />
+              )}
             </div>
           )}
 

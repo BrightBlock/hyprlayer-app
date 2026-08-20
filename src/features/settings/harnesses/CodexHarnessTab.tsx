@@ -112,7 +112,7 @@ export function CodexHarnessTab({
 
   return (
     <>
-      {save.isError && <ErrorNote error={save.error} />}
+      {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
 
       <Card>
         <div className="flex items-start justify-between">
@@ -508,7 +508,7 @@ function CodexApiKeyPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
         </p>
       </div>
 
-      {login.isError && <ErrorNote error={login.error} />}
+      {login.isError && <ErrorNote error={login.error} onDismiss={() => login.reset()} />}
     </div>
   );
 }
@@ -550,7 +550,7 @@ function AuthStatusRow({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
           </button>
         </div>
       </div>
-      {logout.isError && <ErrorNote error={logout.error} />}
+      {logout.isError && <ErrorNote error={logout.error} onDismiss={() => logout.reset()} />}
       {probe.isError && <ErrorNote error={probe.error} />}
     </>
   );

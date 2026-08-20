@@ -66,7 +66,7 @@ export function ConfirmQuitDialog() {
           Running agents, terminals, and lifecycle scripts all stop when the app quits.
         </p>
 
-        {error != null && <ErrorNote error={error} />}
+        {error != null && <ErrorNote error={error} onDismiss={() => setError(null)} />}
 
         <div className="flex items-center justify-between gap-4">
           {/* Bottom-left, deliberately quiet: the opt-out rides along with the

@@ -73,7 +73,7 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
             </>
           )}
         </p>
-        {archive.isError && <ErrorNote error={archive.error} />}
+        {archive.isError && <ErrorNote error={archive.error} onDismiss={() => archive.reset()} />}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={close} disabled={archive.isPending}>
             Cancel

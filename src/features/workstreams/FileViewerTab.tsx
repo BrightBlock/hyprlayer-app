@@ -187,7 +187,7 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
     <Shell path={path} controls={controls}>
       {save.isError && (
         <div className="shrink-0 border-b border-edge p-3">
-          <ErrorNote error={save.error} />
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
         </div>
       )}
       {preview ? (

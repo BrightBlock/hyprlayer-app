@@ -359,7 +359,9 @@ function Step3({ user }: { user: string }) {
             disabled={initThoughts.isPending}
           />
         )}
-        {initThoughts.error != null && <ErrorNote error={initThoughts.error} />}
+        {initThoughts.error != null && (
+          <ErrorNote error={initThoughts.error} onDismiss={() => initThoughts.reset()} />
+        )}
       </div>
     </Step>
   );

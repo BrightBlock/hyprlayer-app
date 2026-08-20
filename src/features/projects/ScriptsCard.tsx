@@ -124,7 +124,9 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
 
       {scripts.isLoading && <Spinner />}
       {scripts.isError && <ErrorNote error={scripts.error} />}
-      {setScripts.isError && <ErrorNote error={setScripts.error} />}
+      {setScripts.isError && (
+        <ErrorNote error={setScripts.error} onDismiss={() => setScripts.reset()} />
+      )}
 
       {draft &&
         ROWS.map((row, i) => (

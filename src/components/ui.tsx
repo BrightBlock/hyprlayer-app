@@ -477,6 +477,11 @@ type DialogProps = {
   padded?: boolean;
   /** Let the panel scroll. Off when the content owns its own scroll regions. */
   scroll?: boolean;
+  /** Render a × beside the title. Opt-in, because most dialogs already end in a
+   *  Cancel button and a second close control next to it reads as clutter. Turn
+   *  it on for the ones that have no footer at all — otherwise Escape and a
+   *  backdrop click are the only ways out, and neither is visible. */
+  closable?: boolean;
 };
 
 /** Dependency-free modal: fixed overlay + panel; Escape or a backdrop click closes. */
@@ -489,6 +494,7 @@ export function Dialog({
   ariaLabel,
   padded = true,
   scroll = true,
+  closable = false,
 }: DialogProps) {
   useEscape(open ? onClose : null);
 
@@ -511,7 +517,25 @@ export function Dialog({
           className,
         )}
       >
-        {title && <h2 className="mb-3 text-sm font-semibold tracking-wide text-ink">{title}</h2>}
+        {(title || closable) && (
+          <div className="mb-3 flex items-start justify-between gap-2">
+            {title ? (
+              <h2 className="text-sm font-semibold tracking-wide text-ink">{title}</h2>
+            ) : (
+              <span />
+            )}
+            {closable && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close dialog"
+                className="-mr-1 -mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+              >
+                <XIcon size={13} />
+              </button>
+            )}
+          </div>
+        )}
         {children}
       </div>
     </div>

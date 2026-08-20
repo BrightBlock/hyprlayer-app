@@ -87,7 +87,7 @@ export function RemoveProjectDialog({ target, onClose, onRemoved }: Props) {
           </p>
         )}
 
-        {remove.isError && <ErrorNote error={remove.error} />}
+        {remove.isError && <ErrorNote error={remove.error} onDismiss={() => remove.reset()} />}
 
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={close} disabled={remove.isPending}>

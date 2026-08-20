@@ -212,7 +212,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
 
       {save.isError && (
         <div className="mt-3">
-          <ErrorNote error={save.error} />
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
         </div>
       )}
 
@@ -358,7 +358,7 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
 
       {save.isError && (
         <div className="mt-3">
-          <ErrorNote error={save.error} />
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
         </div>
       )}
 
@@ -441,7 +441,7 @@ function DefaultHarnessCard({ settings }: { settings: AppSettings }) {
       </p>
       {save.isError && (
         <div className="mb-3">
-          <ErrorNote error={save.error} />
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
         </div>
       )}
       <div className="flex gap-2">
@@ -484,7 +484,7 @@ function QuitCard({ settings }: { settings: AppSettings }) {
 
       {save.isError && (
         <div className="mt-3">
-          <ErrorNote error={save.error} />
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
         </div>
       )}
 
@@ -551,7 +551,7 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
 
       {save.isError && (
         <div className="mt-3">
-          <ErrorNote error={save.error} />
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
         </div>
       )}
 
@@ -882,7 +882,7 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
         </p>
       </div>
 
-      {save.isError && <ErrorNote error={save.error} />}
+      {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
 
       {/* Hero: Multiplexer mode */}
       <div className="overflow-hidden rounded-lg border border-accent/40 bg-accent/5">

@@ -183,9 +183,13 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
 
       {(saveDoc.isError || patchFrontmatter.isError || revealDoc.isError) && (
         <div className="shrink-0 space-y-2 border-b border-edge p-4">
-          {saveDoc.isError && <ErrorNote error={saveDoc.error} />}
-          {patchFrontmatter.isError && <ErrorNote error={patchFrontmatter.error} />}
-          {revealDoc.isError && <ErrorNote error={revealDoc.error} />}
+          {saveDoc.isError && <ErrorNote error={saveDoc.error} onDismiss={() => saveDoc.reset()} />}
+          {patchFrontmatter.isError && (
+            <ErrorNote error={patchFrontmatter.error} onDismiss={() => patchFrontmatter.reset()} />
+          )}
+          {revealDoc.isError && (
+            <ErrorNote error={revealDoc.error} onDismiss={() => revealDoc.reset()} />
+          )}
         </div>
       )}
 

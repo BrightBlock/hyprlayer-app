@@ -173,7 +173,7 @@ function KeyEntry({
 
       {save.isError && (
         <div className="mt-3">
-          <ErrorNote error={save.error} />
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
         </div>
       )}
 

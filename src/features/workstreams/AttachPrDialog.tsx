@@ -67,7 +67,11 @@ export function AttachPrDialog({ target, onClose }: Props) {
   const searchRows = search.data ?? [];
 
   return (
-    <Dialog open={open} onClose={close} title="Attach PR">
+    // `closable`: this picker has no footer, so without the × the only ways out
+    // are Escape and a backdrop click — neither of them visible. With a failure
+    // showing, the ErrorNote's own × was otherwise the sole control in the
+    // modal, making "dismiss the error" the one thing a stuck user could click.
+    <Dialog open={open} onClose={close} title="Attach PR" closable>
       <div className="space-y-3">
         <TextInput
           value={input}
@@ -84,7 +88,7 @@ export function AttachPrDialog({ target, onClose }: Props) {
           }}
         />
 
-        {attach.isError && <ErrorNote error={attach.error} />}
+        {attach.isError && <ErrorNote error={attach.error} onDismiss={() => attach.reset()} />}
 
         <div className="max-h-72 overflow-y-auto">
           {query.length === 0 ? (
@@ -106,6 +110,14 @@ export function AttachPrDialog({ target, onClose }: Props) {
                 busy={attach.isPending}
                 onClick={() => choose(preview.data!.number)}
               />
+            ) : attach.isError ? (
+              // The note above already says why, in GitHub's own words. This
+              // line would restate it less precisely: `preview_workstream_pr`
+              // (workstreams.rs:1785) folds every lookup failure into
+              // `Ok(None)`, so "No PR #N found" is what a broken `gh` renders
+              // too. Whenever the attach has a real message, that is the one
+              // to show. Dismissing the note brings this line back.
+              null
             ) : (
               <p className="py-6 text-center text-sm text-ink-dim">No PR #{queryNumber} found</p>
             )
@@ -128,6 +140,7 @@ export function AttachPrDialog({ target, onClose }: Props) {
             ))
           )}
         </div>
+
       </div>
     </Dialog>
   );

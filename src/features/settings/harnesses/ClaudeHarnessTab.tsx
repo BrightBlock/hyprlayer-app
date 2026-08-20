@@ -66,7 +66,7 @@ export function ClaudeHarnessTab({
 
   return (
     <>
-      {save.isError && <ErrorNote error={save.error} />}
+      {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
 
       <Card>
         <CardTitle>Authentication</CardTitle>

@@ -31,7 +31,7 @@ pub enum CoreError {
         min: String,
     },
 
-    #[error("`{program}` exited with {exit:?}: {stderr_tail}")]
+    #[error(fmt = fmt_exec)]
     Exec {
         program: String,
         exit: Option<i32>,
@@ -78,6 +78,33 @@ pub enum CoreError {
     Io(#[from] std::io::Error),
 }
 
+/// The command's own stderr is the whole message whenever it wrote one: that is
+/// the part the user can act on, and the `program`/exit framing around it is
+/// noise they did not ask for. `attach_pr_error`
+/// (`src-tauri/src/commands/workstreams.rs:1836`) already strips that framing by
+/// hand for `gh`, and `codex/protocol.rs:817` applies the same
+/// prefer-output-else-name-the-code shape.
+///
+/// A silent failure has nothing to show, so it falls back to naming the program
+/// rather than rendering an empty string. `exit: None` means a signal killed the
+/// child on Unix (`ExitStatus::code()` returns `None` there), so it says the
+/// process was terminated instead of printing a placeholder code.
+fn fmt_exec(
+    program: &str,
+    exit: &Option<i32>,
+    stderr_tail: &str,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    let detail = stderr_tail.trim();
+    if !detail.is_empty() {
+        return f.write_str(detail);
+    }
+    match exit {
+        Some(code) => write!(f, "`{program}` failed with exit code {code}"),
+        None => write!(f, "`{program}` was terminated"),
+    }
+}
+
 impl CoreError {
     /// A short, user-facing suggestion for how to fix the error, when one exists.
     pub fn remedy(&self) -> Option<String> {
@@ -108,6 +135,14 @@ impl CoreError {
             CoreError::Exec { program, stderr_tail, .. } => {
                 if program.contains("gh") && stderr_tail.contains("auth") {
                     Some("Run `gh auth login` in a terminal.".into())
+                } else if program.contains("hyprlayer")
+                    && stderr_tail.contains("No AI tool configured")
+                {
+                    // Settings › AI tool runs `hyprlayer ai configure --force`
+                    // in an embedded terminal (src/routes/Settings.tsx:660), so
+                    // this is a real in-app fix, not just a restatement of the
+                    // CLI's own advice.
+                    Some("Open Settings › AI tool and click Configure.".into())
                 } else {
                     None
                 }
@@ -158,3 +193,61 @@ impl CoreError {
 }
 
 pub type Result<T, E = CoreError> = std::result::Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn exec(exit: Option<i32>, stderr_tail: &str) -> CoreError {
+        CoreError::Exec {
+            program: "git".into(),
+            exit,
+            stderr_tail: stderr_tail.into(),
+        }
+    }
+
+    #[test]
+    fn exec_with_stderr_renders_only_the_command_output() {
+        let msg = exec(Some(1), "fatal: not a git repository").to_string();
+        assert_eq!(msg, "fatal: not a git repository");
+        assert!(!msg.contains("Some("), "leaked Option Debug: {msg}");
+    }
+
+    #[test]
+    fn exec_without_stderr_names_the_program_and_code() {
+        let msg = exec(Some(1), "").to_string();
+        assert_eq!(msg, "`git` failed with exit code 1");
+        // The old format left a dangling colon with nothing after it.
+        assert!(!msg.ends_with(':'), "dangling colon: {msg}");
+    }
+
+    #[test]
+    fn exec_whitespace_only_stderr_is_treated_as_empty() {
+        assert_eq!(
+            exec(Some(1), "  \n ").to_string(),
+            "`git` failed with exit code 1"
+        );
+    }
+
+    #[test]
+    fn exec_without_exit_code_says_terminated() {
+        let msg = exec(None, "").to_string();
+        assert_eq!(msg, "`git` was terminated");
+        assert!(!msg.contains("None"), "leaked Option Debug: {msg}");
+    }
+
+    #[test]
+    fn exec_code_is_unchanged() {
+        assert_eq!(exec(Some(1), "boom").code(), "exec_failed");
+    }
+
+    #[test]
+    fn exec_remedy_points_at_the_ai_tool_card() {
+        let err = CoreError::Exec {
+            program: "hyprlayer".into(),
+            exit: Some(1),
+            stderr_tail: "Error: No AI tool configured. Run 'hyprlayer ai configure' first.".into(),
+        };
+        assert!(err.remedy().is_some_and(|r| r.contains("Settings")));
+    }
+}

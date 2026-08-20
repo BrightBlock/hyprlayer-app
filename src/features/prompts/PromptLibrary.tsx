@@ -732,7 +732,7 @@ export function PromptLibrary({
       {/* ── Editor ── */}
       <section className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl space-y-4 p-8">
-          {save.isError && <ErrorNote error={save.error} />}
+          {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
           <Card>
           <div className="flex items-center gap-2.5">
             <span className="shrink-0 text-accent">

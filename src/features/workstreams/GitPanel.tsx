@@ -184,7 +184,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
           )}
         </div>
       </div>
-      {setBase.isError && <ErrorNote error={setBase.error} />}
+      {setBase.isError && <ErrorNote error={setBase.error} onDismiss={() => setBase.reset()} />}
     </div>
   );
 }

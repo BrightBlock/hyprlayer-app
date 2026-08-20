@@ -95,8 +95,19 @@ export function OllamaHarnessTab({
 
   return (
     <>
-      {(setEndpoint.isError || setModels.isError) && (
-        <ErrorNote error={setEndpoint.error ?? setModels.error} />
+      {/* One note per mutation rather than a coalesced `a.error ?? b.error`:
+          a first-wins coalesce pins the note to whichever failed first, so a
+          later failure never surfaces and a shared dismiss silently discards
+          it. `setDefault` was uncovered entirely, so a failed default-model
+          write rendered nothing at all. */}
+      {setEndpoint.isError && (
+        <ErrorNote error={setEndpoint.error} onDismiss={() => setEndpoint.reset()} />
+      )}
+      {setModels.isError && (
+        <ErrorNote error={setModels.error} onDismiss={() => setModels.reset()} />
+      )}
+      {setDefault.isError && (
+        <ErrorNote error={setDefault.error} onDismiss={() => setDefault.reset()} />
       )}
 
       <Card>

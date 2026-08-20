@@ -372,10 +372,10 @@ export function CreateWorkstreamDialog({
               }
             />
           ) : (
-            <ErrorNote error={create.error} />
+            <ErrorNote error={create.error} onDismiss={() => create.reset()} />
           ))}
-        {discard.isError && <ErrorNote error={discard.error} />}
-        {restore.isError && <ErrorNote error={restore.error} />}
+        {discard.isError && <ErrorNote error={discard.error} onDismiss={() => discard.reset()} />}
+        {restore.isError && <ErrorNote error={restore.error} onDismiss={() => restore.reset()} />}
         <div className="flex justify-end gap-2">
           {checkoutDirty && (
             <Button

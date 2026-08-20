@@ -212,7 +212,7 @@ export function KeyboardSettings({ settings }: { settings: AppSettings }) {
         </p>
       </div>
 
-      {save.isError && <ErrorNote error={save.error} />}
+      {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
 
       {COMMANDS_BY_CATEGORY.map(({ category, commands }) => (
         <Card key={category}>

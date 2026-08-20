@@ -18,7 +18,7 @@ import {
   type AppSettings,
   type Bootstrap,
 } from "@/lib/bindings";
-import { errorMessage, unwrap } from "@/lib/ipc";
+import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { basename } from "@/lib/path";
 import { useAgentBundle, useBootstrap, useSetAppSettings } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
@@ -166,8 +166,16 @@ export function AgentLibrary({
   const baseline = live?.base ?? (stored ? { agent: stored, overlay: overlayFor(library, stored.path) } : null);
 
   const flash = (message: string) => useToast.getState().show("Agents", message);
-  const fail = (title: string, e: unknown) =>
-    useToast.getState().show(title, String(e), { tone: "bad" });
+  // `unwrap` throws the AppError envelope, a plain object, so a bare String(e)
+  // renders "[object Object]" (same trap as ScriptRunView.tsx:125). The remedy
+  // is the actionable half, so fold it into the toast's one message line.
+  const fail = (title: string, e: unknown) => {
+    const remedy = errorRemedy(e);
+    const message = errorMessage(e);
+    useToast
+      .getState()
+      .show(title, remedy ? `${message} — ${remedy}` : message, { tone: "bad" });
+  };
   const refetch = () => queryClient.invalidateQueries({ queryKey: ["agent-files"] });
 
   /**
@@ -318,7 +326,7 @@ export function AgentLibrary({
       } catch (e) {
         // Keep the overlays for whatever already moved: half a batch is on
         // disk, and dropping the app-side half would desync the two.
-        throw new MoveFailed(String(e), overlays);
+        throw new MoveFailed(errorMessage(e), overlays);
       }
       return overlays;
     },

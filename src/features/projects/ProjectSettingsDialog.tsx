@@ -93,7 +93,7 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
       </p>
       {files.isLoading && <Spinner />}
       {files.isError && <ErrorNote error={files.error} />}
-      {setFiles.isError && <ErrorNote error={setFiles.error} />}
+      {setFiles.isError && <ErrorNote error={setFiles.error} onDismiss={() => setFiles.reset()} />}
       {list.length > 0 && (
         <ul ref={listRef} className="mb-3 max-h-40 space-y-1 overflow-y-auto pr-1">
           {list.map((p) => (
@@ -175,7 +175,7 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
             )}
           </div>
 
-          {sync.isError && <ErrorNote error={sync.error} />}
+          {sync.isError && <ErrorNote error={sync.error} onDismiss={() => sync.reset()} />}
           {sync.isSuccess && (
             <Card className="shrink-0">
               <CardTitle>Sync output</CardTitle>
