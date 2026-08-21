@@ -42,7 +42,7 @@ import { currentAppLocation } from "@/lib/appNav";
 import type { DocKind } from "@/lib/domain/docs";
 import { docFromTool, docTitle } from "./toolDisplay";
 import { artifactsFromItems, type SessionArtifact } from "./artifacts";
-import { useWrittenDocs } from "./writtenDocs";
+import { forgetWorkstreamDocs, useWrittenDocs } from "./writtenDocs";
 import {
   backgroundTasksFromItems,
   type BackgroundTask,
@@ -153,6 +153,43 @@ function setEntry(sessionId: string, next: SessionEntry): void {
     const taskStartedAt = nextTaskStartedAt(prev, next);
     return { sessions: { ...s.sessions, [sessionId]: { ...next, workingSince, taskStartedAt } } };
   });
+  // Every mutation passes through here, so stamping the workstream here catches
+  // all of them — the same funnel `workingSince` already uses.
+  if (isWorking(next)) lastWorkingAt.set(next.workstreamId, Date.now());
+}
+
+/** Epoch ms each workstream was last seen working, stamped from `setEntry`.
+ *  Read by `activeWorkstreamIds` to attribute a thoughts-index event to the
+ *  workstream(s) whose agent could have caused it. In-memory only: it matters
+ *  while the app runs, and a restart has nothing to attribute yet. */
+const lastWorkingAt = new Map<string, number>();
+
+/** The watcher that feeds the thoughts index debounces 300ms
+ *  (`crates/hyprlayer-core/src/index/watcher.rs:73`) before it emits, so a doc
+ *  written by a turn's final tool call reports after the turn has already gone
+ *  idle. Widen the "is this workstream working" window past that debounce, or
+ *  the last write of every turn arrives too late to attribute. */
+const ATTRIBUTION_GRACE_MS = 30_000;
+
+/**
+ * Workstreams whose agents are writing right now, or were within the last
+ * `ATTRIBUTION_GRACE_MS`, for attributing thoughts-index events
+ * (`writtenDocs.recordWrittenDocs`) to the workstream(s) that could have caused
+ * them. With two workstreams working at once this returns a superset, which is
+ * fine: `docFromTool` still requires the mention to sit in a write position in
+ * *that workstream's own* Bash command.
+ */
+export function activeWorkstreamIds(): string[] {
+  const { sessions } = useSessionStore.getState();
+  const cutoff = Date.now() - ATTRIBUTION_GRACE_MS;
+  const ids = new Set<string>();
+  for (const entry of Object.values(sessions)) {
+    if (isWorking(entry)) ids.add(entry.workstreamId);
+  }
+  for (const [workstreamId, at] of lastWorkingAt) {
+    if (at >= cutoff) ids.add(workstreamId);
+  }
+  return [...ids];
 }
 
 /**
@@ -164,6 +201,14 @@ function setEntry(sessionId: string, next: SessionEntry): void {
  * nothing is lost by releasing them here.
  */
 export function removeSessionsForWorkstream(workstreamId: string): void {
+  // Drop this workstream's written-doc slice and activity stamp regardless of
+  // whether it has any in-memory sessions (e.g. archived before its sessions
+  // were restored after a restart) — otherwise a lingering stamp inside the
+  // grace window could attribute a later index event to a workstream that no
+  // longer exists.
+  forgetWorkstreamDocs(workstreamId);
+  lastWorkingAt.delete(workstreamId);
+
   const { sessions } = useSessionStore.getState();
   const ids = Object.keys(sessions).filter((id) => sessions[id]?.workstreamId === workstreamId);
   if (ids.length === 0) return;
@@ -1271,7 +1316,7 @@ export type CreatedDoc = { path: string; kind: DocKind; title: string };
  * for in-app review without leaving the project.
  */
 export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
-  const written = useWrittenDocs();
+  const written = useWrittenDocs(workstreamId);
   // Select a flat list of "kind\tpath" keys with shallow equality so streaming
   // events don't re-render this unless the set of docs actually changes.
   const keys = useSessionStore(
@@ -1318,7 +1363,7 @@ export function useMostRecentDoc(
   workstreamId: string | null,
   kind: DocKind | null,
 ): CreatedDoc | null {
-  const written = useWrittenDocs();
+  const written = useWrittenDocs(workstreamId);
   const key = useSessionStore(
     useShallow((s) => {
       if (!workstreamId || !kind) return null;

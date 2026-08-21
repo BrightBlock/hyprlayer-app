@@ -69,6 +69,7 @@ vi.mock("../../lib/bindings", () => ({
 
 // Imported after the mocks so the store binds to them.
 const {
+  activeWorkstreamIds,
   startSession,
   sendMessage,
   cancelQueuedMessage,
@@ -81,6 +82,7 @@ const {
   dropSession,
   useSessionStore,
   useWorkstreamArtifacts,
+  useMostRecentDoc,
 } = await import("./sessionStore");
 const { isBusy, isWorking } = await import("./transcript");
 
@@ -800,5 +802,70 @@ describe("useWorkstreamArtifacts", () => {
     const { result } = renderHook(() => useWorkstreamArtifacts("ws1"));
     expect(result.current).toHaveLength(1);
     expect(result.current[0].filePath).toBe("/tmp/a-renamed.html");
+  });
+});
+
+describe("activeWorkstreamIds", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("includes a workstream with a session currently working", async () => {
+    await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
+    expect(activeWorkstreamIds()).toContain("ws1"); // still "starting": isWorking
+  });
+
+  it("excludes a workstream idle past the attribution grace window", async () => {
+    vi.useFakeTimers();
+    await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
+    emit(INIT);
+    emit(TURN_DONE); // settles to idle, not working
+    vi.advanceTimersByTime(31_000); // just past ATTRIBUTION_GRACE_MS
+    expect(activeWorkstreamIds()).not.toContain("ws1");
+  });
+
+  it("still includes a workstream that stopped working seconds ago", async () => {
+    vi.useFakeTimers();
+    await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
+    emit(INIT);
+    emit(TURN_DONE);
+    vi.advanceTimersByTime(5_000);
+    expect(activeWorkstreamIds()).toContain("ws1");
+  });
+
+  it("does not include a workstream with no session that has ever worked", () => {
+    // Other tests in this suite stamp their own workstream ids into the
+    // (module-scoped, never reset between tests) activity map, so assert
+    // against an id this suite never uses rather than global emptiness.
+    expect(activeWorkstreamIds()).not.toContain("ws-never-started");
+  });
+});
+
+// Wrong attribution costs the most at the suggested-doc chip: it hands a
+// foreign plan to the next stage as context, with nothing on screen to say so
+// (2026-08-21-scope-sidebar-docs-to-workstream.md).
+describe("useMostRecentDoc", () => {
+  function toolUse(id: string, name: string, input: Record<string, unknown>): SessionEvent {
+    return { kind: "toolUse", id, name, input: JSON.stringify(input), parentId: null };
+  }
+
+  it("returns the plan a workstream's own session wrote", async () => {
+    await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
+    emit(toolUse("tu1", "Write", { file_path: "/t/shared/plans/2026-08-21-a.md" }));
+
+    const { result } = renderHook(() => useMostRecentDoc("ws1", "plan"));
+    expect(result.current?.path).toBe("/t/shared/plans/2026-08-21-a.md");
+  });
+
+  it("returns null for a workstream whose only reference to the plan is a read", async () => {
+    // ws1 writes the plan; ws2 only `cat`s it (no proof ws2 ever wrote it).
+    await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
+    emit(toolUse("tu1", "Write", { file_path: "/t/shared/plans/2026-08-21-a.md" }));
+
+    await startSession({ workstreamId: "ws2", stage: "general", input: "go" });
+    emit(toolUse("tu2", "Bash", { command: "cat /t/shared/plans/2026-08-21-a.md" }));
+
+    const { result } = renderHook(() => useMostRecentDoc("ws2", "plan"));
+    expect(result.current).toBeNull();
   });
 });

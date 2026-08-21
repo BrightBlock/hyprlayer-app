@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { formatElapsed, formatRelativeTime } from "@/lib/format";
+import type { TranscriptItem } from "./transcript";
 import {
   baseName,
+  detectHandoffDoc,
   docFromTool,
   docTitle,
   editDiffFromTool,
@@ -287,25 +289,79 @@ describe("docFromTool", () => {
       expect(
         bash(`cat > /tmp/notes.txt <<'MD'\nplan => /t/shared/plans/phantom.md\nMD`),
       ).toBeNull();
-      // A source operand `cp` never wrote (the arm used to miscount operands and
-      // capture it), for a doc that doesn't exist.
+      // The destination is `/tmp/dir/`, not a `.md` path, so `cp`'s source
+      // operand (the arm used to miscount operands and capture it) is never
+      // considered a write target, for a doc that doesn't exist anyway.
       expect(bash("cp /t/shared/plans/absent.md /tmp/dir/")).toBeNull();
     });
 
-    it("needs the proof map: a bare mention alone is never a doc", () => {
+    it("needs the proof map: a write-position target alone is never a doc", () => {
       expect(docFromTool("Bash", JSON.stringify({ command: `cat > ${PLAN}` }), {})).toBeNull();
     });
 
-    // The accepted gap. Once a doc is in the index, any mention of it resolves,
-    // so `cp <plan> /tmp/` reports the plan again. Harmless where it matters:
-    // the writing session already listed it and both selectors dedup by path.
-    // It shows a stale doc only if a *different* workstream later names that
-    // exact filename, which needs the write to have happened first.
-    it("re-reports an already-written doc that a later command merely names", () => {
-      expect(bash(`cp ${PLAN} /tmp/dir/`)).toEqual({
+    // Was the accepted gap: any mention of an already-written doc used to
+    // resolve, so `cp <plan> /tmp/` re-reported it. Requiring write position
+    // closes it — the destination here is a directory, not a `.md` path, so
+    // `cp`'s source operand (never the thing `cp` writes) is not a candidate.
+    it("ignores a doc a later command only names, in read or non-md-destination position", () => {
+      const read = (command: string) => docFromTool("Bash", JSON.stringify({ command }), written);
+      expect(read(`cat ${PLAN}`)).toBeNull();
+      expect(read(`sed -n '1,50p' ${PLAN}`)).toBeNull();
+      expect(read(`grep -n foo ${PLAN}`)).toBeNull();
+      expect(read(`cp ${PLAN} /tmp/dir/`)).toBeNull();
+      expect(read(`mv ${PLAN} /tmp/`)).toBeNull();
+    });
+
+    it("recognises write-position targets from the extended table", () => {
+      // The regression that sank the first attempt: an incidental fd redirect
+      // must not unlock the assigned-path guess, asserted against a POPULATED
+      // map so the AND is what rejects it, not an empty map.
+      expect(bash('P=/t/shared/plans/old-plan.md; grep -c . "$P" 2>/dev/null')).toBeNull();
+      expect(bash(`printf '%s' "$BODY" | tee -a ${HANDOFF}`)).toEqual({
+        path: HANDOFF,
+        kind: "handoff",
+      });
+      expect(bash(`mv /tmp/draft.md ${PLAN}`)).toEqual({ path: PLAN, kind: "plan" });
+    });
+
+    it("reads a quoted command name", () => {
+      // Stripping only the leading quote left `cp'`, which matched no entry in
+      // the write tables, so a quoted copy went undetected.
+      expect(bash(`'cp' /tmp/draft.md ${PLAN}`)).toEqual({ path: PLAN, kind: "plan" });
+      expect(bash(`"tee" ${HANDOFF} < /tmp/body`)).toEqual({ path: HANDOFF, kind: "handoff" });
+    });
+
+    it("ignores the append forms of an fd redirect", () => {
+      // `2>>` blocked on the `2` and then matched the bare `>` that followed,
+      // so the doc named after it read as a write target.
+      expect(bash(`grep -c . ${PLAN} 2>>/t/shared/plans/2026-08-16-skill-bar.md`)).toBeNull();
+      expect(bash(`grep -c . ${PLAN} &>>${RESEARCH}`)).toBeNull();
+      // The plain append is still a write.
+      expect(bash(`echo x >>${PLAN}`)).toEqual({ path: PLAN, kind: "plan" });
+    });
+
+    it("strips a heredoc body whatever spells its delimiter", () => {
+      // The parser matched only `\w+` delimiters, so these bodies stayed in the
+      // command and their prose parsed as shell (the `phantom.md` regression).
+      for (const delim of ["'DOC-BODY'", "'EOF.MD'", '"END-OF-DOC"', "\\EOF"]) {
+        const term = delim.replace(/['"\\]/g, "");
+        expect(bash(`cat > /tmp/notes.txt <<${delim}\nplan => ${PLAN}\n${term}`)).toBeNull();
+      }
+      // The header still carries its own write.
+      expect(bash(`cat > ${PLAN} <<'DOC-BODY'\n# Plan\nDOC-BODY`)).toEqual({
         path: PLAN,
         kind: "plan",
       });
+    });
+
+    it("requires the assigned variable to reach the script", () => {
+      // Any `<<` in the command used to unlock the assigned-path guess, so a
+      // script that only read a plan reported it as authored.
+      expect(bash(`P=${PLAN}\npython3 - <<'PY'\nprint(1)\nPY`)).toBeNull();
+      // Handed to the script, so this is the destination it writes.
+      expect(bash(`P=${PLAN}\npython3 - "$P" <<'PY'\nimport sys\nopen(sys.argv[1],'w')\nPY`)).toEqual(
+        { path: PLAN, kind: "plan" },
+      );
     });
   });
 
@@ -338,6 +394,48 @@ describe("docFromTool", () => {
       const repoDoc = "/Users/jt/wt/app/branch/docs/plans/2026-08-19-vm.md";
       expect(write(repoDoc)).toEqual({ path: repoDoc, kind: "plan" });
     });
+  });
+});
+
+describe("detectHandoffDoc", () => {
+  const HANDOFF = "/t/shared/handoffs/2026-08-21-ctx.md";
+  const written = { "2026-08-21-ctx.md": HANDOFF };
+
+  function tool(id: string, name: string, input: Record<string, unknown>): TranscriptItem {
+    return {
+      kind: "tool",
+      id,
+      toolUseId: id,
+      name,
+      input: JSON.stringify(input),
+      result: null,
+    };
+  }
+
+  it("returns the handoff the session's own transcript wrote", () => {
+    const items = [tool("t1", "Write", { file_path: HANDOFF })];
+    expect(detectHandoffDoc(items, written, new Set())).toBe(HANDOFF);
+  });
+
+  it("returns null when the session only read the handoff, however it names it", () => {
+    const items = [tool("t1", "Bash", { command: `cat ${HANDOFF}` })];
+    expect(detectHandoffDoc(items, written, new Set())).toBeNull();
+  });
+
+  it("returns null once the user has dismissed it", () => {
+    const items = [tool("t1", "Write", { file_path: HANDOFF })];
+    expect(detectHandoffDoc(items, written, new Set([HANDOFF]))).toBeNull();
+  });
+
+  it("returns the newest write, scanning back to front", () => {
+    const older = "/t/shared/handoffs/2026-08-20-old.md";
+    const items = [
+      tool("t1", "Write", { file_path: older }),
+      tool("t2", "Write", { file_path: HANDOFF }),
+    ];
+    expect(detectHandoffDoc(items, { ...written, "2026-08-20-old.md": older }, new Set())).toBe(
+      HANDOFF,
+    );
   });
 });
 

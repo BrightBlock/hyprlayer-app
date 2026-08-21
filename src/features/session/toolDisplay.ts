@@ -7,6 +7,7 @@
 import type { DocKind } from "@/lib/domain/docs";
 import { diffStrings, type PatchLine } from "@/features/workstreams/diff";
 
+import type { TranscriptItem } from "./transcript";
 import type { WrittenDocs } from "./writtenDocs";
 
 // A tool's `input` is re-parsed many times per render; cache by input string
@@ -199,10 +200,162 @@ export function docKindForPath(path: string): DocKind | null {
   return null;
 }
 
-// Every `.md` path a shell command mentions: bare, single- or double-quoted.
-// Mentions only. Which of them the command *wrote* is deliberately not asked
-// here — see `docFromTool` for why the shell can't answer that.
-const SH_MD_MENTION = /'([^']+\.md)'|"([^"]+\.md)"|([^\s'"<>|;&()]+\.md)/g;
+// A `.md` mention at the start of a string: bare, single- or double-quoted.
+// Anchored (not global) because callers isolate one candidate word first —
+// a redirect target, a command operand — and ask only whether that word is a
+// doc mention, not scan a whole command for every mention in it.
+const MD_WORD = /^(?:'([^']+\.md)'|"([^"]+\.md)"|([^\s'"<>|;&()]+\.md))/;
+
+/** The `.md` mention `text` starts with (after leading whitespace), or null. */
+function mdWord(text: string): string | null {
+  const m = MD_WORD.exec(text.trimStart());
+  return m ? (m[1] ?? m[2] ?? m[3] ?? null) : null;
+}
+
+/** Whitespace-separated tokens, keeping a `'...'` or `"..."` span intact so a
+ *  quoted path with no internal spaces survives as one token. */
+function tokenize(text: string): string[] {
+  return text.match(/'[^']*'|"[^"]*"|\S+/g) ?? [];
+}
+
+/** A token's command name: the final path segment, quotes stripped, so
+ *  `/usr/bin/cp` and `'cp'` both read as `cp`. */
+function commandName(token: string): string {
+  const bare = token.replace(/^['"]|['"]$/g, "");
+  return baseName(bare);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Delete a heredoc's body (and its terminating delimiter line), keeping the
+ * header line that opened it — the header can carry the write itself
+ * (`cat > out.md <<'EOF'`), while the body is prose, not shell. Without this a
+ * `.md` path only mentioned in a heredoc's body reads as a write target (the
+ * `phantom.md` regression, `toolDisplay.test.ts`).
+ *
+ * Matching only `\w+` missed three delimiters the skills emit: a quoted one
+ * takes any characters (`<<'DOC-BODY'`, `<<'EOF.MD'`), and an unquoted one may
+ * be backslash-escaped (`<<\EOF`). Their bodies stayed in the command to be
+ * parsed as shell. `<<<` opens a here-string, which has no body to strip.
+ */
+function stripHeredocBodies(command: string): string {
+  const START = /(?<!<)<<(-?)\s*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([\w.-]+))/;
+  let out = "";
+  let rest = command;
+  for (;;) {
+    const start = START.exec(rest);
+    if (!start) return out + rest;
+    const dashVariant = start[1] === "-";
+    const delim = start[2] ?? start[3] ?? start[4];
+    const headerEnd = start.index + start[0].length;
+    const nl = rest.indexOf("\n", headerEnd);
+    if (nl === -1) return out + rest; // no body follows on this line: nothing to strip
+    out += rest.slice(0, nl + 1);
+    const body = rest.slice(nl + 1);
+    const TERMINATOR = new RegExp(`^${dashVariant ? "\\t*" : ""}${escapeRegExp(delim)}$`, "m");
+    const terminator = TERMINATOR.exec(body);
+    if (!terminator) return out; // unterminated heredoc: the rest is body, drop it all
+    let after = terminator.index + terminator[0].length;
+    if (body[after] === "\n") after += 1;
+    rest = body.slice(after);
+  }
+}
+
+// `>` belongs in the lookbehind too: `2>>` blocks on the `2`, and then the bare
+// `>` after it matches on its own and hands the append a target.
+const REDIRECT = /(?<![0-9&>])>>?/g;
+
+/** `.md` targets of `>`/`>>` redirects in `simple`, skipping fd-numbered
+ *  (`2>`) and combined (`&>`) forms — neither is ever a doc write. */
+function redirectTargets(simple: string): string[] {
+  const out: string[] = [];
+  for (const m of simple.matchAll(REDIRECT)) {
+    const word = mdWord(simple.slice(m.index + m[0].length));
+    if (word) out.push(word);
+  }
+  return out;
+}
+
+// `cp`/`mv`/`install`/`rsync` take a source and a destination; only the last
+// operand is ever written to.
+const LAST_OPERAND_WRITES = new Set(["cp", "mv", "install", "rsync"]);
+
+/** Targets a single `;`/`&&`/`||`/`|`/newline-delimited command contributes:
+ *  redirects, `tee`'s operands, the last operand of a copy/move command, and
+ *  an `NAME=<path>` assignment. The assignment counts only for a name in
+ *  `scriptVars`, where a heredoc script opens the destination by reading the
+ *  variable. Without that guard an incidental `P=plan.md; grep … 2>/dev/null`
+ *  counted `P`'s assignment as a write — PR #237's first attempt, replaced
+ *  because of it. */
+function simpleCommandTargets(simple: string, scriptVars: ReadonlySet<string>): string[] {
+  const out = redirectTargets(simple);
+
+  const tokens = tokenize(simple);
+  if (tokens.length > 0) {
+    const name = commandName(tokens[0]);
+    const operands = tokens.slice(1).filter((t) => !t.startsWith("-"));
+    if (name === "tee") {
+      for (const op of operands) {
+        const word = mdWord(op);
+        if (word) out.push(word);
+      }
+    } else if (LAST_OPERAND_WRITES.has(name) && operands.length > 0) {
+      const word = mdWord(operands[operands.length - 1]);
+      if (word) out.push(word);
+    }
+  }
+
+  const assign = /^\s*([A-Za-z_]\w*)=(\S+)\s*$/.exec(simple);
+  if (assign && scriptVars.has(assign[1])) {
+    const word = mdWord(assign[2]);
+    if (word) out.push(word);
+  }
+
+  return out;
+}
+
+// A shell variable reference: `$OUT`, `${OUT}`, `"$OUT"`.
+const VAR_REF = /\$\{?([A-Za-z_]\w*)/g;
+
+/** The variable names a heredoc-bearing command hands to its script: the ones
+ *  it references outside their own assignment. Empty when the command opens no
+ *  heredoc.
+ *
+ *  `stripped` has the heredoc *bodies* removed, so a reference has to sit on a
+ *  header line, as in `python3 - "$OUT" <<'PY'`. That is where the observed
+ *  writes put it, and a quoted delimiter leaves nowhere else — such a body
+ *  never expands `$OUT`. A `<<` anywhere in the command used to be proof
+ *  enough, so a script that carried a heredoc reported every `.md` path it
+ *  assigned as authored. The accepted gap: a body-only `$OUT` under an
+ *  unquoted `<<PY` goes undetected. */
+function heredocScriptVars(stripped: string): Set<string> {
+  const out = new Set<string>();
+  if (!stripped.includes("<<")) return out;
+  for (const m of stripped.matchAll(VAR_REF)) out.add(m[1]);
+  return out;
+}
+
+/**
+ * Every `.md` path a shell command writes *to*, as opposed to only names.
+ *
+ * PR #237 first tried this alone and had to replace it: a stray `2>/dev/null`
+ * unlocked the assigned-path guess and reported a grepped plan as authored.
+ * It works here because it is the narrowing half of an AND — `docFromTool`
+ * still requires the thoughts index to have seen the file written, so a
+ * mis-parsed target that names no real doc resolves to nothing.
+ */
+function shellWriteTargets(command: string): string[] {
+  const stripped = stripHeredocBodies(command);
+  const scriptVars = heredocScriptVars(stripped);
+  const out: string[] = [];
+  for (const simple of stripped.split(/;|&&|\|\||\||\n/)) {
+    out.push(...simpleCommandTargets(simple, scriptVars));
+  }
+  return out;
+}
 
 /** Last three path segments, the part a thoughts symlink preserves. */
 function docTail(path: string): string {
@@ -218,11 +371,11 @@ function docTail(path: string): string {
  * `<store>/repos/<project>/shared/plans/x.md` from the index — two strings for
  * one file, which the dedup-by-path selectors listed twice.
  *
- * The shared tail is what makes the substitution safe: the symlink sits at the
- * scope segment, so an alias always spells the same `<scope>/<dir>/<file>.md`,
- * while a same-named doc under another scope or outside the store does not.
- * Without that guard this would inherit the Bash arm's filename-collision gap
- * on a path that is otherwise exact.
+ * The shared tail makes the substitution safe: the symlink sits at the scope
+ * segment, so an alias spells the same `<scope>/<dir>/<file>.md`, while a
+ * same-named doc under another scope or outside the store does not. Without
+ * that guard this would inherit the Bash arm's filename-collision gap on a path
+ * that is otherwise exact.
  */
 function canonicalDocPath(path: string, written: WrittenDocs): string {
   const indexed = written[baseName(path)];
@@ -239,27 +392,28 @@ function canonicalDocPath(path: string, written: WrittenDocs): string {
  * `cartographer`) and then persist the returned body with a heredoc, `cp`, or a
  * script that opens the path itself.
  *
- * A shell command is read as a list of *mentions*, not parsed for write
- * position, because the text cannot settle either question that matters. Which
- * path got written needs a shell grammar that a regex loses to (a `2>/dev/null`
- * anywhere makes every other mention look like a target; a heredoc body isn't
- * shell at all; `cp a.md b.md dir/` writes neither operand it names). And what
- * the path resolves to is not in the text at all — `"$OUT"`, `~/…`, and the
- * relative `thoughts/shared/plans/…` the skills are told to use all name a file
- * no consumer can open.
+ * Two guards narrow it, and it needs both. `shellWriteTargets` reduces a Bash
+ * command to the `.md` paths it writes *to*, so a `cat`/`grep`/`sed` read of a
+ * doc never reads as authoring it — but write-position parsing alone
+ * false-positives: PR #237's first attempt had to be replaced because a stray
+ * `2>/dev/null` unlocked its assigned-path guess and reported a grepped plan as
+ * authored. `written` settles what the shell text cannot. It holds the docs the
+ * thoughts index saw written, so a mis-parsed target that names no real doc
+ * resolves to nothing, and it supplies the canonical absolute path behind
+ * `"$OUT"`, `~/…`, and the relative `thoughts/shared/plans/…` spelling the
+ * skills are told to use.
  *
- * `written` settles both: it holds the docs the thoughts index actually saw
- * written, so a mention absent from it is a read (the archivist `grep`s old
- * plans constantly, and must not fill the Documents list with them), and a
- * mention present in it resolves to the canonical absolute path. `Write`/`Edit`
- * need no such proof — `file_path` is unambiguously the file written, and it may
- * legitimately sit outside a thoughts root, where the index never sees it. They
- * still consult `written` to agree with the shell arm on *which* spelling of a
- * doc to report (see `canonicalDocPath`).
+ * What gets through both is a false *negative*: a write shape
+ * `shellWriteTargets` misses shows up as a missing chip, which costs less than
+ * a foreign doc in the sidebar.
  *
- * `written` is required rather than defaulted: a caller that forgot it would
- * silently stop detecting every shell-written doc, which is the bug this
- * function exists to fix.
+ * `Write`/`Edit` need no such proof — `file_path` names the file written, and
+ * it may sit outside a thoughts root, where the index never sees it. They still
+ * consult `written` to agree with the shell arm on *which* spelling of a doc to
+ * report (see `canonicalDocPath`).
+ *
+ * `written` is required rather than defaulted: a caller that omits it stops
+ * detecting shell-written docs, and nothing reports the loss.
  */
 export function docFromTool(
   name: string,
@@ -274,15 +428,38 @@ export function docFromTool(
     return kind ? { path: canonicalDocPath(path, written), kind } : null;
   }
   if (name !== "Bash") return null;
-  for (const match of str(obj.command).matchAll(SH_MD_MENTION)) {
-    const mention = match[1] ?? match[2] ?? match[3];
-    if (!mention || docKindForPath(mention) === null) continue;
-    const path = written[baseName(mention)];
-    if (!path) continue; // mentioned but never written: a read
-    // Classify from the resolved path, not the mention: on the (unlikely)
+  for (const target of shellWriteTargets(str(obj.command))) {
+    const path = written[baseName(target)];
+    if (!path) continue; // a write target the index never confirmed: no doc, or it failed
+    // Classify from the resolved path, not the target: on the (unlikely)
     // filename collision the indexed doc is the one being described.
     const kind = docKindForPath(path);
     if (kind) return { path, kind };
+  }
+  return null;
+}
+
+/**
+ * The newest handoff doc a session's own transcript wrote, skipping ones the
+ * user dismissed. Scans the live session's `items` rather than a
+ * workstream-wide selector so a previous session's handoff doesn't pop in as
+ * soon as a new session of the same workstream opens.
+ *
+ * Extracted from `SessionChat`'s handoff-attach `useMemo` so the detection
+ * logic is testable without rendering the (2000+ line, no-test-harness)
+ * component; `SessionChat` calls this from that same `useMemo`, unchanged in
+ * behavior.
+ */
+export function detectHandoffDoc(
+  items: TranscriptItem[],
+  written: WrittenDocs,
+  dismissed: ReadonlySet<string>,
+): string | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind !== "tool") continue;
+    const doc = docFromTool(item.name, item.input, written);
+    if (doc?.kind === "handoff" && !dismissed.has(doc.path)) return doc.path;
   }
   return null;
 }
