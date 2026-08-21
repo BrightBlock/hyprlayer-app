@@ -20,6 +20,7 @@ import type {
   AgentSkill,
 } from "@/lib/bindings";
 import { MODELS } from "@/lib/domain/models";
+import { treeIndent } from "@/lib/layout";
 import {
   AGENT_PHASE,
   ANY_STAGE,
@@ -91,6 +92,10 @@ export function hasUnknownMemoryScope(memory: string | null): boolean {
 export type AgentTab = "yours" | "system";
 /** Global lists every agent you own; project narrows to the repo's own. */
 export type AgentScope = "global" | "project";
+/** The sidebar's root nav choice — `?section=` in the URL. `"system"` maps to
+ *  `AgentTab`'s `"system"`; `"skills"` has no `AgentTab` equivalent, the
+ *  placeholder root has no list to filter. */
+export type AgentSection = "agents" | "system" | "skills";
 
 export type EditorTab = "setup" | "prompt" | "capabilities" | "permissions" | "collaborators";
 
@@ -462,13 +467,14 @@ export type AgentRow =
 /**
  * Loose agents first, then each folder that has something in it. A collapsed
  * folder still renders its header; an empty one is dropped rather than shown
- * as a dead row.
+ * as a dead row, unless `keepEmpty` names it.
  */
 export function agentRows({
   agents,
   folders,
   closedFolders,
   folderOf: folderOfAgent,
+  keepEmpty,
 }: {
   agents: readonly AgentFile[];
   /** Every folder name, in render order, see [`folderList`]. */
@@ -477,13 +483,22 @@ export function agentRows({
    *  folder never touched, including one that appears later, means open. */
   closedFolders: ReadonlySet<string>;
   folderOf: FolderOf;
+  /** Folders that render even with nothing in them — `library.folders`, the
+   *  ones the user created by hand. Without this "New folder…" wrote a name
+   *  into settings that the tree then refused to draw, because a folder is
+   *  empty for exactly as long as it takes to move the first agent into it,
+   *  and the only picker that could do the moving is the one place the name
+   *  did show up. The derived folders (phases, plugin names, `category`
+   *  values) are deliberately not in here: they exist only because an agent
+   *  is in them, so "empty" and "gone" are the same state. */
+  keepEmpty?: ReadonlySet<string>;
 }): AgentRow[] {
   const loose: AgentRow[] = [];
   const inside = new Map<string, AgentFile[]>();
   for (const agent of agents) {
     const folder = folderOfAgent(agent);
     if (!folder) {
-      loose.push({ kind: "agent", agent, indent: 0 });
+      loose.push({ kind: "agent", agent, indent: treeIndent(0, 0) });
       continue;
     }
     const members = inside.get(folder);
@@ -492,11 +507,14 @@ export function agentRows({
   }
   const grouped = folders.flatMap((folder): AgentRow[] => {
     const members = inside.get(folder) ?? [];
-    if (members.length === 0) return [];
+    if (members.length === 0 && !keepEmpty?.has(folder)) return [];
     const open = !closedFolders.has(folder);
     const header: AgentRow = { kind: "group", folder, count: members.length, open };
     if (!open) return [header];
-    return [header, ...members.map((agent): AgentRow => ({ kind: "agent", agent, indent: 14 }))];
+    return [
+      header,
+      ...members.map((agent): AgentRow => ({ kind: "agent", agent, indent: treeIndent(1, 0) })),
+    ];
   });
   return [...loose, ...grouped];
 }

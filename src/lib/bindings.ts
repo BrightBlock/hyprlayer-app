@@ -80,6 +80,15 @@ export const commands = {
 	 */
 	createThoughtsProfile: (name: string, thoughtsRepo: string | null) => typedError<ThoughtsProfile, AppError>(__TAURI_INVOKE("create_thoughts_profile", { name, thoughtsRepo })),
 	syncThoughts: (path: string, message: string | null) => typedError<SyncReport, AppError>(__TAURI_INVOKE("sync_thoughts", { path, message })),
+	/**
+	 *  Per-project health, not per-binary: `run_backend_health` used to also emit
+	 *  four `binary.*` rows from `state.binaries.status_all()`, but a single
+	 *  `BinaryResolver` has no project argument, so those four rows were
+	 *  identical for every project shown inside a per-project dialog. Settings →
+	 *  Binaries (`Settings.tsx` → `BinariesCard`) already renders all seven
+	 *  `BinaryKind`s from that same call, strictly more complete, so the binary
+	 *  checks were dropped here rather than kept in two places.
+	 */
 	runBackendHealth: (path: string) => typedError<HealthReport, AppError>(__TAURI_INVOKE("run_backend_health", { path })),
 	getWorktreeFiles: (path: string) => typedError<string[], AppError>(__TAURI_INVOKE("get_worktree_files", { path })),
 	setWorktreeFiles: (path: string, patterns: string[]) => typedError<string[], AppError>(__TAURI_INVOKE("set_worktree_files", { path, patterns })),

@@ -176,7 +176,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
               disabled={!check.url}
               onClick={() => check.url && void openUrl(check.url)}
               title={check.url ?? check.name}
-              className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/40 disabled:cursor-default disabled:hover:bg-transparent"
+              className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 disabled:cursor-default disabled:hover:bg-transparent"
             >
               <span className="w-3 shrink-0 text-center font-mono">
                 <CheckGlyph state={check.state} />

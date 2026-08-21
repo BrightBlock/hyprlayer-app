@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { Popover } from "@/components/ui";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -207,7 +208,7 @@ export function ScriptDock({
               onResize: setDockHeight,
             })
           }
-          className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize bg-transparent transition-colors hover:bg-edge/60"
+          className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize bg-transparent transition-colors hover:bg-panel-2"
         />
       )}
       {/* header, single row: the left chrome and right Run button stay pinned,
@@ -283,7 +284,7 @@ export function ScriptDock({
                   e.stopPropagation();
                   closeTerm(t);
                 }}
-                className="ml-0.5 grid h-4 w-4 place-items-center rounded text-ink-dim/70 hover:bg-edge hover:text-ink"
+                className="ml-0.5 grid h-4 w-4 place-items-center rounded text-ink-dim/70 hover:bg-panel-2 hover:text-ink"
               >
                 <XIcon size={10} />
               </span>
@@ -298,7 +299,7 @@ export function ScriptDock({
             <button
               type="button"
               onClick={openPort}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2.5 text-[12.5px] text-ink hover:bg-edge/60"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2.5 text-xs text-ink hover:bg-edge/60"
             >
               <GlobeIcon size={13} className="text-ink-dim" /> Open{" "}
               <span className="font-mono text-brand">:{port}</span>
@@ -400,7 +401,7 @@ function DockTab({
       type="button"
       onClick={onClick}
       className={cx(
-        "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border px-3 text-[12.5px] whitespace-nowrap",
+        "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border px-3 text-xs whitespace-nowrap",
         active
           ? "border-edge bg-panel-2 font-semibold text-ink"
           : "border-transparent font-medium text-ink-dim hover:text-ink",
@@ -424,7 +425,7 @@ function Dot({ pulse }: { pulse?: boolean }) {
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded border border-edge bg-surface px-1 py-px font-mono text-[10.5px] text-ink-dim">
+    <span className="rounded border border-edge bg-surface px-1 py-px font-mono text-2xs text-ink-dim">
       {children}
     </span>
   );
@@ -458,17 +459,8 @@ function RunSplit({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onWindowClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener("click", onWindowClick);
-    return () => window.removeEventListener("click", onWindowClick);
-  }, [open]);
-
   return (
-    <div ref={ref} className="relative inline-flex items-stretch">
+    <div ref={ref} className="inline-flex items-stretch">
       <button
         type="button"
         onClick={running ? onStop : onRun}
@@ -481,7 +473,7 @@ function RunSplit({
               : undefined
         }
         className={cx(
-          "inline-flex h-7 items-center gap-1.5 rounded-l-md border border-edge bg-panel-2 text-[12.5px] font-medium hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50",
+          "inline-flex h-7 items-center gap-1.5 rounded-l-md border border-edge bg-panel-2 text-xs font-medium hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50",
           compact ? "px-2" : "px-3",
           running ? "text-bad" : "text-ink",
           open && "rounded-bl-none",
@@ -498,12 +490,7 @@ function RunSplit({
         type="button"
         aria-label="Script options"
         title="Script options"
-        // Stop the opening click reaching the window listener (it would close the
-        // menu in the same tick).
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
+        onClick={() => setOpen((o) => !o)}
         className={cx(
           "inline-flex h-7 items-center rounded-r-md border border-l-0 border-edge bg-panel-2 px-1.5 text-ink-dim hover:bg-edge/60",
           open && "rounded-br-none",
@@ -511,8 +498,23 @@ function RunSplit({
       >
         <ChevronDownIcon size={12} />
       </button>
-      {open && (
-        <div className="absolute right-0 top-full z-50 w-max min-w-full overflow-hidden rounded-b-md border border-t-0 border-edge bg-panel-2">
+      {/* The Popover's own panel chrome is neutralized (rounded-none/border-0/
+          bg-transparent/p-0/shadow-none) and the visible box lives on the div
+          below instead — Popover's base `rounded-md` and this menu's flat-top
+          `rounded-b-md` are different tailwind-merge groups, so merging them
+          onto one element would leave both in the compiled output with the
+          winner decided by Tailwind's own generation order, the exact
+          landmine `cx()` exists to avoid. */}
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={ref}
+        align="end"
+        sideOffset={0}
+        matchAnchorWidth
+        className="rounded-none border-0 bg-transparent p-0 shadow-none"
+      >
+        <div className="w-max min-w-full overflow-hidden rounded-b-md border border-t-0 border-edge bg-panel-2">
           <button
             type="button"
             onClick={() => {
@@ -524,7 +526,7 @@ function RunSplit({
             Configure
           </button>
         </div>
-      )}
+      </Popover>
     </div>
   );
 }
@@ -550,7 +552,7 @@ function RunIdle({
           <button
             type="button"
             onClick={onEdit}
-            className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-[12.5px] text-ink hover:bg-edge/60"
+            className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-xs text-ink hover:bg-edge/60"
           >
             Edit scripts <span aria-hidden>↗</span>
           </button>
@@ -561,7 +563,7 @@ function RunIdle({
           <button
             type="button"
             onClick={onRun}
-            className="inline-flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-3.5 py-2 text-[13px] font-medium text-ink hover:bg-edge/60"
+            className="inline-flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-3.5 py-2 text-sm font-medium text-ink hover:bg-edge/60"
           >
             <PlayIcon size={12} className="text-ink-dim" /> Start Run {runKey && <Kbd>{runKey}</Kbd>}
           </button>

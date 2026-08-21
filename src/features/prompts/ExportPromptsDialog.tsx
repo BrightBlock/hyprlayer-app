@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, Dialog } from "@/components/ui";
 import { ExportIcon } from "@/components/icons";
-import { PromptRowIcon, ShareCheck, ShareModal } from "./promptShareUi";
+import { PromptRowIcon, ShareCheck } from "./promptShareUi";
 import type { ExportEntry, ExportOptions } from "./promptsIo";
 import { PROMPTS_FILE_EXT } from "./promptsIo";
 
@@ -38,7 +38,63 @@ export function ExportPromptsDialog({
   const count = selected.length;
 
   return (
-    <ShareModal onClose={onClose} title="Export prompts" icon={<ExportIcon size={15} />}>
+    <Dialog
+      open
+      onClose={onClose}
+      title={
+        <span className="flex items-center gap-2.5">
+          <ExportIcon size={15} className="shrink-0 text-accent" />
+          Export prompts
+        </span>
+      }
+      size="lg"
+      align="top"
+      seams
+      padded={false}
+      closable
+      footer={
+        <div className="space-y-3">
+          <div className="space-y-2.5">
+            <label className="flex cursor-pointer items-center gap-2.5">
+              <ShareCheck
+                checked={includeChords}
+                onToggle={() => setIncludeChords((v) => !v)}
+                label="Include keyboard shortcuts"
+              />
+              <span className="text-xs text-ink">Include keyboard shortcuts</span>
+            </label>
+            <div className="space-y-1">
+              <label className="flex cursor-pointer items-center gap-2.5">
+                <ShareCheck
+                  checked={includeOverrides}
+                  onToggle={() => setIncludeOverrides((v) => !v)}
+                  label="Include project overrides"
+                />
+                <span className="text-xs text-ink">Include project overrides</span>
+              </label>
+              <p className="pl-[26px] text-[11px] leading-relaxed text-ink-dim">
+                Overrides only apply if the importer has a project with the same name.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 border-t border-edge pt-3">
+            <span className="truncate font-mono text-[11px] text-ink-dim">
+              {DEFAULT_EXPORT_NAME}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Button onClick={onClose}>Cancel</Button>
+              <Button
+                variant="primary"
+                disabled={count === 0}
+                onClick={() => onExport(selected, { includeChords, includeOverrides })}
+              >
+                Export {count} prompt{count === 1 ? "" : "s"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      }
+    >
       <div className="border-b border-edge px-4 pb-3 pt-0.5">
         <p className="text-xs leading-relaxed text-ink-dim">
           Writes a .{PROMPTS_FILE_EXT} file anyone on Hyprlayer desktop can import.
@@ -86,46 +142,6 @@ export function ExportPromptsDialog({
           );
         })}
       </div>
-
-      {/* Options */}
-      <div className="space-y-2.5 border-t border-edge px-4 py-3">
-        <label className="flex cursor-pointer items-center gap-2.5">
-          <ShareCheck
-            checked={includeChords}
-            onToggle={() => setIncludeChords((v) => !v)}
-            label="Include keyboard shortcuts"
-          />
-          <span className="text-xs text-ink">Include keyboard shortcuts</span>
-        </label>
-        <div className="space-y-1">
-          <label className="flex cursor-pointer items-center gap-2.5">
-            <ShareCheck
-              checked={includeOverrides}
-              onToggle={() => setIncludeOverrides((v) => !v)}
-              label="Include project overrides"
-            />
-            <span className="text-xs text-ink">Include project overrides</span>
-          </label>
-          <p className="pl-[26px] text-[11px] leading-relaxed text-ink-dim">
-            Overrides only apply if the importer has a project with the same name.
-          </p>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="flex items-center gap-2.5 border-t border-edge px-4 py-3">
-        <span className="truncate font-mono text-[11px] text-ink-dim">{DEFAULT_EXPORT_NAME}</span>
-        <div className="ml-auto flex items-center gap-2">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="primary"
-            disabled={count === 0}
-            onClick={() => onExport(selected, { includeChords, includeOverrides })}
-          >
-            Export {count} prompt{count === 1 ? "" : "s"}
-          </Button>
-        </div>
-      </div>
-    </ShareModal>
+    </Dialog>
   );
 }

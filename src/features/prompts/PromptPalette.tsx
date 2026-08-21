@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
 import { useBootstrap } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
-import { ChordHint } from "@/components/ui";
+import { ChordHint, rowClass } from "@/components/ui";
 import { effectiveChord, type Overrides } from "@/lib/keybindings/resolve";
 import { GitCommitIcon, GitPullRequestIcon, PencilIcon, ZapIcon } from "@/components/icons";
 import { isFolderWorkstream } from "@/lib/domain/projects";
@@ -173,7 +173,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         aria-haspopup="listbox"
         aria-expanded={true}
         aria-label="Prompt library"
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-edge bg-panel shadow-2xl"
+        className="w-full max-w-xl overflow-hidden rounded-lg border border-edge bg-panel shadow-2xl"
         onKeyDown={handleKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-edge px-4 py-3">
@@ -223,9 +223,16 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
                 title={row.disabled ?? undefined}
                 onMouseEnter={() => setActiveIndex(i)}
                 onClick={() => select(row)}
-                className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm transition-colors ${
-                  clampedActive === i ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/30"
-                } ${row.disabled ? "opacity-50" : ""}`}
+                className={rowClass({
+                  tier: "standard",
+                  // Rounded corners would show mid-list, clipped only by the
+                  // palette's own `rounded-lg`, so cancel the tier's default
+                  // radius. The keyboard-active state is the palette's own
+                  // highlight, not Row's `selected` tint.
+                  className: `flex w-full gap-2 rounded-none px-4 text-left text-sm transition-colors ${
+                    clampedActive === i ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/50"
+                  } ${row.disabled ? "opacity-50" : ""}`,
+                })}
               >
                 {row.icon}
                 <span className="shrink-0 font-medium">{row.name}</span>

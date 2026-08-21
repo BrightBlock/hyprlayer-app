@@ -1,8 +1,10 @@
 /** Small controls the Agents list and editor share. */
 
-import type { ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { TextInput } from "@/components/ui";
+import { MenuItem, Popover, TextInput } from "@/components/ui";
+import { FolderIcon } from "@/components/icons";
+import { folderColor } from "./agents";
 
 export type SegmentedOption<T extends string> = {
   key: T;
@@ -62,9 +64,15 @@ export function Segmented<T extends string>({
  * A free-text folder field with autocomplete suggestions. `category` (and a
  * plugin's `overlay.folder`) is free text, a user or plugin author can file
  * an agent under a folder that isn't a derived phase, so this is a text
- * input offering the known folders as a `<datalist>`, not a closed
- * `DropdownSelect`. Used by both the editor's Folder field and the bulk move
- * dialog's target picker.
+ * input offering the known folders, not a closed `DropdownSelect`. Used by
+ * both the editor's Folder field and the move dialog's target picker.
+ *
+ * The suggestions used to be a native `<datalist>`. The dropdown a datalist
+ * draws is the platform's, not the app's: it takes no theme token, no radius
+ * and no type scale, so inside the Move dialog it rendered as a bare system
+ * list against the dialog's own panel. `Popover` gets the app's styling, and
+ * (ADR-0006 "Floating panels") the Escape handling, the `z-50` and the portal
+ * that keeps the panel from being clipped by the dialog body's own scroll.
  */
 export function FolderCombo({
   id,
@@ -74,7 +82,7 @@ export function FolderCombo({
   placeholder,
   "aria-label": ariaLabel,
 }: {
-  /** Unique per instance, backs the `<datalist>` id the input points at. */
+  /** Unique per instance, backs the suggestion listbox's id. */
   id: string;
   value: string;
   onChange: (value: string) => void;
@@ -82,22 +90,100 @@ export function FolderCombo({
   placeholder?: string;
   "aria-label"?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  /** Index into `suggestions`, or -1 for "the user hasn't arrowed in yet". */
+  const [active, setActive] = useState(-1);
+  const anchorRef = useRef<HTMLDivElement>(null);
   const listId = `${id}-folders`;
+
+  const q = value.trim().toLowerCase();
+  const matches = folders.filter((f) => f.toLowerCase().includes(q));
+  // An exact match means the field already says what the only row would say.
+  const suggestions = matches.length === 1 && matches[0].toLowerCase() === q ? [] : matches;
+
+  const close = () => {
+    setOpen(false);
+    setActive(-1);
+  };
+  const commit = (folder: string) => {
+    onChange(folder);
+    close();
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (suggestions.length === 0) return;
+      e.preventDefault();
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      if (!open) {
+        setOpen(true);
+        setActive(step === 1 ? 0 : suggestions.length - 1);
+        return;
+      }
+      setActive((i) => (i + step + suggestions.length) % suggestions.length);
+      return;
+    }
+    // Only with a row highlighted. A bare Enter belongs to the dialog's own
+    // primary action — swallowing it would break "type a new name, press
+    // Enter", which is the whole reason this is a combobox and not a listbox.
+    if (e.key === "Enter" && open && active >= 0 && active < suggestions.length) {
+      e.preventDefault();
+      commit(suggestions[active]);
+    }
+  };
+
   return (
-    <>
+    <div ref={anchorRef}>
       <TextInput
-        list={listId}
+        role="combobox"
+        aria-expanded={open && suggestions.length > 0}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        // The browser's own history dropdown would cover the suggestions with
+        // a second, unstyled panel saying the same names back.
+        autoComplete="off"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setActive(-1);
+          setOpen(true);
+        }}
+        // Click, not focus: the panel comes with a full-viewport backdrop that
+        // swallows the next click anywhere, so tabbing through the editor's
+        // Folder field must not arm it.
+        onClick={() => setOpen(true)}
+        onKeyDown={onKeyDown}
         placeholder={placeholder}
         aria-label={ariaLabel}
       />
-      <datalist id={listId}>
-        {folders.map((f) => (
-          <option key={f} value={f} />
-        ))}
-      </datalist>
-    </>
+      <Popover
+        open={open && suggestions.length > 0}
+        onClose={close}
+        anchorRef={anchorRef}
+        matchAnchorWidth
+        className="max-h-56 overflow-y-auto"
+      >
+        <div id={listId} role="listbox" aria-label={ariaLabel}>
+          {suggestions.map((f, i) => (
+            <MenuItem
+              key={f}
+              role="option"
+              aria-selected={f === value}
+              // Pointer and keyboard drive one highlight, so arrowing down and
+              // then moving the mouse can't leave two rows looking chosen.
+              onMouseEnter={() => setActive(i)}
+              onClick={() => commit(f)}
+              className={`flex items-center gap-2 ${i === active ? "bg-panel-2" : ""}`}
+            >
+              <span className="shrink-0" style={{ color: folderColor(f) }}>
+                <FolderIcon size={13} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{f}</span>
+            </MenuItem>
+          ))}
+        </div>
+      </Popover>
+    </div>
   );
 }
 
@@ -153,11 +239,23 @@ export function RadioRow({
       <span className="min-w-0">
         <span className="flex items-baseline gap-2">
           <span className={labelClassName ?? "text-ink"}>{label}</span>
-          {hint && <span className="font-mono text-[11px] text-ink-dim">{hint}</span>}
+          {hint && <span className="font-mono text-2xs text-ink-dim">{hint}</span>}
         </span>
         {description && <span className="mt-0.5 block text-xs text-ink-dim">{description}</span>}
       </span>
     </label>
+  );
+}
+
+/** The Skills placeholder's "not live yet" marker — the sidebar's root row
+ *  and the content pane's heading both carry it, matching the same treatment
+ *  the "proj" and "Overrides global in…" tags already use elsewhere in the
+ *  app (`bg-brand/15` / `text-brand`), rather than inventing a new tone. */
+export function SoonBadge() {
+  return (
+    <span className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand">
+      Soon
+    </span>
   );
 }
 
@@ -169,7 +267,7 @@ export function RadioRow({
 export function CardGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2.5">
-      <h2 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">{label}</h2>
+      <h2 className="text-2xs font-semibold uppercase tracking-wider text-ink-dim">{label}</h2>
       <div className="flex flex-col gap-3.5">{children}</div>
     </section>
   );

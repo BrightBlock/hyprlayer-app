@@ -7,44 +7,8 @@ import { useSearchSources } from "./useSearchSources";
 import { selectAgentTab } from "./selectAgentTab";
 import { openDocPreviewTab } from "@/features/session/workstreamTabs";
 import { BookIcon, FolderIcon, TerminalIcon } from "@/components/icons";
-import type { WorkstreamActivity } from "@/features/session/sessionStore";
-
-// ── Activity badge ─────────────────────────────────────────────────────────
-
-const ACTIVITY_STYLE: Record<
-  Exclude<WorkstreamActivity, "idle">,
-  { color: string; anim: "ping" | "work" | "none"; label: string }
-> = {
-  "needs-you": { color: "bg-warn", anim: "ping", label: "Waiting on you" },
-  working: { color: "bg-working", anim: "work", label: "Working" },
-  error: { color: "bg-bad", anim: "none", label: "Errored" },
-  review: { color: "bg-ok", anim: "none", label: "Turn done" },
-  background: { color: "bg-background", anim: "work", label: "Background tasks running" },
-};
-
-function ActivityBadge({ activity }: { activity: WorkstreamActivity }) {
-  if (activity === "idle") return null;
-  const { color, anim, label } = ACTIVITY_STYLE[activity];
-  return (
-    <span
-      className="relative flex h-1.5 w-1.5 shrink-0 items-center justify-center"
-      title={label}
-      role="status"
-      aria-label={label}
-    >
-      {anim === "ping" && (
-        <span
-          className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 ${color}`}
-          aria-hidden="true"
-        />
-      )}
-      <span
-        className={`relative inline-flex h-1.5 w-1.5 rounded-full ${color} ${anim === "work" ? "animate-work-pulse" : ""}`}
-        aria-hidden="true"
-      />
-    </span>
-  );
-}
+import { ActivityDot } from "@/components/ActivityDot";
+import { rowClass } from "@/components/ui";
 
 // ── Kind icon ──────────────────────────────────────────────────────────────
 
@@ -152,18 +116,23 @@ function ResultRow({
       aria-selected={active}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
-      className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm transition-colors ${
-        active ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/30"
-      }`}
+      className={rowClass({
+        tier: "standard",
+        // Rounded corners here would show mid-list, clipped only by the
+        // palette's own `rounded-lg`, so cancel the tier's default radius.
+        // The keyboard-active state is the palette's own highlight, not
+        // Row's `selected` tint, so it stays a plain conditional here.
+        className: `flex w-full gap-2 rounded-none px-4 text-left text-sm transition-colors ${
+          active ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/50"
+        }`,
+      })}
     >
       <KindIcon kind={result.kind} />
       <span className="min-w-0 flex-1 truncate font-medium">{result.title}</span>
       {result.subtitle && (
         <span className="shrink-0 truncate text-xs text-ink-dim/70">{result.subtitle}</span>
       )}
-      {result.activity && result.activity !== "idle" && (
-        <ActivityBadge activity={result.activity} />
-      )}
+      {result.activity && result.activity !== "idle" && <ActivityDot activity={result.activity} />}
       {result.tag && (
         <span className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-[10px] text-ink-dim">
           {result.tag}
@@ -281,7 +250,7 @@ export function SearchPalette() {
         aria-haspopup="listbox"
         aria-expanded={true}
         aria-label="Search everything"
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-edge bg-panel shadow-2xl"
+        className="w-full max-w-xl overflow-hidden rounded-lg border border-edge bg-panel shadow-2xl"
         onKeyDown={handleKeyDown}
       >
         {/* Search input */}

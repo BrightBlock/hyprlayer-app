@@ -9,11 +9,15 @@ const STEP_ROW_BASE =
   "group -ml-1.5 flex w-[calc(100%+0.375rem)] items-center gap-2 rounded px-1.5 py-1 text-left";
 
 /** A working-step row on the transcript's own background. */
-export const STEP_ROW = `${STEP_ROW_BASE} hover:bg-panel-2`;
+export const STEP_ROW = `${STEP_ROW_BASE} hover:bg-edge/50`;
 
-/** The same row on a `bg-panel-2` surface (the user bubble), where [`STEP_ROW`]'s
- *  hover tint would be the surface color and so read as no hover at all. */
-export const STEP_ROW_ON_PANEL = `${STEP_ROW_BASE} hover:bg-edge/40`;
+/** The same row on a `bg-panel-2` surface (the user bubble). Used to carry its
+ *  own, lighter edge tint here, distinct from [`STEP_ROW`]'s old panel-toned
+ *  hover, which would have read as the surface color and so as no hover at
+ *  all. Now that rows share the app's one row-hover value, that value is
+ *  visible on either surface, so the two converge. Kept as its own export so
+ *  callers don't have to reason about which surface they're on. */
+export const STEP_ROW_ON_PANEL = STEP_ROW;
 
 /** The row shape with no hover tint, for a row that only reports something and has
  *  nothing to disclose, a hover affordance on it would promise a click that does

@@ -68,7 +68,7 @@ export function AgentUpdateReport({
   ].filter(Boolean);
 
   return (
-    <Dialog open={open} onClose={onClose} title="Agents updated" className="max-w-lg">
+    <Dialog open={open} onClose={onClose} title="Agents updated" size="lg">
       <div className="flex flex-col gap-3.5">
         {report.toSha !== null && (
           <p className="font-mono text-xs text-ink-dim">
@@ -157,7 +157,7 @@ export function AgentUpdateFailed({
   if (!failure) return null;
 
   return (
-    <Dialog open={open} onClose={onClose} title="Agent update failed" className="max-w-lg">
+    <Dialog open={open} onClose={onClose} title="Agent update failed" size="lg">
       <div className="flex flex-col gap-3.5">
         {/* "Most likely unchanged", not "unchanged": the CLI stages the whole
             bundle and refuses to touch the destination unless the download

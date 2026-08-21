@@ -66,7 +66,7 @@ import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "@/lib/keybindings/registry";
 import { useKeybindings } from "@/lib/keybindings/useKeybindings";
 import type { Overrides } from "@/lib/keybindings/resolve";
-import { ContextMenu, ContextMenuItem, Spinner } from "@/components/ui";
+import { ContextMenu, ContextMenuItem, MenuItem, Popover, rowClass, RowSpine, Spinner } from "@/components/ui";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { HyprlayerMark } from "@/components/Logo";
 import { WindowControls } from "@/components/WindowControls";
@@ -534,6 +534,7 @@ function appIcon(app: EditorTarget, size = 22): ReactNode {
 function OpenInMenu({ dir }: { dir: string }) {
   const [open, setOpen] = useState(false);
   const targets = useEditorTargets();
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // The default editor (what the trigger wears) is also pulled to the top of
   // the dropdown so row 1, and the "1" accelerator, open the user's primary
@@ -575,14 +576,10 @@ function OpenInMenu({ dir }: { dir: string }) {
   }, [targets.data, defaultApp, dir]);
 
   // While open, number keys (1–9) trigger the matching row, mirroring the
-  // accelerators shown at the right of each item; Escape closes.
+  // accelerators shown at the right of each item. Escape is the Popover's job.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-        return;
-      }
       const n = Number(e.key);
       if (Number.isInteger(n) && n >= 1 && n <= Math.min(items.length, 9)) {
         e.preventDefault();
@@ -605,8 +602,9 @@ function OpenInMenu({ dir }: { dir: string }) {
     // flex item, cleanly cross-axis-centered like its sibling icon buttons in
     // the header row. As a plain block wrapper it aligned to the line-box text
     // baseline instead, which pushed the icon a few px high vs. its neighbours.
-    <div className="relative flex items-center">
+    <div className="flex items-center">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={topIconClass}
@@ -617,36 +615,33 @@ function OpenInMenu({ dir }: { dir: string }) {
       >
         {headerAppIcon(defaultApp)}
       </button>
-      {open && (
-        <>
-          <div
-            className="fixed inset-0 z-20"
-            onClick={() => setOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="absolute right-0 top-full z-30 mt-1.5 min-w-[220px] overflow-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
-            {items.map((it, i) => (
-              <button
-                key={it.key}
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  it.run();
-                }}
-                className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-ink-dim hover:bg-edge/50 hover:text-ink"
-              >
-                <span className="shrink-0">{it.icon}</span>
-                <span className="flex-1 font-medium">{it.label}</span>
-                {i < 9 && (
-                  <span className="shrink-0 font-mono text-[10px] text-ink-dim/60">
-                    {i + 1}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        align="end"
+        className="min-w-44"
+      >
+        {items.map((it, i) => (
+          <MenuItem
+            key={it.key}
+            onClick={() => {
+              setOpen(false);
+              it.run();
+            }}
+          >
+            <span className="flex w-full items-center gap-2.5">
+              <span className="shrink-0">{it.icon}</span>
+              <span className="min-w-0 flex-1 truncate">{it.label}</span>
+              {i < 9 && (
+                <span className="shrink-0 font-mono text-[10px] text-ink-dim/60">
+                  {i + 1}
+                </span>
+              )}
+            </span>
+          </MenuItem>
+        ))}
+      </Popover>
     </div>
   );
 }
@@ -767,6 +762,11 @@ export function Root() {
   // panel, and a project tree beside it would be dead weight (nothing in
   // Settings is project-scoped).
   const onSettings = pathname.startsWith("/settings");
+  // Agents renders its own sidebar (the root nav + agent tree, or an open
+  // agent's configuration sections), so the project tree steps aside there
+  // too — the two stacked would put a project column beside a panel that
+  // already owns the surface's navigation.
+  const onAgents = pathname.startsWith("/agents");
   // Route-exit cleanup, companion to the tier-exit cleanup above. Neither
   // drawer renders on every route, and navigating away doesn't clear the slot.
   // An open drawer on a route that can't paint it isn't just invisible: it
@@ -779,7 +779,7 @@ export function Root() {
   // runs it. Subscribing would let it fire between "open the drawer" and the
   // router committing the new path, which is the order the rail's Projects
   // button uses, and it would close the drawer again.
-  const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings;
+  const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings && !onAgents;
   const diffDrawerRoutable = pathname.startsWith("/projects");
   useEffect(() => {
     const open = useUiStore.getState().narrowDrawer;
@@ -1104,6 +1104,8 @@ export function Root() {
   };
   const libraryCollapsed = useUiStore((state) => state.libraryCollapsed);
   const toggleLibrary = useUiStore((state) => state.toggleLibrary);
+  const agentsCollapsed = useUiStore((state) => state.agentsCollapsed);
+  const toggleAgents = useUiStore((state) => state.toggleAgents);
 
   // On the compact tier the project panel is an overlay drawer (see
   // lib/layout): its persisted `collapsed` flag is ignored and left untouched,
@@ -1122,19 +1124,22 @@ export function Root() {
       ? 0
       : projectSidebarWidth(sidebarWidth, width);
   // The header sidebar toggle acts on whichever left panel the route shows: the
-  // Library's list panel on /library, the project tree everywhere else. Both
-  // collapse the same way, so one button drives both (and reads each one's
-  // shown/hidden state for its label). The Prompt library's and Settings' panels
-  // are fixed (always shown), so the toggle is inert there rather than silently
-  // flipping the hidden project tree.
+  // Library's list panel on /library, the Agents sidebar on /agents, the project
+  // tree everywhere else. All three collapse the same way, so one button drives
+  // them (and reads each one's shown/hidden state for its label). The Prompt
+  // library's and Settings' panels are fixed (always shown), so the toggle is
+  // inert there rather than silently flipping the hidden project tree.
   const sidebarShown = onLibrary
     ? !libraryCollapsed
-    : onPrompts || onSettings
-      ? true
-      : projectSidebarShown;
+    : onAgents
+      ? !agentsCollapsed
+      : onPrompts || onSettings
+        ? true
+        : projectSidebarShown;
   const toggleSidebar = () => {
     if (onPrompts || onSettings) return;
     if (onLibrary) toggleLibrary();
+    else if (onAgents) toggleAgents();
     else if (compact) setNarrowDrawer(narrowDrawer === "project" ? null : "project");
     else toggleProjectSidebar();
   };
@@ -1718,7 +1723,7 @@ export function Root() {
             column, driven by `narrowDrawer` rather than the persisted
             `collapsed` flag, which is left untouched and resumes the moment
             the window widens back out of compact. */}
-        {!onLibrary && !onPrompts && !onSettings && (
+        {!onLibrary && !onPrompts && !onSettings && !onAgents && (
           <aside
             className={`shrink-0 overflow-hidden border-r border-edge bg-panel ${
               compact ? "absolute inset-y-0 z-30 shadow-lg" : "relative"
@@ -2009,13 +2014,20 @@ export function Root() {
                               setProjectMenu(null);
                               setItemMenu({ x: e.clientX, y: e.clientY, view });
                             }}
-                            // pl-10 puts this title on the project title's x: it
-                            // trails the header's chevron (ml-1 + w-4) + avatar.
-                            className={`relative flex items-center gap-2.5 overflow-hidden rounded-lg py-2 pl-10 pr-2 text-sm ${
-                              isActiveItem
-                                ? "bg-accent/15 text-ink"
-                                : "text-ink-dim hover:bg-edge/50 hover:text-ink"
-                            }`}
+                            // paddingLeft 40 puts this title on the project title's
+                            // x: it trails the header's chevron (ml-1 + w-4) + avatar.
+                            className={rowClass({
+                              tier: "standard",
+                              selected: isActiveItem ? "spine" : "none",
+                              // Off while active: the tint already carries the
+                              // highlight, so a hover on top of it would flicker
+                              // the row back to the neutral colour.
+                              interactive: !isActiveItem,
+                              className: `flex gap-2.5 overflow-hidden pr-2 text-sm ${
+                                isActiveItem ? "text-ink" : "text-ink-dim hover:text-ink"
+                              }`,
+                            })}
+                            style={{ paddingLeft: 40 }}
                             title={
                               folder
                                 ? `${view.item.title} · project folder`
@@ -2030,12 +2042,7 @@ export function Root() {
                                   }`
                             }
                           >
-                            {isActiveItem && (
-                              <span
-                                className="absolute inset-y-0 left-0 w-[3px] bg-accent"
-                                aria-hidden="true"
-                              />
-                            )}
+                            {isActiveItem && <RowSpine />}
                             <WorkstreamActivityDot
                               workstreamId={view.item.id}
                               idle="dot"
@@ -2086,7 +2093,7 @@ export function Root() {
             the narrow tier too: the sidebar is clamped (or a drawer) there,
             so there's nothing to drag, this is why the narrow content row is
             473, not 465 (lib/layout's SPLIT_PANE_MIN comment). */}
-        {!collapsed && !narrow && !onLibrary && !onPrompts && !onSettings && (
+        {!collapsed && !narrow && !onLibrary && !onPrompts && !onSettings && !onAgents && (
           <div
             role="separator"
             aria-orientation="vertical"

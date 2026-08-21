@@ -5,7 +5,7 @@ use hyprlayer_core::config::{
     DEFAULT_GLOBAL_DIR, DEFAULT_REPOS_DIR,
 };
 use hyprlayer_core::hyprcli::{HyprCli, StorageInfo};
-use hyprlayer_core::process::binaries::{BinaryKind, BinaryState, BinaryStatus};
+use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repos;
 use hyprlayer_core::store::{NewProject, ProjectSource};
 // Items, not the module: `create_thoughts_profile` has an arg of the same name.
@@ -110,6 +110,12 @@ pub struct ProjectDetail {
 #[serde(rename_all = "lowercase")]
 pub enum CheckStatus {
     Pass,
+    // Visual-polish-v1 Phase 4 deleted `binary.gh`, the only check that ever
+    // constructed this. It stays in the enum anyway: it's a specta-exported
+    // type the frontend's CheckStatus binding and ProjectSettingsDialog's
+    // CHECK_TONE map both switch on, and a future per-project check may want
+    // a non-fatal warning verdict again.
+    #[allow(dead_code)]
     Warn,
     Fail,
 }
@@ -940,6 +946,13 @@ pub async fn sync_thoughts(
     Ok(SyncReport { output })
 }
 
+/// Per-project health, not per-binary: `run_backend_health` used to also emit
+/// four `binary.*` rows from `state.binaries.status_all()`, but a single
+/// `BinaryResolver` has no project argument, so those four rows were
+/// identical for every project shown inside a per-project dialog. Settings →
+/// Binaries (`Settings.tsx` → `BinariesCard`) already renders all seven
+/// `BinaryKind`s from that same call, strictly more complete, so the binary
+/// checks were dropped here rather than kept in two places.
 #[tauri::command]
 #[specta::specta]
 pub async fn run_backend_health(
@@ -948,58 +961,9 @@ pub async fn run_backend_health(
 ) -> CmdResult<HealthReport> {
     let mut checks = Vec::new();
 
-    // 1. Required binaries, one concurrent probe pass for all four kinds,
-    // not four serialized probes (each can hit its full timeout cold).
-    let statuses = state.binaries.status_all().await;
-    let status_of = |kind: BinaryKind| {
-        statuses
-            .iter()
-            .find(|s| s.kind == kind)
-            .cloned()
-            .expect("status_all covers every binary kind")
-    };
-
     // A folder project needs neither git nor the hyprlayer CLI, and has no
     // mapping or links to check, only an agent to run and a folder to run in.
     let git_backed = project_source(&state, &path).await.is_git();
-    let required = if git_backed {
-        &[BinaryKind::Hyprlayer, BinaryKind::Git, BinaryKind::Claude][..]
-    } else {
-        &[BinaryKind::Claude][..]
-    };
-    for &kind in required {
-        let status = status_of(kind);
-        let (check_status, detail, remedy) = match &status.state {
-            BinaryState::Ok => (
-                CheckStatus::Pass,
-                status
-                    .version
-                    .as_ref()
-                    .map(|v| format!("{v} at {}", status.path.as_deref().unwrap_or("?"))),
-                None,
-            ),
-            BinaryState::Missing => (
-                CheckStatus::Fail,
-                None,
-                AppError::from(CoreError::BinaryMissing {
-                    name: status.name.clone(),
-                })
-                .remedy,
-            ),
-            BinaryState::TooOld { min } => (
-                CheckStatus::Fail,
-                status.version.clone(),
-                Some(format!("Update {} to {min} or newer.", status.name)),
-            ),
-        };
-        checks.push(HealthCheck {
-            id: format!("binary.{}", status.name),
-            label: format!("{} CLI", status.name),
-            status: check_status,
-            detail,
-            remedy,
-        });
-    }
 
     // A folder project has no remote, no mapping, and no links, the folder
     // being there is the whole contract.
@@ -1018,25 +982,7 @@ pub async fn run_backend_health(
         return Ok(HealthReport { checks });
     }
 
-    // gh is optional: warn, never fail.
-    let gh = status_of(BinaryKind::Gh);
-    checks.push(HealthCheck {
-        id: "binary.gh".into(),
-        label: "GitHub CLI (optional)".into(),
-        status: if matches!(gh.state, BinaryState::Ok) {
-            CheckStatus::Pass
-        } else {
-            CheckStatus::Warn
-        },
-        detail: gh.version.clone(),
-        remedy: if matches!(gh.state, BinaryState::Ok) {
-            None
-        } else {
-            Some("Without gh, PR creation degrades to opening a browser link.".into())
-        },
-    });
-
-    // 2. Project mapping resolves via the CLI.
+    // 1. Project mapping resolves via the CLI.
     match HyprCli::new(&state.binaries)
         .storage_info(Path::new(&path))
         .await
@@ -1074,7 +1020,7 @@ pub async fn run_backend_health(
         }
     }
 
-    // 3 & 4. Thoughts root + per-repo symlinks (filesystem backends only).
+    // 2 & 3. Thoughts root + per-repo symlinks (filesystem backends only).
     checks.extend(thoughts_health_checks(&state, &path).await);
 
     Ok(HealthReport { checks })

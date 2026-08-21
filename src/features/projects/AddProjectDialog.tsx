@@ -333,7 +333,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
     <Dialog
       open
       onClose={close}
-      className="max-w-md"
       title={
         <span className="flex items-baseline justify-between gap-3">
           <span>Add project</span>

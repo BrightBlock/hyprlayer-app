@@ -48,7 +48,7 @@ export function ProviderPickerModal({
   }
 
   return (
-    <Dialog open={open} onClose={close} title="Providers" className="max-w-xl">
+    <Dialog open={open} onClose={close} title="Providers" size="xl">
       {picked ? (
         <KeyEntry provider={picked} onBack={() => setPicked(null)} onDone={close} />
       ) : (

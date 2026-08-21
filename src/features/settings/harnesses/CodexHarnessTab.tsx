@@ -446,7 +446,7 @@ function ChatgptAuthPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
         open={loginOpen}
         onClose={() => setLoginOpen(false)}
         title="Sign in to Codex"
-        className="max-w-2xl"
+        size="2xl"
       >
         <p className="mb-3 text-xs text-ink-dim">
           Runs <code className="font-mono">codex login</code> in a terminal; it opens a

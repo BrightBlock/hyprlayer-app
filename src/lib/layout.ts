@@ -45,27 +45,6 @@ export function isCompact(viewport: number): boolean {
   return viewport < COMPACT_WIDTH;
 }
 
-/** The content-pane equivalents of NARROW_WIDTH / COMPACT_WIDTH, for panes that
- *  must tier off their OWN width rather than the window's. The shell tiers
- *  above bake in the columns to the pane's left (the nav rail, and, at narrow,
- *  where it is still an in-flow column, the clamped project sidebar), so
- *  testing a pane's width against them would drop content a whole sidebar's
- *  worth too late. Each is the pane width at its shell tier's boundary:
- *  900 − 48 − 180 at narrow, and 640 − 48 at compact (where the project
- *  sidebar has become a drawer and stopped taking room in flow). */
-export const CONTENT_NARROW_WIDTH = NARROW_WIDTH - NAV_RAIL_WIDTH - PROJECT_SIDEBAR_MIN;
-export const CONTENT_COMPACT_WIDTH = COMPACT_WIDTH - NAV_RAIL_WIDTH;
-
-/** Whether a content pane of `paneWidth` is below the narrow tier. */
-export function isContentNarrow(paneWidth: number): boolean {
-  return paneWidth < CONTENT_NARROW_WIDTH;
-}
-
-/** Whether a content pane of `paneWidth` is below the compact tier. */
-export function isContentCompact(paneWidth: number): boolean {
-  return paneWidth < CONTENT_COMPACT_WIDTH;
-}
-
 /** Project sidebar width to render: the user's dragged width normally, its
  *  minimum on the narrow tier. Never writes the dragged value back. */
 export function projectSidebarWidth(dragged: number, viewport: number): number {
@@ -90,4 +69,15 @@ export function drawerWidth(preferred: number, available: number): number {
  *  (less the handle) when the row cannot hold two SPLIT_PANE_MIN panes. */
 export function splitPaneFloor(rowWidth: number): number {
   return Math.min(SPLIT_PANE_MIN, Math.floor((rowWidth - SPLIT_HANDLE_WIDTH) / 2));
+}
+
+/** Left inset for a row at `depth` in a tree, in px. The 14px step is what
+ *  three of the four trees already used independently (ChangesPanel's two,
+ *  `agentRows()`'s flat 0-or-14 for the Agents sidebar's tree). `base` differs
+ *  per tree because it encodes a real layout fact — the width of whatever
+ *  chrome the row's text must clear — so it stays a caller's argument rather
+ *  than a constant. */
+export const TREE_INDENT_STEP = 14;
+export function treeIndent(depth: number, base = 8): number {
+  return base + depth * TREE_INDENT_STEP;
 }

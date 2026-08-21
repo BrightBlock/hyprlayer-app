@@ -121,7 +121,7 @@ export function ModelMultiSelectDialog({
   const close = onClose;
 
   return (
-    <Dialog open={open} onClose={close} title={title} className="max-w-xl">
+    <Dialog open={open} onClose={close} title={title} size="xl">
       <div className="relative mb-3">
         <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim">
           <SearchIcon />

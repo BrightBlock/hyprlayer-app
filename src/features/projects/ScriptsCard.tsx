@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ArchiveIcon, CheckIcon, PlayIcon, TerminalIcon, WrenchIcon } from "@/components/icons";
-import { Badge, Card, CardTitle, ErrorNote, Spinner } from "@/components/ui";
+import { Badge, ErrorNote, Spinner } from "@/components/ui";
 import type { BadgeTone } from "@/components/ui";
 import type { ScriptSettings } from "@/lib/bindings";
 import { useScripts, useSetScripts } from "@/lib/queries";
 import { ScriptEditor } from "./ScriptEditor";
+import { SectionHeading, SettingsSection } from "./settingsSection";
 
 type ScriptKey = keyof ScriptSettings; // "setup" | "run" | "archive"
 
@@ -99,9 +100,9 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
   const saving = setScripts.isPending || dirty;
 
   return (
-    <Card className="shrink-0">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <CardTitle className="mb-0">Scripts</CardTitle>
+    <SettingsSection>
+      <div className="flex items-center justify-between gap-3">
+        <SectionHeading>Scripts</SectionHeading>
         {draft && (
           <span className="inline-flex items-center gap-1.5 text-xs text-ink-dim">
             {saving ? (
@@ -116,10 +117,8 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
           </span>
         )}
       </div>
-      <p className="mb-3 text-xs leading-relaxed text-ink-dim">
-        Commands that run automatically in <span className="text-ink">every workstream</span>. They
-        run in the workstream's shell on your machine. Saved to{" "}
-        <code className="font-mono">.hyprlayer/settings.toml</code> (safe to commit).
+      <p className="mb-3 mt-1.5 max-w-xl text-xs leading-relaxed text-ink-dim">
+        Commands that run automatically in <span className="text-ink">every workstream</span>.
       </p>
 
       {scripts.isLoading && <Spinner />}
@@ -164,6 +163,6 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
             </div>
           </div>
         ))}
-    </Card>
+    </SettingsSection>
   );
 }

@@ -130,12 +130,12 @@ export function HeroSearch({ total }: { total: number }) {
       <span className="flex text-ink-dim">
         <SearchIcon size={15} />
       </span>
-      <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-dim">
+      <span className="min-w-0 flex-1 truncate text-sm text-ink-dim">
         Search {total > 0 ? `${total} ${total === 1 ? "document" : "documents"}, ` : ""}
         workstreams, agents…
       </span>
       {chord && (
-        <span className="shrink-0 rounded-[5px] border border-edge bg-panel-2/80 px-1.5 py-px font-mono text-[10px] text-ink-dim">
+        <span className="shrink-0 rounded-[5px] border border-edge bg-panel-2/80 px-1.5 py-px font-mono text-2xs text-ink-dim">
           {formatChord(chord, IS_MACOS)}
         </span>
       )}
@@ -145,7 +145,7 @@ export function HeroSearch({ total }: { total: number }) {
 
 function StatPill({ n, label }: { n: number; label: string }) {
   return (
-    <span className="rounded-full border border-edge bg-panel/60 px-3 py-[5px] text-[11.5px] text-ink-dim backdrop-blur-md">
+    <span className="rounded-full border border-edge bg-panel/60 px-3 py-1 text-2xs text-ink-dim backdrop-blur-md">
       <b className="font-semibold text-ink">{n}</b> {label}
     </span>
   );
@@ -178,7 +178,7 @@ export function StatPills({
       <StatPill n={links} label={links === 1 ? "link" : "links"} />
       <StatPill n={projects} label={projects === 1 ? "project" : "projects"} />
       {agentsLive > 0 ? (
-        <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-[5px] text-[11.5px] text-accent backdrop-blur-md">
+        <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-2xs text-accent backdrop-blur-md">
           <b className="font-semibold">{agentsLive}</b> {agentsLive === 1 ? "agent" : "agents"} live
         </span>
       ) : (
@@ -210,7 +210,7 @@ export function FirstNodeField() {
         />
       </div>
       <div
-        className="absolute left-1/2 top-[36%] flex -translate-x-1/2 -translate-y-[calc(100%+18px)] items-center rounded-full border border-accent/25 bg-panel/70 px-2.5 py-1 text-[10.5px] backdrop-blur-md"
+        className="absolute left-1/2 top-[36%] flex -translate-x-1/2 -translate-y-[calc(100%+18px)] items-center rounded-full border border-accent/25 bg-panel/70 px-2.5 py-1 text-2xs backdrop-blur-md"
         style={{ color: "color-mix(in srgb, var(--color-accent) 40%, var(--color-ink))" }}
       >
         hyprlayer, your first node
@@ -224,7 +224,7 @@ export function FirstNodeField() {
  *  state shows (setup can be unfinished while agents work). */
 export function StarterStats({ agentsLive }: { agentsLive: number }) {
   const stat = (n: number, label: string) => (
-    <span className="rounded-full border border-edge/60 bg-panel/40 px-3 py-[5px] text-[11.5px] text-ink-dim/70 backdrop-blur-md">
+    <span className="rounded-full border border-edge/60 bg-panel/40 px-3 py-1 text-2xs text-ink-dim/70 backdrop-blur-md">
       <b className="font-semibold text-ink-dim">{n}</b> {label}
     </span>
   );
@@ -234,7 +234,7 @@ export function StarterStats({ agentsLive }: { agentsLive: number }) {
       {stat(0, "links")}
       {stat(0, "projects")}
       {agentsLive > 0 && (
-        <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-[5px] text-[11.5px] text-accent backdrop-blur-md">
+        <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-2xs text-accent backdrop-blur-md">
           <b className="font-semibold">{agentsLive}</b> {agentsLive === 1 ? "agent" : "agents"} live
         </span>
       )}
@@ -252,7 +252,7 @@ export function SetupPill({ onClick }: { onClick: () => void }) {
       className="pointer-events-auto absolute bottom-6 right-6 flex items-center gap-2 rounded-full border border-edge bg-panel/75 px-3.5 py-2 backdrop-blur-md hover:border-ink-dim/40"
     >
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-      <span className="text-[12px] font-medium text-ink">Get set up</span>
+      <span className="text-xs font-medium text-ink">Get set up</span>
       <span className="flex text-ink-dim">
         <ChevronRightIcon size={13} />
       </span>
@@ -293,7 +293,7 @@ export function GraphPins({ pins }: { pins: GraphPin[] }) {
           style={PIN_SLOTS[i]}
           className={`pointer-events-auto absolute flex -translate-y-1/2 items-center gap-1.5 rounded-full border ${
             pin.border ?? "border-edge"
-          } bg-panel/70 px-2.5 py-1 text-[10.5px] text-ink-dim backdrop-blur-md hover:text-ink`}
+          } bg-panel/70 px-2.5 py-1 text-2xs text-ink-dim backdrop-blur-md hover:text-ink`}
         >
           <span
             className={`h-1.5 w-1.5 shrink-0 rounded-full ${pin.dot} ${pin.pulse ? "animate-pulse" : ""}`}
@@ -312,7 +312,7 @@ const GLASS_PANEL =
 
 function PanelLabel({ children }: { children: string }) {
   return (
-    <span className="text-[10.5px] font-bold uppercase tracking-[0.13em] text-ink-dim">
+    <span className="text-2xs font-bold uppercase tracking-[0.13em] text-ink-dim">
       {children}
     </span>
   );
@@ -351,10 +351,10 @@ function AgentCard({
         <span
           className={`h-2 w-2 shrink-0 rounded-full ${tone.dot} ${tone.pulse ? "animate-pulse" : ""}`}
         />
-        <span className="max-w-[45%] shrink-0 truncate text-[13px] font-bold text-ink">
+        <span className="max-w-[45%] shrink-0 truncate text-sm font-bold text-ink">
           {view.item.title}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-dim">
+        <span className="min-w-0 flex-1 truncate font-mono text-2xs text-ink-dim">
           {activity === "review" && git.dirty > 0 ? (
             <>
               <span className="text-ok">+{git.additions}</span>{" "}
@@ -372,21 +372,21 @@ function AgentCard({
         </span>
         {running ? (
           <span
-            className={`shrink-0 rounded-full px-2 py-px text-[10.5px] font-semibold ${MODE_STYLES[stage].badge}`}
+            className={`shrink-0 rounded-full px-2 py-px text-2xs font-semibold ${MODE_STYLES[stage].badge}`}
           >
             {stageLabel(stage).toLowerCase()}
           </span>
         ) : (
           statePill && (
             <span
-              className={`shrink-0 rounded-full px-2 py-px text-[10px] font-bold ${statePill.tone}`}
+              className={`shrink-0 rounded-full px-2 py-px text-2xs font-bold ${statePill.tone}`}
             >
               {statePill.label}
             </span>
           )
         )}
         {running && since !== null && (
-          <span className="w-9 shrink-0 text-right font-mono text-[10.5px] text-ink-dim">
+          <span className="w-9 shrink-0 text-right font-mono text-2xs text-ink-dim">
             {shortElapsed(now - since)}
           </span>
         )}
@@ -430,14 +430,14 @@ export function LiveNowPanel({
       <span className="flex items-center gap-2.5">
         <PanelLabel>Live now</PanelLabel>
         {items.length > 0 && (
-          <span className="rounded-full border border-accent/25 bg-accent/10 px-2 py-px text-[10px] font-semibold text-accent">
+          <span className="rounded-full border border-accent/25 bg-accent/10 px-2 py-px text-2xs font-semibold text-accent">
             {items.length} live
           </span>
         )}
       </span>
       {items.length === 0 ? (
         <div className="flex flex-1 flex-col justify-center gap-3 py-2">
-          <p className="text-[13px] leading-relaxed text-ink-dim">
+          <p className="text-sm leading-relaxed text-ink-dim">
             {emptyHint}
             {lastShipped && (
               <>
@@ -509,38 +509,36 @@ export function ActivityPanel({
         <button
           type="button"
           onClick={onOpenArchive}
-          className="text-[11.5px] text-ink-dim hover:text-ink"
+          className="text-2xs text-ink-dim hover:text-ink"
         >
           View all →
         </button>
       </span>
       <div className="mt-2 flex max-h-[170px] flex-col gap-0.5 overflow-y-auto">
         {rows.length === 0 && (
-          <p className="px-1.5 py-2 text-[12.5px] text-ink-dim">
-            No activity yet.
-          </p>
+          <p className="px-1.5 py-2 text-xs text-ink-dim">No activity yet.</p>
         )}
         {rows.map((row) => (
           <button
             key={`${row.kind}-${row.view.item.id}`}
             type="button"
             onClick={() => (row.kind === "active" ? onOpenActive(row.view) : onOpenArchive())}
-            className="flex w-full shrink-0 items-center gap-2.5 rounded-lg px-1.5 py-[5px] text-left hover:bg-panel-2/60"
+            className="flex w-full shrink-0 items-center gap-2.5 rounded-lg px-1.5 py-1 text-left hover:bg-edge/50"
           >
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${rowDot(row)}`} />
-            <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">
+            <span className="min-w-0 truncate text-xs font-semibold text-ink">
               {row.view.item.title}
             </span>
-            <span className="shrink-0 font-mono text-[10.5px] text-ink-dim">{row.project}</span>
+            <span className="shrink-0 font-mono text-2xs text-ink-dim">{row.project}</span>
             <span className="min-w-0 flex-1" />
             {row.kind === "archived" && (
               <span
-                className={`shrink-0 font-mono text-[10.5px] ${row.merged ? "text-ok" : "text-ink-dim"}`}
+                className={`shrink-0 font-mono text-2xs ${row.merged ? "text-ok" : "text-ink-dim"}`}
               >
                 {row.merged ? "merged" : "archived"}
               </span>
             )}
-            <span className="w-8 shrink-0 text-right font-mono text-[10.5px] text-ink-dim">
+            <span className="w-8 shrink-0 text-right font-mono text-2xs text-ink-dim">
               {formatRelativeTime(row.at, now).replace(" ago", "")}
             </span>
           </button>

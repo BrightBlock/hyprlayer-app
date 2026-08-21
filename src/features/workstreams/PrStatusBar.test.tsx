@@ -107,6 +107,11 @@ describe("PrStatusBar merge menu", () => {
     expect(menu?.className).toContain("fixed");
     expect(menu?.className).not.toContain("absolute");
     expect(menu?.style.top).toBe("124px");
-    expect(menu?.style.right).toBe("100px");
+    // Popover always positions off `left` (right-aligning by subtracting its
+    // own width from the anchor's right edge), never a `right` style — jsdom
+    // reports a 0-width panel, so the anchor's own right edge (900) is where
+    // the panel's left edge lands too.
+    expect(menu?.style.left).toBe("900px");
+    expect(menu?.style.right).toBe("");
   });
 });

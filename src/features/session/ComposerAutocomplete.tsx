@@ -394,7 +394,7 @@ export function AutocompleteDropdown({
                 }}
                 onMouseEnter={() => state.setActiveIndex(i)}
                 className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left ${
-                  active ? "bg-accent/15" : "hover:bg-edge/40"
+                  active ? "bg-accent/15" : "hover:bg-edge/50"
                 }`}
               >
                 <span className="shrink-0 font-medium text-ink">

@@ -35,8 +35,9 @@ export function attachEventListeners(): () => void {
       void queryClient.invalidateQueries({ queryKey: ["project"] });
       void queryClient.invalidateQueries({ queryKey: ["thoughts-profiles"] });
     }),
-    // Binary probes changed (PATH enrichment, overrides, redetect). Project
-    // detail depends on binaries too, it shells out to `hyprlayer`.
+    // Binary probes changed (PATH enrichment, overrides, redetect). Health and
+    // project detail both shell out to `hyprlayer`, so a resolved-or-lost binary
+    // changes their answers even though health no longer lists binaries itself.
     events.binariesChanged.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["health"] });

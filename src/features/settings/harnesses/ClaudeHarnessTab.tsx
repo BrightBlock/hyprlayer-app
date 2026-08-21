@@ -272,7 +272,7 @@ function CliAuthPanel() {
         open={loginOpen}
         onClose={() => setLoginOpen(false)}
         title="Sign in to Claude Code"
-        className="max-w-2xl"
+        size="2xl"
       >
         <p className="mb-3 text-xs text-ink-dim">
           Runs <code className="font-mono">claude auth login</code> in a terminal.

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Spinner } from "@/components/ui";
+import { Popover, Spinner } from "@/components/ui";
 import { TerminalIcon } from "@/components/icons";
 import { formatElapsed } from "@/lib/format";
 import type { LiveBackgroundTask } from "./sessionStore";
@@ -21,6 +21,7 @@ export function BackgroundTasksIndicator({
   onJumpTo: (toolUseId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -58,6 +59,7 @@ export function BackgroundTasksIndicator({
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={countLabel}
@@ -68,45 +70,42 @@ export function BackgroundTasksIndicator({
         <TerminalIcon size={14} className="animate-work-pulse" />
         <span className="font-mono text-[11px]">{tasks.length}</span>
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute bottom-full right-0 z-30 mb-1.5 w-72 rounded-lg border border-edge bg-panel p-1.5 shadow-xl">
-            <div className="px-1.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-dim/60">
-              {countLabel}
-            </div>
-            {tasks.map((task) => {
-              const elapsed =
-                task.startedAt !== null ? formatElapsed(now - task.startedAt) : null;
-              const isAwaiting = task.status === "awaiting";
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        side="top"
+        align="end"
+        className="w-72 p-1.5"
+      >
+        <div className="px-1.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-dim/60">
+          {countLabel}
+        </div>
+        {tasks.map((task) => {
+          const elapsed = task.startedAt !== null ? formatElapsed(now - task.startedAt) : null;
+          const isAwaiting = task.status === "awaiting";
 
-              return (
-                <button
-                  key={task.toolUseId}
-                  type="button"
-                  onClick={() => {
-                    onJumpTo(task.toolUseId);
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-xs hover:bg-edge/40"
-                  title="Jump to transcript"
-                >
-                  <Spinner size={12} />
-                  <span className="flex-1 truncate font-mono text-ink">{task.label}</span>
-                  {elapsed !== null && (
-                    <span className="shrink-0 text-ink-dim">{elapsed}</span>
-                  )}
-                  <span
-                    className={`shrink-0 ${isAwaiting ? "text-warn" : "text-ink-dim"}`}
-                  >
-                    {isAwaiting ? "waiting…" : "running"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
+          return (
+            <button
+              key={task.toolUseId}
+              type="button"
+              onClick={() => {
+                onJumpTo(task.toolUseId);
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-xs hover:bg-edge/40"
+              title="Jump to transcript"
+            >
+              <Spinner size={12} />
+              <span className="flex-1 truncate font-mono text-ink">{task.label}</span>
+              {elapsed !== null && <span className="shrink-0 text-ink-dim">{elapsed}</span>}
+              <span className={`shrink-0 ${isAwaiting ? "text-warn" : "text-ink-dim"}`}>
+                {isAwaiting ? "waiting…" : "running"}
+              </span>
+            </button>
+          );
+        })}
+      </Popover>
     </div>
   );
 }

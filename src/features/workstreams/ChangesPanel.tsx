@@ -4,16 +4,17 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { GitFileEntry } from "@/lib/bindings";
 import {
   Badge,
-  Button,
+  ConfirmDialog,
   ContextMenu,
   ContextMenuItem,
-  Dialog,
   ErrorNote,
   IconButton,
+  rowClass,
   Spinner,
 } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, DocIcon, FolderIcon, GlobeIcon } from "@/components/icons";
 import { FileTypeIcon } from "@/components/fileIcon";
+import { treeIndent } from "@/lib/layout";
 import { basename } from "@/lib/path";
 import { queryClient } from "@/lib/queryClient";
 import {
@@ -83,8 +84,8 @@ const FileRow = memo(function FileRow({
   const glyph = GLYPH[entry.change] ?? { ch: "?", cls: "text-ink-dim", label: entry.change };
   return (
     <div
-      className="group flex h-7 items-center gap-2 rounded-md pr-1 text-left hover:bg-edge/40"
-      style={{ paddingLeft: 6 + depth * 14 }}
+      className={rowClass({ tier: "compact", className: "group flex gap-2 pr-1 text-left" })}
+      style={{ paddingLeft: treeIndent(depth, 6) }}
       onClick={onOpen}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -196,8 +197,8 @@ function TreeLevel({
             <button
               type="button"
               onClick={() => toggleCollapsed(child.path)}
-              className="flex h-7 w-full items-center gap-1 rounded-md text-left hover:bg-edge/40"
-              style={{ paddingLeft: 6 + depth * 14 }}
+              className={rowClass({ tier: "compact", className: "flex w-full gap-1 text-left" })}
+              style={{ paddingLeft: treeIndent(depth, 6) }}
             >
               {collapsed.has(child.path) ? (
                 <ChevronRightIcon size={12} />
@@ -405,7 +406,7 @@ function DirLevel({
   const dir = useWorktreeDir(id, relPath);
   if (dir.isLoading) {
     return (
-      <div className="py-1" style={{ paddingLeft: 8 + depth * 14 }}>
+      <div className="py-1" style={{ paddingLeft: treeIndent(depth, 8) }}>
         <Spinner size={12} />
       </div>
     );
@@ -428,8 +429,8 @@ function DirLevel({
             type="button"
             onClick={() => onOpenFile(entry.path)}
             title={entry.path}
-            className="flex h-7 w-full items-center gap-2 rounded-md text-left hover:bg-edge/40"
-            style={{ paddingLeft: 8 + depth * 14 + 14 }}
+            className={rowClass({ tier: "compact", className: "flex w-full gap-2 text-left" })}
+            style={{ paddingLeft: treeIndent(depth + 1, 8) }}
           >
             <FileTypeIcon name={entry.name} size={13} />
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">{entry.name}</span>
@@ -457,8 +458,8 @@ function DirNode({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-7 w-full items-center gap-1.5 rounded-md text-left hover:bg-edge/40"
-        style={{ paddingLeft: 8 + depth * 14 }}
+        className={rowClass({ tier: "compact", className: "flex w-full gap-1.5 text-left" })}
+        style={{ paddingLeft: treeIndent(depth, 8) }}
       >
         {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         <span className="text-brand">
@@ -687,10 +688,27 @@ export function ChangesPanel({
         </ContextMenu>
       )}
 
-      <Dialog
+      <ConfirmDialog
         open={confirmDiscard !== null}
-        onClose={() => setConfirmDiscard(null)}
+        onClose={() => {
+          if (discard.isPending) return;
+          setConfirmDiscard(null);
+        }}
         title="Discard changes?"
+        confirmLabel="Discard"
+        confirmVariant="danger"
+        busy={discard.isPending}
+        error={discard.isError ? discard.error : null}
+        onDismissError={() => discard.reset()}
+        onConfirm={() => {
+          if (!confirmDiscard) return;
+          // The dialog would otherwise unmount as soon as this fires, so a
+          // failure had nowhere to surface, and a success gave no feedback
+          // for the duration of the discard. Closing on settle keeps the
+          // dialog up (busy) while it runs, and lets the error note show
+          // when the mutation fails instead of vanishing with it.
+          discard.mutate([confirmDiscard.path], { onSettled: () => setConfirmDiscard(null) });
+        }}
       >
         <p className="text-sm text-ink-dim">
           Discard working-tree changes to{" "}
@@ -699,19 +717,7 @@ export function ChangesPanel({
           </span>
           ? This cannot be undone.
         </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button onClick={() => setConfirmDiscard(null)}>Cancel</Button>
-          <Button
-            variant="danger"
-            onClick={() => {
-              if (confirmDiscard) discard.mutate([confirmDiscard.path]);
-              setConfirmDiscard(null);
-            }}
-          >
-            Discard
-          </Button>
-        </div>
-      </Dialog>
+      </ConfirmDialog>
     </>
   );
 }

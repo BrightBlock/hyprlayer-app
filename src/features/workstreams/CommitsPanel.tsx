@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { CommitEntry } from "@/lib/bindings";
-import { ErrorNote, Spinner } from "@/components/ui";
+import { ErrorNote, rowClass, Spinner } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
 import { FileTypeIcon } from "@/components/fileIcon";
 import { formatRelativeTime, shortSha } from "@/lib/format";
@@ -29,7 +29,7 @@ function CommitRow({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-7 w-full items-center gap-2 rounded-md pr-1 text-left hover:bg-edge/40"
+        className={rowClass({ tier: "compact", className: "flex w-full gap-2 pr-1 text-left" })}
         style={{ paddingLeft: 6 }}
       >
         {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
@@ -70,7 +70,10 @@ function CommitRow({
                 key={entry.path}
                 type="button"
                 onClick={() => onOpenDiff(entry.path, false, commit.sha)}
-                className="flex h-7 w-full items-center gap-2 rounded-md pl-[26px] pr-1 text-left hover:bg-edge/40"
+                className={rowClass({
+                  tier: "compact",
+                  className: "flex w-full gap-2 pl-[26px] pr-1 text-left",
+                })}
               >
                 <span
                   className={`w-3 shrink-0 text-center font-mono text-xs font-semibold ${glyph.cls}`}

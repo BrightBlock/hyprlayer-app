@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { commands, events } from "@/lib/bindings";
-import { Button, Dialog, ErrorNote } from "@/components/ui";
+import { ConfirmDialog } from "@/components/ui";
 import { IS_MACOS } from "@/lib/platform";
 
 /**
@@ -60,41 +60,37 @@ export function ConfirmQuitDialog() {
   };
 
   return (
-    <Dialog open={open} onClose={close} title="Quit Hyprlayer?">
-      <div className="space-y-3">
-        <p className="text-sm leading-relaxed text-ink-dim">
-          Running agents, terminals, and lifecycle scripts all stop when the app quits.
-        </p>
+    <ConfirmDialog
+      open={open}
+      onClose={close}
+      title="Quit Hyprlayer?"
+      confirmLabel="Quit"
+      confirmVariant="danger"
+      onConfirm={quit}
+      busy={quitting}
+      autoFocusConfirm
+      error={error}
+      onDismissError={() => setError(null)}
+    >
+      <p className="text-sm leading-relaxed text-ink-dim">
+        Running agents, terminals, and lifecycle scripts all stop when the app quits.
+      </p>
 
-        {error != null && <ErrorNote error={error} onDismiss={() => setError(null)} />}
-
-        <div className="flex items-center justify-between gap-4">
-          {/* Bottom-left, deliberately quiet: the opt-out rides along with the
-              confirmation rather than competing with it. */}
-          <label
-            className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-dim hover:text-ink"
-            title={`${IS_MACOS ? "⌘Q" : "Closing the window"} quits immediately. Re-enable in Settings → General.`}
-          >
-            <input
-              type="checkbox"
-              className="h-3 w-3 shrink-0 cursor-pointer accent-accent"
-              checked={dontAskAgain}
-              onChange={(e) => setDontAskAgain(e.target.checked)}
-              disabled={quitting}
-            />
-            Don't ask again
-          </label>
-
-          <div className="flex shrink-0 gap-2">
-            <Button type="button" onClick={close} disabled={quitting}>
-              Cancel
-            </Button>
-            <Button type="button" variant="danger" busy={quitting} autoFocus onClick={quit}>
-              Quit
-            </Button>
-          </div>
-        </div>
-      </div>
-    </Dialog>
+      {/* Deliberately quiet: the opt-out rides along with the confirmation
+          rather than competing with it. */}
+      <label
+        className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-dim hover:text-ink"
+        title={`${IS_MACOS ? "⌘Q" : "Closing the window"} quits immediately. Re-enable in Settings → General.`}
+      >
+        <input
+          type="checkbox"
+          className="h-3 w-3 shrink-0 cursor-pointer accent-accent"
+          checked={dontAskAgain}
+          onChange={(e) => setDontAskAgain(e.target.checked)}
+          disabled={quitting}
+        />
+        Don't ask again
+      </label>
+    </ConfirmDialog>
   );
 }

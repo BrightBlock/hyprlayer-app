@@ -32,6 +32,7 @@ import {
   type Session,
   type SessionEvent,
 } from "@/lib/bindings";
+import type { WorkstreamActivity } from "@/lib/domain/activity";
 import { unwrap } from "@/lib/ipc";
 import { queryClient } from "@/lib/queryClient";
 import { invalidateWorkstreamPr, invalidateWorktreeGit } from "@/lib/queries";
@@ -1447,24 +1448,13 @@ export function useSessionPlanTasks(sessionId: string | undefined): PlanTask[] {
 }
 
 /**
- * One live-activity signal per workstream, folded from every session bound to
- * it. Drives the sidebar activity dot, so you can see which workstreams are
- * running, blocked on you, or waiting for review without opening each one.
- *
- * A workstream takes the most urgent state any of its sessions is in. Highest
- * priority first:
- *  - `needs-you`:  parked on a permission grant or a question, and stuck until
- *                  you answer. The state most worth surfacing.
- *  - `working`:    computing a turn.
- *  - `error`:      crashed or failed to spawn.
- *  - `review`:     turn finished or session completed. Nothing is running, but
- *                  a result is waiting.
- *  - `background`: the turn is done, but background shells are still running.
- *                  Gets its own pulse, separate from `working` and `review`.
- *  - `idle`:       nothing worth flagging, including cold start before sessions
- *                  are restored into the store.
+ * `WorkstreamActivity` itself lives in `lib/domain/activity` — the search
+ * palette renders it too, so it graduated out of this feature — and is
+ * re-exported here so existing imports from this module keep working. See
+ * that file for what each state means; below is the per-session fold that
+ * decides which one a workstream shows.
  */
-export type WorkstreamActivity = "needs-you" | "working" | "error" | "background" | "review" | "idle";
+export type { WorkstreamActivity } from "@/lib/domain/activity";
 
 // Higher number = more urgent. A workstream surfaces the max across its sessions.
 const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {

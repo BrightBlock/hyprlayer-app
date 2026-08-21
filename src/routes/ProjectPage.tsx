@@ -13,6 +13,7 @@ import {
   ContextMenuItem,
   Dialog,
   IconButton,
+  MenuSeparator,
   PageError,
   PageSpinner,
   TextInput,
@@ -1659,7 +1660,7 @@ export function ProjectPage() {
                         </span>
                       </ContextMenuItem>
                     ))}
-                    <div className="my-1 h-px bg-edge" />
+                    <MenuSeparator />
                     <ContextMenuItem
                       onClick={() => {
                         spawn();
@@ -1671,7 +1672,7 @@ export function ProjectPage() {
                         <span className="min-w-0 flex-1 truncate">Native chat</span>
                       </span>
                     </ContextMenuItem>
-                    <div className="my-1 h-px bg-edge" />
+                    <MenuSeparator />
                     <ContextMenuItem
                       onClick={() => {
                         setNewAgentMenu(null);
@@ -1857,7 +1858,7 @@ export function ProjectPage() {
         open={docsModalShellId !== null}
         onClose={() => setDocsModalShellId(null)}
         title="Attach context from library"
-        className="!max-w-2xl"
+        size="2xl"
       >
         <WorkstreamDocsPanel
           thoughtsProject={folderProject ? null : project.thoughtsProject}

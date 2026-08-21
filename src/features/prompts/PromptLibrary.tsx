@@ -9,7 +9,18 @@ import { useToast } from "@/lib/toast";
 import { startEdgeDrag } from "@/lib/resize";
 import { useViewport } from "@/lib/useViewport";
 import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
-import { Badge, Button, Card, ChordHint, ErrorNote, TextInput, Toggle } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  ChordHint,
+  ErrorNote,
+  MenuItem,
+  MenuSeparator,
+  Popover,
+  TextInput,
+  Toggle,
+} from "@/components/ui";
 import {
   BracesIcon,
   ExportIcon,
@@ -214,7 +225,9 @@ export function PromptLibrary({
   const [scope, setScope] = useState<string>("global"); // "global" | project path
   const [recording, setRecording] = useState(false);
   const [varPickerOpen, setVarPickerOpen] = useState(false);
+  const varPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const [projPickerOpen, setProjPickerOpen] = useState(false);
+  const projPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const [filter, setFilter] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [importFile, setImportFile] = useState<{
@@ -832,6 +845,7 @@ export function PromptLibrary({
                     </button>
                   ))}
                   <button
+                    ref={projPickerTriggerRef}
                     type="button"
                     onClick={() => setProjPickerOpen((v) => !v)}
                     className="inline-flex items-center gap-1 rounded-md border border-dashed border-edge px-2 py-1 text-xs text-ink-dim hover:border-accent/50 hover:text-ink"
@@ -839,50 +853,43 @@ export function PromptLibrary({
                     <PlusIcon size={11} />
                     Project override…
                   </button>
-                  {projPickerOpen && (
-                    <>
-                      <button
-                        type="button"
-                        aria-label="Close"
-                        className="fixed inset-0 z-20 cursor-default"
-                        onClick={() => setProjPickerOpen(false)}
-                      />
-                      <div className="absolute left-0 top-8 z-40 w-60 rounded-md border border-edge bg-panel p-1 shadow-2xl">
-                        <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
-                          Add override for…
-                        </div>
-                        {availableOverrideProjects.map((p) => (
-                          <button
-                            key={p.path}
-                            type="button"
-                            onClick={() => {
-                              if (!selPrompt) return;
-                              // Seed the override from the global body so editing
-                              // starts from something, not a blank page.
-                              updateCustom(
-                                selPrompt.id!,
-                                (c) => ({
-                                  ...c,
-                                  overrides: { ...(c.overrides ?? {}), [p.path]: c.body ?? "" },
-                                }),
-                                { immediate: true },
-                              );
-                              setScope(p.path);
-                              setProjPickerOpen(false);
-                            }}
-                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-ink hover:bg-edge/50"
-                          >
-                            {p.mappedName}
-                          </button>
-                        ))}
-                        {availableOverrideProjects.length === 0 && (
-                          <div className="px-2 py-1.5 text-xs text-ink-dim">
-                            Every project already has an override.
-                          </div>
-                        )}
+                  <Popover
+                    open={projPickerOpen}
+                    onClose={() => setProjPickerOpen(false)}
+                    anchorRef={projPickerTriggerRef}
+                    className="min-w-44"
+                  >
+                    <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+                      Add override for…
+                    </div>
+                    {availableOverrideProjects.map((p) => (
+                      <MenuItem
+                        key={p.path}
+                        onClick={() => {
+                          if (!selPrompt) return;
+                          // Seed the override from the global body so editing
+                          // starts from something, not a blank page.
+                          updateCustom(
+                            selPrompt.id!,
+                            (c) => ({
+                              ...c,
+                              overrides: { ...(c.overrides ?? {}), [p.path]: c.body ?? "" },
+                            }),
+                            { immediate: true },
+                          );
+                          setScope(p.path);
+                          setProjPickerOpen(false);
+                        }}
+                      >
+                        {p.mappedName}
+                      </MenuItem>
+                    ))}
+                    {availableOverrideProjects.length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-ink-dim">
+                        Every project already has an override.
                       </div>
-                    </>
-                  )}
+                    )}
+                  </Popover>
                 </div>
                 <p className="text-xs text-ink-dim">
                   {isProjScope
@@ -937,8 +944,9 @@ export function PromptLibrary({
               placeholder="What should the agent do when this prompt runs?"
               className="selectable min-h-40 w-full resize-y rounded-md border border-edge bg-panel-2 px-3 py-2.5 font-mono text-xs leading-relaxed text-ink focus:border-accent focus:outline-none"
             />
-            <div className="relative flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5">
               <button
+                ref={varPickerTriggerRef}
                 type="button"
                 onClick={() => setVarPickerOpen((v) => !v)}
                 className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs text-brand hover:border-brand/60"
@@ -950,50 +958,39 @@ export function PromptLibrary({
                 Variables resolve from the worktree; <code>{"{{input}}"}</code> asks you when
                 the prompt runs.
               </span>
-              {varPickerOpen && (
-                <>
-                  <button
-                    type="button"
-                    aria-label="Close"
-                    className="fixed inset-0 z-20 cursor-default"
-                    onClick={() => setVarPickerOpen(false)}
-                  />
-                  <div className="absolute bottom-8 left-0 z-40 w-80 rounded-md border border-edge bg-panel p-1 shadow-2xl">
-                    {PROMPT_VARS.map((v) => (
-                      <button
-                        key={v.token}
-                        type="button"
-                        onClick={() => insertVariable(v.token)}
-                        className="flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left hover:bg-edge/50"
-                      >
-                        <code className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-[11px] text-brand">
-                          {v.token}
-                        </code>
-                        <span className="min-w-0 flex-1 truncate text-xs text-ink-dim">
-                          {v.desc}
-                        </span>
-                      </button>
-                    ))}
-                    <div className="my-1 border-t border-edge/60" />
-                    <button
-                      type="button"
-                      onClick={() => insertVariable(PROMPT_INPUT_TOKEN)}
-                      className="flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left hover:bg-edge/50"
-                    >
-                      <code className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent">
-                        {PROMPT_INPUT_TOKEN}
+              <Popover
+                open={varPickerOpen}
+                onClose={() => setVarPickerOpen(false)}
+                anchorRef={varPickerTriggerRef}
+                side="top"
+                className="min-w-44"
+              >
+                {PROMPT_VARS.map((v) => (
+                  <MenuItem key={v.token} onClick={() => insertVariable(v.token)}>
+                    <span className="flex w-full items-center gap-2.5">
+                      <code className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-[11px] text-brand">
+                        {v.token}
                       </code>
-                      <span className="min-w-0 flex-1 truncate text-xs text-ink-dim">
-                        Ask me for a value when it runs
-                      </span>
-                    </button>
-                    <p className="px-2 pb-1 pt-0.5 text-[11px] leading-relaxed text-ink-dim/80">
-                      Name the field with <code>{"{{input:which module}}"}</code>. Repeat a token
-                      to fill it once and use it twice.
-                    </p>
-                  </div>
-                </>
-              )}
+                      <span className="min-w-0 flex-1 truncate text-xs text-ink-dim">{v.desc}</span>
+                    </span>
+                  </MenuItem>
+                ))}
+                <MenuSeparator />
+                <MenuItem onClick={() => insertVariable(PROMPT_INPUT_TOKEN)}>
+                  <span className="flex w-full items-center gap-2.5">
+                    <code className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent">
+                      {PROMPT_INPUT_TOKEN}
+                    </code>
+                    <span className="min-w-0 flex-1 truncate text-xs text-ink-dim">
+                      Ask me for a value when it runs
+                    </span>
+                  </span>
+                </MenuItem>
+                <p className="px-2.5 pb-1 pt-0.5 text-[11px] leading-relaxed text-ink-dim/80">
+                  Name the field with <code>{"{{input:which module}}"}</code>. Repeat a token to
+                  fill it once and use it twice.
+                </p>
+              </Popover>
             </div>
           </div>
 

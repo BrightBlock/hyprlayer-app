@@ -2,17 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   COMPACT_WIDTH,
-  CONTENT_COMPACT_WIDTH,
-  CONTENT_NARROW_WIDTH,
   drawerWidth,
   isCompact,
-  isContentCompact,
-  isContentNarrow,
   isNarrow,
   NARROW_WIDTH,
   projectSidebarWidth,
   PROJECT_SIDEBAR_MIN,
   splitPaneFloor,
+  treeIndent,
 } from "./layout";
 
 describe("isNarrow", () => {
@@ -43,25 +40,6 @@ describe("projectSidebarWidth", () => {
     // width so a stub returning `dragged` cannot pass.
     expect(projectSidebarWidth(240, 899)).toBe(PROJECT_SIDEBAR_MIN);
     expect(projectSidebarWidth(360, 701)).toBe(PROJECT_SIDEBAR_MIN);
-  });
-});
-
-describe("isContentNarrow / isContentCompact", () => {
-  it("both sides of each content boundary", () => {
-    expect(CONTENT_NARROW_WIDTH).toBe(672); // 900 - 48 rail - 180 sidebar
-    expect(CONTENT_COMPACT_WIDTH).toBe(592); // 640 - 48 rail (sidebar is a drawer)
-    expect(isContentNarrow(671)).toBe(true);
-    expect(isContentNarrow(672)).toBe(false);
-    expect(isContentCompact(591)).toBe(true);
-    expect(isContentCompact(592)).toBe(false);
-  });
-
-  it("is looser than the shell tier, since the pane excludes the columns left of it", () => {
-    // A 950px window with a dragged 360px sidebar leaves the list 542px: wide
-    // by the shell tier, compact by its own. Reading the window here is the
-    // bug, GRID_WIDE's 480px of fixed tracks does not fit 542 minus padding.
-    expect(isNarrow(950)).toBe(false);
-    expect(isContentNarrow(950 - 48 - 360)).toBe(true);
   });
 });
 
@@ -101,5 +79,23 @@ describe("splitPaneFloor", () => {
     // 473 is the real narrow content width: 701 - 48 (rail) - 180 (clamped
     // project sidebar), the drag handle gated off while narrow.
     expect(splitPaneFloor(473)).toBe(232); // floor((473-8)/2)
+  });
+});
+
+describe("treeIndent", () => {
+  it("defaults to an 8px base", () => {
+    expect(treeIndent(0)).toBe(8);
+    expect(treeIndent(1)).toBe(22);
+  });
+
+  it("steps by 14px per depth level", () => {
+    expect(treeIndent(0, 6)).toBe(6);
+    expect(treeIndent(1, 6)).toBe(20);
+    expect(treeIndent(2, 6)).toBe(34);
+  });
+
+  it("takes a caller-supplied base, since it encodes a real layout fact", () => {
+    expect(treeIndent(0, 0)).toBe(0);
+    expect(treeIndent(1, 0)).toBe(14); // AgentList's flat 0-or-14
   });
 });

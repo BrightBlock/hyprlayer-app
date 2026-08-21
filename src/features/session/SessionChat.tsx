@@ -12,7 +12,7 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
-import { Badge, Button, ErrorNote, Spinner } from "@/components/ui";
+import { Badge, Button, ErrorNote, MenuItem, MenuSeparator, Popover, Spinner } from "@/components/ui";
 import {
   BookIcon,
   ChevronDownIcon,
@@ -197,7 +197,7 @@ export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?
   );
 }
 
-type MenuItem = {
+type ComposerMenuOption = {
   key: string;
   label: string;
   hint?: string;
@@ -217,12 +217,12 @@ type MenuGroup = {
   key: string;
   label: string;
   icon?: ReactNode;
-  items: MenuItem[];
+  items: ComposerMenuOption[];
   disabled?: boolean;
   /** Rows folded behind a "more" row, revealed on click, the Claude group hides
    *  the older models the CLI's catalog no longer lists. Auto-expanded when the
    *  active selection lives in here, so the current pick is never hidden. */
-  more?: { label: string; items: MenuItem[] };
+  more?: { label: string; items: ComposerMenuOption[] };
 };
 
 /**
@@ -258,7 +258,7 @@ function ComposerMenu({
   leading: ReactNode;
   label: string;
   hint?: string;
-  items?: MenuItem[];
+  items?: ComposerMenuOption[];
   /** When set, render a grouped menu instead of the flat `items` list (the model
    *  picker groups models by harness). `items`/`custom` are ignored in grouped mode. */
   groups?: MenuGroup[];
@@ -274,6 +274,7 @@ function ComposerMenu({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [editing, setEditing] = useState(false);
   // Which groups have their `more` tail revealed. Reset when the menu closes so
   // it reopens in the tidy state.
@@ -310,7 +311,12 @@ function ComposerMenu({
       e.preventDefault();
       commitCustom();
     } else if (e.key === "Escape") {
+      // Stop the keydown reaching the global dispatcher: without this, the
+      // Popover's own Escape handler (registered the moment the menu opens)
+      // would fire in the same keystroke and close the whole menu, not just
+      // cancel the free-text edit.
       e.preventDefault();
+      e.stopPropagation();
       setEditing(false);
     }
   };
@@ -318,6 +324,7 @@ function ComposerMenu({
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
         title={compact ? `${title}: ${label}` : title}
@@ -344,177 +351,188 @@ function ComposerMenu({
           </>
         )}
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={close} aria-hidden="true" />
-          <div className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[60vh] min-w-[190px] max-w-[22rem] overflow-y-auto overflow-x-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
-            {groups ? (
-              <>
-                {groups.map((g, gi) => {
-                  const renderItem = (it: MenuItem) =>
-                    g.disabled || it.disabled ? (
-                      <div
-                        key={it.key}
-                        title={
-                          it.disabled && !g.disabled
-                            ? "Locked to this session's provider. Start a new agent to use a different provider"
-                            : undefined
-                        }
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim/40"
-                      >
-                        {it.icon && <span className="shrink-0">{it.icon}</span>}
-                        <span className="min-w-0 truncate font-medium">{it.label}</span>
-                        {it.hint && <span className="shrink-0 text-[10px] text-ink-dim/70">{it.hint}</span>}
-                        {g.disabled && (
-                          <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
-                        )}
-                      </div>
-                    ) : (
-                      <button
-                        key={it.key}
-                        type="button"
-                        onClick={() => {
-                          onSelect(it.key);
-                          close();
-                        }}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
-                          it.key === activeKey ? "text-ink" : "text-ink-dim"
-                        }`}
-                      >
-                        {it.icon && <span className="shrink-0">{it.icon}</span>}
-                        <span className="min-w-0 truncate font-medium">{it.label}</span>
-                        {it.hint && <span className="shrink-0 text-ink-dim">{it.hint}</span>}
-                        {it.key === activeKey && (
-                          <span className="ml-auto shrink-0 text-[11px] text-ink">✓</span>
-                        )}
-                      </button>
-                    );
-                  const showMore = g.more && (expandedGroups.has(g.key) || g.more.items.some((it) => it.key === activeKey));
-                  return (
-                    <div key={g.key}>
-                      {gi > 0 && <div className="my-1 border-t border-edge" />}
-                      <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-medium text-ink-dim/70">
-                        {g.icon && <span className="shrink-0">{g.icon}</span>}
-                        <span>{g.label}</span>
-                      </div>
-                      {g.items.map(renderItem)}
-                      {g.more && g.more.items.length > 0 && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedGroups((prev) => {
-                                const next = new Set(prev);
-                                if (!next.delete(g.key)) next.add(g.key);
-                                return next;
-                              })
-                            }
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim hover:bg-edge/50"
-                          >
-                            <span className="shrink-0">
-                              {showMore ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
-                            </span>
-                            <span className="min-w-0 truncate font-medium">{g.more.label}</span>
-                            <span className="ml-auto shrink-0 text-[10px] text-ink-dim/70">
-                              {g.more.items.length}
-                            </span>
-                          </button>
-                          {showMore && g.more.items.map(renderItem)}
-                        </>
+      <Popover
+        open={open}
+        onClose={close}
+        anchorRef={triggerRef}
+        side="top"
+        align="start"
+        className="max-h-[60vh] min-w-44 max-w-[22rem] overflow-y-auto overflow-x-hidden"
+      >
+        {groups ? (
+          <>
+            {groups.map((g, gi) => {
+              const renderItem = (it: ComposerMenuOption) =>
+                g.disabled || it.disabled ? (
+                  <MenuItem
+                    key={it.key}
+                    disabled
+                    title={
+                      it.disabled && !g.disabled
+                        ? "Locked to this session's provider. Start a new agent to use a different provider"
+                        : undefined
+                    }
+                  >
+                    <span className="flex w-full items-center gap-2 text-ink-dim/40">
+                      {it.icon && <span className="shrink-0">{it.icon}</span>}
+                      <span className="min-w-0 flex-1 truncate">{it.label}</span>
+                      {it.hint && <span className="shrink-0 text-[10px] text-ink-dim/70">{it.hint}</span>}
+                      {g.disabled && (
+                        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
                       )}
-                    </div>
-                  );
-                })}
-                {footer && (
-                  <>
-                    <div className="my-1 border-t border-edge" />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        footer.onClick();
-                        close();
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim hover:bg-edge/50 hover:text-ink"
-                    >
-                      <span className="font-medium">{footer.label}</span>
-                      {footer.icon && <span className="ml-auto shrink-0">{footer.icon}</span>}
-                    </button>
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                {items.map((it) =>
-                  it.disabled ? (
-                    <div
-                      key={it.key}
-                      title={it.hint || undefined}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim/40"
-                    >
+                    </span>
+                  </MenuItem>
+                ) : (
+                  <MenuItem
+                    key={it.key}
+                    onClick={() => {
+                      onSelect(it.key);
+                      close();
+                    }}
+                    className={it.key === activeKey ? "text-ink" : "text-ink-dim"}
+                  >
+                    <span className="flex w-full items-center gap-2">
                       {it.icon && <span className="shrink-0">{it.icon}</span>}
-                      <span className="font-medium">{it.label}</span>
-                      {it.hint && <span>{it.hint}</span>}
-                    </div>
-                  ) : (
-                    <button
-                      key={it.key}
-                      type="button"
-                      onClick={() => {
-                        onSelect(it.key);
-                        close();
-                      }}
-                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
-                        it.danger
-                          ? "text-bad"
-                          : it.accent
-                            ? "text-accent"
-                            : it.key === activeKey
-                              ? "text-ink"
-                              : "text-ink-dim"
-                      }`}
-                    >
-                      {it.icon && <span className="shrink-0">{it.icon}</span>}
-                      <span className="font-medium">{it.label}</span>
-                      {it.hint && <span className="text-ink-dim">{it.hint}</span>}
-                      {it.key === activeKey && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
-                    </button>
-                  ),
-                )}
-                {custom && (
-                  <>
-                    <div className="my-1 border-t border-edge" />
-                    {editing ? (
-                      <div className="px-2 py-1">
-                        <input
-                          autoFocus
-                          value={text}
-                          onChange={(e) => setText(e.target.value)}
-                          onKeyDown={onCustomKey}
-                          onBlur={commitCustom}
-                          placeholder={custom.placeholder}
-                          spellCheck={false}
-                          className="w-full rounded-md border border-edge bg-base px-2 py-1 text-xs text-ink placeholder:text-ink-dim focus:border-accent focus:outline-none"
-                        />
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={beginCustom}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 ${
-                          customActive ? "text-ink" : "text-ink-dim"
-                        }`}
+                      <span className="min-w-0 flex-1 truncate">{it.label}</span>
+                      {it.hint && <span className="shrink-0 text-ink-dim">{it.hint}</span>}
+                      {it.key === activeKey && (
+                        <span aria-hidden="true" className="ml-auto shrink-0">
+                          ✓
+                        </span>
+                      )}
+                    </span>
+                  </MenuItem>
+                );
+              const showMore = g.more && (expandedGroups.has(g.key) || g.more.items.some((it) => it.key === activeKey));
+              return (
+                <div key={g.key}>
+                  {gi > 0 && <MenuSeparator />}
+                  <div className="flex items-center gap-2 px-2.5 py-1 text-[11px] font-medium text-ink-dim/70">
+                    {g.icon && <span className="shrink-0">{g.icon}</span>}
+                    <span>{g.label}</span>
+                  </div>
+                  {g.items.map(renderItem)}
+                  {g.more && g.more.items.length > 0 && (
+                    <>
+                      <MenuItem
+                        onClick={() =>
+                          setExpandedGroups((prev) => {
+                            const next = new Set(prev);
+                            if (!next.delete(g.key)) next.add(g.key);
+                            return next;
+                          })
+                        }
+                        className="text-ink-dim"
                       >
-                        <span className="font-medium">{customActive ? activeKey : custom.label}</span>
-                        {customActive && <span className="ml-auto text-[10px] text-ink-dim">●</span>}
-                      </button>
+                        <span className="flex w-full items-center gap-2">
+                          <span className="shrink-0">
+                            {showMore ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{g.more.label}</span>
+                          <span className="ml-auto shrink-0 text-[10px] text-ink-dim/70">
+                            {g.more.items.length}
+                          </span>
+                        </span>
+                      </MenuItem>
+                      {showMore && g.more.items.map(renderItem)}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {footer && (
+              <>
+                <MenuSeparator />
+                <MenuItem
+                  onClick={() => {
+                    footer.onClick();
+                    close();
+                  }}
+                  className="text-ink-dim hover:text-ink"
+                >
+                  <span className="flex w-full items-center gap-2">
+                    <span>{footer.label}</span>
+                    {footer.icon && <span className="ml-auto shrink-0">{footer.icon}</span>}
+                  </span>
+                </MenuItem>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {items.map((it) =>
+              it.disabled ? (
+                <MenuItem key={it.key} disabled title={it.hint || undefined}>
+                  <span className="flex w-full items-center gap-2 text-ink-dim/40">
+                    {it.icon && <span className="shrink-0">{it.icon}</span>}
+                    <span>{it.label}</span>
+                    {it.hint && <span>{it.hint}</span>}
+                  </span>
+                </MenuItem>
+              ) : (
+                <MenuItem
+                  key={it.key}
+                  onClick={() => {
+                    onSelect(it.key);
+                    close();
+                  }}
+                  danger={it.danger}
+                  className={
+                    it.danger
+                      ? undefined
+                      : it.accent
+                        ? "text-accent hover:text-accent"
+                        : it.key === activeKey
+                          ? "text-ink"
+                          : "text-ink-dim"
+                  }
+                >
+                  <span className="flex w-full items-center gap-2">
+                    {it.icon && <span className="shrink-0">{it.icon}</span>}
+                    <span>{it.label}</span>
+                    {it.hint && <span className="text-ink-dim">{it.hint}</span>}
+                    {it.key === activeKey && (
+                      <span aria-hidden="true" className="ml-auto">
+                        ✓
+                      </span>
                     )}
-                  </>
+                  </span>
+                </MenuItem>
+              ),
+            )}
+            {custom && (
+              <>
+                <MenuSeparator />
+                {editing ? (
+                  <div className="px-2 py-1">
+                    <input
+                      autoFocus
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      onKeyDown={onCustomKey}
+                      onBlur={commitCustom}
+                      placeholder={custom.placeholder}
+                      spellCheck={false}
+                      className="w-full rounded-md border border-edge bg-base px-2 py-1 text-sm text-ink placeholder:text-ink-dim focus:border-accent focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <MenuItem onClick={beginCustom} className={customActive ? "text-ink" : "text-ink-dim"}>
+                    <span className="flex w-full items-center gap-2">
+                      <span>{customActive ? activeKey : custom.label}</span>
+                      {customActive && (
+                        <span aria-hidden="true" className="ml-auto">
+                          ✓
+                        </span>
+                      )}
+                    </span>
+                  </MenuItem>
                 )}
               </>
             )}
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </Popover>
     </div>
   );
 }
@@ -536,6 +554,7 @@ function AttachMenu({
   onScreenshots: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const items = [
     ...(onLibrary
       ? [{ key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary }]
@@ -546,6 +565,7 @@ function AttachMenu({
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         title="Attach context"
@@ -554,27 +574,30 @@ function AttachMenu({
       >
         <PlusIcon />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute bottom-full right-0 z-30 mb-1.5 min-w-[200px] overflow-hidden rounded-lg border border-edge bg-panel py-1 shadow-xl">
-            {items.map((it) => (
-              <button
-                key={it.key}
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  it.run();
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink-dim hover:bg-edge/50 hover:text-ink"
-              >
-                <span className="shrink-0">{it.icon}</span>
-                <span className="font-medium">{it.label}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        side="top"
+        align="end"
+        className="min-w-44"
+      >
+        {items.map((it) => (
+          <MenuItem
+            key={it.key}
+            onClick={() => {
+              setOpen(false);
+              it.run();
+            }}
+            className="text-ink-dim hover:text-ink"
+          >
+            <span className="flex w-full items-center gap-2">
+              <span className="shrink-0">{it.icon}</span>
+              <span>{it.label}</span>
+            </span>
+          </MenuItem>
+        ))}
+      </Popover>
     </div>
   );
 }
@@ -607,10 +630,12 @@ function ContextRing({ pct }: { pct: number }) {
 /** Context-window usage: a ring in the toolbar, click for the Context popover. */
 function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: number }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const pct = Math.min(1, tokens / windowSize);
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={`Context ${formatTokens(tokens)} / ${formatTokens(windowSize)}`}
@@ -620,32 +645,34 @@ function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: numb
         <ContextRing pct={pct} />
         <span className="font-mono text-[11px]">{formatTokens(tokens)}</span>
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute bottom-full right-0 z-30 mb-1.5 w-64 rounded-lg border border-edge bg-panel p-3 shadow-xl">
-            <div className="flex items-baseline justify-between">
-              <span className="text-sm font-medium text-ink">Context</span>
-              <span className="font-mono text-xs text-ink-dim">
-                {formatTokens(tokens)} / {formatTokens(windowSize)}
-              </span>
-            </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-edge">
-              <div className="h-full rounded-full bg-ink-dim" style={{ width: `${pct * 100}%` }} />
-            </div>
-            <dl className="mt-2.5 space-y-1 text-xs">
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">Used</dt>
-                <dd className="text-ink">{(pct * 100).toFixed(1)}%</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">Free space</dt>
-                <dd className="text-ink">{((1 - pct) * 100).toFixed(1)}%</dd>
-              </div>
-            </dl>
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        side="top"
+        align="end"
+        className="w-64 p-3"
+      >
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm font-medium text-ink">Context</span>
+          <span className="font-mono text-xs text-ink-dim">
+            {formatTokens(tokens)} / {formatTokens(windowSize)}
+          </span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-edge">
+          <div className="h-full rounded-full bg-ink-dim" style={{ width: `${pct * 100}%` }} />
+        </div>
+        <dl className="mt-2.5 space-y-1 text-xs">
+          <div className="flex justify-between">
+            <dt className="text-ink-dim">Used</dt>
+            <dd className="text-ink">{(pct * 100).toFixed(1)}%</dd>
           </div>
-        </>
-      )}
+          <div className="flex justify-between">
+            <dt className="text-ink-dim">Free space</dt>
+            <dd className="text-ink">{((1 - pct) * 100).toFixed(1)}%</dd>
+          </div>
+        </dl>
+      </Popover>
     </div>
   );
 }
@@ -1282,12 +1309,12 @@ export function SessionChat({
   // the id prefix (`openrouter/…`, `opencode/…`, `ollama/…`), not the harness,
   // because e.g. Kimi (OpenRouter) → Big Pickle (Zen) is cross-provider within OpenCode.
   const lockedProvider = lockedSessionProvider(started, harness.key, ocModel);
-  const lockOther = (itemProvider: string): Pick<MenuItem, "disabled"> =>
+  const lockOther = (itemProvider: string): Pick<ComposerMenuOption, "disabled"> =>
     lockedProvider !== null && itemProvider !== lockedProvider ? { disabled: true } : {};
 
   // Org-disabled rows (a curated list can still name one) render greyed with
   // the reason, and can't be picked into a session the CLI would refuse.
-  const claudeRow = (m: ModelOption): MenuItem => ({
+  const claudeRow = (m: ModelOption): ComposerMenuOption => ({
     key: `claude:${m.key}`,
     label: m.label,
     hint: m.disabled ? "disabled by org policy" : m.hint,

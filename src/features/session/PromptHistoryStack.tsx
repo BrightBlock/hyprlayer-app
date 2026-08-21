@@ -58,7 +58,7 @@ export function PromptHistoryStack({
             )}
             <button
               type="button"
-              className="pointer-events-auto flex items-center py-[3px]"
+              className="pointer-events-auto flex items-center py-1"
               aria-label={`Recall prompt ${idx + 1} of ${prompts.length}`}
               onMouseEnter={() => setHovered(idx)}
               onMouseLeave={() => setHovered(null)}

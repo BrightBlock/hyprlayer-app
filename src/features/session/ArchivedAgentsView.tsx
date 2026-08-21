@@ -142,12 +142,9 @@ export function ArchivedAgentsView({
         ) : visible.length === 0 ? (
           <EmptyState title="No matches">No archived agents match “{query}”.</EmptyState>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-edge bg-panel-2">
-            {visible.map((a, i) => (
-              <div
-                key={a.shell.id}
-                className={`flex items-center gap-3.5 px-4 py-3.5 ${i ? "border-t border-edge" : ""}`}
-              >
+          <div className="divide-y divide-edge/60 overflow-hidden rounded-xl border border-edge bg-panel-2">
+            {visible.map((a) => (
+              <div key={a.shell.id} className="flex items-center gap-3.5 px-4 py-3.5">
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-edge bg-panel text-ink-dim">
                   <ModeIcon mode={a.shell.mode} size={15} />
                 </span>

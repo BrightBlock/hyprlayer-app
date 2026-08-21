@@ -101,13 +101,13 @@ export function WorkstreamDocsPanel({
         </p>
       )}
       {docs.data && docs.data.items.length > 0 && (
-        <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-edge bg-panel">
+        <div className="max-h-[60vh] divide-y divide-edge/60 overflow-y-auto rounded-lg border border-edge bg-panel">
           {docs.data.items.map((doc) => {
             const isAttached = attached.has(doc.id);
             return (
               <div
                 key={doc.id}
-                className="flex items-start justify-between gap-3 border-b border-edge/60 px-4 py-3 last:border-b-0 hover:bg-panel-2/70"
+                className="flex items-start justify-between gap-3 px-4 py-3 hover:bg-edge/50"
               >
                 <button
                   type="button"

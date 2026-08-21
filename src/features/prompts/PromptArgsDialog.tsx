@@ -18,7 +18,15 @@ export function PromptArgsDialog() {
       open={request !== null}
       onClose={() => answerPromptArgs(null)}
       ariaLabel="Prompt arguments"
-      className="max-w-sm"
+      size="sm"
+      title={
+        request && (
+          <span className="flex min-w-0 items-center gap-2">
+            <ZapIcon size={14} className="shrink-0 text-accent" />
+            <span className="min-w-0 truncate">{request.name}</span>
+          </span>
+        )
+      }
     >
       {request && <ArgsForm key={request.id} request={request} />}
     </Dialog>
@@ -35,13 +43,6 @@ function ArgsForm({ request }: { request: PromptArgsRequest }) {
         answerPromptArgs(values);
       }}
     >
-      <div className="mb-3 flex items-center gap-2">
-        <ZapIcon size={14} className="shrink-0 text-accent" />
-        <h2 className="min-w-0 truncate text-sm font-semibold tracking-wide text-ink">
-          {request.name}
-        </h2>
-      </div>
-
       <div className="space-y-3">
         {request.inputs.map((input, i) => (
           <label key={input.token} className="block space-y-1.5">

@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type { MergeMethod, WorkstreamView } from "@/lib/bindings";
 import { useBootstrap, useMergePr, useWorkstreamPr } from "@/lib/queries";
 import { addressPrFeedback } from "@/features/session/sessionStore";
-import { ContextMenuItem, Spinner } from "@/components/ui";
+import { MenuItem, Popover, Spinner } from "@/components/ui";
 import { GitPullRequestIcon } from "@/components/icons";
 
 // Pill matching the header "Ship" action's height/treatment (border + tint), so
@@ -59,16 +59,9 @@ export function PrStatusBar({
   const [mergeOpen, setMergeOpen] = useState(false);
   // The menu is wider than the gap between the Merge button and the sidebar's
   // left edge, and the sidebar clips (`overflow-hidden`, for its width
-  // animation). Position it `fixed` off the button's rect so it floats over the
-  // main pane instead of being cut off at the fold.
+  // animation). Popover positions off the button's own rect, so it floats
+  // over the main pane instead of being cut off at the fold.
   const mergeBtnRef = useRef<HTMLButtonElement>(null);
-  const [mergeAnchor, setMergeAnchor] = useState({ top: 0, right: 0 });
-  useLayoutEffect(() => {
-    const btn = mergeBtnRef.current;
-    if (!mergeOpen || !btn) return;
-    const r = btn.getBoundingClientRect();
-    setMergeAnchor({ top: r.bottom + 4, right: window.innerWidth - r.right });
-  }, [mergeOpen]);
 
   const data = pr.data;
   if (!view || !data) return null;
@@ -148,28 +141,25 @@ export function PrStatusBar({
             {merge.isPending ? <Spinner size={12} /> : null}
             {queuesAuto ? "Auto-merge" : "Merge"}
           </button>
-          {mergeOpen && (
-            <>
-              {/* Backdrop closes the dropdown on any outside click. */}
-              <div className="fixed inset-0 z-40" onClick={() => setMergeOpen(false)} />
-              <div
-                className="fixed z-50 min-w-48 rounded-md border border-edge bg-panel p-1 shadow-2xl"
-                style={{ top: mergeAnchor.top, right: mergeAnchor.right }}
+          <Popover
+            open={mergeOpen}
+            onClose={() => setMergeOpen(false)}
+            anchorRef={mergeBtnRef}
+            align="end"
+            className="min-w-44"
+          >
+            {MERGE_OPTIONS.map((opt) => (
+              <MenuItem
+                key={opt.method}
+                onClick={() => {
+                  setMergeOpen(false);
+                  merge.mutate(opt.method);
+                }}
               >
-                {MERGE_OPTIONS.map((opt) => (
-                  <ContextMenuItem
-                    key={opt.method}
-                    onClick={() => {
-                      setMergeOpen(false);
-                      merge.mutate(opt.method);
-                    }}
-                  >
-                    {opt.label}
-                  </ContextMenuItem>
-                ))}
-              </div>
-            </>
-          )}
+                {opt.label}
+              </MenuItem>
+            ))}
+          </Popover>
         </div>
       )}
       {isMerged && (

@@ -309,13 +309,13 @@ export function Dashboard() {
       <div className="pointer-events-none absolute inset-0 flex flex-col px-7 pb-6 pt-7 lg:px-11">
         <header className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-dim">
+            <div className="text-2xs font-semibold uppercase tracking-[0.16em] text-ink-dim">
               {dateLabel}
             </div>
             <h1 className="mt-1.5 truncate text-[30px] font-semibold leading-tight tracking-[-0.02em] text-ink lg:text-[36px]">
               {greetingFor(now, userName)}
             </h1>
-            <div className="mt-2.5 flex items-center gap-2 text-[13px] text-ink-dim">
+            <div className="mt-2.5 flex items-center gap-2 text-sm text-ink-dim">
               <span
                 className={`h-[7px] w-[7px] shrink-0 rounded-full ${status.dot} ${
                   status.pulse ? "animate-pulse" : ""

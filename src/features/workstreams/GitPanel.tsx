@@ -141,7 +141,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
                     type="button"
                     onClick={() => void refreshBranches()}
                     disabled={refreshing}
-                    className="flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge/70 hover:text-ink disabled:opacity-50"
+                    className="flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-panel-2 hover:text-ink disabled:opacity-50"
                     title="Fetch &amp; prune, then refresh branches"
                     aria-label="Refresh branches"
                   >
@@ -166,7 +166,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
                           setOpen(false);
                           if (c.ref !== view.item.baseBranch) setBase.mutate(c.ref);
                         }}
-                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-xs hover:bg-edge/60 hover:text-ink ${
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-xs hover:bg-edge/50 hover:text-ink ${
                           c.label === baseShort ? "text-ink" : "text-ink-dim"
                         }`}
                       >

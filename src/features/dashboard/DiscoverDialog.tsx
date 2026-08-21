@@ -127,7 +127,7 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
       ariaLabel="Discover repositories"
       padded={false}
       scroll={false}
-      className="!max-w-[940px] h-[600px]"
+      className="max-w-[940px] h-[600px]"
     >
       <div className="flex h-full bg-panel">
         <div className="flex w-52 flex-none flex-col border-r border-edge bg-surface px-3 py-4">

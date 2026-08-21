@@ -38,6 +38,34 @@ export function AgentIcon({ size = 19, strokeWidth = 1.8, className }: IconProps
   );
 }
 
+/** Stacked layers, the Agents sidebar's root row and its empty-state glyph.
+ *  `full` adds a third layer for the larger CTA glyph; the nav row stays at
+ *  two so it doesn't read as busy at 14px. */
+export function LayersIcon({
+  size = 14,
+  strokeWidth = 1.7,
+  className,
+  full,
+}: IconProps & { full?: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 3 3 7.5 12 12l9-4.5L12 3Z" />
+      <path d="M3 12.5 12 17l9-4.5" />
+      {full && <path d="M3 17 12 21.5 21 17" />}
+    </svg>
+  );
+}
+
 export function ZapIcon({ size = 14, strokeWidth = 1.7, className }: IconProps) {
   return (
     // The bolt spans the viewBox like its rail siblings (Cube/Book fill ~80% of
@@ -232,6 +260,27 @@ export function DocIcon({ size = 12, strokeWidth = 2, className }: IconProps) {
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
       <path d="M6 3h8l4 4v14H6V3Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
       <path d="M14 3v4h4" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A document with ruled text lines — distinct from `DocIcon`'s folded-corner
+ *  blank page — the agent editor's Prompt section, whose content is the body
+ *  text itself rather than a file reference. */
+export function DocTextIcon({ size = 12, strokeWidth = 1.7, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      className={className}
+    >
+      <path d="M6 3h9l4 4v14H6V3Z" strokeLinejoin="round" />
+      <path d="M9 12h7M9 16h5" strokeLinecap="round" />
     </svg>
   );
 }
@@ -831,6 +880,27 @@ export function PersonIcon({ size = 14, strokeWidth = 1.8, className }: IconProp
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
       <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth={strokeWidth} />
       <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Two people — `PersonIcon` is one, this is the group — the agent editor's
+ *  Collaborators section. */
+export function PeopleIcon({ size = 14, strokeWidth = 1.7, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      className={className}
+    >
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6S13.9 16 14.5 19M16 7.2a3 3 0 0 1 0 5.6M17.5 19c-.3-1.7-1-3-2-3.9" />
     </svg>
   );
 }

@@ -271,7 +271,7 @@ function ArchivedRow({ view, projectLabel, projectOrigin, busy, onRestore, onMen
     : `${view.item.title} · backup directory missing`;
   return (
     <li
-      className="group flex items-center gap-3 px-3 py-2 hover:bg-edge/40"
+      className="group flex items-center gap-3 px-3 py-2 hover:bg-edge/50"
       onContextMenu={onMenu}
       title={missingTitle}
     >
@@ -367,7 +367,7 @@ function CleanupDialog({ open, archived, busy, onClose, onConfirm, error }: Clea
               role="radio"
               aria-checked={scope === opt.value}
               onClick={() => setScope(opt.value)}
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-edge/40"
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-panel-2"
             >
               <span
                 className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${

@@ -352,6 +352,31 @@ describe("agentRows", () => {
     expect(rowsOf([loose], new Set())).toHaveLength(1);
   });
 
+  it("keeps an empty folder that keepEmpty names, so a just-created one is visible", () => {
+    const rows = agentRows({
+      agents: [loose],
+      folders: ["Review"],
+      closedFolders: new Set(),
+      folderOf,
+      keepEmpty: new Set(["Review"]),
+    });
+    expect(rows).toEqual([
+      { kind: "agent", agent: loose, indent: 0 },
+      { kind: "group", folder: "Review", count: 0, open: true },
+    ]);
+  });
+
+  it("still drops an empty folder keepEmpty does not name", () => {
+    const rows = agentRows({
+      agents: [loose],
+      folders: ["Review"],
+      closedFolders: new Set(),
+      folderOf,
+      keepEmpty: new Set(["Something else"]),
+    });
+    expect(rows.some((r) => r.kind === "group")).toBe(false);
+  });
+
   it("renders a folder absent from closedFolders open, including one that appears later", () => {
     // Nothing has ever been collapsed (the set is empty), a brand-new folder
     // must still default open rather than needing to be explicitly listed.

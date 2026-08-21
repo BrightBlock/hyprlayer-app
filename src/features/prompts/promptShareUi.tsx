@@ -1,62 +1,14 @@
 /**
- * Shared chrome for the prompt import/export dialogs: the modal shell (overlay,
- * Escape/click-outside close, header/body/footer bands), the little checkbox,
- * and the per-row prompt glyph. Kept together so the two dialogs stay visually
- * identical without cross-importing each other.
+ * Shared chrome for the prompt import/export dialogs: the little checkbox and
+ * the per-row prompt glyph. Kept together so the two dialogs stay visually
+ * identical without cross-importing each other. The modal shell itself is the
+ * shared `Dialog` (`size="lg"`/`"xl"`, `align="top"`, `seams`) — it used to be
+ * a fork here because `Dialog`'s fixed padding couldn't do full-bleed seams,
+ * but Dialog grew bands (header/body/footer, each with its own inset) that
+ * make the fork unnecessary.
  */
 
-import type { ReactNode } from "react";
-
-import { CheckIcon, GitCommitIcon, GitPullRequestIcon, XIcon, ZapIcon } from "@/components/icons";
-import { useEscape } from "@/lib/keybindings/registry";
-
-/** Full-screen modal shell matching the app's `Dialog` overlay, but with a
- *  flex column so callers can lay out their own header/scroll-body/footer
- *  bands (the shared `Dialog`'s fixed padding can't do full-bleed seams). */
-export function ShareModal({
-  onClose,
-  title,
-  icon,
-  width = "max-w-lg",
-  children,
-}: {
-  onClose: () => void;
-  title: string;
-  icon: ReactNode;
-  width?: string;
-  children: ReactNode;
-}) {
-  useEscape(onClose);
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-surface/70 p-4 pt-[6vh] backdrop-blur-sm"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={`flex max-h-[88vh] w-full ${width} flex-col overflow-hidden rounded-xl border border-edge bg-panel shadow-2xl`}
-      >
-        <div className="flex items-center gap-2.5 border-b border-edge px-4 py-3">
-          <span className="shrink-0 text-accent">{icon}</span>
-          <h2 className="text-sm font-semibold text-ink">{title}</h2>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="ml-auto flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-          >
-            <XIcon size={13} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
+import { CheckIcon, GitCommitIcon, GitPullRequestIcon, ZapIcon } from "@/components/icons";
 
 /** A square checkbox toggled by clicking. Accent-filled + check when on. */
 export function ShareCheck({

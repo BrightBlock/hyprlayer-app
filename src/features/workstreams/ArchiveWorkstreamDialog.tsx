@@ -1,5 +1,5 @@
 import type { WorkstreamView } from "@/lib/bindings";
-import { Button, Dialog, ErrorNote } from "@/components/ui";
+import { Button, ConfirmDialog } from "@/components/ui";
 import { isFolderWorkstream } from "@/lib/domain/projects";
 import { isAppError } from "@/lib/ipc";
 import { useArchiveWorkstream } from "@/lib/queries";
@@ -49,50 +49,45 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
   const folder = target !== null && isFolderWorkstream(target);
 
   return (
-    <Dialog open={target !== null} onClose={close} title="Archive workstream?">
-      <div className="space-y-3">
-        <p className="text-sm leading-relaxed text-ink-dim">
-          {target && (
-            <>
-              <span className="font-medium text-ink">{target.item.title}</span>
-              {!folder && (
-                <>
-                  {" "}
-                  <span className="font-mono text-xs">({target.item.branch})</span>
-                </>
-              )}{" "}
-              :{" "}
-            </>
-          )}
-          {folder ? (
-            "the folder is left untouched; only this workstream is archived. You can unarchive it later from the Archive view."
-          ) : (
-            <>
-              the worktree moves to <span className="font-mono text-xs">archived-contexts/</span>{" "}
-              and the branch is preserved. You can unarchive it later from the Archive view.
-            </>
-          )}
-        </p>
-        {archive.isError && <ErrorNote error={archive.error} onDismiss={() => archive.reset()} />}
-        <div className="flex justify-end gap-2">
-          <Button type="button" onClick={close} disabled={archive.isPending}>
-            Cancel
+    <ConfirmDialog
+      open={target !== null}
+      onClose={close}
+      title="Archive workstream?"
+      confirmLabel={scriptFailed ? "Retry" : "Archive"}
+      onConfirm={() => run(false)}
+      busy={archive.isPending}
+      error={archive.isError ? archive.error : null}
+      onDismissError={() => archive.reset()}
+      extraActions={
+        scriptFailed && (
+          <Button type="button" variant="danger" disabled={archive.isPending} onClick={() => run(true)}>
+            Skip script &amp; archive
           </Button>
-          {scriptFailed && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={archive.isPending}
-              onClick={() => run(true)}
-            >
-              Skip script &amp; archive
-            </Button>
-          )}
-          <Button type="button" variant="primary" busy={archive.isPending} onClick={() => run(false)}>
-            {scriptFailed ? "Retry" : "Archive"}
-          </Button>
-        </div>
-      </div>
-    </Dialog>
+        )
+      }
+    >
+      <p className="text-sm leading-relaxed text-ink-dim">
+        {target && (
+          <>
+            <span className="font-medium text-ink">{target.item.title}</span>
+            {!folder && (
+              <>
+                {" "}
+                <span className="font-mono text-xs">({target.item.branch})</span>
+              </>
+            )}{" "}
+            :{" "}
+          </>
+        )}
+        {folder ? (
+          "the folder is left untouched; only this workstream is archived. You can unarchive it later from the Archive view."
+        ) : (
+          <>
+            the worktree moves to <span className="font-mono text-xs">archived-contexts/</span>{" "}
+            and the branch is preserved. You can unarchive it later from the Archive view.
+          </>
+        )}
+      </p>
+    </ConfirmDialog>
   );
 }

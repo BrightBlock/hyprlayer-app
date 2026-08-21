@@ -85,10 +85,15 @@ const promptsRoute = createRoute({
   }),
 });
 
-/** The agent library's selection lives in the URL; a bare `/agents` is the list. */
+/** The agent library's selection lives in the URL; a bare `/agents` is the list.
+ *  `section` names the sidebar's root nav choice (agents/system/skills); an
+ *  old link without it lands on `agents`, see `AgentsPage`. `project` is the
+ *  path of the project the list is scoped to; absent means the global library. */
 export type AgentsSearch = {
   agent?: string;
   tab?: string;
+  section?: string;
+  project?: string;
 };
 
 const agentsRoute = createRoute({
@@ -98,6 +103,8 @@ const agentsRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): AgentsSearch => ({
     agent: optionalString(search.agent),
     tab: optionalString(search.tab),
+    section: optionalString(search.section),
+    project: optionalString(search.project),
   }),
 });
 

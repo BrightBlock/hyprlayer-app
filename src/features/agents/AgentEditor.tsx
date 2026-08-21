@@ -17,7 +17,7 @@ import {
 } from "@/components/ui";
 import {
   CheckIcon,
-  ChevronLeftIcon,
+  ChevronRightIcon,
   DocIcon,
   ShieldIcon,
   WarningTriangleIcon,
@@ -99,8 +99,18 @@ type Props = {
   tab: EditorTab;
   onTab: (tab: EditorTab) => void;
   onBack: () => void;
+  /** The breadcrumb's ancestor targets. The folder segment is omitted when
+   *  empty — a loose agent has no folder ancestor to show. */
+  breadcrumb: {
+    folder: string;
+    onAgents: () => void;
+    onFolder: () => void;
+  };
   onSave: () => void;
-  onPublish: () => void;
+  /** Sets the overlay's publish status. Patches the draft like any other edit
+   *  — the header's ✓ is what writes it — so the unsaved dot appears and one
+   *  Save covers the toggle plus whatever else is pending. */
+  onStatus: (status: "draft" | "published") => void;
   onReset: () => void;
   onExport: () => void;
   onCopyPath: () => void;
@@ -123,8 +133,9 @@ export function AgentEditor(props: Props) {
     tab,
     onTab,
     onBack,
+    breadcrumb,
     onSave,
-    onPublish,
+    onStatus,
     onReset,
     saving,
   } = props;
@@ -136,15 +147,15 @@ export function AgentEditor(props: Props) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      {/* Title, tabs and actions share one row: a 5-tab strip and four text
-          buttons don't fit the column, so the two rare actions (reset,
-          publish) live behind the kebab and Cancel keeps only its glyph.
-          The gap below is here rather than in the scroller's padding, which
-          would scroll away and leave content touching the strip. */}
-      <div className={`${COLUMN} flex shrink-0 items-center gap-3 px-7 pb-8 pt-4`}>
-        <button type="button" onClick={onBack} aria-label="Back to agents" className={HEADER_ICON}>
-          <ChevronLeftIcon size={15} />
-        </button>
+      <Breadcrumb
+        folder={breadcrumb.folder}
+        agentName={draft.name}
+        sectionLabel={tabs.find((t) => t.key === tab)?.label ?? tab}
+        onAgents={breadcrumb.onAgents}
+        onFolder={breadcrumb.onFolder}
+        onAgent={() => onTab("setup")}
+      />
+      <div className={`${COLUMN} flex shrink-0 items-center gap-3 px-7 pb-8 pt-1.5`}>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="truncate text-lg font-semibold tracking-tight text-ink">
@@ -164,7 +175,6 @@ export function AgentEditor(props: Props) {
           </div>
         </div>
         <div className="flex-1" />
-        <Segmented aria-label="Agent settings" value={tab} onChange={onTab} options={tabs} />
         {dirty && (
           <span
             aria-label="Unsaved changes"
@@ -172,23 +182,23 @@ export function AgentEditor(props: Props) {
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"
           />
         )}
-        {(system || isDraftStatus) && (
-          <button
-            type="button"
-            aria-label="More actions"
-            onClick={(e) => {
-              // The menu closes on any window click, so the opener has to keep
-              // its own click from reaching that listener. Anchor off the
-              // button, not the pointer, so it lands the same place every time.
-              e.stopPropagation();
-              const at = e.currentTarget.getBoundingClientRect();
-              setMenuAt({ x: at.right - 150, y: at.bottom + 6 });
-            }}
-            className={`${HEADER_ICON} tracking-widest`}
-          >
-            ⋮
-          </button>
-        )}
+        {/* Always rendered: every agent has one item in here — Reset for a
+            system agent, the publish toggle for one of yours. */}
+        <button
+          type="button"
+          aria-label="More actions"
+          onClick={(e) => {
+            // The menu closes on any window click, so the opener has to keep
+            // its own click from reaching that listener. Anchor off the
+            // button, not the pointer, so it lands the same place every time.
+            e.stopPropagation();
+            const at = e.currentTarget.getBoundingClientRect();
+            setMenuAt({ x: at.right - 150, y: at.bottom + 6 });
+          }}
+          className={`${HEADER_ICON} tracking-widest`}
+        >
+          ⋮
+        </button>
         <button
           type="button"
           onClick={onBack}
@@ -232,14 +242,17 @@ export function AgentEditor(props: Props) {
               Reset to default
             </ContextMenuItem>
           )}
-          {isDraftStatus && (
+          {/* Not for a system agent: `statusOf` reads those as always Active,
+              so a draft flag on one would badge nothing. */}
+          {!system && (
             <ContextMenuItem
               onClick={() => {
                 setMenuAt(null);
-                onPublish();
+                onStatus(isDraftStatus ? "published" : "draft");
               }}
+              hint={isDraftStatus ? undefined : "Sessions can't spawn a draft agent by name."}
             >
-              Publish
+              {isDraftStatus ? "Publish" : "Unpublish"}
             </ContextMenuItem>
           )}
         </ContextMenu>
@@ -258,6 +271,79 @@ export function AgentEditor(props: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Agents › folder › agent › section, above the `h1`. The drilled-in sidebar
+ * shows the root rows and the agent's configuration sections but never the
+ * folder the agent sits in, so without this trail the folder is unreachable
+ * except by going all the way back out.
+ *
+ * Follows the app's one other breadcrumb (`Root.tsx:1380-1396`), including
+ * its polarity: ancestors are the *stronger* treatment (`font-medium
+ * text-ink`) and the current crumb is the dim, inert one — the opposite of
+ * the usual convention, matched anyway so the two breadcrumbs in the app
+ * agree. Rendered at `text-xs`, not the header's `text-sm`: the `h1` below is
+ * the generic "Edit Agent", and the `font-mono text-xs` subtitle under it
+ * already carries the agent's own name — a trail sized to compete with the
+ * heading would outrank the thing it introduces.
+ */
+function Breadcrumb({
+  folder,
+  agentName,
+  sectionLabel,
+  onAgents,
+  onFolder,
+  onAgent,
+}: {
+  folder: string;
+  agentName: string;
+  sectionLabel: string;
+  onAgents: () => void;
+  onFolder: () => void;
+  onAgent: () => void;
+}) {
+  const sep = (
+    <span aria-hidden="true" className="shrink-0 text-ink-dim">
+      <ChevronRightIcon size={12} />
+    </span>
+  );
+  return (
+    <nav
+      aria-label="Breadcrumb"
+      className={`${COLUMN} flex min-w-0 items-center gap-1.5 px-7 pt-4 text-xs`}
+    >
+      <button
+        type="button"
+        onClick={onAgents}
+        className="max-w-[200px] shrink truncate font-medium text-ink hover:text-ink"
+      >
+        Agents
+      </button>
+      {folder && (
+        <>
+          {sep}
+          <button
+            type="button"
+            onClick={onFolder}
+            className="max-w-[200px] shrink truncate font-medium text-ink hover:text-ink"
+          >
+            {folder}
+          </button>
+        </>
+      )}
+      {sep}
+      <button
+        type="button"
+        onClick={onAgent}
+        className="max-w-[200px] shrink truncate font-medium text-ink hover:text-ink"
+      >
+        {agentName || "untitled"}
+      </button>
+      {sep}
+      <span className="shrink truncate text-ink-dim">{sectionLabel}</span>
+    </nav>
   );
 }
 
@@ -318,7 +404,7 @@ function SetupTab({
         <div>
           <div className="mb-2 flex items-baseline gap-2">
             <span className="text-xs font-medium text-ink-dim">Model</span>
-            <span className="text-[11px] text-ink-dim opacity-70">Fixed when a session spawns</span>
+            <span className="text-2xs text-ink-dim opacity-70">Fixed when a session spawns</span>
           </div>
           <div className="grid grid-cols-2 gap-x-6">
             <RadioRow
@@ -343,7 +429,7 @@ function SetupTab({
         <div>
           <div className="mb-2 flex items-baseline gap-2">
             <span className="text-xs font-medium text-ink-dim">Persistent memory</span>
-            <span className="text-[11px] text-ink-dim opacity-70">
+            <span className="text-2xs text-ink-dim opacity-70">
               What this agent still knows next time it runs
             </span>
           </div>
@@ -367,7 +453,7 @@ function SetupTab({
             ))}
           </div>
           {hasUnknownMemoryScope(draft.memory) && (
-            <p className="mt-1.5 text-[11px] text-warn">
+            <p className="mt-1.5 text-2xs text-warn">
               This file sets <code>memory: {draft.memory}</code>, a scope this editor doesn&apos;t
               know. It is left untouched unless you pick one above.
             </p>
@@ -473,7 +559,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
         title="System prompt"
         description="Prepended to every session this agent starts, after the harness's own system prompt."
         action={
-          <span className="font-mono text-[11px] text-ink-dim">{promptStats(draft.prompt)}</span>
+          <span className="font-mono text-2xs text-ink-dim">{promptStats(draft.prompt)}</span>
         }
         className="flex min-h-0 flex-1 flex-col"
       >
@@ -484,7 +570,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
           className="selectable min-h-75 w-full flex-1 resize-y rounded-lg border border-edge bg-panel-2 p-3.5 font-mono text-xs leading-relaxed text-ink focus:border-ink-dim/70 focus:outline-none"
         />
         <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
-          <span className="text-[11px] text-ink-dim">Insert variable</span>
+          <span className="text-2xs text-ink-dim">Insert variable</span>
           {PROMPT_VARS.map((v) => (
             <button
               key={v.token}
@@ -496,7 +582,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
                     draft.prompt + (draft.prompt && !draft.prompt.endsWith("\n") ? " " : "") + v.token,
                 })
               }
-              className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-ink-dim hover:border-ink-dim hover:text-ink"
+              className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-2xs text-ink-dim hover:border-ink-dim hover:text-ink"
             >
               {v.token}
             </button>
@@ -526,7 +612,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
                     <DocIcon size={14} />
                   </span>
                   <span className="font-mono text-xs text-ink">{c.path}</span>
-                  <span className="text-[11px] text-ink-dim">{c.note}</span>
+                  <span className="text-2xs text-ink-dim">{c.note}</span>
                   <div className="flex-1" />
                   <Toggle
                     checked={on}
@@ -582,7 +668,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="font-mono text-xs text-ink">{t.key}</div>
-                    <div className="truncate text-[11px] text-ink-dim">{t.desc}</div>
+                    <div className="truncate text-2xs text-ink-dim">{t.desc}</div>
                   </div>
                   <Toggle
                     checked={on}
@@ -595,11 +681,11 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           </div>
           {extras.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-ink-dim">Also in the file</span>
+              <span className="text-2xs text-ink-dim">Also in the file</span>
               {extras.map((t) => (
                 <span
                   key={t}
-                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-ink-dim"
+                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-2xs text-ink-dim"
                 >
                   {t}
                 </span>
@@ -630,7 +716,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                         className={`h-[7px] w-[7px] rounded-full ${on ? "bg-ok" : "bg-ink-dim/55"}`}
                       />
                       <span className="font-mono text-xs text-ink">{s.name}</span>
-                      <span className="text-[11px] text-ink-dim">
+                      <span className="text-2xs text-ink-dim">
                         {s.transport} · {s.scope}
                       </span>
                       <div className="flex-1" />
@@ -645,7 +731,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                         {chips.map((t) => (
                           <span
                             key={t}
-                            className="rounded-md border border-edge bg-panel px-1.5 py-0.5 font-mono text-[11px] text-ink"
+                            className="rounded-md border border-edge bg-panel px-1.5 py-0.5 font-mono text-2xs text-ink"
                           >
                             {t}
                           </span>
@@ -666,8 +752,8 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           description="Preloaded into this agent when it runs."
           action={
             <>
-              <span className="font-mono text-[11px] text-ink-dim">{skillSummary(draft, skills)}</span>
-              <label className="flex items-center gap-2 text-[11px] text-ink-dim">
+              <span className="font-mono text-2xs text-ink-dim">{skillSummary(draft, skills)}</span>
+              <label className="flex items-center gap-2 text-2xs text-ink-dim">
                 Only these skills
                 <Toggle
                   checked={skillsRestricted(overlay.rules)}
@@ -709,11 +795,11 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                           </span>
                         )}
                       </div>
-                      <div className="truncate text-[11px] text-ink-dim">
+                      <div className="truncate text-2xs text-ink-dim">
                         {shortDescription(s.description)}
                       </div>
                     </div>
-                    <div className="shrink-0 text-right text-[11px] text-ink-dim">
+                    <div className="shrink-0 text-right text-2xs text-ink-dim">
                       <div>{s.source}</div>
                       <div className="font-mono">~{(s.chars / 3.8 / 1000).toFixed(1)}k tokens</div>
                     </div>
@@ -735,11 +821,11 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           )}
           {extraSkillNames.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-ink-dim">Also in the file</span>
+              <span className="text-2xs text-ink-dim">Also in the file</span>
               {extraSkillNames.map((name) => (
                 <span
                   key={name}
-                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-ink-dim"
+                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-2xs text-ink-dim"
                 >
                   {name}
                 </span>
@@ -777,7 +863,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                     />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-xs text-ink">{p.name}</div>
-                      <div className="truncate text-[11px] text-ink-dim">
+                      <div className="truncate text-2xs text-ink-dim">
                         {shortDescription(p.description)}
                       </div>
                     </div>
@@ -874,7 +960,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
                       type="button"
                       title={a.key}
                       onClick={() => setRule(r.id, { action: a.key })}
-                      className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide"
+                      className="rounded px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide"
                       style={
                         r.action === a.key
                           ? { background: `color-mix(in oklab, ${a.tone} 18%, transparent)`, color: a.tone }
@@ -898,7 +984,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
                   onClick={() =>
                     patchOverlay({ rules: overlay.rules.filter((x) => x.id !== r.id) })
                   }
-                  className="grid h-6 w-6 place-items-center rounded-md text-ink-dim hover:bg-panel hover:text-bad"
+                  className="grid h-6 w-6 place-items-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-bad"
                 >
                   <XIcon size={12} />
                 </button>
@@ -974,7 +1060,7 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
               className="flex items-center gap-2.5 rounded-lg border border-edge bg-panel-2 px-3 py-2"
             >
               <span
-                className={`grid h-6.5 w-6.5 place-items-center rounded-full text-[11px] font-semibold text-accent-ink ${
+                className={`grid h-6 w-6 place-items-center rounded-full text-2xs font-semibold text-accent-ink ${
                   i % 2 ? "bg-research" : "bg-accent"
                 }`}
               >
@@ -982,10 +1068,10 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
               </span>
               <div className="min-w-0">
                 <div className="truncate text-xs text-ink">{c.name}</div>
-                <div className="truncate font-mono text-[11px] text-ink-dim">{c.email}</div>
+                <div className="truncate font-mono text-2xs text-ink-dim">{c.email}</div>
               </div>
               <div className="flex-1" />
-              <span className="text-[11px] text-ink-dim">{c.role}</span>
+              <span className="text-2xs text-ink-dim">{c.role}</span>
               <button
                 type="button"
                 aria-label={`Remove ${c.email}`}
@@ -1082,7 +1168,7 @@ function MiniButton({ onClick, children }: { onClick: () => void; children: Reac
     <button
       type="button"
       onClick={onClick}
-      className="rounded-md border border-edge bg-panel-2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
+      className="rounded-md border border-edge bg-panel-2 px-2 py-1 text-2xs text-ink-dim hover:text-ink"
     >
       {children}
     </button>

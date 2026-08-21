@@ -688,7 +688,7 @@ function AiToolCard() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         title="Configure AI tool"
-        className="max-w-2xl"
+        size="2xl"
       >
         <div className="relative h-80 rounded-lg border border-edge bg-surface overflow-hidden">
           <SetupTerminal

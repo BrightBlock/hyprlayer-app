@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, Dialog } from "@/components/ui";
 import { DocIcon, ImportIcon, WarningTriangleIcon } from "@/components/icons";
-import { PromptRowIcon, ShareCheck, ShareModal } from "./promptShareUi";
+import { PromptRowIcon, ShareCheck } from "./promptShareUi";
 import { promptFirstLine } from "./prompts";
 import type { ImportCandidate, ImportDecision, ImportResolution } from "./promptsIo";
 
@@ -75,7 +75,34 @@ export function ImportPromptsDialog({
   );
 
   return (
-    <ShareModal onClose={onClose} title="Import prompts" icon={<ImportIcon size={15} />} width="max-w-xl">
+    <Dialog
+      open
+      onClose={onClose}
+      title={
+        <span className="flex items-center gap-2.5">
+          <ImportIcon size={15} className="shrink-0 text-accent" />
+          Import prompts
+        </span>
+      }
+      size="xl"
+      align="top"
+      seams
+      padded={false}
+      closable
+      footer={
+        <div className="flex items-center gap-2.5">
+          <span className="text-[11px] text-ink-dim">
+            {willImport} of {candidates.length} will be imported
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" disabled={willImport === 0} onClick={() => onConfirm(decisions)}>
+              Import {willImport} prompt{willImport === 1 ? "" : "s"}
+            </Button>
+          </div>
+        </div>
+      }
+    >
       {/* File info band */}
       <div className="flex items-center gap-2 border-b border-edge bg-panel-2/40 px-4 py-2.5">
         <DocIcon size={14} className="shrink-0 text-ink-dim" />
@@ -161,19 +188,6 @@ export function ImportPromptsDialog({
           );
         })}
       </div>
-
-      {/* Footer */}
-      <div className="flex items-center gap-2.5 border-t border-edge px-4 py-3">
-        <span className="text-[11px] text-ink-dim">
-          {willImport} of {candidates.length} will be imported
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={willImport === 0} onClick={() => onConfirm(decisions)}>
-            Import {willImport} prompt{willImport === 1 ? "" : "s"}
-          </Button>
-        </div>
-      </div>
-    </ShareModal>
+    </Dialog>
   );
 }

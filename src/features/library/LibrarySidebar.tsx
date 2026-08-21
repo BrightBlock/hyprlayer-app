@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
-import { Badge, DropdownSelect, ErrorNote, Field, Spinner, TextInput } from "@/components/ui";
+import { Badge, DropdownSelect, ErrorNote, Field, MenuItem, Popover, Spinner, TextInput } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, FolderIcon, PlusIcon } from "@/components/icons";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import type { Project, QueryResult } from "@/lib/bindings";
@@ -183,6 +183,7 @@ function ProjectSwitcher({
   onChange: (project: string | undefined) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const current = projects.find((p) => p.thoughtsProject === value);
 
   const choose = (project: string | undefined) => {
@@ -193,6 +194,7 @@ function ProjectSwitcher({
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm hover:bg-edge/40"
@@ -212,27 +214,28 @@ function ProjectSwitcher({
         )}
         <ChevronDownIcon size={12} className="shrink-0 text-ink-dim" />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border border-edge bg-panel p-1 shadow-xl">
-            <SwitcherItem active={!value} onClick={() => choose(undefined)}>
-              <FolderIcon size={14} />
-              <span className="flex-1 truncate">All projects</span>
-            </SwitcherItem>
-            {projects.map((p) => (
-              <SwitcherItem
-                key={p.path}
-                active={p.thoughtsProject === value}
-                onClick={() => choose(p.thoughtsProject)}
-              >
-                <RepoAvatar source={p.originUrl} name={p.mappedName} size={14} className="rounded" />
-                <span className="flex-1 truncate">{p.mappedName}</span>
-              </SwitcherItem>
-            ))}
-          </div>
-        </>
-      )}
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        matchAnchorWidth
+        className="max-h-72 overflow-y-auto"
+      >
+        <SwitcherItem active={!value} onClick={() => choose(undefined)}>
+          <FolderIcon size={14} />
+          <span className="flex-1 truncate">All projects</span>
+        </SwitcherItem>
+        {projects.map((p) => (
+          <SwitcherItem
+            key={p.path}
+            active={p.thoughtsProject === value}
+            onClick={() => choose(p.thoughtsProject)}
+          >
+            <RepoAvatar source={p.originUrl} name={p.mappedName} size={14} className="rounded" />
+            <span className="flex-1 truncate">{p.mappedName}</span>
+          </SwitcherItem>
+        ))}
+      </Popover>
     </div>
   );
 }
@@ -247,15 +250,12 @@ function SwitcherItem({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <MenuItem
       onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
-        active ? "bg-accent/15 text-ink" : "text-ink-dim hover:bg-edge/50 hover:text-ink"
-      }`}
+      className={active ? "bg-accent/15 text-ink hover:bg-accent/15" : "text-ink-dim hover:text-ink"}
     >
-      {children}
-    </button>
+      <span className="flex w-full items-center gap-2">{children}</span>
+    </MenuItem>
   );
 }
 

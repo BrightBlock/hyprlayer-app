@@ -104,12 +104,12 @@ describe("BackgroundTasksIndicator", () => {
   });
 
   it("closes the popover when the outside overlay is clicked", () => {
-    const { container } = render(
-      <BackgroundTasksIndicator tasks={[running("tu-1")]} onJumpTo={vi.fn()} />,
-    );
+    render(<BackgroundTasksIndicator tasks={[running("tu-1")]} onJumpTo={vi.fn()} />);
     openPopover();
     expect(screen.getByText("sleep 999 (tu-1)")).toBeTruthy();
-    const overlay = container.querySelector(".fixed.inset-0");
+    // The Popover portals its backdrop onto document.body, not into this
+    // component's own container.
+    const overlay = document.body.querySelector('div.fixed.inset-0[aria-hidden="true"]');
     expect(overlay).toBeTruthy();
     fireEvent.click(overlay!);
     expect(screen.queryByText("sleep 999 (tu-1)")).toBeNull();

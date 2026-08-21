@@ -51,11 +51,24 @@ type UiStore = {
    *  (excluded from `partialize`, so a drag never writes to localStorage). */
   promptsWidth: number;
   setPromptsWidth: (width: number) => void;
+  /** Live width (px) of the agent library's sidebar. Unlike `promptsWidth` and
+   *  `libraryWidth`, this one IS persisted (see `partialize`): the Agents
+   *  sidebar is the surface's primary navigation, not a list panel beside an
+   *  editor, so a width chosen for it is a standing preference rather than a
+   *  per-session adjustment. */
+  agentsWidth: number;
+  setAgentsWidth: (width: number) => void;
   /** Whether the Library's list panel is collapsed. Mirrors the project panel's
    *  collapse so the header sidebar toggle works the same on the Library route;
    *  here (not the route) so it survives leaving and re-opening the Library. */
   libraryCollapsed: boolean;
   toggleLibrary: () => void;
+  /** Whether the Agents sidebar is collapsed. Same contract as
+   *  `libraryCollapsed`: the Agents route owns the shell's second column
+   *  outright, so the header's sidebar toggle has to act on this panel rather
+   *  than on a project tree that isn't rendered there. */
+  agentsCollapsed: boolean;
+  toggleAgents: () => void;
   /** Whether the left project sidebar is collapsed. Persisted (like the other
    *  collapse states) so the app reopens with the same layout. Lives here rather
    *  than as Root-local state so it survives an app restart. */
@@ -92,8 +105,12 @@ export const useUiStore = create<UiStore>()(
       setLibraryWidth: (width) => set({ libraryWidth: width }),
       promptsWidth: SIDE_PANEL_WIDTH,
       setPromptsWidth: (width) => set({ promptsWidth: width }),
+      agentsWidth: SIDE_PANEL_WIDTH,
+      setAgentsWidth: (width) => set({ agentsWidth: width }),
       libraryCollapsed: false,
       toggleLibrary: () => set((state) => ({ libraryCollapsed: !state.libraryCollapsed })),
+      agentsCollapsed: false,
+      toggleAgents: () => set((state) => ({ agentsCollapsed: !state.agentsCollapsed })),
       projectSidebarCollapsed: false,
       setProjectSidebarCollapsed: (collapsed) => set({ projectSidebarCollapsed: collapsed }),
       toggleProjectSidebar: () =>
@@ -106,14 +123,22 @@ export const useUiStore = create<UiStore>()(
     {
       name: "hyprlayer:ui",
       version: 1,
-      // Persist only the layout/preference flags, NOT the live drag widths,
-      // which would otherwise write to localStorage on every resize pointermove.
+      // Persist the layout/preference flags, and `agentsWidth` alone among the
+      // drag widths (see its doc comment). The other three stay out because
+      // they write to localStorage on every resize pointermove; `agentsWidth`
+      // is safe here only because `AgentLibrary` tracks the live drag in local
+      // state and calls `setAgentsWidth` once, on pointer-up — so this key is
+      // written per drag, not per frame. An existing user has no `agentsWidth`
+      // key and picks up `SIDE_PANEL_WIDTH` as the default: zustand merges the
+      // stored blob over the initializer, so an absent key needs no migration.
       partialize: (s) => ({
         diffHidden: s.diffHidden,
         tasksCollapsed: s.tasksCollapsed,
         libraryCollapsed: s.libraryCollapsed,
+        agentsCollapsed: s.agentsCollapsed,
         projectSidebarCollapsed: s.projectSidebarCollapsed,
         docWide: s.docWide,
+        agentsWidth: s.agentsWidth,
       }),
     },
   ),

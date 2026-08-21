@@ -52,6 +52,7 @@ When a shared module needs feature-side behavior, expose a registration seam
 |---|---|
 | Is a shared vocabulary type (Stage, Harness, DocKind, PermissionMode) | `src/lib/domain/` — derived from Rust enum bindings, never re-declared |
 | Is a shared UI primitive (popover, dialog, empty hint) | `src/components/ui.tsx` — check here before building one |
+| Is a shared visual convention (row height, hover, indent, dialog width) | `src/components/ui.tsx` — check the vocabulary in ADR-0006 before inventing a new value |
 | Is a shared formatting helper | `src/lib/format.ts` |
 | Is a shared path helper | `src/lib/path.ts` |
 | Is a terminal/PTY concern | `src/lib/terminal/` |
@@ -160,3 +161,4 @@ Cite the receipt where one exists — `issue #1011`, `PR #221`, `ADR-0002`,
 @docs/adr/0003-frontend-layering.md
 @docs/adr/0004-vocabulary-standard.md
 @docs/adr/0005-git-access.md
+@docs/adr/0006-visual-conventions.md
