@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.6.1",
+      "date": "2026-08-21",
+      "summary": "Agents get folder management + a publish toggle; fixed doc misattribution.",
+      "notes": [
+        "The Agents sidebar now supports folder management — right-click to create an agent in a folder or delete an empty one — plus a publish/unpublish toggle instead of a one-way Publish action, and a Default badge showing which agent is the library's default.",
+        "System-raised confirm dialogs (like quitting via the dock) now auto-focus their confirm button, and several dialog/menu sizing bugs are fixed — a narrow popover opening at the wrong width, and dialogs stuck at a fixed width regardless of what they asked for.",
+        "A workstream could pick up a doc it only read — never wrote — as one of its own written docs, if another workstream had actually written it. Attribution is now scoped correctly per workstream."
+      ]
+    },
+    {
       "version": "0.6.0",
       "date": "2026-08-20",
       "summary": "New Agents view, Commits tab, and Settings panel; Linux tiling WM support.",
