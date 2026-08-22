@@ -69,3 +69,9 @@ uuid = { version = "1.23.3", features = ["v4"] }
 # Remove once cookie ships a fix and tauri picks it up.
 time = { version = ">=0.3.36, <0.3.48", default-features = false }
 tauri-plugin-clipboard-manager = "2"
+
+# Reaching WebKitGTK's own zoom gesture to switch it off (webview_gestures.rs)
+# needs the GTK widget API. Version and feature pinned to tauri 2.11's, so the
+# two share one gtk/glib in the tree rather than linking a second.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", features = ["v3_24"] }

@@ -9,6 +9,7 @@ mod session_registry;
 mod settings;
 mod state;
 mod terminal_registry;
+mod webview_gestures;
 mod window_geometry;
 
 use std::collections::HashMap;
@@ -281,6 +282,12 @@ pub fn run() {
             // monitor is gone. The window-state plugin still owns SAVING; see
             // window_geometry for why restore lives here.
             window_geometry::restore_main_window(app.handle());
+
+            // Take WebKitGTK's pinch-to-zoom off the web view: a trackpad pinch
+            // magnified the whole app like a web page, and the scale persisted.
+            if let Some(window) = app.get_webview_window("main") {
+                webview_gestures::disable_pinch_zoom(&window);
+            }
 
             let config = Arc::new(ConfigService::with_default_path()?);
             let settings_dir = app.path().app_config_dir()?;

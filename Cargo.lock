@@ -1987,6 +1987,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
  "dunce",
+ "gtk",
  "hyprlayer-core",
  "log",
  "reqwest 0.12.28",
