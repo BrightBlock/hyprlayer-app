@@ -5,11 +5,13 @@
 //! persists events to `session_events`, advances the `sessions` row, and pushes onto
 //! the per-session Channel. Re-attach replays the log then tails the live stream.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use hyprlayer_core::agent::{AgentDriver, Harness};
 use hyprlayer_core::agents;
+use hyprlayer_core::claude::workflow::{self, SessionWorkflows, WorkflowLaunch};
 use hyprlayer_core::claude::{
     ClaudeDriver, ExitOutcome, PermissionMode, SessionEvent, SessionState, SpawnConfig,
 };
@@ -22,12 +24,12 @@ use tauri::ipc::Channel;
 use tauri::Manager;
 use tauri::State;
 use tauri_specta::Event;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify};
 
 use super::{db_task, effective_for};
 use crate::error::{AppError, CmdResult};
 use crate::events::SessionLifecycle;
-use crate::session_registry::{ForwarderHandle, SessionRegistry};
+use crate::session_registry::{ForwarderHandle, SessionRegistry, WorkflowChannel};
 use crate::state::AppState;
 
 fn session_not_found(id: &str) -> AppError {
@@ -332,6 +334,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
         session_id: session.id.clone(),
         workstream_id: session.workstream_id.clone(),
         rx,
+        workflow: state.sessions.workflow(&session.id).await,
         start_seq,
         // A relaunch (resume/restart/log-only rewind) is a NEW process; its
         // boundary drops the dead prior process's background tasks.
@@ -949,6 +952,26 @@ async fn live_rewind_handoff(
         })
         .await?;
     }
+    // Drop the workflow runs whose arming `ToolResult` that cut just removed:
+    // `cut_session_events_from` deletes `seq >= cutoff`, so `armed_seq < cutoff`
+    // keeps exactly the runs whose `Workflow` row survived. Everything else on
+    // the `LiveSession` — the watch, the reader task, the surviving runs' byte
+    // cursors — is untouched, which is why they live there and not on the
+    // forwarder being replaced.
+    //
+    // Accepted gap: a `read_tick` may already have queued a cut run's events on
+    // the channel, and there is no per-event run tag to filter the queue on, so
+    // the replacement forwarder can persist a few children whose parent row is
+    // gone. They are invisible rather than wrong — a child whose `parentId`
+    // names no item is filtered out of `topLevel` — and quiescing the reader
+    // across the cut would mean a stop protocol for a handful of dead rows.
+    if let Some(w) = state.sessions.workflow(&session.id).await {
+        let workflows = w.workflows.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            workflows.blocking_lock().runs.retain_armed_below(cutoff);
+        })
+        .await;
+    }
     {
         let id = session.id.clone();
         let _ = db_task(state.db.clone(), move |db| {
@@ -976,6 +999,7 @@ async fn live_rewind_handoff(
         session_id: session.id.clone(),
         workstream_id: session.workstream_id.clone(),
         rx,
+        workflow: state.sessions.workflow(&session.id).await,
         start_seq,
         // Same process, keep its background tasks (see the `Rewound` event doc).
         boundary: Boundary::Rewound,
@@ -1208,6 +1232,13 @@ struct ForwarderCtx {
     session_id: String,
     workstream_id: String,
     rx: broadcast::Receiver<SessionEvent>,
+    /// This session's workflow injection channel and run state, taken from the
+    /// registry rather than constructed here: a rewind's replacement forwarder
+    /// must reach the SAME channel and the SAME runs, whose reader task and
+    /// byte cursors survive the swap. `None` only if the session vanished from
+    /// the registry between `insert` and here, in which case the injection arm
+    /// below is simply never ready.
+    workflow: Option<WorkflowChannel>,
     /// First persisted-event sequence number, 0 for a fresh session, or the
     /// existing event count when resuming (so the log appends, not collides).
     start_seq: i64,
@@ -1237,6 +1268,241 @@ enum RowWrite {
     Detached,
 }
 
+/// The next injected workflow event, or a future that never completes when
+/// this session has no workflow plumbing. Cancel-safe on both halves —
+/// `Mutex::lock` and `UnboundedReceiver::recv` are, and `stop_forwarder`'s
+/// join guarantees no two forwarders poll the shared receiver at once — so
+/// losing this branch of the `select!` cannot drop a queued event.
+async fn recv_workflow(workflow: Option<&WorkflowChannel>) -> Option<SessionEvent> {
+    match workflow {
+        Some(w) => w.rx.lock().await.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// The task that turns a watch signal into events. The debouncer callback is
+/// `Fn` while `read_tick` takes `&mut self`, and megabyte-scale file reads plus
+/// JSON parsing on the debouncer thread would block notify's own event loop
+/// across up to 34 concurrently-appended files — so the callback only signals a
+/// `Notify` and this does the work, on the blocking pool, coalescing a burst
+/// into one pass.
+///
+/// Spawned with bare `tokio::spawn` rather than the house
+/// `tauri::async_runtime::spawn`: the handle is owned by core (it lives on the
+/// `WorkflowWatch`, so dropping the watch aborts the reader), and core cannot
+/// name `tauri::async_runtime::JoinHandle` under ADR-0001.
+///
+/// **Takes a `Weak`, never an `Arc`, and upgrades per tick.** The handle this
+/// returns is stored on the `WorkflowWatch` *inside* the very
+/// `SessionWorkflows` it reads, and `WorkflowWatch::drop` is the only code that
+/// aborts it — so a strong handle here is a cycle no side can break. The task
+/// parks on `notified()`; claude is dead by the time the session leaves the
+/// registry, so nothing appends under the run tree again and the watch never
+/// fires; `tx.send` (the only other exit) is reached only after a tick actually
+/// produces an event. `SessionRegistry::remove` would then drop a
+/// `WorkflowChannel` whose strong count is still 1, `Drop` would never run, and
+/// every session that ran a workflow would leak its debouncer thread (a 75 ms
+/// poll loop, `notify-debouncer-full` 0.5's `Drop` only sets a stop flag), its
+/// recursive inotify watch, and this task for the life of the app process.
+fn spawn_workflow_reader(
+    workflows: Weak<Mutex<SessionWorkflows>>,
+    notify: Arc<Notify>,
+    tx: mpsc::UnboundedSender<SessionEvent>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            notify.notified().await;
+            // Upgraded per tick and dropped before the next park, so the
+            // session's own teardown is never blocked by this task. A removal
+            // landing mid-tick therefore runs the watch's `Drop` on the
+            // blocking pool, where blocking work belongs, rather than on a
+            // runtime worker.
+            let Some(handle) = workflows.upgrade() else {
+                return;
+            };
+            let events = match tauri::async_runtime::spawn_blocking(move || {
+                handle.blocking_lock().runs.read_tick()
+            })
+            .await
+            {
+                Ok(events) => events,
+                Err(err) => {
+                    log::warn!("workflow reader tick failed: {err}");
+                    return;
+                }
+            };
+            for event in events {
+                // The forwarder holds the only other sender clone, so a send
+                // error means the session is gone and nothing will read again.
+                if tx.send(event).is_err() {
+                    return;
+                }
+            }
+        }
+    })
+}
+
+/// Register a workflow run against this session and make sure its single
+/// recursive watch is armed, then wake the reader for a first pass rather than
+/// waiting on a filesystem event (the tree may already hold everything, and the
+/// watch was armed after the launch either way).
+///
+/// `seen_uses`/`seen_results` seed the run's dedup sets from the persisted log
+/// on the recovery path below; a live arming passes them empty. They go in
+/// through `register_seeded` — atomically with the insert, before the run is
+/// reachable by the reader — because `read_tick` consults them at emit time and
+/// nothing writes back into them.
+async fn arm_workflow_run(
+    w: &WorkflowChannel,
+    launch: WorkflowLaunch,
+    workflow_tool_use_id: String,
+    armed_seq: i64,
+    seen_uses: HashSet<String>,
+    seen_results: HashSet<String>,
+) {
+    // `<session>/subagents/workflows/`, i.e. the run directory's own parent.
+    // Nothing computes a project slug and nothing globs: the launch's path is
+    // absolute and authoritative, and claude's cwd→project-dir encoding is not
+    // invertible.
+    let Some(workflows_dir) = launch.run_dir.parent().map(|p| p.to_path_buf()) else {
+        log::warn!(
+            "workflow run dir {} has no parent; not arming",
+            launch.run_dir.display()
+        );
+        return;
+    };
+
+    // Never inline on the forwarder's loop: `create_dir_all` plus
+    // `watch(Recursive)` walks and arms every existing `wf_*` subtree
+    // synchronously (a busy session on disk holds two, of 22 and 25 agents),
+    // which would stall every other event this session is forwarding.
+    let workflows = w.workflows.clone();
+    let armed = tauri::async_runtime::spawn_blocking(move || {
+        let mut guard = workflows.blocking_lock();
+        guard.runs.register_seeded(
+            launch,
+            workflow_tool_use_id,
+            armed_seq,
+            seen_uses,
+            seen_results,
+        );
+        guard.arm(&workflows_dir, Box::new(|| {}))
+    })
+    .await;
+    let (notify, newly_armed) = match armed {
+        Ok(Ok(armed)) => armed,
+        Ok(Err(err)) => {
+            // The posture `watch_roots` takes for a missing root: warn and
+            // carry on, leaving the `Workflow` row rendering as it does today.
+            log::warn!("could not arm the workflow watch: {err}");
+            return;
+        }
+        Err(err) => {
+            log::warn!("workflow arming task failed: {err}");
+            return;
+        }
+    };
+
+    // One reader per session, started by whichever launch armed the watch.
+    if newly_armed {
+        let reader =
+            spawn_workflow_reader(Arc::downgrade(&w.workflows), notify.clone(), w.tx.clone());
+        let workflows = w.workflows.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            workflows.blocking_lock().attach_reader(reader);
+        })
+        .await;
+    }
+    notify.notify_one();
+}
+
+/// Re-arm every workflow run this session launched that never reported
+/// completion, seeded with what the log already holds so the reader re-emits
+/// only what is missing. Cursors restart at 0 and the run's files are re-read
+/// from the top: the deliberate cost of not persisting cursors and not needing
+/// a migration, paid once per relaunched forwarder and bounded by run size.
+///
+/// A persisted `toolResult` payload carries no tool NAME (it is
+/// `{tool_use_id, content, is_error, parent_id}`), so the launches are found by
+/// joining on the ids of `toolUse` events named `Workflow`, not by sniffing
+/// result text. "Never completed" is the absence of a `backgroundTaskUpdate`
+/// naming that same id with a terminal status — `"backgroundTaskUpdate"` is the
+/// persisted `kind` string (`events.rs:349`), not the frontend's `taskUpdate`,
+/// and a poll can report `running`, which is not an ending.
+async fn recover_workflow_runs(db: &Arc<Db>, session_id: &str, w: &WorkflowChannel) {
+    let sid = session_id.to_string();
+    let handle = db.clone();
+    let events =
+        match tauri::async_runtime::spawn_blocking(move || handle.session_events(&sid)).await {
+            Ok(Ok(events)) => events,
+            Ok(Err(err)) => {
+                log::warn!("session {session_id}: could not scan the log for workflow runs: {err}");
+                return;
+            }
+            Err(err) => {
+                log::warn!("session {session_id}: workflow recovery scan failed: {err}");
+                return;
+            }
+        };
+
+    let mut workflow_tool_ids: HashSet<String> = HashSet::new();
+    let mut seen_uses: HashSet<String> = HashSet::new();
+    let mut seen_results: HashSet<String> = HashSet::new();
+    let mut ended: HashSet<String> = HashSet::new();
+    let mut launches: Vec<(WorkflowLaunch, String, i64)> = Vec::new();
+
+    for stored in &events {
+        let Ok(event) = serde_json::from_str::<SessionEvent>(&stored.payload) else {
+            continue;
+        };
+        match event {
+            SessionEvent::ToolUse { id, name, .. } => {
+                if name == "Workflow" {
+                    workflow_tool_ids.insert(id.clone());
+                }
+                seen_uses.insert(id);
+            }
+            SessionEvent::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            } => {
+                if workflow_tool_ids.contains(&tool_use_id) {
+                    if let Some(launch) = workflow::workflow_launch_from_result(&content) {
+                        launches.push((launch, tool_use_id.clone(), stored.seq as i64));
+                    }
+                }
+                seen_results.insert(tool_use_id);
+            }
+            SessionEvent::BackgroundTaskUpdate {
+                tool_use_id,
+                status,
+                ..
+            } => {
+                if let Some(id) = tool_use_id.filter(|_| status != "running") {
+                    ended.insert(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (launch, tool_use_id, armed_seq) in launches {
+        if ended.contains(&tool_use_id) {
+            continue;
+        }
+        arm_workflow_run(
+            w,
+            launch,
+            tool_use_id,
+            armed_seq,
+            seen_uses.clone(),
+            seen_results.clone(),
+        )
+        .await;
+    }
+}
+
 fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
     let ForwarderCtx {
         app,
@@ -1246,6 +1512,7 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
         session_id,
         workstream_id,
         mut rx,
+        workflow,
         start_seq,
         boundary,
     } = ctx;
@@ -1280,11 +1547,49 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
             }
         }
 
+        // A forwarder starting against a session that already has history from
+        // a DEAD process (resume, restart, or the log-only rewind fallback,
+        // all of which reach here as `Relaunched`) may be missing journal and
+        // agent lines claude wrote after the app stopped reading but before it
+        // exited. Narrower than it looks: a UI reload leaves the backend, this
+        // forwarder and the `LiveSession` untouched, so nothing is abandoned;
+        // and if the backend died, claude died with it and its subagents with
+        // that, so there is no run still going to rejoin.
+        //
+        // Deliberately not on the other two paths. `live_rewind_handoff`
+        // (`Rewound`) keeps the reader task and its advanced offsets, so a
+        // re-register would either re-read the whole run or skip the re-seed;
+        // and `attach_session` spawns no forwarder at all (it replays rows and
+        // calls `tail_live`), as does `resume_session`'s re-wire branch, so
+        // neither has anywhere to inject.
+        if start_seq > 0 && matches!(boundary, Boundary::Relaunched) {
+            if let Some(w) = &workflow {
+                recover_workflow_runs(&db, &session_id, w).await;
+            }
+        }
+
         loop {
             // Cooperative stop: a signalled (or dropped) `shutdown` breaks the loop
             // at the next poll. Writes below the select are awaited to completion
             // per iteration, so a stop can only land BETWEEN events, never leaving
             // a DB append in flight when `stop_forwarder`'s join returns.
+            //
+            // The third arm carries the workflow reader's synthesized events.
+            // They are injected here rather than published on the driver's
+            // broadcast because an unbounded mpsc cannot lag: an 8-agent run's
+            // ~800-event burst would overrun the 1024-slot broadcast while this
+            // loop awaits a DB round-trip per event, and `Lagged` above is a
+            // `warn` + `continue` — a silent hole in the persisted transcript.
+            //
+            // Below the broadcast arm on purpose. `biased` polls in order, so a
+            // sustained workflow burst defers to the live stream rather than
+            // starving it or the shutdown signal; `recv()` returns `Pending` as
+            // soon as the queue drains, so nothing spins.
+            //
+            // Ordering: injected events take `seq` in arrival order, interleaved
+            // with the main thread's. Correct, because nesting keys on
+            // `parentId`, not order (`TranscriptView.tsx:1167-1176`), and an
+            // injected item is never top-level.
             let event = tokio::select! {
                 biased;
                 _ = &mut shutdown_rx => break,
@@ -1296,6 +1601,7 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
+                Some(event) = recv_workflow(workflow.as_ref()) => event,
             };
 
             // `UserMessage` is persist-only: the UI already showed it optimistically
@@ -1320,6 +1626,27 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                 .then(|| serde_json::to_string(&event).ok())
                 .flatten();
             let kind = event.kind();
+
+            // The workflow launch this event announces, if it is one, extracted
+            // here because `event` is moved into the channel below. Armed after
+            // the persist block rather than now, so the `Workflow` row its
+            // subagents nest under is already in the log when the first injected
+            // child can arrive — a child whose `parentId` names an item not yet
+            // in the log is filtered out of `topLevel` and stays invisible.
+            //
+            // `seq` captured here is this event's OWN seq; the persist block
+            // advances it afterwards. `armed_seq` has to name the row a rewind's
+            // `cut_session_events_from(cutoff)` would delete, or
+            // `retain_armed_below` keeps a run whose parent it just cut.
+            let launched_workflow = match &event {
+                SessionEvent::ToolResult {
+                    tool_use_id,
+                    content,
+                    ..
+                } => workflow::workflow_launch_from_result(content)
+                    .map(|launch| (launch, tool_use_id.clone(), seq)),
+                _ => None,
+            };
 
             // Extract the session-row update (owned) and the coarse lifecycle to
             // emit, so the actual writes can run on the blocking pool.
@@ -1424,6 +1751,20 @@ fn spawn_forwarder(ctx: ForwarderCtx) -> ForwarderHandle {
                 }
             }
 
+            if let (Some(w), Some((launch, tool_use_id, armed_seq))) =
+                (&workflow, launched_workflow)
+            {
+                arm_workflow_run(
+                    w,
+                    launch,
+                    tool_use_id,
+                    armed_seq,
+                    HashSet::new(),
+                    HashSet::new(),
+                )
+                .await;
+            }
+
             // Drop the live driver from the registry on exit, then emit the coarse
             // lifecycle transition for the sidebar/toasts.
             if terminal {
@@ -1501,4 +1842,68 @@ pub async fn list_active_sessions(state: State<'_, AppState>) -> CmdResult<Vec<A
         Ok(out)
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// The reader task must not own the `SessionWorkflows` that owns the
+    /// handle aborting it. It held an `Arc` once: the task parked on
+    /// `notified()` holding the last strong reference, so `WorkflowWatch`'s
+    /// `Drop` — the only caller of `reader.abort()` — could never run, and
+    /// every session that ran a `Workflow` leaked its debouncer thread, its
+    /// recursive inotify watch and this task for the life of the app process.
+    ///
+    /// Asserted through a `Weak`, because that is exactly the property
+    /// `SessionRegistry::remove`'s RAII teardown rests on: once the session's
+    /// `WorkflowChannel` is gone, nothing may keep the object alive.
+    #[tokio::test]
+    async fn a_dropped_session_reaps_its_workflow_watch_and_reader() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workflows = Arc::new(Mutex::new(SessionWorkflows::new()));
+        let (tx, rx) = mpsc::unbounded_channel::<SessionEvent>();
+
+        let notify = {
+            let mut guard = workflows.lock().await;
+            let (notify, armed) = guard
+                .arm(&tmp.path().join("subagents/workflows"), Box::new(|| {}))
+                .expect("arming creates the directory it watches");
+            // Without a real watch `attach_reader` aborts the handle on the
+            // spot, and the test would pass against the leak it exists for.
+            assert!(armed, "the session's watch must really be armed");
+            let reader =
+                spawn_workflow_reader(Arc::downgrade(&workflows), notify.clone(), tx.clone());
+            guard.attach_reader(reader);
+            notify
+        };
+
+        // Everything `remove` drops, in the order it drops it: the registry's
+        // entry, then the forwarder's own clones as its loop ends.
+        let weak = Arc::downgrade(&workflows);
+        drop(workflows);
+        drop(tx);
+        drop(rx);
+
+        assert!(
+            weak.upgrade().is_none(),
+            "the reader task is still holding the session's workflows alive, so the debouncer and the task itself can never be stopped"
+        );
+
+        // …and the abort that `Drop` fired really reaped the task. The reader
+        // holds the only other `Notify` handle once the debouncer's callback
+        // is gone; that lags by up to one debouncer tick (75 ms).
+        for _ in 0..200 {
+            if Arc::strong_count(&notify) == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            Arc::strong_count(&notify),
+            1,
+            "the reader task outlived the watch that was supposed to abort it"
+        );
+    }
 }

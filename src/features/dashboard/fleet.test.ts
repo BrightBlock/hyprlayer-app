@@ -74,6 +74,32 @@ describe("workingLine", () => {
     expect(workingLine([tool("Bash", { command: "pnpm test" })])).toBe("pnpm test");
   });
 
+  it("phrases an Agent tool item as a running subagent", () => {
+    // "Agent" is the current wire name for the tool "Task" used to be.
+    expect(workingLine([tool("Agent", { description: "map the store" })])).toBe(
+      "subagent: map the store",
+    );
+  });
+
+  it("ignores a trailing parented tool item and returns the last unparented one", () => {
+    // A workflow's nested agents append hundreds of their own tool calls, so
+    // the tail is almost always one of theirs; the line must stay on the main
+    // thread's own activity.
+    const items: TranscriptItem[] = [
+      tool("Edit", { file_path: "/a/b/main.ts" }),
+      {
+        kind: "tool",
+        id: "t2",
+        toolUseId: "tu2",
+        name: "Grep",
+        input: JSON.stringify({ pattern: "foo" }),
+        result: null,
+        parentId: "wf:wf_1:agent1",
+      },
+    ];
+    expect(workingLine(items)).toBe("editing main.ts");
+  });
+
   it("falls back to thinking when no tool has run this turn", () => {
     expect(workingLine([])).toBe("thinking…");
     const items: TranscriptItem[] = [

@@ -16,6 +16,37 @@ const SPAWN_RESULT = (taskId: string) => ({
   isError: false,
 });
 
+// The verbatim launch block, transcribed from a real run: nine lines, three
+// carrying identifiers (`Task ID:`, `Transcript dir:`, `Run ID:`). `Summary:`
+// is model-authored and can wrap, so nothing may key on line position. There
+// is no `async_launched` anywhere here — that key lives on the transcript
+// FILE's `toolUseResult` object, a sibling of `message`, and never reaches the
+// app: `parse_blocks` reads only `message.content`.
+const WORKFLOW_SPAWN_RESULT = (taskId: string) => ({
+  content: `Workflow launched in background. Task ID: ${taskId}
+Summary: Map how hyprlayer-app drives spec-driven dev stages, and what each transition actually writes
+Transcript dir: /home/jt/.claude/projects/<slug>/<session>/subagents/workflows/wf_89a9bc27-4f1
+Script file: /home/jt/.claude/projects/<slug>/<session>/workflows/scripts/map-stage-driving-wf_89a9bc27-4f1.js
+(Edit this file with Write/Edit and re-invoke Workflow with {scriptPath: "…"} to iterate without resending the script.)
+Run ID: wf_89a9bc27-4f1
+To resume after editing the script: Workflow({scriptPath: "…", resumeFromRunId: "wf_89a9bc27-4f1"}) — completed agents return cached results (…).
+
+You will be notified when it completes. Use /workflows to watch live progress.`,
+  isError: false,
+});
+
+function workflowTool(
+  toolUseId: string,
+  opts: { description?: string; result?: { content: string; isError: boolean } | null } = {},
+): Extract<TranscriptItem, { kind: "tool" }> {
+  return makeTool(
+    "Workflow",
+    JSON.stringify({ script: "export const meta = {...}", description: opts.description ?? "Map the store" }),
+    toolUseId,
+    opts.result ?? null,
+  );
+}
+
 const TASKOUT_TIMEOUT = (taskId: string) => ({
   content: `<retrieval_status>timeout</retrieval_status>\n\n<task_id>${taskId}</task_id>\n\n<task_type>local_bash</task_type>\n\n<status>running</status>`,
   isError: false,
@@ -147,6 +178,12 @@ describe("isBackgroundSpawn", () => {
       createdAt: null, promptName: null
     };
     expect(isBackgroundSpawn(userItem)).toBe(false);
+  });
+
+  it("returns true for a Workflow item regardless of input (every launch backgrounds)", () => {
+    expect(
+      isBackgroundSpawn(makeTool("Workflow", JSON.stringify({ script: "...", description: "d" }), "wf1")),
+    ).toBe(true);
   });
 });
 
@@ -294,6 +331,41 @@ describe("backgroundTasksFromItems", () => {
       taskUpdate("completely-unknown", null, "completed"),
     ];
     expect(backgroundTasksFromItems(items)).toHaveLength(1);
+  });
+
+  // ── Workflow launch (background-task ride-along) ────────────────────────────
+
+  it("opens a task for a Workflow item, taking its id from the launch block's Task ID line", () => {
+    const items: TranscriptItem[] = [
+      workflowTool("wf1", { description: "Map the store", result: WORKFLOW_SPAWN_RESULT("whjv5o0xq") }),
+    ];
+    const tasks = backgroundTasksFromItems(items);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject<Partial<BackgroundTask>>({
+      taskId: "whjv5o0xq",
+      toolUseId: "wf1",
+      label: "Map the store",
+      status: "running",
+    });
+  });
+
+  it("a matching taskUpdate with status:completed closes a Workflow task", () => {
+    const items: TranscriptItem[] = [
+      workflowTool("wf1", { result: WORKFLOW_SPAWN_RESULT("whjv5o0xq") }),
+      taskUpdate("whjv5o0xq", "wf1", "completed"),
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
+  });
+
+  it("opens no task for a parented Bash{run_in_background} item (a nested workflow agent's own spawn)", () => {
+    // Once the watcher (Phase 4) nests a workflow agent's tools, that agent's
+    // own background Bash calls carry the synthetic per-agent parentId. Its
+    // completion notification lands on the agent's file stream, never on this
+    // session's, so tracking it here would open a task that can never close.
+    const items: TranscriptItem[] = [
+      { ...bgBash("t1", { description: "Nested build", result: SPAWN_RESULT("task-a") }), parentId: "wf:wf_1:agent1" },
+    ];
+    expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
   // ── errored spawn (denied / hook-blocked), no phantom ─────────────────────

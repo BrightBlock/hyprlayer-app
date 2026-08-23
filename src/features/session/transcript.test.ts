@@ -396,6 +396,44 @@ describe("permission flow", () => {
     expect(view.items[0]).toMatchObject({ kind: "permission", decision: null });
   });
 
+  it("a parented toolUse/toolResult leaves `streaming` untouched", () => {
+    // A workflow's file-derived agent events arrive for many minutes after the
+    // launching turn's own `turnDone`. Re-setting `streaming` on each would pin
+    // `isWorking` true for the whole run: the session would read `working`
+    // rather than `background`, and `isBusy` would queue any typed follow-up
+    // with no reachable flush path.
+    const resting = { ...initialSessionView("running"), streaming: false };
+
+    const afterUse = reduceEvent(resting, {
+      kind: "toolUse",
+      id: "wf-tool-1",
+      name: "Read",
+      input: JSON.stringify({ file_path: "/a.ts" }),
+      parentId: "wf:wf_1:agent1",
+    });
+    expect(afterUse.streaming).toBe(false);
+
+    const afterResult = reduceEvent(afterUse, {
+      kind: "toolResult",
+      toolUseId: "wf-tool-1",
+      content: "ok",
+      isError: false,
+      parentId: "wf:wf_1:agent1",
+    });
+    expect(afterResult.streaming).toBe(false);
+
+    // An UNparented tool still starts the turn streaming, as before.
+    expect(
+      reduceEvent(resting, {
+        kind: "toolUse",
+        id: "main-1",
+        name: "Read",
+        input: "{}",
+        parentId: null,
+      }).streaming,
+    ).toBe(true);
+  });
+
   it("resolvePermission marks the card, clears pending, and resumes", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, {

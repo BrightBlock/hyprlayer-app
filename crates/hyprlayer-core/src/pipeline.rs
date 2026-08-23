@@ -93,7 +93,11 @@ const READ_ONLY: &[&str] = &[
     "Read",
     "Glob",
     "Grep",
+    // "Agent" is the current wire name; "Task" is the pre-rename name an
+    // older CLI still emits. Same tool, both kept so a stage-scoped session
+    // doesn't newly prompt on delegation under either name.
     "Task",
+    "Agent",
     "TodoWrite",
     "WebFetch",
     "WebSearch",

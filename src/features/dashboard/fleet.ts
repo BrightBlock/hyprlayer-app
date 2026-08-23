@@ -84,16 +84,23 @@ function toolLine(name: string, input: string): string {
   const verb = FILE_VERBS[name];
   if (verb) return summary ? `${verb} ${baseName(summary)}` : verb;
   if (name === "Bash" || name === "BashOutput") return summary || "running a command";
-  if (name === "Task") return summary ? `subagent: ${summary}` : "running a subagent";
+  // "Agent" is the current wire name; "Task" is the pre-rename name an older
+  // CLI still emits. Same tool, both kept.
+  if (name === "Task" || name === "Agent")
+    return summary ? `subagent: ${summary}` : "running a subagent";
   return summary ? `${name} · ${summary}` : name;
 }
 
 /** What a working session is on right now: its most recent tool call, else a
- *  generic "thinking". Scans from the tail, so long transcripts stay cheap. */
+ *  generic "thinking". Scans from the tail, so long transcripts stay cheap.
+ *
+ *  Parented items are skipped so the line keeps describing the MAIN thread: a
+ *  workflow's nested agents contribute hundreds of their own tool calls to the
+ *  same array, and the tail is almost always one of theirs. */
 export function workingLine(items: readonly TranscriptItem[]): string {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
-    if (item.kind === "tool") return toolLine(item.name, item.input);
+    if (item.kind === "tool" && !item.parentId) return toolLine(item.name, item.input);
     if (item.kind === "user") break; // no tool call yet this turn
   }
   return "thinking…";

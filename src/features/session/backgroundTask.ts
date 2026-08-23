@@ -39,17 +39,26 @@ function firstLine(value: string): string {
 }
 
 /**
- * Parse the task id from a background Bash spawn's result content.
- * Wire format (confirmed): "Command running in background with ID: {task_id}."
+ * Parse the task id from a background spawn's result content. Two wire
+ * formats (confirmed): a Bash spawn reads "Command running in background
+ * with ID: {task_id}."; a Workflow launch reads "...Task ID: {task_id}\n..."
+ * (the id is not the last token on the line, so the pattern stops at the
+ * first run of non-whitespace rather than anchoring to a trailing period).
  */
 function parseTaskIdFromSpawnResult(content: string): string | null {
-  const match = /Command running in background with ID:\s*(\S+)\./.exec(content);
-  return match?.[1] ?? null;
+  const bash = /Command running in background with ID:\s*(\S+)\./.exec(content);
+  if (bash) return bash[1];
+  const workflow = /Task ID:\s*(\S+)/.exec(content);
+  return workflow?.[1] ?? null;
 }
 
-/** A Bash tool call with run_in_background:true, the spawn event. */
+/** A Bash tool call with run_in_background:true, or a Workflow launch (always
+ *  backgrounded — the CLI hands the tool_result back in ~20ms and the run
+ *  continues after). */
 export function isBackgroundSpawn(item: TranscriptItem): boolean {
-  if (item.kind !== "tool" || item.name !== "Bash") return false;
+  if (item.kind !== "tool") return false;
+  if (item.name === "Workflow") return true;
+  if (item.name !== "Bash") return false;
   return parseToolInput(item.input)?.run_in_background === true;
 }
 
@@ -86,7 +95,14 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
 
     if (item.kind !== "tool") continue;
 
-    // ── 1. Background Bash spawn ─────────────────────────────────────────────
+    // A nested workflow-agent's own tool calls (its `parentId` is the
+    // synthetic per-agent id, not this thread). Its Bash{run_in_background}
+    // spawns and polls are real, but its completion notification lands on
+    // the agent's own file stream, never on this session's — tracked here it
+    // would open a task in the main session's indicator that can never close.
+    if (item.parentId) continue;
+
+    // ── 1. Background spawn: Bash{run_in_background} or Workflow ────────────
     if (isBackgroundSpawn(item)) {
       // A spawn that errored (denied / hook-blocked / bad command) never started
       // a shell, no task_id, nothing to complete it, so don't track a phantom.

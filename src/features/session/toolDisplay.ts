@@ -45,6 +45,29 @@ function str(value: unknown): string {
   return "";
 }
 
+/**
+ * `meta.description`, falling back to `meta.name`, out of a Workflow
+ * script's head. The Workflow tool's `description` parameter is documented
+ * as ignored in favour of the script's own `meta` block, so real tool_use
+ * records never carry it — this is the only place the label actually lives.
+ * The contract requires `meta` to be a pure literal
+ * (`export const meta = { name: '...', description: '...', ... }`, no
+ * variables, calls, spreads, or interpolation), so a narrow regex over the
+ * object's head is sufficient; there is no reason to evaluate the script to
+ * read two string fields. The window is bounded to the first 600 characters
+ * so a `description` key inside a later `agent()` call's JSON Schema
+ * (schemas commonly carry one) can't be mistaken for meta's own — `name`
+ * and `description` are always meta's first two fields by convention.
+ */
+function workflowMetaLabel(script: string): string {
+  const head = script.slice(0, 600);
+  const field = (key: string): string => {
+    const match = head.match(new RegExp(`\\b${key}\\s*:\\s*(['"])((?:(?!\\1).)*)\\1`));
+    return match ? match[2] : "";
+  };
+  return field("description") || field("name");
+}
+
 /** First whitespace-collapsed line of a value, for compact single-line headers. */
 function firstLine(value: string): string {
   const trimmed = value.trim();
@@ -77,8 +100,20 @@ export function toolSummary(name: string, input: string): string {
       const path = str(obj.path);
       return path ? `${pattern}  in ${path}` : pattern;
     }
+    // "Agent" is the current wire name; "Task" is the pre-rename name an
+    // older CLI still emits. Same tool, both kept.
     case "Task":
+    case "Agent":
       return str(obj.description) || str(obj.subagent_type);
+    // A Workflow call's `description` parameter is documented as ignored in
+    // favour of the script's `meta` block, so callers never pass it — every
+    // real tool_use carries only `script`, and `str(obj.description)` reads
+    // empty for all of them. Pull the label out of the script's own
+    // `meta = { name: '...', description: '...' }` head instead; the
+    // `default` arm's first-string-value fallback would return the script
+    // body verbatim, since `script` is the only string key present.
+    case "Workflow":
+      return workflowMetaLabel(str(obj.script)) || str(obj.description);
     case "Skill": {
       // Claude Code emits `{skill, args?}` args-first, so the generic first-string
       // fallback would surface args (often a bare PR id) instead of the skill.

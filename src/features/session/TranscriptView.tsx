@@ -854,14 +854,20 @@ function SubagentBlock({
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
-        <span className="shrink-0 font-mono font-medium text-ink">Subagent</span>
-        {summary && (
-          <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
-            {summary}
-          </span>
-        )}
+        <span className="shrink-0 font-mono font-medium text-ink">
+          {item.name === "Workflow" ? "Workflow" : "Subagent"}
+        </span>
+        {/* Always rendered, even when empty: this is the flex spacer that eats the
+         *  row's free space. Without it, both the tool count and `StepChevron`
+         *  carry `ml-auto` and flexbox splits the slack *between* them, leaving
+         *  the count floating mid-row. A `Workflow` call has no summary — the
+         *  tool's `description` arg is ignored in favor of the script's `meta` —
+         *  so it is the row that exposes this. */}
+        <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
+          {summary}
+        </span>
         {toolCount > 0 && (
-          <span className="ml-auto shrink-0 text-ink-dim">
+          <span className="shrink-0 text-ink-dim">
             {toolCount} tool{toolCount === 1 ? "" : "s"}
             {running && " · working…"}
           </span>

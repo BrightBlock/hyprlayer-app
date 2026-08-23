@@ -653,7 +653,14 @@ async fn read_and_wait(
 }
 
 /// Translate one parsed stdout line into zero or more session events.
-fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
+///
+/// Also called by the workflow reader (`claude::workflow`), which replays
+/// lines from a `Workflow` subagent's own `agent-<id>.jsonl` file rather
+/// than this driver's live stdout. That caller is responsible for stamping
+/// `parent_id` onto the `ParsedLine` before calling this — a file line has
+/// no `parent_tool_use_id` of its own, and the `Usage` suppression below
+/// keys on `parent_id.is_none()`.
+pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
     match parsed {
         ParsedLine::Init {
             claude_session_id,
@@ -761,7 +768,7 @@ fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
     }
 }
 
-fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<SessionEvent> {
+pub(crate) fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<SessionEvent> {
     let parent_id = parent_id.map(str::to_string);
     match block {
         Block::Text { text } => Some(SessionEvent::AssistantText { text, parent_id }),

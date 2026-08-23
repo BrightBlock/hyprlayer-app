@@ -676,6 +676,51 @@ describe("classifyEntry, background activity state", () => {
     expect(classifyEntry(entry)).toBe("review");
   });
 
+  it("stays 'background' while a workflow's parented events keep arriving", async () => {
+    // The whole point of the parented-`streaming` rule: ~800 file-derived
+    // agent events land across a 17-minute run, all after `turnDone`. Without
+    // it `isWorking` pre-empts `background` and the sidebar dot stays blue for
+    // the entire run.
+    const id = await startBusySession();
+    emit(INIT);
+    emit({
+      kind: "toolUse",
+      id: "wf-1",
+      name: "Workflow",
+      input: JSON.stringify({ script: "export const meta = {…", description: "map the store" }),
+      parentId: null,
+    });
+    emit({
+      kind: "toolResult",
+      toolUseId: "wf-1",
+      content: "Workflow launched in background. Task ID: whjv5o0xq\nRun ID: wf_1",
+      isError: false,
+      parentId: null,
+    });
+    emit(TURN_DONE);
+    expect(classifyEntry(entryOf(id))).toBe("background");
+
+    // A nested agent's own tool call, arriving minutes later.
+    emit({
+      kind: "toolUse",
+      id: "wf:wf_1:agent1",
+      name: "Agent",
+      input: JSON.stringify({ description: "map the stage model" }),
+      parentId: "wf-1",
+    });
+    emit({
+      kind: "toolUse",
+      id: "inner-1",
+      name: "Grep",
+      input: JSON.stringify({ pattern: "foo" }),
+      parentId: "wf:wf_1:agent1",
+    });
+
+    const entry = entryOf(id);
+    expect(entry.streaming).toBe(false);
+    expect(classifyEntry(entry)).toBe("background");
+  });
+
   it("returns 'working' (which outranks background) while the turn is streaming", async () => {
     const id = await startBusySession();
     emit(INIT);

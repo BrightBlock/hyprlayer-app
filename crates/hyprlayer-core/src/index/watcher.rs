@@ -295,7 +295,12 @@ fn tracked_dirs(repo: &git2::Repository) -> HashSet<PathBuf> {
 /// documents as "kind unknown", a backend that reports one of those may well
 /// be reporting a mutation, and dropping a real change is far worse than the
 /// occasional redundant refresh.
-fn signals_change(kind: &EventKind) -> bool {
+///
+/// `pub(crate)` for a second caller with the identical problem: the workflow
+/// watcher ([`crate::claude::workflow::watch_workflows`]) reads the very files
+/// it watches, so an unfiltered `IN_OPEN` closes the same loop there. Reused
+/// rather than copied — a second copy of this filter would drift.
+pub(crate) fn signals_change(kind: &EventKind) -> bool {
     !matches!(
         kind,
         EventKind::Access(
@@ -463,7 +468,7 @@ fn resolve_owner<'a>(
     best.map(|(root, local, _)| (root, local))
 }
 
-fn notify_to_core(err: notify::Error) -> CoreError {
+pub(crate) fn notify_to_core(err: notify::Error) -> CoreError {
     CoreError::Io(std::io::Error::other(err))
 }
 

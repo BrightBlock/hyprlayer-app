@@ -51,6 +51,8 @@ describe("toolSummary", () => {
 
   it("summarises task / web / todo tools", () => {
     expect(toolSummary("Task", '{"description":"find bugs","subagent_type":"x"}')).toBe("find bugs");
+    // "Agent" is the current wire name for the same tool "Task" used to be.
+    expect(toolSummary("Agent", '{"description":"map the store"}')).toBe("map the store");
     expect(toolSummary("WebSearch", '{"query":"tauri channel"}')).toBe("tauri channel");
     expect(toolSummary("TodoWrite", '{"todos":[{},{},{}]}')).toBe("3 items");
   });
@@ -71,6 +73,32 @@ describe("toolSummary", () => {
     expect(toolSummary("Skill", '{"skill":"create_plan","args":"add\\nauth"}')).toBe(
       "create_plan  add …",
     );
+  });
+
+  it("reads a Workflow row's label out of the script's meta block", () => {
+    // Real tool_use records carry ONLY `script` — the Workflow tool's
+    // `description` parameter is documented as ignored in favour of
+    // `meta`, so no caller ever passes it. `str(obj.description)` alone
+    // would read empty on every real record; the label has to come out of
+    // the script's own head.
+    const withDescription =
+      "export const meta = {\n" +
+      "  name: 'find-flaky-tests',\n" +
+      "  description: 'Find flaky tests and propose fixes',\n" +
+      "  phases: [\n" +
+      "    { title: 'Scan', detail: 'grep test logs for retries' },\n" +
+      "  ],\n" +
+      "}\n" +
+      "phase('Scan')\n" +
+      "const flaky = await agent('grep CI logs for retries', {schema: FLAKY_SCHEMA})\n";
+    expect(toolSummary("Workflow", JSON.stringify({ script: withDescription }))).toBe(
+      "Find flaky tests and propose fixes",
+    );
+
+    // No `description` field in meta at all: fall back to `name`.
+    const nameOnly =
+      "export const meta = {\n" + "  name: 'audit-deps',\n" + "  phases: [],\n" + "}\n";
+    expect(toolSummary("Workflow", JSON.stringify({ script: nameOnly }))).toBe("audit-deps");
   });
 
   it("falls back to the first string arg for unknown tools", () => {

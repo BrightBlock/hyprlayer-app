@@ -794,7 +794,15 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           }),
           !event.parentId,
         ),
-        streaming: true,
+        // A parented tool leaves `streaming` untouched, the same reason
+        // `backgroundTaskUpdate` does below: a workflow's agents append ~800
+        // events across 17 minutes, long after the launching turn's own
+        // `turnDone`. Re-setting `streaming` on each would pin `isWorking`
+        // true for the whole run — the session would read `working` instead of
+        // `background`, and `isBusy` would queue any follow-up the user typed
+        // with no reachable flush path. Ordinary Task/Agent subagents are
+        // unaffected: their events arrive while the main thread streams anyway.
+        streaming: event.parentId ? view.streaming : true,
       };
     }
 
@@ -809,8 +817,9 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           // gating it was answered, settle it so a replay doesn't re-surface an
           // already-answered card. (Subagent results gate nothing on the main
           // thread.)
+          // Parented: leave `streaming` alone (see the `toolUse` arm).
           return event.parentId
-            ? { ...view, items, streaming: true }
+            ? { ...view, items, streaming: view.streaming }
             : settleAnsweredPrompt(view, items, item.name);
         }
       }
@@ -826,7 +835,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           result: { content: event.content, isError: event.isError },
           parentId: event.parentId,
         })),
-        streaming: true,
+        streaming: event.parentId ? view.streaming : true,
       };
     }
 

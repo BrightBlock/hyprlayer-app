@@ -75,3 +75,7 @@ tauri-plugin-clipboard-manager = "2"
 # two share one gtk/glib in the tree rather than linking a second.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", features = ["v3_24"] }
+
+[dev-dependencies]
+# Temp trees for the workflow-watch teardown test (matches hyprlayer-core).
+tempfile = "3"
