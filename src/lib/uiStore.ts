@@ -41,6 +41,13 @@ type UiStore = {
    *  switch agent tabs) persisted like the other collapse flags. */
   tasksCollapsed: boolean;
   toggleTasks: () => void;
+  /** Whether the Documents section at the top of the changes sidebar, the docs
+   *  this workstream's own agents wrote, is collapsed to its header. A long
+   *  research/plan list otherwise pushes the staged/unstaged lists off the
+   *  bottom of a 420px-wide column. Sidebar-level like `tasksCollapsed`, not
+   *  per-workstream, so folding it away stays folded across switches. */
+  docsCollapsed: boolean;
+  toggleDocs: () => void;
   /** Live width (px) of the Library's list panel. Lives here (not in the route
    *  component) so a drag survives leaving and re-opening the Library, the
    *  route unmounts, but this store doesn't. */
@@ -101,6 +108,8 @@ export const useUiStore = create<UiStore>()(
       setDiffWidth: (width) => set({ diffWidth: width }),
       tasksCollapsed: false,
       toggleTasks: () => set((state) => ({ tasksCollapsed: !state.tasksCollapsed })),
+      docsCollapsed: false,
+      toggleDocs: () => set((state) => ({ docsCollapsed: !state.docsCollapsed })),
       libraryWidth: SIDE_PANEL_WIDTH,
       setLibraryWidth: (width) => set({ libraryWidth: width }),
       promptsWidth: SIDE_PANEL_WIDTH,
@@ -134,6 +143,7 @@ export const useUiStore = create<UiStore>()(
       partialize: (s) => ({
         diffHidden: s.diffHidden,
         tasksCollapsed: s.tasksCollapsed,
+        docsCollapsed: s.docsCollapsed,
         libraryCollapsed: s.libraryCollapsed,
         agentsCollapsed: s.agentsCollapsed,
         projectSidebarCollapsed: s.projectSidebarCollapsed,

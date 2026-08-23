@@ -27,3 +27,26 @@ vi.mock("@xterm/addon-fit", () => ({
     fit() {}
   },
 }));
+
+// Node 22 defines a `localStorage` global that is undefined unless the runtime
+// was started with `--localstorage-file`, and it wins over the one jsdom would
+// otherwise install — so `zustand/persist`'s default storage resolves to
+// undefined and any `useUiStore` write throws `Cannot read properties of
+// undefined (reading 'setItem')`. Give the persisted stores a real in-memory
+// backing instead.
+if (!globalThis.localStorage) {
+  const store = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, String(value)),
+      removeItem: (key: string) => void store.delete(key),
+      clear: () => store.clear(),
+      key: (i: number) => [...store.keys()][i] ?? null,
+      get length() {
+        return store.size;
+      },
+    },
+  });
+}

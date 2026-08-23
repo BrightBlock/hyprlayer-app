@@ -25,6 +25,7 @@ import {
   useWorktreeDir,
   useWorktreeGitStatus,
 } from "@/lib/queries";
+import { useUiStore } from "@/lib/uiStore";
 import { useWorkstreamArtifacts, useWorkstreamDocs } from "@/features/session/sessionStore";
 import type { DocKind } from "@/lib/domain/docs";
 import { GLYPH } from "./changeGlyph";
@@ -325,29 +326,49 @@ function DocsSection({
   onOpenDoc: (path: string, title: string) => void;
 }) {
   const docs = useWorkstreamDocs(workstreamId);
+  const collapsed = useUiStore((s) => s.docsCollapsed);
+  const toggle = useUiStore((s) => s.toggleDocs);
   if (docs.length === 0) return null;
+  const open = !collapsed;
+  const label = `${open ? "Hide" : "Show"} documents, ${docs.length}`;
   return (
     <div className="rounded-lg border border-edge bg-panel-2 p-2">
-      <h3 className="px-1 pb-1.5 text-xs font-semibold text-ink-dim">Documents</h3>
-      <div className="space-y-0.5">
-        {docs.map((doc) => (
-          <button
-            key={doc.path}
-            type="button"
-            onClick={() => onOpenDoc(doc.path, doc.title)}
-            title={doc.path}
-            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
-          >
-            <DocIcon size={13} />
-            <span className="min-w-0 flex-1 truncate text-xs text-ink">{doc.title}</span>
-            <span
-              className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${DOC_TONE[doc.kind]}`}
+      <button
+        type="button"
+        onClick={toggle}
+        title={label}
+        aria-label={label}
+        aria-expanded={open}
+        className={`flex w-full items-center px-1 text-left text-ink-dim hover:text-ink ${
+          open ? "pb-1.5" : ""
+        }`}
+      >
+        <span className="text-xs font-semibold">Documents</span>
+        <span className="ml-auto flex w-3 shrink-0 justify-center">
+          {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-0.5">
+          {docs.map((doc) => (
+            <button
+              key={doc.path}
+              type="button"
+              onClick={() => onOpenDoc(doc.path, doc.title)}
+              title={doc.path}
+              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
             >
-              {doc.kind}
-            </span>
-          </button>
-        ))}
-      </div>
+              <DocIcon size={13} />
+              <span className="min-w-0 flex-1 truncate text-xs text-ink">{doc.title}</span>
+              <span
+                className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${DOC_TONE[doc.kind]}`}
+              >
+                {doc.kind}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

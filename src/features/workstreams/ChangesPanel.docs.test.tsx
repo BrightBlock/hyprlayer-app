@@ -5,10 +5,11 @@
 // the sidebar surface: a doc a workstream's own agent wrote lists, one it only
 // read does not, per PR #237 and the plan that closed its gap
 // (`2026-08-21-scope-sidebar-docs-to-workstream.md`).
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionEvent } from "@/lib/bindings";
+import { useUiStore } from "@/lib/uiStore";
 import { ChangesPanel } from "./ChangesPanel";
 
 const q = vi.hoisted(() => ({
@@ -86,6 +87,7 @@ function setup() {
 
 beforeEach(() => {
   useSessionStore.setState({ sessions: {} });
+  useUiStore.setState({ docsCollapsed: false });
   h.channels.clear();
   h.startStageSession.mockClear();
 });
@@ -114,5 +116,18 @@ describe("ChangesPanel Documents section, real attribution", () => {
     );
     expect(screen.queryByText("Documents")).toBeNull();
     expect(screen.queryByText("scope")).toBeNull();
+  });
+
+  it("collapses the list to its header, leaving the section title visible", async () => {
+    await emitToWorkstream("wsA", { name: "Write", input: JSON.stringify({ file_path: PLAN }) });
+    setup();
+    render(
+      <ChangesPanel workstreamId="wsA" onOpenDoc={vi.fn()} onOpenDiff={vi.fn()} onOpenFile={vi.fn()} baseBranch="main" />,
+    );
+    fireEvent.click(screen.getByLabelText("Hide documents, 1"));
+    expect(screen.queryByText("scope")).toBeNull();
+    expect(screen.getByText("Documents")).toBeDefined();
+    expect(screen.getByLabelText("Show documents, 1")).toBeDefined();
+    expect(useUiStore.getState().docsCollapsed).toBe(true);
   });
 });
