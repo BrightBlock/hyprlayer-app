@@ -8,8 +8,7 @@ import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
-import { useThemeStore } from "@/lib/theme";
-import { attachTerminalClipboard } from "@/lib/terminal/terminalChrome";
+import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
@@ -34,6 +33,7 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
   const appliedFontSizeRef = useRef<number>(0);
 
   const fontSize = useTerminalFontSize((s) => s.fontSize);
+  useTerminalThemeSync(engineRef);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -128,22 +128,6 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
     const id = idRef.current;
     if (id) void commands.terminalResize(id, g.cols, g.rows);
   }, [fontSize]);
-
-  // Recolor live when the theme changes.
-  useEffect(() => {
-    const recolor = () => engineRef.current?.setTheme(xtermThemeFromCss());
-    const schedule = () => requestAnimationFrame(recolor);
-    const unsub = useThemeStore.subscribe(schedule);
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-    const onMq = () => {
-      if (useThemeStore.getState().mode === "system") schedule();
-    };
-    mq?.addEventListener("change", onMq);
-    return () => {
-      unsub();
-      mq?.removeEventListener("change", onMq);
-    };
-  }, []);
 
   return (
     <div className={`relative min-h-0 min-w-0 flex-1 bg-surface ${className}`}>

@@ -518,6 +518,22 @@ export const commands = {
 	 */
 	openFullDiskAccessSettings: () => typedError<null, AppError>(__TAURI_INVOKE("open_full_disk_access_settings")),
 	/**
+	 *  Whether Omarchy is installed, and its active theme resolved into
+	 *  hyprlayer's token vocabulary — see [`omarchy::status`] for why those are two
+	 *  answers and not one.
+	 * 
+	 *  Registered on every platform and gated inside `omarchy::status` by a path
+	 *  probe, the same shape as `play_sound` (:63-74) and
+	 *  `open_full_disk_access_settings` (:94-101). No `#[cfg]` is needed:
+	 *  `omarchy::current_dir()` cannot resolve off Linux, because
+	 *  `dirs::state_dir()` returns None on macOS and Windows, so this reports
+	 *  `installed: false` there.
+	 * 
+	 *  Infallible by design, so no `CmdResult` — a parse failure is logged in core
+	 *  and collapses to `theme: None` rather than raising an `AppError`.
+	 */
+	getOmarchyTheme: () => __TAURI_INVOKE<OmarchyStatus>("get_omarchy_theme"),
+	/**
 	 *  Confirmed quit. The menu/window handlers only ever *ask* (see
 	 *  `crate::request_quit`), so this is the one path that actually exits once the
 	 *  prompt is up. `dont_ask_again` persists before the exit, so the choice can't
@@ -911,6 +927,7 @@ export const commands = {
 export const events = {
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
+	omarchyThemeChanged: makeEvent<OmarchyThemeChanged>("omarchy-theme-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
@@ -2133,6 +2150,65 @@ export type OllamaStatus = {
 	endpoint: string,
 	/**  Models installed on the server, sorted by id. Empty when unreachable. */
 	models: OllamaModelInfo[],
+};
+
+/**
+ *  Omarchy's `mode` key: `"dark"` (17 of 22 built-in themes) or `"light"`
+ *  (5 of 22). Same shape as [`crate::system::FullDiskAccess`].
+ */
+export type OmarchyMode = "dark" | "light";
+
+/**
+ *  Whether Omarchy is installed, and its palette if one could be read.
+ * 
+ *  The two answers are separate because they have opposite remedies and the
+ *  frontend must not conflate them. `installed: false` is permanent until the
+ *  user does something (Omarchy is gone, or was never here), so a stored
+ *  palette is stale and must be dropped. `installed: true, theme: None` is
+ *  the transient: Omarchy replaces the theme directory with `rm -rf` + `mv`
+ *  (/usr/bin/omarchy-theme-set:164-165), so a poll tick landing inside that
+ *  window reads no `colors.toml` for one cycle, and dropping the user's
+ *  palette for ~2s on every theme switch would be worse than keeping it.
+ * 
+ *  `installed` cannot flicker across that window: [`current_dir`] probes
+ *  `theme.name`, which omarchy-theme-set:168 writes with a truncate-in-place
+ *  `echo >` *after* the directory swap. The file never ceases to exist, so a
+ *  theme switch can only ever produce the second shape, never the first.
+ */
+export type OmarchyStatus = {
+	installed: boolean,
+	theme: OmarchyTheme | null,
+};
+
+/**  The active Omarchy theme, resolved into hyprlayer's token vocabulary. */
+export type OmarchyTheme = {
+	/**  From `theme.name`; may be empty (see [`theme_name`]). */
+	name: string,
+	mode: OmarchyMode,
+	/**
+	 *  Exactly 46 entries: the 30 semantic `--color-*` tokens (`--color-bad`
+	 *  deliberately absent, see the comment inside [`resolve`]) followed by
+	 *  the 16 `--color-ansi-*` terminal slots, strictly appended in that
+	 *  order.
+	 */
+	tokens: OmarchyToken[],
+};
+
+/**
+ *  The user changed their Omarchy theme. Carries no payload: the frontend
+ *  refetches `get_omarchy_theme` for the resolved palette, the same shape as
+ *  `ConfigChanged`.
+ */
+export type OmarchyThemeChanged = null;
+
+/**
+ *  One resolved CSS custom property. `name` is the full property name
+ *  (`"--color-surface"`), so the frontend can `setProperty(name, value)`
+ *  with no mapping table.
+ */
+export type OmarchyToken = {
+	name: string,
+	value: string,
 };
 
 /**

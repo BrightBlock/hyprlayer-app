@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use hyprlayer_core::omarchy;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::process::Exec;
 use hyprlayer_core::system::FullDiskAccess;
@@ -97,6 +98,25 @@ pub fn open_full_disk_access_settings() -> CmdResult<()> {
         .spawn()
         .map_err(|e| AppError::internal(format!("open: {e}")))?;
     Ok(())
+}
+
+/// Whether Omarchy is installed, and its active theme resolved into
+/// hyprlayer's token vocabulary — see [`omarchy::status`] for why those are two
+/// answers and not one.
+///
+/// Registered on every platform and gated inside `omarchy::status` by a path
+/// probe, the same shape as `play_sound` (:63-74) and
+/// `open_full_disk_access_settings` (:94-101). No `#[cfg]` is needed:
+/// `omarchy::current_dir()` cannot resolve off Linux, because
+/// `dirs::state_dir()` returns None on macOS and Windows, so this reports
+/// `installed: false` there.
+///
+/// Infallible by design, so no `CmdResult` — a parse failure is logged in core
+/// and collapses to `theme: None` rather than raising an `AppError`.
+#[tauri::command]
+#[specta::specta]
+pub fn get_omarchy_theme() -> omarchy::OmarchyStatus {
+    omarchy::status()
 }
 
 /// Confirmed quit. The menu/window handlers only ever *ask* (see

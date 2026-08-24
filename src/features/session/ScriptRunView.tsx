@@ -3,7 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type ScriptKind, type TerminalEvent } from "@/lib/bindings";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
-import { attachTerminalClipboard } from "@/lib/terminal/terminalChrome";
+import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
@@ -31,10 +31,12 @@ type Props = {
 /**
  * Streams one script run into an xterm view, either attaching to a live PTY or
  * spawning a fresh one via `script_run`. Reuses the same engine as
- * {@link TerminalTab}; trimmed of zoom/live-theme/focus-repaint (the run log
- * self-heals on the next output). Unmounting never kills the PTY, collapsing the
- * dock keeps a Run alive (the rail's green dot is the signal); teardown is the
- * backend's job (Stop, archive, or app exit).
+ * {@link TerminalTab}; trimmed of zoom and focus-repaint (the run log
+ * self-heals on the next output). Live theme is no longer trimmed: a theme
+ * change with no output pending has nothing to self-heal from, so this calls
+ * the same `useTerminalThemeSync` every other terminal does. Unmounting never
+ * kills the PTY, collapsing the dock keeps a Run alive (the rail's green dot
+ * is the signal); teardown is the backend's job (Stop, archive, or app exit).
  */
 export function ScriptRunView({
   workstreamId,
@@ -49,6 +51,7 @@ export function ScriptRunView({
   const hostRef = useRef<HTMLDivElement>(null);
   const fontSize = useTerminalFontSize((s) => s.fontSize);
   const engineRef = useRef<TerminalEngine | null>(null);
+  useTerminalThemeSync(engineRef);
   const attachRef = useRef(attachId);
   attachRef.current = attachId;
   const onStartedRef = useRef(onStarted);

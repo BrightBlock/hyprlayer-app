@@ -2,6 +2,26 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { xtermThemeFromCss } from "./terminalTheme";
 
+/** All 16 `ITheme` ANSI slot keys, ANSI index order (0-15). */
+const ANSI_SLOTS = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+
 describe("xtermThemeFromCss", () => {
   afterEach(() => {
     // Reset any inline vars between tests.
@@ -33,5 +53,44 @@ describe("xtermThemeFromCss", () => {
     expect(theme.cursor).toBe("#ffcc00");
     // --color-ink drives both foreground and white
     expect(theme.white).toBe("#aabbcc");
+  });
+
+  it("fills all 16 ANSI slots with their documented fallback when no vars are set", () => {
+    const theme = xtermThemeFromCss();
+    // The eight xterm already filled for us pre-Phase-5: its own stock Tango
+    // palette, verbatim (@xterm/xterm ThemeService.ts:36-52).
+    expect(theme.black).toBe("#2e3436");
+    expect(theme.brightRed).toBe("#ef2929");
+    expect(theme.brightGreen).toBe("#8ae234");
+    expect(theme.brightYellow).toBe("#fce94f");
+    expect(theme.brightBlue).toBe("#729fcf");
+    expect(theme.brightMagenta).toBe("#ad7fa8");
+    expect(theme.brightCyan).toBe("#34e2e2");
+    expect(theme.brightWhite).toBe("#eeeeec");
+    // The eight that fall through to the semantic token they read before
+    // --color-ansi-* existed — the preservation proof for the ANSI slots.
+    expect(theme.red).toBe("#ef5350");
+    expect(theme.green).toBe("#4caf50");
+    expect(theme.yellow).toBe("#f0b13a");
+    expect(theme.blue).toBe("#60a5fa");
+    expect(theme.magenta).toBe("#d97757");
+    expect(theme.cyan).toBe("#7dd3fc");
+    expect(theme.white).toBe("#e8e6e2");
+    expect(theme.brightBlack).toBe("#a8a6a2");
+    for (const slot of ANSI_SLOTS) expect(theme[slot], slot).toBeTruthy();
+  });
+
+  it("--color-ansi-red follows --color-bad when only the semantic token is set", () => {
+    document.documentElement.style.setProperty("--color-bad", "#ff00ff");
+    const theme = xtermThemeFromCss();
+    expect(theme.red).toBe("#ff00ff");
+  });
+
+  it("--color-ansi-red wins over --color-bad when both are set", () => {
+    document.documentElement.style.setProperty("--color-bad", "#ff00ff");
+    document.documentElement.style.setProperty("--color-ansi-red", "#123456");
+    const theme = xtermThemeFromCss();
+    expect(theme.red).toBe("#123456");
+    for (const slot of ANSI_SLOTS) expect(theme[slot], slot).toBeTruthy();
   });
 });

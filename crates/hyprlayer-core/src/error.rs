@@ -65,6 +65,9 @@ pub enum CoreError {
     #[error("failed to parse {path}: {message}")]
     RepoSettingsParse { path: PathBuf, message: String },
 
+    #[error("failed to parse Omarchy palette at {path}: {message}")]
+    OmarchyPaletteParse { path: PathBuf, message: String },
+
     #[error("{detail}")]
     ProfileInvalid { detail: String },
 
@@ -184,6 +187,7 @@ impl CoreError {
             CoreError::WorktreeUnpushed { .. } => "worktree_unpushed",
             CoreError::InvalidPath { .. } => "invalid_path",
             CoreError::RepoSettingsParse { .. } => "repo_settings_parse",
+            CoreError::OmarchyPaletteParse { .. } => "omarchy_palette_parse",
             CoreError::ProfileInvalid { .. } => "invalid_profile_name",
             CoreError::ProfileExists { .. } => "profile_exists",
             CoreError::Frontmatter(_) => "frontmatter_patch",

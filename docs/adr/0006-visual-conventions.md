@@ -391,12 +391,22 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   another one with its own Escape story (or lack of one) and its own z-index.
 - **Explicitly out of scope, so nobody "fixes" these later:**
   - **Uneven theme-token override coverage.** The default `@theme` declares
-    31 `--color-*` tokens; `light` overrides all 31, `claude`/`cobalt`/`matrix`
-    override 18, `solarized` 20. `src/index.css:104-110` and `:113-119` explain
-    why — the stage/doc-type/activity hues deliberately inherit the Dark+
-    defaults on dark themes and are deepened only for the light surface. This
-    is by design, not an oversight, and this pass added exactly one new
-    token (`--text-2xs`), which is typography, not colour.
+    47 `--color-*` tokens, of which 31 are the semantic palette: `light`
+    overrides all 31, `claude`/`cobalt`/`matrix` override 18, `solarized` 20.
+    `src/index.css:104-110` and `:113-119` explain why — the
+    stage/doc-type/activity hues deliberately inherit the Dark+ defaults on
+    dark themes and are deepened only for the light surface. This is by
+    design, not an oversight, and this pass added exactly one new token
+    (`--text-2xs`), which is typography, not colour.
+
+    The remaining 16 are the `--color-ansi-*` terminal slots
+    (`src/index.css:143-165`), added later by the Omarchy theming work. No
+    `html.<name>` block overrides any of them, and none needs to: eight are
+    `var()` aliases onto semantic tokens and so follow whatever theme is
+    active, and eight are fixed xterm Tango literals with no semantic
+    equivalent to alias. They are not part of the design vocabulary — nothing
+    in the app may use `bg-ansi-*`; they exist solely for
+    `xtermThemeFromCss()` to read.
   - **The two `h-11` Library headers** (`DocDetail.tsx:108`,
     `LibrarySidebar.tsx:70`), 4px taller than the 40px window bar. PR #213
     recorded this as known-and-left; still left.

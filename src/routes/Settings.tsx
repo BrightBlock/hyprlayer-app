@@ -15,6 +15,7 @@ import type {
   GitSettings,
   MultiplexerSettings,
   NotificationSettings,
+  OmarchyTheme,
   TabTitleSettings,
 } from "@/lib/bindings";
 import {
@@ -66,7 +67,9 @@ function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
 /** [surface, panel-2, accent] preview colors per theme. Kept explicit (rather
  *  than relying on the cascade) since the theme overrides in index.css are
  *  scoped to `html.<name>` and wouldn't resolve on a swatch element. "System"
- *  previews as the default Dark+. */
+ *  previews as the default Dark+. No "omarchy" entry here: its swatch is a
+ *  live sample of the detected palette, passed through the `colors` prop
+ *  below rather than a static triple in this table. */
 const SWATCHES: Record<string, [string, string, string]> = {
   system: ["#0c0c0c", "#1c1c1c", "#d97757"],
   dark: ["#0c0c0c", "#1c1c1c", "#d97757"],
@@ -77,9 +80,11 @@ const SWATCHES: Record<string, [string, string, string]> = {
   solarized: ["#002b36", "#0a4756", "#cb4b16"],
 };
 
-/** Three-swatch preview of a theme, so the picker reads at a glance. */
-function ThemeSwatch({ id }: { id: string }) {
-  const [surface, panel, accent] = SWATCHES[id] ?? SWATCHES.dark;
+/** Three-swatch preview of a theme, so the picker reads at a glance. `colors`
+ *  wins over the `SWATCHES` lookup when given — the Omarchy row samples its
+ *  triple live from the resolved palette instead of a static table entry. */
+function ThemeSwatch({ id, colors }: { id: string; colors?: [string, string, string] }) {
+  const [surface, panel, accent] = colors ?? SWATCHES[id] ?? SWATCHES.dark;
   return (
     <span className="flex shrink-0 overflow-hidden rounded border border-edge">
       <span className="h-5 w-5" style={{ background: surface }} />
@@ -89,19 +94,42 @@ function ThemeSwatch({ id }: { id: string }) {
   );
 }
 
+/** Pull [surface, panel-2, accent] out of a resolved Omarchy palette for the
+ *  picker's live swatch — the same three slots SWATCHES hand-picks for every
+ *  other theme. */
+function omarchySwatch(theme: OmarchyTheme): [string, string, string] {
+  const token = (name: string) => theme.tokens.find((t) => t.name === name)?.value ?? "";
+  return [token("--color-surface"), token("--color-panel-2"), token("--color-accent")];
+}
+
 function AppearanceSection() {
   const mode = useThemeStore((s) => s.mode);
   const setMode = useThemeStore((s) => s.setMode);
+  const omarchy = useThemeStore((s) => s.omarchy);
+
+  // Keep the Omarchy entry visible while it's the active selection even with
+  // no palette detected (Omarchy was uninstalled, or the machine never had
+  // it) — otherwise the grid would show nothing as active.
+  const showOmarchy = omarchy !== null || mode === "omarchy";
+  const themes = showOmarchy ? THEMES : THEMES.filter((t) => t.id !== "omarchy");
+  const omarchyColors = omarchy ? omarchySwatch(omarchy) : undefined;
 
   return (
     <Card>
       <CardTitle>Appearance</CardTitle>
       <p className="mt-1 text-xs text-ink-dim">
         “System” follows your OS light/dark setting.
+        {showOmarchy &&
+          " “Omarchy” follows your Linux desktop's active theme and updates automatically when it changes."}
       </p>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {THEMES.map((theme) => {
+        {themes.map((theme) => {
           const active = mode === theme.id;
+          const isOmarchy = theme.id === "omarchy";
+          // An empty name is the theme.name `echo >` truncate race — degrade
+          // the label, nothing else. No palette at all (but still selected)
+          // reads as "not detected" so the user can see what they're on.
+          const suffix = isOmarchy ? (omarchy ? omarchy.name || null : "not detected") : null;
           return (
             <button
               key={theme.id}
@@ -114,8 +142,11 @@ function AppearanceSection() {
                   : "border-edge text-ink-dim hover:bg-edge/60 hover:text-ink"
               }`}
             >
-              <ThemeSwatch id={theme.id} />
-              <span className="truncate">{theme.label}</span>
+              <ThemeSwatch id={theme.id} colors={isOmarchy ? omarchyColors : undefined} />
+              <span className="truncate">
+                {theme.label}
+                {suffix && <span className="text-ink-dim"> {suffix}</span>}
+              </span>
             </button>
           );
         })}

@@ -129,6 +129,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::play_sound,
             commands::system::full_disk_access_status,
             commands::system::open_full_disk_access_settings,
+            commands::system::get_omarchy_theme,
             commands::system::quit_app,
             commands::harnesses::opencode_catalog,
             commands::harnesses::opencode_auth_list,
@@ -190,6 +191,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             events::ConfigChanged,
+            events::OmarchyThemeChanged,
             events::BinariesChanged,
             events::ThoughtsIndexUpdated,
             events::PrStatusChanged,
@@ -424,7 +426,60 @@ pub fn run() {
                 }
             });
 
-            // 3. Watch each active workstream's PR server-side and push a
+            // 3. Watch Omarchy's live theme state and push an
+            //    OmarchyThemeChanged event on change, so the frontend can
+            //    refetch the resolved palette. Gated on a synchronous probe
+            //    (two metadata() calls) done once here, not per tick — off
+            //    Omarchy this spawns nothing at all: no task, no timer, no
+            //    wakeups.
+            if let Some(omarchy_dir) = hyprlayer_core::omarchy::current_dir() {
+                log::info!("watching Omarchy theme state at {}", omarchy_dir.display());
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    // Polling, not notify. Two reasons. (1) Omarchy replaces the whole theme
+                    // directory (`rm -rf` + `mv`, /usr/bin/omarchy-theme-set:164-165) and nothing
+                    // in this tree establishes that notify's inotify backend keeps delivering
+                    // after a watched directory is deleted and recreated at the same path.
+                    // (2) This watcher would READ what it watches, and inotify's IN_OPEN turns a
+                    // read into a change signal — the loop `signals_change`
+                    // (index/watcher.rs:284-310) and `batch_signals_change`
+                    // (claude/workflow.rs:621-634) both exist to break. A 2s stat of two paths
+                    // costs nothing and cannot spin.
+                    //
+                    // The key covers theme.name AND theme/colors.toml, so a user hand-editing a
+                    // custom theme's palette is caught too, not just a full `omarchy theme set`.
+                    // During the rm -rf + mv window colors.toml may momentarily not exist; key()
+                    // yields None for that path, this tick fires, and the next fires again once
+                    // it reappears. Both fires are idempotent — the frontend refetches and gets
+                    // the same answer — so this costs one extra IPC round-trip per theme switch
+                    // and closes a real gap.
+                    //
+                    // theme.name is written (omarchy-theme-set:168) AFTER the directory swap
+                    // (:164-165), so by the time this key changes the palette is already there.
+                    let key = |dir: &std::path::Path| {
+                        let stat = |p: std::path::PathBuf| {
+                            std::fs::metadata(p)
+                                .ok()
+                                .map(|m| (m.modified().ok(), m.len()))
+                        };
+                        (
+                            stat(dir.join("theme.name")),
+                            stat(dir.join("theme").join("colors.toml")),
+                        )
+                    };
+                    let mut last = key(&omarchy_dir);
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        let current = key(&omarchy_dir);
+                        if current != last {
+                            last = current;
+                            let _ = events::OmarchyThemeChanged.emit(&handle);
+                        }
+                    }
+                });
+            }
+
+            // 4. Watch each active workstream's PR server-side and push a
             //    PrStatusChanged event on change, so the merge/archive bar stays
             //    in sync (e.g. a PR merged on GitHub flips Merge → Archive)
             //    without the frontend polling gh on a timer.

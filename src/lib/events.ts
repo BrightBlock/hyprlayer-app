@@ -1,5 +1,6 @@
 import { events } from "./bindings";
 import { queryClient } from "./queryClient";
+import { refreshOmarchyTheme } from "./theme";
 import {
   invalidateScriptOutput,
   invalidateScriptRuntime,
@@ -42,6 +43,11 @@ export function attachEventListeners(): () => void {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["health"] });
       void queryClient.invalidateQueries({ queryKey: ["project"] });
+    }),
+    // Omarchy's theme changed on disk. The event carries no payload; refetch
+    // the resolved palette, the same shape as configChanged above (:33-37).
+    events.omarchyThemeChanged.listen(() => {
+      void refreshOmarchyTheme();
     }),
     // A workstream's PR status changed server-side (merged, checks settled, a
     // PR appeared/disappeared). The backend watcher already diffed it, so just

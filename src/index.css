@@ -139,6 +139,30 @@
   --color-nebula-3: #60a5fa;
   --color-nebula-4: #818cf8;
   --color-nebula-5: #a78bfa;
+
+  /* Terminal ANSI slots. Not a design vocabulary — nothing in the app may use
+     `bg-ansi-*`; these exist solely for xtermThemeFromCss() to read.
+     The eight below default to the semantic token that already drives them
+     (terminalTheme.ts:38-45), so all seven existing themes keep their exact
+     current terminal palette. The eight after default to xterm's own stock
+     Tango values (@xterm/xterm ThemeService.ts:36-52), which is what xterm
+     fills them with today when we leave them unset. */
+  --color-ansi-red: var(--color-bad);
+  --color-ansi-green: var(--color-ok);
+  --color-ansi-yellow: var(--color-warn);
+  --color-ansi-blue: var(--color-brand);
+  --color-ansi-magenta: var(--color-accent);
+  --color-ansi-cyan: var(--color-brand-soft);
+  --color-ansi-white: var(--color-ink);
+  --color-ansi-bright-black: var(--color-ink-dim);
+  --color-ansi-black: #2e3436;
+  --color-ansi-bright-red: #ef2929;
+  --color-ansi-bright-green: #8ae234;
+  --color-ansi-bright-yellow: #fce94f;
+  --color-ansi-bright-blue: #729fcf;
+  --color-ansi-bright-magenta: #ad7fa8;
+  --color-ansi-bright-cyan: #34e2e2;
+  --color-ansi-bright-white: #eeeeec;
 }
 
 /* Tell the engine the page is dark, so the chrome we DON'T draw ourselves —

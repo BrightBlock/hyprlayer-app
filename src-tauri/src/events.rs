@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct ConfigChanged;
 
+/// The user changed their Omarchy theme. Carries no payload: the frontend
+/// refetches `get_omarchy_theme` for the resolved palette, the same shape as
+/// `ConfigChanged`.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+pub struct OmarchyThemeChanged;
+
 /// Binary statuses were re-probed (override set, redetect requested).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct BinariesChanged;

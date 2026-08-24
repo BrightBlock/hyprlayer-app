@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
-import { attachTerminalClipboard } from "@/lib/terminal/terminalChrome";
-import { createTerminalEngine } from "@/lib/terminal/terminalEngine";
+import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
+import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 
@@ -13,11 +13,14 @@ import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 export function ScriptOutputView({ output }: { output: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const fontSize = useTerminalFontSize((s) => s.fontSize);
+  const engineRef = useRef<TerminalEngine | null>(null);
+  useTerminalThemeSync(engineRef);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
+    engineRef.current = engine;
     engine.mount(host);
     // Ctrl+Shift+C / Ctrl+Shift+V off macOS, the emulator has no copy
     // path of its own there (see attachTerminalClipboard).
@@ -41,6 +44,7 @@ export function ScriptOutputView({ output }: { output: string }) {
     return () => {
       if (raf) cancelAnimationFrame(raf);
       ro.disconnect();
+      engineRef.current = null;
       engine.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
