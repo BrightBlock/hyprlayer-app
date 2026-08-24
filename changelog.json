@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.7.0",
+      "date": "2026-08-24",
+      "summary": "Omarchy theme support, Workflow subagent visibility, and Linux fixes.",
+      "notes": [
+        "Added an Omarchy theme to match that desktop environment's palette.",
+        "Workflow subagent activity (parallel agents spawned during a multi-step task) now surfaces properly in the transcript instead of being invisible.",
+        "Fixed pinch-to-zoom on Linux accidentally zooming the whole app instead of the page content — the webview now ignores that gesture.",
+        "Fixed a Linux transcript click bug and cut down its rendering/persistence overhead.",
+        "The Settings reinstall flow now keeps its backup if a reinstall fails instead of discarding it, and the version picker is tighter."
+      ]
+    },
+    {
       "version": "0.6.1",
       "date": "2026-08-21",
       "summary": "Agents get folder management + a publish toggle; fixed doc misattribution.",
