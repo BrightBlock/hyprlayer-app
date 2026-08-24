@@ -7,6 +7,7 @@ import {
   type AppSettings,
   type BinaryKind,
   type Bootstrap,
+  type BranchPrefix,
   type CliInstallMethodId,
   type CreateDocInput,
   type FmPatchDto,
@@ -446,6 +447,9 @@ export function useSetAppSettings() {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      // A change to the global branch-type list changes the resolved list of
+      // every repo that inherits it.
+      void queryClient.invalidateQueries({ queryKey: ["branchPrefixes"] });
     },
   });
 }
@@ -572,12 +576,15 @@ export function useCreateWorkstream(projectPath: string) {
       base,
       mode,
       branch,
+      branchPrefix,
     }: {
       title: string;
       base: string | null;
       mode: WorktreeMode;
       branch: string | null;
-    }) => unwrap(commands.createWorkstream(projectPath, title, base, mode, branch)),
+      /** The type picked in the dialog; `null` = the global prefix applies. */
+      branchPrefix: string | null;
+    }) => unwrap(commands.createWorkstream(projectPath, title, base, mode, branch, branchPrefix)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
     },
@@ -1090,6 +1097,30 @@ export function useWorktreeFilesCheck(path: string) {
   return useQuery({
     queryKey: ["worktree-files-check", path],
     queryFn: () => unwrap(commands.checkWorktreeFiles(path)),
+  });
+}
+
+// ── Repo branch types ─────────────────────────────────────────────────────────
+
+/** The branch-type picker's resolved list for a project, plus the no-type-picked
+ *  default prefix. Resolution is the backend's (see ResolvedBranchPrefixes). */
+export function useBranchPrefixes(path: string, enabled = true) {
+  return useQuery({
+    queryKey: ["branchPrefixes", path],
+    queryFn: () => unwrap(commands.getBranchPrefixes(path)),
+    enabled,
+  });
+}
+
+/** Persist the project's own branch-type list (whole-list replace). Invalidates
+ *  rather than `setQueryData`: the payload is the RAW repo list, the cache holds
+ *  the RESOLVED payload, so writing the payload into the cache would be wrong. */
+export function useSetBranchPrefixes(path: string) {
+  return useMutation({
+    mutationFn: (prefixes: BranchPrefix[]) => unwrap(commands.setBranchPrefixes(path, prefixes)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["branchPrefixes", path] });
+    },
   });
 }
 

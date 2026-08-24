@@ -74,6 +74,9 @@ pub enum CoreError {
     #[error("profile \"{name}\" already exists")]
     ProfileExists { name: String },
 
+    #[error("{detail}")]
+    BranchPrefixInvalid { detail: String },
+
     #[error(transparent)]
     Frontmatter(#[from] crate::docs::frontmatter::FmError),
 
@@ -165,6 +168,9 @@ impl CoreError {
             CoreError::ProfileExists { .. } => {
                 Some("Pick a different name, or select the existing profile.".into())
             }
+            CoreError::BranchPrefixInvalid { .. } => Some(
+                "Use letters, digits, '-', '_' and '/' — for example `fix/` or `hotfix-`.".into(),
+            ),
             _ => None,
         }
     }
@@ -190,6 +196,7 @@ impl CoreError {
             CoreError::OmarchyPaletteParse { .. } => "omarchy_palette_parse",
             CoreError::ProfileInvalid { .. } => "invalid_profile_name",
             CoreError::ProfileExists { .. } => "profile_exists",
+            CoreError::BranchPrefixInvalid { .. } => "invalid_branch_prefix",
             CoreError::Frontmatter(_) => "frontmatter_patch",
             CoreError::Io(_) => "io",
         }

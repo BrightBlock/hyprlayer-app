@@ -139,7 +139,22 @@ export const commands = {
 	 *  a workstream that was already archived, so there is no live row to hang it off.
 	 */
 	discardProjectChanges: (projectPath: string) => typedError<number, AppError>(__TAURI_INVOKE("discard_project_changes", { projectPath })),
-	createWorkstream: (projectPath: string, title: string, base: string | null, mode: WorktreeMode, branch: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base, mode, branch })),
+	createWorkstream: (projectPath: string, title: string, base: string | null, mode: WorktreeMode, branch: string | null, branchPrefix: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("create_workstream", { projectPath, title, base, mode, branch, branchPrefix })),
+	/**  This project's branch types, resolved built-in → global → per-repo. */
+	getBranchPrefixes: (projectPath: string) => typedError<ResolvedBranchPrefixes, AppError>(__TAURI_INVOKE("get_branch_prefixes", { projectPath })),
+	/**
+	 *  Overwrite this repo's `[branches].prefixes`. Deliberately asymmetric with
+	 *  [`get_branch_prefixes`], which returns the RESOLVED chain: the global list is
+	 *  written through the existing `set_app_settings` whole-object replace, and
+	 *  there is no writable "resolved" level to write back to.
+	 * 
+	 *  Returns the stored (trimmed) list, mirroring `set_worktree_files`
+	 *  (`src-tauri/src/commands/projects.rs:1100-1116`). That return value is what
+	 *  makes normalization safe: the editor's re-seed guard compares what it sent
+	 *  against what it reads back, so a silent server-side trim would look like an
+	 *  external edit and wipe an in-progress row.
+	 */
+	setBranchPrefixes: (projectPath: string, prefixes: BranchPrefix[]) => typedError<BranchPrefix[], AppError>(__TAURI_INVOKE("set_branch_prefixes", { projectPath, prefixes })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
 	/**
 	 *  Change a workstream's target (base) branch. Re-targets the live PR via
@@ -1424,6 +1439,21 @@ export type Bootstrap = {
 	promptDefaults: PromptDefaults,
 };
 
+export type BranchPrefix = {
+	/**  What the picker shows ("Bug fix"). */
+	label: string,
+	/**
+	 *  Used verbatim before the slug — `manager.rs:169` injects no separator,
+	 *  so `hotfix-` is as valid as `hotfix/`.
+	 */
+	prefix: string,
+	/**
+	 *  Lowercase single words that suggest this type from a title. Empty means
+	 *  "derive from the label" (see [`BranchPrefix::match_words`]).
+	 */
+	keywords?: string[],
+};
+
 /**
  *  Which source `hyprlayer ai reinstall` actually installed the bundle from.
  * 
@@ -1946,6 +1976,13 @@ export type GitSettings = {
 	 */
 	branchPrefix?: string | null,
 	/**
+	 *  Branch types offered by the New-workstream dialog's branch-type picker. `None`
+	 *  or empty keeps the built-in set; a list replaces it wholesale — record
+	 *  lists have no identity key to merge on, the same reason `worktree.copy`
+	 *  replaces rather than merges.
+	 */
+	prefixes?: BranchPrefix[] | null,
+	/**
 	 *  Delete the local branch when archiving a workspace. Default `true`,
 	 *  matching the historical behaviour.
 	 */
@@ -2330,6 +2367,12 @@ export type PrSummary = {
 	isDraft: boolean,
 };
 
+/**
+ *  Which level of the chain a resolved list came from, so the editors can say
+ *  what a surface is inheriting instead of leaving an empty list ambiguous.
+ */
+export type PrefixSource = "builtin" | "global" | "repo";
+
 export type Project = {
 	/**  Absolute path of the app-owned clone (`~/hyprlayer/repos/<name>`). */
 	path: string,
@@ -2497,6 +2540,36 @@ export type RepoPathStatus =
 "unborn" | 
 /**  A ready git repo (working tree with at least one commit). */
 "ready";
+
+/**
+ *  The branch-type picker's view of one project's branch types.
+ * 
+ *  The chain is resolved HERE, not in the frontend: `src/routes/Settings.tsx`
+ *  already hand-mirrors Rust defaults at `:129-137`, `:319-322` and `:415-418`
+ *  (the last carrying an explicit "keep in sync with settings.rs" comment), and
+ *  a fifth mirror is how those drift.
+ */
+export type ResolvedBranchPrefixes = {
+	/**
+	 *  The picker's list, after built-in → global → per-repo resolution. Every
+	 *  entry's `keywords` is filled from its label when it stored none, so the
+	 *  frontend matcher never re-derives the fallback.
+	 */
+	prefixes: BranchPrefix[],
+	/**
+	 *  The prefix that applies when no type is picked
+	 *  (`GitSettings::effective_branch_prefix`), so the "None" row can preview
+	 *  its branch name without a fourth TS mirror of `DEFAULT_BRANCH_PREFIX`.
+	 */
+	defaultPrefix: string,
+	/**
+	 *  This repo's raw `[branches].prefixes`, empty when it inherits. The
+	 *  per-repo editor edits THIS; `prefixes` above is the read-only resolution.
+	 */
+	repo: BranchPrefix[],
+	/**  Which level `prefixes` came from. */
+	source: PrefixSource,
+};
 
 /**
  *  GitHub's aggregate review verdict for the PR, from `gh`'s `reviewDecision`

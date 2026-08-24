@@ -4,11 +4,13 @@ import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
 import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/components/ui";
 import { ArchiveIcon, PlusIcon, SplitIcon, WarningTriangleIcon } from "@/components/icons";
 import type { WorktreeMode } from "@/lib/bindings";
+import { previewSlug, suggestPrefix } from "@/lib/domain/branchPrefix";
 import { formatRelativeTime } from "@/lib/format";
 import { isAppError } from "@/lib/ipc";
 import { basename } from "@/lib/path";
 import {
   useArchivedWorkstreams,
+  useBranchPrefixes,
   useCreateWorkstream,
   useDiscardProjectChanges,
   useFetchProjectRemote,
@@ -83,10 +85,16 @@ export function CreateWorkstreamDialog({
   const [base, setBase] = useState("");
   // Whether the user has explicitly chosen a base, vs. it being auto-defaulted.
   const [userPickedBase, setUserPickedBase] = useState(false);
+  // The chosen type's prefix; null = no type, so the global prefix applies.
+  const [typePrefix, setTypePrefix] = useState<string | null>(null);
+  // Whether the user chose the type explicitly, vs. it being suggested from the
+  // title. Same idiom as `userPickedBase` above.
+  const [userPickedType, setUserPickedType] = useState(false);
   const [place, setPlace] = useState<Place>("worktree");
   const create = useCreateWorkstream(projectPath);
   // A folder project has no branches to list, don't even ask.
   const bases = useWorkstreamBases(projectPath, open && !folder);
+  const prefixes = useBranchPrefixes(projectPath, open && !folder);
   const refreshRemote = useFetchProjectRemote(projectPath);
 
   const defaultBase = bases.data?.defaultBase ?? "";
@@ -110,6 +118,31 @@ export function CreateWorkstreamDialog({
   );
   const remoteSet = useMemo(() => new Set(remoteBranches), [remoteBranches]);
   const filtered = useMemo(() => filterBranches(pickable, query), [pickable, query]);
+
+  // Memoized like `branches` above, so the `?? []` literal can't re-fire the
+  // suggestion effect every render. Deduped by prefix defensively:
+  // `validate_prefixes` rejects duplicates on every write path, but a
+  // hand-edited `settings.toml` is not a write path.
+  const typeList = useMemo(() => {
+    const seen = new Set<string>();
+    return (prefixes.data?.prefixes ?? []).filter((p) => {
+      // Dedupe on the TRIMMED prefix, which is what the backend stores and what
+      // `create_workstream` trims to before building the branch. Comparing raw
+      // strings let `fix/` and `" fix/ "` both through as separate options that
+      // build the identical branch — and a hand-edited `settings.toml`, the
+      // only way past `normalize_branch_prefixes`, is exactly the case this
+      // defence exists for.
+      const prefix = p.prefix.trim();
+      // Blank is dropped, not just deduped: `value: ""` is the None row's own
+      // sentinel below, and a second option carrying it would collide on
+      // `DropdownSelect`'s composite key (`src/components/ui.tsx:387`) and be
+      // unselectable.
+      if (!prefix || seen.has(prefix)) return false;
+      seen.add(prefix);
+      return true;
+    });
+  }, [prefixes.data?.prefixes]);
+  const defaultPrefix = prefixes.data?.defaultPrefix ?? "";
 
   // An in-place create refused to switch branches because the project checkout
   // has uncommitted work. Recoverable in the dialog, so it doesn't render as a
@@ -172,12 +205,22 @@ export function CreateWorkstreamDialog({
     if (initial && initial !== base) setBase(initial);
   }, [open, userPickedBase, defaultBase, branches, base]);
 
+  // Suggest a type from the title until the user picks one. Keyed on `open` via
+  // reset(), so reopening re-suggests.
+  useEffect(() => {
+    if (!open || userPickedType || !isNew) return;
+    const next = suggestPrefix(title, typeList)?.prefix ?? null;
+    if (next !== typePrefix) setTypePrefix(next);
+  }, [open, userPickedType, isNew, title, typeList, typePrefix]);
+
   const reset = () => {
     setTitle("");
     setQuery("");
     setSelectedBranch(null);
     setBase("");
     setUserPickedBase(false);
+    setTypePrefix(null);
+    setUserPickedType(false);
     setPlace("worktree");
     setConfirmDiscard(false);
     create.reset();
@@ -194,12 +237,22 @@ export function CreateWorkstreamDialog({
   /** Recovery is in flight, the whole dialog holds still until it settles. */
   const recovering = discard.isPending || restore.isPending;
 
-  // Resolve the combobox state into the backend's (mode, base, branch) shape.
-  const resolved = (): { mode: WorktreeMode; base: string | null; branch: string | null } => {
-    if (folder) return { mode: "folder", base: null, branch: null };
-    if (isNew) return { mode: "isolated", base: base || null, branch: null };
-    if (place === "here") return { mode: "inplace", base: null, branch: selectedBranch };
-    return { mode: "existing", base: null, branch: selectedBranch };
+  // Resolve the combobox state into the backend's (mode, base, branch,
+  // branchPrefix) shape. A null prefix means the global one applies; only the
+  // new-branch path can ever carry one, since the other three adopt a branch
+  // that already has a name.
+  const resolved = (): {
+    mode: WorktreeMode;
+    base: string | null;
+    branch: string | null;
+    branchPrefix: string | null;
+  } => {
+    if (folder) return { mode: "folder", base: null, branch: null, branchPrefix: null };
+    if (isNew)
+      return { mode: "isolated", base: base || null, branch: null, branchPrefix: typePrefix };
+    if (place === "here")
+      return { mode: "inplace", base: null, branch: selectedBranch, branchPrefix: null };
+    return { mode: "existing", base: null, branch: selectedBranch, branchPrefix: null };
   };
 
   const submit = () => {
@@ -313,6 +366,39 @@ export function CreateWorkstreamDialog({
         </Field>
         )}
 
+        {!folder && isNew && (
+          <Field label="Type of work">
+            <DropdownSelect
+              aria-label="Type of work"
+              value={typePrefix ?? ""}
+              onChange={(v) => {
+                setTypePrefix(v || null);
+                setUserPickedType(true);
+              }}
+              disabled={create.isPending || prefixes.isLoading}
+              options={[
+                // "General", not "None": the row still produces a branch (under
+                // the global prefix), so naming it for the absence of a type
+                // read as though it meant no work. The prefix it yields is not
+                // spelled out here — the preview line below already shows the
+                // whole branch name, and no other option lists its prefix.
+                { value: "", label: "General" },
+                ...typeList.map((p) => ({ value: p.prefix, label: p.label })),
+              ]}
+            />
+            {/* Same "Preview:" shape as Settings → Git (`Settings.tsx:248-254`),
+                against the real title instead of a sample slug. The 4-hex suffix
+                is the backend's, so it renders dimmed as a placeholder. */}
+            <p className="mt-1.5 text-xs text-ink-dim">
+              Preview:{" "}
+              <span className="font-mono text-ink">
+                {typePrefix ?? defaultPrefix}
+                {previewSlug(title)}-<span className="opacity-60">xxxx</span>
+              </span>
+            </p>
+          </Field>
+        )}
+
         {folder ? null : isNew ? (
           <Field label="Branched from">
             <DropdownSelect
@@ -353,6 +439,10 @@ export function CreateWorkstreamDialog({
 
         <p className="text-xs leading-relaxed text-ink-dim">{hint}</p>
         {!folder && bases.isError && <ErrorNote error={bases.error} />}
+        {/* Surfaced rather than swallowed: an unreadable `.hyprlayer/settings.toml`
+            fails this query, and without a note the picker just shows the
+            built-ins as though nothing were wrong. */}
+        {!folder && isNew && prefixes.isError && <ErrorNote error={prefixes.error} />}
         {create.isError &&
           (checkoutDirty ? (
             <CheckoutDirtyNotice
@@ -395,7 +485,11 @@ export function CreateWorkstreamDialog({
             type="submit"
             variant="primary"
             busy={create.isPending}
-            disabled={!title.trim() || recovering}
+            // Hold Create until the branch types have loaded. `typePrefix` is
+            // null until then, so an early submit silently builds the branch
+            // under the global prefix instead of the type the title suggests —
+            // the picker already disables itself for the same window.
+            disabled={!title.trim() || recovering || (isNew && !folder && prefixes.isLoading)}
           >
             {create.isPending ? busyLabel : "Create"}
           </Button>

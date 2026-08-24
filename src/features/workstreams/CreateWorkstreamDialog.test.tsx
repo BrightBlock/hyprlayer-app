@@ -15,6 +15,7 @@ const q = vi.hoisted(() => ({
   useArchivedWorkstreams: vi.fn(),
   useDiscardProjectChanges: vi.fn(),
   useRestoreWorkstream: vi.fn(),
+  useBranchPrefixes: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
 
@@ -83,6 +84,24 @@ q.useRestoreWorkstream.mockReturnValue({
   error: null,
 });
 
+/** The resolved Type list, as `get_branch_prefixes` returns it (keywords already
+ *  filled from the label backend-side). Always stubbed: the dialog reads it on
+ *  every render, folder projects included. */
+function mockPrefixes(
+  prefixes = [
+    { label: "Bug fix", prefix: "fix/", keywords: ["fix", "bug", "crash"] },
+    { label: "Feature", prefix: "feat/", keywords: ["feature", "add"] },
+  ],
+) {
+  q.useBranchPrefixes.mockReturnValue({
+    data: { prefixes, defaultPrefix: "hyprlayer/", repo: [], source: "builtin" },
+    isLoading: false,
+    isError: false,
+    error: null,
+  });
+}
+mockPrefixes();
+
 /** Put the create mutation into its `checkout_dirty` failure state. */
 function mockCheckoutDirty(count = 2) {
   q.useCreateWorkstream.mockReturnValue({
@@ -121,6 +140,19 @@ function pickBase(label: string) {
   fireEvent.click(screen.getByRole("option", { name: label }));
 }
 
+// The branch-type picker, same DropdownSelect anatomy as the base one above.
+const typeTrigger = () => screen.getByRole("button", { name: "Type of work" });
+const typeValue = () => typeTrigger().textContent;
+function pickType(label: string) {
+  fireEvent.click(typeTrigger());
+  fireEvent.click(screen.getByRole("option", { name: label }));
+}
+
+const fillTitle = (value: string) =>
+  fireEvent.change(screen.getByPlaceholderText("What are you working on?"), {
+    target: { value },
+  });
+
 describe("CreateWorkstreamDialog remote branches", () => {
   it("offers a remote-only branch and submits its full ref", () => {
     createMutate.mockClear();
@@ -150,7 +182,13 @@ describe("CreateWorkstreamDialog remote branches", () => {
     // The backend resolves the ref to a local tracking branch, so the dialog
     // hands it the ref verbatim.
     expect(createMutate).toHaveBeenCalledWith(
-      { title: "Linux", mode: "existing", base: null, branch: "origin/linux-support" },
+      {
+        title: "Linux",
+        mode: "existing",
+        base: null,
+        branch: "origin/linux-support",
+        branchPrefix: null,
+      },
       expect.anything(),
     );
   });
@@ -368,5 +406,123 @@ describe("CreateWorkstreamDialog base detection", () => {
       />,
     );
     expect(baseValue()).toBe("feature-x");
+  });
+});
+
+describe("CreateWorkstreamDialog branch types", () => {
+  const gitRepo = {
+    branches: ["main"],
+    localBranches: ["main"],
+    defaultBase: "main",
+    currentBranch: "main",
+  };
+
+  it("suggests a type from the title and submits its prefix", () => {
+    createMutate.mockClear();
+    mockBases(gitRepo);
+    renderDialog(true);
+
+    // Nothing typed yet, so nothing to suggest.
+    expect(typeValue()).toBe("General");
+
+    fillTitle("Fix the login crash");
+    expect(typeValue()).toBe("Bug fix");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(createMutate).toHaveBeenCalledWith(
+      {
+        title: "Fix the login crash",
+        mode: "isolated",
+        base: "main",
+        branch: null,
+        branchPrefix: "fix/",
+      },
+      expect.anything(),
+    );
+  });
+
+  it("keeps an explicit None through further typing", () => {
+    createMutate.mockClear();
+    mockBases(gitRepo);
+    renderDialog(true);
+
+    fillTitle("Fix the login crash");
+    expect(typeValue()).toBe("Bug fix");
+
+    // The user overrides the suggestion back to General; a later keyword
+    // must not undo that choice.
+    pickType("General");
+    fillTitle("Fix the login crash on add");
+    expect(typeValue()).toBe("General");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(createMutate).toHaveBeenCalledWith(
+      {
+        title: "Fix the login crash on add",
+        mode: "isolated",
+        base: "main",
+        branch: null,
+        branchPrefix: null,
+      },
+      expect.anything(),
+    );
+  });
+
+  it("previews the branch the create will produce", () => {
+    mockBases(gitRepo);
+    renderDialog(true);
+
+    fillTitle("Fix the login crash");
+    // The 4-hex suffix is the backend's, so the preview ends in a placeholder.
+    expect(screen.getByText(/Preview:/).textContent).toBe(
+      "Preview: fix/fix-the-login-crash-xxxx",
+    );
+  });
+
+  it("falls back to the global prefix when no keyword hits", () => {
+    createMutate.mockClear();
+    mockBases(gitRepo);
+    renderDialog(true);
+
+    fillTitle("Dashboard tweaks");
+    expect(typeValue()).toBe("General");
+    expect(screen.getByText(/Preview:/).textContent).toBe(
+      "Preview: hyprlayer/dashboard-tweaks-xxxx",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(createMutate).toHaveBeenCalledWith(
+      {
+        title: "Dashboard tweaks",
+        mode: "isolated",
+        base: "main",
+        branch: null,
+        branchPrefix: null,
+      },
+      expect.anything(),
+    );
+  });
+
+  it("hides the picker for a branch that already has a name", () => {
+    mockBases({ ...gitRepo, branches: ["main", "feature-x"], localBranches: ["main", "feature-x"] });
+    renderDialog(true);
+    expect(typeTrigger()).toBeDefined();
+
+    // Adopting an existing branch names nothing, so there is no type to pick.
+    fireEvent.click(screen.getByRole("button", { name: /feature-x/ }));
+    expect(screen.queryByRole("button", { name: "Type of work" })).toBeNull();
+
+    // A folder project has no branch at all.
+    cleanup();
+    render(
+      <CreateWorkstreamDialog
+        projectPath="/repo"
+        open
+        folder
+        onClose={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Type of work" })).toBeNull();
   });
 });

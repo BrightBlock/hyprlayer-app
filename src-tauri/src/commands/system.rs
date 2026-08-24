@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use hyprlayer_core::branch_prefix;
 use hyprlayer_core::omarchy;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::process::Exec;
@@ -158,12 +159,60 @@ pub async fn get_app_settings(state: State<'_, AppState>) -> CmdResult<AppSettin
     Ok(state.settings.get().await)
 }
 
+/// Whether this write actually changes the branch prefix, comparing what the
+/// user set rather than how it was spelled.
+///
+/// Both sides are trimmed, and that asymmetry is the whole point: the incoming
+/// value has just been normalized while the stored one may predate any
+/// normalization at all (nothing validated or trimmed this field before the
+/// branch-type picker landed). Comparing normalized against raw would read a stored
+/// `" my feature/"` as changed on every unrelated write — the whitespace alone
+/// differs — so validation would fire and block a prompt pin or a folder
+/// collapse, which is exactly the outcome scoping the validation exists to
+/// prevent.
+fn branch_prefix_changed(incoming: Option<&str>, current: Option<&str>) -> bool {
+    incoming.map(str::trim) != current.map(str::trim)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn set_app_settings(
     state: State<'_, AppState>,
-    settings: AppSettings,
+    mut settings: AppSettings,
 ) -> CmdResult<AppSettings> {
+    // Normalize before comparing, so what gets validated is exactly what gets
+    // stored. `validate_prefix` checks the TRIMMED content (a pasted
+    // `" feature/"` is a legal prefix with incidental whitespace), so storing
+    // the raw string would let a value pass validation and then fail later at
+    // `git worktree add`. The list gets the same treatment as
+    // `set_branch_prefixes` gives the per-repo one — same editor, same bytes.
+    settings.git.branch_prefix = settings.git.branch_prefix.map(|p| p.trim().to_string());
+    settings.git.prefixes = settings.git.prefixes.map(super::normalize_branch_prefixes);
+
+    // Validate only what this write actually CHANGES. `set_app_settings` is a
+    // whole-object replace (`src/lib/queries.ts:415-451`) called from twelve
+    // unrelated surfaces — an agent-folder collapse (`AgentLibrary.tsx:111`), a
+    // prompt pin (`PromptLibrary.tsx:151`), a keybinding
+    // (`KeyboardSettings.tsx:180`), each harness tab, the full-disk-access
+    // dismissal (`FullDiskAccessNotice.tsx:24`) — and every one of them resends
+    // `git.branchPrefix` untouched. Validating it unconditionally would mean a
+    // user with an already-bad stored prefix could no longer collapse a folder
+    // or pin a prompt, and `useSetAppSettings`'s optimistic write + rollback
+    // (`queries.ts:424-439`) would show those changes land and silently revert.
+    let current = state.settings.get().await;
+    if branch_prefix_changed(
+        settings.git.branch_prefix.as_deref(),
+        current.git.branch_prefix.as_deref(),
+    ) {
+        if let Some(p) = settings.git.branch_prefix.as_deref() {
+            branch_prefix::validate_prefix(p).map_err(AppError::from)?;
+        }
+    }
+    if settings.git.prefixes != current.git.prefixes {
+        branch_prefix::validate_prefixes(settings.git.prefixes.as_deref().unwrap_or(&[]))
+            .map_err(AppError::from)?;
+    }
+
     state.settings.set(settings).await?;
     Ok(state.settings.get().await)
 }
@@ -379,4 +428,42 @@ async fn package_manager_available(shell: &Path, path: &std::ffi::OsStr, manager
         .run()
         .await
         .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The regression guard for the scoped-validation property. `set_app_settings`
+    /// is a whole-object replace called from twelve unrelated surfaces, every one
+    /// of which resends `git.branchPrefix` untouched. A user whose stored prefix
+    /// is already invalid (nothing validated this field before the branch-type picker)
+    /// must still be able to pin a prompt or collapse an agent folder, so
+    /// echoing a bad value back must not read as a change.
+    #[test]
+    fn resending_a_stored_invalid_prefix_is_not_a_change() {
+        // Whitespace-padded AND invalid after trimming: the shape that would
+        // have compared unequal if only the incoming side were normalized.
+        let stored = Some(" my feature/");
+        assert!(!branch_prefix_changed(stored, stored));
+        // Which is what keeps validation from firing on an unrelated write.
+        assert!(!branch_prefix_changed(
+            Some("my feature/"),
+            Some("my feature/")
+        ));
+    }
+
+    #[test]
+    fn incidental_whitespace_is_not_a_change() {
+        assert!(!branch_prefix_changed(Some(" fix/ "), Some("fix/")));
+        assert!(!branch_prefix_changed(Some("fix/"), Some(" fix/ ")));
+    }
+
+    #[test]
+    fn a_real_edit_is_a_change() {
+        assert!(branch_prefix_changed(Some("fix/"), Some("feat/")));
+        assert!(branch_prefix_changed(Some("fix/"), None));
+        assert!(branch_prefix_changed(None, Some("fix/")));
+        assert!(!branch_prefix_changed(None, None));
+    }
 }

@@ -6,6 +6,7 @@
 pub mod agent;
 pub mod agent_bundle;
 pub mod agents;
+pub mod branch_prefix;
 pub mod claude;
 pub mod codex;
 pub mod config;

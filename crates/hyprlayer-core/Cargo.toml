@@ -20,6 +20,7 @@ dirs.workspace = true
 tracing.workspace = true
 which = "7"
 shellexpand = "3"
+regex = "1"
 serde_yaml = "0.9"
 # Local-only git operations (status/ahead-behind); no network transports, so
 # no openssl. Network git stays with the system binary (credential helpers).

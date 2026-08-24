@@ -65,6 +65,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::fetch_project_remote,
             commands::workstreams::discard_project_changes,
             commands::workstreams::create_workstream,
+            commands::workstreams::get_branch_prefixes,
+            commands::workstreams::set_branch_prefixes,
             commands::workstreams::rename_workstream,
             commands::workstreams::set_workstream_base_branch,
             commands::workstreams::update_workstream_from_base,

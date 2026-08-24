@@ -980,6 +980,16 @@ mod tests {
         assert!(a.starts_with("add-oauth2-login-"), "{a}");
         assert_ne!(unique_slug("x"), unique_slug("x"));
         assert!(unique_slug("!!!").starts_with("work-item-"));
+
+        // The 48 cap, previously unasserted. `previewSlug`
+        // (`src/lib/domain/branchPrefix.ts`) mirrors this number; without an
+        // assertion here the mirror has nothing to drift from.
+        //
+        // The break is checked after the push and one byte is pushed per
+        // iteration, so the stem stops at exactly 48, then loses any trailing
+        // dash before the 5-byte "-xxxx" suffix: 53 is the true ceiling.
+        let long = unique_slug(&"very long words ".repeat(20));
+        assert!(long.len() <= 48 + 5, "{long}");
     }
 
     #[tokio::test]
@@ -1091,6 +1101,47 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+    }
+
+    #[tokio::test]
+    async fn isolated_branch_uses_the_spec_prefix_verbatim() {
+        // `hotfix-` (no slash) must produce `hotfix-<slug>`, not `hotfix-/<slug>`
+        // — `create` injects nothing between prefix and slug, so a prefix that
+        // ends in anything other than '/' is a legitimate thing to configure.
+        let (_guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").expect("git on PATH");
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Add login".into(),
+                    base_override: None,
+                    branch_prefix: "hotfix-".into(),
+                    mode: CreateMode::Isolated,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            created.branch.starts_with("hotfix-add-login-"),
+            "{}",
+            created.branch
+        );
+        // And that name is what git checked out, not just what the manager
+        // reported: a separator slipped in here would have created a real
+        // (valid, differently-named) branch rather than failing.
+        assert_eq!(
+            status(Path::new(&created.path), "main", None)
+                .branch
+                .as_deref(),
+            Some(created.branch.as_str())
+        );
     }
 
     /// Regression: pushing a branch to its remote must not hide Ship. After a

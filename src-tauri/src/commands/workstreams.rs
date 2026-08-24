@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use hyprlayer_core::branch_prefix::{self, BranchPrefix, PrefixSource};
 use hyprlayer_core::gitops::{CommitEntry, DirEntry, FileSides, GitFileEntry, WorktreeGitStatus};
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::pr::{self, MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::BinaryKind;
+use hyprlayer_core::repo_settings;
 use hyprlayer_core::scripts::ScriptKind;
 use hyprlayer_core::skills::SlashCommand;
 use hyprlayer_core::store::{
@@ -50,6 +52,30 @@ pub struct WorkstreamBases {
     pub remote_branches: Vec<String>,
     pub default_base: String,
     pub current_branch: Option<String>,
+}
+
+/// The branch-type picker's view of one project's branch types.
+///
+/// The chain is resolved HERE, not in the frontend: `src/routes/Settings.tsx`
+/// already hand-mirrors Rust defaults at `:129-137`, `:319-322` and `:415-418`
+/// (the last carrying an explicit "keep in sync with settings.rs" comment), and
+/// a fifth mirror is how those drift.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedBranchPrefixes {
+    /// The picker's list, after built-in → global → per-repo resolution. Every
+    /// entry's `keywords` is filled from its label when it stored none, so the
+    /// frontend matcher never re-derives the fallback.
+    pub prefixes: Vec<BranchPrefix>,
+    /// The prefix that applies when no type is picked
+    /// (`GitSettings::effective_branch_prefix`), so the "None" row can preview
+    /// its branch name without a fourth TS mirror of `DEFAULT_BRANCH_PREFIX`.
+    pub default_prefix: String,
+    /// This repo's raw `[branches].prefixes`, empty when it inherits. The
+    /// per-repo editor edits THIS; `prefixes` above is the read-only resolution.
+    pub repo: Vec<BranchPrefix>,
+    /// Which level `prefixes` came from.
+    pub source: PrefixSource,
 }
 
 fn item_not_found(id: &str) -> AppError {
@@ -497,6 +523,8 @@ async fn create_folder_workstream(
 
 #[tauri::command]
 #[specta::specta]
+// Arity mirrors the IPC contract this command exposes.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_workstream(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -506,6 +534,9 @@ pub async fn create_workstream(
     // `branch`: the local branch to adopt for existing/inplace; unused for isolated.
     mode: WorktreeMode,
     branch: Option<String>,
+    // `branch_prefix`: the type picked in the dialog. Only consulted for
+    // isolated, like `base`.
+    branch_prefix: Option<String>,
 ) -> CmdResult<WorkstreamView> {
     let title = title.trim().to_string();
     if title.is_empty() {
@@ -602,7 +633,32 @@ pub async fn create_workstream(
         .require(BinaryKind::Git)
         .await
         .map_err(AppError::from)?;
-    let branch_prefix = state.settings.get().await.git.effective_branch_prefix();
+    // A type picked in the dialog REPLACES the global prefix rather than
+    // composing with it: `fix/add-login-a1b2`, not `jt/fix/add-login-a1b2`.
+    // A blank pick is the same as no pick, matching how `base_override` below
+    // treats an empty selection.
+    let picked = branch_prefix
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    let branch_prefix = match picked {
+        Some(p) => p,
+        None => state.settings.get().await.git.effective_branch_prefix(),
+    };
+    // Validate whichever level won, not just an explicit pick. Nothing checked
+    // `git.branchPrefix` before the branch-type picker landed, so a stored
+    // `" my feature/"` is a real shape (`system.rs`'s own scoped-validation
+    // test uses it), and `set_app_settings` deliberately re-validates it only
+    // when it CHANGES — so an already-bad global prefix is never re-examined
+    // there. Without this it reaches `git worktree add -b` and surfaces as a
+    // raw git fatal naming neither the setting nor its remedy.
+    //
+    // Scoped to the isolated path because that is the only arm of
+    // `WorktreeManager::create` that reads `branch_prefix` (`manager.rs:169`);
+    // the others adopt a branch that already has a name, and a bad stored
+    // prefix must not block them.
+    if matches!(create_mode, CreateMode::Isolated) {
+        hyprlayer_core::branch_prefix::validate_prefix(&branch_prefix).map_err(AppError::from)?;
+    }
     // An empty/blank selection means "auto-detect", same as omitting it.
     let base_override = base.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
     let created = state
@@ -741,6 +797,65 @@ pub async fn create_workstream(
     let mut view = item_view(item, Some(link));
     view.seed = seed;
     Ok(view)
+}
+
+/// This project's branch types, resolved built-in → global → per-repo.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_branch_prefixes(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> CmdResult<ResolvedBranchPrefixes> {
+    super::ensure_registered_project(&state, &project_path).await?;
+    let git = state.settings.get().await.git;
+    let repo_dir = PathBuf::from(&project_path);
+    let settings = blocking("read_branch_prefixes", move || {
+        repo_settings::read(&repo_dir)
+    })
+    .await?
+    .map_err(AppError::from)?;
+    let repo = settings.branches.prefixes;
+    let global = git.prefixes.as_deref();
+    let prefixes = branch_prefix::resolve_prefixes(global, &repo)
+        .into_iter()
+        .map(BranchPrefix::with_effective_keywords)
+        .collect();
+    Ok(ResolvedBranchPrefixes {
+        prefixes,
+        default_prefix: git.effective_branch_prefix(),
+        source: branch_prefix::prefix_source(global, &repo),
+        repo,
+    })
+}
+
+/// Overwrite this repo's `[branches].prefixes`. Deliberately asymmetric with
+/// [`get_branch_prefixes`], which returns the RESOLVED chain: the global list is
+/// written through the existing `set_app_settings` whole-object replace, and
+/// there is no writable "resolved" level to write back to.
+///
+/// Returns the stored (trimmed) list, mirroring `set_worktree_files`
+/// (`src-tauri/src/commands/projects.rs:1100-1116`). That return value is what
+/// makes normalization safe: the editor's re-seed guard compares what it sent
+/// against what it reads back, so a silent server-side trim would look like an
+/// external edit and wipe an in-progress row.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_branch_prefixes(
+    state: State<'_, AppState>,
+    project_path: String,
+    prefixes: Vec<BranchPrefix>,
+) -> CmdResult<Vec<BranchPrefix>> {
+    super::ensure_registered_project(&state, &project_path).await?;
+    let cleaned = super::normalize_branch_prefixes(prefixes);
+    branch_prefix::validate_prefixes(&cleaned).map_err(AppError::from)?;
+    let repo = PathBuf::from(&project_path);
+    let saved = cleaned.clone();
+    blocking("write_branch_prefixes", move || {
+        repo_settings::set_branch_prefixes(&repo, &cleaned)
+    })
+    .await?
+    .map_err(AppError::from)?;
+    Ok(saved)
 }
 
 #[tauri::command]

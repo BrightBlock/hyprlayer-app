@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use hyprlayer_core::agents::AgentOverlay;
+use hyprlayer_core::branch_prefix::BranchPrefix;
 use hyprlayer_core::process::binaries::BinaryKind;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -420,6 +421,11 @@ pub struct GitSettings {
     /// Branch-name prefix for new worktrees. `None` keeps the built-in
     /// `hyprlayer/` default; a value (e.g. `"feature/"`) is used verbatim.
     pub branch_prefix: Option<String>,
+    /// Branch types offered by the New-workstream dialog's branch-type picker. `None`
+    /// or empty keeps the built-in set; a list replaces it wholesale — record
+    /// lists have no identity key to merge on, the same reason `worktree.copy`
+    /// replaces rather than merges.
+    pub prefixes: Option<Vec<BranchPrefix>>,
     /// Delete the local branch when archiving a workspace. Default `true`,
     /// matching the historical behaviour.
     pub delete_branch_on_archive: bool,
@@ -441,6 +447,7 @@ impl Default for GitSettings {
     fn default() -> Self {
         Self {
             branch_prefix: None,
+            prefixes: None,
             delete_branch_on_archive: true,
             archive_on_merge: false,
             automerge: false,
@@ -686,7 +693,19 @@ mod tests {
         assert!(!git.archive_on_merge);
         assert!(!git.automerge);
         assert_eq!(git.branch_prefix, None);
+        assert_eq!(git.prefixes, None);
         assert!(git.prune_ignored_on_archive, "prune must default to true");
+    }
+
+    #[test]
+    fn settings_default_when_prefixes_absent() {
+        // An existing settings.json written before the branch-type picker existed must
+        // load unchanged: no `prefixes` key reads as "use the built-ins", and
+        // the prefix the user did configure survives.
+        let raw = r#"{"git":{"branchPrefix":"jt/"}}"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.git.prefixes, None);
+        assert_eq!(s.git.branch_prefix.as_deref(), Some("jt/"));
     }
 
     #[test]

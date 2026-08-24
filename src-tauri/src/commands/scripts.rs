@@ -30,7 +30,7 @@ use tauri_specta::Event;
 use tokio::sync::broadcast;
 
 use super::terminal::{attach_stream, default_shell, login_shell_args};
-use super::{blocking, db_task};
+use super::{blocking, db_task, ensure_registered_project};
 use crate::error::{AppError, CmdResult};
 use crate::events::ScriptRunChanged;
 use crate::script_registry::{RunPhase, ScriptRuntime};
@@ -56,23 +56,6 @@ async fn read_script_settings(project_path: &str) -> CmdResult<ScriptSettings> {
         .await?
         .map_err(AppError::from)?;
     Ok(settings.scripts)
-}
-
-/// Reject a `project_path` that isn't a registered project. `get_scripts` /
-/// `set_scripts` are webview-callable with an arbitrary path and read/write a
-/// file under it, so they must not act on paths the user never added (the run
-/// paths instead take the project from a db-loaded workstream, already trusted).
-async fn ensure_registered_project(state: &AppState, project_path: &str) -> CmdResult<()> {
-    let path = project_path.to_string();
-    let known = db_task(state.db.clone(), move |db| db.get_project_record(&path)).await?;
-    if known.is_none() {
-        return Err(AppError {
-            code: "unknown_project".into(),
-            message: format!("{project_path} is not a registered project."),
-            remedy: None,
-        });
-    }
-    Ok(())
 }
 
 /// Read the project's `[scripts]` block (empty strings when unconfigured).

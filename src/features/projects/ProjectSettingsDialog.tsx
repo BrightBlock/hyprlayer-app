@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   useBackendHealth,
+  useBranchPrefixes,
   useProjectDetail,
+  useSetBranchPrefixes,
   useSetWorktreeFiles,
   useWorktreeFiles,
 } from "@/lib/queries";
@@ -11,11 +13,14 @@ import {
   Button,
   Dialog,
   ErrorNote,
+  IconButton,
   PageError,
   PageSpinner,
   Spinner,
   TextInput,
 } from "@/components/ui";
+import { BranchPrefixEditor } from "@/components/BranchPrefixEditor";
+import { PlusIcon } from "@/components/icons";
 import type { CheckStatus, HealthCheck } from "@/lib/bindings";
 import { isGitProject } from "@/lib/domain/projects";
 import { ScriptsCard } from "./ScriptsCard";
@@ -116,10 +121,42 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
           placeholder=".env, certs/, config/*.local.json"
           disabled={setFiles.isPending}
         />
-        <Button onClick={add} disabled={!newPattern.trim() || setFiles.isPending}>
-          Add
-        </Button>
+        <IconButton
+          onClick={add}
+          disabled={!newPattern.trim() || setFiles.isPending}
+          aria-label="Add file pattern"
+          title="Add file pattern"
+        >
+          <PlusIcon size={15} />
+        </IconButton>
       </div>
+    </SettingsSection>
+  );
+}
+
+/**
+ * Editor for this repo's own branch-type list (`[branches]` in
+ * `.hyprlayer/settings.toml`). Edits the RAW repo list, never the resolved one:
+ * an empty list is how the repo says "inherit", so the note beneath names what
+ * it falls back to.
+ */
+function BranchPrefixesCard({ projectPath }: { projectPath: string }) {
+  const q = useBranchPrefixes(projectPath);
+  const save = useSetBranchPrefixes(projectPath);
+  return (
+    <SettingsSection>
+      {q.isLoading && <Spinner />}
+      {q.isError && <ErrorNote error={q.error} />}
+      {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
+      <BranchPrefixEditor
+        title={<SectionHeading>Branch types</SectionHeading>}
+        description="Customize the branch types for what you're working on in this repo."
+        value={q.data?.repo ?? []}
+        onChange={(next) => save.mutate(next)}
+        disabled={save.isPending}
+        blockReseed={save.isPending || save.isError}
+        inheritedNote={q.data?.source === "global" ? "Your global types" : "Built-in types"}
+      />
     </SettingsSection>
   );
 }
@@ -203,6 +240,8 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
           </SettingsSection>
 
           {gitBacked && <WorktreeFilesCard projectPath={projectPath} />}
+
+          {gitBacked && <BranchPrefixesCard projectPath={projectPath} />}
 
           <ScriptsCard projectPath={projectPath} />
 

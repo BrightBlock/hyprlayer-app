@@ -43,6 +43,7 @@ import {
   Toggle,
   SettingRow,
 } from "@/components/ui";
+import { BranchPrefixEditor } from "@/components/BranchPrefixEditor";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
 import { BinaryCard } from "@/features/system/BinaryCard";
 import { UpdatesCard } from "@/features/system/updates";
@@ -159,6 +160,7 @@ function AppearanceSection() {
 
 const DEFAULT_GIT: Required<GitSettings> = {
   branchPrefix: null,
+  prefixes: null,
   deleteBranchOnArchive: true,
   archiveOnMerge: false,
   automerge: false,
@@ -177,6 +179,7 @@ function GitSection({ settings }: { settings: AppSettings }) {
   const raw = settings.git ?? {};
   const git: Required<GitSettings> = {
     branchPrefix: raw.branchPrefix ?? DEFAULT_GIT.branchPrefix ?? null,
+    prefixes: raw.prefixes ?? DEFAULT_GIT.prefixes ?? null,
     deleteBranchOnArchive: raw.deleteBranchOnArchive ?? DEFAULT_GIT.deleteBranchOnArchive,
     archiveOnMerge: raw.archiveOnMerge ?? DEFAULT_GIT.archiveOnMerge,
     automerge: raw.automerge ?? DEFAULT_GIT.automerge,
@@ -285,6 +288,23 @@ function GitSection({ settings }: { settings: AppSettings }) {
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Adjacent to the prefix above because the second one OVERRIDES the
+            first: picking a type in the dialog replaces the prefix, it does not
+            compose with it. */}
+        <div className="py-3.5">
+          <BranchPrefixEditor
+            title={<p className="text-sm text-ink">Branch types</p>}
+            description="Customize the branch types for what you're working on. Picking one replaces the prefix above for that workstream."
+            value={git.prefixes ?? []}
+            // An emptied list collapses back to "unset", the same treatment
+            // `effective_branch_prefix` gives an empty string.
+            onChange={(next) => patch({ prefixes: next.length ? next : null })}
+            disabled={save.isPending}
+            blockReseed={save.isPending || save.isError}
+            inheritedNote="Built-in types"
+          />
         </div>
 
         <SettingRow

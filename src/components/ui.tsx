@@ -21,7 +21,7 @@ import { ChevronDownIcon, RestartIcon, XIcon } from "./icons";
  *  `max-w-2xl` regardless of write order, and five dialogs shipped 448px wide.
  *  See the width-class note in DropdownSelect, which hand-rolled a workaround
  *  for the same defect before this. */
-function cx(...parts: Array<string | false | null | undefined>): string {
+export function cx(...parts: Array<string | false | null | undefined>): string {
   return twMerge(parts.filter(Boolean).join(" "));
 }
 

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::branch_prefix::BranchPrefix;
 use crate::error::{CoreError, Result};
 
 pub const HYPRLAYER_DIR: &str = ".hyprlayer";
@@ -17,6 +18,7 @@ pub const SETTINGS_FILE: &str = "settings.toml";
 pub struct RepoSettings {
     pub worktree: WorktreeSettings,
     pub scripts: ScriptSettings,
+    pub branches: BranchSettings,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -41,6 +43,16 @@ pub struct ScriptSettings {
     pub run: String,
     /// Runs before a workstream is archived.
     pub archive: String,
+}
+
+/// Per-repo branch vocabulary. An empty `prefixes` means "inherit" — the global
+/// list if the user has one, else the built-ins (see
+/// `crate::branch_prefix::resolve_prefixes`). Never merged with the level above.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "kebab-case", default)]
+pub struct BranchSettings {
+    pub prefixes: Vec<BranchPrefix>,
 }
 
 pub fn settings_path(repo: &Path) -> PathBuf {
@@ -147,6 +159,41 @@ pub fn set_scripts(repo: &Path, scripts: &ScriptSettings) -> Result<()> {
     })
 }
 
+/// Overwrite `[branches].prefixes`, preserving comments/order/other sections
+/// via toml_edit. Mirrors [`set_scripts`]. Written as an array-of-tables so the
+/// committed file reads as `[[branches.prefixes]]` blocks a human can edit.
+pub fn set_branch_prefixes(repo: &Path, prefixes: &[BranchPrefix]) -> Result<()> {
+    edit_settings_doc(repo, |doc, path| {
+        // Force a real (non-inline) `[branches]` table for the same reason
+        // `set_scripts` does: index-assigning a brand-new key on an
+        // already-parsed document yields an inline `branches = { … }` table
+        // otherwise.
+        let table = doc
+            .entry("branches")
+            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
+            .as_table_mut()
+            .ok_or_else(|| CoreError::RepoSettingsParse {
+                path: path.to_path_buf(),
+                message: "[branches] is not a table".to_string(),
+            })?;
+        table.set_implicit(false);
+        let mut aot = toml_edit::ArrayOfTables::new();
+        for p in prefixes {
+            let mut t = toml_edit::Table::new();
+            t["label"] = toml_edit::value(p.label.as_str());
+            t["prefix"] = toml_edit::value(p.prefix.as_str());
+            let mut kw = toml_edit::Array::new();
+            for k in &p.keywords {
+                kw.push(k.as_str());
+            }
+            t["keywords"] = toml_edit::value(kw);
+            aot.push(t);
+        }
+        table["prefixes"] = toml_edit::Item::ArrayOfTables(aot);
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +291,20 @@ mod tests {
     }
 
     #[test]
+    fn absent_branches_section_defaults_empty() {
+        let repo = make_repo();
+        let dir = repo.path().join(".hyprlayer");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.toml"),
+            b"[worktree]\ncopy = [\".env\"]\n",
+        )
+        .unwrap();
+        let settings = read(repo.path()).unwrap();
+        assert!(settings.branches.prefixes.is_empty());
+    }
+
+    #[test]
     fn scripts_round_trip_multiline() {
         let repo = make_repo();
         let dir = repo.path().join(".hyprlayer");
@@ -257,6 +318,34 @@ mod tests {
         assert_eq!(s.scripts.setup, "npm install\ncp .env.example .env.local");
         assert_eq!(s.scripts.run, "npm run dev -- --port $HL_PORT");
         assert_eq!(s.scripts.archive, "docker compose down");
+    }
+
+    #[test]
+    fn branch_prefixes_round_trip() {
+        let repo = make_repo();
+        let dir = repo.path().join(".hyprlayer");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.toml"),
+            "[[branches.prefixes]]\nlabel = \"Bug fix\"\nprefix = \"fix/\"\nkeywords = [\"fix\", \"bug\"]\n\n[[branches.prefixes]]\nlabel = \"Hotfix\"\nprefix = \"hotfix-\"\nkeywords = []\n",
+        )
+        .unwrap();
+        let settings = read(repo.path()).unwrap();
+        assert_eq!(
+            settings.branches.prefixes,
+            vec![
+                BranchPrefix {
+                    label: "Bug fix".to_string(),
+                    prefix: "fix/".to_string(),
+                    keywords: vec!["fix".to_string(), "bug".to_string()],
+                },
+                BranchPrefix {
+                    label: "Hotfix".to_string(),
+                    prefix: "hotfix-".to_string(),
+                    keywords: vec![],
+                },
+            ]
+        );
     }
 
     #[test]
@@ -295,6 +384,43 @@ mod tests {
     }
 
     #[test]
+    fn set_branch_prefixes_preserves_comment_and_other_sections() {
+        let repo = make_repo();
+        let dir = repo.path().join(".hyprlayer");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.toml"),
+            "# repo-level hyprlayer settings\n[worktree]\ncopy = [\".env\"]\n\n[scripts]\nsetup = \"npm ci\"\n",
+        )
+        .unwrap();
+
+        let prefixes = vec![BranchPrefix {
+            label: "Bug fix".to_string(),
+            prefix: "fix/".to_string(),
+            keywords: vec!["fix".to_string(), "bug".to_string()],
+        }];
+        set_branch_prefixes(repo.path(), &prefixes).unwrap();
+
+        let raw = std::fs::read_to_string(dir.join("settings.toml")).unwrap();
+        assert!(
+            raw.contains("# repo-level hyprlayer settings"),
+            "comment missing: {raw}"
+        );
+        assert!(raw.contains("[worktree]"), "[worktree] missing: {raw}");
+        assert!(raw.contains(".env"), "worktree copy missing: {raw}");
+        assert!(raw.contains("[scripts]"), "[scripts] missing: {raw}");
+        assert!(
+            raw.contains("[[branches.prefixes]]"),
+            "[[branches.prefixes]] missing: {raw}"
+        );
+
+        let s = read(repo.path()).unwrap();
+        assert_eq!(s.branches.prefixes, prefixes);
+        assert_eq!(s.scripts.setup, "npm ci");
+        assert_eq!(s.worktree.copy, vec![".env"]);
+    }
+
+    #[test]
     fn set_scripts_creates_file_when_absent() {
         let repo = make_repo();
         let scripts = ScriptSettings {
@@ -304,6 +430,37 @@ mod tests {
         set_scripts(repo.path(), &scripts).unwrap();
         let s = read(repo.path()).unwrap();
         assert_eq!(s.scripts.setup, "echo hi");
+    }
+
+    #[test]
+    fn set_branch_prefixes_creates_file_when_absent() {
+        let repo = make_repo();
+        let prefixes = vec![BranchPrefix {
+            label: "Feature".to_string(),
+            prefix: "feat/".to_string(),
+            keywords: vec![],
+        }];
+        set_branch_prefixes(repo.path(), &prefixes).unwrap();
+        let s = read(repo.path()).unwrap();
+        assert_eq!(s.branches.prefixes, prefixes);
+    }
+
+    #[test]
+    fn set_branch_prefixes_with_empty_list_reads_back_empty() {
+        // An empty write is exactly how the Phase 5 editor spells "inherit";
+        // toml_edit renders a zero-entry ArrayOfTables as nothing under a
+        // `set_implicit(false)` [branches] table, so this asserts the
+        // round-trip rather than assuming it.
+        let repo = make_repo();
+        let prefixes = vec![BranchPrefix {
+            label: "Feature".to_string(),
+            prefix: "feat/".to_string(),
+            keywords: vec![],
+        }];
+        set_branch_prefixes(repo.path(), &prefixes).unwrap();
+        set_branch_prefixes(repo.path(), &[]).unwrap();
+        let s = read(repo.path()).unwrap();
+        assert!(s.branches.prefixes.is_empty());
     }
 
     #[cfg(unix)]
@@ -324,6 +481,8 @@ mod tests {
         assert_eq!(err.code(), "invalid_path");
         // Writes too.
         let err = set_scripts(repo.path(), &ScriptSettings::default()).unwrap_err();
+        assert_eq!(err.code(), "invalid_path");
+        let err = set_branch_prefixes(repo.path(), &[]).unwrap_err();
         assert_eq!(err.code(), "invalid_path");
     }
 }
