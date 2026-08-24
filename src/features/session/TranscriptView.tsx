@@ -416,13 +416,33 @@ const ToolBlock = memo(function ToolBlock({
 
   return (
     <div className="text-xs" data-tooluse-id={item.toolUseId}>
-      <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
+      {/* Not a <button>, unlike the app's other step rows: a file tool's
+          `ToolArg` renders a `FileCard`, whose filename is itself a button, and
+          a button inside a button is invalid HTML. React rejects the nesting
+          outright, and the browser's own repair of it is what made clicking a
+          filename both open the file and toggle this disclosure. Same
+          div + role="button" idiom as `ChangesPanel`'s `FileRow`, which nests a
+          stage/unstage button in a clickable row for the same reason. Keyboard
+          activation is spelled out because a div, unlike the button this
+          replaces, gets none of it for free. */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          setOpen((v) => !v);
+        }}
+        className={`${STEP_ROW} cursor-pointer`}
+      >
         <ToolStatusDot result={result} busy={busy} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">{item.name}</span>
         <ToolArg name={item.name} input={item.input} />
         <StepChevron open={open} reveal="hover" size={11} />
-      </button>
+      </div>
 
       {!open && preview && (
         <div className="flex gap-1.5 pl-[1.45rem] text-ink-dim">

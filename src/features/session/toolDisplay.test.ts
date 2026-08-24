@@ -6,6 +6,7 @@ import {
   baseName,
   detectHandoffDoc,
   docFromTool,
+  sessionDocs,
   docTitle,
   editDiffFromTool,
   formatCost,
@@ -544,5 +545,48 @@ describe("formatRelativeTime", () => {
   it("falls back to 'just now' for null and future timestamps", () => {
     expect(formatRelativeTime(null, NOW)).toBe("just now");
     expect(formatRelativeTime(NOW + 5_000, NOW)).toBe("just now");
+  });
+});
+
+describe("sessionDocs", () => {
+  const tool = (name: string, input: string, id: string) =>
+    ({ kind: "tool", id, name, input, parentId: null }) as unknown as TranscriptItem;
+
+  const items = [
+    tool("Write", '{"file_path":"/t/shared/plans/a.md"}', "1"),
+    tool("Read", '{"file_path":"/t/shared/plans/b.md"}', "2"),
+    tool("Edit", '{"file_path":"/t/shared/research/c.md"}', "3"),
+    tool("Write", '{"file_path":"/t/shared/plans/a.md"}', "4"),
+  ];
+
+  it("projects every doc-creating tool call in traversal order, duplicates kept", () => {
+    // Duplicates matter: `useMostRecentDoc` reads the LAST write of a kind,
+    // while `useWorkstreamDocs` dedupes to the first. One projection serves both
+    // only if it keeps the repeat.
+    expect(sessionDocs(items, {})).toEqual([
+      { path: "/t/shared/plans/a.md", kind: "plan" },
+      { path: "/t/shared/research/c.md", kind: "research" },
+      { path: "/t/shared/plans/a.md", kind: "plan" },
+    ]);
+  });
+
+  it("returns the same array for the same items, so repeat scans are free", () => {
+    // One `written` reference, as `useWrittenDocs` hands out: it is part of the
+    // validity key, so a fresh `{}` per call would (correctly) recompute.
+    const written = {};
+    expect(sessionDocs(items, written)).toBe(sessionDocs(items, written));
+  });
+
+  it("recomputes when `written` changes, since it resolves shell targets", () => {
+    const first = sessionDocs(items, {});
+    const second = sessionDocs(items, { "x.md": "/t/shared/plans/x.md" });
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
+  });
+
+  it("recomputes for a new items array, so an appended event is picked up", () => {
+    const grown = [...items, tool("Write", '{"file_path":"/t/shared/handoffs/d.md"}', "5")];
+    expect(sessionDocs(grown, {})).toHaveLength(4);
+    expect(sessionDocs(items, {})).toHaveLength(3);
   });
 });

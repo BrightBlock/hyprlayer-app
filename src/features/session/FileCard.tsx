@@ -115,7 +115,13 @@ export function FileCard({ path, diff }: { path: string; diff?: EditDiff | null 
       </span>
       <button
         type="button"
-        onClick={() => void openPath(path).catch(() => {})}
+        // The card sits inside a clickable row (a tool call's disclosure in the
+        // transcript), so without this, opening the file also toggles the row
+        // the user was not aiming at.
+        onClick={(e) => {
+          e.stopPropagation();
+          void openPath(path).catch(() => {});
+        }}
         className="min-w-0 truncate px-0.5 text-left font-medium hover:text-accent"
         title={`Open ${baseName(path)}`}
       >

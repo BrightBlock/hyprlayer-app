@@ -1,5 +1,6 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -509,6 +510,75 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId]);
 
+  // These five sit above the loading guards, and are memoized, because the
+  // sidebar hangs off them. `ChangesPanel` takes the three openers as props, so
+  // a fresh identity per render re-reconciles the whole changed-file list on
+  // every keystroke (a draft write re-renders this page) — measured at 4.7ms
+  // with 120 changed files, which is most of a frame for a panel whose content
+  // did not change. They memoize cleanly because `updateTabs` passes a
+  // *functional* updater to the store: `wsId` is the only render-scoped value
+  // any of them reads.
+  const updateTabs = useCallback(
+    (updater: (current: WsTabState) => WsTabState) => {
+      if (!wsId) return;
+      updateWorkstreamTabs((all) => {
+        const current = all[wsId] ?? defaultTabState();
+        // updateTabs is the funnel every tab action passes through, so clearing the
+        // archived-agents view on refocus here means no caller has to remember to.
+        return { ...all, [wsId]: clearArchiveOnRefocus(current, updater(current)) };
+      });
+    },
+    [wsId],
+  );
+  // Open (or re-focus) a read-only viewer tab in the main pane. `match` finds an
+  // already-open tab for the same target so we re-focus instead of stacking
+  // dupes; `fields` carries the discriminator + title for a fresh tab. All three
+  // viewer kinds (doc preview, diff, file) go through this.
+  const openViewerTab = useCallback(
+    (match: (shell: ShellTab) => boolean, title: string, fields: Partial<ShellTab>) => {
+      updateTabs((current) => {
+        const existing = current.shells.find(match);
+        if (existing) return { ...current, activeId: existing.id, activePane: "main" };
+        const nextId = nextShellId(current.shells, current.archived);
+        const shell: ShellTab = {
+          id: nextId,
+          title,
+          mode: "general",
+          draft: "",
+          docs: [],
+          attachments: [],
+          panel: "main",
+          ...fields,
+        };
+        return {
+          ...current,
+          shells: [...current.shells, shell],
+          activeId: nextId,
+          activePane: "main",
+        };
+      });
+    },
+    [updateTabs],
+  );
+  const openDocPreview = useCallback(
+    (path: string, title: string) =>
+      openViewerTab((s) => s.docPreviewPath === path, title, { docPreviewPath: path }),
+    [openViewerTab],
+  );
+  const openDiff = useCallback(
+    (path: string, staged: boolean, sha?: string) =>
+      openViewerTab(
+        (s) => s.diffView?.path === path && s.diffView?.staged === staged && s.diffView?.sha === sha,
+        sha ? `${basename(path)} @ ${shortSha(sha)}` : basename(path),
+        { diffView: { path, staged, sha } },
+      ),
+    [openViewerTab],
+  );
+  const openFile = useCallback(
+    (path: string) => openViewerTab((s) => s.filePath === path, basename(path), { filePath: path }),
+    [openViewerTab],
+  );
+
   if (bootstrap.isLoading || workstreams.isLoading) return <PageSpinner />;
   if (bootstrap.isError) return <PageError error={bootstrap.error} />;
   if (workstreams.isError) return <PageError error={workstreams.error} />;
@@ -593,15 +663,6 @@ export function ProjectPage() {
     ? shells.find((s) => s.id === renameShellId)
     : null;
 
-  const updateTabs = (updater: (current: WsTabState) => WsTabState) => {
-    if (!wsId) return;
-    updateWorkstreamTabs((all) => {
-      const current = all[wsId] ?? defaultTabState();
-      // updateTabs is the funnel every tab action passes through, so clearing the
-      // archived-agents view on refocus here means no caller has to remember to.
-      return { ...all, [wsId]: clearArchiveOnRefocus(current, updater(current)) };
-    });
-  };
   // Replace one shell by id via a transform, the single "map the shells, touch
   // the matching one" primitive the per-shell mutators build on.
   const modifyShell = (shellId: number, transform: (shell: ShellTab) => ShellTab) => {
@@ -828,48 +889,6 @@ export function ProjectPage() {
   };
   // Keep the drag hook pointed at the latest action closures.
   dragHandlersRef.current = { reorder: reorderShellInPane, move: moveShellToPane };
-  // Open (or re-focus) a read-only viewer tab in the main pane. `match` finds an
-  // already-open tab for the same target so we re-focus instead of stacking
-  // dupes; `fields` carries the discriminator + title for a fresh tab. All three
-  // viewer kinds (doc preview, diff, file) go through this.
-  const openViewerTab = (
-    match: (shell: ShellTab) => boolean,
-    title: string,
-    fields: Partial<ShellTab>,
-  ) => {
-    updateTabs((current) => {
-      const existing = current.shells.find(match);
-      if (existing) return { ...current, activeId: existing.id, activePane: "main" };
-      const nextId = nextShellId(current.shells, current.archived);
-      const shell: ShellTab = {
-        id: nextId,
-        title,
-        mode: "general",
-        draft: "",
-        docs: [],
-        attachments: [],
-        panel: "main",
-        ...fields,
-      };
-      return {
-        ...current,
-        shells: [...current.shells, shell],
-        activeId: nextId,
-        activePane: "main",
-      };
-    });
-  };
-  const openDocPreview = (path: string, title: string) =>
-    openViewerTab((s) => s.docPreviewPath === path, title, { docPreviewPath: path });
-  const openDiff = (path: string, staged: boolean, sha?: string) =>
-    openViewerTab(
-      (s) =>
-        s.diffView?.path === path && s.diffView?.staged === staged && s.diffView?.sha === sha,
-      sha ? `${basename(path)} @ ${shortSha(sha)}` : basename(path),
-      { diffView: { path, staged, sha } },
-    );
-  const openFile = (path: string) =>
-    openViewerTab((s) => s.filePath === path, basename(path), { filePath: path });
   const closeShell = (shellId: number) => {
     if (!tabs) return;
     const shell = tabs.shells.find((s) => s.id === shellId);

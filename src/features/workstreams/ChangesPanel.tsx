@@ -510,8 +510,13 @@ type Props = {
  *  stage / unstage / discard actions), a Commits tab (this workstream's own
  *  commits, each expanding to the files it touched), and a Files tab (lazy
  *  worktree tree). With `filesOnly` it collapses to just the tree, the
- *  browse-and-edit surface a folder project still needs. */
-export function ChangesPanel({
+ *  browse-and-edit surface a folder project still needs.
+ *
+ *  Memoized: this hangs off `ProjectPage`, which re-renders on every keystroke
+ *  in a composer (a draft write goes through the tab store it subscribes to),
+ *  and reconciling a busy worktree's file list costs ~4.7ms. Its callback props
+ *  are `useCallback`-stable at the call site for exactly this reason. */
+export const ChangesPanel = memo(function ChangesPanel({
   workstreamId,
   onOpenDoc,
   onOpenDiff,
@@ -741,4 +746,4 @@ export function ChangesPanel({
       </ConfirmDialog>
     </>
   );
-}
+});

@@ -40,6 +40,7 @@ import type { EventBridge } from "@/lib/events";
 // `baseName` rather than `lib/path`'s `basename`: a slice's keys and the
 // lookup in `docFromTool` have to be the same function, or a target misses with
 // no error to show for it.
+import { debouncedJSONStorage } from "./persistedStorage";
 import { baseName, docKindForPath } from "./toolDisplay";
 
 /** Filename → absolute indexed path, insertion-ordered (oldest first). One
@@ -72,6 +73,9 @@ export function migrateWrittenDocs(): WrittenDocsState {
 export const useWrittenDocsStore = create<WrittenDocsState>()(
   persist<WrittenDocsState>(() => ({ byWorkstream: {} }), {
     name: "hyprlayer:written-docs",
+    // One `recordWrittenDocs` per thoughts-index event, and every concurrent
+    // agent in the app feeds that watcher. Same coalescing as the tab strip.
+    storage: debouncedJSONStorage<WrittenDocsState>(),
     version: 2,
     migrate: migrateWrittenDocs,
   }),

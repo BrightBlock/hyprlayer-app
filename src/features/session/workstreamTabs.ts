@@ -9,6 +9,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import type { Attachment } from "./attachments";
+import { debouncedJSONStorage } from "./persistedStorage";
 import type { ActionAgentDefaults } from "@/lib/domain/harnessing";
 import type { StageKey } from "@/lib/domain/stages";
 
@@ -308,6 +309,10 @@ type TabsStore = { byWs: Record<string, WsTabState> };
 export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
     name: "hyprlayer:workstream-tabs",
+    // A keystroke in any composer is a `patchShell(..., { draft })`, so the
+    // default storage rewrote this whole blob per character. See the module doc
+    // on `persistedStorage` for what that cost on disk.
+    storage: debouncedJSONStorage(),
     // v2 added `attachments` to every shell.
     // v3 added `dismissedSuggestions` to every shell, backfill it on rehydrate
     // so tabs persisted by an older build don't crash on accessing the field.

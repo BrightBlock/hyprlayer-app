@@ -67,6 +67,8 @@ export function isBackgroundSpawn(item: TranscriptItem): boolean {
  * per-branch rules for opening, ending, and `awaiting` a task are inline below.
  */
 export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTask[] {
+  const hit = tasksCache.get(items);
+  if (hit) return hit;
   const tasks = new Map<string, BackgroundTask>(); // keyed by toolUseId
   const taskIdToToolUseId = new Map<string, string>(); // task_id → toolUseId
 
@@ -187,5 +189,13 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
     }
   }
 
-  return Array.from(tasks.values());
+  const out = Array.from(tasks.values());
+  tasksCache.set(items, out);
+  return out;
 }
+
+// Same memo as `sessionDocs`/`artifactsFromItems`: `useSessionBackgroundTasks`
+// re-runs this on every store read, so a keystroke in the composer walks the
+// whole transcript. Keyed on the `items` array `reduceEvent` replaces per
+// event, so a stale entry is unreachable.
+const tasksCache = new WeakMap<TranscriptItem[], BackgroundTask[]>();

@@ -96,11 +96,22 @@ export function artifactFromTool(
  * doesn't reshuffle mid-session while the latest title and description win.
  */
 export function artifactsFromItems(items: TranscriptItem[]): SessionArtifact[] {
+  const hit = artifactsCache.get(items);
+  if (hit) return hit;
   const byUrl = new Map<string, SessionArtifact>();
   for (const item of items) {
     if (item.kind !== "tool") continue;
     const artifact = artifactFromTool(item.name, item.input, item.result);
     if (artifact) byUrl.set(artifact.url, artifact);
   }
-  return [...byUrl.values()];
+  const out = [...byUrl.values()];
+  artifactsCache.set(items, out);
+  return out;
 }
+
+// Same memo as `sessionDocs`, and for the same reason: the workstream-wide
+// selector above this walks every session on every store read, a keystroke
+// included. Keyed on the `items` array `reduceEvent` replaces per event, so a
+// stale entry is unreachable. No `written`-style validity key here — this
+// projection depends on nothing but the items.
+const artifactsCache = new WeakMap<TranscriptItem[], SessionArtifact[]>();

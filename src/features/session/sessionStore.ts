@@ -40,7 +40,7 @@ import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notificatio
 import { useToast } from "@/lib/toast";
 import { currentAppLocation } from "@/lib/appNav";
 import type { DocKind } from "@/lib/domain/docs";
-import { docFromTool, docTitle } from "./toolDisplay";
+import { docTitle, sessionDocs } from "./toolDisplay";
 import { artifactsFromItems, type SessionArtifact } from "./artifacts";
 import { forgetWorkstreamDocs, useWrittenDocs } from "./writtenDocs";
 import {
@@ -1326,13 +1326,10 @@ export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
       const out: string[] = [];
       for (const entry of Object.values(s.sessions)) {
         if (entry.workstreamId !== workstreamId) continue;
-        for (const item of entry.items) {
-          if (item.kind !== "tool") continue;
-          const doc = docFromTool(item.name, item.input, written);
-          if (doc && !seen.has(doc.path)) {
-            seen.add(doc.path);
-            out.push(`${doc.kind}\t${doc.path}`);
-          }
+        for (const doc of sessionDocs(entry.items, written)) {
+          if (seen.has(doc.path)) continue;
+          seen.add(doc.path);
+          out.push(`${doc.kind}\t${doc.path}`);
         }
       }
       return out;
@@ -1367,14 +1364,12 @@ export function useMostRecentDoc(
   const key = useSessionStore(
     useShallow((s) => {
       if (!workstreamId || !kind) return null;
-      // Flatten every tool item across the workstream's sessions, project each to
-      // the doc it created, keep those of the requested kind, the last in
-      // traversal order is the most recent.
+      // Project every session to the docs it created, keep those of the
+      // requested kind, the last in traversal order is the most recent.
       const docs = Object.values(s.sessions)
         .filter((entry) => entry.workstreamId === workstreamId)
-        .flatMap((entry) => entry.items)
-        .flatMap((item) => (item.kind === "tool" ? [docFromTool(item.name, item.input, written)] : []))
-        .filter((doc) => doc?.kind === kind);
+        .flatMap((entry) => sessionDocs(entry.items, written))
+        .filter((doc) => doc.kind === kind);
       return docs[docs.length - 1]?.path ?? null;
     }),
   );
