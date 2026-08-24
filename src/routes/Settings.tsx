@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Link, useSearch } from "@tanstack/react-router";
 
 import {
-  useAgentBundle,
   useAiStatus,
   useBootstrap,
   useGithubUsername,
@@ -27,7 +26,6 @@ import {
 import { EngineGlyph } from "@/features/multiplexer/agentStateUi";
 import { claudeModels, modelOptions } from "@/lib/domain/models";
 import { DEFAULT_HARNESS_OPTIONS } from "@/lib/domain/harnessing";
-import { formatRelativeTime, shortSha } from "@/lib/format";
 import { invalidateNotificationSettingsCache, sendTestNotification } from "@/lib/notifications";
 import {
   Badge,
@@ -49,6 +47,7 @@ import { BinaryCard } from "@/features/system/BinaryCard";
 import { UpdatesCard } from "@/features/system/updates";
 import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection";
+import { AgentBundleSection } from "@/features/settings/AgentBundleSection";
 import { THEMES, useThemeStore } from "@/lib/theme";
 import { IS_MACOS } from "@/lib/platform";
 import { SIDE_PANEL_WIDTH } from "@/lib/uiStore";
@@ -606,17 +605,10 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
   );
 }
 
-/** AI tool card, shows current agent-tool status and lets users reconfigure
+/** AI Agents card, shows current agent-tool status and lets users reconfigure
  *  via the embedded terminal without leaving Settings. */
-function AiToolCard() {
+function AiAgentsCard() {
   const aiStatus = useAiStatus();
-  // Read-only mirror of the Agents header chip: one trigger for the bundle
-  // update lives there, this just says what's installed and points at it.
-  // Gated on the same condition as the row it feeds, two blocks down: the
-  // query spawns a CLI process and reaches for GitHub, and this card is the
-  // default Settings section, so an ungated call makes an unrequested
-  // outbound request every time a tool-less user opens Settings.
-  const bundle = useAgentBundle({ enabled: aiStatus.data?.installed === true });
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const handleExit = (code: number | null) => {
@@ -629,7 +621,7 @@ function AiToolCard() {
   return (
     <Card>
       <div className="flex items-center justify-between">
-        <CardTitle className="mb-0">AI tool</CardTitle>
+        <CardTitle className="mb-0">AI Agents</CardTitle>
         <Button onClick={() => setDialogOpen(true)}>
           {aiStatus.data?.installed ? "Reconfigure" : "Configure"}
         </Button>
@@ -660,28 +652,7 @@ function AiToolCard() {
       </div>
 
       {!aiStatus.isLoading && aiStatus.data?.installed && (
-        <div className="mt-3 flex items-center justify-between gap-2 border-t border-edge/50 pt-3 text-sm">
-          <span className="text-ink-dim">
-            Agent bundle
-            {bundle.data?.installedSha && (
-              <>
-                {" · "}
-                <span className="font-mono text-xs">{shortSha(bundle.data.installedSha)}</span>
-              </>
-            )}
-            {/* "checked", not "updated": the CLI writes this when its 24h
-                auto-check LOOKS for a new bundle, and `record_install` clears
-                it on an actual install — so labelling it "updated" reports
-                the one moment it is guaranteed not to be. Same wording as the
-                Agents header chip. */}
-            {bundle.data?.lastChecked != null && (
-              <> · checked {formatRelativeTime(bundle.data.lastChecked * 1000)}</>
-            )}
-          </span>
-          <Link to="/agents" className="shrink-0 text-xs text-accent hover:underline">
-            Manage in Agents
-          </Link>
-        </div>
+        <AgentBundleSection status={aiStatus.data} />
       )}
 
       <Dialog
@@ -1158,7 +1129,7 @@ export function Settings() {
                   Windows and Linux need the manual "Check now" card here or they
                   have no way to ask at all. */}
               {!IS_MACOS && <UpdatesCard />}
-              <AiToolCard />
+              <AiAgentsCard />
               <DefaultHarnessCard settings={data.settings} />
               <HyprlayerConfigCard config={data} />
               <TabTitlesCard settings={data.settings} />

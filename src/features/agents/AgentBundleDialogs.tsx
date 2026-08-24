@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { Badge, type BadgeTone, Button, Dialog } from "@/components/ui";
+import { Badge, type BadgeTone, Button, CliOutput, Dialog } from "@/components/ui";
 import { commands, type AgentBundleChange } from "@/lib/bindings";
 import { errorMessage, unwrap } from "@/lib/ipc";
 import { shortSha } from "@/lib/format";
@@ -184,13 +184,11 @@ export function AgentUpdateFailed({
           <summary className="cursor-pointer select-none text-xs text-ink-dim hover:text-ink">
             Technical details
           </summary>
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-edge bg-panel-2 p-2.5 font-mono text-xs text-ink-dim">
-            {failure.message}
-          </pre>
+          <CliOutput text={failure.message} />
         </details>
 
         <div className="flex justify-end gap-2">
-          {/* Straight to the AI tool card, which owns Reconfigure. `useNavigate`
+          {/* Straight to the AI Agents card, which owns Reconfigure. `useNavigate`
               is the router LIBRARY, not the app's router singleton, so this
               stays inside ADR-0003's import direction (same as
               features/search/SearchPalette.tsx). */}

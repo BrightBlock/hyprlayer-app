@@ -2,7 +2,9 @@
 
 **Status:** accepted · 2026-06-12 · amended 2026-07-14 (profile creation routes through
 `hyprlayer thoughts profile create` — no new exception needed) · amended 2026-08-20
-(the agent-bundle SHA probe is read-only against GitHub — not a new exception)
+(the agent-bundle SHA probe is read-only against GitHub — not a new exception) ·
+amended 2026-08-24 (version pinning classifies `ai reinstall`'s install source from its
+stdout — not a new exception)
 
 ## Decision
 
@@ -42,3 +44,12 @@ sentinels, unsafe charset) and reads the created entry back from the config the 
   the installed SHA it compares against still comes from the CLI's own
   `agentsInstalledSha`. Upstream ask: `hyprlayer ai check --json`, which would let the app retire
   its copy of the SHA-resolution logic.
+- The version picker's silent-fallback tripwire (`reinstall_source` in
+  `crates/hyprlayer-core/src/agent_bundle.rs`) classifies what `hyprlayer ai reinstall
+  --version` installed by parsing the CLI's stdout, because the command has no `--json` and
+  both its exit code and the config it writes read as success even when its source chain fell
+  back to master's tree. The parse is coupled to CLI 1.6.0's wording (verified against
+  9a2a33c) and degrades to an explicit `Unknown` rather than guessing when the wording moves.
+  Not a new exception: it writes nothing and reads no config. Upstream ask: `hyprlayer ai
+  reinstall --json` (a machine-readable install summary naming the source), which retires the
+  parse.

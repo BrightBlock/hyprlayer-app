@@ -857,6 +857,54 @@ export const commands = {
 	 *  (`AgentBundleChange::name`).
 	 */
 	restoreAgentFromBackup: (stem: string) => typedError<null, AppError>(__TAURI_INVOKE("restore_agent_from_backup", { stem })),
+	/**
+	 *  `hyprlayer ai versions --json` — the only list a version picker may be
+	 *  built from.
+	 * 
+	 *  Gated on [`require_manageable`] like the install, not left to the caller:
+	 *  the frontend hides the picker for a non-manageable tool, but the gate is
+	 *  what makes offering an uninstallable list unreachable rather than merely
+	 *  unrendered. It costs one local `ai status` spawn before the network-bound
+	 *  call.
+	 * 
+	 *  Network-bound, and the CLI answers from a cache at
+	 *  `<config>/hyprlayer/cache/releases-<harness>.json` when it can — so this
+	 *  usually still answers offline. On a cold cache with no network it exits 1
+	 *  with `Unable to fetch the release list from GitHub: …`, which reaches the
+	 *  UI as that message rather than an empty list. Verified against 1.6.0
+	 *  (9a2a33c) in a network namespace.
+	 */
+	agentBundleVersions: () => typedError<AiVersions, AppError>(__TAURI_INVOKE("agent_bundle_versions")),
+	/**
+	 *  Install a specific bundle version, or clear the pin.
+	 * 
+	 *  `version: None` means `--unpin`: drop the pin and install the binary's own
+	 *  bundle. The two are one command because the CLI's flags are mutually
+	 *  exclusive — [`BundleSelection`] makes passing both unrepresentable.
+	 * 
+	 *  `version` is checked against `ai versions` before anything is installed.
+	 *  That is not belt-and-braces over the picker: `reinstall --version` accepts
+	 *  *any* string and, for a version carrying no verifiable asset, silently
+	 *  falls through to master's tree while recording the requested version in
+	 *  the config — an install that reads as successful from both the exit code
+	 *  and `ai status`, and that reinstalling the right version does not undo.
+	 *  The check makes that unreachable through this command rather than merely
+	 *  unlikely by UI convention; [`BundleSource`] is the backstop for a release
+	 *  that disappears between the listing and the install.
+	 * 
+	 *  Backs the bundle up first, promoting the copy to the backup of record once
+	 *  the install returned 0 — staged like [`update_agent_bundle`], but the
+	 *  failure paths deliberately diverge from it: the staged copy is KEPT, not
+	 *  discarded. That flow's discard rationale assumes a failure changed nothing
+	 *  (it names a DNS error), but a reinstall can die mid-sync — disk full, the
+	 *  300s timeout's SIGKILL — with `~/.claude` half-rewritten, and the staged
+	 *  copy is then the only backup holding the pre-install state. Not *promoted*
+	 *  on failure either: promoting after a nothing-written failure would destroy
+	 *  the previous backup in exchange for a redundant copy of the current tree.
+	 *  The next `stage_backup` replaces the kept copy, so it is a recovery
+	 *  window, not a durable backup, and the payload says where it lives.
+	 */
+	installAgentBundleVersion: (version: string | null) => typedError<AgentBundleInstall, AppError>(__TAURI_INVOKE("install_agent_bundle_version", { version })),
 };
 
 /** Events */
@@ -893,6 +941,38 @@ export type AgentBundleChange = {
 	change: AgentChange,
 	/**  Absolute path to the agent's `.md` file, for display. */
 	path: string,
+};
+
+/**
+ *  The outcome of one `install_agent_bundle_version` run.
+ * 
+ *  A CLI failure is data on this struct, not an `Err`: `ai reinstall` has no
+ *  `--json`, so its own words are all a user has to go on, and
+ *  `CoreError::Exec` keeps a stderr tail and drops stdout entirely. `Err` is
+ *  reserved for never having run the thing — an unresolvable binary, a
+ *  timeout, a refused precondition.
+ */
+export type AgentBundleInstall = {
+	/**  Whether the CLI exited 0. False still carries `stdout`/`stderr`. */
+	ok: boolean,
+	exitCode: number | null,
+	/**
+	 *  Which source actually answered. `ReleaseAsset` is the only outcome a
+	 *  picker selection should produce; `Fallback` means the version label
+	 *  now disagrees with the bytes on disk.
+	 */
+	source: BundleSource,
+	stdout: string,
+	stderr: string,
+	/**
+	 *  Where the pre-install copy of the bundle now lives: the promoted
+	 *  backup of record on success, the kept staging copy on a CLI failure.
+	 *  Kept because the CLI can die mid-sync with `~/.claude` half-rewritten,
+	 *  and the staged copy is then the only backup holding the pre-install
+	 *  state — but only until the next install attempt re-stages over it,
+	 *  which is how the UI words it.
+	 */
+	backupPath: string | null,
 };
 
 /**  Everything one `update_agent_bundle` run changed, for the report dialog. */
@@ -1153,6 +1233,67 @@ export type AiStatus = {
 	 *  explicit install: `record_install` clears it so the next check re-runs.
 	 */
 	lastAgentCheck?: number | null,
+	/**
+	 *  Version of the bundle actually on disk, as the CLI recorded it at
+	 *  install time (`agentsInstalledVersion` in its config). Added by CLI
+	 *  1.6.0; `None` against an older binary, and against a bundle installed
+	 *  before versioned assets existed.
+	 * 
+	 *  NOT proof of what the files are: `ai reinstall --version` records the
+	 *  version it was *asked* for even when its source chain fell through to
+	 *  master's tree, which is the trap [`crate::agent_bundle::reinstall_source`]
+	 *  exists to catch.
+	 */
+	assetsVersion?: string | null,
+	/**
+	 *  Version of the `hyprlayer` binary itself. The bundle it ships with,
+	 *  and therefore what `--unpin` installs.
+	 */
+	binaryVersion?: string | null,
+	/**
+	 *  The pin, if one is set (`agentsPinnedVersion`). `None` means unpinned:
+	 *  the binary's own bundle tracks the binary. A pin that differs from
+	 *  `binary_version` is the state a user gets stuck in, so the UI says so.
+	 */
+	pinnedVersion?: string | null,
+};
+
+/**  One selectable bundle version from `hyprlayer ai versions --json`. */
+export type AiVersionEntry = {
+	version: string,
+	/**
+	 *  RFC 3339, as GitHub's release API spells it. Optional rather than
+	 *  required: it is display sugar, and a release missing the field must
+	 *  not cost the user the whole list.
+	 */
+	publishedAt?: string | null,
+	/**  The version currently installed. */
+	current?: boolean,
+	/**  The version the config pins to. */
+	pinned?: boolean,
+};
+
+/**
+ *  Payload of `hyprlayer ai versions --json`.
+ * 
+ *  The CLI has already filtered `versions` to releases that carry a bundle
+ *  for the active harness — a release with no verifiable asset is absent, not
+ *  present-and-flagged. That filtering is the whole reason the picker is
+ *  populated from here and never from a version string assembled anywhere
+ *  else; see [`crate::agent_bundle::reinstall_source`] for what installing an
+ *  unlisted version actually does.
+ */
+export type AiVersions = {
+	assetsVersion?: string | null,
+	binaryVersion?: string | null,
+	/**
+	 *  The harness the list is for (`"claude"`), following the configured
+	 *  agent tool. One list, not one per harness — the CLI reports a single
+	 *  active harness and the app follows it.
+	 */
+	harness?: string | null,
+	pinnedVersion?: string | null,
+	versions?: AiVersionEntry[],
 };
 
 /**
@@ -1265,6 +1406,43 @@ export type Bootstrap = {
 	/**  Stock built-in prompt bodies (see [`PromptDefaults`]). */
 	promptDefaults: PromptDefaults,
 };
+
+/**
+ *  Which source `hyprlayer ai reinstall` actually installed the bundle from.
+ * 
+ *  Only meaningful for a *selected* version. `reinstall --version <v>` accepts
+ *  any version string and, when that version carries no verifiable bundle,
+ *  does not fail: it walks a source chain — versioned release asset, then
+ *  master's frozen tree, then a Contents-API walk
+ *  (`hyprlayer-cli/src/agents.rs`) — and reports success on whichever answers.
+ *  That is deliberate for the CLI, where a legacy-tree install is still a
+ *  working install. It is wrong as the result of picking an item from a list:
+ *  the config records the version that was *asked* for, so afterwards
+ *  `assetsVersion` agrees with the picker while the files on disk are
+ *  master's. Reproduced on 1.6.0 with `--version 1.5.9`, which installed
+ *  master's pre-1.6.0 tree under a `1.5.9` label and could not be recovered by
+ *  reinstalling 1.6.0 (the installer read the fallback's files as user
+ *  modifications and kept them).
+ * 
+ *  Populating the picker only from `ai versions --json` is the actual
+ *  prevention — that list already excludes releases with no bundle. This is
+ *  the backstop for the gap between listing a version and installing it, and
+ *  the only signal there is: exit code and config both read as success.
+ */
+export type BundleSource = 
+/**  The versioned release asset — what a picker selection must produce. */
+"releaseAsset" | 
+/**
+ *  A fallback source answered: master's repo archive, or the per-file
+ *  Contents-API walk. The version label now lies about the bytes.
+ */
+"fallback" | 
+/**
+ *  No recognizable source line. Reported rather than guessed at: the
+ *  caller shows the CLI's own output, and inventing a verdict from
+ *  unparsed text would be worse than admitting there isn't one.
+ */
+"unknown";
 
 export type CatalogModel = {
 	id: string,

@@ -7,9 +7,9 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::State;
 
-use hyprlayer_core::agent_bundle::{self, AgentChange};
+use hyprlayer_core::agent_bundle::{self, AgentChange, BundleSource};
 use hyprlayer_core::agents::{self, AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay};
-use hyprlayer_core::hyprcli::HyprCli;
+use hyprlayer_core::hyprcli::{AiVersions, BundleSelection, HyprCli};
 use hyprlayer_core::skills::AgentSkill;
 
 use crate::commands::blocking;
@@ -370,4 +370,213 @@ pub async fn restore_agent_from_backup(stem: String) -> CmdResult<()> {
         agent_bundle::restore_agent_from_backup(&root, &stem).map_err(AppError::from)
     })
     .await?
+}
+
+// --- Agent bundle: version selection ---------------------------------------
+//
+// CLI 1.6.0 ships the bundle as a versioned GitHub release asset and can pin
+// which one is installed (`ai versions`, `ai reinstall --version|--unpin`).
+// The pin state itself is read through `get_ai_status`, which already carries
+// it — this file adds only the list and the install.
+
+/// How many recent releases `ai versions` examines. The CLI's own default;
+/// stated here so the app's list length is a decision rather than a default
+/// that could move under it.
+///
+/// Releases carrying no bundle are examined and dropped, so this is an upper
+/// bound on the *examined* set, not on the answer.
+///
+/// Deliberately wider than the picker, which shows only the newest three of
+/// these (`VERSION_PICKER_LIMIT` in `features/settings/bundleVersions.ts`):
+/// dropped bundle-less releases must not starve the menu, and install-time
+/// validation checks the choice against this window, so a displayed option
+/// cannot age out of it between the menu opening and the click.
+const VERSION_LIST_LIMIT: u32 = 10;
+
+/// Refuse unless the CLI reports an installed [`MANAGEABLE_AGENT_TOOL`].
+///
+/// Both version-selection commands sit behind this: the backup and the
+/// reinstall target `~/.claude` specifically, and `ai versions` follows the
+/// CLI's *configured* harness — so on any other tool the list would offer
+/// versions whose every install this app must refuse anyway, while reaching
+/// GitHub for a machine the bundle surfaces otherwise leave alone. Same
+/// constant, and same reasoning, as the freshness chip's gate.
+async fn require_manageable(cli: &HyprCli<'_>, cwd: &Path) -> CmdResult<()> {
+    let status = cli.ai_status(cwd).await.map_err(AppError::from)?;
+    if !status.installed || status.agent_tool.as_deref() != Some(MANAGEABLE_AGENT_TOOL) {
+        return Err(AppError {
+            code: "agent_bundle_not_manageable".into(),
+            message: format!("Bundle versions can only be managed for {MANAGEABLE_AGENT_TOOL}."),
+            remedy: Some("Run the AI tool setup and choose Claude Code.".into()),
+        });
+    }
+    Ok(())
+}
+
+/// `hyprlayer ai versions --json` — the only list a version picker may be
+/// built from.
+///
+/// Gated on [`require_manageable`] like the install, not left to the caller:
+/// the frontend hides the picker for a non-manageable tool, but the gate is
+/// what makes offering an uninstallable list unreachable rather than merely
+/// unrendered. It costs one local `ai status` spawn before the network-bound
+/// call.
+///
+/// Network-bound, and the CLI answers from a cache at
+/// `<config>/hyprlayer/cache/releases-<harness>.json` when it can — so this
+/// usually still answers offline. On a cold cache with no network it exits 1
+/// with `Unable to fetch the release list from GitHub: …`, which reaches the
+/// UI as that message rather than an empty list. Verified against 1.6.0
+/// (9a2a33c) in a network namespace.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_bundle_versions(state: State<'_, AppState>) -> CmdResult<AiVersions> {
+    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let cli = HyprCli::new(&state.binaries);
+    require_manageable(&cli, &cwd).await?;
+    cli.ai_versions(&cwd, VERSION_LIST_LIMIT)
+        .await
+        .map_err(AppError::from)
+}
+
+/// The outcome of one `install_agent_bundle_version` run.
+///
+/// A CLI failure is data on this struct, not an `Err`: `ai reinstall` has no
+/// `--json`, so its own words are all a user has to go on, and
+/// `CoreError::Exec` keeps a stderr tail and drops stdout entirely. `Err` is
+/// reserved for never having run the thing — an unresolvable binary, a
+/// timeout, a refused precondition.
+#[derive(Debug, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentBundleInstall {
+    /// Whether the CLI exited 0. False still carries `stdout`/`stderr`.
+    pub ok: bool,
+    pub exit_code: Option<i32>,
+    /// Which source actually answered. `ReleaseAsset` is the only outcome a
+    /// picker selection should produce; `Fallback` means the version label
+    /// now disagrees with the bytes on disk.
+    pub source: BundleSource,
+    pub stdout: String,
+    pub stderr: String,
+    /// Where the pre-install copy of the bundle now lives: the promoted
+    /// backup of record on success, the kept staging copy on a CLI failure.
+    /// Kept because the CLI can die mid-sync with `~/.claude` half-rewritten,
+    /// and the staged copy is then the only backup holding the pre-install
+    /// state — but only until the next install attempt re-stages over it,
+    /// which is how the UI words it.
+    pub backup_path: Option<String>,
+}
+
+/// Install a specific bundle version, or clear the pin.
+///
+/// `version: None` means `--unpin`: drop the pin and install the binary's own
+/// bundle. The two are one command because the CLI's flags are mutually
+/// exclusive — [`BundleSelection`] makes passing both unrepresentable.
+///
+/// `version` is checked against `ai versions` before anything is installed.
+/// That is not belt-and-braces over the picker: `reinstall --version` accepts
+/// *any* string and, for a version carrying no verifiable asset, silently
+/// falls through to master's tree while recording the requested version in
+/// the config — an install that reads as successful from both the exit code
+/// and `ai status`, and that reinstalling the right version does not undo.
+/// The check makes that unreachable through this command rather than merely
+/// unlikely by UI convention; [`BundleSource`] is the backstop for a release
+/// that disappears between the listing and the install.
+///
+/// Backs the bundle up first, promoting the copy to the backup of record once
+/// the install returned 0 — staged like [`update_agent_bundle`], but the
+/// failure paths deliberately diverge from it: the staged copy is KEPT, not
+/// discarded. That flow's discard rationale assumes a failure changed nothing
+/// (it names a DNS error), but a reinstall can die mid-sync — disk full, the
+/// 300s timeout's SIGKILL — with `~/.claude` half-rewritten, and the staged
+/// copy is then the only backup holding the pre-install state. Not *promoted*
+/// on failure either: promoting after a nothing-written failure would destroy
+/// the previous backup in exchange for a redundant copy of the current tree.
+/// The next `stage_backup` replaces the kept copy, so it is a recovery
+/// window, not a durable backup, and the payload says where it lives.
+#[tauri::command]
+#[specta::specta]
+pub async fn install_agent_bundle_version(
+    state: State<'_, AppState>,
+    version: Option<String>,
+) -> CmdResult<AgentBundleInstall> {
+    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let cli = HyprCli::new(&state.binaries);
+    require_manageable(&cli, &cwd).await?;
+
+    if let Some(v) = version.as_deref() {
+        let listed = cli
+            .ai_versions(&cwd, VERSION_LIST_LIMIT)
+            .await
+            .map_err(AppError::from)?;
+        if !listed.versions.iter().any(|e| e.version == v) {
+            return Err(AppError {
+                code: "agent_bundle_version_unavailable".into(),
+                message: format!("No agent bundle is published for version {v}."),
+                remedy: Some(
+                    "Pick a version from the list. Installing an unlisted version would fall back to an unversioned bundle."
+                        .into(),
+                ),
+            });
+        }
+    }
+
+    let root = claude_root()?;
+    let staging_root = root.clone();
+    // The staged path is held for the failure paths below: nothing here diffs
+    // against the copy the way `update_agent_bundle` does, but both failure
+    // shapes name where it lives.
+    let staged = blocking("stage_agent_bundle_backup", move || {
+        agent_bundle::stage_backup(&staging_root).map_err(AppError::from)
+    })
+    .await??;
+
+    let selection = match version.as_deref() {
+        Some(v) => BundleSelection::Version(v),
+        None => BundleSelection::Unpin,
+    };
+    let output = match cli.ai_reinstall_selected(&cwd, selection).await {
+        Ok(output) => output,
+        // A missing binary, or the 300s timeout. The timeout SIGKILLs a CLI
+        // that may already be rewriting `~/.claude`, so the staged copy stays
+        // (see the function doc) and the error's remedy says where it is —
+        // this arm has no payload to carry the path on.
+        Err(e) => {
+            let kept = format!(
+                "A pre-install copy of the bundle was kept at {}.",
+                staged.display()
+            );
+            let mut err = AppError::from(e);
+            err.remedy = Some(match err.remedy {
+                Some(remedy) => format!("{remedy} {kept}"),
+                None => kept,
+            });
+            return Err(err);
+        }
+    };
+
+    if output.exit_code != Some(0) {
+        return Ok(AgentBundleInstall {
+            ok: false,
+            exit_code: output.exit_code,
+            source: agent_bundle::reinstall_source(&output.stdout),
+            stdout: output.stdout,
+            stderr: output.stderr,
+            backup_path: Some(staged.to_string_lossy().into_owned()),
+        });
+    }
+
+    let backup_path = blocking("promote_agent_bundle_backup", move || {
+        agent_bundle::promote_backup(&root).map_err(AppError::from)
+    })
+    .await??;
+
+    Ok(AgentBundleInstall {
+        ok: true,
+        exit_code: output.exit_code,
+        source: agent_bundle::reinstall_source(&output.stdout),
+        stdout: output.stdout,
+        stderr: output.stderr,
+        backup_path: Some(backup_path.to_string_lossy().into_owned()),
+    })
 }

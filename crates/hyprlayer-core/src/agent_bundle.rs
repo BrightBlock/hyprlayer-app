@@ -62,6 +62,88 @@ pub fn parse_master_sha(body: &str) -> Option<String> {
     })
 }
 
+/// Which source `hyprlayer ai reinstall` actually installed the bundle from.
+///
+/// Only meaningful for a *selected* version. `reinstall --version <v>` accepts
+/// any version string and, when that version carries no verifiable bundle,
+/// does not fail: it walks a source chain — versioned release asset, then
+/// master's frozen tree, then a Contents-API walk
+/// (`hyprlayer-cli/src/agents.rs`) — and reports success on whichever answers.
+/// That is deliberate for the CLI, where a legacy-tree install is still a
+/// working install. It is wrong as the result of picking an item from a list:
+/// the config records the version that was *asked* for, so afterwards
+/// `assetsVersion` agrees with the picker while the files on disk are
+/// master's. Reproduced on 1.6.0 with `--version 1.5.9`, which installed
+/// master's pre-1.6.0 tree under a `1.5.9` label and could not be recovered by
+/// reinstalling 1.6.0 (the installer read the fallback's files as user
+/// modifications and kept them).
+///
+/// Populating the picker only from `ai versions --json` is the actual
+/// prevention — that list already excludes releases with no bundle. This is
+/// the backstop for the gap between listing a version and installing it, and
+/// the only signal there is: exit code and config both read as success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum BundleSource {
+    /// The versioned release asset — what a picker selection must produce.
+    ReleaseAsset,
+    /// A fallback source answered: master's repo archive, or the per-file
+    /// Contents-API walk. The version label now lies about the bytes.
+    Fallback,
+    /// No recognizable source line. Reported rather than guessed at: the
+    /// caller shows the CLI's own output, and inventing a verdict from
+    /// unparsed text would be worse than admitting there isn't one.
+    Unknown,
+}
+
+/// Classify what a `reinstall` run installed from, by reading its stdout.
+///
+/// stdout, because nothing else carries it. The exit code is 0 either way and
+/// the CLI writes the requested version into its config regardless, so a
+/// post-hoc `ai status` comparison agrees with the picker on exactly the runs
+/// this needs to catch.
+///
+/// Both markers come from the shipped 1.6.0 binary (9a2a33c), which builds one
+/// source label per source — `the v{version} release asset`, `the {branch}
+/// repo archive` — and reuses it in both lines:
+///
+/// ```text
+///   Fetching the v1.5.9 release asset failed (…); trying the next source.
+///   Downloaded 60 files from the master repo archive
+/// ```
+///
+/// `trying the next source` is checked first and on its own: it is printed at
+/// the moment a source is abandoned, so it holds even for a third-source
+/// install whose final line this function would not otherwise recognize.
+pub fn reinstall_source(stdout: &str) -> BundleSource {
+    if stdout.contains("trying the next source") {
+        return BundleSource::Fallback;
+    }
+    // Matched on the "Downloaded …" line specifically, not anywhere in
+    // stdout: "release asset" also appears in the CLI's *failure* text
+    // ("GitHub release `v1.5.9` exposes no SHA256 digest for asset …"), and
+    // reading that as a success would invert the verdict on the one run
+    // this exists to catch. Within that line, containment rather than a
+    // suffix match: a future CLI appending detail to the line ("… release
+    // asset (12 MB)") must not turn every good install into a Fallback
+    // verdict — a false corruption claim, the other inversion.
+    //
+    // At most one such line can exist: a second source only runs after an
+    // abandon, whose "trying the next source" already returned above.
+    stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("Downloaded "))
+        .map(|line| {
+            if line.contains("release asset") {
+                BundleSource::ReleaseAsset
+            } else {
+                BundleSource::Fallback
+            }
+        })
+        .unwrap_or(BundleSource::Unknown)
+}
+
 /// Whether `installed` is behind `latest`. A missing installed SHA is stale:
 /// the CLI writes `None` when ref resolution failed during an install, which
 /// means we genuinely do not know what is on disk.
@@ -359,6 +441,63 @@ mod tests {
         std::fs::write(agents_dir(root).join("foreman.md"), "foreman\n").unwrap();
         std::fs::write(root.join("skills/code_review/SKILL.md"), "review\n").unwrap();
         std::fs::write(root.join("settings.json"), "{\"mine\":true}\n").unwrap();
+    }
+
+    /// Real stdout from `hyprlayer ai reinstall --version 1.6.0` on 1.6.0.
+    const RELEASE_ASSET_STDOUT: &str = "Downloading Claude Code agent files...\n  Downloaded 54 files from the v1.6.0 release asset\n  Kept your modified settings.json\n";
+
+    /// Real stdout from `hyprlayer ai reinstall --version 1.5.9` on 1.6.0 —
+    /// the run that recorded `assetsVersion: 1.5.9` while installing master's
+    /// pre-1.6.0 tree. Exit code was 0.
+    const FALLBACK_STDOUT: &str = "Downloading Claude Code agent files...\n  Fetching the v1.5.9 release asset failed (GitHub release `v1.5.9` exposes no SHA256 digest for asset `hyprlayer-assets-claude-1.5.9.tar.gz`. Refusing to install an unverified bundle.); trying the next source.\n  Downloaded 60 files from the master repo archive\n";
+
+    #[test]
+    fn reads_a_versioned_release_asset_install_as_the_real_thing() {
+        assert_eq!(
+            reinstall_source(RELEASE_ASSET_STDOUT),
+            BundleSource::ReleaseAsset
+        );
+    }
+
+    #[test]
+    fn catches_the_silent_fallback_to_masters_tree() {
+        assert_eq!(reinstall_source(FALLBACK_STDOUT), BundleSource::Fallback);
+    }
+
+    /// The failure half of the fallback line names a "release asset" too. A
+    /// substring search over the whole of stdout reads that as a success and
+    /// clears exactly the run this function exists to flag.
+    #[test]
+    fn does_not_read_the_failure_text_as_a_release_asset_install() {
+        let refusal = "  Fetching the v1.5.9 release asset failed (GitHub release `v1.5.9` exposes no SHA256 digest for asset `hyprlayer-assets-claude-1.5.9.tar.gz`.); trying the next source.\n  Downloaded 60 files from the master repo archive\n";
+        assert_ne!(reinstall_source(refusal), BundleSource::ReleaseAsset);
+    }
+
+    /// The third source walks the Contents API and prints per-file progress,
+    /// not a line this parser knows. `trying the next source` is printed on
+    /// the way there regardless, which is why it is checked first.
+    #[test]
+    fn flags_a_third_source_install_from_the_abandon_marker_alone() {
+        let walked = "Downloading Claude Code agent files...\n  Fetching the v1.5.9 release asset failed (…); trying the next source.\n  Fetching the master repo archive failed (…); trying the next source.\n  agents/cartographer.md\n";
+        assert_eq!(reinstall_source(walked), BundleSource::Fallback);
+    }
+
+    /// The success line is matched by containment, not suffix: a CLI that
+    /// appends detail to it must degrade to nothing worse than what the line
+    /// still says, not to a false corruption verdict on every good install.
+    #[test]
+    fn tolerates_detail_appended_to_the_release_asset_line() {
+        let suffixed = "Downloading Claude Code agent files...\n  Downloaded 54 files from the v1.6.1 release asset (12 MB)\n";
+        assert_eq!(reinstall_source(suffixed), BundleSource::ReleaseAsset);
+    }
+
+    #[test]
+    fn reports_unrecognized_output_as_unknown_rather_than_guessing() {
+        assert_eq!(reinstall_source(""), BundleSource::Unknown);
+        assert_eq!(
+            reinstall_source("Downloading Claude Code agent files...\n"),
+            BundleSource::Unknown
+        );
     }
 
     #[test]

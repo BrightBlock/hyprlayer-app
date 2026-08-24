@@ -22,7 +22,12 @@ import {
 } from "@/lib/bindings";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { basename } from "@/lib/path";
-import { useAgentBundle, useBootstrap, useSetAppSettings } from "@/lib/queries";
+import {
+  invalidateAgentBundle,
+  useAgentBundle,
+  useBootstrap,
+  useSetAppSettings,
+} from "@/lib/queries";
 import { startEdgeDrag } from "@/lib/resize";
 import { useToast } from "@/lib/toast";
 import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
@@ -448,20 +453,13 @@ export function AgentLibrary({
     mutationFn: (_vars: { fromSha: string | null; toSha: string | null }) =>
       unwrap(commands.updateAgentBundle()),
     onSuccess: (result, { fromSha, toSha }) => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-files"] });
-      void queryClient.invalidateQueries({ queryKey: ["agent-bundle"] });
-      // `skills` too: the reinstall rewrites `~/.claude/skills` alongside the
-      // agents, and the Capabilities tab reads that query.
-      void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+      invalidateAgentBundle();
       setBundleReport({ ...result, fromSha, toSha });
     },
+    // The shared invalidator runs on this path too — see its doc for why a
+    // failed update still invalidates.
     onError: (e, { fromSha }) => {
-      // Invalidated on this path too: a 300s timeout can kill the CLI
-      // mid-sync, so "the update failed" does not imply "nothing on disk
-      // moved" and the cached list may already be wrong.
-      void queryClient.invalidateQueries({ queryKey: ["agent-files"] });
-      void queryClient.invalidateQueries({ queryKey: ["agent-bundle"] });
-      void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+      invalidateAgentBundle();
       setBundleFailure({ message: errorMessage(e), stillOnSha: fromSha });
     },
   });

@@ -211,7 +211,7 @@ describe("AgentUpdateFailed", () => {
 
   // The fix for "no AI tool configured" is the Settings card that owns
   // Reconfigure, not a terminal the user has to read CLI output in.
-  it("Open AI settings closes the dialog and routes to the AI tool card", () => {
+  it("Open AI settings closes the dialog and routes to the AI Agents card", () => {
     const onClose = vi.fn();
     render(
       <AgentUpdateFailed failure={failure} open={true} onClose={onClose} onRetry={() => {}} />,

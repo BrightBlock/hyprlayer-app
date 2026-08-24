@@ -168,6 +168,16 @@ type DropdownSelectProps = {
   /** Trigger text when `value` matches no option, otherwise a stale/unknown
    *  value would leak onto the button as raw text. */
   placeholder?: string;
+  /** Overrides the trigger's text, leaving the menu's own labels alone. For a
+   *  control that sits inline in a sentence, where the full option label is
+   *  worth reading in the menu but too long for the line it anchors to.
+   *  Suppresses `placeholder`'s dim styling — the override is real content,
+   *  not an empty-state hint. */
+  triggerLabel?: string;
+  /** Observes the menu opening and closing without owning either. Lets a
+   *  caller defer loading its options until the user actually reaches for
+   *  the menu. */
+  onOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -196,6 +206,8 @@ export function DropdownSelect({
   disabled,
   className,
   placeholder,
+  triggerLabel,
+  onOpenChange,
   "aria-label": ariaLabel,
 }: DropdownSelectProps) {
   const [open, setOpen] = useState(false);
@@ -208,8 +220,13 @@ export function DropdownSelect({
     maxHeight: number;
   }>({ left: 0, width: 0, maxHeight: 0 });
 
+  const openMenu = () => {
+    setOpen(true);
+    onOpenChange?.(true);
+  };
   const close = () => {
     setOpen(false);
+    onOpenChange?.(false);
     triggerRef.current?.focus();
   };
   useEscape(open ? close : null);
@@ -299,11 +316,11 @@ export function DropdownSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={() => (open ? close() : openMenu())}
         onKeyDown={(e) => {
           if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
             e.preventDefault();
-            setOpen(true);
+            openMenu();
           }
         }}
         className={cx(
@@ -314,8 +331,13 @@ export function DropdownSelect({
           className,
         )}
       >
-        <span className={cx("min-w-0 truncate", !selected && placeholder && "text-ink-dim")}>
-          {selected?.label ?? placeholder ?? value}
+        <span
+          className={cx(
+            "min-w-0 truncate",
+            !triggerLabel && !selected && placeholder && "text-ink-dim",
+          )}
+        >
+          {triggerLabel ?? selected?.label ?? placeholder ?? value}
         </span>
         <ChevronDownIcon size={12} className="shrink-0 text-ink-dim" />
       </button>
@@ -719,6 +741,21 @@ export function ErrorNote({
       <p className={cx("text-bad", onDismiss && "pr-5")}>{errorMessage(error)}</p>
       {remedy && <p className="mt-1 text-ink-dim">{remedy}</p>}
     </div>
+  );
+}
+
+/** Raw CLI output, for an outcome the app cannot summarise honestly. Trims
+ *  and renders nothing when there is nothing to show, so callers can pass
+ *  stdout/stderr unconditionally. Wraps long lines (`whitespace-pre-wrap
+ *  break-words`): CLI text embeds full asset filenames and URLs that would
+ *  otherwise force a horizontal scrollbar inside a short note. */
+export function CliOutput({ text }: { text: string }) {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return (
+    <pre className="selectable mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-edge bg-panel-2 p-2.5 font-mono text-xs text-ink-dim">
+      {trimmed}
+    </pre>
   );
 }
 

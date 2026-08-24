@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
 use crate::process::binaries::{BinaryKind, BinaryResolver};
-use crate::process::Exec;
+use crate::process::{Exec, ExecOutput};
 
 /// Backend settings from `storage info --json`. The CLI emits a different
 /// key set per backend kind; this is the union, all optional.
@@ -91,6 +91,77 @@ pub struct AiStatus {
     /// Unix seconds of the CLI's last 24h auto-check. `None` right after an
     /// explicit install: `record_install` clears it so the next check re-runs.
     pub last_agent_check: Option<f64>,
+    /// Version of the bundle actually on disk, as the CLI recorded it at
+    /// install time (`agentsInstalledVersion` in its config). Added by CLI
+    /// 1.6.0; `None` against an older binary, and against a bundle installed
+    /// before versioned assets existed.
+    ///
+    /// NOT proof of what the files are: `ai reinstall --version` records the
+    /// version it was *asked* for even when its source chain fell through to
+    /// master's tree, which is the trap [`crate::agent_bundle::reinstall_source`]
+    /// exists to catch.
+    pub assets_version: Option<String>,
+    /// Version of the `hyprlayer` binary itself. The bundle it ships with,
+    /// and therefore what `--unpin` installs.
+    pub binary_version: Option<String>,
+    /// The pin, if one is set (`agentsPinnedVersion`). `None` means unpinned:
+    /// the binary's own bundle tracks the binary. A pin that differs from
+    /// `binary_version` is the state a user gets stuck in, so the UI says so.
+    pub pinned_version: Option<String>,
+}
+
+/// One selectable bundle version from `hyprlayer ai versions --json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct AiVersionEntry {
+    pub version: String,
+    /// RFC 3339, as GitHub's release API spells it. Optional rather than
+    /// required: it is display sugar, and a release missing the field must
+    /// not cost the user the whole list.
+    #[serde(default)]
+    pub published_at: Option<String>,
+    /// The version currently installed.
+    #[serde(default)]
+    pub current: bool,
+    /// The version the config pins to.
+    #[serde(default)]
+    pub pinned: bool,
+}
+
+/// Payload of `hyprlayer ai versions --json`.
+///
+/// The CLI has already filtered `versions` to releases that carry a bundle
+/// for the active harness — a release with no verifiable asset is absent, not
+/// present-and-flagged. That filtering is the whole reason the picker is
+/// populated from here and never from a version string assembled anywhere
+/// else; see [`crate::agent_bundle::reinstall_source`] for what installing an
+/// unlisted version actually does.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiVersions {
+    pub assets_version: Option<String>,
+    pub binary_version: Option<String>,
+    /// The harness the list is for (`"claude"`), following the configured
+    /// agent tool. One list, not one per harness — the CLI reports a single
+    /// active harness and the app follows it.
+    pub harness: Option<String>,
+    pub pinned_version: Option<String>,
+    pub versions: Vec<AiVersionEntry>,
+}
+
+/// Which bundle `hyprlayer ai reinstall` should install.
+///
+/// An enum rather than two optional arguments because `--version` and
+/// `--unpin` are mutually exclusive at the clap layer: passing both makes the
+/// CLI exit non-zero, and a pair of `Option`s can express exactly that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BundleSelection<'a> {
+    /// `--version <v>`: pin to this version and install it.
+    Version(&'a str),
+    /// `--unpin`: drop the pin and install the binary's own bundle.
+    Unpin,
 }
 
 pub struct HyprCli<'a> {
@@ -102,16 +173,22 @@ impl<'a> HyprCli<'a> {
         Self { resolver }
     }
 
-    async fn exec(&self, cwd: &Path, args: &[&str], timeout: Duration) -> Result<String> {
+    /// The one spawn contract for every `hyprlayer` invocation: the resolved
+    /// binary, the augmented PATH, the caller's cwd and timeout. Kept single
+    /// so [`exec`](Self::exec) and [`ai_reinstall_selected`](Self::ai_reinstall_selected)
+    /// cannot drift — they differ only in `run()` vs `run_unchecked()`.
+    async fn command(&self, cwd: &Path, args: &[&str], timeout: Duration) -> Result<Exec> {
         let bin = self.resolver.require(BinaryKind::Hyprlayer).await?;
         let path = self.resolver.augmented_path().await;
-        let output = Exec::new(bin)
+        Ok(Exec::new(bin)
             .args(args.iter().copied())
             .cwd(cwd)
             .env("PATH", path)
-            .timeout(timeout)
-            .run()
-            .await?;
+            .timeout(timeout))
+    }
+
+    async fn exec(&self, cwd: &Path, args: &[&str], timeout: Duration) -> Result<String> {
+        let output = self.command(cwd, args, timeout).await?.run().await?;
         Ok(output.stdout)
     }
 
@@ -230,5 +307,180 @@ impl<'a> HyprCli<'a> {
     pub async fn ai_reinstall(&self, cwd: &Path) -> Result<String> {
         self.exec(cwd, &["ai", "reinstall"], Duration::from_secs(300))
             .await
+    }
+
+    /// `hyprlayer ai versions --json --limit <n>`, the list a version picker
+    /// may offer. Requires network: it queries the GitHub releases API.
+    ///
+    /// `limit` is how many recent *releases* to examine, not how many results
+    /// come back — releases carrying no bundle for the active harness are
+    /// examined and then dropped, so a limit of 10 can answer with three.
+    pub async fn ai_versions(&self, cwd: &Path, limit: u32) -> Result<AiVersions> {
+        let limit = limit.to_string();
+        let stdout = self
+            .exec(
+                cwd,
+                &["ai", "versions", "--json", "--limit", &limit],
+                // Two GitHub API round trips on a cold cache, against the
+                // 8s used for the single ref-advertisement probe.
+                Duration::from_secs(30),
+            )
+            .await?;
+        serde_json::from_str(&stdout).map_err(|e| CoreError::OutputParse {
+            program: "hyprlayer ai versions".into(),
+            detail: e.to_string(),
+        })
+    }
+
+    /// `hyprlayer ai reinstall --version <v>` or `--unpin`.
+    ///
+    /// Returns the raw [`ExecOutput`] — stdout, stderr and exit code — rather
+    /// than `Result<String>` like [`ai_reinstall`](Self::ai_reinstall), and
+    /// runs `run_unchecked` so a non-zero exit is data instead of an error.
+    /// Both halves are load-bearing for a *selected* version: `Exec::run`'s
+    /// `CoreError::Exec` keeps only a stderr tail and drops stdout entirely,
+    /// and stdout is where the CLI reports which source it actually installed
+    /// from. A reinstall that exits 0 having silently fallen back to master's
+    /// tree is the failure mode the caller has to catch, and it is invisible
+    /// from the exit code alone — see [`crate::agent_bundle::reinstall_source`].
+    pub async fn ai_reinstall_selected(
+        &self,
+        cwd: &Path,
+        selection: BundleSelection<'_>,
+    ) -> Result<ExecOutput> {
+        let mut args = vec!["ai", "reinstall"];
+        match selection {
+            BundleSelection::Version(v) => {
+                args.push("--version");
+                args.push(v);
+            }
+            BundleSelection::Unpin => args.push("--unpin"),
+        }
+        self.command(cwd, &args, Duration::from_secs(300))
+            .await?
+            .run_unchecked()
+            .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Real `hyprlayer ai status --json` from 1.6.0 (9a2a33c), verbatim.
+    const STATUS_1_6_0: &str = r#"{
+      "agentTool": "Claude Code",
+      "agentsInstalledSha": "9a2a33c6fc0648e8cd7bac278365c8a9dcca220b",
+      "assetsVersion": "1.6.0",
+      "binaryVersion": "1.6.0",
+      "installed": true,
+      "lastAgentCheck": null,
+      "location": "~/.claude/",
+      "pinnedVersion": "1.6.0"
+    }"#;
+
+    /// Real `hyprlayer ai versions --json` from the same binary, verbatim.
+    const VERSIONS_1_6_0: &str = r#"{
+      "assetsVersion": "1.6.0",
+      "binaryVersion": "1.6.0",
+      "harness": "claude",
+      "pinnedVersion": "1.6.0",
+      "versions": [
+        { "version": "1.6.0",      "publishedAt": "2026-08-24T04:13:17Z", "current": true,  "pinned": true  },
+        { "version": "1.6.0-rc.2", "publishedAt": "2026-08-24T03:17:01Z", "current": false, "pinned": false },
+        { "version": "1.6.0-rc.1", "publishedAt": "2026-08-24T01:06:31Z", "current": false, "pinned": false }
+      ]
+    }"#;
+
+    #[test]
+    fn parses_the_1_6_0_status_payload() {
+        let s: AiStatus = serde_json::from_str(STATUS_1_6_0).unwrap();
+        assert!(s.installed);
+        assert_eq!(s.agent_tool.as_deref(), Some("Claude Code"));
+        assert_eq!(s.assets_version.as_deref(), Some("1.6.0"));
+        assert_eq!(s.binary_version.as_deref(), Some("1.6.0"));
+        assert_eq!(s.pinned_version.as_deref(), Some("1.6.0"));
+    }
+
+    /// `pinnedVersion: null` is the unpinned state, and it is a real value the
+    /// CLI emits — not a missing key. Distinguishing "no pin" from "pinned to
+    /// something" is the whole point of the field, so a null that deserialized
+    /// into anything but `None` would invert the UI's headline claim.
+    #[test]
+    fn reads_a_null_pin_as_unpinned() {
+        let s: AiStatus = serde_json::from_str(
+            r#"{"agentTool":"Claude Code","installed":true,"assetsVersion":"1.6.0","binaryVersion":"1.6.0","pinnedVersion":null}"#,
+        )
+        .unwrap();
+        assert_eq!(s.pinned_version, None);
+        assert_eq!(s.assets_version.as_deref(), Some("1.6.0"));
+    }
+
+    /// A pre-1.6.0 binary emits none of the three version keys. It must still
+    /// deserialize — the app has to run against whatever `hyprlayer` is on the
+    /// machine, and the version row simply has nothing to say.
+    #[test]
+    fn tolerates_a_pre_1_6_0_status_payload() {
+        let s: AiStatus = serde_json::from_str(
+            r#"{"agentTool":"Claude Code","installed":true,"location":"~/.claude/","agentsInstalledSha":"abc","lastAgentCheck":null}"#,
+        )
+        .unwrap();
+        assert!(s.installed);
+        assert_eq!(s.assets_version, None);
+        assert_eq!(s.binary_version, None);
+        assert_eq!(s.pinned_version, None);
+    }
+
+    /// The CLI answers a bare `{}` when nothing is configured
+    /// (`print_not_configured`), which must not be a parse error.
+    #[test]
+    fn reads_an_unconfigured_status_as_not_installed() {
+        let s: AiStatus = serde_json::from_str("{}").unwrap();
+        assert!(!s.installed);
+        assert_eq!(s.pinned_version, None);
+    }
+
+    #[test]
+    fn parses_the_1_6_0_versions_payload() {
+        let v: AiVersions = serde_json::from_str(VERSIONS_1_6_0).unwrap();
+        assert_eq!(v.harness.as_deref(), Some("claude"));
+        assert_eq!(v.binary_version.as_deref(), Some("1.6.0"));
+        assert_eq!(v.pinned_version.as_deref(), Some("1.6.0"));
+        assert_eq!(v.versions.len(), 3);
+        assert_eq!(v.versions[0].version, "1.6.0");
+        assert_eq!(
+            v.versions[0].published_at.as_deref(),
+            Some("2026-08-24T04:13:17Z")
+        );
+        assert!(v.versions[0].current && v.versions[0].pinned);
+        // Prereleases are listed, and neither current nor pinned.
+        assert_eq!(v.versions[2].version, "1.6.0-rc.1");
+        assert!(!v.versions[2].current && !v.versions[2].pinned);
+    }
+
+    /// No release in the examined window carries a bundle. Distinct from an
+    /// error: the CLI reached GitHub and the honest answer is "nothing to
+    /// offer", so the picker has to render empty rather than fail.
+    #[test]
+    fn parses_an_empty_versions_list() {
+        let v: AiVersions = serde_json::from_str(
+            r#"{"assetsVersion":"1.6.0","binaryVersion":"1.6.0","harness":"claude","pinnedVersion":null,"versions":[]}"#,
+        )
+        .unwrap();
+        assert!(v.versions.is_empty());
+        assert_eq!(v.pinned_version, None);
+        assert_eq!(v.harness.as_deref(), Some("claude"));
+    }
+
+    /// `publishedAt` is display sugar; a release missing it must cost that one
+    /// row its date, not the whole list.
+    #[test]
+    fn keeps_an_entry_whose_published_date_is_absent() {
+        let v: AiVersions =
+            serde_json::from_str(r#"{"versions":[{"version":"1.6.0","current":true}]}"#).unwrap();
+        assert_eq!(v.versions.len(), 1);
+        assert_eq!(v.versions[0].published_at, None);
+        assert!(v.versions[0].current);
+        assert!(!v.versions[0].pinned);
     }
 }

@@ -991,7 +991,7 @@ export function useAiStatus() {
  *
  *  `enabled` because the query is not free — it spawns `hyprlayer ai status`
  *  and makes an outbound request to github.com. Settings passes `false`
- *  while its AI tool card has nothing to show, so a user who never
+ *  while its AI Agents card has nothing to show, so a user who never
  *  configured a tool never pays for it. */
 export function useAgentBundle(options: { enabled?: boolean } = {}) {
   return useQuery({
@@ -1000,6 +1000,48 @@ export function useAgentBundle(options: { enabled?: boolean } = {}) {
     staleTime: 5 * 60_000,
     enabled: options.enabled ?? true,
   });
+}
+
+/** The bundle versions a picker may offer, from `hyprlayer ai versions --json`.
+ *
+ *  `enabled` gates more than cost here: the caller enables this only for a
+ *  manageable (Claude Code) install, and only once the user actually reaches
+ *  for the picker — the call spawns a CLI process that can query the GitHub
+ *  releases API, and most Settings visits never open the menu.
+ *
+ *  Five minutes, matching `useAgentBundle`: reopening the picker after a
+ *  release lands mid-session should see it, and the list is cheap to re-ask
+ *  for (the CLI caches it under `<config>/hyprlayer/cache/`, which is also
+ *  why this usually still answers offline). `retry: false` because the
+ *  failure worth showing is a network or rate-limit error the user should
+ *  read, not something a silent retry fixes — and it keeps a cold-cache
+ *  offline open from stalling the menu for three attempts before saying so. */
+export function useAgentBundleVersions(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ["agent-bundle-versions"],
+    queryFn: () => unwrap(commands.agentBundleVersions()),
+    staleTime: 5 * 60_000,
+    retry: false,
+    enabled: options.enabled ?? true,
+  });
+}
+
+/** Refresh everything a rewritten `~/.claude` bundle touches: the pin and
+ *  version fields (`aiStatus` is `staleTime: Infinity`, so without this the
+ *  Settings row would keep the pre-install version for the rest of the
+ *  session), the freshness probe, the version list's `current`/`pinned`
+ *  flags, and the agent/skill lists the Agents view is built from.
+ *
+ *  One list, shared by every bundle-rewriting flow (the Settings picker, the
+ *  Agents header chip's update) — run on failure too: the CLI can die partway
+ *  through a sync, so "the install failed" does not imply "nothing on disk
+ *  moved". */
+export function invalidateAgentBundle() {
+  void queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
+  void queryClient.invalidateQueries({ queryKey: ["agent-bundle"] });
+  void queryClient.invalidateQueries({ queryKey: ["agent-bundle-versions"] });
+  void queryClient.invalidateQueries({ queryKey: ["agent-files"] });
+  void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
 }
 
 /** Probe `~/thoughts` so the wizard can default to "open from disk" (and prefill
