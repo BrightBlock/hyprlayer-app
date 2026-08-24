@@ -380,6 +380,7 @@ mod tests {
         SessionEvent::AssistantText {
             text: text.into(),
             parent_id: None,
+            injected: false,
         }
     }
     fn turn_done() -> SessionEvent {

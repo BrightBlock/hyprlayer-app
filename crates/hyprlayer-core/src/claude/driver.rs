@@ -692,10 +692,26 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
                 .collect()
         }
         ParsedLine::User {
-            blocks, parent_id, ..
+            blocks,
+            parent_id,
+            is_synthetic,
+            ..
         } => blocks
             .into_iter()
             .filter_map(|b| block_to_event(b, parent_id.as_deref()))
+            .map(|event| match event {
+                // A synthetic user turn's text is claude injecting content (a
+                // skill's SKILL.md body), not the agent writing. Mark it so the
+                // UI can fold it into the `Skill` row that pulled it in.
+                SessionEvent::AssistantText {
+                    text, parent_id, ..
+                } if is_synthetic => SessionEvent::AssistantText {
+                    text,
+                    parent_id,
+                    injected: true,
+                },
+                other => other,
+            })
             .collect(),
         ParsedLine::CanUseTool {
             request_id,
@@ -771,7 +787,11 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
 pub(crate) fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<SessionEvent> {
     let parent_id = parent_id.map(str::to_string);
     match block {
-        Block::Text { text } => Some(SessionEvent::AssistantText { text, parent_id }),
+        Block::Text { text } => Some(SessionEvent::AssistantText {
+            text,
+            parent_id,
+            injected: false,
+        }),
         Block::Thinking { text } => Some(SessionEvent::Thinking { text, parent_id }),
         Block::ToolUse { id, name, input } => Some(SessionEvent::ToolUse {
             id,
@@ -999,6 +1019,51 @@ mod tests {
             }
             other => panic!("expected one QuestionAsk, got {other:?}"),
         }
+    }
+
+    /// A synthetic user turn's text is content claude injected (the launched
+    /// skill's SKILL.md body), so it reaches the UI flagged `injected` and folds
+    /// into the `Skill` row instead of dumping into the transcript. The bundled
+    /// skills that ship no auxiliary files — `artifact-design`,
+    /// `artifact-diagramming` — inject a body with no `Base directory for this
+    /// skill:` prefix, which is why the flag, not the prefix, has to carry this.
+    #[test]
+    fn synthetic_user_text_is_flagged_injected() {
+        let events = parsed_to_events(ParsedLine::User {
+            blocks: vec![Block::Text {
+                text: "Approach this as the design lead".into(),
+            }],
+            parent_id: None,
+            uuid: None,
+            is_replay: false,
+            is_synthetic: true,
+        });
+        assert!(matches!(
+            events.as_slice(),
+            [SessionEvent::AssistantText { injected: true, .. }]
+        ));
+    }
+
+    /// A tool-result `user` line is not synthetic, so nothing else on that line
+    /// picks the flag up.
+    #[test]
+    fn ordinary_user_text_is_not_injected() {
+        let events = parsed_to_events(ParsedLine::User {
+            blocks: vec![Block::Text {
+                text: "plain".into(),
+            }],
+            parent_id: None,
+            uuid: None,
+            is_replay: false,
+            is_synthetic: false,
+        });
+        assert!(matches!(
+            events.as_slice(),
+            [SessionEvent::AssistantText {
+                injected: false,
+                ..
+            }]
+        ));
     }
 
     /// Every other tool keeps the normal Allow/Deny permission gate.

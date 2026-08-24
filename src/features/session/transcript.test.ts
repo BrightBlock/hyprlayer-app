@@ -94,6 +94,16 @@ describe("launched skill bodies", () => {
   const SKILL_BODY =
     "Base directory for this skill: /Users/jt/.claude/skills/describe_pr\n\n# Generate PR Description\nYou are ...";
 
+  /** The handshake claude settles a `Skill` call with just before it injects
+   *  that skill's body — the only result shape that promises one is coming. */
+  const launched = (toolUseId: string, skill: string): SessionEvent => ({
+    kind: "toolResult",
+    toolUseId,
+    content: `Launching skill: ${skill}`,
+    isError: false,
+    parentId: null,
+  });
+
   it("folds the injected body into the Skill invocation row, not a second block", () => {
     let view = initialSessionView("running");
     // Real flow: the assistant says it'll run the skill, the Skill tool runs,
@@ -124,12 +134,76 @@ describe("launched skill bodies", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "toolUse", id: "s1", name: "Skill", input: '{"skill":"a"}', parentId: null });
     view = reduceEvent(view, { kind: "toolUse", id: "s2", name: "Skill", input: '{"skill":"b"}', parentId: null });
+    view = reduceEvent(view, launched("s1", "a"));
+    view = reduceEvent(view, launched("s2", "b"));
     view = reduceEvent(view, { kind: "assistantText", text: `${SKILL_BODY} (one)`, parentId: null });
     view = reduceEvent(view, { kind: "assistantText", text: `${SKILL_BODY} (two)`, parentId: null });
     // Bodies attach to the earliest still-awaiting row first, in order.
     expect(view.items[0]).toMatchObject({ toolUseId: "s1", skillBody: `${SKILL_BODY} (one)` });
     expect(view.items[1]).toMatchObject({ toolUseId: "s2", skillBody: `${SKILL_BODY} (two)` });
     expect(kinds(view)).toEqual(["tool", "tool"]);
+  });
+
+  // A bundled skill that ships no auxiliary files gets no `Base directory for
+  // this skill:` line, so the prefix alone never recognized it and 11KB of
+  // `artifact-design` dumped into the transcript. `injected` (claude's
+  // `isSynthetic`) is what marks it.
+  it("folds a prefix-less injected body into its Skill row", () => {
+    const body = "Approach this as the design lead at a small studio known for their versatility…";
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "s1",
+      name: "Skill",
+      input: '{"skill":"artifact-design"}',
+      parentId: null,
+    });
+    view = reduceEvent(view, launched("s1", "artifact-design"));
+    view = reduceEvent(view, { kind: "assistantText", text: body, parentId: null, injected: true });
+
+    expect(kinds(view)).toEqual(["tool"]);
+    expect(view.items[0]).toMatchObject({ kind: "tool", name: "Skill", skillBody: body });
+  });
+
+  // `/code-review` forks its execution and injects nothing, so its row stays
+  // body-less for the rest of the session. Before the launch-handshake guard it
+  // sat at the front of the scan and swallowed the *next* skill's body.
+  it("does not fold a body into a skill row that was never going to get one", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "fork",
+      name: "Skill",
+      input: '{"skill":"code-review"}',
+      parentId: null,
+    });
+    view = reduceEvent(view, {
+      kind: "toolResult",
+      toolUseId: "fork",
+      content: 'Skill "code-review" completed (forked execution)',
+      isError: false,
+      parentId: null,
+    });
+    view = reduceEvent(view, { kind: "toolUse", id: "s2", name: "Skill", input: '{"skill":"b"}', parentId: null });
+    view = reduceEvent(view, launched("s2", "b"));
+    view = reduceEvent(view, { kind: "assistantText", text: SKILL_BODY, parentId: null, injected: true });
+
+    expect(view.items[0]).toMatchObject({ toolUseId: "fork" });
+    expect(view.items[0]).not.toHaveProperty("skillBody");
+    expect(view.items[1]).toMatchObject({ toolUseId: "s2", skillBody: SKILL_BODY });
+  });
+
+  // Not every synthetic user turn is a skill body — "[Request interrupted…]"
+  // markers ride the same flag. With no skill row waiting, it stays prose.
+  it("leaves injected text with no skill row awaiting a body as an assistant block", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "assistantText",
+      text: "[Request interrupted by user for tool use]",
+      parentId: null,
+      injected: true,
+    });
+    expect(kinds(view)).toEqual(["assistant"]);
   });
 
   it("falls back to a collapsed chip when a streamed body has no invocation row", () => {

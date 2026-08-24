@@ -558,6 +558,7 @@ impl OpenCodeDriver {
                 let _ = events.send(SessionEvent::AssistantText {
                     text: format!("⚠ OpenCode request failed: {e}"),
                     parent_id: None,
+                    injected: false,
                 });
                 let _ = events.send(SessionEvent::TurnDone {
                     cost_usd: None,
@@ -854,6 +855,7 @@ impl Translator {
                     SessionEvent::AssistantText {
                         text: format!("⚠ OpenCode error: {msg}"),
                         parent_id: None,
+                        injected: false,
                     },
                     SessionEvent::TurnDone {
                         cost_usd: None,
@@ -917,6 +919,7 @@ impl Translator {
                     out.push(SessionEvent::AssistantText {
                         text: full.to_string(),
                         parent_id: None,
+                        injected: false,
                     });
                 }
             }

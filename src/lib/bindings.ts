@@ -2429,7 +2429,16 @@ promptName?: string | null } |
  */
 { kind: "partialText"; text: string; parentId: string | null } | 
 /**  A completed assistant text block. */
-{ kind: "assistantText"; text: string; parentId: string | null } | 
+{ kind: "assistantText"; text: string; parentId: string | null; 
+/**
+ *  True when claude injected this block as a synthetic user turn rather
+ *  than the agent writing it: a launched skill's SKILL.md body, a
+ *  re-invocation notice. The UI folds an injected block into the `Skill`
+ *  row that pulled it in instead of dumping it inline. Defaulted: rows
+ *  persisted before this field existed still deserialize (and replay as
+ *  non-injected, which is what the prefix heuristic already handled).
+ */
+injected?: boolean } | 
 /**  A completed thinking block (shown collapsed). */
 { kind: "thinking"; text: string; parentId: string | null } | 
 /**

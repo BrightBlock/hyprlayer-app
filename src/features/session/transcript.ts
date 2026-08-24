@@ -101,17 +101,22 @@ export function buildQuestionAnswers(
  *  nests them under that Task instead of inlining them in the main thread. */
 type Parented = { parentId?: string | null };
 
-/** Prefix Claude Code prepends to a launched skill's body: the complete
- *  assistant block reads `Base directory for this skill: <dir>\n\n<SKILL.md>`. */
+/** Prefix Claude Code prepends to a launched skill's body when — and only when —
+ *  that skill ships auxiliary files to extract: the block then reads
+ *  `Base directory for this skill: <dir>\n\n<SKILL.md>`.
+ *
+ *  A bundled skill with no files gets no prefix, which is why this is a naming
+ *  hint and a replay fallback, never the test for "is this a skill body". The
+ *  `injected` flag on the event is that test (it rides claude's `isSynthetic`);
+ *  persisted rows written before the flag existed still only have the prefix. */
 const SKILL_BODY_PREFIX = "Base directory for this skill:";
 
 /**
- * If a completed assistant block is actually a launched skill's injected body
- * (it starts with [`SKILL_BODY_PREFIX`]), return the skill's name, the last
- * segment of the base-directory path on the first line, else null. Matched on
- * the *complete* block only: a streamed `partialText` chunk can start with the
- * prefix by coincidence, but a whole assistant turn starting with it is the
- * skill injection, not prose.
+ * If a completed assistant block carries [`SKILL_BODY_PREFIX`], return the
+ * skill's name, the last segment of the base-directory path on the first line,
+ * else null. Matched on the *complete* block only: a streamed `partialText`
+ * chunk can start with the prefix by coincidence, but a whole assistant turn
+ * starting with it is the skill injection, not prose.
  */
 export function skillBodyName(text: string): string | null {
   if (!text.startsWith(SKILL_BODY_PREFIX)) return null;
@@ -207,8 +212,8 @@ export type TranscriptItem =
     }
   | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
   | ({ kind: "thinking"; id: string; text: string } & Parented)
-  /** A launched skill's injected SKILL.md body (Claude delivers it as an assistant
-   *  block), kept as its own collapsed chip, not dumped inline. */
+  /** A launched skill's injected SKILL.md body with no invocation row to fold
+   *  into, kept as its own collapsed chip, not dumped inline. */
   | ({ kind: "skill"; id: string; name: string; body: string } & Parented)
   | ({
       kind: "tool";
@@ -485,17 +490,33 @@ function streamedAssistantIndex(items: TranscriptItem[], text: string): number {
   return -1;
 }
 
+/** The handshake a `Skill` call settles with when claude is about to inject that
+ *  skill's body. The other three results a `Skill` row can carry all mean no body
+ *  is coming, and all three were found sitting in real transcripts: a forked
+ *  skill (`Skill "code-review" completed (forked execution)`), an unknown skill
+ *  (`<tool_use_error>Unknown skill: …`), and a row interrupted before it
+ *  resolved (no result at all). */
+const SKILL_LAUNCH_RESULT = "Launching skill:";
+
 /** The earliest `Skill` tool row in the same thread (`parentId`) still awaiting
  *  its injected body, so a skill-body block folds into its invocation row rather
  *  than repeating the header as a separate block. Scans front-to-back so that if
  *  several skills are queued, bodies attach in invocation (FIFO) order. -1 if
- *  none. */
+ *  none.
+ *
+ *  A row only counts once it carries [`SKILL_LAUNCH_RESULT`]. Without that guard
+ *  a row that will never receive a body stays hungry forever at the front of the
+ *  scan, and the *next* skill's body folds into it instead of its own row — the
+ *  shape a `/code-review` at the top of a session left behind. */
 function firstSkillToolAwaitingBody(items: TranscriptItem[], parentId: string | null): number {
   for (let i = 0; i < items.length; i += 1) {
     const it = items[i];
     if (
       it.kind === "tool" &&
       it.name === "Skill" &&
+      it.result !== null &&
+      !it.result.isError &&
+      it.result.content.startsWith(SKILL_LAUNCH_RESULT) &&
       it.skillBody === undefined &&
       (it.parentId ?? null) === parentId
     ) {
@@ -643,7 +664,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
 
     case "assistantText": {
       const skill = skillBodyName(event.text);
-      if (skill) {
+      if (skill || event.injected) {
         // A launched skill's injected SKILL.md body. In practice it always
         // follows the skill's own invocation row, so fold the body into that row
         // (expand to read it) rather than repeat the header as a second block.
@@ -654,6 +675,8 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           items[toolIdx] = { ...tool, skillBody: event.text };
           return { ...view, items, streaming: true };
         }
+      }
+      if (skill) {
         // No invocation row to fold into (rare), keep the body as its own
         // collapsed chip so it's still inspectable but never dumped inline. If it
         // streamed into an open assistant block first, convert that in place.

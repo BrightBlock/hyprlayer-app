@@ -563,6 +563,7 @@ fn emit_start_failure(channel: &Channel<SessionEvent>, reason: &str) {
     let _ = channel.send(SessionEvent::AssistantText {
         text: format!("⚠ Failed to start the agent: {reason}"),
         parent_id: None,
+        injected: false,
     });
     let _ = channel.send(SessionEvent::Exited {
         outcome: ExitOutcome::SpawnFailed,

@@ -42,6 +42,11 @@ pub enum ParsedLine {
         /// under `--replay-user-messages`). Not new transcript content, so the reader
         /// suppresses it; it never renders as assistant text.
         is_replay: bool,
+        /// `isSynthetic:true`, a user turn claude injected rather than one the
+        /// human typed: a launched skill's SKILL.md body, a re-invocation notice,
+        /// an "[Request interrupted…]" marker. Text blocks on such a line are
+        /// system content, not the agent talking.
+        is_synthetic: bool,
     },
     /// A partial-message chunk (`type:"stream_event"`); only text deltas are
     /// surfaced, for live streaming. Everything else here is ignored (the
@@ -215,6 +220,10 @@ pub fn parse_line(line: &str) -> ParsedLine {
             parent_id: str_field(&v, "parent_tool_use_id"),
             uuid: str_field(&v, "uuid"),
             is_replay: v.get("isReplay").and_then(Value::as_bool).unwrap_or(false),
+            is_synthetic: v
+                .get("isSynthetic")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         },
         Some("stream_event") => parse_stream_event(&v),
         Some("result") => ParsedLine::Result {
@@ -745,6 +754,20 @@ mod tests {
                     Some("d2052f84-2034-4399-81e7-bd28d28bc691")
                 );
             }
+            other => panic!("expected a User line, got {other:?}"),
+        }
+    }
+
+    /// A launched skill's SKILL.md body arrives as a synthetic `user` line whose
+    /// text block is claude injecting content, not the agent writing. Line shape
+    /// captured from a live `--output-format stream-json` run invoking the
+    /// `artifact-design` skill: no `sourceToolUseID`/`isMeta` survives into
+    /// stream-json, `isSynthetic` is the only marker on the wire.
+    #[test]
+    fn injected_skill_body_is_synthetic() {
+        let line = r#"{"type":"user","parent_tool_use_id":null,"uuid":"u1","isSynthetic":true,"message":{"role":"user","content":[{"type":"text","text":"Approach this as the design lead"}]},"session_id":"s"}"#;
+        match parse_line(line) {
+            ParsedLine::User { is_synthetic, .. } => assert!(is_synthetic),
             other => panic!("expected a User line, got {other:?}"),
         }
     }

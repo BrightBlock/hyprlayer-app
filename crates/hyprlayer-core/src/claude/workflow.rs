@@ -749,12 +749,14 @@ fn stamp_parent(parsed: ParsedLine, parent_id: &str) -> ParsedLine {
             blocks,
             uuid,
             is_replay,
+            is_synthetic,
             ..
         } => ParsedLine::User {
             blocks,
             parent_id: Some(parent_id.to_string()),
             uuid,
             is_replay,
+            is_synthetic,
         },
         other => other,
     }

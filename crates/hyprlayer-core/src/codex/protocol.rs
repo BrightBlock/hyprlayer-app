@@ -209,6 +209,7 @@ impl Translator {
                         out.push(SessionEvent::AssistantText {
                             text: format!("⚠ Codex error: {msg}"),
                             parent_id: None,
+                            injected: false,
                         });
                     }
                 }
@@ -258,6 +259,7 @@ impl Translator {
                     SessionEvent::AssistantText {
                         text: format!("⚠ Codex error: {msg}"),
                         parent_id: None,
+                        injected: false,
                     },
                     SessionEvent::TurnDone {
                         cost_usd: None,
@@ -482,6 +484,7 @@ impl Translator {
                     .unwrap_or_default()
                     .to_string(),
                 parent_id: None,
+                injected: false,
             }],
             "reasoning" => {
                 // `content` is the full chain when the model exposes it; `summary`
