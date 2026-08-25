@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.7.1",
+      "date": "2026-08-25",
+      "summary": "Fixed the AI Agents bundle status going stale after a CLI upgrade.",
+      "notes": [
+        "Upgrading the hyprlayer CLI and hitting Re-detect used to leave the agent bundle showing the old version until an app restart — the bundle's own status now refreshes along with everything else a CLI upgrade affects.",
+        "Bundle freshness is more accurate now too: instead of a signal that just says \"has the CLI's repo moved\", it directly compares your installed version against the current one, and a legacy CLI whose bundle can no longer receive new skills is now flagged distinctly rather than shown as plain \"Up to date\".",
+        "Settings can now offer and run a hyprlayer CLI update directly from the frozen-bundle notice, instead of just telling you to go update it yourself.",
+        "The AI Agents card is now a subsection of the Hyprlayer card instead of a separate card, since they're driven by the same CLI."
+      ]
+    },
+    {
       "version": "0.7.0",
       "date": "2026-08-24",
       "summary": "Omarchy theme support, Workflow subagent visibility, and Linux fixes.",
