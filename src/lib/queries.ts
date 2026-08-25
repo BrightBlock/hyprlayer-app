@@ -990,15 +990,16 @@ export function useAiStatus() {
   });
 }
 
-/** Agent-bundle freshness for the Agents header chip and Settings' AI tool
- *  card. Cached for five minutes rather than forever like `useAiStatus`: the
- *  CLI's own 24h auto-refresh (`hyprlayer-cli/src/version.rs`) can move the
- *  installed SHA between visits without the app doing anything, and the chip
- *  carries an explicit recheck for when five minutes is too long to wait.
+/** Agent-bundle freshness for the Agents header chip and the Hyprlayer card's
+ *  AI Agents subsection. Cached for five minutes rather than forever like
+ *  `useAiStatus`: the CLI's own 24h auto-refresh (`hyprlayer-cli/src/version.rs`)
+ *  can move the installed SHA between visits without the app doing anything,
+ *  and the chip carries an explicit recheck for when five minutes is too long
+ *  to wait.
  *
  *  `enabled` because the query is not free — it spawns `hyprlayer ai status`
  *  and makes an outbound request to github.com. Settings passes `false`
- *  while its AI Agents card has nothing to show, so a user who never
+ *  while its AI Agents subsection has nothing to show, so a user who never
  *  configured a tool never pays for it. */
 export function useAgentBundle(options: { enabled?: boolean } = {}) {
   return useQuery({
@@ -1033,20 +1034,34 @@ export function useAgentBundleVersions(options: { enabled?: boolean } = {}) {
   });
 }
 
-/** Refresh everything a rewritten `~/.claude` bundle touches: the pin and
- *  version fields (`aiStatus` is `staleTime: Infinity`, so without this the
- *  Settings row would keep the pre-install version for the rest of the
- *  session), the freshness probe, the version list's `current`/`pinned`
- *  flags, and the agent/skill lists the Agents view is built from.
- *
- *  One list, shared by every bundle-rewriting flow (the Settings picker, the
- *  Agents header chip's update) — run on failure too: the CLI can die partway
- *  through a sync, so "the install failed" does not imply "nothing on disk
- *  moved". */
-export function invalidateAgentBundle() {
+/** Everything the `hyprlayer` binary's own identity decides — a binary can
+ *  change while `~/.claude` does not, and every answer about it still moves. */
+export function invalidateCliBundleState() {
   void queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
   void queryClient.invalidateQueries({ queryKey: ["agent-bundle"] });
   void queryClient.invalidateQueries({ queryKey: ["agent-bundle-versions"] });
+  void queryClient.invalidateQueries({ queryKey: ["cli-update-check"] });
+}
+
+/** Whether a newer `hyprlayer` is installable. Network-bound — the CLI asks
+ *  its own package manager — so callers enable it only where it is
+ *  actionable. `retry: false`: an unreachable release source is a real answer
+ *  (everything `None`), not something a retry fixes. */
+export function useCliUpdateCheck(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ["cli-update-check"],
+    queryFn: () => unwrap(commands.hyprlayerCliUpdateCheck()),
+    staleTime: 5 * 60_000,
+    retry: false,
+    enabled: options.enabled ?? true,
+  });
+}
+
+/** Refresh everything a rewritten `~/.claude` bundle touches. Run on failure
+ *  too: the CLI can die partway through a sync, so "the install failed" does
+ *  not imply "nothing on disk moved". */
+export function invalidateAgentBundle() {
+  invalidateCliBundleState();
   void queryClient.invalidateQueries({ queryKey: ["agent-files"] });
   void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
 }

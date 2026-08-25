@@ -77,6 +77,33 @@ function sidebar(rows: AgentRow[] = ROWS, overrides: Partial<AgentSidebarProps> 
   return { onFolderMenu, onMenu };
 }
 
+describe("AgentSidebar bundle chip", () => {
+  const chip = (state: AgentSidebarProps["bundle"]["state"]) =>
+    sidebar(undefined, {
+      bundle: {
+        state,
+        updating: false,
+        checking: false,
+        onRefresh: vi.fn(),
+        onUpdate: vi.fn(),
+      },
+    });
+
+  it("says the bundle is up to date on a CLI that installs a live one", () => {
+    chip({ kind: "upToDate", label: "1.6.0", lastCheckedMs: null, frozen: false });
+    expect(screen.getByText("Up to date")).toBeTruthy();
+    expect(screen.queryByText("CLI out of date")).toBeNull();
+  });
+
+  // Current bytes, dead-end source: the SHA matches master, but a pre-1.6.0
+  // CLI tracks the frozen tree. A green "Up to date" reads as "nothing to do".
+  it("blames the CLI, not the bundle, when the tree it tracks is frozen", () => {
+    chip({ kind: "upToDate", label: "9a2a33c", lastCheckedMs: null, frozen: true });
+    expect(screen.getByText("CLI out of date")).toBeTruthy();
+    expect(screen.queryByText("Up to date")).toBeNull();
+  });
+});
+
 describe("AgentSidebar folder rows", () => {
   it("reports a right-click on a folder header, so an agent can be made inside it", () => {
     const { onFolderMenu } = sidebar();

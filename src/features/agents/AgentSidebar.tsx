@@ -24,7 +24,7 @@ import {
 } from "@/components/icons";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { useSignedIn } from "@/lib/account";
-import { formatRelativeTime, shortSha } from "@/lib/format";
+import { formatRelativeTime } from "@/lib/format";
 import { SIDE_PANEL_MIN } from "@/lib/uiStore";
 import { useViewport } from "@/lib/useViewport";
 import type { AgentFile, AgentLibrarySettings, Project } from "@/lib/bindings";
@@ -729,12 +729,12 @@ function BundleChip({
   }
 
   if (state.kind === "updateAvailable") {
-    const to = shortSha(state.toSha);
+    const to = state.to;
     return (
       <div className="flex shrink-0 items-center gap-2">
         <Badge tone="warn">New agents available</Badge>
         <span className="hidden font-mono text-xs text-ink-dim sm:inline">
-          {state.fromSha ? `${shortSha(state.fromSha)} → ${to}` : to}
+          {state.from ? `${state.from} → ${to}` : to}
         </span>
         {/* The accent tint rides on the ICON, not the button: `cx` in
             components/ui.tsx merges conflicting classes now, but the icon is
@@ -770,16 +770,34 @@ function BundleChip({
     );
   }
 
-  // The steady state, so it stays a bare "Up to date": which SHA is installed
-  // and when it was last looked at are reference details, not something to
-  // read on every visit. They ride on `title` instead, which `RefreshButton`
-  // keeps distinct from the `aria-label` naming the action.
+  // The steady state, so it stays a bare "Up to date": which bundle is
+  // installed and when it was last looked at are reference details, not
+  // something to read on every visit. They ride on `title` instead, which
+  // `RefreshButton` keeps distinct from the `aria-label` naming the action.
   const detail = [
-    state.sha ? shortSha(state.sha) : null,
+    state.label,
     state.lastCheckedMs !== null ? `checked ${formatRelativeTime(state.lastCheckedMs)}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
+
+  // Current bytes from a dead-end source, so neither the green dot nor the
+  // update trigger: the fix is a new CLI, which this chip cannot install.
+  // Settings names the version and offers the button.
+  if (state.frozen) {
+    return (
+      <RefreshButton
+        onClick={onRefresh}
+        busy={checking}
+        label="Check for agent updates"
+        title={`Update the hyprlayer CLI for current skills${detail ? ` · ${detail}` : ""}`}
+        className="shrink-0 text-xs"
+      >
+        <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
+        <span className="whitespace-nowrap">CLI out of date</span>
+      </RefreshButton>
+    );
+  }
 
   return (
     <RefreshButton

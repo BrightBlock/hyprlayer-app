@@ -479,6 +479,27 @@ export const commands = {
 	 */
 	detectCliInstallMethods: () => typedError<CliInstallMethod[], AppError>(__TAURI_INVOKE("detect_cli_install_methods")),
 	/**
+	 *  Whether a newer `hyprlayer` is installable, via the CLI's own
+	 *  `self-update --check`.
+	 * 
+	 *  Every field `None` means no answer, not "up to date": the check exits
+	 *  non-zero when its install method's release source is unreachable. The
+	 *  caller shows nothing in that case.
+	 */
+	hyprlayerCliUpdateCheck: () => typedError<CliUpdateCheck, AppError>(__TAURI_INVOKE("hyprlayer_cli_update_check")),
+	/**
+	 *  Run `hyprlayer self-update`, then re-probe the binaries.
+	 * 
+	 *  A non-zero exit is data, not an `Err`: the CLI dispatches to the user's
+	 *  package manager, and one that wants to prompt gets `/dev/null` on stdin and
+	 *  dies — so the only useful thing left is the manager's own words next to the
+	 *  CLI's upgrade hint. `Err` stays for never having run it at all.
+	 * 
+	 *  Re-detects and emits on every path including failure: a partially applied
+	 *  package-manager upgrade still moves the binary.
+	 */
+	updateHyprlayerCli: () => typedError<CliUpdateResult, AppError>(__TAURI_INVOKE("update_hyprlayer_cli")),
+	/**
 	 *  Install the hyprlayer CLI via the chosen package manager, in the background
 	 *  (no terminal). Re-detects on success so the UI flips to "installed".
 	 */
@@ -861,13 +882,9 @@ export const commands = {
 	/**  Write a portable `.agent.json` to Downloads; returns where it landed. */
 	exportAgentFile: (agent: AgentFile, overlay: AgentOverlay) => typedError<string, AppError>(__TAURI_INVOKE("export_agent_file", { agent, overlay })),
 	/**
-	 *  `hyprlayer ai status --json` for the installed SHA, plus a direct probe of
-	 *  GitHub's ref advertisement for the latest one.
-	 * 
-	 *  The two are awaited in order, not joined: the CLI call is local and runs
-	 *  in a millisecond or two against the probe's ~150ms round trip, so joining
-	 *  buys almost nothing and would cost the short-circuit that keeps a machine
-	 *  with no `hyprlayer` binary from reaching for the network at all.
+	 *  `hyprlayer ai status --json`, and — only for a CLI too old to answer in
+	 *  versions — a probe of GitHub's ref advertisement. See
+	 *  [`agent_bundle::desired_version`] for why the SHA branch is the legacy one.
 	 */
 	agentBundleStatus: () => typedError<AgentBundleStatus, AppError>(__TAURI_INVOKE("agent_bundle_status")),
 	/**
@@ -1043,9 +1060,17 @@ export type AgentBundleStatus = {
 	/**
 	 *  `master` HEAD as resolved just now. `None` when the probe failed —
 	 *  offline, or GitHub unreachable — which renders as "up to date" rather
-	 *  than as an error: not knowing is not the same as being behind.
+	 *  than as an error: not knowing is not the same as being behind. Also
+	 *  `None` with no probe run at all when `desired_version` is `Some`.
 	 */
 	latestSha: string | null,
+	/**  `assetsVersion`. */
+	installedVersion: string | null,
+	/**
+	 *  `agent_bundle::desired_version`, and the label the update affordances
+	 *  name. `None` on a pre-1.6.0 CLI.
+	 */
+	desiredVersion: string | null,
 	/**
 	 *  Unix seconds of the CLI's last auto-check — when the bundle was last
 	 *  *looked at*, not when it was last installed. `record_install` clears
@@ -1651,6 +1676,35 @@ export type CliInstallMethod = {
 
 /**  A package manager that can install the hyprlayer CLI. */
 export type CliInstallMethodId = "homebrew" | "winget" | "scoop";
+
+/**
+ *  What `hyprlayer self-update --check` reported.
+ * 
+ *  `latest` is `Some` only when the CLI itself judged a newer version
+ *  installable, so it doubles as "an update is available". Everything `None`
+ *  means no answer — the check exited non-zero (an install method whose
+ *  source is unreachable, which is what AUR does with no helper installed) or
+ *  its wording moved.
+ */
+export type CliUpdateCheck = {
+	current?: string | null,
+	latest?: string | null,
+	/**
+	 *  The CLI's own upgrade command for the detected install method, e.g.
+	 *  `brew upgrade hyprlayer`. Shown verbatim when the in-app update fails,
+	 *  which is the only way a user on an interactive package manager gets
+	 *  the command they actually need.
+	 */
+	hint?: string | null,
+};
+
+/**  What one `hyprlayer self-update` run did. */
+export type CliUpdateResult = {
+	ok: boolean,
+	exitCode: number | null,
+	stdout: string,
+	stderr: string,
+};
 
 /**  Who `codex` is currently authenticated as. */
 export type CodexAuthStatus = {

@@ -9,14 +9,20 @@ import { AgentBundleSection } from "./AgentBundleSection";
 
 const b = vi.hoisted(() => ({
   installAgentBundleVersion: vi.fn(),
+  updateAgentBundle: vi.fn(),
   agentBundleVersions: vi.fn(),
   agentBundleStatus: vi.fn(),
+  hyprlayerCliUpdateCheck: vi.fn(),
+  updateHyprlayerCli: vi.fn(),
 }));
 vi.mock("@/lib/bindings", () => ({
   commands: {
     installAgentBundleVersion: b.installAgentBundleVersion,
+    updateAgentBundle: b.updateAgentBundle,
     agentBundleVersions: b.agentBundleVersions,
     agentBundleStatus: b.agentBundleStatus,
+    hyprlayerCliUpdateCheck: b.hyprlayerCliUpdateCheck,
+    updateHyprlayerCli: b.updateHyprlayerCli,
   },
 }));
 
@@ -32,14 +38,30 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-/** Freshness probe behind the row's "checked …" note and — via `manageable` —
- *  the gate on every interactive control here. */
+/** `latestSha: null` is not an omission: a versioned CLI runs no SHA probe. */
 const FRESHNESS = {
   manageable: true,
   installedSha: "9a2a33c6fc0648e8cd7bac278365c8a9dcca220b",
-  latestSha: "9a2a33c6fc0648e8cd7bac278365c8a9dcca220b",
+  latestSha: null,
+  installedVersion: "1.6.0",
+  desiredVersion: "1.6.0",
   lastChecked: null,
   updateAvailable: false,
+};
+
+const BEHIND = {
+  ...FRESHNESS,
+  installedVersion: "1.5.9",
+  updateAvailable: true,
+};
+
+const REPORT = {
+  agents: [
+    { name: "cartographer", change: "added" as const, path: "/home/u/.claude/agents/carto.md" },
+  ],
+  settingsChanged: false,
+  skillsChanged: 0,
+  backupPath: "/home/u/.claude/hyprlayer-backup",
 };
 
 const ok = <T,>(data: T) => Promise.resolve({ status: "ok" as const, data });
@@ -64,6 +86,18 @@ const VERSIONS: AiVersions = {
     { version: "1.6.0", publishedAt: "2026-08-24T04:13:17Z", current: true, pinned: true },
     { version: "1.6.0-rc.2", publishedAt: "2026-08-24T03:17:01Z", current: false, pinned: false },
   ],
+};
+
+/** `ai status` from a CLI too old to report any version field. */
+const LEGACY_STATUS: AiStatus = {
+  agentTool: "Claude Code",
+  installed: true,
+  location: "~/.claude/",
+  agentsInstalledSha: "abc",
+  lastAgentCheck: null,
+  assetsVersion: null,
+  binaryVersion: null,
+  pinnedVersion: null,
 };
 
 const install = (over: Partial<AgentBundleInstall>): AgentBundleInstall => ({
@@ -339,15 +373,114 @@ describe("AgentBundleSection", () => {
   });
 
   // A pre-1.6.0 binary has no `ai versions` to call at all.
-  it("explains the CLI is too old instead of calling a command it lacks", async () => {
-    renderSection({
-      agentTool: "Claude Code",
-      installed: true,
-      location: "~/.claude/",
-      agentsInstalledSha: "abc",
-      lastAgentCheck: null,
-    });
-    expect(await screen.findByText(/Update the hyprlayer CLI to 1\.6\.0 or newer/i)).toBeTruthy();
+  it("prompts for a CLI upgrade instead of calling a command it lacks", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
+    renderSection(LEGACY_STATUS);
+    expect(await screen.findByText(/hyprlayer 1\.5\.9/)).toBeTruthy();
     expect(b.agentBundleVersions).not.toHaveBeenCalled();
+  });
+
+  it("offers a one-click catch-up when the bundle is behind, without opening the menu", async () => {
+    b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
+    renderSection({ ...STATUS, assetsVersion: "1.5.9", pinnedVersion: null }, BEHIND);
+    expect(await screen.findByRole("button", { name: /update to 1\.6\.0/i })).toBeTruthy();
+    expect(screen.getByText(/1\.6\.0 available/)).toBeTruthy();
+    expect(b.agentBundleVersions).not.toHaveBeenCalled();
+  });
+
+  it("catches up with a plain reinstall, which leaves the pin alone", async () => {
+    b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
+    b.updateAgentBundle.mockReturnValue(ok(REPORT));
+    renderSection({ ...STATUS, assetsVersion: "1.5.9", pinnedVersion: null }, BEHIND);
+    fireEvent.click(await screen.findByRole("button", { name: /update to 1\.6\.0/i }));
+    await waitFor(() => expect(b.updateAgentBundle).toHaveBeenCalled());
+    // Not `installAgentBundleVersion("1.6.0")`: that is the pinning command.
+    expect(b.installAgentBundleVersion).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Updated to 1\.6\.0/)).toBeTruthy();
+  });
+
+  it("names the backup when the catch-up replaced settings.json", async () => {
+    b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
+    b.updateAgentBundle.mockReturnValue(ok({ ...REPORT, settingsChanged: true }));
+    renderSection({ ...STATUS, assetsVersion: "1.5.9", pinnedVersion: null }, BEHIND);
+    fireEvent.click(await screen.findByRole("button", { name: /update to 1\.6\.0/i }));
+    expect(await screen.findByText(/settings\.json/)).toBeTruthy();
+    expect(screen.getByText(/hyprlayer-backup/)).toBeTruthy();
+  });
+
+  it("offers no catch-up when the bundle already matches the version the CLI wants", async () => {
+    b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
+    renderSection();
+    await screen.findByRole("button", { name: /agent bundle version/i });
+    expect(screen.queryByRole("button", { name: /update to/i })).toBeNull();
+    expect(screen.queryByText(/available/)).toBeNull();
+  });
+
+  it("hides the catch-up while a picked version is waiting to install", async () => {
+    b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
+    renderSection({ ...STATUS, assetsVersion: "1.5.9", pinnedVersion: null }, BEHIND);
+    await choose(/1\.6\.0-rc\.2/);
+    expect(await screen.findByRole("button", { name: /install 1\.6\.0-rc\.2/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /update to/i })).toBeNull();
+  });
+
+  it("offers no catch-up icon on a CLI that reports no versions", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: null, latest: null, hint: null }));
+    renderSection(LEGACY_STATUS, {
+      ...FRESHNESS,
+      installedVersion: null,
+      desiredVersion: null,
+      latestSha: "def",
+      updateAvailable: true,
+    });
+    await screen.findByText(/hyprlayer/i);
+    expect(screen.queryByRole("button", { name: /update to/i })).toBeNull();
+  });
+
+  // The pre-1.6.0 branch: name the version that fixes it, not an essay about
+  // what a frozen bundle is.
+  it("names the installable CLI version and offers to install it", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(
+      ok({ current: "1.5.9", latest: "1.6.2", hint: "brew upgrade hyprlayer" }),
+    );
+    renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });
+    expect(await screen.findByText(/1\.6\.2 available/)).toBeTruthy();
+    expect(screen.getByText(/hyprlayer 1\.5\.9/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^update$/i })).toBeTruthy();
+  });
+
+  it("updates the CLI through self-update, not a package manager of its own", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(
+      ok({ current: "1.5.9", latest: "1.6.2", hint: "brew upgrade hyprlayer" }),
+    );
+    b.updateHyprlayerCli.mockReturnValue(ok({ ok: true, exitCode: 0, stdout: "", stderr: "" }));
+    renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });
+    fireEvent.click(await screen.findByRole("button", { name: /^update$/i }));
+    await waitFor(() => expect(b.updateHyprlayerCli).toHaveBeenCalled());
+    expect(await screen.findByText(/hyprlayer updated/i)).toBeTruthy();
+  });
+
+  // A package manager that wants to prompt gets /dev/null on stdin and dies.
+  // The command it needs is the only thing that helps then.
+  it("hands over the manual command when the in-app update fails", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(
+      ok({ current: "1.5.9", latest: "1.6.2", hint: "brew upgrade hyprlayer" }),
+    );
+    b.updateHyprlayerCli.mockReturnValue(
+      ok({ ok: false, exitCode: 1, stdout: "", stderr: "Error: sudo: no tty present" }),
+    );
+    renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });
+    fireEvent.click(await screen.findByRole("button", { name: /^update$/i }));
+    expect(await screen.findByText(/brew upgrade hyprlayer/)).toBeTruthy();
+    expect(screen.getByText(/no tty present/)).toBeTruthy();
+  });
+
+  // An unreachable release source (AUR with no helper) answers with nothing.
+  // A dead Update button would be worse than none.
+  it("offers no button when the check cannot name a version", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
+    renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });
+    expect(await screen.findByText(/hyprlayer 1\.5\.9/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^update$/i })).toBeNull();
   });
 });

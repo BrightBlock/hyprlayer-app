@@ -53,7 +53,7 @@ import { AgentBundleSection } from "@/features/settings/AgentBundleSection";
 import { THEMES, useThemeStore } from "@/lib/theme";
 import { IS_MACOS } from "@/lib/platform";
 import { SIDE_PANEL_WIDTH } from "@/lib/uiStore";
-import { AgentIcon, AnytypeIcon, BellIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, KeyboardIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PaletteIcon, PersonIcon, PlusIcon, PuzzleIcon, SlidersIcon, TerminalIcon, XIcon } from "@/components/icons";
+import { AgentIcon, AnytypeIcon, BellIcon, CheckIcon, ClipboardIcon, GearIcon, GitBranchIcon, harnessIcon, KeyboardIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PaletteIcon, PersonIcon, PlusIcon, PuzzleIcon, SlidersIcon, TerminalIcon, XIcon } from "@/components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
   switch (kind) {
@@ -656,9 +656,11 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
   );
 }
 
-/** AI Agents card, shows current agent-tool status and lets users reconfigure
- *  via the embedded terminal without leaving Settings. */
-function AiAgentsCard() {
+/** The Hyprlayer card's AI Agents subsection: which agent tool the CLI has
+ *  configured, and (once installed) the agent-bundle row. Lives here, not in
+ *  its own card, because the CLI owns both — `ai configure`/`ai status` are
+ *  hyprlayer CLI commands, and the bundle picker below drives `ai reinstall`. */
+function AiAgentsSubsection() {
   const aiStatus = useAiStatus();
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -670,12 +672,23 @@ function AiAgentsCard() {
   };
 
   return (
-    <Card>
+    <div className="mt-3 border-t border-edge/50 pt-3 text-sm">
       <div className="flex items-center justify-between">
-        <CardTitle className="mb-0">AI Agents</CardTitle>
-        <Button onClick={() => setDialogOpen(true)}>
-          {aiStatus.data?.installed ? "Reconfigure" : "Configure"}
-        </Button>
+        <span className="text-ink-dim">AI Agents</span>
+        {/* ADR-0006's inline icon-button tier, not the h-8 chrome tier: this
+            sits inside the Hyprlayer card, beside a text-sm label. 12, not the
+            nav rail's 16 — `GearIcon` paints its full viewBox, so it needs a
+            smaller nominal size than the 74%-fill glyphs around it to land on
+            the same ink as `PersonIcon size={13}` above. */}
+        <button
+          type="button"
+          onClick={() => setDialogOpen(true)}
+          title={aiStatus.data?.installed ? "Reconfigure" : "Configure"}
+          aria-label={aiStatus.data?.installed ? "Reconfigure" : "Configure"}
+          className="-mr-1 ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+        >
+          <GearIcon size={12} />
+        </button>
       </div>
       <div className="mt-2 text-sm">
         {aiStatus.isLoading && (
@@ -720,7 +733,7 @@ function AiAgentsCard() {
           />
         </div>
       </Dialog>
-    </Card>
+    </div>
   );
 }
 
@@ -791,6 +804,7 @@ function HyprlayerConfigCard({ config }: { config: ReturnType<typeof useBootstra
       {data.config.state === "error" && (
         <ErrorNote error={{ message: data.config.message, remedy: data.config.remedy }} />
       )}
+      <AiAgentsSubsection />
     </Card>
   );
 }
@@ -1180,9 +1194,8 @@ export function Settings() {
                   Windows and Linux need the manual "Check now" card here or they
                   have no way to ask at all. */}
               {!IS_MACOS && <UpdatesCard />}
-              <AiAgentsCard />
-              <DefaultHarnessCard settings={data.settings} />
               <HyprlayerConfigCard config={data} />
+              <DefaultHarnessCard settings={data.settings} />
               <TabTitlesCard settings={data.settings} />
               <QuitCard settings={data.settings} />
               <Card>

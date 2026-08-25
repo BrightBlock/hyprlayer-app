@@ -4,6 +4,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use hyprlayer_core::branch_prefix;
+use hyprlayer_core::hyprcli::{CliUpdateCheck, HyprCli};
 use hyprlayer_core::omarchy;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::process::Exec;
@@ -415,6 +416,64 @@ pub async fn install_hyprlayer_cli(
     state.binaries.redetect().await;
     let _ = BinariesChanged.emit(&app);
     Ok(())
+}
+
+/// Whether a newer `hyprlayer` is installable, via the CLI's own
+/// `self-update --check`.
+///
+/// Every field `None` means no answer, not "up to date": the check exits
+/// non-zero when its install method's release source is unreachable. The
+/// caller shows nothing in that case.
+#[tauri::command]
+#[specta::specta]
+pub async fn hyprlayer_cli_update_check(state: State<'_, AppState>) -> CmdResult<CliUpdateCheck> {
+    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    HyprCli::new(&state.binaries)
+        .self_update_check(&cwd)
+        .await
+        .map_err(AppError::from)
+}
+
+/// What one `hyprlayer self-update` run did.
+#[derive(Debug, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CliUpdateResult {
+    pub ok: bool,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Run `hyprlayer self-update`, then re-probe the binaries.
+///
+/// A non-zero exit is data, not an `Err`: the CLI dispatches to the user's
+/// package manager, and one that wants to prompt gets `/dev/null` on stdin and
+/// dies — so the only useful thing left is the manager's own words next to the
+/// CLI's upgrade hint. `Err` stays for never having run it at all.
+///
+/// Re-detects and emits on every path including failure: a partially applied
+/// package-manager upgrade still moves the binary.
+#[tauri::command]
+#[specta::specta]
+pub async fn update_hyprlayer_cli(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<CliUpdateResult> {
+    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let output = HyprCli::new(&state.binaries)
+        .self_update(&cwd)
+        .await
+        .map_err(AppError::from)?;
+
+    state.binaries.redetect().await;
+    let _ = BinariesChanged.emit(&app);
+
+    Ok(CliUpdateResult {
+        ok: output.exit_code == Some(0),
+        exit_code: output.exit_code,
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
 }
 
 /// True when `manager --version` exits cleanly through the login shell.

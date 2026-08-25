@@ -695,42 +695,86 @@ describe("labels", () => {
 });
 
 describe("bundleChipState", () => {
+  const SHA = "4c5cf370aed5fffee3b98f741bd6d911965c9033";
+  /** A CLI 1.6.0 machine: version comparison, so no SHA probe runs. */
   const status = (over: Partial<AgentBundleStatus> = {}): AgentBundleStatus => ({
     manageable: true,
-    installedSha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
-    latestSha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+    installedSha: SHA,
+    latestSha: null,
+    installedVersion: "1.6.0",
+    desiredVersion: "1.6.0",
     lastChecked: 1_700_000_000,
     updateAvailable: false,
     ...over,
   });
+  const legacy = (over: Partial<AgentBundleStatus> = {}): AgentBundleStatus =>
+    status({ installedVersion: null, desiredVersion: null, latestSha: SHA, ...over });
   const settled = { loading: false, error: false };
 
-  it("up to date: installed matches latest", () => {
+  it("up to date: names the installed version", () => {
     expect(bundleChipState(status(), settled)).toEqual({
       kind: "upToDate",
-      sha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+      label: "1.6.0",
       lastCheckedMs: 1_700_000_000_000,
+      frozen: false,
     });
   });
 
-  it("update available: carries both SHAs", () => {
-    const s = status({ latestSha: "9a1c2f0aed5fffee3b98f741bd6d911965c9033", updateAvailable: true });
+  it("update available: names the version pair, not the SHA pair", () => {
+    // `installedSha` is still set — 1.6.0 records master's HEAD whatever it
+    // unpacked — and showing it here would name a comparison nobody made.
+    const s = status({ installedVersion: "1.5.9", updateAvailable: true });
     expect(bundleChipState(s, settled)).toEqual({
       kind: "updateAvailable",
-      fromSha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
-      toSha: "9a1c2f0aed5fffee3b98f741bd6d911965c9033",
+      from: "1.5.9",
+      to: "1.6.0",
     });
   });
 
-  it("unknown latest (a failed probe) reads as up to date, not as an error", () => {
+  it("a versioned CLI over a bundle installed before versioned assets falls back to the SHA", () => {
+    const s = status({ installedVersion: null, updateAvailable: true });
+    expect(bundleChipState(s, settled)).toEqual({
+      kind: "updateAvailable",
+      from: "4c5cf37",
+      to: "1.6.0",
+    });
+  });
+
+  it("a pin is the target, so a bundle behind its pin reads as an update", () => {
+    const s = status({ installedVersion: "1.6.0", desiredVersion: "1.5.9", updateAvailable: true });
+    expect(bundleChipState(s, settled)).toEqual({
+      kind: "updateAvailable",
+      from: "1.6.0",
+      to: "1.5.9",
+    });
+  });
+
+  it("legacy CLI: shortens both SHAs", () => {
+    const s = legacy({ latestSha: "9a1c2f0aed5fffee3b98f741bd6d911965c9033", updateAvailable: true });
+    expect(bundleChipState(s, settled)).toEqual({
+      kind: "updateAvailable",
+      from: "4c5cf37",
+      to: "9a1c2f0",
+    });
+  });
+
+  it("legacy CLI, unknown latest (a failed probe) reads as up to date, not as an error", () => {
     // Not knowing whether a newer bundle exists is not the same as being
     // unable to look: the CLI answered, the network did not.
-    const s = status({ latestSha: null, updateAvailable: false });
+    const s = legacy({ latestSha: null, updateAvailable: false });
     expect(bundleChipState(s, settled)).toEqual({
       kind: "upToDate",
-      sha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+      label: "4c5cf37",
       lastCheckedMs: 1_700_000_000_000,
+      frozen: true,
     });
+  });
+
+  // Current bytes from a dead-end source: a pre-1.6.0 CLI tracks the frozen
+  // `claude/` tree, which receives no new skills however fresh its SHA is.
+  it("marks a legacy CLI's up-to-date bundle as frozen", () => {
+    expect(bundleChipState(legacy(), settled)).toMatchObject({ kind: "upToDate", frozen: true });
+    expect(bundleChipState(status(), settled)).toMatchObject({ frozen: false });
   });
 
   it("a failed query is unknown, NOT a green up-to-date claim", () => {
@@ -752,13 +796,18 @@ describe("bundleChipState", () => {
     // The CLI prints `{}` for an unconfigured machine and installs into a
     // different tree entirely for Copilot/OpenCode, so `manageable: false`
     // must never render the warn badge or the download trigger.
-    const s = status({ manageable: false, installedSha: null, latestSha: null, updateAvailable: false });
+    const s = status({ manageable: false, installedSha: null, updateAvailable: false });
     expect(bundleChipState(s, settled).kind).toBe("unknown");
   });
 
-  it("never installed but manageable: no SHA, no last-checked time, up to date", () => {
-    const s = status({ installedSha: null, latestSha: null, lastChecked: null, updateAvailable: false });
-    expect(bundleChipState(s, settled)).toEqual({ kind: "upToDate", sha: null, lastCheckedMs: null });
+  it("never installed but manageable: no identity, no last-checked time, up to date", () => {
+    const s = legacy({ installedSha: null, latestSha: null, lastChecked: null });
+    expect(bundleChipState(s, settled)).toEqual({
+      kind: "upToDate",
+      label: null,
+      lastCheckedMs: null,
+      frozen: true,
+    });
   });
 
   it("converts lastChecked from Unix seconds to the epoch-ms formatRelativeTime expects", () => {

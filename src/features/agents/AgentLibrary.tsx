@@ -444,23 +444,24 @@ export function AgentLibrary({
   });
 
   // `updateAgentBundle` takes no arguments of its own, but the report and
-  // failure dialogs both need the SHA pair as it stood the moment the update
-  // was triggered, `agentBundle.data` has already moved on to the new value
-  // by the time a success/error callback runs (the query invalidates right
-  // alongside). Carrying it through as the mutation's variables, the same
-  // shape `moveToFolder` reads its `folder` from, sidesteps a stale closure.
+  // failure dialogs both need the identity pair as it stood the moment the
+  // update was triggered, `agentBundle.data` has already moved on to the new
+  // value by the time a success/error callback runs (the query invalidates
+  // right alongside). Carrying it through as the mutation's variables, the
+  // same shape `moveToFolder` reads its `folder` from, sidesteps a stale
+  // closure.
   const updateBundle = useMutation({
-    mutationFn: (_vars: { fromSha: string | null; toSha: string | null }) =>
+    mutationFn: (_vars: { from: string | null; to: string | null }) =>
       unwrap(commands.updateAgentBundle()),
-    onSuccess: (result, { fromSha, toSha }) => {
+    onSuccess: (result, { from, to }) => {
       invalidateAgentBundle();
-      setBundleReport({ ...result, fromSha, toSha });
+      setBundleReport({ ...result, from, to });
     },
     // The shared invalidator runs on this path too — see its doc for why a
     // failed update still invalidates.
-    onError: (e, { fromSha }) => {
+    onError: (e, { from }) => {
       invalidateAgentBundle();
-      setBundleFailure({ message: errorMessage(e), stillOnSha: fromSha });
+      setBundleFailure({ message: errorMessage(e), stillOn: from });
     },
   });
 
@@ -470,17 +471,17 @@ export function AgentLibrary({
   });
 
   // One definition behind both the chip's trigger and the failure dialog's
-  // "Try again". The SHA pair is bookkeeping for the report, NOT a
+  // "Try again". The identity pair is bookkeeping for the report, NOT a
   // precondition: the chip only ever offers the trigger from
   // `updateAvailable`, but a retry runs after `onError` invalidated the
   // freshness query, which may since have failed for the same reason the
-  // update did. Refusing to fire without a known SHA pair would make "Try
-  // again" a silent no-op exactly when the user needs it.
+  // update did. Refusing to fire without a known pair would make "Try again"
+  // a silent no-op exactly when the user needs it.
   const startUpdate = () => {
     updateBundle.mutate(
       bundleChip.kind === "updateAvailable"
-        ? { fromSha: bundleChip.fromSha, toSha: bundleChip.toSha }
-        : { fromSha: agentBundle.data?.installedSha ?? null, toSha: null },
+        ? { from: bundleChip.from, to: bundleChip.to }
+        : { from: bundleChip.kind === "upToDate" ? bundleChip.label : null, to: null },
     );
   };
 

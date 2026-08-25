@@ -1,6 +1,6 @@
 /**
- * Agent-bundle version selection: what the AI Agents card says about the pin,
- * and what its picker is allowed to offer.
+ * Agent-bundle version selection: what the Hyprlayer card's AI Agents
+ * subsection says about the pin, and what its picker is allowed to offer.
  *
  * Pure, so the one rule that matters here is testable without a webview: a
  * picker option may only ever come from `ai versions --json`'s `versions`

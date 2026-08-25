@@ -144,11 +144,19 @@ pub fn reinstall_source(stdout: &str) -> BundleSource {
         .unwrap_or(BundleSource::Unknown)
 }
 
-/// Whether `installed` is behind `latest`. A missing installed SHA is stale:
-/// the CLI writes `None` when ref resolution failed during an install, which
-/// means we genuinely do not know what is on disk.
-pub fn is_stale(installed: Option<&str>, latest: &str) -> bool {
-    installed != Some(latest)
+/// Whether `installed` is behind `wanted`. A missing installed identity is
+/// stale: the CLI writes `None` when ref resolution failed during an install,
+/// which means we genuinely do not know what is on disk.
+pub fn is_stale(installed: Option<&str>, wanted: &str) -> bool {
+    installed != Some(wanted)
+}
+
+/// What a plain `ai reinstall` would install; `None` on a pre-1.6.0 binary.
+/// Replaced the SHA probe there, which 1.6.0 broke: it records
+/// `fetch_master_sha()` whatever it unpacked, so the SHA answers "has master
+/// moved", not "is my bundle behind".
+pub fn desired_version<'a>(pinned: Option<&'a str>, binary: Option<&'a str>) -> Option<&'a str> {
+    pinned.or(binary)
 }
 
 /// One agent the bundle changed, as observed by diffing the library either
@@ -539,6 +547,22 @@ mod tests {
         assert!(!is_stale(Some("abc"), "abc"));
         assert!(is_stale(Some("abc"), "def"));
         assert!(is_stale(Some(""), "abc"));
+    }
+
+    #[test]
+    fn desired_version_prefers_the_pin_over_the_binary() {
+        assert_eq!(desired_version(Some("1.5.9"), Some("1.6.0")), Some("1.5.9"));
+        assert_eq!(desired_version(None, Some("1.6.0")), Some("1.6.0"));
+        assert_eq!(desired_version(Some("1.5.9"), None), Some("1.5.9"));
+        assert_eq!(desired_version(None, None), None);
+    }
+
+    #[test]
+    fn an_unversioned_bundle_under_a_versioned_cli_is_stale() {
+        let desired = desired_version(None, Some("1.6.0")).unwrap();
+        assert!(is_stale(None, desired));
+        assert!(is_stale(Some("1.5.9"), desired));
+        assert!(!is_stale(Some("1.6.0"), desired));
     }
 
     #[test]

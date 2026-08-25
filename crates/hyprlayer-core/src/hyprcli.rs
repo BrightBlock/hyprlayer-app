@@ -151,6 +151,73 @@ pub struct AiVersions {
     pub versions: Vec<AiVersionEntry>,
 }
 
+/// What `hyprlayer self-update --check` reported.
+///
+/// `latest` is `Some` only when the CLI itself judged a newer version
+/// installable, so it doubles as "an update is available". Everything `None`
+/// means no answer — the check exited non-zero (an install method whose
+/// source is unreachable, which is what AUR does with no helper installed) or
+/// its wording moved.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct CliUpdateCheck {
+    pub current: Option<String>,
+    pub latest: Option<String>,
+    /// The CLI's own upgrade command for the detected install method, e.g.
+    /// `brew upgrade hyprlayer`. Shown verbatim when the in-app update fails,
+    /// which is the only way a user on an interactive package manager gets
+    /// the command they actually need.
+    pub hint: Option<String>,
+}
+
+/// Parse `hyprlayer self-update --check`'s stdout.
+///
+/// Both lines are verbatim from `commands/self_update.rs` and identical in
+/// 1.5.9 (4c5cf37) and 1.6.0 (9a2a33c) — one parse covers every CLI the app
+/// can meet:
+///
+/// ```text
+/// Update available: 1.5.9 → 1.6.2 (brew upgrade hyprlayer)
+/// hyprlayer is up to date (1.6.0).
+/// ```
+///
+/// The separator is U+2192, not `->`. Anything unrecognized returns the empty
+/// check rather than a guess: this drives an Update button, and inventing a
+/// version to offer would be worse than offering nothing.
+pub fn parse_self_update_check(stdout: &str) -> CliUpdateCheck {
+    for line in stdout.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix("Update available: ") {
+            // `rsplit_once` on the LAST " (": the hint is a shell command and
+            // a version never contains a parenthesis, so the tail is the hint
+            // even if a future hint gains one of its own.
+            let Some((versions, hint)) = rest.rsplit_once(" (") else {
+                continue;
+            };
+            let Some(hint) = hint.strip_suffix(')') else {
+                continue;
+            };
+            let Some((current, latest)) = versions.split_once(" \u{2192} ") else {
+                continue;
+            };
+            return CliUpdateCheck {
+                current: Some(current.trim().to_string()),
+                latest: Some(latest.trim().to_string()),
+                hint: Some(hint.trim().to_string()),
+            };
+        }
+        if let Some(rest) = line.strip_prefix("hyprlayer is up to date (") {
+            if let Some(current) = rest.strip_suffix(").") {
+                return CliUpdateCheck {
+                    current: Some(current.trim().to_string()),
+                    ..Default::default()
+                };
+            }
+        }
+    }
+    CliUpdateCheck::default()
+}
+
 /// Which bundle `hyprlayer ai reinstall` should install.
 ///
 /// An enum rather than two optional arguments because `--version` and
@@ -361,11 +428,76 @@ impl<'a> HyprCli<'a> {
             .run_unchecked()
             .await
     }
+
+    /// `hyprlayer self-update --check`. Network-bound, and exits non-zero when
+    /// the install method's source cannot be reached — so it runs unchecked
+    /// and a failure reads as "no answer" rather than an error the user has to
+    /// dismiss.
+    pub async fn self_update_check(&self, cwd: &Path) -> Result<CliUpdateCheck> {
+        let output = self
+            .command(cwd, &["self-update", "--check"], Duration::from_secs(30))
+            .await?
+            .run_unchecked()
+            .await?;
+        if output.exit_code != Some(0) {
+            return Ok(CliUpdateCheck::default());
+        }
+        Ok(parse_self_update_check(&output.stdout))
+    }
+
+    /// `hyprlayer self-update`, which dispatches to the detected package
+    /// manager.
+    ///
+    /// `run_unchecked`, because a failure here is the interesting case: the
+    /// CLI shells `brew`/`winget`/`scoop`/an AUR helper with inherited stdio,
+    /// and `Exec` gives the child `/dev/null` on stdin — so a manager that
+    /// wants to prompt gets EOF and dies quickly instead of hanging out the
+    /// timeout. The user then needs the manager's own words and the hint
+    /// command, which only survive as data.
+    pub async fn self_update(&self, cwd: &Path) -> Result<ExecOutput> {
+        self.command(cwd, &["self-update"], Duration::from_secs(300))
+            .await?
+            .run_unchecked()
+            .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Verbatim from 1.6.0 (9a2a33c); 1.5.9 prints the same two lines.
+    #[test]
+    fn self_update_check_reads_an_available_update() {
+        let got = parse_self_update_check(
+            "Update available: 1.5.9 \u{2192} 1.6.2 (brew upgrade hyprlayer)\n",
+        );
+        assert_eq!(got.current.as_deref(), Some("1.5.9"));
+        assert_eq!(got.latest.as_deref(), Some("1.6.2"));
+        assert_eq!(got.hint.as_deref(), Some("brew upgrade hyprlayer"));
+    }
+
+    #[test]
+    fn self_update_check_reads_up_to_date_as_no_update() {
+        let got = parse_self_update_check("hyprlayer is up to date (1.6.0).\n");
+        assert_eq!(got.current.as_deref(), Some("1.6.0"));
+        assert_eq!(got.latest, None);
+    }
+
+    #[test]
+    fn self_update_check_offers_nothing_it_cannot_read() {
+        // The AUR failure path writes to stderr and exits 1, so stdout is
+        // empty; a reworded line must land here too, not on a guess.
+        assert_eq!(parse_self_update_check(""), CliUpdateCheck::default());
+        assert_eq!(
+            parse_self_update_check("Update available: 1.5.9 -> 1.6.2 (brew upgrade hyprlayer)"),
+            CliUpdateCheck::default()
+        );
+        assert_eq!(
+            parse_self_update_check("Update available: 1.5.9 \u{2192} 1.6.2"),
+            CliUpdateCheck::default()
+        );
+    }
 
     /// Real `hyprlayer ai status --json` from 1.6.0 (9a2a33c), verbatim.
     const STATUS_1_6_0: &str = r#"{

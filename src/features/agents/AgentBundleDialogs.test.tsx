@@ -42,8 +42,8 @@ const BACKUP = "/home/u/.claude/hyprlayer-backup";
 /** A report with the backend's own fields defaulted, so each case names only
  *  what it is about. */
 const report = (over: Partial<BundleReport>): BundleReport => ({
-  fromSha: "abc",
-  toSha: "def",
+  from: "abc",
+  to: "def",
   agents: [],
   settingsChanged: false,
   skillsChanged: 0,
@@ -61,8 +61,8 @@ describe("AgentUpdateReport", () => {
     render(
       <AgentUpdateReport
         report={report({
-          fromSha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
-          toSha: "9a1c2f0aed5fffee3b98f741bd6d911965c9033",
+          from: "1.5.9",
+          to: "1.6.0",
           agents: [
             change({ name: "cartographer", change: "added" }),
             change({
@@ -82,7 +82,7 @@ describe("AgentUpdateReport", () => {
     expect(screen.getByText("foreman")).toBeTruthy();
     expect(screen.getByText("Updated")).toBeTruthy();
     // The SHA pair on the header line.
-    expect(screen.getByText("4c5cf37 → 9a1c2f0")).toBeTruthy();
+    expect(screen.getByText("1.5.9 → 1.6.0")).toBeTruthy();
   });
 
   // The backend cannot tell a reverted local edit apart from a genuine
@@ -139,12 +139,12 @@ describe("AgentUpdateReport", () => {
   });
 
   // A retry fired after the freshness query itself stopped answering has no
-  // SHA pair to report. Printing a sentinel where a SHA belongs is worse than
-  // printing nothing.
-  it("omits the SHA line entirely when the landed SHA is unknown", () => {
+  // identity pair to report. Printing a sentinel where a version belongs is
+  // worse than printing nothing.
+  it("omits the identity line entirely when what landed is unknown", () => {
     render(
       <AgentUpdateReport
-        report={report({ fromSha: null, toSha: null, settingsChanged: true })}
+        report={report({ from: null, to: null, settingsChanged: true })}
         open={true}
         onClose={() => {}}
       />,
@@ -154,7 +154,7 @@ describe("AgentUpdateReport", () => {
   });
 
   it("reports an update that changed nothing rather than an empty list", () => {
-    render(<AgentUpdateReport report={report({ toSha: "abc" })} open={true} onClose={() => {}} />);
+    render(<AgentUpdateReport report={report({ to: "abc" })} open={true} onClose={() => {}} />);
     expect(screen.getByText(/already matched the bundle/)).toBeTruthy();
   });
 
@@ -178,7 +178,7 @@ describe("AgentUpdateReport", () => {
 describe("AgentUpdateFailed", () => {
   const failure: BundleFailure = {
     message: "network error: connection reset",
-    stillOnSha: "4c5cf370aed5fffee3b98f741bd6d911965c9033",
+    stillOn: "1.5.9",
   };
 
   it("renders nothing when there is no failure yet", () => {
@@ -188,11 +188,11 @@ describe("AgentUpdateFailed", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("leads with the SHA it is most likely still on, and keeps the CLI's error folded away", () => {
+  it("leads with what it is most likely still on, and keeps the CLI's error folded away", () => {
     render(
       <AgentUpdateFailed failure={failure} open={true} onClose={() => {}} onRetry={() => {}} />,
     );
-    expect(screen.getByText("4c5cf37")).toBeTruthy();
+    expect(screen.getByText("1.5.9")).toBeTruthy();
     // Present for support, but folded away rather than the headline.
     expect(screen.getByText("Technical details")).toBeTruthy();
     const details = screen.getByText("network error: connection reset").closest("details");

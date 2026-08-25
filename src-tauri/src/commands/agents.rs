@@ -212,8 +212,14 @@ pub struct AgentBundleStatus {
     pub installed_sha: Option<String>,
     /// `master` HEAD as resolved just now. `None` when the probe failed —
     /// offline, or GitHub unreachable — which renders as "up to date" rather
-    /// than as an error: not knowing is not the same as being behind.
+    /// than as an error: not knowing is not the same as being behind. Also
+    /// `None` with no probe run at all when `desired_version` is `Some`.
     pub latest_sha: Option<String>,
+    /// `assetsVersion`.
+    pub installed_version: Option<String>,
+    /// `agent_bundle::desired_version`, and the label the update affordances
+    /// name. `None` on a pre-1.6.0 CLI.
+    pub desired_version: Option<String>,
     /// Unix seconds of the CLI's last auto-check — when the bundle was last
     /// *looked at*, not when it was last installed. `record_install` clears
     /// it, so it is `None` immediately after an update.
@@ -221,13 +227,9 @@ pub struct AgentBundleStatus {
     pub update_available: bool,
 }
 
-/// `hyprlayer ai status --json` for the installed SHA, plus a direct probe of
-/// GitHub's ref advertisement for the latest one.
-///
-/// The two are awaited in order, not joined: the CLI call is local and runs
-/// in a millisecond or two against the probe's ~150ms round trip, so joining
-/// buys almost nothing and would cost the short-circuit that keeps a machine
-/// with no `hyprlayer` binary from reaching for the network at all.
+/// `hyprlayer ai status --json`, and — only for a CLI too old to answer in
+/// versions — a probe of GitHub's ref advertisement. See
+/// [`agent_bundle::desired_version`] for why the SHA branch is the legacy one.
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_bundle_status(state: State<'_, AppState>) -> CmdResult<AgentBundleStatus> {
@@ -238,15 +240,37 @@ pub async fn agent_bundle_status(state: State<'_, AppState>) -> CmdResult<AgentB
         .map_err(AppError::from)?;
     let manageable =
         status.installed && status.agent_tool.as_deref() == Some(MANAGEABLE_AGENT_TOOL);
+    let desired = agent_bundle::desired_version(
+        status.pinned_version.as_deref(),
+        status.binary_version.as_deref(),
+    )
+    .map(str::to_string);
+
     if !manageable {
         return Ok(AgentBundleStatus {
             manageable,
             installed_sha: status.agents_installed_sha,
             latest_sha: None,
+            installed_version: status.assets_version,
+            desired_version: desired,
             last_checked: status.last_agent_check,
             update_available: false,
         });
     }
+
+    if let Some(desired) = desired {
+        let update_available = agent_bundle::is_stale(status.assets_version.as_deref(), &desired);
+        return Ok(AgentBundleStatus {
+            manageable,
+            installed_sha: status.agents_installed_sha,
+            latest_sha: None,
+            installed_version: status.assets_version,
+            desired_version: Some(desired),
+            last_checked: status.last_agent_check,
+            update_available,
+        });
+    }
+
     let latest_sha = fetch_latest_bundle_sha().await;
     let update_available = latest_sha.as_deref().is_some_and(|latest| {
         agent_bundle::is_stale(status.agents_installed_sha.as_deref(), latest)
@@ -255,6 +279,8 @@ pub async fn agent_bundle_status(state: State<'_, AppState>) -> CmdResult<AgentB
         manageable,
         installed_sha: status.agents_installed_sha,
         latest_sha,
+        installed_version: status.assets_version,
+        desired_version: None,
         last_checked: status.last_agent_check,
         update_available,
     })

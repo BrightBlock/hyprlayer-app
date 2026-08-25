@@ -1,13 +1,16 @@
 /**
- * The AI Agents card's agent-bundle section: which bundle is installed, whether
+ * The Hyprlayer card's AI Agents subsection: which bundle is installed, whether
  * it is pinned, when it was last checked, and a picker to change it.
  *
  * One row, not two. The bundle has a single identity, and since CLI 1.6.0 that
  * identity is a version — so the version stands where the install SHA used to,
- * and is itself the control: click it to pick another. The SHA is still what
- * the freshness probe compares, so it stays the row's subject for a CLI that
- * reports no version at all, for a bundle installed before versioned assets
- * existed, and for a tool this app cannot manage.
+ * and is itself the control: click it to pick another. The install SHA stays
+ * the row's subject where no version exists to put there: a pre-1.6.0 CLI, a
+ * bundle installed before versioned assets existed, and a tool this app
+ * cannot manage.
+ *
+ * Picking from the menu PINS; the one-click icon beside it is a plain
+ * `ai reinstall` that catches up and leaves the pin alone.
  *
  * Renders only inside the card's `installed` branch — an unconfigured machine
  * has no bundle to describe. The derivations it switches on are in
@@ -26,10 +29,21 @@ import {
   type DropdownOption,
 } from "@/components/ui";
 import { DownloadIcon } from "@/components/icons";
-import { commands, type AgentBundleInstall, type AiStatus } from "@/lib/bindings";
+import {
+  commands,
+  type AgentBundleInstall,
+  type AgentBundleReport,
+  type AiStatus,
+} from "@/lib/bindings";
 import { formatRelativeTime, shortSha } from "@/lib/format";
 import { unwrap } from "@/lib/ipc";
-import { invalidateAgentBundle, useAgentBundle, useAgentBundleVersions } from "@/lib/queries";
+import {
+  invalidateAgentBundle,
+  invalidateCliBundleState,
+  useAgentBundle,
+  useAgentBundleVersions,
+  useCliUpdateCheck,
+} from "@/lib/queries";
 
 import { bundlePinState, selectedVersion, versionOptions } from "./bundleVersions";
 
@@ -139,6 +153,135 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
   );
 }
 
+/** ADR-0006's inline icon tier. Install-and-pin or catch up, separated only by
+ *  `label` — so that is the whole accessible name. */
+function RowInstallButton({
+  label,
+  busy,
+  onClick,
+}: {
+  label: string;
+  busy: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      title={label}
+      aria-label={label}
+      className="flex h-6 w-6 items-center justify-center rounded text-accent enabled:hover:bg-accent/15 disabled:cursor-default"
+    >
+      {busy ? <Spinner size={12} /> : <DownloadIcon size={14} />}
+    </button>
+  );
+}
+
+function listOf(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** No per-agent restore here (the Agents view owns that), so when
+ *  `settings.json` was replaced the backup path is the only way back. */
+function UpdateOutcome({ report, target }: { report: AgentBundleReport; target: string }) {
+  const changed = listOf(
+    [
+      report.agents.length > 0
+        ? `${report.agents.length} agent file${report.agents.length === 1 ? "" : "s"}`
+        : null,
+      report.settingsChanged ? "settings.json" : null,
+      report.skillsChanged > 0
+        ? `${report.skillsChanged} skill file${report.skillsChanged === 1 ? "" : "s"}`
+        : null,
+    ].filter((part): part is string => part !== null),
+  );
+  if (changed === "") {
+    return (
+      <p className="mt-2 text-sm text-ok">Now on {target} — the files on disk already matched it.</p>
+    );
+  }
+  return (
+    <div
+      className={`selectable mt-2 rounded-md border p-3 text-sm ${
+        report.settingsChanged ? "border-warn/30 bg-warn/10" : "border-edge bg-panel-2"
+      }`}
+    >
+      <p className={report.settingsChanged ? "text-warn" : "text-ok"}>
+        Updated to {target} — replaced {changed}.
+      </p>
+      <p className="mt-1 text-ink-dim">
+        Your previous copies are at{" "}
+        <span className="font-mono text-xs">{report.backupPath}</span> — until the next install,
+        which replaces that copy.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The pre-1.6.0 branch: name the version that fixes it, and offer to install
+ * it. `self-update` dispatches to the user's package manager with no stdin, so
+ * one that wants to prompt dies instead of hanging — and the CLI's own upgrade
+ * hint is then the command they need, which is why a failure shows it.
+ */
+function CliUpdateNote() {
+  const check = useCliUpdateCheck();
+  const update = useMutation({
+    mutationFn: () => unwrap(commands.updateHyprlayerCli()),
+    onSettled: () => invalidateCliBundleState(),
+  });
+  const { current, latest, hint } = check.data ?? {};
+  const result = update.data ?? null;
+
+  return (
+    <div className="mt-2 text-ink-dim">
+      <div className="flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
+        <span>hyprlayer {current ?? "pre-1.6.0"}</span>
+        {latest ? (
+          <>
+            <span className="text-warn">· {latest} available</span>
+            <Button
+              variant="primary"
+              busy={update.isPending}
+              onClick={() => update.mutate()}
+            >
+              Update
+            </Button>
+          </>
+        ) : (
+          !update.isSuccess && <span>· update to 1.6.0 or newer for current skills</span>
+        )}
+      </div>
+
+      {!update.isPending && update.error != null && (
+        <div className="mt-2">
+          <ErrorNote error={update.error} />
+        </div>
+      )}
+      {!update.isPending && result && !result.ok && (
+        <div className="selectable mt-2 rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
+          <p className="text-bad">
+            The update failed{result.exitCode != null && <> (exit {result.exitCode})</>}.
+            {hint && (
+              <>
+                {" "}
+                Run <span className="font-mono text-xs">{hint}</span> in a terminal — your package
+                manager may need to prompt.
+              </>
+            )}
+          </p>
+          <CliOutput text={result.stderr || result.stdout} />
+        </div>
+      )}
+      {!update.isPending && result?.ok && (
+        <p className="mt-2 text-sm text-ok">hyprlayer updated. Re-open Settings to pick it up.</p>
+      )}
+    </div>
+  );
+}
+
 export function AgentBundleSection({ status }: { status: AiStatus | undefined }) {
   const pin = bundlePinState(status);
   const bundle = useAgentBundle({ enabled: status?.installed === true });
@@ -172,6 +315,14 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
     onError: () => invalidateAgentBundle(),
   });
 
+  // Plain `ai reinstall`, whose `apply_pin` only fires on an explicit flag
+  // (9a2a33c): same destination as `install` when unpinned, without the pin.
+  const update = useMutation({
+    mutationFn: (_target: string) => unwrap(commands.updateAgentBundle()),
+    onSuccess: () => invalidateAgentBundle(),
+    onError: () => invalidateAgentBundle(),
+  });
+
   const listOptions = versionOptions(versions.data);
   // The menu needs a body before the lazily-fetched list arrives (and when it
   // cannot arrive): one disabled row saying why, never a selectable invention
@@ -201,9 +352,11 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
   const current = selectedVersion(status);
   const value = choice ?? current;
   const pending = choice !== null && choice !== current;
-  const busy = install.isPending;
+  const busy = install.isPending || update.isPending;
   const lastChecked = bundle.data?.lastChecked;
   const outcome = install.data ?? null;
+  const behind =
+    !pending && bundle.data?.updateAvailable === true ? (bundle.data.desiredVersion ?? null) : null;
 
   return (
     <div className="mt-3 border-t border-edge/50 pt-3 text-sm">
@@ -225,6 +378,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
                   // A fresh pick supersedes the previous run's report and
                   // error — leaving them up reads as describing this pick.
                   install.reset();
+                  update.reset();
                 }}
                 onOpenChange={(open) => open && setListWanted(true)}
                 disabled={busy}
@@ -242,24 +396,26 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
                 }
                 className="w-auto border-transparent bg-transparent px-1 py-0 text-xs text-ink hover:border-edge hover:bg-panel-2"
               />
-              {/* The install affordance rides the row instead of standing as a
-                  labeled button below it: it only exists after an explicit
-                  pick, and the picked version is already the trigger text two
-                  characters to its left, so a label would repeat it. ADR-0006
-                  inline icon tier (h-6 w-6 rounded); accent-tinted because it
-                  commits a ~/.claude rewrite — a semantic tint, outside the
-                  neutral hover split by design. */}
               {pending && (
-                <button
-                  type="button"
+                <RowInstallButton
+                  label={`Install ${value}`}
+                  busy={busy}
                   onClick={() => install.mutate(value)}
-                  disabled={busy}
-                  title={`Install ${value}`}
-                  aria-label={`Install ${value}`}
-                  className="flex h-6 w-6 items-center justify-center rounded text-accent enabled:hover:bg-accent/15 disabled:cursor-default"
-                >
-                  {busy ? <Spinner size={12} /> : <DownloadIcon size={14} />}
-                </button>
+                />
+              )}
+              {behind && (
+                <>
+                  {" · "}
+                  <span className="text-warn">{behind} available</span>
+                  <RowInstallButton
+                    label={`Update to ${behind}`}
+                    busy={busy}
+                    onClick={() => {
+                      install.reset();
+                      update.mutate(behind);
+                    }}
+                  />
+                </>
               )}
               {/* Only the drift is worth words. That a version is pinned is
                   already what the row shows — picking one pins it — and the
@@ -293,16 +449,18 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
       </div>
 
       {/* Only for a manageable tool: on any other, the CLI being 1.6.0 would
-          not make the picker appear, so the upgrade hint would be a lie. */}
-      {manageable && pin.kind === "unavailable" && (
-        <p className="mt-2 text-ink-dim">
-          Update the hyprlayer CLI to 1.6.0 or newer to pin the bundle to a specific version.
-        </p>
-      )}
+          not make the picker appear, so the upgrade prompt would be a lie. */}
+      {manageable && pin.kind === "unavailable" && <CliUpdateNote />}
 
       {versioned && !pending && pin.kind === "pinned" && (
         <div className="mt-2">
-          <Button busy={busy} onClick={() => install.mutate(null)}>
+          <Button
+            busy={busy}
+            onClick={() => {
+              update.reset();
+              install.mutate(null);
+            }}
+          >
             Clear pin
           </Button>
         </div>
@@ -337,6 +495,14 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
       )}
       {!busy && outcome && (
         <InstallOutcome result={outcome} unpinned={install.variables === null} />
+      )}
+      {!busy && update.error != null && (
+        <div className="mt-2">
+          <ErrorNote error={update.error} />
+        </div>
+      )}
+      {!busy && update.data && update.variables != null && (
+        <UpdateOutcome report={update.data} target={update.variables} />
       )}
     </div>
   );

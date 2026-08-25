@@ -2,6 +2,7 @@ import { events } from "./bindings";
 import { queryClient } from "./queryClient";
 import { refreshOmarchyTheme } from "./theme";
 import {
+  invalidateCliBundleState,
   invalidateScriptOutput,
   invalidateScriptRuntime,
   invalidateWorkstreamLists,
@@ -43,6 +44,9 @@ export function attachEventListeners(): () => void {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["health"] });
       void queryClient.invalidateQueries({ queryKey: ["project"] });
+      // `aiStatus` is `staleTime: Infinity`: without this a redetect after a
+      // CLI upgrade left the AI Agents card on the old binary until restart.
+      invalidateCliBundleState();
     }),
     // Omarchy's theme changed on disk. The event carries no payload; refetch
     // the resolved palette, the same shape as configChanged above (:33-37).

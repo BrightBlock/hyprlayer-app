@@ -20,6 +20,7 @@ import type {
   AgentSkill,
 } from "@/lib/bindings";
 import { MODELS } from "@/lib/domain/models";
+import { shortSha } from "@/lib/format";
 import { treeIndent } from "@/lib/layout";
 import {
   AGENT_PHASE,
@@ -569,22 +570,22 @@ export function initialsOf(name: string): string {
 }
 
 /** Result of one `updateAgentBundle` run, the data behind `AgentUpdateReport`.
- *  The SHA pair rides alongside the backend's report because the command
- *  cannot report it: `ai reinstall` prints no SHA, so the pair is the one the
+ *  The identity pair rides alongside the backend's report because the command
+ *  cannot report it: `ai reinstall` prints neither, so the pair is the one the
  *  chip was showing when the user triggered the update. Either half may be
  *  `null` — a retry fired from the failure dialog can run after the freshness
  *  query itself has stopped answering — and the dialog then says nothing
- *  about SHAs rather than printing a sentinel where one belongs. */
+ *  about identities rather than printing a sentinel where one belongs. */
 export type BundleReport = AgentBundleReport & {
-  fromSha: string | null;
-  toSha: string | null;
+  from: string | null;
+  to: string | null;
 };
 
 /** A failed `updateAgentBundle` run, the data behind `AgentUpdateFailed`. */
 export type BundleFailure = {
   message: string;
-  /** The SHA the library is still on, unchanged, so the dialog can say so. */
-  stillOnSha: string | null;
+  /** What the library is still on, unchanged, so the dialog can say so. */
+  stillOn: string | null;
 };
 
 /** The header chip's states. "Updating" is a mutation in flight, not a shape
@@ -593,8 +594,16 @@ export type BundleChipState =
   /** No verdict to give: still checking, the query failed, or the CLI reports
    *  a tool whose bundle this app does not manage. */
   | { kind: "unknown"; detail: string }
-  | { kind: "upToDate"; sha: string | null; lastCheckedMs: number | null }
-  | { kind: "updateAvailable"; fromSha: string | null; toSha: string };
+  | {
+      kind: "upToDate";
+      label: string | null;
+      lastCheckedMs: number | null;
+      /** The bundle is current, but the CLI that installs it predates
+       *  versioned assets — so it tracks the frozen pre-1.6.0 `claude/` tree,
+       *  which receives no new skills. Current bytes, dead-end source. */
+      frozen: boolean;
+    }
+  | { kind: "updateAvailable"; from: string | null; to: string };
 
 /**
  * Maps the bundle-freshness probe to the chip's state, so the component only
@@ -625,11 +634,13 @@ export function bundleChipState(
     return { kind: "unknown", detail: "No Claude Code agent bundle is configured." };
   }
   const lastCheckedMs = status.lastChecked != null ? status.lastChecked * 1000 : null;
-  // Narrowed on `latestSha` rather than on `updateAvailable`, so `toSha` is a
-  // `string` by control flow and needs no unreachable fallback sentinel.
-  const latest = status.latestSha;
-  if (!status.updateAvailable || latest === null) {
-    return { kind: "upToDate", sha: status.installedSha, lastCheckedMs };
+  const from =
+    status.installedVersion ?? (status.installedSha ? shortSha(status.installedSha) : null);
+  // Narrowed to a `string` rather than trusting `updateAvailable`, so `to`
+  // needs no unreachable fallback sentinel below.
+  const to = status.desiredVersion ?? (status.latestSha ? shortSha(status.latestSha) : null);
+  if (!status.updateAvailable || to === null) {
+    return { kind: "upToDate", label: from, lastCheckedMs, frozen: status.desiredVersion === null };
   }
-  return { kind: "updateAvailable", fromSha: status.installedSha, toSha: latest };
+  return { kind: "updateAvailable", from, to };
 }

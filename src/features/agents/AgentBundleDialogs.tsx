@@ -2,8 +2,8 @@
  * The two dialogs an `updateAgentBundle` run can end in: a report naming
  * what changed, with a way back for anything of the user's own the update
  * replaced, or a failure carrying the CLI's own error and a path to debug
- * it. `AgentLibrary` owns the mutation and the SHA bookkeeping; these render
- * the result.
+ * it. `AgentLibrary` owns the mutation and the identity bookkeeping; these
+ * render the result.
  */
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -12,7 +12,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Badge, type BadgeTone, Button, CliOutput, Dialog } from "@/components/ui";
 import { commands, type AgentBundleChange } from "@/lib/bindings";
 import { errorMessage, unwrap } from "@/lib/ipc";
-import { shortSha } from "@/lib/format";
 import { useToast } from "@/lib/toast";
 
 import type { BundleFailure, BundleReport } from "./agents";
@@ -70,10 +69,10 @@ export function AgentUpdateReport({
   return (
     <Dialog open={open} onClose={onClose} title="Agents updated" size="lg">
       <div className="flex flex-col gap-3.5">
-        {report.toSha !== null && (
+        {report.to !== null && (
           <p className="font-mono text-xs text-ink-dim">
-            {report.fromSha ? `${shortSha(report.fromSha)} → ` : ""}
-            {shortSha(report.toSha)}
+            {report.from ? `${report.from} → ` : ""}
+            {report.to}
           </p>
         )}
 
@@ -167,9 +166,9 @@ export function AgentUpdateFailed({
             Claiming certainty we do not have is worse than the hedge. */}
         <p className="text-sm text-ink-dim">
           Your agents are most likely unchanged
-          {failure.stillOnSha ? (
+          {failure.stillOn ? (
             <>
-              , still on <span className="font-mono">{shortSha(failure.stillOnSha)}</span>
+              , still on <span className="font-mono">{failure.stillOn}</span>
             </>
           ) : null}
           . This is usually a network problem, or an AI tool that still needs configuring.
@@ -188,10 +187,10 @@ export function AgentUpdateFailed({
         </details>
 
         <div className="flex justify-end gap-2">
-          {/* Straight to the AI Agents card, which owns Reconfigure. `useNavigate`
-              is the router LIBRARY, not the app's router singleton, so this
-              stays inside ADR-0003's import direction (same as
-              features/search/SearchPalette.tsx). */}
+          {/* Straight to the Hyprlayer card's AI Agents subsection, which owns
+              Reconfigure. `useNavigate` is the router LIBRARY, not the app's
+              router singleton, so this stays inside ADR-0003's import
+              direction (same as features/search/SearchPalette.tsx). */}
           <Button
             onClick={() => {
               onClose();
