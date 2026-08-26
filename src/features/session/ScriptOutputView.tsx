@@ -5,11 +5,6 @@ import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/termin
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 
-/**
- * Read-only render of a script's captured last-run output (terminal text incl.
- * ANSI). Reuses the same xterm engine as the live views, but just writes the
- * stored text once, no PTY, no input.
- */
 export function ScriptOutputView({ output }: { output: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const fontSize = useTerminalFontSize((s) => s.fontSize);
@@ -22,13 +17,8 @@ export function ScriptOutputView({ output }: { output: string }) {
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engineRef.current = engine;
     engine.mount(host);
-    // Ctrl+Shift+C / Ctrl+Shift+V off macOS, the emulator has no copy
-    // path of its own there (see attachTerminalClipboard).
     attachTerminalClipboard(engine);
     engine.fit();
-    // xterm needs CRLF; normalize bare \n (captured Exec output) without doubling
-    // existing CRLFs (captured PTY scrollback). Trailing `\x1b[?25l` hides the
-    // cursor. This is a read-only render, so it shouldn't look like a live prompt.
     engine.write(output.replace(/\r?\n/g, "\r\n") + "\x1b[?25l");
 
     let raf = 0;

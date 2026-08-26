@@ -5,27 +5,9 @@ const cssVar = (name: string, fallback: string): string => {
   return v || fallback;
 };
 
-/** Read an ANSI slot. `semantic` is the token that drove this slot before the
- *  --color-ansi-* family existed, for the eight that had one; the other eight
- *  pass null and fall straight to their stock-Tango literal. The @theme
- *  defaults already express both fallbacks in CSS; this repeats them in JS so
- *  the vitest suite — which loads no stylesheet at all — keeps asserting the
- *  same values it does today.
- *
- *  Every `ansi` argument at the sixteen call sites below must stay a literal
- *  string. Tailwind v4's oxide scanner keeps a `@theme` custom property in
- *  the built stylesheet only by finding its bare name in a scanned source
- *  file — a `@theme` declaration whose value is `var(--X)` registers `--X`
- *  as a dependency, it does not mark the declaring variable itself used
- *  (the same mechanism NEBULA_COLORS relies on in
- *  features/dashboard/graph.ts:30-34). Building the property name
- *  dynamically here (`` `--color-ansi-${slot}` ``) would silently drop all
- *  sixteen `--color-ansi-*` declarations from the stylesheet, and the only
- *  symptom would be every terminal rendering stock Tango. */
 const ansiVar = (ansi: string, semantic: string | null, fallback: string): string =>
   cssVar(ansi, "") || (semantic ? cssVar(semantic, fallback) : fallback);
 
-/** Map hyprlayer theme tokens (src/index.css) onto an xterm palette. */
 export function xtermThemeFromCss(): ITheme {
   const ink = cssVar("--color-ink", "#e8e6e2");
   const surface = cssVar("--color-surface", "#0c0c0c");

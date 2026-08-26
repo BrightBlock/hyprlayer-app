@@ -1,15 +1,3 @@
-/**
- * Pure detection of live background shell tasks from a session's transcript.
- * No React/IPC/clock, deterministic and unit-testable, like transcript.ts.
- *
- * A task is spawned by Bash{run_in_background:true} and ends when: the agent
- * reads its `<taskId>.output` file (the common terminus, the spawn result
- * steers it there, and reading suppresses the async completion signal); a
- * terminal `taskUpdate` notification arrives (the never-read fire-and-forget
- * case); a TaskOutput poll returns <status>completed</status>; or TaskStop.
- * Session exit is handled by the caller, this walk still reports an un-ended
- * spawn as live, so callers drop tasks once the session is terminal.
- */
 
 import type { TranscriptItem } from "./transcript";
 import { parseToolInput } from "./toolDisplay";
@@ -17,9 +5,7 @@ import { parseToolInput } from "./toolDisplay";
 export type BackgroundTaskStatus = "running" | "awaiting";
 
 export type BackgroundTask = {
-  /** Claude task/shell id, or null until the spawn result arrives. */
   taskId: string | null;
-  /** Spawning tool item's id, stable key + jump-to-transcript target. */
   toolUseId: string;
   label: string;
   command: string;
@@ -38,13 +24,6 @@ function firstLine(value: string): string {
   return nl === -1 ? trimmed : `${trimmed.slice(0, nl).trim()} …`;
 }
 
-/**
- * Parse the task id from a background spawn's result content. Two wire
- * formats (confirmed): a Bash spawn reads "Command running in background
- * with ID: {task_id}."; a Workflow launch reads "...Task ID: {task_id}\n..."
- * (the id is not the last token on the line, so the pattern stops at the
- * first run of non-whitespace rather than anchoring to a trailing period).
- */
 function parseTaskIdFromSpawnResult(content: string): string | null {
   const bash = /Command running in background with ID:\s*(\S+)\./.exec(content);
   if (bash) return bash[1];
@@ -52,9 +31,6 @@ function parseTaskIdFromSpawnResult(content: string): string | null {
   return workflow?.[1] ?? null;
 }
 
-/** A Bash tool call with run_in_background:true, or a Workflow launch (always
- *  backgrounded — the CLI hands the tool_result back in ~20ms and the run
- *  continues after). */
 export function isBackgroundSpawn(item: TranscriptItem): boolean {
   if (item.kind !== "tool") return false;
   if (item.name === "Workflow") return true;
@@ -62,22 +38,15 @@ export function isBackgroundSpawn(item: TranscriptItem): boolean {
   return parseToolInput(item.input)?.run_in_background === true;
 }
 
-/**
- * Live (non-ended) background tasks for a transcript, in spawn order. Pure, the
- * per-branch rules for opening, ending, and `awaiting` a task are inline below.
- */
 export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTask[] {
   const hit = tasksCache.get(items);
   if (hit) return hit;
-  const tasks = new Map<string, BackgroundTask>(); // keyed by toolUseId
-  const taskIdToToolUseId = new Map<string, string>(); // task_id → toolUseId
+  const tasks = new Map<string, BackgroundTask>();
+  const taskIdToToolUseId = new Map<string, string>();
 
   for (const item of items) {
-    // ── 0. taskUpdate: claude's async completion notification ────────────────
-    // Ends a task the agent never polled (the fire-and-forget case the paths
-    // below miss). Match by carried `toolUseId`, else the spawn-result task_id.
     if (item.kind === "taskUpdate") {
-      if (item.status === "running") continue; // still live, nothing to drop
+      if (item.status === "running") continue;
       const toolUseId = item.toolUseId ?? taskIdToToolUseId.get(item.taskId);
       if (toolUseId) {
         tasks.delete(toolUseId);
@@ -86,9 +55,6 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
       continue;
     }
 
-    // Owning process gone (`relaunched`/`exit`): its shells are dead and can't
-    // complete-notify, so drop everything tracked so far; later spawns survive.
-    // Not per-turn `init` (process alive) nor `rewound` (same process, shells live).
     if (item.kind === "relaunched" || item.kind === "exit") {
       tasks.clear();
       taskIdToToolUseId.clear();
@@ -97,17 +63,9 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
 
     if (item.kind !== "tool") continue;
 
-    // A nested workflow-agent's own tool calls (its `parentId` is the
-    // synthetic per-agent id, not this thread). Its Bash{run_in_background}
-    // spawns and polls are real, but its completion notification lands on
-    // the agent's own file stream, never on this session's — tracked here it
-    // would open a task in the main session's indicator that can never close.
     if (item.parentId) continue;
 
-    // ── 1. Background spawn: Bash{run_in_background} or Workflow ────────────
     if (isBackgroundSpawn(item)) {
-      // A spawn that errored (denied / hook-blocked / bad command) never started
-      // a shell, no task_id, nothing to complete it, so don't track a phantom.
       if (item.result?.isError) continue;
       const parsed = parseToolInput(item.input);
       const descStr = str(parsed?.description);
@@ -124,7 +82,6 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
         });
       }
 
-      // Extract taskId from result if already arrived (usually immediate).
       if (item.result && !item.result.isError) {
         const taskId = parseTaskIdFromSpawnResult(item.result.content);
         const task = tasks.get(item.toolUseId);
@@ -136,9 +93,8 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
       continue;
     }
 
-    // ── 2. TaskStop / KillBash → confirmed stop ends the task ────────────────
     if (item.name === "TaskStop" || item.name === "KillBash") {
-      if (!item.result) continue; // not yet confirmed
+      if (!item.result) continue;
       const parsed = parseToolInput(item.input);
       const taskId = str(parsed?.task_id ?? parsed?.shell_id);
       if (!taskId) continue;
@@ -150,7 +106,6 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
       continue;
     }
 
-    // ── 3. TaskOutput / BashOutput → awaiting (result=null) or status update ─
     if (item.name === "TaskOutput" || item.name === "BashOutput") {
       const parsed = parseToolInput(item.input);
       const taskId = str(parsed?.task_id ?? parsed?.shell_id);
@@ -161,26 +116,16 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
       if (!task) continue;
 
       if (item.result === null) {
-        // Agent is currently blocked, result hasn't arrived yet.
         task.status = "awaiting";
       } else if (item.result.content.includes("<status>completed</status>")) {
-        // Task completed naturally, remove from live set.
         tasks.delete(toolUseId);
         taskIdToToolUseId.delete(taskId);
       } else {
-        // Timeout (<status>running</status>) or non-blocking poll, task is
-        // still live; reset to running in case it was previously awaiting.
         task.status = "running";
       }
       continue;
     }
 
-    // ── 4. Direct read of a task's `<taskId>.output` file → end tracking ─────
-    // Any tool whose INPUT references the file (Read/cat/grep/tail): the agent
-    // consumed the output directly, which suppresses the async notification, so
-    // this read is the only end-signal we'll get, without it the task lingers
-    // as a phantom forever. Ids are unique tokens, so the basename can't collide.
-    // Snapshot the map, we delete while iterating.
     for (const [taskId, toolUseId] of [...taskIdToToolUseId]) {
       if (item.input.includes(`${taskId}.output`)) {
         tasks.delete(toolUseId);
@@ -194,8 +139,4 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
   return out;
 }
 
-// Same memo as `sessionDocs`/`artifactsFromItems`: `useSessionBackgroundTasks`
-// re-runs this on every store read, so a keystroke in the composer walks the
-// whole transcript. Keyed on the `items` array `reduceEvent` replaces per
-// event, so a stale entry is unreachable.
 const tasksCache = new WeakMap<TranscriptItem[], BackgroundTask[]>();

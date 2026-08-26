@@ -75,16 +75,12 @@ describe("workingLine", () => {
   });
 
   it("phrases an Agent tool item as a running subagent", () => {
-    // "Agent" is the current wire name for the tool "Task" used to be.
     expect(workingLine([tool("Agent", { description: "map the store" })])).toBe(
       "subagent: map the store",
     );
   });
 
   it("ignores a trailing parented tool item and returns the last unparented one", () => {
-    // A workflow's nested agents append hundreds of their own tool calls, so
-    // the tail is almost always one of theirs; the line must stay on the main
-    // thread's own activity.
     const items: TranscriptItem[] = [
       tool("Edit", { file_path: "/a/b/main.ts" }),
       {
@@ -217,7 +213,7 @@ describe("foldFleetItem", () => {
       windows,
     );
     expect(item?.activity).toBe("needs-you");
-    expect(item?.sessionId).toBeNull(); // pty agents have no session tab to focus
+    expect(item?.sessionId).toBeNull();
   });
 
   it("lets a registry needs-you outrank the store, carrying its session", () => {

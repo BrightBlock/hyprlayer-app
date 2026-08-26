@@ -5,8 +5,6 @@ import { buildTree, type TreeNode } from "./ChangesPanel";
 
 const added = (path: string): GitFileEntry => ({ path, change: "added", oldPath: null });
 
-/** Flatten to `depth:name` rows the way TreeLevel renders them: a node with an
- *  entry and no children is a file leaf; anything else is a folder. */
 function flatten(node: TreeNode, depth = -1): string[] {
   const rows: string[] = [];
   if (depth >= 0) rows.push(`${depth}:${node.name}${node.entry ? "" : "/"}`);
@@ -28,8 +26,6 @@ describe("buildTree", () => {
   });
 
   it("never emits a nameless leaf for a collapsed trailing-slash dir entry", () => {
-    // A collapsed untracked-dir entry (`crates/`) must not spawn a phantom
-    // empty-named child, the bug that rendered a `+`/file-icon row with no label.
     const tree = buildTree([added("crates/")]);
     const names: string[] = [];
     const walk = (n: TreeNode) => {

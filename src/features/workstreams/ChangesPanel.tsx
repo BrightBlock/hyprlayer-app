@@ -46,7 +46,6 @@ function RefreshIcon() {
   );
 }
 
-/** Down arrow → stage; up arrow → unstage. */
 function MoveIcon({ dir }: { dir: "down" | "up" }) {
   return (
     <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -123,20 +122,17 @@ const FileRow = memo(function FileRow({
   );
 });
 
-// ── Tree mode ──────────────────────────────────────────────────────────────
 
 export type TreeNode = {
   name: string;
   path: string;
-  entry?: GitFileEntry; // leaf
+  entry?: GitFileEntry;
   children: Map<string, TreeNode>;
 };
 
 export function buildTree(entries: GitFileEntry[]): TreeNode {
   const root: TreeNode = { name: "", path: "", children: new Map() };
   for (const entry of entries) {
-    // Drop empty segments so a trailing slash (e.g. a collapsed untracked-dir
-    // entry `crates/`) never spawns a nameless phantom leaf under the folder.
     const parts = entry.path.split("/").filter(Boolean);
     if (parts.length === 0) continue;
     let node = root;
@@ -173,7 +169,6 @@ function TreeLevel({
   onToggle: (entry: GitFileEntry) => void;
   onMenu: (entry: GitFileEntry, x: number, y: number) => void;
 }) {
-  // Folders first, then files; each alphabetical.
   const kids = [...node.children.values()].sort((a, b) => {
     const af = a.entry ? 1 : 0;
     const bf = b.entry ? 1 : 0;
@@ -227,7 +222,6 @@ function TreeLevel({
   );
 }
 
-// ── Changes-list section (one of unstaged / staged) ──────────────────────────
 
 function ChangeSection({
   title,
@@ -307,11 +301,7 @@ function ChangeSection({
   );
 }
 
-// ── Documents section (workstream research/plan docs) ────────────────────────
 
-// Doc-type accent hues bind themed tokens (research/plan share the matching
-// pipeline-stage tokens; handoff its own) so the chips recolor per theme and
-// stay legible on the light surface instead of washing out. See src/index.css.
 const DOC_TONE: Record<DocKind, string> = {
   research: "bg-research/10 text-research",
   plan: "bg-plan/10 text-plan",
@@ -373,13 +363,7 @@ function DocsSection({
   );
 }
 
-// ── Artifacts section (published claude.ai pages) ─────────────────────────────
 
-/**
- * Artifacts the workstream's agent published to claude.ai. Clicking opens the
- * hosted page in the browser: the published page IS the artifact, and its local
- * source usually lives in a session scratchpad that gets cleaned up.
- */
 function ArtifactsSection({ workstreamId }: { workstreamId: string }) {
   const artifacts = useWorkstreamArtifacts(workstreamId);
   if (artifacts.length === 0) return null;
@@ -407,7 +391,6 @@ function ArtifactsSection({ workstreamId }: { workstreamId: string }) {
   );
 }
 
-// ── Files tree tab (lazy, whole worktree) ────────────────────────────────────
 
 function FilesTree({ id, onOpenFile }: { id: string; onOpenFile: (path: string) => void }) {
   return <DirLevel id={id} relPath="" depth={0} onOpenFile={onOpenFile} />;
@@ -493,29 +476,16 @@ function DirNode({
   );
 }
 
-// ── Panel ────────────────────────────────────────────────────────────────────
 
 type Props = {
   workstreamId: string | null;
   onOpenDoc: (path: string, title: string) => void;
   onOpenDiff: (path: string, staged: boolean, sha?: string) => void;
   onOpenFile: (path: string) => void;
-  /** Folder project: no git, so only the file tree, no Changes tab, no status query. */
   filesOnly?: boolean;
-  /** Names the workstream's base branch in the Commits tab's empty-state hint. */
   baseBranch: string | null;
 };
 
-/** Right-hand source-control panel: a Changes tab (split staged/unstaged with
- *  stage / unstage / discard actions), a Commits tab (this workstream's own
- *  commits, each expanding to the files it touched), and a Files tab (lazy
- *  worktree tree). With `filesOnly` it collapses to just the tree, the
- *  browse-and-edit surface a folder project still needs.
- *
- *  Memoized: this hangs off `ProjectPage`, which re-renders on every keystroke
- *  in a composer (a draft write goes through the tab store it subscribes to),
- *  and reconciling a busy worktree's file list costs ~4.7ms. Its callback props
- *  are `useCallback`-stable at the call site for exactly this reason. */
 export const ChangesPanel = memo(function ChangesPanel({
   workstreamId,
   onOpenDoc,
@@ -529,23 +499,13 @@ export const ChangesPanel = memo(function ChangesPanel({
   const [view, setView] = useState<"list" | "tree">("list");
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState<GitFileEntry | null>(null);
-  // Whether the USER asked for this refresh. Deliberately NOT `status.isFetching`:
-  // the backend's worktree watcher invalidates git-status on every file change
-  // (see lib/events → worktreeChanged), so during an agent turn or a build that
-  // flag strobes true/false several times a second, and the button visibly
-  // flickered between its glyph and the spinner, dimming on each disabled edge.
-  // Background refreshes now update the list silently, as they should.
   const [refreshing, setRefreshing] = useState(false);
 
   const id = workstreamId ?? "";
-  // Never ask git about a folder project, there's no repo to answer.
   const status = useWorktreeGitStatus(id, workstreamId !== null && !filesOnly);
   const stage = useStageFiles(id);
   const unstage = useUnstageFiles(id);
   const discard = useDiscardFiles(id);
-  // Only while the tab is showing: the whole ["workstream", id] prefix is swept
-  // on every worktree file change, so an always-enabled list would re-walk the
-  // branch during an agent turn for a panel nobody is looking at.
   const commits = useWorkstreamCommits(id, workstreamId !== null && !filesOnly && tab === "commits");
 
   const staged = status.data?.staged ?? [];
@@ -588,8 +548,6 @@ export const ChangesPanel = memo(function ChangesPanel({
                   setRefreshing(true);
                   void commits.refetch().finally(() => setRefreshing(false));
                 } else {
-                  // The tree is lazy per directory level; drop them all so
-                  // reopening re-reads from disk.
                   void queryClient.invalidateQueries({ queryKey: ["workstream", id, "dir"] });
                 }
               }}
@@ -728,11 +686,6 @@ export const ChangesPanel = memo(function ChangesPanel({
         onDismissError={() => discard.reset()}
         onConfirm={() => {
           if (!confirmDiscard) return;
-          // The dialog would otherwise unmount as soon as this fires, so a
-          // failure had nowhere to surface, and a success gave no feedback
-          // for the duration of the discard. Closing on settle keeps the
-          // dialog up (busy) while it runs, and lets the error note show
-          // when the mutation fails instead of vanishing with it.
           discard.mutate([confirmDiscard.path], { onSettled: () => setConfirmDiscard(null) });
         }}
       >

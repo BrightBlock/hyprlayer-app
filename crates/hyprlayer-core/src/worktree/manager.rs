@@ -1,8 +1,3 @@
-//! Worktree lifecycle. Hybrid git strategy (mirrors the hyprlayer CLI):
-//! `git worktree add/remove/prune` via subprocess, the porcelain handles
-//! branch-from-base creation, sparse checkout, and hooks correctly, while
-//! status polling uses git2 so it never forks.
-
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,8 +9,6 @@ use crate::process::Exec;
 
 use super::thoughts_links::LinkStatus;
 
-/// `~/hyprlayer/worktrees`: user-visible, short (Windows path budgets), and
-/// outside any repo (no gitignore or watcher interplay).
 pub fn default_worktree_root() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -23,20 +16,12 @@ pub fn default_worktree_root() -> PathBuf {
         .join("worktrees")
 }
 
-/// `<project>/archived-contexts`: archived worktrees live alongside their
-/// source repo so the relationship is visible in a file manager.
-/// `.git/info/exclude` keeps them out of the user's `git status`.
 pub const ARCHIVE_SUBDIR: &str = "archived-contexts";
 
-/// Where a workstream's worktree lands after archive: one directory per slug
-/// under [`ARCHIVE_SUBDIR`].
 pub fn archive_dir_for(project_repo: &Path, slug: &str) -> PathBuf {
     project_repo.join(ARCHIVE_SUBDIR).join(slug)
 }
 
-/// Append `archived-contexts/` to the project's per-clone exclude so its
-/// archived worktrees don't show as untracked in the user's `git status`.
-/// Idempotent: re-running is a no-op once the entry is present.
 pub fn ensure_archive_excluded(project_repo: &Path) -> std::io::Result<()> {
     let exclude = project_repo.join(".git").join("info").join("exclude");
     let Some(parent) = exclude.parent() else {
@@ -62,28 +47,15 @@ pub struct CreateSpec {
     pub project_repo: PathBuf,
     pub mapped_name: String,
     pub title: String,
-    /// Override base (e.g. "origin/release"); detected when None.
-    /// Only consulted in [`CreateMode::Isolated`].
     pub base_override: Option<String>,
-    /// Branch-name prefix (e.g. "hyprlayer/"). Used verbatim before the slug.
-    /// Only consulted in [`CreateMode::Isolated`].
     pub branch_prefix: String,
-    /// How to back the workstream.
     pub mode: CreateMode,
 }
 
-/// The three ways to back a new workstream. The default, [`CreateMode::Isolated`],
-/// is the original behavior; the other two adopt a branch the user already has.
 #[derive(Debug, Clone)]
 pub enum CreateMode {
-    /// Create branch `<prefix><slug>` and a dedicated worktree from the base.
     Isolated,
-    /// Check an existing *local* branch out into a dedicated worktree (no new
-    /// branch). A remote-tracking ref would detach HEAD, so the caller must pass
-    /// a local branch name.
     Existing { branch: String },
-    /// No worktree: switch the project's own checkout onto an existing local
-    /// `branch`. `worktree_path` becomes the project repo itself.
     InPlace { branch: String },
 }
 
@@ -103,33 +75,19 @@ pub struct CreatedWorktree {
 pub struct WorktreeStatus {
     pub exists: bool,
     pub branch: Option<String>,
-    /// Tracked changes (staged + unstaged), excluding thoughts/.
     pub dirty: u32,
-    /// Added lines in the working-tree diff vs HEAD, excluding thoughts/.
     pub additions: u32,
-    /// Deleted lines in the working-tree diff vs HEAD, excluding thoughts/.
     pub deletions: u32,
-    /// Untracked files, excluding thoughts/ (informational only).
     pub untracked: u32,
-    /// Commits ahead/behind the upstream once it exists, else the base branch.
-    /// Drops to 0 the moment the branch is pushed, a sync indicator, not a
-    /// "has work to ship" signal (see `ahead_of_base`).
     pub ahead: u32,
     pub behind: u32,
-    /// Commits on this branch not yet in the base branch (the PR's merge
-    /// target), always measured against `base_branch` regardless of the
-    /// upstream. Unlike `ahead`. This does NOT drop to 0 when the branch is
-    /// pushed, so it answers "is there anything to open a PR for?", the signal
-    /// Ship gates on.
     pub ahead_of_base: u32,
     pub thoughts: LinkStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemovePolicy {
-    /// Refuse when dirty or carrying unmerged commits.
     Safe,
-    /// Drop everything: changes, commits, branch.
     ForceDiscard,
 }
 
@@ -150,15 +108,9 @@ impl WorktreeManager {
         self.root.join(mapped_name).join(slug)
     }
 
-    /// Provision the worktree for a workstream per its [`CreateMode`]. Thoughts
-    /// provisioning is the caller's next step (it needs config context this
-    /// module doesn't own), except in [`CreateMode::InPlace`], where the target
-    /// is the already-provisioned project checkout.
     pub async fn create(&self, git: &Path, spec: &CreateSpec) -> Result<CreatedWorktree> {
         let slug = unique_slug(&spec.title);
 
-        // Freshen remote refs so the base/branch is current; offline is fine.
-        // Shared by every mode.
         let _ = git_in(git, &spec.project_repo, &["fetch", "--prune", "origin"])
             .timeout(Duration::from_secs(30))
             .run()
@@ -172,7 +124,6 @@ impl WorktreeManager {
                     Some(b) => b.clone(),
                     None => detect_base_branch(git, &spec.project_repo).await?,
                 };
-                // `-b <branch>`: create the branch as part of the checkout.
                 self.worktree_add(git, &spec.project_repo, &path, &["-b", &branch], &base)
                     .await?;
                 self.windows_longpaths(git, &path).await;
@@ -185,12 +136,9 @@ impl WorktreeManager {
             }
             CreateMode::Existing { branch } => {
                 let path = self.prepare_worktree_dir(&spec.mapped_name, &slug)?;
-                // Base is informational here (ahead/behind fallback); detection
-                // failing must not block adopting a branch the user already has.
                 let base = detect_base_branch(git, &spec.project_repo)
                     .await
                     .unwrap_or_else(|_| branch.clone());
-                // No `-b`: check the existing local branch out into the worktree.
                 self.worktree_add(git, &spec.project_repo, &path, &[], branch)
                     .await?;
                 self.windows_longpaths(git, &path).await;
@@ -202,19 +150,9 @@ impl WorktreeManager {
                 })
             }
             CreateMode::InPlace { branch } => {
-                // No worktree: switch the project's own checkout onto `branch`.
-                // On checkout git refuses only *conflicting* dirty changes,
-                // non-conflicting modified files silently follow the switch onto
-                // the new branch. To avoid carrying a user's in-progress work
-                // across branches, refuse a dirty tree up front. Exception: when
-                // we're already on `branch` the switch is a no-op, and the dirty
-                // tree is that branch's own work, leave it untouched.
                 let already_here = crate::gitops::current_branch(&spec.project_repo).as_deref()
                     == Some(branch.as_str());
                 if !already_here {
-                    // Untracked files ride along harmlessly and aren't "carried
-                    // onto" the branch in a surprising way; only modified tracked
-                    // files are. Guard on those.
                     let dirty = status(&spec.project_repo, branch, None).dirty;
                     if dirty > 0 {
                         return Err(CoreError::CheckoutDirty { count: dirty });
@@ -237,9 +175,6 @@ impl WorktreeManager {
         }
     }
 
-    /// Resolve + reserve the worktree directory for `slug`, erroring if it's
-    /// already taken and creating its parent. Shared by the worktree-backed
-    /// modes (isolated, existing).
     fn prepare_worktree_dir(&self, mapped_name: &str, slug: &str) -> Result<PathBuf> {
         let path = self.worktree_dir(mapped_name, slug);
         if path.exists() {
@@ -252,8 +187,6 @@ impl WorktreeManager {
         Ok(path)
     }
 
-    /// `git -C <repo> worktree add <extra...> <path> <committish>`. `extra` is
-    /// `["-b", branch]` to create a branch, or empty to check an existing one out.
     async fn worktree_add(
         &self,
         git: &Path,
@@ -277,7 +210,6 @@ impl WorktreeManager {
         Ok(())
     }
 
-    /// Windows path-length escape valve, applied per worktree. No-op elsewhere.
     async fn windows_longpaths(&self, _git: &Path, _worktree: &Path) {
         #[cfg(windows)]
         {
@@ -287,13 +219,6 @@ impl WorktreeManager {
         }
     }
 
-    /// Remove worktree + branch. `Safe` refuses to destroy work; the caller
-    /// maps the typed errors to confirm-dialog affordances. When
-    /// `delete_branch` is false the local branch is left in place (the
-    /// worktree is still removed).
-    // Each parameter is a distinct, independent input (paths, branch names,
-    // policy, branch-deletion opt-out); bundling them into a struct would only
-    // add indirection.
     #[allow(clippy::too_many_arguments)]
     pub async fn remove(
         &self,
@@ -309,21 +234,12 @@ impl WorktreeManager {
             if policy == RemovePolicy::Safe {
                 ensure_removable(worktree, base_branch, branch)?;
             }
-            // Always --force the porcelain removal: the Safe gate above is
-            // the real protection, and leftover app infrastructure (the
-            // untracked thoughts/ links) would otherwise make git refuse.
             let wt = worktree.display().to_string();
             git_in(git, project_repo, &["worktree", "remove", "--force", &wt])
                 .timeout(Duration::from_secs(60))
                 .run()
                 .await?;
         } else {
-            // Husk or fully gone: git's `worktree remove` would fail (the path
-            // isn't in its registry anymore, or has no `.git` to read), and
-            // ensure_removable can't even read status. Prune the registration
-            // and best-effort delete the leftover directory, anything still
-            // in it is post-teardown runtime crud (.vite/, logs/) recreated by
-            // a process whose cwd outlived the archive.
             let _ = git_in(git, project_repo, &["worktree", "prune"])
                 .run()
                 .await;
@@ -332,9 +248,6 @@ impl WorktreeManager {
             }
         }
 
-        // Branch cleanup: only-if-merged on Safe (tolerate failure and leave
-        // the branch), forced on discard. Skipped entirely when the caller
-        // opts out of branch deletion.
         if delete_branch {
             let delete_flag = if policy == RemovePolicy::ForceDiscard {
                 "-D"
@@ -349,7 +262,6 @@ impl WorktreeManager {
         Ok(())
     }
 
-    /// Reconcile git's worktree registry after out-of-band deletions.
     pub async fn prune(&self, git: &Path, project_repo: &Path) -> Result<()> {
         git_in(git, project_repo, &["worktree", "prune"])
             .run()
@@ -357,12 +269,6 @@ impl WorktreeManager {
         Ok(())
     }
 
-    /// Move a worktree to its archive location, preserving the branch + every
-    /// uncommitted file. Restore is the inverse [`Self::restore`]. Husks
-    /// (worktree dir without `.git`) can't be moved by git, so we fall back to
-    /// pruning + best-effort `rm -rf`: there's nothing recoverable left.
-    /// Returns `true` when a real archive was produced; `false` for a husk
-    /// (caller should not promise the user a restore path).
     pub async fn archive(
         &self,
         git: &Path,
@@ -371,7 +277,6 @@ impl WorktreeManager {
         dest: &Path,
     ) -> Result<bool> {
         if !is_live_worktree(worktree) {
-            // Same husk handling as Self::remove, nothing recoverable here.
             let _ = git_in(git, project_repo, &["worktree", "prune"])
                 .run()
                 .await;
@@ -393,8 +298,6 @@ impl WorktreeManager {
 
         let from = worktree.display().to_string();
         let to = dest.display().to_string();
-        // `git worktree move` refuses if the worktree is locked or contains
-        // submodules, which surfaces as a CoreError::Git for the caller to map.
         git_in(git, project_repo, &["worktree", "move", &from, &to])
             .timeout(Duration::from_secs(120))
             .run()
@@ -402,9 +305,6 @@ impl WorktreeManager {
         Ok(true)
     }
 
-    /// Move a previously-archived worktree back to its original path. The
-    /// caller must guarantee `target` is free, collision is the one failure
-    /// mode the UI prompts for.
     pub async fn restore(
         &self,
         git: &Path,
@@ -437,30 +337,20 @@ impl WorktreeManager {
         Ok(())
     }
 
-    /// Best-effort removal of git-ignored files from a live worktree before
-    /// archive, so build artifacts (target/, node_modules/) don't bloat the
-    /// archive. `keep` patterns (the repo's `worktree.copy` globs) are passed as
-    /// `git clean -e !<pat>` negations so seeded files like `.env` survive even
-    /// when they appear in the repo's gitignore. Single `-f` (not `-ff`) leaves
-    /// nested git repos untouched.
     pub async fn clean_ignored(&self, git: &Path, worktree: &Path, keep: &[String]) -> Result<()> {
         let mut args: Vec<String> = vec!["clean".into(), "-d".into(), "-f".into(), "-X".into()];
         for pat in keep {
-            // Negation `!<pat>` un-ignores the pattern, keeping matching files.
             args.push("-e".into());
             args.push(format!("!{pat}"));
         }
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        git_in(git, worktree, &arg_refs) // git -C <worktree> clean -d -f -X -e !<pat>...
+        git_in(git, worktree, &arg_refs)
             .timeout(Duration::from_secs(120))
             .run()
             .await?;
         Ok(())
     }
 
-    /// Permanent purge: prune the archive directory + delete the branch (local
-    /// and, best-effort, its `origin` counterpart). Used by the "Delete
-    /// permanently" action on the archive history view.
     pub async fn purge_archive(
         &self,
         git: &Path,
@@ -472,8 +362,6 @@ impl WorktreeManager {
         if archive.exists() {
             let _ = std::fs::remove_dir_all(archive);
         }
-        // The archive was a registered worktree until this moment; prune to
-        // drop the registry entry now that its directory is gone.
         let _ = git_in(git, project_repo, &["worktree", "prune"])
             .run()
             .await;
@@ -481,31 +369,18 @@ impl WorktreeManager {
             let _ = git_in(git, project_repo, &["branch", "-D", branch])
                 .run()
                 .await;
-            // Also drop the remote branch so it doesn't linger on GitHub. Best
-            // effort: the branch may have been deleted already (at archive, for a
-            // merged PR) or never pushed at all.
             let _ = delete_remote_branch(git, project_repo, branch).await;
         }
         Ok(())
     }
 }
 
-/// True iff `path` is a live git worktree (has a `.git` entry, directory for
-/// the main checkout, regular file with `gitdir:` for a linked worktree). A
-/// path that exists without `.git` is a husk left over from a partial teardown
-/// (e.g. `git worktree remove` succeeded but a process whose cwd was inside
-/// recreated runtime dirs after); callers treat it the same as "missing".
 pub fn is_live_worktree(path: &Path) -> bool {
     path.join(".git").exists()
 }
 
-/// The Safe-removal gate: errors when removing the worktree would destroy
-/// work. Public so callers that must act between the gate and the removal
-/// (e.g. `thoughts uninit`) share the one definition of destroyable work.
 pub fn ensure_removable(worktree: &Path, base_branch: &str, branch: &str) -> Result<()> {
     let status = status(worktree, base_branch, None);
-    // Untracked files (outside thoughts/) count too: removal deletes them
-    // just as surely as tracked edits.
     if status.dirty + status.untracked > 0 {
         return Err(CoreError::WorktreeDirty(status.dirty + status.untracked));
     }
@@ -526,40 +401,23 @@ fn git_in(git: &Path, repo: &Path, args: &[&str]) -> Exec {
         .args(args.iter().copied())
 }
 
-/// What [`pull_base`] did, surfaced to the GIT panel so it can report the
-/// result inline (a clean merge vs. conflicts the user must resolve by hand).
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PullOutcome {
-    /// The branch already contains the base's commits, nothing to pull.
     UpToDate,
-    /// The base merged cleanly (fast-forward or a new merge commit).
     Merged,
-    /// The merge stopped on conflicts. The worktree is left mid-merge (NOT
-    /// aborted) so the listed files show up conflicted in the Changes panel; the
-    /// user resolves them and commits (or runs `git merge --abort`).
     Conflicts { files: Vec<String> },
 }
 
-/// Pull the target (`base`) branch's new commits into `worktree`: fetch the
-/// remote, then merge. The freshest base is its remote-tracking ref, so we merge
-/// `origin/<base>` when it exists (falling back to the base as given for a
-/// purely-local target). Deterministic, no agent. On conflicts the merge is
-/// left in progress for manual resolution; a precondition failure (e.g. a dirty
-/// working tree that git refuses to merge over) surfaces git's own message.
 pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOutcome> {
     let branch = base.strip_prefix("origin/").unwrap_or(base);
 
-    // Freshen the remote ref. Best effort: offline, or a base with no remote
-    // counterpart, just means we merge whatever ref resolves below.
     let _ = git_in(git, worktree, &["fetch", "origin", branch])
         .timeout(Duration::from_secs(60))
         .run()
         .await;
 
-    // Prefer the remote-tracking ref (it carries the new commits); fall back to
-    // the base as given (a local-only target branch).
     let remote_ref = format!("origin/{branch}");
     let merge_ref = if git_in(
         git,
@@ -588,8 +446,6 @@ pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOu
         });
     }
 
-    // Non-zero: a conflicted merge (unmerged paths, merge in progress) vs. a
-    // precondition failure (e.g. dirty tree) that we surface as git's error.
     let files = unmerged_files(git, worktree).await;
     if !files.is_empty() {
         return Ok(PullOutcome::Conflicts { files });
@@ -601,9 +457,6 @@ pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOu
     })
 }
 
-/// `git fetch --prune origin` in the worktree, refreshes remote-tracking refs so
-/// ahead/behind (and a subsequent `gh pr view`) reflect what's on the remote now.
-/// Used by the GIT panel's refresh; deletes-then-recomputes are the caller's job.
 pub async fn fetch_remote(git: &Path, worktree: &Path) -> Result<()> {
     git_in(git, worktree, &["fetch", "--prune", "origin"])
         .timeout(Duration::from_secs(60))
@@ -612,11 +465,6 @@ pub async fn fetch_remote(git: &Path, worktree: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Create local branch `local` tracking `remote_ref` (e.g. `origin/feature`),
-/// `git branch --track <local> <remote_ref>`. The existing/in-place modes check a
-/// *local* branch out (a remote-tracking ref would detach HEAD), so adopting a
-/// branch that only exists on the remote goes through here first. Errors when
-/// `local` already exists, which the caller avoids by checking the local list.
 pub async fn create_tracking_branch(
     git: &Path,
     repo: &Path,
@@ -630,11 +478,6 @@ pub async fn create_tracking_branch(
     Ok(())
 }
 
-/// Delete `branch` on the `origin` remote (`git push origin --delete <branch>`).
-/// The local branch name equals the remote head name for app-created branches,
-/// so this clears the leftover GitHub branch after a merged PR is archived (the
-/// app no longer relies on GitHub's "auto-delete head branches" setting). Callers
-/// treat it as best-effort: a branch never pushed, or already deleted, just errors.
 pub async fn delete_remote_branch(git: &Path, repo: &Path, branch: &str) -> Result<()> {
     git_in(git, repo, &["push", "origin", "--delete", branch])
         .timeout(Duration::from_secs(60))
@@ -643,7 +486,6 @@ pub async fn delete_remote_branch(git: &Path, repo: &Path, branch: &str) -> Resu
     Ok(())
 }
 
-/// Paths git reports as unmerged (conflicted) in the worktree.
 async fn unmerged_files(git: &Path, worktree: &Path) -> Vec<String> {
     match git_in(git, worktree, &["diff", "--name-only", "--diff-filter=U"])
         .run()
@@ -660,8 +502,6 @@ async fn unmerged_files(git: &Path, worktree: &Path) -> Vec<String> {
     }
 }
 
-/// `origin/HEAD` symref when set, else the first of origin/main,
-/// origin/master, main, master that exists.
 pub async fn detect_base_branch(git: &Path, repo: &Path) -> Result<String> {
     if let Ok(out) = git_in(git, repo, &["symbolic-ref", "refs/remotes/origin/HEAD"])
         .run()
@@ -700,9 +540,6 @@ pub async fn detect_base_branch(git: &Path, repo: &Path) -> Result<String> {
     })
 }
 
-/// Status for a `folder` workstream: the directory either exists or it
-/// doesn't. No git and no thoughts links, so every counter is zero and the
-/// link status is `Unsupported` rather than the git default of `Broken`.
 pub fn folder_status(dir: &Path) -> WorktreeStatus {
     WorktreeStatus {
         exists: dir.is_dir(),
@@ -718,9 +555,6 @@ pub fn folder_status(dir: &Path) -> WorktreeStatus {
     }
 }
 
-/// Sync status snapshot via git2 (cheap; callers use spawn_blocking).
-/// `base_branch` is the merge target used for ahead/behind when the branch
-/// has no upstream yet (the usual state before first push).
 pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) -> WorktreeStatus {
     let missing = WorktreeStatus {
         exists: false,
@@ -756,13 +590,9 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         }
     }
 
-    // Line-level counts come from the same diff the panel renders, so the
-    // sidebar's "+adds −dels" always matches what's listed there.
     let (additions, deletions) = crate::gitops::worktree_diff_line_counts(&repo);
 
     let head = repo.head().ok();
-    // Detached HEAD (rebase, bisect) shorthands to the literal "HEAD", report
-    // None rather than a branch name nothing can check out.
     let branch = head
         .as_ref()
         .filter(|h| h.is_branch())
@@ -772,7 +602,6 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     let (ahead, behind) = (|| -> Option<(u32, u32)> {
         let head_ref = head.as_ref()?;
         let local = head_ref.target()?;
-        // Prefer the upstream once it exists; fall back to the base branch.
         let target = match crate::gitops::upstream_oid(&repo, head_ref) {
             Some(oid) => oid,
             None => repo
@@ -787,9 +616,6 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     })()
     .unwrap_or((0, 0));
 
-    // Ship gates on this, NOT `ahead`: once the branch is pushed, `ahead` (vs
-    // upstream) is 0, but there's still a PR to open, so measure against the
-    // base branch always, ignoring the upstream, so a push never hides Ship.
     let ahead_of_base = (|| -> Option<u32> {
         let head_ref = head.as_ref()?;
         let local = head_ref.target()?;
@@ -818,8 +644,6 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     }
 }
 
-/// `<kebab-title>-<4 hex chars>`: readable, collision-resistant, filesystem-
-/// and ref-safe.
 pub fn unique_slug(title: &str) -> String {
     let mut kebab = String::new();
     let mut last_dash = true;
@@ -852,25 +676,18 @@ mod tests {
         std::fs::create_dir(&notes).unwrap();
         std::fs::write(notes.join("todo.md"), "hi\n").unwrap();
 
-        // The git reader can't open a plain folder, so it reports `exists: false`,
-        // which the UI renders as "missing on disk". Folder workstreams must
-        // not go through it.
         assert!(!status(&notes, "", None).exists);
 
         let st = folder_status(&notes);
         assert!(st.exists);
         assert_eq!(st.branch, None);
         assert_eq!((st.dirty, st.untracked, st.ahead, st.behind), (0, 0, 0, 0));
-        // No thoughts links to be broken, the chip must stay quiet.
         assert_eq!(st.thoughts, LinkStatus::Unsupported);
 
         assert!(!folder_status(&dir.path().join("gone")).exists);
     }
 
     fn sh(repo: &Path, args: &[&str]) {
-        // `-c commit.gpgsign=false`: keep test commits hermetic from the user's
-        // global git config (e.g. a 1Password SSH signing key that can't sign
-        // in a non-interactive test run).
         let out = std::process::Command::new("git")
             .arg("-c")
             .arg("commit.gpgsign=false")
@@ -901,9 +718,6 @@ mod tests {
         (dir, repo)
     }
 
-    /// A branch that only exists on the remote (the colleague's-branch case) is
-    /// adopted by first creating a local branch tracking it, `worktree add` on
-    /// `origin/x` would detach HEAD.
     #[tokio::test]
     async fn remote_only_branch_is_adopted_via_a_local_tracking_branch() {
         let (_guard, origin) = fixture_repo();
@@ -916,7 +730,6 @@ mod tests {
         );
         let git = which::which("git").expect("git on PATH");
 
-        // Nothing local to check out yet.
         assert!(!crate::gitops::list_local_branches(&repo)
             .unwrap()
             .contains(&"linux-support".to_string()));
@@ -925,8 +738,6 @@ mod tests {
             .await
             .unwrap();
 
-        // The new local branch tracks the remote, so ahead/behind and a later
-        // push both target the right place.
         let upstream = std::process::Command::new(&git)
             .arg("-C")
             .arg(&repo)
@@ -938,7 +749,6 @@ mod tests {
             "origin/linux-support"
         );
 
-        // And it checks out into a dedicated worktree like any other local branch.
         let wt_root = tempfile::tempdir().unwrap();
         let manager = WorktreeManager::new(wt_root.path().to_path_buf());
         let created = manager
@@ -965,8 +775,6 @@ mod tests {
             Some("linux-support")
         );
 
-        // A second attempt at the same local name fails rather than silently
-        // adopting an unrelated branch, the caller checks the local list first.
         assert!(
             create_tracking_branch(&git, &repo, "linux-support", "origin/linux-support")
                 .await
@@ -981,13 +789,6 @@ mod tests {
         assert_ne!(unique_slug("x"), unique_slug("x"));
         assert!(unique_slug("!!!").starts_with("work-item-"));
 
-        // The 48 cap, previously unasserted. `previewSlug`
-        // (`src/lib/domain/branchPrefix.ts`) mirrors this number; without an
-        // assertion here the mirror has nothing to drift from.
-        //
-        // The break is checked after the push and one byte is pushed per
-        // iteration, so the stem stops at exactly 48, then loses any trailing
-        // dash before the 5-byte "-xxxx" suffix: 53 is the true ceiling.
         let long = unique_slug(&"very long words ".repeat(20));
         assert!(long.len() <= 48 + 5, "{long}");
     }
@@ -1018,12 +819,10 @@ mod tests {
         assert_eq!(created.base_branch, "main");
         assert!(created.branch.starts_with("hyprlayer/auth-work-"));
 
-        // Clean tree: removable under Safe policy.
         let st = status(&wt, &created.base_branch, None);
         assert!(st.exists);
         assert_eq!((st.dirty, st.untracked, st.ahead), (0, 0, 0));
 
-        // Untracked files (outside thoughts/) block Safe removal too.
         std::fs::write(wt.join("scratch.txt"), "wip\n").unwrap();
         let err = manager
             .remove(
@@ -1040,7 +839,6 @@ mod tests {
         assert_eq!(err.code(), "worktree_dirty");
         std::fs::remove_file(wt.join("scratch.txt")).unwrap();
 
-        // Tracked edit makes it dirty and blocks Safe removal.
         std::fs::write(wt.join("README.md"), "changed\n").unwrap();
         let st = status(&wt, &created.base_branch, None);
         assert_eq!(st.dirty, 1);
@@ -1058,7 +856,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code(), "worktree_dirty");
 
-        // Commit → ahead of base → still blocked; thoughts/ is ignored.
         std::fs::create_dir_all(wt.join("thoughts/sub")).unwrap();
         std::fs::write(wt.join("thoughts/sub/x.md"), "ignored").unwrap();
         sh(&wt, &["add", "README.md"]);
@@ -1080,7 +877,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code(), "worktree_unpushed");
 
-        // ForceDiscard drops everything.
         manager
             .remove(
                 &git,
@@ -1105,9 +901,6 @@ mod tests {
 
     #[tokio::test]
     async fn isolated_branch_uses_the_spec_prefix_verbatim() {
-        // `hotfix-` (no slash) must produce `hotfix-<slug>`, not `hotfix-/<slug>`
-        // — `create` injects nothing between prefix and slug, so a prefix that
-        // ends in anything other than '/' is a legitimate thing to configure.
         let (_guard, repo) = fixture_repo();
         let wt_root = tempfile::tempdir().unwrap();
         let manager = WorktreeManager::new(wt_root.path().to_path_buf());
@@ -1133,9 +926,6 @@ mod tests {
             "{}",
             created.branch
         );
-        // And that name is what git checked out, not just what the manager
-        // reported: a separator slipped in here would have created a real
-        // (valid, differently-named) branch rather than failing.
         assert_eq!(
             status(Path::new(&created.path), "main", None)
                 .branch
@@ -1144,24 +934,18 @@ mod tests {
         );
     }
 
-    /// Regression: pushing a branch to its remote must not hide Ship. After a
-    /// push, `ahead` (vs the upstream) is 0, but the branch still carries commits
-    /// with no PR, so `ahead_of_base` (vs the base branch) must stay > 0.
     #[test]
     fn ahead_of_base_survives_push_while_ahead_zeroes() {
         let (guard, repo) = fixture_repo();
 
-        // A branch one commit ahead of main, no upstream yet.
         sh(&repo, &["checkout", "-b", "feature/x"]);
         std::fs::write(repo.join("feature.txt"), "work\n").unwrap();
         sh(&repo, &["add", "."]);
         sh(&repo, &["commit", "-m", "feature work"]);
 
-        // Pre-push: no upstream, so `ahead` falls back to the base branch.
         let before = status(&repo, "main", None);
         assert_eq!((before.ahead, before.ahead_of_base), (1, 1));
 
-        // Push to a bare remote and set upstream, the state that hid Ship.
         let remote = guard.path().join("remote.git");
         sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
         sh(
@@ -1178,9 +962,6 @@ mod tests {
         );
     }
 
-    /// Existing-branch mode checks a branch the user already has out into a
-    /// dedicated worktree, no new branch is created, and the worktree's HEAD is
-    /// that branch (not detached).
     #[tokio::test]
     async fn create_existing_checks_out_user_branch_without_creating_one() {
         let (_guard, repo) = fixture_repo();
@@ -1188,7 +969,6 @@ mod tests {
         let manager = WorktreeManager::new(wt_root.path().to_path_buf());
         let git = which::which("git").unwrap();
 
-        // A branch the user already created.
         sh(&repo, &["branch", "feature-x"]);
 
         let created = manager
@@ -1211,13 +991,10 @@ mod tests {
         assert_eq!(created.branch, "feature-x");
         let wt = PathBuf::from(&created.path);
         assert!(wt.join("README.md").exists());
-        // The worktree is on the branch, not detached.
         let st = status(&wt, &created.base_branch, None);
         assert_eq!(st.branch.as_deref(), Some("feature-x"));
     }
 
-    /// In-place mode creates no worktree: it switches the project's own checkout
-    /// onto the chosen branch and reports the repo itself as the path.
     #[tokio::test]
     async fn create_inplace_switches_main_checkout_and_makes_no_worktree() {
         let (_guard, repo) = fixture_repo();
@@ -1225,7 +1002,6 @@ mod tests {
         let manager = WorktreeManager::new(wt_root.path().to_path_buf());
         let git = which::which("git").unwrap();
 
-        // Move the main checkout off main so the create has to switch it back.
         sh(&repo, &["checkout", "-b", "side"]);
         assert_eq!(
             crate::gitops::current_branch(&repo).as_deref(),
@@ -1250,22 +1026,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(created.branch, "main");
-        // The path is the project repo itself, no dedicated worktree dir.
         assert_eq!(PathBuf::from(&created.path), repo);
         assert!(
             std::fs::read_dir(wt_root.path()).unwrap().next().is_none(),
             "in-place must not create a worktree under the root"
         );
-        // The main checkout was switched onto the chosen branch.
         assert_eq!(
             crate::gitops::current_branch(&repo).as_deref(),
             Some("main")
         );
     }
 
-    /// `status().branch` is the checkout's live HEAD, so an out-of-band branch
-    /// switch (an agent running `git checkout -b`) is visible to the caller that
-    /// adopts it. A detached HEAD reports `None`, never the literal "HEAD".
     #[test]
     fn status_branch_follows_head_and_reports_none_when_detached() {
         let (_guard, repo) = fixture_repo();
@@ -1281,9 +1052,6 @@ mod tests {
         assert_eq!(status(&repo, "main", None).branch, None);
     }
 
-    /// In-place onto a *different* branch refuses a dirty tree: a plain checkout
-    /// would silently carry the user's modified tracked files across, so the
-    /// branch + checkout are left exactly as they were.
     #[tokio::test]
     async fn create_inplace_refuses_dirty_tree_when_switching_branches() {
         let (_guard, repo) = fixture_repo();
@@ -1291,7 +1059,6 @@ mod tests {
         let manager = WorktreeManager::new(wt_root.path().to_path_buf());
         let git = which::which("git").unwrap();
 
-        // A branch to switch to, while a tracked file is left modified on main.
         sh(&repo, &["branch", "other"]);
         std::fs::write(repo.join("README.md"), "dirty edit\n").unwrap();
 
@@ -1312,20 +1079,15 @@ mod tests {
             .await
             .unwrap_err();
 
-        // Its own variant, not the archive path's `worktree_dirty`: there is no
-        // worktree here, and the remedy is about the project checkout.
         assert!(
             matches!(err, CoreError::CheckoutDirty { count: 1 }),
             "got {err:?}"
         );
         assert_eq!(err.code(), "checkout_dirty");
-        // The create dialog reads the count back out of this message to label
-        // its discard button (`dirtyCount` in CreateWorkstreamDialog.tsx).
         assert_eq!(
             err.to_string(),
             "the project checkout has 1 uncommitted change(s)"
         );
-        // Nothing moved: still on main, edit intact.
         assert_eq!(
             crate::gitops::current_branch(&repo).as_deref(),
             Some("main")
@@ -1336,9 +1098,6 @@ mod tests {
         );
     }
 
-    /// In-place onto the branch already checked out is a no-op switch, so a dirty
-    /// tree is fine, that work belongs to the branch being adopted and must be
-    /// left untouched.
     #[tokio::test]
     async fn create_inplace_allows_dirty_tree_on_current_branch() {
         let (_guard, repo) = fixture_repo();
@@ -1367,7 +1126,6 @@ mod tests {
 
         assert_eq!(created.branch, "main");
         assert_eq!(PathBuf::from(&created.path), repo);
-        // The in-progress edit is preserved exactly.
         assert_eq!(
             std::fs::read_to_string(repo.join("README.md")).unwrap(),
             "wip\n"
@@ -1381,10 +1139,6 @@ mod tests {
         assert_eq!(detect_base_branch(&git, &repo).await.unwrap(), "main");
     }
 
-    /// Archive → restore round-trip preserves the branch and the uncommitted
-    /// edits that block a Safe remove. This is the non-destructive
-    /// alternative to remove(): work survives, restore returns the worktree
-    /// to its original path with `git worktree move`.
     #[tokio::test]
     async fn archive_restore_round_trip_preserves_uncommitted_work() {
         let (_guard, repo) = fixture_repo();
@@ -1408,7 +1162,6 @@ mod tests {
             .unwrap();
         let wt = PathBuf::from(&created.path);
 
-        // Dirty edit + untracked file: archive must preserve both.
         std::fs::write(wt.join("README.md"), "edited\n").unwrap();
         std::fs::write(wt.join("scratch.txt"), "wip\n").unwrap();
 
@@ -1423,8 +1176,6 @@ mod tests {
         assert!(archive_dir.join("scratch.txt").exists());
         assert!(is_live_worktree(&archive_dir), "still a live worktree");
 
-        // The branch survived archive and git still tracks the worktree at
-        // its new location.
         let branches = std::process::Command::new("git")
             .arg("-C")
             .arg(&repo)
@@ -1450,8 +1201,6 @@ mod tests {
         assert_eq!((st.dirty, st.untracked), (1, 1));
     }
 
-    /// Restore refuses (rather than clobbers) when the original path was
-    /// re-used by another workstream while this one was archived.
     #[tokio::test]
     async fn restore_refuses_when_target_path_is_occupied() {
         let (_guard, repo) = fixture_repo();
@@ -1480,7 +1229,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Something else took the path before the user clicked Unarchive.
         std::fs::create_dir_all(&wt).unwrap();
         std::fs::write(wt.join("squatter"), "occupied").unwrap();
 
@@ -1493,10 +1241,6 @@ mod tests {
         );
     }
 
-    /// `clean_ignored` removes git-ignored files but preserves `keep` patterns
-    /// (worktree.copy), tracked edits, and untracked-not-ignored files.
-    /// `.env` is included in the gitignore to verify that the negation exclude
-    /// (`!.env`) overrides the gitignore rule and keeps the seeded file.
     #[tokio::test]
     async fn clean_ignored_removes_ignored_keeps_seeded_and_tracked() {
         let (_guard, repo) = fixture_repo();
@@ -1520,24 +1264,18 @@ mod tests {
             .unwrap();
         let wt = PathBuf::from(&created.path);
 
-        // Gitignore: target/, *.log, and .env (seeded files are typically ignored).
         std::fs::write(wt.join(".gitignore"), "target/\n*.log\n.env\n").unwrap();
         sh(&wt, &["add", ".gitignore"]);
         sh(&wt, &["commit", "-m", "add gitignore"]);
 
-        // Create ignored files/dirs.
         std::fs::create_dir_all(wt.join("target")).unwrap();
         std::fs::write(wt.join("target").join("junk"), "build output").unwrap();
         std::fs::write(wt.join("debug.log"), "log").unwrap();
 
-        // Create untracked-but-NOT-ignored file (should survive).
         std::fs::write(wt.join("scratch.txt"), "wip").unwrap();
 
-        // Create a "seeded" ignored file; its pattern is in keep so the `!.env`
-        // negation un-ignores it and `git clean -X` leaves it alone.
         std::fs::write(wt.join(".env"), "SECRET=1").unwrap();
 
-        // Tracked edit (should survive).
         std::fs::write(wt.join("README.md"), "changed").unwrap();
 
         manager
@@ -1545,11 +1283,9 @@ mod tests {
             .await
             .unwrap();
 
-        // Ignored files removed.
         assert!(!wt.join("target").exists(), "target/ must be cleaned");
         assert!(!wt.join("debug.log").exists(), "debug.log must be cleaned");
 
-        // Kept: not-ignored, tracked, and seeded.
         assert!(
             wt.join("scratch.txt").exists(),
             "untracked non-ignored must survive"
@@ -1558,12 +1294,6 @@ mod tests {
         assert!(wt.join("README.md").exists(), "tracked edit must survive");
     }
 
-    /// Husk state: the worktree directory exists but its `.git` linkfile is
-    /// gone and only post-teardown runtime crud remains. This reproduces
-    /// project-removal-21c6, a Safe archive there hung because ensure_removable
-    /// couldn't open the repo and `git worktree remove --force` rejected a path
-    /// no longer in git's registry. `remove` must succeed under Safe and clear
-    /// the directory.
     #[tokio::test]
     async fn safe_remove_clears_husk_left_by_partial_teardown() {
         let (_guard, repo) = fixture_repo();
@@ -1587,9 +1317,6 @@ mod tests {
             .unwrap();
         let wt = PathBuf::from(&created.path);
 
-        // Simulate the partial teardown: drop git's record of the worktree
-        // (which also removes the `.git` linkfile), then have a still-running
-        // process recreate runtime dirs at the cwd.
         std::process::Command::new("git")
             .arg("-C")
             .arg(&repo)

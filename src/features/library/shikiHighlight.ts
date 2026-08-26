@@ -1,20 +1,3 @@
-// Lazy-loaded Shiki highlighter for chat-pane fenced code blocks. The custom
-// theme below maps TextMate scopes to the same `--color-*` CSS variables that
-// codeView.ts uses for the file viewer and diff view, so chat code blocks
-// recolor with the active theme without any per-theme palette duplication.
-//
-// Shiki itself is dynamic-imported on first use so the core only loads when
-// the user actually sees an assistant message with code in it. Grammars load
-// on demand from GRAMMARS below, so the bundle never pays for languages the
-// user never views.
-//
-// This assembles the highlighter from `shiki/core` rather than calling the
-// `shiki` entry's createHighlighter(). That entry resolves to the *full*
-// bundle: `langs-bundle-full` plus `themes-bundle-full`, 301 dynamic imports
-// that rollup emits as 8.3 MB of lazy chunks in `dist/assets`. Two thirds of
-// that is unreachable — 65 bundled themes this module can never load (it
-// registers HYPRLAYER_THEME and never calls loadTheme) and ~165 grammars no
-// chat fence will name (wolfram, emacs-lisp, ballerina, vue-vine).
 
 import type { Root } from "hast";
 import type { HighlighterCore, LanguageRegistration, ThemeInput } from "shiki";
@@ -23,12 +6,6 @@ type Highlighter = HighlighterCore;
 
 const THEME_NAME = "hyprlayer";
 
-// Token color scopes mapped to the app's status/brand/accent tokens. The shape
-// matches codeView.ts (Lezer) one-for-one so highlight reads consistently
-// whether you're looking at a chat block, a file in the viewer, or a diff.
-// Cast to `ThemeInput` because Shiki accepts the VS Code Color Theme JSON
-// shape (tokenColors) at runtime but its TS types model the raw TextMate
-// format that requires a top-level `settings: []`.
 const HYPRLAYER_THEME = {
   name: THEME_NAME,
   type: "dark",
@@ -105,11 +82,6 @@ const HYPRLAYER_THEME = {
   ],
 } as ThemeInput;
 
-// Fence info-strings mapped to the canonical grammar name that keys GRAMMARS.
-// Every entry is a declared `aliases` value on the grammar it points at, so a
-// fence spelled the short way resolves to the same registration Shiki's own
-// bundle would have picked. Bypassing that bundle means this module owns the
-// mapping: `codeToHast` is called with the canonical name, never the alias.
 const LANG_ALIASES: Record<string, string> = {
   bash: "shellscript",
   batch: "bat",
@@ -117,9 +89,6 @@ const LANG_ALIASES: Record<string, string> = {
   "c++": "cpp",
   cjs: "javascript",
   clj: "clojure",
-  // Shiki's own bundle aliases `cmd` to Visual Basic, which coloured every
-  // Windows command-prompt fence in docs/ with VB grammar. Pointed at `bat`
-  // instead — the one place this module deliberately diverges from upstream.
   cmd: "bat",
   console: "shellsession",
   cs: "csharp",
@@ -158,15 +127,6 @@ const LANG_ALIASES: Record<string, string> = {
   zsh: "shellscript",
 };
 
-// The grammars a chat fence can plausibly name. Each import is a literal
-// subpath so rollup emits one lazy chunk per language and nothing else; a
-// grammar module's default export already carries the languages it embeds
-// (`@shikijs/langs/html` pulls javascript and css with it), so a curated list
-// does not have to enumerate dependencies.
-//
-// A fence naming anything outside this set is not an error: ensureLang returns
-// false, highlightToHast returns null, and ShikiCodeBlock renders plain
-// monospace — the same path an unparseable grammar already took.
 const GRAMMARS: Record<string, () => Promise<{ default: LanguageRegistration[] }>> = {
   astro: () => import("@shikijs/langs/astro"),
   awk: () => import("@shikijs/langs/awk"),
@@ -270,10 +230,6 @@ function getHighlighter(): Promise<Highlighter> {
   return highlighterPromise;
 }
 
-// `loadedLangs` caches the post-load check so the steady-state highlight path
-// is O(1) instead of an array scan into Shiki on every call. `loadingLangs`
-// dedups concurrent loads so two parallel highlights for the same language
-// don't kick off two dynamic-import chains.
 const loadedLangs = new Set<string>();
 const loadingLangs = new Map<string, Promise<void>>();
 
@@ -301,9 +257,6 @@ async function ensureLang(hl: Highlighter, lang: string): Promise<boolean> {
   }
 }
 
-/** Highlight `code` as `rawLang` and return the resulting HAST tree (for
- *  rendering via hast-util-to-jsx-runtime). Returns null if the language is
- *  unknown or highlighting fails, the caller should render plain text. */
 export async function highlightToHast(
   code: string,
   rawLang: string | undefined | null,

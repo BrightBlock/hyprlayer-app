@@ -1,27 +1,16 @@
-//! Resolve the indexable filesystem thoughts roots from the hyprlayer config.
-//! Only git/obsidian have a tree (notion/anytype are skipped); default backend
-//! then profiles by name, deduplicated by root path (first wins).
-
 use std::path::PathBuf;
 
 use crate::config::{BackendConfig, BackendKind, HyprlayerConfig};
 
-/// One filesystem thoughts tree to index.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThoughtsRoot {
-    /// Absolute root of the tree (tilde-expanded).
     pub root: PathBuf,
-    /// Name of the per-repo directory under the root (usually `repos`).
     pub repos_dir: String,
-    /// Name of the global directory under the root (usually `global`).
     pub global_dir: String,
     pub backend: BackendKind,
-    /// `None` for the default backend, `Some(name)` for a profile's backend.
     pub profile: Option<String>,
 }
 
-/// All distinct filesystem roots configured: default backend first, then
-/// profiles sorted by name; duplicates (same root path) are dropped.
 pub fn thoughts_roots(config: &HyprlayerConfig) -> Vec<ThoughtsRoot> {
     let Some(thoughts) = config.thoughts.as_ref() else {
         return Vec::new();
@@ -56,7 +45,6 @@ fn root_for(backend: &BackendConfig, profile: Option<String>) -> Option<Thoughts
     let (repos_dir, global_dir) = match backend {
         BackendConfig::Git(g) => (g.repos_dir.as_str(), g.global_dir.as_str()),
         BackendConfig::Obsidian(o) => (o.repos_dir.as_str(), o.global_dir.as_str()),
-        // `uses_filesystem()` filtered everything else out above.
         BackendConfig::Notion(_) | BackendConfig::Anytype(_) => return None,
     };
     Some(ThoughtsRoot {
@@ -68,8 +56,6 @@ fn root_for(backend: &BackendConfig, profile: Option<String>) -> Option<Thoughts
     })
 }
 
-/// The CLI always writes these, but tolerate hand-edited configs by falling
-/// back to its defaults.
 fn non_empty_or(value: &str, default: &str) -> String {
     if value.is_empty() {
         default.to_string()
@@ -103,7 +89,6 @@ mod tests {
     fn empty_when_unconfigured() {
         assert!(thoughts_roots(&HyprlayerConfig::default()).is_empty());
 
-        // Git backend without a repo path resolves to no root.
         let cfg = config_with(ThoughtsConfig {
             user: "jt".into(),
             backend: BackendConfig::Git(GitConfig::default()),
@@ -119,21 +104,18 @@ mod tests {
             backend: git_backend("/tmp/hyprlayer-test-thoughts"),
             ..Default::default()
         };
-        // Duplicate of the default root, dropped.
         thoughts.profiles.insert(
             "dup".into(),
             ProfileConfig {
                 backend: git_backend("/tmp/hyprlayer-test-thoughts"),
             },
         );
-        // Non-filesystem backend, skipped.
         thoughts.profiles.insert(
             "cloud".into(),
             ProfileConfig {
                 backend: BackendConfig::Notion(Default::default()),
             },
         );
-        // Obsidian profile with a subpath and empty dir names → defaults.
         thoughts.profiles.insert(
             "vault".into(),
             ProfileConfig {
@@ -161,7 +143,6 @@ mod tests {
         );
         assert_eq!(roots[1].backend, BackendKind::Obsidian);
         assert_eq!(roots[1].profile.as_deref(), Some("vault"));
-        // Empty dir names fall back to the CLI defaults.
         assert_eq!(roots[1].repos_dir, "repos");
         assert_eq!(roots[1].global_dir, "global");
     }

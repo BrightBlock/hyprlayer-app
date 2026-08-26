@@ -10,7 +10,6 @@ import { BookIcon, FolderIcon, TerminalIcon } from "@/components/icons";
 import { ActivityDot } from "@/components/ActivityDot";
 import { rowClass } from "@/components/ui";
 
-// ── Kind icon ──────────────────────────────────────────────────────────────
 
 function KindIcon({ kind }: { kind: SearchResult["kind"] }) {
   const cls = "shrink-0 text-ink-dim";
@@ -34,11 +33,7 @@ function KindIcon({ kind }: { kind: SearchResult["kind"] }) {
   }
 }
 
-// ── Nav dispatch ───────────────────────────────────────────────────────────
 
-/** Open a search result. `activeWorkstreamId` (the workstream open in the
- *  current route, if any) lets a doc open as a preview tab in place rather than
- *  yanking the user to the Library. */
 function dispatchNav(
   result: SearchResult,
   navigate: ReturnType<typeof useNavigate>,
@@ -59,13 +54,9 @@ function dispatchNav(
         params: { projectPath: nav.projectPath },
         search: { item: nav.workstreamId },
       });
-      // Best-effort tab select, no-op if the tab isn't built yet.
       selectAgentTab(nav.workstreamId, nav.sessionId);
       break;
     case "doc":
-      // In a workstream: open the doc as a read-only preview tab so the user
-      // stays in their flow. Otherwise (Dashboard/Library/etc.) fall back to
-      // the full Library doc view.
       if (activeWorkstreamId) {
         openDocPreviewTab(activeWorkstreamId, nav.id, result.title);
       } else {
@@ -73,14 +64,11 @@ function dispatchNav(
       }
       break;
     case "file":
-      // Phase 3: file tab opening is a follow-on; navigating to the workstream
-      // is the fallback until openWorktreeFileTab is wired up.
       break;
   }
   closeSearch();
 }
 
-// ── Hint row ───────────────────────────────────────────────────────────────
 
 function EmptyHint() {
   return (
@@ -90,7 +78,6 @@ function EmptyHint() {
   );
 }
 
-// ── Result row ─────────────────────────────────────────────────────────────
 
 function ResultRow({
   result,
@@ -118,10 +105,6 @@ function ResultRow({
       onClick={onClick}
       className={rowClass({
         tier: "standard",
-        // Rounded corners here would show mid-list, clipped only by the
-        // palette's own `rounded-lg`, so cancel the tier's default radius.
-        // The keyboard-active state is the palette's own highlight, not
-        // Row's `selected` tint, so it stays a plain conditional here.
         className: `flex w-full gap-2 rounded-none px-4 text-left text-sm transition-colors ${
           active ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/50"
         }`,
@@ -142,7 +125,6 @@ function ResultRow({
   );
 }
 
-// ── Section ────────────────────────────────────────────────────────────────
 
 function Section({
   group,
@@ -175,9 +157,7 @@ function Section({
   );
 }
 
-// ── Main palette ───────────────────────────────────────────────────────────
 
-/** Derive the active workstream from the current route. */
 function useActiveWorkstreamId(): string | undefined {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const locationSearch = useRouterState({ select: (s) => s.location.search }) as {
@@ -199,15 +179,12 @@ export function SearchPalette() {
   const groups = groupResults(allResults);
   const flat = flattenGroups(groups);
 
-  // Clamp active index when results change.
   const clampedActive = flat.length > 0 ? Math.min(activeIndex, flat.length - 1) : 0;
 
-  // Auto-focus the input when the palette opens; reset state on close.
   useEffect(() => {
     if (open) {
       setQuery("");
       setActiveIndex(0);
-      // Small delay to let the DOM mount before focusing.
       setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [open]);
@@ -235,7 +212,6 @@ export function SearchPalette() {
 
   if (!open) return null;
 
-  // Compute flat offset for each group (for active-index mapping).
   let offset = 0;
 
   return (
@@ -253,7 +229,6 @@ export function SearchPalette() {
         className="w-full max-w-xl overflow-hidden rounded-lg border border-edge bg-panel shadow-2xl"
         onKeyDown={handleKeyDown}
       >
-        {/* Search input */}
         <div className="flex items-center gap-2 border-b border-edge px-4 py-3">
           <svg
             aria-hidden="true"
@@ -290,7 +265,6 @@ export function SearchPalette() {
           </kbd>
         </div>
 
-        {/* Results */}
         <div
           id="search-palette-results"
           role="listbox"

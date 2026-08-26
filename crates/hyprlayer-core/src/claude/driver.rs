@@ -1,18 +1,3 @@
-//! The long-lived `claude` session driver.
-//!
-//! Unlike one-shot [`crate::process::Exec`], a session is a long-running child
-//! we talk to over stdin/stdout for its whole life. [`ClaudeDriver::spawn`]
-//! starts the process and three background tasks:
-//!
-//! * **reader**: `claude` stdout NDJSON → [`SessionEvent`]s, broadcast to
-//!   subscribers (the UI Channel and the persistence writer both attach).
-//! * **stderr**: drained into a small ring buffer, so a crash can report the
-//!   tail (e.g. a `/login` hint).
-//! * **waiter**: `child.wait()` → classify the exit → final `Exited` event.
-//!
-//! Turns and control responses are written through an mpsc queue so writes from
-//! different callers serialize onto one stdin without interleaving.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -29,9 +14,6 @@ use super::protocol::{self, Block, ParsedLine};
 use crate::agent::KillFlag;
 use crate::error::{CoreError, Result};
 
-/// Per-stage permission posture (maps to claude's `--permission-mode`). Also
-/// the wire type for a user-chosen override (serialized as the CLI's own
-/// camelCase flag strings, which the frontend already speaks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -52,10 +34,6 @@ impl PermissionMode {
         }
     }
 
-    /// Parse a `--permission-mode` value (the same strings claude's CLI accepts),
-    /// or `None` for anything unrecognized. Used to apply a user-chosen override
-    /// on top of the stage's default posture; an unknown value falls back to the
-    /// stage default at the call site.
     pub fn from_flag(s: &str) -> Option<PermissionMode> {
         match s {
             "default" => Some(PermissionMode::Default),
@@ -67,83 +45,45 @@ impl PermissionMode {
     }
 }
 
-/// Everything needed to launch one session.
 pub struct SpawnConfig {
-    /// Absolute path to the resolved `claude` binary.
     pub claude_bin: PathBuf,
-    /// Working directory, the workstream's worktree.
     pub cwd: PathBuf,
-    /// App-generated session id (so resume bookkeeping survives a crash before
-    /// the init event lands).
     pub session_id: String,
     pub permission_mode: PermissionMode,
     pub allowed_tools: Vec<String>,
     pub disallowed_tools: Vec<String>,
-    /// Extra read/write roots (e.g. the thoughts root outside the worktree).
     pub add_dirs: Vec<PathBuf>,
-    /// `--resume <claude_session_id>` to continue; cwd must match the original.
     pub resume: Option<String>,
-    /// Branch a resumed session instead of continuing it.
     pub fork: bool,
-    /// Cost circuit-breaker.
     pub max_budget_usd: Option<f64>,
-    /// Override the model (else claude's default).
     pub model: Option<String>,
-    /// Reasoning effort level (`low|medium|high|xhigh|max`); else claude's default.
     pub effort: Option<String>,
-    /// Enable the "Claude in Chrome" browser-control feature (`--chrome`).
     pub chrome: bool,
-    /// Custom agent this session runs as, defined inline so nothing has to be
-    /// installed into the user's repo. `--agent` applies to the top-level
-    /// session, so the interactive permission surface is unaffected.
     pub agent: Option<crate::pipeline::SessionAgent>,
-    /// Augmented PATH + any extra env for the child (e.g. `ANTHROPIC_API_KEY`
-    /// for enterprise API-key auth).
     pub env: Vec<(String, String)>,
 }
 
 const STDERR_RING_LINES: usize = 200;
 const EVENT_CHANNEL_CAP: usize = 1024;
 
-/// The result of one `rewind_conversation` control request. `rewound` is claude's
-/// own success flag; `error` carries its refusal reason ("stale target", "turn
-/// running", "no preceding assistant", …) when it declined.
 struct RewindOutcome {
     rewound: bool,
     error: Option<String>,
 }
 
-/// A handle to a live session. Dropping it does NOT kill the child (the waiter
-/// task owns it); call [`ClaudeDriver::kill`] for a hard stop.
 pub struct ClaudeDriver {
     session_id: String,
-    /// Serialized writes to the child's stdin (turns + control responses).
     stdin_tx: mpsc::UnboundedSender<String>,
-    /// New subscribers clone this to receive the event stream.
     events: broadcast::Sender<SessionEvent>,
-    /// Monotonic counter for app-initiated control requests.
     control_seq: std::sync::atomic::AtomicU64,
-    /// Last 200 stderr lines (for crash diagnostics).
     stderr_ring: Arc<StdMutex<Vec<String>>>,
-    /// Set when `kill`/`kill_detached` is called, so the waiter classifies the
-    /// exit as app-initiated rather than an unexpected `Crashed`.
     kill_flag: Arc<KillFlag>,
-    /// Tool inputs from open `can_use_tool` requests, keyed by request id,
-    /// echoed back as `updatedInput` when allowing (claude's schema requires it).
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
-    /// Control requests awaiting a `control_response`, keyed by request id (just
-    /// `rewind_conversation` today). The reader resolves the oneshot on reply.
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
-    /// Best-effort hard-kill hook (pid / process group).
     killer: Killer,
 }
 
 impl ClaudeDriver {
-    /// Spawn a session. Returns the driver plus a receiver that is guaranteed to
-    /// observe every event (it's subscribed before the reader task can
-    /// broadcast, so the `init` event can't be missed). Additional subscribers
-    /// (re-attach) use [`ClaudeDriver::subscribe`] and replay from SQLite for
-    /// anything before they joined.
     pub fn spawn(config: SpawnConfig) -> Result<(Self, broadcast::Receiver<SessionEvent>)> {
         let mut cmd = Command::new(&config.claude_bin);
         cmd.arg("-p")
@@ -154,8 +94,6 @@ impl ClaudeDriver {
             .args(["--permission-prompt-tool", "stdio"])
             .args(["--permission-mode", config.permission_mode.as_flag()]);
 
-        // Fresh sessions pin our generated id; resuming continues an existing
-        // conversation by id (claude rejects --session-id together with --resume).
         if let Some(resume) = &config.resume {
             cmd.args(["--resume", resume]);
             if config.fork {
@@ -181,13 +119,6 @@ impl ClaudeDriver {
         }
         if let Some(effort) = &config.effort {
             if effort == "ultracode" {
-                // "ultracode" is our composer preset, not a CLI --effort value
-                // (the CLI rejects `--effort ultracode`). It means xhigh effort
-                // plus standing dynamic-workflow orchestration, which the CLI
-                // enables via the `ultracode` settings key. The --effort flag wins
-                // over the settings-implied xhigh, so xhigh is passed explicitly;
-                // enableWorkflows pins the workflows feature on. --settings layers
-                // over the user's settings, leaving all other keys untouched.
                 cmd.args(["--effort", "xhigh"])
                     .args(["--settings", r#"{"ultracode":true,"enableWorkflows":true}"#]);
             } else {
@@ -197,9 +128,6 @@ impl ClaudeDriver {
         if config.chrome {
             cmd.arg("--chrome");
         }
-        // Inline definition + selection. `tools` is intentionally absent: an
-        // agent's roster grants rather than scopes (a `Skill(name)` entry
-        // unlocks every skill), so restriction lives in --disallowedTools.
         if let Some(agent) = &config.agent {
             let defs = serde_json::json!({
                 agent.name: {
@@ -211,8 +139,6 @@ impl ClaudeDriver {
                 .args(["--agent", agent.name]);
         }
 
-        // Before any explicit env, so an AppImage build doesn't hand the harness
-        // (and every tool subprocess it spawns) our bundled AppDir.
         crate::process::appimage::scrub_tokio(&mut cmd);
         cmd.current_dir(&config.cwd)
             .env("CLAUDE_CODE_ENTRYPOINT", "hyprlayer-app")
@@ -224,8 +150,6 @@ impl ClaudeDriver {
             cmd.env(k, v);
         }
 
-        // Unix: own process group so we can signal the whole tree (claude spawns
-        // tool subprocesses). Windows job-object isolation is a follow-up.
         #[cfg(unix)]
         cmd.process_group(0);
 
@@ -235,9 +159,6 @@ impl ClaudeDriver {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        // Supervised: on Windows the job object kills claude (and anything it
-        // spawned) even when our destructors never run, a `process::exit` or a
-        // hard kill would otherwise orphan it.
         let mut child = crate::process::spawn_supervised(&mut cmd).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 CoreError::BinaryMissing {
@@ -254,8 +175,6 @@ impl ClaudeDriver {
         let stderr = child.take_stderr().expect("stderr piped");
 
         let (events_tx, _) = broadcast::channel(EVENT_CHANNEL_CAP);
-        // Subscribe BEFORE the reader task is spawned: the returned receiver
-        // can't miss the init event to a startup race.
         let primary_rx = events_tx.subscribe();
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
@@ -265,13 +184,10 @@ impl ClaudeDriver {
             HashMap::<String, oneshot::Sender<Value>>::new(),
         ));
 
-        // Writer task: drain the queue onto stdin, one line per message.
         tokio::spawn(write_loop(stdin, stdin_rx));
 
-        // Stderr task: keep the last N lines.
         tokio::spawn(stderr_loop(stderr, stderr_ring.clone()));
 
-        // Reader + waiter: parse stdout into events, then classify the exit.
         tokio::spawn(read_and_wait(
             child,
             stdout,
@@ -298,21 +214,10 @@ impl ClaudeDriver {
         ))
     }
 
-    /// Subscribe to the event stream. Late subscribers miss earlier events,
-    /// the persistence layer attaches immediately and replays from SQLite.
     pub fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
         self.events.subscribe()
     }
 
-    /// Send a user turn (the first prompt, or a follow-up). Stage-skill
-    /// invocations are just prompt text (e.g. `"/research_codebase …"`). `stage`
-    /// is the stage label for the opening prompt, else `None` for a follow-up.
-    ///
-    /// Emits a [`SessionEvent::UserMessage`] first so the turn is persisted and
-    /// replays after a restart. Claude never echoes the human prompt on stdout,
-    /// so without this the user's side of the conversation is lost on reload.
-    /// `prompt_name` tags the turn as a custom-prompt run so the replayed
-    /// transcript collapses the body into a card instead of a wall of text.
     pub fn send_user_turn(
         &self,
         text: &str,
@@ -327,9 +232,6 @@ impl ClaudeDriver {
         self.write_line(protocol::user_turn_json(&self.session_id, text))
     }
 
-    /// Answer a `PermissionAsk`. On allow, claude's schema requires the tool's
-    /// `updatedInput` back, we echo the original input we cached from the
-    /// `can_use_tool` request (unchanged); on deny it requires a message.
     pub fn respond_permission(
         &self,
         request_id: &str,
@@ -349,11 +251,6 @@ impl ClaudeDriver {
         ))
     }
 
-    /// Answer an `AskUserQuestion` prompt. claude's AskUserQuestion executor
-    /// reads the user's choices from `updatedInput.answers` (a map of question
-    /// text → selected label(s), comma-joined for multi-select), so we merge
-    /// `answers` into the cached tool input and allow. An empty `answers` map is
-    /// claude's "the user didn't answer" signal (it then asks again in prose).
     pub fn answer_question(&self, request_id: &str, answers: Value) -> Result<()> {
         let mut input = self
             .pending_permissions
@@ -372,14 +269,11 @@ impl ClaudeDriver {
         ))
     }
 
-    /// Graceful interrupt via the control protocol (portable; the process keeps
-    /// its pid). Falls back to a hard kill if claude doesn't ack.
     pub fn interrupt(&self) -> Result<()> {
         let id = self.next_control_id();
         self.write_line(protocol::control_request_json(&id, "interrupt", json!({})))
     }
 
-    /// Switch permission posture mid-session (e.g. plan → acceptEdits).
     pub fn set_permission_mode(&self, mode: PermissionMode) -> Result<()> {
         let id = self.next_control_id();
         self.write_line(protocol::control_request_json(
@@ -389,24 +283,8 @@ impl ClaudeDriver {
         ))
     }
 
-    /// Rewind claude's OWN conversation to the 1-based `ordinal` human turn so that
-    /// turn and everything after it leave the model's memory. claude's
-    /// `rewind_conversation` only accepts the *latest* human turn as a target, so we
-    /// peel from the tail down to the target; each step is the current last turn, so
-    /// none is "stale".
-    ///
-    /// The target uuids come from claude's own on-disk transcript, the SAME record
-    /// it reloads on `--resume`, so `ordinal` maps directly onto index `ordinal - 1`
-    /// and works across resumes (an app restart, model/permission switch, or a prior
-    /// log-only rewind), not just the current generation. Any miss, the transcript
-    /// isn't found/readable, the first turn (no preceding assistant to land on), a
-    /// running turn that won't interrupt, or a claude refusal, leaves the
-    /// conversation untouched and lets the caller fall back to a log-only rewind.
     pub async fn rewind_to_ordinal(&self, ordinal: usize) -> Result<()> {
         let uuids = self.transcript_user_uuids().await;
-        // Resolve which uuid to peel down to (pure; unit-tested). An unreachable
-        // target leaves the conversation untouched and drops the caller to a
-        // log-only rewind.
         let start =
             rewind_local_start(ordinal, uuids.len()).map_err(|detail| CoreError::OutputParse {
                 program: "claude".into(),
@@ -427,10 +305,6 @@ impl ClaudeDriver {
         Ok(())
     }
 
-    /// This session's human-turn uuids, in order, read from claude's transcript
-    /// (`~/.claude/projects/*/<session_id>.jsonl`). Runs the blocking file read off
-    /// the async runtime. Empty on any miss (not found, unreadable, unparseable), so
-    /// [`Self::rewind_to_ordinal`] falls back to a log-only rewind rather than error.
     async fn transcript_user_uuids(&self) -> Vec<String> {
         let session_id = self.session_id.clone();
         tokio::task::spawn_blocking(move || {
@@ -443,8 +317,6 @@ impl ClaudeDriver {
         .unwrap_or_default()
     }
 
-    /// Send one `rewind_conversation` control request and await its reply. The
-    /// reader resolves the oneshot keyed by our request id (see [`read_and_wait`]).
     async fn rewind_conversation(
         &self,
         target_uuid: &str,
@@ -455,8 +327,6 @@ impl ClaudeDriver {
         if let Ok(mut map) = self.pending_controls.lock() {
             map.insert(id.clone(), tx);
         }
-        // Reclaim the pending slot if the write fails (stdin closed), otherwise the
-        // sender lingers forever, since no reply will ever arrive to remove it.
         if let Err(e) = self.write_line(protocol::control_request_json(
             &id,
             "rewind_conversation",
@@ -473,8 +343,6 @@ impl ClaudeDriver {
         }
         let payload = match tokio::time::timeout(std::time::Duration::from_secs(20), rx).await {
             Ok(Ok(v)) => v,
-            // Timed out or the reader dropped the sender (process exited): reclaim
-            // the slot and report so the caller falls back.
             _ => {
                 if let Ok(mut map) = self.pending_controls.lock() {
                     map.remove(&id);
@@ -497,26 +365,20 @@ impl ClaudeDriver {
         })
     }
 
-    /// Hard stop: kill the process (group on Unix). The waiter task observes the
-    /// exit and emits the terminal event (classified `Killed`).
     pub fn kill(&self) {
         self.kill_flag.mark_killed();
         self.killer.kill();
     }
 
-    /// Same teardown, but for the app's own bookkeeping (quit, relaunch), the
-    /// exit is classified `Detached` and leaves the transcript untouched.
     pub fn kill_detached(&self) {
         self.kill_flag.mark_detached();
         self.killer.kill();
     }
 
-    /// The child's OS process id, if it spawned (recorded in the orphan ledger).
     pub fn pid(&self) -> Option<u32> {
         self.killer.pid
     }
 
-    /// Snapshot of the captured stderr tail (crash diagnostics).
     pub fn stderr_tail(&self) -> String {
         self.stderr_ring
             .lock()
@@ -548,7 +410,7 @@ async fn write_loop(
 ) {
     while let Some(line) = rx.recv().await {
         if stdin.write_all(line.as_bytes()).await.is_err() || stdin.flush().await.is_err() {
-            break; // child closed stdin; nothing more we can do
+            break;
         }
     }
 }
@@ -589,7 +451,6 @@ async fn read_and_wait(
                         saw_result = true;
                         saw_error_result |= *is_error;
                     }
-                    // Stash the tool input so an allow can echo it as updatedInput.
                     ParsedLine::CanUseTool {
                         request_id, input, ..
                     } => {
@@ -597,16 +458,9 @@ async fn read_and_wait(
                             map.insert(request_id.clone(), input.clone());
                         }
                     }
-                    // Defensive: suppress any replayed user echo (we no longer run
-                    // with `--replay-user-messages`, but a stray echo is a
-                    // re-emission of a prompt we sent, not new content, never render
-                    // it as text).
                     ParsedLine::User {
                         is_replay: true, ..
                     } => continue,
-                    // A reply to one of our control requests: hand it to the waiter
-                    // keyed by request id (if any), then drop it, not a transcript
-                    // event. Unmatched acks (e.g. interrupt) simply have no waiter.
                     ParsedLine::ControlResponse {
                         request_id,
                         payload,
@@ -624,8 +478,8 @@ async fn read_and_wait(
                     let _ = events.send(event);
                 }
             }
-            Ok(None) => break, // EOF: stdout closed, process is winding down
-            Err(_) => break,   // read error: treat as EOF
+            Ok(None) => break,
+            Err(_) => break,
         }
     }
 
@@ -633,9 +487,6 @@ async fn read_and_wait(
     let code = status.as_ref().ok().and_then(|s| s.code());
     let stderr_tail = stderr_ring.lock().map(|r| r.join("\n")).unwrap_or_default();
 
-    // Classify: an app-initiated kill takes precedence (and carries its reason);
-    // otherwise a clean terminal result + exit 0 is Completed and anything else
-    // is read from the wait status.
     let outcome =
         kill_flag
             .outcome()
@@ -652,14 +503,6 @@ async fn read_and_wait(
     });
 }
 
-/// Translate one parsed stdout line into zero or more session events.
-///
-/// Also called by the workflow reader (`claude::workflow`), which replays
-/// lines from a `Workflow` subagent's own `agent-<id>.jsonl` file rather
-/// than this driver's live stdout. That caller is responsible for stamping
-/// `parent_id` onto the `ParsedLine` before calling this — a file line has
-/// no `parent_tool_use_id` of its own, and the `Usage` suppression below
-/// keys on `parent_id.is_none()`.
 pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
     match parsed {
         ParsedLine::Init {
@@ -677,20 +520,16 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             blocks,
             context_tokens,
             parent_id,
-        } => {
-            // A live usage ping (main thread only, subagent usage is separate
-            // and shouldn't move the session's context meter), then the blocks.
-            context_tokens
-                .filter(|_| parent_id.is_none())
-                .map(|t| SessionEvent::Usage { context_tokens: t })
-                .into_iter()
-                .chain(
-                    blocks
-                        .into_iter()
-                        .filter_map(|b| block_to_event(b, parent_id.as_deref())),
-                )
-                .collect()
-        }
+        } => context_tokens
+            .filter(|_| parent_id.is_none())
+            .map(|t| SessionEvent::Usage { context_tokens: t })
+            .into_iter()
+            .chain(
+                blocks
+                    .into_iter()
+                    .filter_map(|b| block_to_event(b, parent_id.as_deref())),
+            )
+            .collect(),
         ParsedLine::User {
             blocks,
             parent_id,
@@ -700,9 +539,6 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             .into_iter()
             .filter_map(|b| block_to_event(b, parent_id.as_deref()))
             .map(|event| match event {
-                // A synthetic user turn's text is claude injecting content (a
-                // skill's SKILL.md body), not the agent writing. Mark it so the
-                // UI can fold it into the `Skill` row that pulled it in.
                 SessionEvent::AssistantText {
                     text, parent_id, ..
                 } if is_synthetic => SessionEvent::AssistantText {
@@ -718,10 +554,6 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             tool_name,
             input,
         } => {
-            // AskUserQuestion isn't a yes/no gate, surface its questions so the
-            // UI can render them interactively (answered via `answer_question`).
-            // Fall back to a normal permission card if `questions` is missing or
-            // not a non-empty array (a malformed shape we can't render as a prompt).
             let questions = (tool_name == "AskUserQuestion")
                 .then(|| input.get("questions"))
                 .flatten()
@@ -777,8 +609,6 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             detail: "unrecognized stream-json line".into(),
             raw,
         }],
-        // Replies to our control requests are routed by the reader (keyed by
-        // request id), never surfaced as transcript events.
         ParsedLine::ControlResponse { .. } => Vec::new(),
         ParsedLine::System { .. } => Vec::new(),
     }
@@ -813,14 +643,6 @@ pub(crate) fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<Se
     }
 }
 
-/// Map a 1-based human-turn `ordinal` onto the index in the transcript's `len`
-/// human-turn uuids to begin peeling from (`ordinal - 1`). Pure so the ordinal
-/// arithmetic, the part that silently corrupted a resumed session, is
-/// exhaustively unit-tested without a live claude.
-///
-/// `Err` (target unreachable) is not fatal: the caller falls back to a log-only
-/// rewind. Unreachable when the target is the first turn (no preceding assistant to
-/// land on) or past the turns the transcript holds (`>= len`).
 fn rewind_local_start(ordinal: usize, len: usize) -> std::result::Result<usize, String> {
     if ordinal < 2 {
         return Err("rewind_conversation cannot target the first user turn".into());
@@ -834,17 +656,12 @@ fn rewind_local_start(ordinal: usize, len: usize) -> std::result::Result<usize, 
     Ok(idx)
 }
 
-/// claude's config root, `$CLAUDE_CONFIG_DIR` when set (claude honors it), else
-/// `~/.claude`. Session transcripts live under `<root>/projects/`.
 fn claude_config_dir() -> Option<PathBuf> {
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
 }
 
-/// Locate `<config>/projects/*/<session_id>.jsonl`, claude keys each project's
-/// transcript dir off a (lossy) escaping of the cwd, so rather than replicate that
-/// we scan the project dirs for the file named by the (unique) session id.
 fn transcript_path(session_id: &str) -> Option<PathBuf> {
     let projects = claude_config_dir()?.join("projects");
     let filename = format!("{session_id}.jsonl");
@@ -857,10 +674,6 @@ fn transcript_path(session_id: &str) -> Option<PathBuf> {
     None
 }
 
-/// The uuids of the genuine human turns in a session transcript (`jsonl`), in
-/// order, the same turns claude's own rewind targets. Mirrors claude's filter:
-/// a `type:"user"` line that isn't a tool-result echo, meta / injected / compaction
-/// line, subagent sidechain, or non-human origin. Pure + unit-tested.
 fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
     jsonl
         .lines()
@@ -877,7 +690,6 @@ fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
             {
                 return None;
             }
-            // A user line whose content is a tool_result array is a tool return.
             let content = v.get("message").and_then(|m| m.get("content"));
             let is_tool_result = content
                 .and_then(Value::as_array)
@@ -888,7 +700,6 @@ fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
             if is_tool_result {
                 return None;
             }
-            // `origin.kind`, when present, must be human.
             if let Some(kind) = v
                 .get("origin")
                 .and_then(|o| o.get("kind"))
@@ -903,9 +714,6 @@ fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
         .collect()
 }
 
-/// Best-effort process-tree killer. On Unix we signal the process group we put
-/// the child in; elsewhere we fall back to the pid (kill_on_drop covers the
-/// common case where the driver is dropped).
 struct Killer {
     pid: Option<u32>,
 }
@@ -915,7 +723,6 @@ impl Killer {
         let Some(pid) = self.pid else { return };
         #[cfg(unix)]
         {
-            // Negative pid = the process group. SIGTERM first; the OS reaps.
             unsafe {
                 libc::kill(-(pid as i32), libc::SIGTERM);
             }
@@ -938,24 +745,15 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// The index is `ordinal - 1`, so peeling from it keeps turns `1..ordinal` and
-    /// drops `ordinal..`. Because the uuids come from the transcript (all turns,
-    /// every generation), a turn from before a resume maps directly, the fix for
-    /// the "predates this live generation" fall-through.
     #[test]
     fn rewind_maps_ordinal_to_index() {
         assert_eq!(rewind_local_start(2, 5), Ok(1));
         assert_eq!(rewind_local_start(5, 5), Ok(4));
-        // A pre-resume turn is now reachable (transcript holds every turn's uuid).
         assert_eq!(rewind_local_start(3, 7), Ok(2));
-        // The first turn has no preceding assistant, unreachable.
         assert!(rewind_local_start(1, 5).is_err());
-        // Beyond what the transcript holds, unreachable.
         assert!(rewind_local_start(6, 5).is_err());
     }
 
-    /// An empty transcript (not found / unreadable) reaches no turn, every ordinal
-    /// falls back to a log-only rewind.
     #[test]
     fn rewind_empty_transcript_reaches_nothing() {
         for ordinal in 1..=8 {
@@ -963,9 +761,6 @@ mod tests {
         }
     }
 
-    /// The transcript parser keeps genuine human turns in order and drops the rest:
-    /// tool-result echoes, meta / compaction / injected lines, subagent sidechains,
-    /// and non-human origins, mirroring what claude's own rewind will accept.
     #[test]
     fn parse_transcript_keeps_only_human_turns() {
         let jsonl = [
@@ -983,15 +778,12 @@ mod tests {
         assert_eq!(parse_transcript_user_uuids(&jsonl), vec!["u1", "u2", "u3"]);
     }
 
-    /// Blank/garbage lines are skipped, not fatal (tolerant parse).
     #[test]
     fn parse_transcript_tolerates_junk_lines() {
         let jsonl = "\nnot json\n{}\n{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"content\":\"hi\"}}\n";
         assert_eq!(parse_transcript_user_uuids(jsonl), vec!["u1"]);
     }
 
-    /// AskUserQuestion is surfaced as an interactive `QuestionAsk` (carrying the
-    /// questions JSON), not a yes/no `PermissionAsk`.
     #[test]
     fn ask_user_question_becomes_a_question_ask() {
         let questions = json!([{
@@ -1014,19 +806,12 @@ mod tests {
                 questions: q,
             }] => {
                 assert_eq!(request_id, "req-1");
-                // The serialized questions round-trip back to the same value.
                 assert_eq!(serde_json::from_str::<Value>(q).unwrap(), questions);
             }
             other => panic!("expected one QuestionAsk, got {other:?}"),
         }
     }
 
-    /// A synthetic user turn's text is content claude injected (the launched
-    /// skill's SKILL.md body), so it reaches the UI flagged `injected` and folds
-    /// into the `Skill` row instead of dumping into the transcript. The bundled
-    /// skills that ship no auxiliary files — `artifact-design`,
-    /// `artifact-diagramming` — inject a body with no `Base directory for this
-    /// skill:` prefix, which is why the flag, not the prefix, has to carry this.
     #[test]
     fn synthetic_user_text_is_flagged_injected() {
         let events = parsed_to_events(ParsedLine::User {
@@ -1044,8 +829,6 @@ mod tests {
         ));
     }
 
-    /// A tool-result `user` line is not synthetic, so nothing else on that line
-    /// picks the flag up.
     #[test]
     fn ordinary_user_text_is_not_injected() {
         let events = parsed_to_events(ParsedLine::User {
@@ -1066,7 +849,6 @@ mod tests {
         ));
     }
 
-    /// Every other tool keeps the normal Allow/Deny permission gate.
     #[test]
     fn other_tools_remain_permission_asks() {
         let events = parsed_to_events(ParsedLine::CanUseTool {
@@ -1080,9 +862,6 @@ mod tests {
         ));
     }
 
-    /// A background-task completion notification becomes a `BackgroundTaskUpdate`
-    /// session event (the UI drops the finished shell from its live indicator),
-    /// carrying the shell id, the spawning Bash tool-use id, and the status.
     #[test]
     fn task_notification_becomes_a_background_task_update() {
         let events = parsed_to_events(ParsedLine::TaskNotification {
@@ -1104,16 +883,13 @@ mod tests {
         }
     }
 
-    /// Defensive: an AskUserQuestion whose `questions` is missing OR present but
-    /// malformed (null, non-array, or empty) falls back to a permission card
-    /// rather than emitting an unanswerable/blank question prompt.
     #[test]
     fn ask_user_question_with_bad_questions_falls_back_to_permission() {
         for bad in [
-            json!({}), // missing entirely
+            json!({}),
             json!({ "questions": null }),
-            json!({ "questions": "nope" }), // not an array
-            json!({ "questions": [] }),     // empty array
+            json!({ "questions": "nope" }),
+            json!({ "questions": [] }),
         ] {
             let events = parsed_to_events(ParsedLine::CanUseTool {
                 request_id: "req-3".into(),

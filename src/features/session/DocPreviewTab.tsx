@@ -8,12 +8,6 @@ import { FrontmatterCard } from "@/features/library/FrontmatterCard";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { splitFrontmatter } from "@/features/library/text";
 
-/**
- * Read-only preview of an agent-created research/plan doc, shown in its own
- * agent-strip tab so the user can review it without leaving the project (the
- * doc id is its absolute path). Retries briefly: a freshly-written doc may not
- * be indexed for a moment after the agent's `Write`.
- */
 export function DocPreviewTab({ path, title }: { path: string; title: string }) {
   const doc = useQuery({
     queryKey: ["doc", path],

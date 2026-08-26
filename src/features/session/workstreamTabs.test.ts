@@ -51,12 +51,11 @@ describe("cycleActiveTab", () => {
   });
 
   it("wraps around both ends", () => {
-    expect(cycleActiveTab(mainState(3, 1, 2, 3), 1).activeId).toBe(1); // last → first
-    expect(cycleActiveTab(mainState(1, 1, 2, 3), -1).activeId).toBe(3); // first → last
+    expect(cycleActiveTab(mainState(3, 1, 2, 3), 1).activeId).toBe(1);
+    expect(cycleActiveTab(mainState(1, 1, 2, 3), -1).activeId).toBe(3);
   });
 
   it("cycles in on-screen order, so it follows drag reordering", () => {
-    // shells stored as [3, 1, 2] (e.g. after a drag); active is the middle one.
     const state: WsTabState = {
       shells: [shell(3), shell(1), shell(2)],
       activeId: 1,
@@ -67,9 +66,9 @@ describe("cycleActiveTab", () => {
   });
 
   it("treats an unresolved active id as the first tab", () => {
-    const state = mainState(99, 1, 2, 3); // 99 isn't a real tab
-    expect(cycleActiveTab(state, 1).activeId).toBe(2); // first → next
-    expect(cycleActiveTab(state, -1).activeId).toBe(3); // first → previous wraps to last
+    const state = mainState(99, 1, 2, 3);
+    expect(cycleActiveTab(state, 1).activeId).toBe(2);
+    expect(cycleActiveTab(state, -1).activeId).toBe(3);
   });
 
   it("cycles only the focused right pane and leaves the main selection alone", () => {
@@ -82,12 +81,11 @@ describe("cycleActiveTab", () => {
     };
     const next = cycleActiveTab(state, 1);
     expect(next.rightActiveId).toBe(3);
-    expect(next.activeId).toBe(1); // main pane untouched
+    expect(next.activeId).toBe(1);
     expect(next.activePane).toBe("right");
   });
 
   it("is a no-op when the focused pane has fewer than two tabs", () => {
-    // Focus is on the right pane, but it holds a single tab.
     const state: WsTabState = {
       shells: [shell(1, "main"), shell(2, "main"), shell(3, "right")],
       activeId: 1,
@@ -111,15 +109,11 @@ describe("nextShellId", () => {
   });
 
   it("also avoids archived ids, so an unarchived tab never collides", () => {
-    // Visible tabs are 1,2; an archived tab still holds id 5. The next id must
-    // clear 5 so unarchiving #5 can't clash with a freshly-minted tab.
     expect(nextShellId([shell(1), shell(2)], [archived(5)])).toBe(6);
   });
 });
 
 describe("removeShellState", () => {
-  // Safari's rule. A three-tab strip can't separate "the tab to the right" from
-  // "the last tab" when you close the middle one, so these use four.
   it("selects the tab to the right of the closed one", () => {
     expect(removeShellState(mainState(2, 1, 2, 3, 4), 2).activeId).toBe(3);
     expect(removeShellState(mainState(1, 1, 2, 3, 4), 1).activeId).toBe(2);
@@ -140,7 +134,6 @@ describe("removeShellState", () => {
       activeId: 3,
       activePane: "main",
     };
-    // 1 sits to the right of 3 on screen, even though 3 is the highest id.
     expect(removeShellState(state, 3).activeId).toBe(1);
   });
 
@@ -165,7 +158,6 @@ describe("removeShellState", () => {
   it("applies the same right-hand rule inside the right pane", () => {
     expect(removeShellState(splitState(2), 2).rightActiveId).toBe(3);
     expect(removeShellState(splitState(4), 4).rightActiveId).toBe(3);
-    // The main pane's selection is untouched by a right-pane close.
     expect(removeShellState(splitState(2), 2).activeId).toBe(1);
   });
 
@@ -206,7 +198,7 @@ describe("selectTabAt", () => {
     const next = selectTabAt(state, 0);
     expect(next.rightActiveId).toBe(2);
     expect(next.activePane).toBe("right");
-    expect(next.activeId).toBe(1); // main pane untouched
+    expect(next.activeId).toBe(1);
   });
 });
 
@@ -334,10 +326,10 @@ describe("composer focus signal", () => {
 
   it("only the targeted shell consumes it, and exactly once", () => {
     requestComposerFocus(7);
-    expect(consumeComposerFocus(3)).toBe(false); // wrong shell, left pending
+    expect(consumeComposerFocus(3)).toBe(false);
     expect(useComposerFocusStore.getState().pendingShellId).toBe(7);
-    expect(consumeComposerFocus(7)).toBe(true); // target claims it
+    expect(consumeComposerFocus(7)).toBe(true);
     expect(useComposerFocusStore.getState().pendingShellId).toBeNull();
-    expect(consumeComposerFocus(7)).toBe(false); // already consumed, never re-fires
+    expect(consumeComposerFocus(7)).toBe(false);
   });
 });

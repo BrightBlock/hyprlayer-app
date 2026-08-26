@@ -1,30 +1,22 @@
-//! New-document templates: deterministic file names plus frontmatter/body
-//! skeletons that match the hyprlayer-cli layout conventions.
-
 use serde::{Deserialize, Serialize};
 
 use super::frontmatter::{patch_frontmatter, FmPatch, FmValue};
 
-/// Inputs for a new thought document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DocTemplate {
     pub title: String,
-    /// plan | research | handoff | note | pr
     #[serde(rename = "type")]
     pub doc_type: String,
-    /// YYYY-MM-DD
     pub date: String,
     pub ticket: Option<String>,
     pub project: Option<String>,
-    /// user | shared | global
     pub scope: String,
     pub author: String,
     pub tags: Vec<String>,
 }
 
-/// A rendered new document, ready to be written to disk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -33,9 +25,6 @@ pub struct NewDoc {
     pub content: String,
 }
 
-/// Render a new document: `YYYY-MM-DD[-TICKET]-kebab-slug.md` plus schema-
-/// ordered frontmatter (status: draft, empty optionals omitted) and a minimal
-/// body skeleton per type.
 pub fn new_doc(t: &DocTemplate) -> NewDoc {
     let mut file_name = t.date.clone();
     if let Some(ticket) = t.ticket.as_deref() {
@@ -79,15 +68,12 @@ pub fn new_doc(t: &DocTemplate) -> NewDoc {
         set,
         remove: Vec::new(),
     };
-    // Synthesizing onto a frontmatter-free body with validated keys cannot
-    // fail: every key is a schema key and every value round-trips.
     let content =
         patch_frontmatter(body, &patch).expect("template frontmatter must render and validate");
 
     NewDoc { file_name, content }
 }
 
-/// Lowercase kebab slug: alphanumeric runs joined by `-`, capped at ~60 chars.
 fn slugify(title: &str) -> String {
     const MAX: usize = 60;
     let mut out = String::new();
@@ -116,7 +102,6 @@ fn slugify(title: &str) -> String {
     }
 }
 
-/// Tickets go into file names verbatim minus anything filename-hostile.
 fn sanitize_ticket(ticket: &str) -> String {
     ticket
         .chars()

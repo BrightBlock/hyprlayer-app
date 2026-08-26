@@ -3,36 +3,18 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Button, Dialog, TextInput } from "@/components/ui";
 import { SearchIcon } from "@/components/icons";
 
-/** One selectable model. `id` is the FINAL id the caller persists, this
- *  component never composes ids, so a harness with `provider/model` paths and one
- *  with bare ids both fit. */
 export type ModelRow = {
   id: string;
   name: string;
-  /** Secondary line under the name; defaults to the id when omitted. */
   detail?: string;
 };
 
-/** A labelled run of models. `label` is omitted for a single ungrouped list. */
 export type ModelRowGroup = {
   key: string;
   label?: string;
   models: ModelRow[];
 };
 
-/**
- * The shared "Add models" multi-select: a search filter over grouped checkbox
- * rows, with Cancel/Save and a running count. Every harness's model picker is
- * this same interaction, so the shell lives here and each tab supplies rows,
- * OpenCode groups by provider (and applies its keyed/free rules first), Codex
- * passes one flat group.
- *
- * Selection is draft state seeded from `selected` at MOUNT, so callers must
- * render this only while open (`{open && <ModelMultiSelectDialog …/>}`),
- * unmounting is what discards a cancelled edit and re-seeds the next one. Kept
- * mounted, the draft would go stale against `selected` and Save would write back
- * a selection the user had already changed.
- */
 export function ModelMultiSelectDialog({
   open,
   onClose,
@@ -53,19 +35,12 @@ export function ModelMultiSelectDialog({
   title?: string;
   searchPlaceholder?: string;
   emptyLabel?: string;
-  /** Opt in to an "add a model ID by hand" field (Claude's `--model` takes any
-   *  alias or dated id). The dialog owns it so a typed id joins the DRAFT like
-   *  any checkbox, persisting it directly would be undone by Save, which only
-   *  writes the draft. Added ids show under "Added" until saved. */
   addCustom?: { placeholder: string };
-  /** Rendered beside the "N selected" count. Takes `(setChosen)` so a harness can
-   *  offer select-all/none over a list only it knows the shape of. */
   bulkActions?: (apply: (ids: string[]) => void) => ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(selected));
   const [newId, setNewId] = useState("");
-  /** Ids typed into the custom field this session, draft-only until Save. */
   const [added, setAdded] = useState<string[]>([]);
 
   const allGroups: ModelRowGroup[] = useMemo(
@@ -95,8 +70,6 @@ export function ModelMultiSelectDialog({
       .filter((g) => g.models.length > 0);
   }, [allGroups, query]);
 
-  /** Add a hand-typed id to the draft (and surface it in the list), never
-   *  persisted here; Save is what writes it. */
   function addTypedId() {
     const id = newId.trim();
     if (!id) return;
@@ -115,9 +88,6 @@ export function ModelMultiSelectDialog({
     });
   }
 
-  // No draft reset here: the caller unmounts us, which discards it wholesale.
-  // Resetting from `selected` would read the PRE-save prop and clobber the save
-  // that just happened.
   const close = onClose;
 
   return (

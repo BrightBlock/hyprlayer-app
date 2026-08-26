@@ -3,8 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installDragRegion, isDragRegion } from "./dragRegion";
 
-// The module reaches for the real window only through the injected host, but it
-// still imports @tauri-apps/api/window at module load.
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({}) }));
 
 const host = { startDragging: vi.fn(), toggleMaximize: vi.fn() };
@@ -70,7 +68,7 @@ describe("drag threshold", () => {
     down($("bar"), 100, 5);
     move(102, 6);
     up();
-    move(400, 300); // the release ended it; later motion must not drag
+    move(400, 300);
     expect(host.startDragging).not.toHaveBeenCalled();
   });
 

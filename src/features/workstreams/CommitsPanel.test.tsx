@@ -86,8 +86,6 @@ describe("CommitsPanel", () => {
     fireEvent.click(screen.getByText("add the commits tab"));
     const row = screen.getByText("src/old-name.ts → src/new-name.ts");
 
-    // The old path is re-derived backend-side from the commit's own diff, so
-    // the click carries the new path and the full sha, exactly as any other row.
     fireEvent.click(row);
     expect(onOpenDiff).toHaveBeenCalledWith("src/new-name.ts", false, SHA);
   });

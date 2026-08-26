@@ -2,7 +2,6 @@ import type { AppError } from "./bindings";
 
 type CommandResult<T> = { status: "ok"; data: T } | { status: "error"; error: AppError };
 
-/** Unwrap a tauri-specta command result, throwing the typed AppError. */
 export async function unwrap<T>(result: Promise<CommandResult<T>>): Promise<T> {
   const r = await result;
   if (r.status === "ok") return r.data;
@@ -20,7 +19,6 @@ export function isAppError(e: unknown): e is AppError {
   );
 }
 
-/** Human-readable message for anything a command can throw. */
 export function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (typeof e === "object" && e !== null && "message" in e) {
@@ -29,7 +27,6 @@ export function errorMessage(e: unknown): string {
   return String(e);
 }
 
-/** Suggested fix, when the backend supplied one. */
 export function errorRemedy(e: unknown): string | null {
   if (typeof e === "object" && e !== null && "remedy" in e) {
     const remedy = (e as { remedy: unknown }).remedy;

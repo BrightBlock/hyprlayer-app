@@ -1,9 +1,3 @@
-//! Subprocess execution for one-shot external commands.
-//!
-//! Long-lived children (claude sessions) get their own driver; everything
-//! else goes through [`Exec`]: absolute binary path, explicit cwd, args as
-//! vectors (never a shell), captured output, timeout, typed errors.
-
 pub mod appimage;
 pub mod binaries;
 #[cfg(windows)]
@@ -26,13 +20,7 @@ pub struct Exec {
     args: Vec<OsString>,
     cwd: Option<PathBuf>,
     env: Vec<(OsString, OsString)>,
-    /// Bytes to feed the child on stdin (then close it). `None` = no stdin
-    /// (`/dev/null`). Use this for sensitive input that must not appear in argv,
-    /// which is world-readable via process listing.
     stdin: Option<Vec<u8>>,
-    /// Put the child in its own process group so a timeout SIGKILLs the whole
-    /// group (the command plus anything it spawned), not just the direct child.
-    /// Unix-only; a no-op on Windows.
     own_process_group: bool,
     timeout: Duration,
 }
@@ -86,23 +74,16 @@ impl Exec {
         self
     }
 
-    /// Run the child in a fresh process group so a timeout kills the whole group
-    /// (e.g. a script that backgrounded a server), not just the direct child.
-    /// Unix-only; a no-op on Windows.
     pub fn own_process_group(mut self) -> Self {
         self.own_process_group = true;
         self
     }
 
-    /// Feed `data` to the child on stdin, then close it (EOF). Prefer this over
-    /// [`Exec::arg`] for secrets or user content, argv is visible to any local
-    /// process listing, stdin is not.
     pub fn stdin(mut self, data: impl Into<Vec<u8>>) -> Self {
         self.stdin = Some(data.into());
         self
     }
 
-    /// Run to completion, capturing output. Fails on non-zero exit.
     pub async fn run(self) -> Result<ExecOutput> {
         let output = self.run_unchecked().await?;
         if output.exit_code == Some(0) {
@@ -116,7 +97,6 @@ impl Exec {
         }
     }
 
-    /// Run to completion, capturing output regardless of exit status.
     pub async fn run_unchecked(&self) -> Result<ExecOutput> {
         let mut cmd = tokio::process::Command::new(&self.program);
         cmd.args(&self.args)
@@ -132,7 +112,6 @@ impl Exec {
         if let Some(cwd) = &self.cwd {
             cmd.current_dir(cwd);
         }
-        // Before caller env, so an explicit override still wins.
         appimage::scrub_tokio(&mut cmd);
         for (k, v) in &self.env {
             cmd.env(k, v);
@@ -146,9 +125,6 @@ impl Exec {
 
         #[cfg(unix)]
         if self.own_process_group {
-            // New group with pgid == child pid, so a timeout can killpg the whole
-            // tree (see the timeout branch). `process_group` is inherent on tokio's
-            // Command on Unix.
             cmd.process_group(0);
         }
 
@@ -164,13 +140,8 @@ impl Exec {
 
         let mut stdout_pipe = child.stdout.take().expect("stdout piped");
         let mut stderr_pipe = child.stderr.take().expect("stderr piped");
-        // Take the stdin pipe (present only when `self.stdin` is set); writing it
-        // lives inside the `join!` below so a child that blocks on stdout can't
-        // deadlock us, and the pipe is dropped afterwards to signal EOF.
         let mut stdin_pipe = child.stdin.take();
         let stdin_data = self.stdin.clone();
-        // Captured before `work` borrows `child`, so the timeout branch can kill
-        // the child's whole process group.
         #[cfg(unix)]
         let child_pid = child.id();
 
@@ -182,7 +153,6 @@ impl Exec {
                     if let Some(data) = &stdin_data {
                         pipe.write_all(data).await?;
                     }
-                    // `pipe` drops here → child sees EOF on stdin.
                 }
                 Ok::<(), std::io::Error>(())
             };
@@ -206,8 +176,6 @@ impl Exec {
         match tokio::time::timeout(self.timeout, work).await {
             Ok(result) => Ok(result?),
             Err(_) => {
-                // `kill_on_drop` only kills the direct child; when it's in its own
-                // group, SIGKILL the whole group so spawned children die too.
                 #[cfg(unix)]
                 if self.own_process_group {
                     if let Some(pid) = child_pid {
@@ -227,26 +195,17 @@ impl Exec {
     }
 }
 
-/// A long-lived child plus whatever the OS needs to guarantee its whole tree
-/// goes with it. Hold it for as long as the child should live; drop it to tear
-/// the child down.
 pub struct SupervisedChild {
     child: tokio::process::Child,
-    /// Dropping this closes the job handle, which is what kills the tree.
     #[cfg(windows)]
     _job: Option<job::JobObject>,
 }
 
 impl SupervisedChild {
-    /// The pid we spawned. On Windows this may be a `cmd.exe` wrapper rather
-    /// than the program itself, do not kill it directly, drop `self`.
     pub fn id(&self) -> Option<u32> {
         self.child.id()
     }
 
-    /// The piped stdio handles, taken once each (as on [`tokio::process::Child`]).
-    /// The child itself stays owned here so the job handle outlives it, handing
-    /// out the `Child` would let a caller drop the supervision and keep the pipes.
     pub fn take_stdin(&mut self) -> Option<tokio::process::ChildStdin> {
         self.child.stdin.take()
     }
@@ -263,15 +222,9 @@ impl SupervisedChild {
         self.child.wait().await
     }
 
-    /// Kill the child's process tree synchronously, for the app-exit path: `Drop`
-    /// never runs under `process::exit`, and on Unix there's no job object to fall
-    /// back on (that's how an `opencode serve` outlived its app by two weeks).
-    /// Windows needs nothing, the kernel closes the job handle for us.
-    /// Assumes the child leads its own group, as `process_group(0)` spawns do.
     pub fn kill_blocking(&self) {
         let Some(pid) = self.child.id() else { return };
         #[cfg(unix)]
-        // Negative pid = the whole group, so wrappers and grandchildren go too.
         unsafe {
             libc::kill(-(pid as i32), libc::SIGTERM);
         }
@@ -280,20 +233,6 @@ impl SupervisedChild {
     }
 }
 
-/// Spawn a long-lived child so that killing us kills everything it started.
-///
-/// Windows needs a job object: a resolved CLI is often an npm `.cmd` shim, which
-/// `std::process::Command` runs through `cmd.exe`, so the pid we hold is the
-/// wrapper and `kill_on_drop` alone leaves the real program running (see
-/// [`job`]). The job also covers the routes where destructors never run,
-/// `process::exit`, a panic, `TerminateProcess`, because the kernel closes our
-/// handle regardless.
-///
-/// Unix needs nothing extra: a script bin is exec'd in place rather than wrapped,
-/// so the pid we hold *is* the program and `kill_on_drop` reaches it.
-///
-/// A job that cannot be created or joined is logged and skipped rather than
-/// failing the spawn: degrading to the old behaviour beats refusing to start.
 pub fn spawn_supervised(cmd: &mut tokio::process::Command) -> std::io::Result<SupervisedChild> {
     cmd.kill_on_drop(true);
 
@@ -343,13 +282,10 @@ fn tail(s: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
 
-    /// With `own_process_group()`, a timeout must SIGKILL the whole group, a
-    /// child the command backgrounded must not outlive it.
     #[tokio::test]
     async fn timeout_kills_process_group() {
         let dir = tempfile::tempdir().unwrap();
         let pidfile = dir.path().join("pid");
-        // Background a long sleep, record its pid, then hang so the timeout fires.
         let script = format!("sleep 60 & echo $! > {}; sleep 60", pidfile.display());
 
         let res = Exec::new("/bin/sh")

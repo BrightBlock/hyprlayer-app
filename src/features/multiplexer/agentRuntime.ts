@@ -1,14 +1,3 @@
-//! Imperative lifecycle for Multiplexer PTY agents.
-//!
-//! Each agent gets a *persistent* detection Channel (held at module scope, like
-//! the session store's live channels) so its state keeps updating, and a
-//! blocked agent keeps badging + notifying, even while its tab is unmounted in
-//! the background. The visible `AgentPtyTab` opens a SEPARATE render Channel for
-//! xterm while it's on screen; the backend PTY broadcast feeds both subscribers.
-//!
-//! Spawning goes through `agent_open` (engine command in the worktree); reattach
-//! reuses `terminal_attach`. Stop sends SIGINT; close kills the PTY. State
-//! transitions are coalesced per frame before they hit the store.
 
 import { Channel } from "@tauri-apps/api/core";
 
@@ -48,14 +37,11 @@ type Runtime = {
   notifyOnBlocked: boolean;
   exited: boolean;
   starting?: Promise<string | null>;
-  /** Source of truth for the bypass-permissions shield (the store mirrors it). */
   bypass: boolean;
 };
 
 const runtimes = new Map<string, Runtime>();
 
-// One coalescer for all agents: flushes the per-frame batch into the store and
-// fires a notification on each fresh transition into `blocked`.
 const coalescer = new StateCoalescer((batch) => {
   const prev = useMultiplexerStore.getState().agents;
   for (const [key, state] of batch) {
@@ -65,9 +51,6 @@ const coalescer = new StateCoalescer((batch) => {
     }
   }
   setAgentStateBatch(batch);
-  // Re-assert bypass from the runtime (the source of truth) on every flush, so a
-  // transient store change around a dock toggle / re-render can't leave the
-  // shield out of sync, the next bit of output restores it.
   for (const key of batch.keys()) {
     const rt = runtimes.get(key);
     if (rt) setStoreBypass(rt.workstreamId, rt.shellId, rt.bypass);
@@ -87,7 +70,7 @@ function onDetectEvent(rt: Runtime, ev: TerminalEvent): void {
     rt.tail = (rt.tail + stripAnsi(rt.decoder.decode(b64ToBytes(ev.data), { stream: true }))).slice(
       -TAIL_CAP,
     );
-    recompute(rt, false); // live output → working (unless a prompt blocks)
+    recompute(rt, false);
     if (rt.quietTimer) clearTimeout(rt.quietTimer);
     rt.quietTimer = setTimeout(() => recompute(rt, true), QUIET_MS);
   } else if (ev.kind === "exited") {
@@ -102,12 +85,9 @@ function onDetectEvent(rt: Runtime, ev: TerminalEvent): void {
 
 async function maybeNotifyBlocked(rt: Runtime): Promise<void> {
   if (!rt.notifyOnBlocked) return;
-  // Only toast when the window isn't focused, the tab + sidebar badge already
-  // cover the in-view case, mirroring the native "needs you" behavior.
   try {
     if (document.hasFocus()) return;
   } catch {
-    /* no document, shouldn't happen in the webview */
   }
   await notifyNeedsAttention({
     workstreamId: rt.workstreamId,
@@ -123,28 +103,14 @@ export type EnsureAgentOpts = {
   engine: ResolvedEngine;
   projectPath: string;
   workstreamTitle: string;
-  /** True grid from the visible tab; falls back to a sane default for eager
-   *  background spawns (the agent resizes when its tab is shown). */
   cols?: number;
   rows?: number;
-  /** Persisted PTY id to reattach to before spawning fresh. */
   persistedTerminalId?: string;
   notifyOnBlocked: boolean;
-  /** Whether this run is in bypass-permissions mode, restored from the persisted
-   *  ShellTab on cold start so the shield (and a respawn's flags) survive a quit.
-   *  Only seeds a freshly-created runtime; live runtimes keep their current flag. */
   bypass?: boolean;
-  /** Whether a conversation has already begun, seeds a freshly-created runtime so
-   *  a restored/resumed tab's Restart+shield resume immediately, while a fresh tab
-   *  starts false and flips on the first keystroke. */
   started?: boolean;
 };
 
-/**
- * Ensure a PTY + detection stream exist for an agent. Idempotent and
- * concurrency-safe (in-flight spawns are de-duplicated). Returns the backend
- * terminal id, or null if the spawn failed.
- */
 export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
   const key = agentKey(opts.workstreamId, opts.shellId);
   let rt = runtimes.get(key);
@@ -186,18 +152,11 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
   const rows = opts.rows ?? DEFAULT_GRID.rows;
 
   const promise = (async (): Promise<string | null> => {
-    // A Tauri Channel backs exactly one invoke: a failed terminal_attach tears
-    // its channel down, so the agent_open fallback MUST get a fresh one or
-    // detection is silently dead for every respawned agent (the
-    // reference_tauri_channel_single_use trap).
     const makeDetect = () => {
       const ch = new Channel<TerminalEvent>();
       ch.onmessage = (ev) => onDetectEvent(r, ev);
       return ch;
     };
-    // closeAgent may run mid-spawn (rapid create→close); if it did, the runtime
-    // was removed from the map, adopt nothing and kill the PTY we just made so
-    // it can't leak (orphaned process holding the worktree, unreachable from UI).
     const adoptOrKill = (id: string): string | null => {
       if (runtimes.get(key) !== r) {
         void commands.terminalClose(id);
@@ -209,7 +168,6 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
       return id;
     };
 
-    // Reattach to a still-live PTY first (survives webview reloads/remounts).
     const existing = r.terminalId ?? opts.persistedTerminalId;
     if (existing) {
       const ch = makeDetect();
@@ -220,7 +178,6 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
       }
     }
 
-    // Otherwise spawn the engine fresh in the worktree.
     try {
       const ch = makeDetect();
       const id = await unwrap(
@@ -240,11 +197,6 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
   return promise;
 }
 
-/** The resume decision for a (re)launch: does THIS tab's conversation actually
- *  exist on disk? Authoritative for engines we can check (Claude/Codex/
- *  Antigravity), so a pinned-but-never-used id launches fresh instead of failing
- *  `--resume`. For others (Gemini/custom, or before an id is known) fall back to
- *  the caller's heuristic (whether the user has typed). */
 export async function resolveResume(
   engineId: string,
   sessionId: string | undefined,
@@ -255,22 +207,16 @@ export async function resolveResume(
   return unwrap(commands.agentSessionExists(workstreamId, engineId, sessionId)).catch(() => fallback);
 }
 
-/** Push the notify-on-blocked preference to every live runtime, so toggling the
- *  setting affects already-running agents (not just newly spawned ones). */
 export function setAllNotifyOnBlocked(value: boolean): void {
   for (const rt of runtimes.values()) rt.notifyOnBlocked = value;
 }
 
-/** Record whether an agent's current run is in bypass-permissions mode. Writes
- *  the runtime (the source of truth, re-asserted on every detection flush) and
- *  mirrors it into the store for the shield. */
 export function setAgentBypass(workstreamId: string, shellId: number, bypass: boolean): void {
   const rt = runtimes.get(agentKey(workstreamId, shellId));
   if (rt) rt.bypass = bypass;
   setStoreBypass(workstreamId, shellId, bypass);
 }
 
-/** Kill the PTY and forget the agent, used when its tab is closed/archived. */
 export function closeAgent(workstreamId: string, shellId: number): void {
   const key = agentKey(workstreamId, shellId);
   const rt = runtimes.get(key);

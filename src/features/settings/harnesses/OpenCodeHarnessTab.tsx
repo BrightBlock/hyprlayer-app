@@ -66,10 +66,6 @@ export function OpenCodeHarnessTab({
   }, [providers]);
 
   function setSelectedModels(next: string[]) {
-    // Drop the default when it's no longer selected. Clear it in the SAME
-    // settings write, otherwise the full-object save (which still carries the
-    // old defaultModel) can land after a separate setDefault(null) and restore a
-    // default that isn't in selectedModels.
     const clearDefault = !!opencode.defaultModel && !next.includes(opencode.defaultModel);
     save.mutate({
       ...settings,
@@ -82,7 +78,6 @@ export function OpenCodeHarnessTab({
         },
       },
     });
-    // Mirror the cleared default into opencode.json too (CLI agreement).
     if (clearDefault) {
       setDefault.mutate(null);
     }
@@ -90,20 +85,10 @@ export function OpenCodeHarnessTab({
 
   return (
     <>
-      {/* One note per mutation rather than a coalesced `a.error ?? b.error`:
-          a first-wins coalesce pins the note to whichever failed first, so a
-          later failure never surfaces and a shared dismiss silently discards
-          it. `setDefault` writes opencode.json (the CLI agreement in
-          `setSelectedModels` above); failing it silently is what lets the
-          picker snap back on the bootstrap invalidation with nothing shown. */}
       {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
       {setDefault.isError && (
         <ErrorNote error={setDefault.error} onDismiss={() => setDefault.reset()} />
       )}
-      {/* `auth` is a query, not a mutation — it has no `reset()`, and per the
-          query-error convention (e.g. CodexHarnessTab's `probe`) it stays
-          non-dismissable since dismissing would blank the panel with no way
-          back short of a refetch. */}
       {auth.isError && <ErrorNote error={auth.error} />}
 
       <Card>
@@ -123,12 +108,8 @@ export function OpenCodeHarnessTab({
         </div>
       </Card>
 
-      {/* Until the binary exists, surface install as the primary CTA up top
-          (expanded). Once installed it demotes to the collapsed Advanced card at
-          the bottom, providers/models are the day-to-day controls from then on. */}
       {!installed && <AdvancedCard status={status} installed={installed} defaultOpen />}
 
-      {/* Providers */}
       <Card>
         <div className="flex items-center justify-between">
           <CardTitle className="mb-0">
@@ -172,7 +153,6 @@ export function OpenCodeHarnessTab({
         </div>
       </Card>
 
-      {/* Models */}
       <Card>
         <div className="flex items-center justify-between">
           <CardTitle className="mb-0">
@@ -297,8 +277,6 @@ function AdvancedCard({
   const redetect = useRedetectBinaries();
   const refreshCatalog = useRefreshOpencodeCatalog();
 
-  // Before install this card is the primary setup CTA, so name it for the job;
-  // once installed it's just the collapsed "Advanced" drawer.
   const title = installed ? "Advanced" : "Install OpenCode";
 
   return (

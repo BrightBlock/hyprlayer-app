@@ -1,24 +1,4 @@
 #!/usr/bin/env node
-// Render a GitHub Release body: "What's new" from changelog.json, then a
-// compact per-platform install block derived from the release's own assets.
-//
-// The changelog entry already feeds the in-app Update card and the changelog on
-// brightblock.ai, so the release page says exactly what the app says — one
-// source of truth, no second place to keep in sync.
-//
-// The install block is deliberately short and links to brightblock.ai for the
-// rest. It's driven by the asset filenames rather than a set of flags so that
-// this one renderer produces byte-identical output whether it's called by
-// release-local.sh at publish time (passing the files it just built) or by a
-// backfill that passes what `gh release view` reports. Assets that aren't
-// installable by hand — the updater tarball, the .sig sidecars — are ignored.
-//
-// Usage:
-//   node scripts/release-notes.mjs 0.5.11
-//   node scripts/release-notes.mjs 0.5.11 Hyprlayer_0.5.11_aarch64.dmg …
-//
-// With no assets, only "What's new" is printed. Exits 1 (message on stderr)
-// when the version has no changelog entry or the entry is empty.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
@@ -31,8 +11,6 @@ if (!version) {
 }
 
 const SITE = "https://brightblock.ai/hyprlayer";
-// Overridable so the AUR package name has one owner (release-local.sh's config
-// block) rather than being spelled twice.
 const AUR_PKGNAME = process.env.HYPRLAYER_AUR_PKGNAME || "hyprlayer-desktop-bin";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -64,7 +42,6 @@ const out = ["## What's new"];
 if (summary) out.push("", summary);
 if (notes.length) out.push("", ...notes.map((n) => `- ${n}`));
 
-// ─── install block, keyed off what actually shipped ──────────────────
 const names = assetPaths.map((p) => basename(p)).filter((n) => !n.endsWith(".sig"));
 const find = (re) => names.find((n) => re.test(n));
 const dmg = find(/\.dmg$/);

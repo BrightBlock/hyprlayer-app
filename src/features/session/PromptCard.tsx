@@ -3,19 +3,11 @@ import { memo, useState } from "react";
 import { ZapIcon } from "@/components/icons";
 import { STEP_ROW_ON_PANEL, StepChevron } from "./stepRow";
 
-/**
- * A user turn that came from the prompt library, collapsed to the prompt's name.
- * Custom prompt bodies run long, and the raw text would bury the conversation,
- * so the bubble shows a card and expands, in place, to the exact body the agent
- * received (variables already substituted). Nothing about the turn the agent
- * sees changes; this is purely how the transcript renders it.
- */
 export const PromptCard = memo(function PromptCard({
   name,
   body,
 }: {
   name: string;
-  /** The delivered prompt text, what the agent actually got. */
   body: string;
 }) {
   const [open, setOpen] = useState(false);

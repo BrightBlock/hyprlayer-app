@@ -40,7 +40,6 @@ describe("PrChecksPanel review surfacing", () => {
   it("surfaces a Review-required row while waiting on a reviewer", () => {
     renderPanel(makePr({ reviewDecision: "reviewRequired" }));
     expect(screen.getByText("Review required")).toBeTruthy();
-    // The header hint reflects the blocker rather than the (empty) check count.
     expect(screen.getByText("review")).toBeTruthy();
   });
 
@@ -53,7 +52,6 @@ describe("PrChecksPanel review surfacing", () => {
     renderPanel(makePr({ reviewDecision: "approved" }));
     expect(screen.queryByText("Review required")).toBeNull();
     expect(screen.queryByText("Changes requested")).toBeNull();
-    // Nothing to show → the section minimizes to its "none yet" header.
     expect(screen.getByText("none yet")).toBeTruthy();
   });
 
@@ -61,7 +59,6 @@ describe("PrChecksPanel review surfacing", () => {
     renderPanel(
       makePr({ mergeable: false, mergeableState: "conflicting", reviewDecision: "reviewRequired" }),
     );
-    // Both rows render; the header hint stays "conflict" (the harder blocker).
     expect(screen.getByText("Merge conflict")).toBeTruthy();
     expect(screen.getByText("Review required")).toBeTruthy();
     expect(screen.getByText("conflict")).toBeTruthy();

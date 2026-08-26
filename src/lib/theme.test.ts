@@ -3,10 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { OmarchyTheme } from "@/lib/bindings";
 
-// theme.ts imports `commands` from ./bindings as a *value*, and the real
-// bindings.ts imports `invoke` from @tauri-apps/api/core, which throws under
-// vitest with no Tauri runtime present. Replace the whole module rather than
-// letting that import ever execute.
 const bindings = vi.hoisted(() => ({ getOmarchyTheme: vi.fn() }));
 vi.mock("@/lib/bindings", () => ({
   commands: { getOmarchyTheme: bindings.getOmarchyTheme },
@@ -15,10 +11,6 @@ vi.mock("@/lib/bindings", () => ({
 
 const STORAGE_KEY = "hyprlayer:theme";
 
-// A representative stand-in for the 30 names Phase 2 resolves (the 31
-// @theme names minus --color-bad) — this file has no way to see the Rust
-// side's exact list, so it mirrors index.css's own token names rather than
-// inventing arbitrary ones.
 const TOKEN_NAMES = [
   "surface",
   "panel",
@@ -66,14 +58,10 @@ function palette(mode: "dark" | "light", name = "diablo-dreams"): OmarchyTheme {
 const DARK_PALETTE = palette("dark");
 const LIGHT_PALETTE = palette("light", "white");
 
-// The three shapes get_omarchy_theme can return. GONE and UNREADABLE both
-// carry no palette and are handled differently on purpose — see
-// refreshOmarchyTheme.
 const GONE = { installed: false, theme: null };
 const UNREADABLE = { installed: true, theme: null };
 const found = (theme: OmarchyTheme) => ({ installed: true, theme });
 
-/** Every custom property name currently set inline on <html>. */
 function inlineProps(): string[] {
   const el = document.documentElement;
   const names: string[] = [];
@@ -85,12 +73,6 @@ function seed(value: unknown): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
 }
 
-/**
- * A fresh module instance. zustand's persist hydrates at module-evaluation
- * time (see theme.ts's merge/migrate), so re-importing statically would only
- * ever hydrate once for the whole file — resetModules is the only way to
- * exercise hydration against a different localStorage seed per test.
- */
 async function loadTheme() {
   vi.resetModules();
   return import("@/lib/theme");
@@ -99,8 +81,6 @@ async function loadTheme() {
 beforeEach(() => {
   localStorage.clear();
   bindings.getOmarchyTheme.mockReset();
-  // The no-op answer, so a test that never sets its own can't be perturbed by
-  // the clearing GONE branch.
   bindings.getOmarchyTheme.mockResolvedValue(UNREADABLE);
 });
 
@@ -147,9 +127,6 @@ describe("applyTheme", () => {
     useThemeStore.setState({ mode: "omarchy", omarchy: null });
     applyTheme();
     expect(document.documentElement.style.length).toBe(0);
-    // jsdom has no matchMedia at all (unlike a real browser), so prefersDark()
-    // always resolves false here and the fallback lands on "light" — see
-    // terminalTheme.test.ts's own note on jsdom having no real palette.
     expect(document.documentElement.classList.contains("light")).toBe(true);
   });
 
@@ -172,10 +149,6 @@ describe("setMode", () => {
 });
 
 describe("hydration", () => {
-  // The case that guards the whole auto-select feature: merge(undefined, …)
-  // must NOT read as "explicit", or a fresh install can never auto-select
-  // Omarchy. See the "existing record" cases below for the trap this guards
-  // against — coercing every falsy `explicit` to true, including "absent".
   it("yields explicit: false with no persisted record at all", async () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe(null);
     const { useThemeStore } = await loadTheme();
@@ -191,11 +164,6 @@ describe("hydration", () => {
     expect(useThemeStore.getState().explicit).toBe(true);
   });
 
-  // Distinct from the "no record at all" case above: this record exists (at
-  // the current version, so migrate never runs) and simply lacks the field.
-  // A naive `persisted?.explicit ?? false` would treat this the same as no
-  // record and stay false — wrong, because the record's mode/omarchy are
-  // real, previously-persisted values, not an untouched default.
   it("coerces an existing v2 record with a missing explicit flag to true", async () => {
     seed({ state: { mode: "dark" }, version: 2 });
     const { useThemeStore } = await loadTheme();
@@ -203,12 +171,6 @@ describe("hydration", () => {
     expect(useThemeStore.getState().explicit).toBe(true);
   });
 
-  // The mirror case: a record can legitimately be v2 with explicit: false —
-  // it's exactly what the auto-select itself writes (setState({mode:
-  // "omarchy"}) without touching explicit). Coercing every falsy value to
-  // true, rather than testing `!== false` specifically, would flip this back
-  // to true on the very next launch and re-lock the auto-selected theme in as
-  // if the user had chosen it by hand.
   it("keeps an existing explicit: false record false", async () => {
     seed({ state: { mode: "omarchy", explicit: false, omarchy: DARK_PALETTE }, version: 2 });
     const { useThemeStore } = await loadTheme();
@@ -223,9 +185,6 @@ describe("hydration", () => {
     expect(useThemeStore.getState().omarchy).toBe(null);
   });
 
-  // setProperty accepts non-custom properties, so a token name is not just a
-  // string: without the --color- prefix test, this record would hydrate and
-  // applyTheme would set `display: none` on <html>.
   it("drops a persisted omarchy value whose tokens are not --color-* names", async () => {
     seed({
       state: {
@@ -255,9 +214,6 @@ describe("refreshOmarchyTheme", () => {
     expect(useThemeStore.getState().omarchy).toEqual(DARK_PALETTE);
   });
 
-  // The theme-switch race: Omarchy is installed, colors.toml is momentarily
-  // gone mid `rm -rf` + `mv`. Clearing here would drop the user's palette for
-  // ~2s on every single theme switch.
   it("leaves a stored palette untouched when installed but unreadable", async () => {
     const { useThemeStore, refreshOmarchyTheme } = await loadTheme();
     useThemeStore.setState({ omarchy: DARK_PALETTE });
@@ -266,9 +222,6 @@ describe("refreshOmarchyTheme", () => {
     expect(useThemeStore.getState().omarchy).toEqual(DARK_PALETTE);
   });
 
-  // The other half of the same pair, and the one a bare `theme === null`
-  // check got wrong: the palette is persisted, so failing to clear it here
-  // repaints an uninstalled theme on every relaunch, forever.
   it("clears a stored palette when Omarchy is not installed", async () => {
     const { useThemeStore, refreshOmarchyTheme } = await loadTheme();
     useThemeStore.setState({ omarchy: DARK_PALETTE });
@@ -286,9 +239,6 @@ describe("refreshOmarchyTheme", () => {
     expect(useThemeStore.getState().explicit).toBe(false);
   });
 
-  // The mirror: a hand-picked "Omarchy" is a deliberate choice and survives an
-  // uninstall — applyTheme's null branch already paints a sane fallback, and
-  // re-installing brings the palette straight back.
   it("keeps a deliberate Omarchy mode when Omarchy is not installed", async () => {
     const { useThemeStore, refreshOmarchyTheme } = await loadTheme();
     useThemeStore.getState().setMode("omarchy");
@@ -306,7 +256,6 @@ describe("refreshOmarchyTheme", () => {
     bindings.getOmarchyTheme.mockResolvedValue(found(DARK_PALETTE));
     await refreshOmarchyTheme();
     expect(useThemeStore.getState().mode).toBe("omarchy");
-    // The auto-select is not a user choice: it must not lock itself in.
     expect(useThemeStore.getState().explicit).toBe(false);
   });
 

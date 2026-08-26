@@ -12,9 +12,6 @@ import {
 } from "./promptHistory";
 import type { TranscriptItem } from "./transcript";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function userItem(text: string, id = text): Extract<TranscriptItem, { kind: "user" }> {
   return { kind: "user", id, text, stage: null, attachments: [], createdAt: null, promptName: null };
@@ -28,9 +25,6 @@ function nav(index: number | null, stash = ""): HistoryNav {
   return { index, stash };
 }
 
-// ---------------------------------------------------------------------------
-// userPrompts
-// ---------------------------------------------------------------------------
 
 describe("userPrompts", () => {
   it("returns [] for an empty transcript", () => {
@@ -88,7 +82,6 @@ describe("userPrompts", () => {
     );
     const result = userPrompts(items);
     expect(result).toHaveLength(MAX_HISTORY);
-    // The window holds the newest entries; the oldest 7 fell off the back.
     expect(result[0]).toBe(`prompt ${total - MAX_HISTORY}`);
     expect(result[result.length - 1]).toBe(`prompt ${total - 1}`);
   });
@@ -101,8 +94,6 @@ describe("userPrompts", () => {
   });
 
   it("applies the cap AFTER collapsing consecutive duplicates", () => {
-    // 2*MAX_HISTORY raw items, but every pair is a duplicate → MAX_HISTORY unique,
-    // exactly at the cap (nothing aged out).
     const items: TranscriptItem[] = [];
     for (let i = 0; i < MAX_HISTORY; i += 1) {
       items.push(userItem(`p${i}`, `a${i}`), userItem(`p${i}`, `b${i}`));
@@ -113,9 +104,6 @@ describe("userPrompts", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// recallPrev
-// ---------------------------------------------------------------------------
 
 describe("recallPrev", () => {
   it("returns null for empty history", () => {
@@ -157,9 +145,6 @@ describe("recallPrev", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// recallNext
-// ---------------------------------------------------------------------------
 
 describe("recallNext", () => {
   it("returns null when not navigating (index === null)", () => {
@@ -185,9 +170,6 @@ describe("recallNext", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// recallAt
-// ---------------------------------------------------------------------------
 
 describe("recallAt", () => {
   const prompts = ["alpha", "beta", "gamma"];
@@ -222,9 +204,6 @@ describe("recallAt", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// stackWindow
-// ---------------------------------------------------------------------------
 
 describe("stackWindow", () => {
   it("returns [0, count) when count <= max", () => {
@@ -233,7 +212,6 @@ describe("stackWindow", () => {
   });
 
   it("returns the most-recent window when count > max and active is inside", () => {
-    // count=12, max=8 → start=4, end=12; active=7 is inside
     expect(stackWindow(12, 7, 8)).toEqual({ start: 4, end: 12 });
   });
 
@@ -242,7 +220,6 @@ describe("stackWindow", () => {
   });
 
   it("shifts up to reveal an out-of-window active line", () => {
-    // count=12, max=8 → default start=4; active=1 is outside → start=1
     expect(stackWindow(12, 1, 8)).toEqual({ start: 1, end: 9 });
   });
 
@@ -251,7 +228,6 @@ describe("stackWindow", () => {
   });
 
   it("does not shift when active equals the last-in-window index", () => {
-    // count=10, max=8 → start=2, end=10; active=9 (newest) is inside
     expect(stackWindow(10, 9, 8)).toEqual({ start: 2, end: 10 });
   });
 

@@ -1,7 +1,3 @@
-//! Smoke tests against the real machine state (hyprlayer config + binaries).
-//! Ignored by default, they require a configured hyprlayer install. Run with:
-//!   cargo test -p hyprlayer-core --test real_machine_smoke -- --ignored --nocapture
-
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::Duration;
@@ -11,14 +7,6 @@ use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryResolver, BinaryState};
 use hyprlayer_core::process::spawn_supervised;
 
-/// A resolved binary spawns directly, whatever it was installed as.
-///
-/// Worth pinning because the opposite looks true: `CreateProcessW` genuinely
-/// cannot execute a batch file, and npm installs a script-`bin` CLI (OpenCode's
-/// and Codex's both are) as `<name>.cmd` with NO `.exe`. But Rust's
-/// `std::process::Command` routes `.bat`/`.cmd` through `cmd.exe` itself, with
-/// better escaping than a hand-rolled wrapper, so the app needs no shim
-/// handling of its own. Verified on Windows against `opencode.cmd`.
 #[tokio::test]
 #[ignore = "requires opencode installed; run in the session the app launches from"]
 async fn a_resolved_binary_spawns_directly() {
@@ -44,17 +32,6 @@ async fn a_resolved_binary_spawns_directly() {
     assert!(out.status.success(), "`opencode --version` should exit 0");
 }
 
-/// A supervised `opencode serve` must not survive the handle that owns it.
-///
-/// Windows is the case this exists for. npm installs OpenCode as `opencode.cmd`
-/// with no `.exe` on PATH, and `std::process::Command` runs `.cmd` through
-/// `cmd.exe`, so the pid we hold is the wrapper and the server is its child.
-/// Verified on nexus-win: `kill_on_drop` reaped the wrapper and left the server
-/// listening indefinitely, which is why the spawn goes through a job object now.
-/// On Unix the tree is one process deep and this pins the same invariant.
-///
-/// The "came up" assertion is load-bearing: without it a server that never
-/// started would make the teardown check pass for the wrong reason.
 #[tokio::test]
 #[ignore = "spawns a real `opencode serve`; run in the session the app launches from"]
 async fn opencode_serve_dies_with_its_handle() {
@@ -69,8 +46,6 @@ async fn opencode_serve_dies_with_its_handle() {
     let port = free_port();
     let data_dir = tempfile::tempdir().expect("temp data home");
 
-    // The app's spawn shape (src-tauri/src/opencode.rs), against a throwaway
-    // data home so this never touches the user's OpenCode state.
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.args([
         "serve",
@@ -85,7 +60,6 @@ async fn opencode_serve_dies_with_its_handle() {
     .stderr(Stdio::null());
     #[cfg(windows)]
     {
-        // Inherent on tokio's Command; no CommandExt import needed.
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
@@ -118,9 +92,6 @@ fn free_port() -> u16 {
         .port()
 }
 
-/// Poll until `port` is open (`want_open`) or closed, within `budget`.
-/// Blocking connect on purpose, a loopback attempt resolves immediately either
-/// way, and `tokio`'s `net` feature is not enabled for this crate on its own.
 async fn port_settles(port: u16, want_open: bool, budget: Duration) -> bool {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let deadline = tokio::time::Instant::now() + budget;
@@ -154,15 +125,6 @@ async fn real_config_parses_and_lists_projects() {
     assert!(thoughts.is_configured());
 }
 
-/// Whether the app would show Codex as installed, the exact resolver the
-/// Harnesses tab reads, not a `which` approximation.
-///
-/// Windows is the case worth running: the official installer drops a real
-/// `codex.exe` in a per-user `Programs` dir on the User PATH, while `npm i -g`
-/// drops only a `.cmd` shim (its npm `bin` is a JS wrapper). Those resolve and
-/// spawn differently, so run this from the SAME session the app launches from,
-/// an SSH logon session has a different view of per-user install dirs and will
-/// report a false negative.
 #[tokio::test]
 #[ignore = "requires codex installed; run in the session the app launches from"]
 async fn real_codex_resolves() {
@@ -229,9 +191,6 @@ async fn real_storage_info_round_trips() {
     assert_eq!(info.schema.len(), 10, "thought schema has 10 fields");
 }
 
-/// A root the app scaffolds must be one the real CLI adopts, the contract
-/// "Add project" depends on, pinned against the installed binary because the
-/// rule lives in the CLI, not here.
 #[tokio::test]
 #[ignore = "requires the hyprlayer CLI installed; run with --ignored"]
 async fn scaffolded_root_is_accepted_by_the_real_cli() {
@@ -239,13 +198,11 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
     let hyprlayer = which::which("hyprlayer").expect("hyprlayer CLI installed");
     let tmp = tempfile::tempdir().unwrap();
 
-    // The thoughts root, shaped by the app exactly as the wizard would.
     let root = tmp.path().join("thoughts");
     hyprlayer_core::thoughts_repo::scaffold(&git, &root, "tester", "repos", "global")
         .await
         .expect("scaffold should succeed");
 
-    // A throwaway project to run `thoughts init` from.
     let code = tmp.path().join("proj");
     std::fs::create_dir_all(&code).unwrap();
     for args in [
@@ -271,7 +228,6 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
             .expect("git should run");
     }
 
-    // An isolated config so the run can't touch the developer's real one.
     let cfg = tmp.path().join("config.json");
     std::fs::write(
         &cfg,
@@ -325,12 +281,6 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
     );
 }
 
-/// The model-catalog probe drives a REAL `claude`, end to end.
-///
-/// The parse is unit-tested off a captured payload; what this pins is the spawn
-/// path, args, neutral cwd, and holding stdin open until the reply lands. Get
-/// any of those wrong and the probe times out instead of failing loudly, which
-/// unit tests can't catch. Costs no tokens: no user message is ever sent.
 #[tokio::test]
 #[ignore = "spawns a real `claude`; run in the session the app launches from"]
 async fn claude_answers_the_model_catalog_probe() {
@@ -363,8 +313,6 @@ async fn claude_answers_the_model_catalog_probe() {
         );
     }
     assert!(!probe.models.is_empty(), "a signed-in CLI offers models");
-    // Exactly one row launches with no `--model`; the composer's default entry
-    // maps onto it, so a second (or zero) would break that mapping.
     assert_eq!(
         probe.models.iter().filter(|m| m.flag.is_none()).count(),
         1,

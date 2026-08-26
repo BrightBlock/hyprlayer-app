@@ -51,10 +51,6 @@ function HealthRow({ check }: { check: HealthCheck }) {
   );
 }
 
-/**
- * Editor for the "Files copied into new worktrees" list. Whole-list replace on
- * every add/remove, matching the `patchClaude`/`visibleModels` pattern.
- */
 function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
   const [newPattern, setNewPattern] = useState("");
   const files = useWorktreeFiles(projectPath);
@@ -64,8 +60,6 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
 
   const list: string[] = files.data ?? [];
 
-  // After an add (list grows by one), pin the newest pattern into view so it
-  // doesn't land silently below the fold of the fixed-height scroll area.
   useEffect(() => {
     if (list.length === prevLen.current + 1) {
       listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -134,12 +128,6 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
   );
 }
 
-/**
- * Editor for this repo's own branch-type list (`[branches]` in
- * `.hyprlayer/settings.toml`). Edits the RAW repo list, never the resolved one:
- * an empty list is how the repo says "inherit", so the note beneath names what
- * it falls back to.
- */
 function BranchPrefixesCard({ projectPath }: { projectPath: string }) {
   const q = useBranchPrefixes(projectPath);
   const save = useSetBranchPrefixes(projectPath);
@@ -162,19 +150,10 @@ function BranchPrefixesCard({ projectPath }: { projectPath: string }) {
 }
 
 type Props = {
-  /** Project repo path; the dialog is open whenever this is non-null. */
   projectPath: string;
   onClose: () => void;
 };
 
-/**
- * Per-project settings as a dialog opened from the sidebar (right-click a
- * project): the storage summary, the files copied into new worktrees, the
- * workstream lifecycle scripts, and backend health, all scoped to this one
- * project. Repo-wide actions live elsewhere on purpose — thoughts sync is
- * shared across every project (`thoughtsSync.ts`), so it stays in the Library,
- * which already auto-syncs on open and offers a manual control of its own.
- */
 export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
   const detail = useProjectDetail(projectPath);
   const health = useBackendHealth(projectPath);
@@ -182,7 +161,6 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
   const heading = detail.data
     ? `Project settings: ${detail.data.project.mappedName}`
     : "Project settings";
-  // A folder project has no thoughts to sync and no worktrees to seed.
   const gitBacked = isGitProject(detail.data?.project);
 
   return (
@@ -191,8 +169,6 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
       onClose={onClose}
       seams
       size="3xl"
-      // The path rides in the header rather than as the body's first row,
-      // where it read as an orphan line above the first section heading.
       title={
         <>
           {heading}
@@ -228,8 +204,6 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
                   </span>
                 )}
               </div>
-              {/* Full sentence, so it stays on its own line rather than joining
-                  the badge row above. */}
               {!detail.data!.thoughtsRoot && !gitBacked && (
                 <p className="mt-1 text-ink-dim">
                   Not a git repository, so no branches, worktrees or thoughts. Agents run in the

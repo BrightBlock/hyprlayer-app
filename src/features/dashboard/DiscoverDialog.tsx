@@ -11,16 +11,11 @@ import { useBootstrap, useRecentRepos } from "@/lib/queries";
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** The repo the user chose to clone. The caller routes it into the Add-project
-   *  wizard (URL pre-filled), so every clone goes through the same location +
-   *  thoughts-mapping steps, Discover never clones directly. */
   onPick: (repo: GithubRepo) => void;
 };
 
-/** "Don't filter by owner". Null, not "", so a malformed owner can't collide. */
 const ALL_OWNERS = null;
 
-/** Split a `owner/name` GitHub identifier; a name with no owner keeps its slot. */
 function splitRef(nameWithOwner: string): [owner: string, name: string] {
   const slash = nameWithOwner.indexOf("/");
   if (slash === -1) return ["", nameWithOwner];
@@ -34,17 +29,9 @@ function ownerOf(repo: GithubRepo): string {
 type Owner = {
   name: string;
   count: number;
-  /** A `owner/repo` from this owner, RepoAvatar resolves the org icon from it. */
   sample: string;
 };
 
-/**
- * "Discover", a browse-first counterpart to Add. Organizations are the modal's
- * structure (a left rail), repos a single dense column: name is the only bright
- * thing, owner/description/age step back, and Clone surfaces on row hover.
- * Picking a repo hands it to the Add-project wizard with the URL pre-filled, so
- * a Discover clone reviews the same location + thoughts mapping as a pasted one.
- */
 export function DiscoverDialog({ open, onClose, onPick }: Props) {
   const bootstrap = useBootstrap();
   const recents = useRecentRepos(open);
@@ -63,8 +50,6 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
     return set;
   }, [bootstrap.data]);
 
-  // `/user/repos` spans the personal account and every org the user belongs to,
-  // so the owner segment is the only grouping the payload gives us.
   const owners = useMemo(() => {
     const byName = new Map<string, Owner>();
     for (const repo of all) {
@@ -76,18 +61,12 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
     return [...byName.values()].sort((a, b) => b.count - a.count);
   }, [all]);
 
-  // A refresh can retire the selected owner (left the org, repo deleted). Fall
-  // back to "all" rather than stranding the grid behind an owner that's gone.
   const ownerExists = owner !== ALL_OWNERS && owners.some((o) => o.name === owner);
   const activeOwner = ownerExists ? owner : ALL_OWNERS;
-  // Commit the fallback, so a later refetch that resurfaces the owner doesn't
-  // silently yank the scope back to it.
   useEffect(() => {
     if (!ownerExists && owner !== ALL_OWNERS) setOwner(ALL_OWNERS);
   }, [ownerExists, owner]);
 
-  // The rail scopes; the toolbar searches within that scope. Both footer counts
-  // and the search placeholder describe the scope, not the search result.
   const scoped = useMemo(
     () => (activeOwner === ALL_OWNERS ? all : all.filter((r) => ownerOf(r) === activeOwner)),
     [all, activeOwner],
@@ -258,18 +237,12 @@ function OrgRow({
   );
 }
 
-/**
- * One dense repo row. The age gives way to a Clone… affordance on hover, the
- * ellipsis because picking opens the Add-project wizard (location + thoughts)
- * rather than cloning on the spot. Rows already cloned stay inert.
- */
 function RepoRow({
   repo,
   cloned,
   onPick,
 }: {
   repo: GithubRepo;
-  /** Already a project. Cloning again would fail on the existing directory. */
   cloned: boolean;
   onPick: () => void;
 }) {

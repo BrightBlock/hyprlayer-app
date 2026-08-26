@@ -1,12 +1,3 @@
-/**
- * The Observatory home's overlay surfaces (design 2a): the greeting's status
- * line, the centered glass search bar with corpus stat pills, floating pins
- * over the graph naming live agents, and the two glass panels docked at the
- * bottom (Live now + Latest activity). Pure presentation, classification
- * lives in `fleet.ts`, navigation in the parent's callbacks. Everything is
- * built from theme tokens (glass = panel/edge at opacity, stage hues from
- * stages.ts) so all six themes render native.
- */
 import { Button } from "@/components/ui";
 import { ChevronRightIcon, SearchIcon } from "@/components/icons";
 import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
@@ -19,8 +10,6 @@ import { formatElapsed, formatRelativeTime } from "@/lib/format";
 import { openSearch } from "@/features/search/searchStore";
 import type { FleetActivity, FleetItem } from "./fleet";
 
-/** Coarse elapsed for agent cards ("7m", "1h 04m"), minute-level so the rows
- *  don't visibly tick between the dashboard's slow clock beats. */
 function shortElapsed(ms: number): string {
   if (ms < 60_000) return "<1m";
   const min = Math.floor(ms / 60_000);
@@ -28,8 +17,6 @@ function shortElapsed(ms: number): string {
   return formatElapsed(ms);
 }
 
-/** Every stage's dot/bar fill, the same themed accent tokens MODE_STYLES
- *  binds, listed statically so Tailwind sees each class. */
 const STAGE_DOT: Record<StageKey, string> = {
   general: "bg-working",
   research: "bg-research",
@@ -41,7 +28,6 @@ const STAGE_DOT: Record<StageKey, string> = {
   revise: "bg-revise",
 };
 
-/** Border tint per stage for a live graph pin's hairline. */
 const STAGE_PIN_BORDER: Record<StageKey, string> = {
   general: "border-working/30",
   research: "border-research/30",
@@ -53,16 +39,10 @@ const STAGE_PIN_BORDER: Record<StageKey, string> = {
   revise: "border-revise/30",
 };
 
-/** A quiet workstream's stage dot (static, no live pulse). */
 export function stageDot(view: WorkstreamView): string {
   return STAGE_DOT[stageOf(view)];
 }
 
-/**
- * A live item's dot treatment: running agents wear their pipeline stage's hue
- * (the design's stage-colored cards), urgency states keep the app's activity
- * hues (attention/bad/ok) so "needs you" never hides behind a stage color.
- */
 export function liveTone(item: FleetItem): { dot: string; pulse: boolean; border: string } {
   if (item.activity === "needs-you") return { dot: "bg-attention", pulse: true, border: "border-attention/30" };
   if (item.activity === "error") return { dot: "bg-bad", pulse: false, border: "border-bad/30" };
@@ -71,11 +51,9 @@ export function liveTone(item: FleetItem): { dot: string; pulse: boolean; border
   return { dot: STAGE_DOT[stage], pulse: true, border: STAGE_PIN_BORDER[stage] };
 }
 
-// ── Greeting status line ─────────────────────────────────────────────────────
 
 export type HeroStatus = { dot: string; pulse: boolean; text: string };
 
-/** The one-line fleet summary under the greeting, worst state first. */
 export function heroStatus(
   counts: { running: number; needsYou: number; review: number; errors: number; queued: number },
   opts: { hasProjects: boolean; loading: boolean; runningStages: string[] },
@@ -111,9 +89,7 @@ export function heroStatus(
   return { dot: "bg-ok", pulse: false, text: "All quiet. No agents running" };
 }
 
-// ── Centered search + stat pills ─────────────────────────────────────────────
 
-/** The hero's glass search bar, opens the global search palette (⌘P). */
 export function HeroSearch({ total }: { total: number }) {
   const bootstrap = useBootstrap();
   const chord = effectiveChord(
@@ -151,8 +127,6 @@ function StatPill({ n, label }: { n: number; label: string }) {
   );
 }
 
-/** Corpus stats under the search bar; the last slot flips between "agents
- *  live" (tinted, when anything runs) and "workstreams this week". */
 export function StatPills({
   documents,
   links,
@@ -166,7 +140,6 @@ export function StatPills({
   projects: number;
   agentsLive: number;
   weekCount: number;
-  /** Tooltip reconciling the corpus totals with what the hero graph shows. */
   hint?: string;
 }) {
   return (
@@ -190,14 +163,7 @@ export function StatPills({
   );
 }
 
-// ── First-node empty state (design 4b) ──────────────────────────────────────
 
-/** The lone accent star, the workspace itself, already on the canvas,
- *  with its label pill floating above. Overlaid on the empty knowledge
- *  graph, whose svg supplies the nebula wash (same smoothstep gradient +
- *  grain dither as the populated hero, a separate CSS gradient here would
- *  band into rings). Shown before setup finishes or while no repo is
- *  connected. */
 export function FirstNodeField() {
   return (
     <div className="pointer-events-none absolute inset-0">
@@ -219,9 +185,6 @@ export function FirstNodeField() {
   );
 }
 
-/** Starter stats under the first-node search bar, quieter than the live pills,
- *  but agents already running still get the same live pill the populated
- *  state shows (setup can be unfinished while agents work). */
 export function StarterStats({ agentsLive }: { agentsLive: number }) {
   const stat = (n: number, label: string) => (
     <span className="rounded-full border border-edge/60 bg-panel/40 px-3 py-1 text-2xs text-ink-dim/70 backdrop-blur-md">
@@ -242,8 +205,6 @@ export function StarterStats({ agentsLive }: { agentsLive: number }) {
   );
 }
 
-/** Quiet "Get set up" pill in the hero's corner, opens the existing setup
- *  wizard instead of a big onboarding card of its own. */
 export function SetupPill({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -260,27 +221,22 @@ export function SetupPill({ onClick }: { onClick: () => void }) {
   );
 }
 
-// ── Floating graph pins ──────────────────────────────────────────────────────
 
 export type GraphPin = {
   key: string;
   label: string;
   dot: string;
   pulse: boolean;
-  /** Stage/state border tint for a live pin; neutral hairline when absent. */
   border?: string;
   onClick: () => void;
 };
 
-/** Fixed slots scattered over the graph field, clear of the greeting, the
- *  centered search, and the docked panels. */
 const PIN_SLOTS = [
   { left: "57%", top: "26%" },
   { left: "27%", top: "50%" },
   { left: "66%", top: "47%" },
 ] as const;
 
-/** Up to three annotation pills floated over the hero graph. */
 export function GraphPins({ pins }: { pins: GraphPin[] }) {
   if (pins.length === 0) return null;
   return (
@@ -305,7 +261,6 @@ export function GraphPins({ pins }: { pins: GraphPin[] }) {
   );
 }
 
-// ── Docked glass panels ──────────────────────────────────────────────────────
 
 const GLASS_PANEL =
   "flex min-h-[150px] min-w-0 flex-col rounded-[14px] border border-edge bg-panel/75 p-4 shadow-[0_16px_48px_rgba(0,0,0,0.35)] backdrop-blur-xl";
@@ -403,9 +358,6 @@ function AgentCard({
   );
 }
 
-/** LIVE NOW, stage-colored agent cards when busy; when quiet, the
- *  last-shipped note plus the primary "Start an agent" path (the design's
- *  first-class all-quiet state, not an empty one). */
 export function LiveNowPanel({
   items,
   now,
@@ -477,7 +429,6 @@ export function LiveNowPanel({
   );
 }
 
-// ── Latest activity ──────────────────────────────────────────────────────────
 
 export type RecentRow =
   | { kind: "active"; at: number; view: WorkstreamView; project: string }
@@ -488,8 +439,6 @@ function rowDot(row: RecentRow): string {
   return stageDot(row.view);
 }
 
-/** LATEST ACTIVITY, quiet actives and freshly archived workstreams, newest
- *  first; the "what was I doing" list beside the live panel. */
 export function ActivityPanel({
   rows,
   now,

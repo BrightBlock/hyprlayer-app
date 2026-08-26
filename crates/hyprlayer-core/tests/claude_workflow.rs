@@ -1,10 +1,3 @@
-//! Integration test for the workflow reader against a real (scrubbed,
-//! trimmed) `Workflow` run tree — `wf_89a9bc27-4f1`, an 8-agent run recorded
-//! against claude 2.1.239. Locks the observed on-disk shape (journal
-//! started/result brackets, agent files carrying attachment/tool_use/
-//! tool_result/text/thinking lines) so a future claude release that changes
-//! it fails loudly here instead of silently in the reader.
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -58,8 +51,6 @@ fn parent_id_of(event: &SessionEvent) -> Option<&str> {
     }
 }
 
-/// The synthetic `Agent` parent this run opened for each of its agents, in
-/// emission order, as `(index, id, label)`.
 fn synthetic_parents(events: &[SessionEvent], run_id: &str) -> Vec<(usize, String, String)> {
     let prefix = format!("wf:{run_id}:");
     events
@@ -81,12 +72,6 @@ fn synthetic_parents(events: &[SessionEvent], run_id: &str) -> Vec<(usize, Strin
         .collect()
 }
 
-/// The complete fixture (8 agents, 8 `started`/8 `result` journal lines)
-/// parses into one synthetic `ToolUse`/`ToolResult` pair per agent, every
-/// event carries a `parent_id`, no `Usage` or `ProtocolError` ever appears
-/// (the fixture's agent files carry real `attachment` lines — a known,
-/// deliberately-unhandled kind, not an unrecognized one), and a second tick
-/// over the same, unchanged tree emits nothing further.
 #[test]
 fn workflow_reader_parses_the_complete_fixture_into_paired_agent_events() {
     let mut runs = register(fixture_dir("wf_89a9bc27-4f1"), "wf_89a9bc27-4f1");
@@ -153,9 +138,6 @@ fn workflow_reader_parses_the_complete_fixture_into_paired_agent_events() {
     );
 }
 
-/// Every real agent file in the fixture carries at least one `tool_use` /
-/// `tool_result` pair of its own; the reader must surface those nested under
-/// the agent's synthetic parent, not just the open/close pair itself.
 #[test]
 fn workflow_reader_surfaces_each_agents_own_tool_calls() {
     let mut runs = register(fixture_dir("wf_89a9bc27-4f1"), "wf_89a9bc27-4f1");
@@ -171,11 +153,6 @@ fn workflow_reader_surfaces_each_agents_own_tool_calls() {
     );
 }
 
-/// `journal.jsonl` is read before the agent files, so an agent's synthetic
-/// parent always precedes the children that name it. Nesting itself is
-/// order-independent, but a child whose `parentId` names an item not yet in
-/// the log is filtered out of `topLevel` and stays invisible until the
-/// parent lands (`TranscriptView.tsx:1167-1176`).
 #[test]
 fn workflow_reader_opens_a_synthetic_parent_before_any_of_its_children() {
     let mut runs = register(fixture_dir("wf_89a9bc27-4f1"), "wf_89a9bc27-4f1");
@@ -200,11 +177,6 @@ fn workflow_reader_opens_a_synthetic_parent_before_any_of_its_children() {
     }
 }
 
-/// The label rule (Phase 3 §4): the first non-empty line AFTER the prompt's
-/// first blank line. Seven of these eight prompts open with the same
-/// `Repo root: … Read-only…` preamble the workflow script hands every agent
-/// — a first-line rule yields four distinct strings across the eight rows,
-/// which is a tree the user cannot read.
 #[test]
 fn workflow_reader_labels_the_eight_fixture_agents_distinctly() {
     let mut runs = register(fixture_dir("wf_89a9bc27-4f1"), "wf_89a9bc27-4f1");
@@ -222,18 +194,11 @@ fn workflow_reader_labels_the_eight_fixture_agents_distinctly() {
             !label.starts_with("Repo root:"),
             "a label must be the agent's assignment, not the shared preamble: {label}"
         );
-        // `close`'s fallback, for an agent whose file never became readable,
-        // labels the row with the bare agent id. None of these took it.
         let agent_id = id.rsplit(':').next().unwrap();
         assert_ne!(label, agent_id, "label fell back to the bare agent id");
     }
 }
 
-/// How the reader identifies the prompt line, per Phase 3 §3: `parentUuid`
-/// is explicitly `null` on it and on no other line in the file. "The first
-/// `type:"user"` line" would say the same thing but isn't decidable from one
-/// line, and a positional rule would misfire the moment a tick's batch
-/// starts mid-file.
 #[test]
 fn workflow_fixture_prompt_is_the_only_line_with_a_null_parent_uuid() {
     for dir in ["wf_89a9bc27-4f1", "wf_89a9bc27-4f1-partial"] {
@@ -261,9 +226,6 @@ fn workflow_fixture_prompt_is_the_only_line_with_a_null_parent_uuid() {
     }
 }
 
-/// A run caught mid-flight: some agents have a journal `started` with no
-/// matching `result`, so they should surface as open (a `ToolUse` with no
-/// closing `ToolResult`) — the honest render of what the disk says.
 #[test]
 fn workflow_reader_leaves_unfinished_agents_open_on_the_partial_fixture() {
     let mut runs = register(
@@ -299,28 +261,13 @@ fn workflow_reader_leaves_unfinished_agents_open_on_the_partial_fixture() {
     );
 }
 
-/// Phase 4 §7's recovery path, through the public surface only: a forwarder
-/// starting against a session whose previous process died mid-run re-arms
-/// every unfinished run with cursors back at 0, seeded from what the log
-/// already holds. It must emit **exactly** the events missing from that
-/// snapshot — no duplicate of anything persisted, and no `ToolResult`
-/// suppressed by its own already-persisted `ToolUse` (the two sets are split
-/// for precisely that: the ids are the same string, `events.rs:229-241`).
 #[test]
 fn a_seeded_re_arm_emits_exactly_what_the_persisted_log_is_missing() {
     let dir = fixture_dir("wf_89a9bc27-4f1");
 
-    // What a first, uninterrupted reader produced for this run.
     let complete = register(dir.clone(), "wf_89a9bc27-4f1").read_tick();
     assert!(complete.len() > 20, "fixture should be substantial");
 
-    // The app died mid-run: everything before the cut reached
-    // `session_events`, everything after it was written to disk but never
-    // read. The cut is chosen rather than taken at a round fraction — it has
-    // to leave BOTH row kinds open across it (an agent's own tool call, whose
-    // result the keep-filter gates, and a synthetic per-agent parent, whose
-    // result `close` gates) or the split-set rule is only half exercised.
-    // The latest such cut, so the tail is small, as a real one would be.
     let cut = (1..complete.len())
         .rev()
         .find(|&i| leaves_both_row_kinds_open(&complete, i))
@@ -339,10 +286,6 @@ fn a_seeded_re_arm_emits_exactly_what_the_persisted_log_is_missing() {
             _ => {}
         }
     }
-    // The cut has to leave rows OPEN across it, or the split-set rule this
-    // test exists for is never exercised: at least one `ToolResult` in the
-    // missing tail whose own `ToolUse` the snapshot already holds. A single
-    // seen-set would suppress exactly those and strand the rows forever.
 
     let mut runs = WorkflowRuns::new();
     assert!(
@@ -368,11 +311,6 @@ fn a_seeded_re_arm_emits_exactly_what_the_persisted_log_is_missing() {
     );
 }
 
-/// Whether splitting `events` at `cut` leaves a row of EACH kind open across
-/// the boundary: a `ToolResult` in the tail whose `ToolUse` is in the head,
-/// once for an agent's own tool call and once for a synthetic `wf:` per-agent
-/// parent. Those two close through different gates (`keep_new_tool_events`
-/// and `close`), and a single seen-set would suppress both.
 fn leaves_both_row_kinds_open(events: &[SessionEvent], cut: usize) -> bool {
     let (head, tail) = events.split_at(cut);
     let opened: HashSet<&str> = head
@@ -398,8 +336,6 @@ fn leaves_both_row_kinds_open(events: &[SessionEvent], cut: usize) -> bool {
     synthetic && agent_owned
 }
 
-/// `(kind, id)` per event, which is the dedup key the reader uses — the id
-/// alone cannot tell a `ToolUse` from its own `ToolResult`.
 fn ids_of(events: &[SessionEvent]) -> Vec<(&'static str, &str)> {
     events
         .iter()

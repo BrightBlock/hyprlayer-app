@@ -73,7 +73,6 @@ describe("chordToCommand", () => {
   });
 
   it("never lets an alternate displace a primary binding", () => {
-    // Rebind Previous Tab onto Next Tab's alternate: the explicit chord wins.
     const map = chordToCommand({ "tab.prev": "mod+shift+bracketright" }, true);
     expect(map.get("mod+shift+bracketright")).toBe("tab.prev");
   });
@@ -93,9 +92,7 @@ describe("effectiveAlternates", () => {
 
 describe("conflictsFor", () => {
   it("finds a collision with another command and ignores self", () => {
-    // ctrl+1 is nav.dashboard's default; binding it to nav.library conflicts.
     expect(conflictsFor("ctrl+1", "nav.library", {}, true)).toEqual(["nav.dashboard"]);
-    // Re-asserting nav.dashboard's own default is not a conflict with itself.
     expect(conflictsFor("ctrl+1", "nav.dashboard", {}, true)).toEqual([]);
   });
 
@@ -146,8 +143,6 @@ describe("catalog integrity", () => {
     });
 
     it(`keeps alternates normalized, unreserved, and off every other chord on ${os}`, () => {
-      // An alternate loses to a primary in the index, so a collision between them
-      // leaves a dead binding and no error.
       const primaries = new Map(
         COMMANDS.flatMap((cmd) => {
           const chord = defaultChord(cmd, isMac);

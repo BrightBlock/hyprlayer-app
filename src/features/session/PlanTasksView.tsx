@@ -1,11 +1,3 @@
-/**
- * The agent's live plan/to-do list, presented as {@link SidebarTasksPanel}: a
- * collapsible section in the right "changes" sidebar, docked directly under the
- * Git section. A header bar (checklist glyph + count + chevron) folds the task
- * list open and shut; the collapsed state is a persisted, sidebar-level
- * preference in `uiStore`, so it stays put as you switch agent tabs. The panel
- * tracks the sidebar's focused session and renders nothing until it has a plan.
- */
 
 import { Spinner } from "@/components/ui";
 import { ChecklistIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
@@ -14,12 +6,10 @@ import { useSession, useSessionPlanTasks } from "./sessionStore";
 import { isWorking } from "./transcript";
 import type { PlanTask } from "./planTasks";
 
-/** Completed-task count for the "n/total" progress label. */
 function doneCount(tasks: PlanTask[]): number {
   return tasks.reduce((n, t) => (t.status === "completed" ? n + 1 : n), 0);
 }
 
-/** Spinner while working, else a static marker; check when done, box when pending. */
 function StatusGlyph({ status, working }: { status: PlanTask["status"]; working: boolean }) {
   if (status === "in_progress") {
     return working ? (
@@ -61,16 +51,6 @@ function TaskRow({ task, working }: { task: PlanTask; working: boolean }) {
   );
 }
 
-/**
- * The Tasks section of the changes sidebar, the focused session's live plan,
- * below the pinned Git + Changes block. Behaves like an accordion pane:
- * expanded it grows (`flex-1`) to sit directly under Changes and share the
- * vertical space, its list scrolling within; collapsed it drops to a bare `h-9`
- * header (chevron + checklist glyph + "TASKS" + n/total) that sinks to the
- * bottom under the space-filling Changes. Absent until the session has a plan;
- * collapse state is the shared, persisted `tasksCollapsed` so it survives tab
- * switches/restart.
- */
 export function SidebarTasksPanel({ sessionId }: { sessionId: string | undefined }) {
   const tasks = useSessionPlanTasks(sessionId);
   const session = useSession(sessionId);
@@ -99,7 +79,6 @@ export function SidebarTasksPanel({ sessionId }: { sessionId: string | undefined
         <span className="flex w-3 shrink-0 justify-center">
           {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         </span>
-        {/* Pulse only while genuinely working, an ended turn can leave an in_progress task. */}
         <ChecklistIcon size={14} className={active && working ? "animate-work-pulse" : undefined} />
         <span className="text-xs font-semibold uppercase tracking-wide">Tasks</span>
         <span className="ml-auto font-mono text-xs">

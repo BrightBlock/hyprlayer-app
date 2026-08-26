@@ -5,8 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useKeybindings } from "./useKeybindings";
 import { useCommand, useEscape } from "./registry";
 
-// IS_MACOS derives from the jsdom user agent (not "Macintosh"), so these tests
-// run in the non-mac branch where Ctrl maps to `mod`.
 afterEach(cleanup);
 
 function Dispatcher({ overrides = {} }: { overrides?: Record<string, string | null> }) {
@@ -25,8 +23,6 @@ function EscapeHost({ handler }: { handler: (() => void) | null }) {
 }
 
 describe("useKeybindings dispatcher", () => {
-  // `nav.settings` is ⌘,/Ctrl+, on both platforms: a stable stand-in for "some
-  // mod chord" that the tab bindings don't use.
   it("routes a chord to the registered command handler", () => {
     const fn = vi.fn();
     render(
@@ -41,7 +37,6 @@ describe("useKeybindings dispatcher", () => {
 
   it("does nothing when no handler is registered (wrong context)", () => {
     render(<Dispatcher />);
-    // No throw, and the default isn't prevented since nothing ran.
     const evt = new KeyboardEvent("keydown", { key: ",", ctrlKey: true, cancelable: true });
     window.dispatchEvent(evt);
     expect(evt.defaultPrevented).toBe(false);
@@ -55,7 +50,6 @@ describe("useKeybindings dispatcher", () => {
         <CommandHost id="tab.prev" handler={fn} />
       </>,
     );
-    // Ctrl+Shift+[ arrives as key "{"; the primary here is Ctrl+PageUp.
     fireEvent.keyDown(window, { key: "{", ctrlKey: true, shiftKey: true });
     expect(fn).toHaveBeenCalledOnce();
     fireEvent.keyDown(window, { key: "PageUp", ctrlKey: true });
@@ -76,11 +70,9 @@ describe("useKeybindings dispatcher", () => {
     const input = container.querySelector("input")!;
     input.focus();
 
-    // Bare "n" while the input is focused must NOT trigger the command.
     fireEvent.keyDown(input, { key: "n" });
     expect(bare).not.toHaveBeenCalled();
 
-    // A primary-modifier chord still works mid-typing.
     fireEvent.keyDown(input, { key: ",", ctrlKey: true });
     expect(modded).toHaveBeenCalledOnce();
   });
@@ -129,7 +121,6 @@ describe("useKeybindings Escape routing", () => {
         <EscapeHost handler={page} />
       </>,
     );
-    // Modal opens on top of the page, it's the latest registrant, so it wins.
     rerender(
       <>
         <Dispatcher />
@@ -141,7 +132,6 @@ describe("useKeybindings Escape routing", () => {
     expect(modal).toHaveBeenCalledOnce();
     expect(page).not.toHaveBeenCalled();
 
-    // Modal closes; the next Escape falls through to the page beneath it.
     rerender(
       <>
         <Dispatcher />

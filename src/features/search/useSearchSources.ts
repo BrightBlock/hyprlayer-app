@@ -8,7 +8,6 @@ import { fuzzyScore, type SearchResult } from "./search";
 import type { WorkstreamActivity } from "@/features/session/sessionStore";
 import { basename } from "@/lib/path";
 
-/** Map a backend session.state string to a WorkstreamActivity badge. */
 function sessionStateToActivity(state: string): WorkstreamActivity {
   if (state === "awaiting_permission" || state === "awaiting_question") return "needs-you";
   if (state === "starting" || state === "running") return "working";
@@ -17,7 +16,6 @@ function sessionStateToActivity(state: string): WorkstreamActivity {
   return "idle";
 }
 
-/** Activity urgency rank, higher is more urgent. For empty-query agent sort. */
 const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
   idle: 0,
   review: 1,
@@ -30,8 +28,6 @@ const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
 export function useSearchSources(query: string, activeWorkstreamId?: string): SearchResult[] {
   const debounced = useDebounced(query, 120);
 
-  // ── Workstreams ────────────────────────────────────────────────────────────
-  // Already cached by the sidebar tree; filter client-side.
   const workstreams = useAllWorkstreams();
   const wsResults = useMemo<SearchResult[]>(() => {
     const views = workstreams.data ?? [];
@@ -45,7 +41,6 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
         key: `ws:${v.item.id}`,
         title: v.item.title,
         subtitle: v.item.branch,
-        // Empty query: recent first (negate updatedAt, larger = newer)
         score: score + (query ? 0 : -(v.item.updatedAt ?? 0) / 1e13),
         nav: { type: "workstream", projectPath: v.item.projectPath, workstreamId: v.item.id },
         tag: v.item.stage,
@@ -54,10 +49,6 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
     return out;
   }, [workstreams.data, query]);
 
-  // ── Docs ───────────────────────────────────────────────────────────────────
-  // Reuse the full-text index. Only once the query clears the minimum length,
-  // below that, a text query is a full-corpus disk scan (see
-  // MIN_DOC_TEXT_QUERY), and this fires on every focus refetch.
   const hasDocQuery = debounced.length >= MIN_DOC_TEXT_QUERY;
   const docsQuery = useDocs(
     { text: hasDocQuery ? debounced : null, sort: hasDocQuery ? "relevance" : "mtime", limit: 12 },
@@ -71,16 +62,13 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
         key: `doc:${d.id}`,
         title: d.fm.title ?? d.relPath,
         subtitle: [d.project, d.fm.type].filter(Boolean).join(" · ") || undefined,
-        score: 1000 - i, // already relevance-ranked by the index
+        score: 1000 - i,
         nav: { type: "doc", id: d.id },
         tag: d.fm.type ?? undefined,
       }),
     );
   }, [docsQuery.data]);
 
-  // ── Agents ─────────────────────────────────────────────────────────────────
-  // All live sessions from the backend registry (covers sessions whose tab was
-  // never opened this run, which the frontend sessionStore misses).
   const activeSessions = useActiveSessions();
   const agentResults = useMemo<SearchResult[]>(() => {
     const sessions = activeSessions.data ?? [];
@@ -95,7 +83,6 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
         key: `agent:${v.session.id}`,
         title: v.workstreamTitle,
         subtitle: v.session.stage,
-        // Empty query: urgency first, then recency
         score:
           score +
           (query ? 0 : ACTIVITY_RANK[activity] * 100 - (v.session.startedAt ?? 0) / 1e13),
@@ -112,8 +99,6 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
     return out;
   }, [activeSessions.data, query]);
 
-  // ── Files ──────────────────────────────────────────────────────────────────
-  // Scoped to the active workstream; only present when a query is typed.
   const fileQueryEnabled = !!activeWorkstreamId && debounced.length > 0;
   const filesQuery = useQuery({
     queryKey: ["worktree-search-files", activeWorkstreamId, debounced],
@@ -129,7 +114,7 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
         key: `file:${activeWorkstreamId}:${path}`,
         title: basename(path),
         subtitle: path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : undefined,
-        score: 1000 - i, // already ranked by the worktree search
+        score: 1000 - i,
         nav: { type: "file", workstreamId: activeWorkstreamId, path },
       }),
     );

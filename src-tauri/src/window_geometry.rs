@@ -1,52 +1,17 @@
-//! DPI-aware restore of the main window's saved geometry.
-//!
-//! `tauri-plugin-window-state` owns SAVING. It gets `skip_initial_state("main")`
-//! so RESTORE lives here, because the plugin re-applies a saved size as raw
-//! *physical* pixels: on a mixed-DPI setup a window sized on a 1x display
-//! reopens half-size on a 2x display, or oversized the other way.
-//!
-//! We restore verbatim when the saved rect still lands on a connected monitor
-//! at a compatible DPI, else open a default sized to the target monitor.
-//!
-//! Position applies in *physical* pixels (absolute virtual-desktop coords, so
-//! it is unambiguous across monitors). Size is computed in physical pixels but
-//! APPLIED in *logical* points: macOS sets points directly, while
-//! `set_size(Physical)` converts through the window's current (possibly stale,
-//! mid-move) scale factor and halves or doubles the result.
-//!
-//! The plugin keeps one geometry slot per window, so last close wins and
-//! per-monitor geometry is not remembered across unplug/replug.
-
 use std::collections::HashMap;
 
 use tauri::{AppHandle, LogicalSize, Manager, Monitor, PhysicalPosition};
 
-// Fallbacks if the "main" window config can't be read. Mirror the BASE
-// tauri.conf.json (macOS/Windows: 1180×620), not the platform overlay.
-// `config_dims()` below reads `app.config()`, which is the merged *live*
-// config including `tauri.linux.conf.json`, so on Linux the 500×400 overlay
-// minimum is what actually reaches `decide()` at runtime; these constants are
-// only the "config unreadable" fallback (`config_dims`'s `None` arm). Do not
-// lower them to "fix" the apparent 1180-vs-500 mismatch, that would widen
-// this fallback's blast radius on macOS/Windows, the platforms it exists to
-// protect.
 const DEFAULT_W: f64 = 1280.0;
 const DEFAULT_H: f64 = 800.0;
 const MIN_W: f64 = 1180.0;
 const MIN_H: f64 = 620.0;
 
-// The default window fills this fraction of the monitor's work area, so it scales
-// up on large/non-retina displays instead of stranding a laptop-sized window on a
-// big screen. Bounded below by the config default (keeps the laptop comfortable)
-// and above by a cap (keeps it sane on 4K/ultrawide), and never within a sliver of
-// filling the whole screen.
 const DEFAULT_FRACTION: f64 = 0.75;
 const MAX_DEFAULT_W: f64 = 2560.0;
 const MAX_DEFAULT_H: f64 = 1600.0;
 const MAX_WORK_FRACTION: f64 = 0.94;
 
-/// Saved geometry as written by tauri-plugin-window-state (physical px). Unknown
-/// fields are ignored; any missing field (or a parse failure) defaults to 0.
 #[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
 #[serde(default)]
 struct SavedWindow {
@@ -54,14 +19,11 @@ struct SavedWindow {
     height: u32,
     x: i32,
     y: i32,
-    // Pre-maximize origin: when maximized, x/y hold the monitor's top-left.
     prev_x: i32,
     prev_y: i32,
     maximized: bool,
 }
 
-/// A monitor reduced to the numbers `decide` needs, full rect + usable work
-/// area (physical, virtual-desktop coords) and the scale factor.
 #[derive(Debug, Clone, Copy)]
 struct MonitorDesc {
     x: i32,
@@ -80,7 +42,6 @@ impl MonitorDesc {
         let pos = m.position();
         let size = m.size();
         let wa = m.work_area();
-        // Some platforms under-report the work area as 0×0; fall back to full size.
         let (work_x, work_y, work_w, work_h) = if wa.size.width == 0 || wa.size.height == 0 {
             (pos.x, pos.y, size.width, size.height)
         } else {
@@ -100,13 +61,9 @@ impl MonitorDesc {
     }
 }
 
-/// The chosen geometry: physical top-left position + LOGICAL size (points). Two
-/// variants so tests can assert which path ran; both are applied identically.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Plan {
-    /// Saved monitor still present at a compatible DPI, restore verbatim.
     RestoreExact { x: i32, y: i32, w: f64, h: f64 },
-    /// No trustworthy saved geometry, comfortable default, centered.
     DefaultCentered { x: i32, y: i32, w: f64, h: f64 },
 }
 
@@ -120,7 +77,6 @@ impl Plan {
     }
 }
 
-/// Best-effort restore of the main window's geometry; never blocks startup.
 pub fn restore_main_window(app: &AppHandle) {
     if let Err(e) = try_restore(app) {
         log::warn!("main window geometry restore skipped: {e}");
@@ -132,8 +88,6 @@ fn try_restore(app: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     };
 
-    // available_monitors() is reliable this early; current_monitor() can be None
-    // before the window is placed (Linux/GTK), so it's only a default-path hint.
     let monitors: Vec<MonitorDesc> = win
         .available_monitors()?
         .iter()
@@ -156,24 +110,20 @@ fn try_restore(app: &AppHandle) -> tauri::Result<()> {
         "window geometry restore: saved={saved:?} current={current:?} monitors={monitors:?} plan={plan:?}"
     );
 
-    // Position (absolute physical) moves the window onto the target monitor; the
-    // size is applied in logical points so it can't be mis-scaled by the current
-    // (possibly mid-move) monitor, see the module docs.
     let (x, y, w, h) = plan.rect();
+    // Position is physical; logical sizing avoids stale monitor DPI.
     win.set_position(PhysicalPosition { x, y })?;
     win.set_size(LogicalSize {
         width: w,
         height: h,
     })?;
 
-    // The frame above is the pre-maximize ("unmaximize") target.
     if saved.map(|s| s.maximized).unwrap_or(false) {
         win.maximize()?;
     }
     Ok(())
 }
 
-/// (min_w, min_h, def_w, def_h) in logical px from the "main" window config.
 fn config_dims(app: &AppHandle) -> (f64, f64, f64, f64) {
     match app.config().app.windows.iter().find(|w| w.label == "main") {
         Some(w) => (
@@ -186,8 +136,6 @@ fn config_dims(app: &AppHandle) -> (f64, f64, f64, f64) {
     }
 }
 
-/// Read the plugin's saved state, tolerating a missing/corrupt file. Mirrors the
-/// plugin's own "ignore the all-zero default" guard.
 fn load_saved(app: &AppHandle) -> Option<SavedWindow> {
     let path = app
         .path()
@@ -200,7 +148,6 @@ fn load_saved(app: &AppHandle) -> Option<SavedWindow> {
     (s.width != 0 && s.height != 0).then_some(s)
 }
 
-/// Pure geometry decision, unit-tested below. Position is physical; size logical.
 fn decide(
     saved: Option<SavedWindow>,
     monitors: &[MonitorDesc],
@@ -211,8 +158,6 @@ fn decide(
     def_h: f64,
 ) -> Plan {
     if let Some(s) = saved {
-        // Maximized windows save the monitor's top-left in x/y; the real frame is
-        // in prev_x/prev_y. Decide placement from the frame either way.
         let (px, py) = if s.maximized {
             (s.prev_x, s.prev_y)
         } else {
@@ -222,16 +167,10 @@ fn decide(
             .iter()
             .find(|m| intersects(m, px, py, s.width, s.height))
         {
-            // Trust the saved physical size only if it's still >= min at this
-            // monitor's DPI. A low→high-DPI landing yields a sub-min logical size
-            // the OS would clamp up to min (the "forgot my size" bug), so fall
-            // back to a comfortable default there instead. Epsilon absorbs integer
-            // rounding and fractional scale factors.
             let lw = s.width as f64 / m.scale;
             let lh = s.height as f64 / m.scale;
             if lw >= min_w - 1.0 && lh >= min_h - 1.0 {
                 let (x, y, w, h) = clamp_to_work_area(px, py, s.width, s.height, m);
-                // Physical size → logical points for the target monitor's DPI.
                 return Plan::RestoreExact {
                     x,
                     y,
@@ -245,8 +184,6 @@ fn decide(
     default_on(&current, min_w, min_h, def_w, def_h)
 }
 
-/// Does the saved rect touch this monitor's full rect? Mirrors the plugin's
-/// four-corner test (tauri-plugin-window-state lib.rs `MonitorExt::intersects`).
 fn intersects(m: &MonitorDesc, x: i32, y: i32, w: u32, h: u32) -> bool {
     let (left, right, top, bottom) = (m.x, m.x + m.w as i32, m.y, m.y + m.h as i32);
     [
@@ -259,8 +196,6 @@ fn intersects(m: &MonitorDesc, x: i32, y: i32, w: u32, h: u32) -> bool {
     .any(|(cx, cy)| cx >= left && cx < right && cy >= top && cy < bottom)
 }
 
-/// Shrink the rect to the monitor's work area and nudge it fully on-screen (all
-/// physical px).
 fn clamp_to_work_area(x: i32, y: i32, w: u32, h: u32, m: &MonitorDesc) -> (i32, i32, u32, u32) {
     let w = w.min(m.work_w);
     let h = h.min(m.work_h);
@@ -271,13 +206,9 @@ fn clamp_to_work_area(x: i32, y: i32, w: u32, h: u32, m: &MonitorDesc) -> (i32, 
     (x, y, w, h)
 }
 
-/// A comfortable default centered on `m`, scaled to the monitor (see the
-/// DEFAULT_* constants). Size is logical (points); position is the physical
-/// centering of that size's physical footprint on `m`.
 fn default_on(m: &MonitorDesc, min_w: f64, min_h: f64, def_w: f64, def_h: f64) -> Plan {
     let w_l = default_axis(m.work_w as f64 / m.scale, min_w, def_w, MAX_DEFAULT_W);
     let h_l = default_axis(m.work_h as f64 / m.scale, min_h, def_h, MAX_DEFAULT_H);
-    // Center the physical footprint (logical × scale) within the work area.
     let w_px = (w_l * m.scale).round() as i32;
     let h_px = (h_l * m.scale).round() as i32;
     let x = m.work_x + (m.work_w as i32 - w_px) / 2;
@@ -290,8 +221,6 @@ fn default_on(m: &MonitorDesc, min_w: f64, min_h: f64, def_w: f64, def_h: f64) -
     }
 }
 
-/// One axis of the default size (logical): a fraction of the work area, at least
-/// the config default, capped, and never within a sliver of filling the screen.
 fn default_axis(work: f64, min: f64, def: f64, cap: f64) -> f64 {
     (DEFAULT_FRACTION * work)
         .max(def)
@@ -304,7 +233,6 @@ fn default_axis(work: f64, min: f64, def: f64, cap: f64) -> f64 {
 mod tests {
     use super::*;
 
-    // Full-rect == work-area monitor at the given origin/size/scale.
     fn mon(x: i32, y: i32, w: u32, h: u32, scale: f64) -> MonitorDesc {
         MonitorDesc {
             x,
@@ -331,7 +259,6 @@ mod tests {
         }
     }
 
-    // Standard config dims for tests.
     const DIMS: (f64, f64, f64, f64) = (MIN_W, MIN_H, DEFAULT_W, DEFAULT_H);
 
     fn decide_std(s: Option<SavedWindow>, mons: &[MonitorDesc], cur: MonitorDesc) -> Plan {
@@ -355,7 +282,6 @@ mod tests {
 
     #[test]
     fn restore_size_is_logical_on_a_2x_monitor() {
-        // Saved 2400x1600 physical on a 2x display → 1200x800 logical points.
         let m = mon(0, 0, 3024, 1964, 2.0);
         let s = saved(100, 100, 2400, 1600);
         assert_eq!(
@@ -371,10 +297,8 @@ mod tests {
 
     #[test]
     fn off_screen_saved_falls_back_to_centered_default_on_current() {
-        // External at negative coords is gone; only the 2x built-in remains.
         let built_in = mon(0, 0, 3024, 1964, 2.0);
-        let s = saved(-3249, -888, 1934, 1109); // the real bug report's numbers
-                                                // Default 1280x800 logical, centered (its 2560x1600 physical footprint fits).
+        let s = saved(-3249, -888, 1934, 1109);
         assert_eq!(
             decide_std(Some(s), &[built_in], built_in),
             Plan::DefaultCentered {
@@ -388,8 +312,6 @@ mod tests {
 
     #[test]
     fn sub_min_at_target_dpi_falls_back_to_default() {
-        // Saved rect's coords overlap a surviving 2x monitor, but the saved
-        // physical size is small → 1200/2 = 600 logical < 1180 min → reject.
         let m = mon(0, 0, 1920, 1080, 2.0);
         let s = saved(100, 100, 1200, 700);
         assert!(matches!(
@@ -401,7 +323,7 @@ mod tests {
     #[test]
     fn oversized_saved_is_clamped_to_work_area() {
         let m = mon(0, 0, 1920, 1080, 1.0);
-        let s = saved(0, 0, 4000, 3000); // bigger than the monitor
+        let s = saved(0, 0, 4000, 3000);
         assert_eq!(
             decide_std(Some(s), &[m], m),
             Plan::RestoreExact {
@@ -416,7 +338,6 @@ mod tests {
     #[test]
     fn no_saved_state_scales_default_to_monitor() {
         let m = mon(0, 0, 1920, 1080, 1.0);
-        // 0.75 * 1920 = 1440 wide, 0.75 * 1080 = 810 tall, centered.
         assert_eq!(
             decide_std(None, &[m], m),
             Plan::DefaultCentered {
@@ -430,8 +351,6 @@ mod tests {
 
     #[test]
     fn default_scales_up_on_large_non_retina_monitor() {
-        // The reported case: a 1x ultrawide. 1280 logical looked tiny; the default
-        // now fills 0.75 of the work area (2560, capped) instead.
         let m = mon(0, 0, 3440, 1440, 1.0);
         assert_eq!(
             decide_std(None, &[m], m),
@@ -446,9 +365,9 @@ mod tests {
 
     #[test]
     fn picks_the_intersecting_monitor_among_several() {
-        let left = mon(-3440, 0, 3440, 1440, 1.0); // 1x external, left of primary
-        let primary = mon(0, 0, 3024, 1964, 2.0); // 2x built-in
-        let s = saved(-3000, 200, 1934, 1109); // lives on the external
+        let left = mon(-3440, 0, 3440, 1440, 1.0);
+        let primary = mon(0, 0, 3024, 1964, 2.0);
+        let s = saved(-3000, 200, 1934, 1109);
         assert_eq!(
             decide_std(Some(s), &[primary, left], primary),
             Plan::RestoreExact {
@@ -462,8 +381,6 @@ mod tests {
 
     #[test]
     fn default_stays_off_the_screen_edges_on_small_monitors() {
-        // Config default (1280) would nearly fill a 1300-wide screen, so the 0.94
-        // work-area guard pulls it in to 1222.
         let m = mon(0, 0, 1300, 900, 1.0);
         assert_eq!(
             decide_std(None, &[m], m),
@@ -478,14 +395,11 @@ mod tests {
 
     #[test]
     fn default_caps_at_max_on_huge_monitors() {
-        let m = mon(0, 0, 5120, 2160, 1.0); // fraction ≫ cap
+        let m = mon(0, 0, 5120, 2160, 1.0);
         let (_, _, w, h) = decide_std(None, &[m], m).rect();
         assert_eq!((w, h), (MAX_DEFAULT_W, MAX_DEFAULT_H));
     }
 
-    /// With Linux's low floor, a window the compositor tiled to 701×852 logical
-    /// (1402×1704 physical on a 2× display) is restored verbatim instead of being
-    /// rejected as sub-minimum, `decide` reads the merged config's min, not MIN_W.
     #[test]
     fn low_min_config_restores_a_tiled_sub_1180_window() {
         let m = mon(0, 0, 2880, 1800, 2.0);
@@ -503,19 +417,17 @@ mod tests {
 
     #[test]
     fn maximized_uses_prev_coords_for_placement() {
-        // Maximized: x/y are the monitor origin; prev_x/prev_y are the real frame.
         let external = mon(-3440, 0, 3440, 1440, 1.0);
         let primary = mon(0, 0, 3024, 1964, 2.0);
         let s = SavedWindow {
             width: 1600,
             height: 1000,
-            x: -3440, // maximized origin (monitor top-left)
+            x: -3440,
             y: 0,
-            prev_x: -2000, // pre-maximize frame, on the external
+            prev_x: -2000,
             prev_y: 100,
             maximized: true,
         };
-        // Placement decided from prev coords → external, restored verbatim.
         assert_eq!(
             decide_std(Some(s), &[primary, external], primary),
             Plan::RestoreExact {

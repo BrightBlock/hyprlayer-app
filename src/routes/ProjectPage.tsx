@@ -115,42 +115,28 @@ type ShellMenu = {
   y: number;
 };
 
-/** A read-only viewer tab (doc preview, diff, or file) rather than an agent
- *  chat, these carry no session, so the strip shows a doc icon and no dot. */
 function isViewerShell(shell: ShellTab): boolean {
   return !!(shell.docPreviewPath || shell.diffView || shell.filePath);
 }
 
-/** An interactive terminal tab, has its own PTY, no session dot. */
 function isTerminalShell(shell: ShellTab): boolean {
   return !!shell.terminalView;
 }
 
-/** A Multiplexer agent tab, an engine CLI in a PTY, no native session/composer.
- *  Carries an engine glyph + a working/blocked/done/idle dot. Like a native agent
- *  the "×" archives it (keeping its conversation, resumable by id); right-click →
- *  Close ends it for good. */
 function isPtyShell(shell: ShellTab): boolean {
   return !!shell.ptyAgent;
 }
 
-/** A tab whose "×" archives (keeps it recoverable) rather than closes: native
- *  agents and PTY agents both. Viewers and terminals just close. */
 function isArchivable(shell: ShellTab): boolean {
   return isAgentShell(shell) || isPtyShell(shell);
 }
 
-/** An agent chat tab (the only kind with a composer), not a viewer, terminal,
- *  or PTY agent. */
 function isAgentShell(shell: ShellTab): boolean {
   return !isViewerShell(shell) && !isTerminalShell(shell) && !isPtyShell(shell);
 }
 
-/** The disabled-reason shown when a still-working agent can't be archived yet. */
 const AGENT_BUSY_HINT = "Agent is still working. Stop it first.";
 
-/** Snapshot an agent's lifecycle into a coarse archive-row label at archive time
- *  (the live entry isn't kept around while archived). */
 function classifyArchivedStatus(state: SessionState | undefined): ArchivedStatus {
   if (!state) return "idle";
   if (state === "completed") return "done";
@@ -158,17 +144,10 @@ function classifyArchivedStatus(state: SessionState | undefined): ArchivedStatus
   return "idle";
 }
 
-/** The PTY-agent equivalent: map the multiplexer's working/blocked/done/idle into
- *  the coarse archive-row label (only "done" carries through; the rest read idle). */
 function classifyPtyArchivedStatus(state: AgentState | undefined): ArchivedStatus {
   return state === "done" ? "done" : "idle";
 }
 
-/** The tab's "×": archives an agent (keeping its session/branch/transcript)
- *  rather than ending it, closing moves to right-click → Close. PTY agents
- *  archive too (their conversation resumes by id). Terminals and viewers just
- *  close. A native agent is soft-disabled (reactively) while it's working; a PTY
- *  agent isn't, since archiving it is recoverable. */
 function TabCloseControl({
   shell,
   onArchive,
@@ -203,16 +182,9 @@ function TabCloseControl({
   );
 }
 
-/**
- * Detach the doc at `path` from a shell. A manually-attached doc is just removed;
- * detaching a *suggested* chip also records the path in `dismissedSuggestions` so
- * the suggestion never re-adds for this pane. Pure: returns the next shell.
- */
 function detachDoc(shell: ShellTab, path: string): ShellTab {
   const removed = shell.docs.find((d) => d.path === path);
   const docs = shell.docs.filter((d) => d.path !== path);
-  // Suggested chips and auto-captured handoff docs both need to be remembered
-  // as dismissed, they're re-added by their respective effects otherwise.
   const persistDismissal = Boolean(removed?.suggested) || removed?.role === "handoff";
   if (!persistDismissal) return { ...shell, docs };
   return {
@@ -222,15 +194,6 @@ function detachDoc(shell: ShellTab, path: string): ShellTab {
   };
 }
 
-/**
- * Registers the project/session keyboard commands whose action closures live in
- * `ProjectPage`. Split into its own component so its hooks (notably `useSession`
- * for the focused pane) run unconditionally, `ProjectPage` itself has early
- * returns above where these closures are defined. Mounted only when a workstream
- * is open, so the commands are naturally unregistered (inert) otherwise.
- */
-/** One `tab.selectN` registration. A component per index because `useCommand` is
- *  a hook and the count, while constant, can't be looped over inline. */
 function TabSelectCommand({ index, onSelect }: { index: number; onSelect: (i: number) => void }) {
   useCommand(tabSelectId(index), () => onSelect(index));
   return null;
@@ -239,12 +202,8 @@ function TabSelectCommand({ index, onSelect }: { index: number; onSelect: (i: nu
 function ProjectCommands(props: {
   sessionId: string | undefined;
   onNewTab: () => void;
-  /** ⌘W: archive the focused agent (or close a terminal/viewer), the × button's
-   *  action. Null when nothing is focused. */
   onArchiveTab: (() => void) | null;
   onCloseTab: (() => void) | null;
-  /** ⌘⇧T: restore the most recently archived agent. Null when the archive is
-   *  empty, so the keystroke passes through instead of being swallowed. */
   onReopenTab: (() => void) | null;
   onSelectTab: (index: number) => void;
   onSelectLastTab: () => void;
@@ -252,18 +211,11 @@ function ProjectCommands(props: {
   onNextTab: () => void;
   onPrevTab: () => void;
   onNewWorkstream: () => void;
-  /** ⌘R: run the workstream's Run script, or stop it if already live. Null when
-   *  no workstream is selected. */
   onToggleRun: (() => void) | null;
-  /** Cycle the focused agent's stage, or null when there's no un-started agent
-   *  tab in focus (a running agent's stage is fixed; terminals have none). */
   onCycleStage: (() => void) | null;
-  /** Toggle the archived-agents pane, or null when no workstream is selected. */
   onToggleArchived: (() => void) | null;
 }) {
   const session = useSession(props.sessionId);
-  // "Stop turn" only makes sense while the focused pane's session is working /
-  // blocked on the user; otherwise there's no turn to interrupt.
   const running = Boolean(props.sessionId && session && isBusy(session));
   const sid = props.sessionId;
   useCommand("tab.new", props.onNewTab);
@@ -298,91 +250,45 @@ export function ProjectPage() {
   const search = useSearch({ from: "/projects/$projectPath" });
   const navigate = useNavigate({ from: "/projects/$projectPath" });
 
-  // Selection is DERIVED from the URL every render, never mirrored into
-  // state. (A state mirror + URL canonicalizer once fought each other into
-  // an infinite navigate loop when switching between two workstreams.)
-  // When no ?item= is present, the project-root landing shows the board.
   const selectedId = search.item;
 
-  // Shell tabs are PER WORKSTREAM (1 workstream -> N tabs), keyed by workstream
-  // id so switching workstreams never mixes tabs. Held in a module store so a
-  // tab's bound session (and its draft/docs) survives leaving this page.
   const tabsByWs = useWorkstreamTabsStore((s) => s.byWs);
-  // The URL is the sole source of truth for which workstream is selected (no
-  // localStorage fallback, the project root with no ?item= shows the board).
-  // It's derived purely from the URL + the already-loaded list, so we compute it
-  // here, above the dock-open selector, which then subscribes to just THIS
-  // workstream's open flag rather than the whole dock map (the map changes on any
-  // workstream's dock interaction, which would re-render this entire page).
   const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
   const activeView = selectedId ? (views.find((v) => v.item.id === selectedId) ?? null) : null;
   const wsId = activeView?.item.id ?? null;
-  // Multiplexer config (off by default). Drives whether `+`/⌘T launch a CLI in a
-  // PTY and show the engine menu; with it off everything below is inert.
   const multiplexer = useMultiplexer();
   const dockOpen = useScriptsStore((s) => (wsId ? !!s.dock[wsId]?.open : false));
   const dockPosition = useScriptsStore((s) => s.dockPosition);
   const [shellMenu, setShellMenu] = useState<ShellMenu | null>(null);
-  // The `+` new-agent menu (multiplexer on): anchored under the clicked button.
   const [newAgentMenu, setNewAgentMenu] = useState<{
     x: number;
     y: number;
     pane: "main" | "right";
   } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  // Board-card right-click menu (Attach/Change/Detach PR) and the attach dialog.
   const [cardMenu, setCardMenu] = useState<{ x: number; y: number; view: WorkstreamView } | null>(
     null,
   );
   const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(null);
-  // Id is passed at mutate time, the card menu closes on click, so a hook-arg id
-  // would churn to "" before the async detach resolves (its onSuccess invalidation
-  // would then miss the PR query, leaving the bar stale until a window refocus).
   const detachPr = useDetachPr();
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  // Which shell's "+" opened the library picker modal (null = closed).
   const [docsModalShellId, setDocsModalShellId] = useState<number | null>(null);
-  // The narrow layout tier (see lib/layout): below NARROW_WIDTH the changes
-  // sidebar becomes an overlay drawer, driven by the shared (non-persisted)
-  // `narrowDrawer` slot rather than the persisted `diffHidden` preference.
-  //
-  // The tier itself is a property of the window (Root and this page must agree
-  // on it, or the shell tiles against one answer and the page against another),
-  // but the drawer's WIDTH is a property of this page's own box: the drawer is
-  // positioned against it, so the nav rail and, at narrow, where it is still an
-  // in-flow column, the project sidebar are already outside it. Sizing off the
-  // viewport there hands a 640px window a 520px drawer inside a 412px pane.
   const { narrow } = useViewport();
   const { ref: paneRef, width: paneWidth } = useElementWidth<HTMLDivElement>();
   const narrowDrawer = useUiStore((state) => state.narrowDrawer);
-  // Hidden state lives in a shared store so the top-bar toggle controls it.
   const diffHidden = useUiStore((state) => state.diffHidden);
-  // Width lives in the same store so the Root header's toggle and this page's
-  // resize handle stay in sync without either owning the value.
   const diffWidth = useUiStore((state) => state.diffWidth);
   const setDiffWidth = useUiStore((state) => state.setDiffWidth);
-  // True only while the diff-sidebar resize handle is dragged, suppresses the
-  // width transition so the panel tracks the cursor instead of trailing it.
   const [resizingDiff, setResizingDiff] = useState(false);
-  // Right-split width as a fraction of the agent area (0..1). The split's
-  // open/closed state and pane assignments persist in the tab store, but the
-  // exact ratio resets to a sane default per visit.
   const [rightRatio, setRightRatio] = useState(0.5);
-  // Which pane (if any) is maximized to fill the whole agent view, scoped to
-  // the workstream it was triggered in so switching workstreams un-maximizes.
-  // Ephemeral view state (a temporary "focus this terminal"), not persisted.
   const [maximized, setMaximized] = useState<{ wsId: string; pane: "main" | "right" } | null>(
     null,
   );
   const splitRowRef = useRef<HTMLDivElement>(null);
-  // Tab drag (reorder within a pane + move across the split). The hook must run
-  // before this component's early returns, so it reaches the action closures
-  // (defined later) through a ref.
   const dragHandlersRef = useRef<TabDragHandlers>({ reorder: () => {}, move: () => {} });
   const { drag, dropPane, suppressClickRef, startDrag } = useTabDrag(dragHandlersRef);
 
-  // ?create=true (sidebar "+") pops the dialog once, then leaves the URL.
   useEffect(() => {
     if (search.create) {
       setCreateOpen(true);
@@ -394,44 +300,21 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.create]);
 
-  // The scripts dock is shown when the user has expanded it for this ws; its
-  // position (bottom strip vs. right sidebar) is a global preference. (views/
-  // activeView/wsId/dockOpen are computed above, with the store hooks.)
   const rightDock = !!activeView && dockOpen && dockPosition === "right";
-  // The right sidebar's visibility is owned by its own toggle. A right-docked
-  // scripts panel only renders while that sidebar is shown (the rail icon reveals
-  // it when needed), so the toggle still collapses the whole sidebar. On the
-  // narrow tier it's an overlay drawer instead: its effective visibility is
-  // the drawer slot, not the persisted preference.
   const showAside = narrow ? narrowDrawer === "diff" : !diffHidden;
-  // The dragged width off the narrow tier; clamped to this pane (not the
-  // window) once the sidebar is an overlay drawer positioned against it.
   const asideWidth = narrow ? drawerWidth(diffWidth, paneWidth) : diffWidth;
-  // True when no workstream is selected, the project-overview board.
   const showBoard = selectedId === undefined;
 
-  // Stale-strip: if the URL names a workstream that the SETTLED list doesn't
-  // contain (archived/removed elsewhere), drop back to the board. Never fires
-  // mid-refetch, where a just-created id can legitimately be absent for a moment.
   useEffect(() => {
-    if (selectedId === undefined) return; // board: nothing to fix
-    if (!workstreams.isSuccess || workstreams.isFetching) return; // wait for list to settle
+    if (selectedId === undefined) return;
+    if (!workstreams.isSuccess || workstreams.isFetching) return;
     if (!views.some((v) => v.item.id === selectedId)) {
       void navigate({ search: (prev) => ({ ...prev, item: undefined }), replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, workstreams.isSuccess, workstreams.isFetching]);
 
-  // (The backend's live worktree watcher is pointed at the on-screen workstream
-  // from Root, which owns the one definition of "active", see its
-  // `watchWorktree` effect.)
 
-  // Multiplexer persistence: keep this workstream's pty agents spawned +
-  // monitored, so background agents still badge/notify, and a restart relaunches
-  // them (a child PTY can't outlive the app, so "persist" means relaunch-on-open
-  // here). The active tab also spawns on mount; ensureAgent is idempotent. Gated
-  // on enabled + persistAcrossRestarts → a complete no-op otherwise. Keyed on the
-  // pty-shell signature so draft edits (which rewrite the strip) don't re-run it.
   const ptyAgentSig =
     multiplexer.enabled && wsId
       ? (tabsByWs[wsId]?.shells ?? [])
@@ -439,8 +322,6 @@ export function ProjectPage() {
           .map((s) => `${s.id}:${s.ptyAgent!.engineId}`)
           .join(",")
       : "";
-  // Toggling "Notify when blocked" reaches already-running agents immediately,
-  // independent of the persist gate below.
   useEffect(() => {
     setAllNotifyOnBlocked(multiplexer.notifyOnBlocked);
   }, [multiplexer.notifyOnBlocked]);
@@ -450,19 +331,10 @@ export function ProjectPage() {
     if (!wsId || !activeView) return;
     for (const s of tabsByWs[wsId]?.shells ?? []) {
       if (!s.ptyAgent) continue;
-      // An exec-mint engine (Codex) with no id yet must mint it before launch,
-      // that's AgentPtyTab's job on mount. Spawning bare here would race ahead and
-      // pre-empt the mint with a wrong (most-recent) session, so defer it.
       if (engineMintsViaExec(s.ptyAgent.engineId) && !s.ptyAgent.sessionId) continue;
       const base = engineOrFallback(multiplexer, s.ptyAgent.engineId);
       const bypass = !!s.ptyAgent.bypass;
       const pty = s.ptyAgent;
-      // After a full quit the PTY is dead, so this relaunches: resume THIS tab's
-      // conversation by its sessionId iff it's actually on disk, else start fresh,
-      // and re-enter bypass if it was on. Falls back to the persisted started flag
-      // ("a PTY id was persisted" for older tabs) for engines we can't disk-check.
-      // Args are unused when ensureAgent reattaches a still-live PTY (webview
-      // reload) or finds the runtime already up.
       void (async () => {
         const fallback = pty.started ?? !!pty.terminalId;
         const resume = await resolveResume(pty.engineId, pty.sessionId, wsId, fallback);
@@ -482,21 +354,11 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ptyAgentSig, wsId, multiplexer.enabled, multiplexer.persistAcrossRestarts, multiplexer.notifyOnBlocked]);
 
-  // Publish the on-screen workstream so the left-rail scripts icon can toggle its
-  // dock; clear it when leaving the project view.
   useEffect(() => {
     setActiveWorkstream(wsId);
     return () => setActiveWorkstream(null);
   }, [wsId]);
 
-  // Landing on a workstream, switching focus to it, or opening it fresh, drops
-  // the cursor straight into its composer so the user can type immediately, no
-  // click needed. We target the active tab of the focused pane when it's an
-  // agent (terminals/viewers have no composer); the shell's SessionChat consumes
-  // the one-shot focus signal once it's on screen. Keyed on `wsId` ONLY: this
-  // must fire on a workstream switch, never on in-workstream tab edits, a
-  // `tabsByWs` dependency would re-run on every keystroke (draft writes mutate
-  // the strip) and yank the caret to the end mid-type.
   useEffect(() => {
     if (!wsId) return;
     const tabs = tabsByWs[wsId] ?? defaultTabState();
@@ -510,30 +372,16 @@ export function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId]);
 
-  // These five sit above the loading guards, and are memoized, because the
-  // sidebar hangs off them. `ChangesPanel` takes the three openers as props, so
-  // a fresh identity per render re-reconciles the whole changed-file list on
-  // every keystroke (a draft write re-renders this page) — measured at 4.7ms
-  // with 120 changed files, which is most of a frame for a panel whose content
-  // did not change. They memoize cleanly because `updateTabs` passes a
-  // *functional* updater to the store: `wsId` is the only render-scoped value
-  // any of them reads.
   const updateTabs = useCallback(
     (updater: (current: WsTabState) => WsTabState) => {
       if (!wsId) return;
       updateWorkstreamTabs((all) => {
         const current = all[wsId] ?? defaultTabState();
-        // updateTabs is the funnel every tab action passes through, so clearing the
-        // archived-agents view on refocus here means no caller has to remember to.
         return { ...all, [wsId]: clearArchiveOnRefocus(current, updater(current)) };
       });
     },
     [wsId],
   );
-  // Open (or re-focus) a read-only viewer tab in the main pane. `match` finds an
-  // already-open tab for the same target so we re-focus instead of stacking
-  // dupes; `fields` carries the discriminator + title for a fresh tab. All three
-  // viewer kinds (doc preview, diff, file) go through this.
   const openViewerTab = useCallback(
     (match: (shell: ShellTab) => boolean, title: string, fields: Partial<ShellTab>) => {
       updateTabs((current) => {
@@ -583,8 +431,6 @@ export function ProjectPage() {
   if (bootstrap.isError) return <PageError error={bootstrap.error} />;
   if (workstreams.isError) return <PageError error={workstreams.error} />;
 
-  // The bootstrap cache already names every project, no per-page
-  // `storage info` subprocess needed just for the mapped name.
   const project = bootstrap.data!.projects.find((p) => p.path === projectPath);
   if (!project) {
     return (
@@ -598,22 +444,16 @@ export function ProjectPage() {
     );
   }
 
-  // A folder project has no git: no branch, diff, or PR surfaces anywhere.
   const folderProject = !isGitProject(project);
 
-  // The active workstream's own tab strip (1 workstream -> N shells).
   const tabs = wsId ? (tabsByWs[wsId] ?? defaultTabState()) : null;
   const shells = tabs?.shells ?? [];
-  // The split partitions a workstream's shells into the main pane and the
-  // right pane by their `panel`; each pane tracks its own active shell.
   const isMainShell = (s: ShellTab) => (s.panel ?? "main") !== "right";
   const isRightShell = (s: ShellTab) => s.panel === "right";
   const mainShells = shells.filter(isMainShell);
   const rightShells = shells.filter(isRightShell);
   const rightSplit = (tabs?.rightSplit ?? false) && rightShells.length > 0;
   const activePane: "main" | "right" = tabs?.activePane ?? "main";
-  // A maximized pane hides its sibling (and the sibling's tab strip) so the
-  // active pane fills the agent view. Only meaningful while the split is open.
   const maxPane = maximized && maximized.wsId === wsId ? maximized.pane : null;
   const maxMain = maxPane === "main" && rightSplit;
   const maxRight = maxPane === "right" && rightSplit;
@@ -623,33 +463,19 @@ export function ProjectPage() {
     : null;
   const rightActiveShell =
     rightShells.find((s) => s.id === tabs?.rightActiveId) ?? rightShells[0] ?? null;
-  // The shell keyboard commands act on: the active tab of whichever pane holds
-  // focus, so split-pane users stop/close the agent they're looking at.
   const focusedShell = activePane === "right" ? rightActiveShell : activeShell;
-  // The shell whose composer "+" opened the library picker, the modal's
-  // attach target, stable while the modal is open.
   const docsModalShell =
     docsModalShellId !== null ? (shells.find((s) => s.id === docsModalShellId) ?? null) : null;
   const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
   const archivedShells = tabs?.archived ?? [];
-  // Conversation ids already owned in this workstream (live + archived), so a
-  // capture-mode agent reading its id off disk doesn't claim one that's taken.
   const ptySessionIds = [...shells, ...archivedShells.map((a) => a.shell)]
     .map((s) => s.ptyAgent?.sessionId)
     .filter((id): id is string => !!id);
   const archiveViewOpen = tabs?.archiveOpen ?? false;
-  // One toggle for both entry points (tab-bar button + keyboard command), so a
-  // repeat flips the same state shut. Null with no workstream selected, which
-  // leaves the keyboard command inert.
   const toggleArchived = wsId
     ? () => updateTabs((c) => ({ ...c, archiveOpen: !c.archiveOpen }))
     : null;
-  // The right-clicked tab is the main pane's last agent, so closing or archiving
-  // it would empty the pane, both are blocked.
   const contextIsLastMain = !!contextShell && isMainShell(contextShell) && mainShells.length === 1;
-  // Why "Archive agent" is blocked for the right-clicked tab (null = allowed).
-  // Read non-reactively: the menu is short-lived and a hook can't run here (the
-  // early returns above forbid it).
   const contextEntry = contextShell?.sessionId
     ? useSessionStore.getState().sessions[contextShell.sessionId]
     : undefined;
@@ -663,8 +489,6 @@ export function ProjectPage() {
     ? shells.find((s) => s.id === renameShellId)
     : null;
 
-  // Replace one shell by id via a transform, the single "map the shells, touch
-  // the matching one" primitive the per-shell mutators build on.
   const modifyShell = (shellId: number, transform: (shell: ShellTab) => ShellTab) => {
     updateTabs((current) => ({
       ...current,
@@ -698,22 +522,14 @@ export function ProjectPage() {
   ) => modifyShell(shellId, (s) => ({ ...s, ...patch }));
   const setTerminalId = (shellId: number, terminalId: string) =>
     patchShell(shellId, { terminalView: { terminalId } });
-  // Persist a pty agent's backend terminal id so it reattaches on reload. Merge
-  // (don't replace ptyAgent) so the persisted bypass flag survives.
   const setPtyTerminalId = (shellId: number, engineId: string, terminalId: string) =>
     modifyShell(shellId, (s) => ({ ...s, ptyAgent: { ...s.ptyAgent, engineId, terminalId } }));
-  // Persist whether a pty agent is in bypass-permissions mode, so a cold-start
-  // relaunch (after a full quit) resumes it in bypass mode rather than fresh.
   const setPtyBypass = (shellId: number, bypass: boolean) =>
     modifyShell(shellId, (s) => (s.ptyAgent ? { ...s, ptyAgent: { ...s.ptyAgent, bypass } } : s));
-  // Persist that a pty agent's conversation has begun (first keystroke), so a
-  // cold-start relaunch resumes it by sessionId instead of starting fresh.
   const setPtyStarted = (shellId: number) =>
     modifyShell(shellId, (s) =>
       s.ptyAgent && !s.ptyAgent.started ? { ...s, ptyAgent: { ...s.ptyAgent, started: true } } : s,
     );
-  // Persist a conversation id learned from disk after launch (capture-mode engines,
-  // Codex, Antigravity), so resume/restore can target this tab's conversation.
   const setPtySessionId = (shellId: number, sessionId: string) =>
     modifyShell(shellId, (s) =>
       s.ptyAgent && s.ptyAgent.sessionId !== sessionId
@@ -729,11 +545,7 @@ export function ProjectPage() {
   const setActivePane = (pane: "main" | "right") => {
     updateTabs((current) => (current.activePane === pane ? current : { ...current, activePane: pane }));
   };
-  // Ctrl+Tab / Ctrl+Shift+Tab: move to the next/previous agent tab within the
-  // focused pane, wrapping at the ends (a no-op when that pane has one tab).
   const cycleTab = (dir: 1 | -1) => updateTabs((current) => cycleActiveTab(current, dir));
-  // `ptyEngineId` (multiplexer mode) makes the tab a CLI-in-PTY agent; absent →
-  // a native chat tab, exactly as before.
   const makeShell = (id: number, panel: "main" | "right", ptyEngineId?: string): ShellTab => ({
     id,
     title: `Agent ${id}`,
@@ -742,17 +554,12 @@ export function ProjectPage() {
     docs: [],
     attachments: [],
     panel,
-    // Mint the conversation id up front for engines that accept one (Claude,
-    // Gemini), so the tab owns a distinct, resumable conversation from the start.
-    // `started:false` is explicit so a never-typed new tab relaunches fresh, only
-    // legacy tabs (no `started`) fall back to "a PTY id was persisted".
     ...(ptyEngineId
       ? {
           ptyAgent: { engineId: ptyEngineId, sessionId: mintPtySessionId(ptyEngineId), started: false },
         }
       : {}),
   });
-  // Append a fresh agent to the right pane and focus it (opening the split).
   const spawnRightShell = (current: WsTabState, ptyEngineId?: string): WsTabState => {
     const id = nextShellId(current.shells, current.archived);
     return {
@@ -775,33 +582,21 @@ export function ProjectPage() {
     });
   };
   const addRightShell = (ptyEngineId?: string) => updateTabs((c) => spawnRightShell(c, ptyEngineId));
-  // ⌘T: a new tab launches the default engine when multiplexer is on, else a
-  // native chat. The `+` button opens the engine menu when on (see its onClick).
   const onNewTabDefault = () => {
     if (!multiplexer.enabled) return addShell();
     addShell(defaultEngine(multiplexer)?.id);
   };
-  // Open the `+` new-agent menu anchored under the clicked button. stopPropagation
-  // so the same click doesn't reach ContextMenu's window-close listener.
   const openNewAgentMenu = (e: ReactMouseEvent, pane: "main" | "right") => {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
     setNewAgentMenu({ x: r.left, y: r.bottom + 4, pane });
   };
-  // The `+` button: native chat directly when off; the engine menu when on.
   const onPlus = (e: ReactMouseEvent, pane: "main" | "right") => {
     if (!multiplexer.enabled) return pane === "main" ? addShell() : addRightShell();
     openNewAgentMenu(e, pane);
   };
-  // Resolve a tab's engine for glyph/accent + spawn, tolerating an engine that
-  // was disabled/removed in settings after the tab was created.
   const ptyEngineFor = (engineId: string): ResolvedEngine => engineOrFallback(multiplexer, engineId);
-  // A pty tab only renders/spawns as a CLI while multiplexer is ON. With it off,
-  // a previously-created pty tab falls back to the native chat (so disabling the
-  // flag never silently launches a CLI on reopen/restart).
   const isLivePty = (shell: ShellTab): boolean => multiplexer.enabled && !!shell.ptyAgent;
-  // The split toggle in the tab strip: open the right pane (seeding a fresh
-  // agent the first time) or hide it. Hiding keeps the right shells around.
   const toggleRightSplit = () => {
     setMaximized(null);
     updateTabs((current) => {
@@ -812,8 +607,6 @@ export function ProjectPage() {
       return spawnRightShell(current);
     });
   };
-  // The X on the right strip tears the split down: end its agents and drop the
-  // right shells entirely (vs. the toggle, which just hides the pane).
   const closeRightSplit = () => {
     setMaximized(null);
     for (const s of rightShells) {
@@ -828,7 +621,6 @@ export function ProjectPage() {
       rightActiveId: undefined,
       activePane: "main",
     }));
-    // The right shells are dropped, not hidden, free their transcripts too.
     for (const s of rightShells) if (s.sessionId) dropSession(s.sessionId);
   };
   const moveShellToPane = (shellId: number, toPane: "main" | "right") => {
@@ -837,7 +629,7 @@ export function ProjectPage() {
       if (!shell || (shell.panel ?? "main") === toPane) return current;
       if (toPane === "right") {
         const mains = current.shells.filter(isMainShell);
-        if (mains.length <= 1) return current; // never empty the main pane
+        if (mains.length <= 1) return current;
         return {
           ...current,
           shells: current.shells.map((s) =>
@@ -869,9 +661,6 @@ export function ProjectPage() {
       };
     });
   };
-  // Reorder a shell within its own pane to `toIndex` (an index among that
-  // pane's shells). The other pane's shells keep their slots. We only shuffle
-  // the dragged pane's members back into the positions they occupied.
   const reorderShellInPane = (shellId: number, pane: "main" | "right", toIndex: number) => {
     updateTabs((current) => {
       const inPane = (s: ShellTab) =>
@@ -882,33 +671,23 @@ export function ProjectPage() {
       const reordered = [...members];
       const [moved] = reordered.splice(from, 1);
       reordered.splice(clamp(toIndex, 0, reordered.length), 0, moved);
-      if (reordered.every((s, i) => s.id === members[i].id)) return current; // no-op
+      if (reordered.every((s, i) => s.id === members[i].id)) return current;
       let i = 0;
       return { ...current, shells: current.shells.map((s) => (inPane(s) ? reordered[i++] : s)) };
     });
   };
-  // Keep the drag hook pointed at the latest action closures.
   dragHandlersRef.current = { reorder: reorderShellInPane, move: moveShellToPane };
   const closeShell = (shellId: number) => {
     if (!tabs) return;
     const shell = tabs.shells.find((s) => s.id === shellId);
     if (!shell) return;
-    // The main pane must always keep at least one shell.
     if (isMainShell(shell) && tabs.shells.filter(isMainShell).length === 1) return;
-    // Closing ends the session, there's no End button; the window IS the handle.
-    // (No-op if the session already ended or was never started.)
     if (shell.sessionId) void killSession(shell.sessionId);
     if (shell.terminalView?.terminalId) void commands.terminalClose(shell.terminalView.terminalId);
     if (shell.ptyAgent && wsId) closeAgent(wsId, shellId);
     updateTabs((current) => removeShellState(current, shellId));
-    // Tab's gone for good, free its transcript; nothing points at it anymore.
     if (shell.sessionId) dropSession(shell.sessionId);
   };
-  // Archive an agent: lift its tab out of the strip but keep its conversation,
-  // branch and worktree intact (the opposite of closeShell). The status snapshot
-  // only labels the archive row; archiveShellState no-ops if it can't. A PTY agent
-  // keeps the ShellTab (with its sessionId) but its live PTY is killed, the
-  // conversation lives on disk and resumes by id on unarchive.
   const archiveShell = (shellId: number) => {
     const shell = shells.find((s) => s.id === shellId);
     if (!shell) return;
@@ -926,24 +705,15 @@ export function ProjectPage() {
       status = classifyArchivedStatus(entry?.state);
     }
     updateTabs((current) => archiveShellState(current, shellId, status, Date.now()));
-    // Keep the tab handle warm but release a terminal session's transcript heap;
-    // unarchive rebuilds it from the SQLite log on mount. A still-live archived
-    // turn keeps its entry (and channel) so unarchive reconnects seamlessly.
     if (!shell.ptyAgent && shell.sessionId) {
       const entry = useSessionStore.getState().sessions[shell.sessionId];
       if (entry && !entry.live) dropSession(shell.sessionId);
     }
   };
-  // Restore an archived agent and focus it, re-mounting re-attaches the live
-  // session or, for a PTY agent, relaunches and resumes its conversation by id.
   const unarchiveShell = (shellId: number) => {
     updateTabs((current) => unarchiveShellState(current, shellId));
     requestComposerFocus(shellId);
   };
-  // ⌘W does what the tab's × button does, so the keyboard and the mouse can't
-  // disagree about which gesture is destructive: an agent archives (see
-  // archiveShell), a terminal or viewer closes. Refuses mid-turn for a native
-  // agent, as TabCloseControl disables itself.
   const archiveOrCloseShell = (shellId: number) => {
     const shell = shells.find((s) => s.id === shellId);
     if (!shell) return;
@@ -957,38 +727,24 @@ export function ProjectPage() {
     if (session && isBusy(session)) return;
     archiveShell(shellId);
   };
-  // ⌘⇧T. `archived` is newest-first (archiveShellState prepends), so the head is
-  // the last agent you closed with ⌘W or the × button.
   const reopenLastClosedShell = () => {
     const newest = tabs?.archived?.[0];
     if (newest) unarchiveShell(newest.shell.id);
   };
-  // Drop an archived entry for good. The branch/worktree/transcript live on the
-  // backend and are untouched, only the resumable tab handle is forgotten.
   const removeArchivedShell = (shellId: number) => {
     const sessionId = tabs?.archived?.find((a) => a.shell.id === shellId)?.shell.sessionId;
     updateTabs((current) => ({
       ...current,
       archived: (current.archived ?? []).filter((a) => a.shell.id !== shellId),
     }));
-    // Handle forgotten for good, release any transcript still held for it.
     if (sessionId) dropSession(sessionId);
   };
   const openDoc = (id: string) => {
     void navigate({ to: "/library", search: { doc: id } });
   };
-  // A library pick from the modal always stages as a per-turn attachment on the
-  // shell whose composer opened it, the same lane as files/screenshots. That way
-  // attached context is one consistent thing: a card inside the composer, sent
-  // with the next turn, whether or not the session has started. (`shell.docs`
-  // stays reserved for the app's *automatic* context, the mode's auto-suggestion
-  // and the handoff bridge.) `role` no longer distinguishes lanes.
   const attachDocToShell = (path: string, _role: string) => {
     if (!docsModalShell) return;
     addAttachmentsToShell(docsModalShell.id, [{ path, name: chipLabel(path), kind: "file" }]);
-    // If the user picks the very doc the mode auto-suggested, drop the suggested
-    // chip so it doesn't double up as chip + card (the reconciler also skips
-    // re-suggesting a staged doc).
     modifyShell(docsModalShell.id, (s) => {
       const docs = s.docs.filter((d) => !(d.suggested && d.path === path));
       return docs.length === s.docs.length ? s : { ...s, docs };
@@ -999,8 +755,6 @@ export function ProjectPage() {
     removeAttachmentFromShell(docsModalShell.id, path);
   };
 
-  // The URL is the single source of truth; the canonicalize effect persists
-  // the last-used id once the selection settles.
   const selectItem = (id: string) => {
     void navigate({
       search: (prev) => ({ ...prev, item: id }),
@@ -1010,11 +764,8 @@ export function ProjectPage() {
   const changeShellMode = (shell: ShellTab, key: StageKey) => {
     if (!activeView || key === shell.mode) return;
     patchShell(shell.id, { mode: key });
-    // The workstream's pipeline position follows the latest mode choice.
     setStage.mutate({ id: activeView.item.id, stage: key });
   };
-  // Stage attachments (dropped, pasted, or dialog-picked) on a shell's composer,
-  // deduped by path. Sent with the next turn (start or follow-up), then cleared.
   const addAttachmentsToShell = (shellId: number, atts: Attachment[]) => {
     if (atts.length === 0) return;
     modifyShell(shellId, (s) => {
@@ -1030,9 +781,6 @@ export function ProjectPage() {
       attachments: (s.attachments ?? []).filter((a) => a.path !== path),
     }));
   const clearShellAttachments = (shellId: number) => patchShell(shellId, { attachments: [] });
-  // Attach files (or, filtered to images, screenshots) to a shell via the native
-  // OS file dialog. Images are copied into the worktree's attachments dir (same
-  // as a drop); other files are referenced in place.
   const addFilesToShell = async (shellId: number, imagesOnly: boolean) => {
     if (!wsId) return;
     const selected = await open({
@@ -1046,14 +794,10 @@ export function ProjectPage() {
     const atts = await importDroppedPaths(wsId, paths);
     addAttachmentsToShell(shellId, atts);
   };
-  // Reconcile the pane's *suggested* doc to `path` (or clear it when path is
-  // null). Never touches user-attached docs (those have suggested !== true).
   const suggestDocToShell = (shellId: number, path: string | null, role: string) =>
     modifyShell(shellId, (s) => {
       const dismissed = s.dismissedSuggestions ?? [];
       const manual = s.docs.filter((d) => !d.suggested);
-      // Don't suggest a doc the user has already staged as an attachment (the
-      // lane picked docs now live in). It would double up as chip + card.
       const staged = (s.attachments ?? []).some((a) => a.path === path);
       const alreadyManual = path != null && (staged || manual.some((d) => d.path === path));
       const keepSuggested =
@@ -1063,8 +807,6 @@ export function ProjectPage() {
       return { ...s, docs: [...manual, ...keepSuggested] };
     });
 
-  // The full set of SessionChat callbacks scoped to ONE shell, so the main and
-  // right panes each drive their own agent independently.
   const shellChatProps = (shell: ShellTab) => ({
     view: activeView!,
     shell,
@@ -1076,30 +818,17 @@ export function ProjectPage() {
     onHarnessChange: (key: string) => patchShell(shell.id, { harness: key }),
     onOpencodeModelChange: (key: string) => {
       patchShell(shell.id, { opencodeModel: key });
-      // Push the switch to the live session too: OpenCode takes a model per
-      // prompt, so this retargets the next turn without a restart. A no-op on the
-      // backend when the session isn't live, a fresh session picks up the shell
-      // value at launch instead.
       if (shell.sessionId) void commands.setSessionModel(shell.sessionId, key);
     },
     onCodexModelChange: (key: string) => {
       patchShell(shell.id, { codexModel: key });
-      // Codex also takes a model per turn, so, like OpenCode, and unlike Claude,
-      // a live switch retargets the next turn instead of relaunching the process.
       if (shell.sessionId) void commands.setSessionModel(shell.sessionId, key);
     },
     onCodexEffortChange: (key: string) => {
       patchShell(shell.id, { codexEffort: key });
-      // Effort rides on the same `turn/start` as the model, so it switches live
-      // too. Without this the composer would show the new tier while every turn
-      // kept running at the one bound at spawn.
       if (shell.sessionId) void commands.setSessionEffort(shell.sessionId, key);
     },
     onOpenHarnessSettings: () => void navigate({ to: "/settings", search: { section: "harnesses" } }),
-    // Strip the auto-captured handoff chip(s) once the new session has started:
-    // by then they've already ridden through `handleStart` as attachments, so the
-    // bridge has served its purpose, keeping the chip would leave the ready
-    // banner re-showing in the resumed session and block a future suggest fire.
     onSessionStarted: (sessionId: string) =>
       modifyShell(shell.id, (s) => ({
         ...s,
@@ -1109,21 +838,15 @@ export function ProjectPage() {
       })),
     onResetSession: () => patchShell(shell.id, { sessionId: undefined }),
     onOpenDoc: openDoc,
-    // Detaching a suggested chip records the dismissal so it does not re-add;
-    // detaching a manually-attached doc just removes it. See `detachDoc`.
     onDetachDoc: (path: string) => modifyShell(shell.id, (s) => detachDoc(s, path)),
     onSuggestDoc: (path: string | null, role: string) => suggestDocToShell(shell.id, path, role),
     onDismissHandoffNudge: () => patchShell(shell.id, { handoffNudgeDismissed: true }),
-    // Append the handoff doc as a regular (non-suggested) chip so it sticks
-    // through `handleClear` and rides as an attachment into the fresh session.
-    // Deduped by path; the auto-attach effect in SessionChat is the only caller.
     onAttachHandoffDoc: (path: string) =>
       modifyShell(shell.id, (s) =>
         s.docs.some((d) => d.path === path)
           ? s
           : { ...s, docs: [...s.docs, { path, role: "handoff" }] },
       ),
-    // No library attach for folder projects: their docs scope doesn't exist.
     onBrowseDocs: folderProject ? null : () => setDocsModalShellId(shell.id),
     onAddFiles: () => void addFilesToShell(shell.id, false),
     onAddScreenshots: () => void addFilesToShell(shell.id, true),
@@ -1143,8 +866,6 @@ export function ProjectPage() {
     if (!shellBeingRenamed) return;
     const nextTitle = renameValue.trim();
     if (!nextTitle) return;
-    // A manual rename claims the title for good, lock it so auto-titling (which
-    // only fires on an unlocked tab) can never overwrite the user's choice.
     patchShell(shellBeingRenamed.id, { title: nextTitle, titleLocked: true });
     closeRenameShell();
   };
@@ -1165,21 +886,15 @@ export function ProjectPage() {
   };
   const startSplitResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     const rowW = splitRowRef.current?.clientWidth ?? 800;
-    // Viewport-relative floor (lib/layout): SPLIT_PANE_MIN normally, half the
-    // row (less the handle) when the row can't hold two SPLIT_PANE_MIN panes,
-    // e.g. the 473px narrow content row, where a hard-coded 280 would pin one
-    // pane at its floor and starve the other.
     const floor = splitPaneFloor(rowW);
     startEdgeDrag(event, {
       startWidth: rightRatio * rowW,
       min: floor,
       max: Math.max(floor, rowW - floor),
-      // Dragging the divider left grows the right pane.
       direction: -1,
       onResize: (paneWidth) => setRightRatio(clamp(paneWidth / rowW, 0.2, 0.8)),
     });
   };
-  // The diff sidebar's handle sits on its left edge, so dragging left grows it.
   const startDiffResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     startEdgeDrag(event, {
       startWidth: diffWidth,
@@ -1192,9 +907,6 @@ export function ProjectPage() {
     });
   };
 
-  // One tab pill, shared by both pane strips. `paneFocused` is true when this
-  // pill's pane holds focus, only then does its active tab read as fully
-  // selected, so across a split only one tab looks active at a time.
   const renderTabPill = (
     shell: ShellTab,
     opts: {
@@ -1222,8 +934,6 @@ export function ProjectPage() {
         setShellMenu({ shellId: shell.id, x: e.clientX, y: e.clientY });
       }}
       className={`inline-flex shrink-0 cursor-pointer select-none items-center rounded-md ${
-        // While dragging, the live-reordering tab's own slot reads as a clear
-        // accent placeholder so it's obvious where the tab will land on drop.
         drag?.id === shell.id ? "opacity-60 bg-accent/10 ring-2 ring-inset ring-accent" : ""
       } ${
         opts.active
@@ -1235,8 +945,6 @@ export function ProjectPage() {
     >
       <span className="flex min-w-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium">
         {shell.diffView ? (
-          // Accent-tinted badge so a diff tab is obvious at a glance, distinct
-          // from dim doc/file viewers and the hue-coded agent tabs.
           <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
             <DiffIcon size={13} />
           </span>
@@ -1281,7 +989,6 @@ export function ProjectPage() {
     </div>
   );
 
-  // The body of one pane: a doc preview, an agent chat, or a placeholder.
   const renderPaneContent = (shell: ShellTab | null) => {
     if (!activeView || !shell) {
       return (
@@ -1358,8 +1065,6 @@ export function ProjectPage() {
     return <SessionChat key={`${activeView.item.id}:${shell.id}`} {...shellChatProps(shell)} />;
   };
 
-  // Board: render when no workstream is selected (project-root click).
-  // All hooks above still run harmlessly with wsId === null.
   if (showBoard) {
     return (
       <>
@@ -1368,7 +1073,6 @@ export function ProjectPage() {
           folder={folderProject}
           onOpen={(id) => selectItem(id)}
           onNewWorkstream={() => setCreateOpen(true)}
-          // The card menu is only PR attach/detach, meaningless without git.
           onCardContextMenu={
             folderProject ? undefined : (view, x, y) => setCardMenu({ x, y, view })
           }
@@ -1407,8 +1111,6 @@ export function ProjectPage() {
     );
   }
 
-  // Guard: a selectedId that hasn't resolved yet (stale-strip in flight or
-  // post-create refetch) shows a spinner rather than the empty-state card.
   if (selectedId && !activeView && workstreams.isFetching) return <PageSpinner />;
 
   return (
@@ -1435,10 +1137,6 @@ export function ProjectPage() {
             : null
         }
         onCycleStage={
-          // Only when an un-started agent tab holds focus: a live session's stage
-          // is fixed at spawn, and terminal tabs have no stage. The composer
-          // handles Shift+Tab itself while focused (see SessionChat); this is the
-          // global path for when focus sits outside the composer.
           focusedShell && isAgentShell(focusedShell) && !focusedShell.sessionId
             ? () => changeShellMode(focusedShell, nextModeStage(focusedShell.mode))
             : null
@@ -1448,20 +1146,12 @@ export function ProjectPage() {
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
           <main className="flex min-w-0 flex-1 flex-col">
-            {/* Glass, matching the sidebar's Projects band: the transcript below
-                extends up behind this strip (-mt-9 in TranscriptView) and scrolls
-                under it, so the blur samples real content. */}
             <div
               data-glass
               className={`relative z-10 flex h-9 items-stretch border-b border-edge ${GLASS_BAND}`}
             >
-              {/* Main-pane tab strip + the split / docs controls. */}
               <div
                 data-pane="main"
-                // pr-2.5 (not px-5) lines the rightmost control, the split
-                // toggle, an h-8 button, up vertically with the title bar's
-                // "changes sidebar" toggle above it (an h-7 button at pr-3); the
-                // 2px-narrower title button needs 2px more inset to share a center.
                 className={`flex min-w-0 flex-1 items-center justify-between gap-3 pl-5 pr-2.5 ${
                   maxRight ? "hidden" : ""
                 } ${dropPane === "main" ? "bg-accent/10" : ""}`}
@@ -1493,8 +1183,6 @@ export function ProjectPage() {
                 </ScrollableTabStrip>
                 {activeView && (
                   <div className="flex shrink-0 items-center gap-1">
-                    {/* Subtle archive entry-point: blends into the tab bar, shows a
-                        count, and toggles the workstream's archived-agents view. */}
                     <button
                       type="button"
                       onClick={() => toggleArchived?.()}
@@ -1523,8 +1211,6 @@ export function ProjectPage() {
                   </div>
                 )}
               </div>
-              {/* Right-pane tab strip, sized + bordered to sit over the right
-                  pane below so the two read as one continuous column. */}
               {activeView && rightSplit && !archiveViewOpen && (
                 <div
                   data-pane="right"
@@ -1824,15 +1510,6 @@ export function ProjectPage() {
           onPointerDown={startDiffResize}
         />
       )}
-      {/* Changes sidebar, width-animates between 0 and diffWidth so toggling it
-          glides instead of snapping. overflow-hidden clips the fixed-width inner
-          shell (pinned to the window edge) so its content never reflows; the
-          transition is dropped while the resize handle is dragged. It is not
-          reduced-motion-gated, Windows maps that to the often-off "Animation
-          effects" toggle, which would otherwise snap it. On the narrow tier
-          (see lib/layout) it becomes an overlay drawer instead of an in-flow
-          column, the agent pane keeps its full width whether or not it's
-          open, so the resize drag above only exists off that tier. */}
       <aside
         className={`shrink-0 overflow-hidden border-l border-edge bg-panel ${
           narrow ? "absolute inset-y-0 right-0 z-30 shadow-lg" : "relative"
@@ -1844,8 +1521,6 @@ export function ProjectPage() {
           className="absolute inset-y-0 right-0 flex flex-col"
           style={{ width: asideWidth }}
         >
-          {/* A folder project keeps the file tree (browse + open into editor
-              tabs); only the git header and the Changes tab drop away. */}
           {!folderProject && <GitPanel view={activeView ?? null} />}
           <div className="flex min-h-0 flex-1 flex-col">
             <ChangesPanel
@@ -1871,8 +1546,6 @@ export function ProjectPage() {
         </div>
       </aside>
 
-      {/* Library picker, opened from a composer's "+" menu. Centered modal so
-          attaching context docs never replaces the agent view. */}
       <Dialog
         open={docsModalShellId !== null}
         onClose={() => setDocsModalShellId(null)}
@@ -1889,9 +1562,6 @@ export function ProjectPage() {
         />
       </Dialog>
 
-      {/* Floating pill that trails the cursor while dragging a tab, styled as a
-          "lifted" tab (accent ring, lift shadow, slight scale) so the drag reads
-          clearly as carrying that tab to a new spot. */}
       {drag && (
         <div
           className="pointer-events-none fixed z-50 scale-105 rounded-md border border-accent/70 bg-panel-2 px-2.5 py-1.5 text-xs font-medium text-ink shadow-2xl ring-2 ring-accent/30"

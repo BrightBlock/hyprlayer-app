@@ -25,10 +25,8 @@ import {
 } from "@/lib/keybindings/resolve";
 import { isReserved } from "@/lib/keybindings/reserved";
 
-/** Stable identity for "no overrides" so the effective-chords memo doesn't churn every render. */
 const EMPTY_OVERRIDES: Overrides = {};
 
-/** Short context hint shown beside each command. */
 const WHEN_HINT: Record<CommandWhen, string> = {
   always: "Everywhere",
   project: "In a project",
@@ -36,18 +34,13 @@ const WHEN_HINT: Record<CommandWhen, string> = {
   session: "In a session",
 };
 
-/** A small monospace chord pill, or a muted "Unbound" when null/empty. */
 function ChordPill({ chord }: { chord: Chord | null }) {
   if (!chord) {
     return <span className="text-xs italic text-ink-dim">Unbound</span>;
   }
   return (
-    // Sized to match the Edit/Reset/Unbind buttons so the row reads as one set of
-    // equal controls. No `font-mono`: the system font renders ⌘/⇧ at native size.
     <kbd
       className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm font-medium text-ink"
-      // macOS concatenates modifier glyphs (⌘⇧B) with no separators, track them
-      // apart so each stays legible; the +-joined Windows/Linux form needs none.
       style={IS_MACOS ? { letterSpacing: "0.1em", paddingRight: "calc(0.625rem - 0.1em)" } : undefined}
     >
       {formatChord(chord, IS_MACOS)}
@@ -78,8 +71,6 @@ function CommandRow({
 }) {
   const [candidate, setCandidate] = useState<Chord | null>(null);
 
-  // Capture the chord on the capture phase so it beats the global dispatcher
-  // (bubble phase) and never fires a shortcut mid-record. Esc cancels, Enter confirms.
   useEffect(() => {
     if (!recording) {
       setCandidate(null);
@@ -153,8 +144,6 @@ function CommandRow({
           </>
         ) : (
           <div className="flex items-center gap-2">
-            {/* Alternates fire the same command and have no row of their own.
-                Shown here so this row lists every key that works. */}
             {alternates.map((alt) => (
               <span key={alt} className="flex items-center gap-2 text-xs text-ink-dim">
                 <ChordPill chord={alt} />

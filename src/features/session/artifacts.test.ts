@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { artifactFromTool, artifactsFromItems } from "./artifacts";
 import type { TranscriptItem } from "./transcript";
 
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 function makeTool(
   name: string,
@@ -31,7 +30,6 @@ function artifactTool(
   return makeTool("Artifact", JSON.stringify(input), toolUseId, result);
 }
 
-// ─── artifactFromTool ───────────────────────────────────────────────────────
 
 describe("artifactFromTool", () => {
   it("parses the captured real-world publish", () => {
@@ -121,7 +119,6 @@ describe("artifactFromTool", () => {
   });
 });
 
-// ─── artifactsFromItems ─────────────────────────────────────────────────────
 
 describe("artifactsFromItems", () => {
   it("returns empty for an empty transcript", () => {

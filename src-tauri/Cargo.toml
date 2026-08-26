@@ -7,15 +7,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# The binary is named "Hyprlayer" (not the package name) so the dev menu bar /
-# Dock label reads "Hyprlayer" — in `tauri dev` the bare executable's name is
-# what macOS shows; productName only renames the packaged .app.
 [[bin]]
 name = "Hyprlayer"
 path = "src/main.rs"
 
 [lib]
-# Distinct lib name to avoid bin/lib clashes on Windows.
 name = "hyprlayer_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -28,9 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 dirs.workspace = true
-# Strips the Windows `\\?\` verbatim prefix from canonicalized project paths.
 dunce = "1"
-# Resolve the default terminal shell (pwsh/powershell) by name on Windows.
 which = "7"
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
@@ -38,44 +32,23 @@ tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
-# In-app self-update. The updater fetches the ed25519-signed manifest from
-# brightblock.ai (see tauri.conf.json → plugins.updater) and verifies update
-# packages against the baked-in public key before install. `process` exposes
-# `relaunch()`, which the frontend calls after downloadAndInstall().
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-# Dev-only: lets `@hypothesi/tauri-mcp-server` drive the webview over a
-# WebSocket on :9223 for end-to-end verification. The init call is gated
-# behind `cfg(debug_assertions)` in lib.rs, so the bridge is never reachable
-# from a release build.
 tauri-plugin-mcp-bridge = "0.11"
-# Native OS toast notifications. The frontend uses these to flag when a session
-# transitions to needs-you (awaiting permission/question) while the window is
-# unfocused. On macOS the plugin's sound field rides legacy NSUserNotification
-# and goes silent on 13+, so we play sounds out-of-band via `afplay` in
-# play_sound() — see commands/system.rs.
 tauri-plugin-notification = "2"
 specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 specta-typescript = "0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 log = "0.4"
 base64 = "0.22"
-# Fetch the models.dev provider/model catalog for the OpenCode harness. rustls
-# (no system OpenSSL dep) keeps cross-compiles simple; `json` for typed parse.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 uuid = { version = "1.23.3", features = ["v4"] }
-# Not used directly: caps the transitive `time` version because time 0.3.48
-# added a `From` impl that breaks coherence in cookie 0.18.1 (E0119).
-# Remove once cookie ships a fix and tauri picks it up.
+# cookie 0.18.1 conflicts with time 0.3.48.
 time = { version = ">=0.3.36, <0.3.48", default-features = false }
 tauri-plugin-clipboard-manager = "2"
 
-# Reaching WebKitGTK's own zoom gesture to switch it off (webview_gestures.rs)
-# needs the GTK widget API. Version and feature pinned to tauri 2.11's, so the
-# two share one gtk/glib in the tree rather than linking a second.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", features = ["v3_24"] }
 
 [dev-dependencies]
-# Temp trees for the workflow-watch teardown test (matches hyprlayer-core).
 tempfile = "3"

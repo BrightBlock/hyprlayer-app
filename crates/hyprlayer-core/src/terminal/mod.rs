@@ -1,13 +1,3 @@
-//! PTY session abstraction for the terminal panel.
-//!
-//! [`PtySession`] spawns the user's shell on a real PTY in the worktree
-//! directory, streams output over a [`tokio::sync::broadcast`] channel with a
-//! bounded scrollback ring, and accepts input / resize / kill.
-//!
-//! The reader loop runs on a dedicated [`std::thread`] because
-//! `portable-pty`'s reader is a blocking `std::io::Read` handle. It must not
-//! block a tokio task. Everything else (broadcast, scrollback) is shared-safe.
-
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -18,16 +8,11 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
-/// Max scrollback bytes retained for re-attach replay (drops oldest first).
 const SCROLLBACK_CAP: usize = 256 * 1024;
-/// Upper bound on a single coalesced IPC event. Only a genuine flood (a build,
-/// `cat` of a big file), where reads queue up faster than we drain them, gets
-/// batched this far; interactive output flushes immediately (see the coalescer).
 const FLUSH_BYTES: usize = 64 * 1024;
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
-/// One streamed terminal event. Output is base64 because PTY output is binary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -36,12 +21,8 @@ pub enum TerminalEvent {
     Exited { code: Option<i32> },
 }
 
-/// Configuration for spawning a new [`PtySession`].
 pub struct SpawnTerminal {
     pub shell: PathBuf,
-    /// Additional arguments passed to the program (empty for an interactive
-    /// shell, non-empty when running a specific command such as `["ai",
-    /// "configure"]` via `spawn_cli_terminal`).
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub cols: u16,
@@ -50,32 +31,18 @@ pub struct SpawnTerminal {
     pub workstream_id: String,
 }
 
-/// A live PTY session: shell process + broadcast output + bounded scrollback.
-///
-/// A waiter thread owns the `Child`, `wait()`s on it for the real exit code,
-/// hands that to the reader thread, and then drops the master. The reader
-/// thread streams output and emits the final `Exited`. We keep only a cloned
-/// [`ChildKiller`] here so `kill()` never contends with that wait.
 pub struct PtySession {
-    /// `Option` so the waiter can drop the master once the child exits, on
-    /// Windows that tears down the lingering ConPTY conhost, which is the only
-    /// thing that unblocks the reader's blocking read (it never sees EOF on its
-    /// own there). Shared with the waiter thread.
     master: Arc<StdMutex<Option<Box<dyn MasterPty + Send>>>>,
     killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
     writer: StdMutex<Box<dyn Write + Send>>,
     tx: broadcast::Sender<TerminalEvent>,
     scrollback: Arc<StdMutex<VecDeque<u8>>>,
-    /// The shell's pid, captured at spawn. On Unix the PTY child is a session
-    /// leader (portable-pty `setsid`s it), so this doubles as its process-group
-    /// id, `kill()` SIGKILLs the whole group to reap children the shell spawned.
     #[cfg(unix)]
     pid: Option<u32>,
     pub workstream_id: String,
 }
 
 impl PtySession {
-    /// Spawn a shell in the given worktree directory and start the reader thread.
     pub fn spawn(cfg: SpawnTerminal) -> std::io::Result<Arc<Self>> {
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -92,9 +59,6 @@ impl PtySession {
         }
         cmd.cwd(&cfg.cwd);
         cmd.env("TERM", "xterm-256color");
-        // An AppImage build hands us an environment pointing at the mounted
-        // AppDir; an interactive shell must not inherit it. Applied before the
-        // caller's env so an explicit override still wins.
         for (key, value) in crate::process::appimage::child_env_overrides() {
             match value {
                 Some(value) => cmd.env(key, value),
@@ -105,10 +69,8 @@ impl PtySession {
             cmd.env(k, v);
         }
         let mut child = pair.slave.spawn_command(cmd).map_err(to_io)?;
-        drop(pair.slave); // so the master sees EOF when the shell exits
+        drop(pair.slave);
         let killer = child.clone_killer();
-        // Capture the pid before `child` moves to the waiter thread, so `kill()`
-        // can signal the child's whole process group.
         #[cfg(unix)]
         let pid = child.process_id();
 
@@ -129,45 +91,22 @@ impl PtySession {
             workstream_id: cfg.workstream_id,
         });
 
-        // The reader and the child are reaped on separate threads. The reader
-        // can't double as the reaper: on Windows the ConPTY conhost keeps the
-        // read pipe open after the child exits, so a read-until-EOF loop would
-        // block forever and never surface the exit. Instead the waiter reaps the
-        // child for its code and the reader emits `Exited` once it has both
-        // drained to EOF and received that code, keeping the final output ahead
-        // of the exit event (the property the Unix tests rely on).
         let (code_tx, code_rx) = std::sync::mpsc::channel::<Option<i32>>();
 
-        // Raw reads flow reader-thread → coalescer-thread over this channel. The
-        // reader can only do blocking `read`s (it can't also wait on a timer), so
-        // a second thread does the time-based batching.
         let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<u8>>();
 
-        // Reader: portable-pty's reader is a blocking io::Read, so it gets its own
-        // thread. It just hands each read to the coalescer and exits (dropping
-        // `chunk_tx`, which the coalescer observes as EOF) once the PTY closes.
         let mut reader = reader;
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
-                    // If the coalescer is gone there's no one to stream to; stop.
                     Ok(n) if chunk_tx.send(buf[..n].to_vec()).is_err() => break,
                     Ok(_) => {}
                 }
             }
         });
 
-        // Coalescer: flush each read straight through, but fold in any reads that
-        // are ALREADY queued (a flood) up to `FLUSH_BYTES`, so a chatty program
-        // still collapses into a handful of IPC events without ever delaying the
-        // interactive path. It appends each batch to the scrollback ring and
-        // broadcasts it under the same lock, so a concurrent
-        // `subscribe_with_scrollback` sees every batch in exactly one of
-        // {snapshot, live stream}, never both (duplicated) nor neither (lost).
-        // It blocks on `recv()` when idle, so an open-but-quiet terminal costs no
-        // wakeups.
         let reader_tx = tx.clone();
         std::thread::spawn(move || {
             let mut pending: Vec<u8> = Vec::with_capacity(FLUSH_BYTES);
@@ -182,30 +121,12 @@ impl PtySession {
                 if overflow > 0 {
                     sb.drain(0..overflow);
                 }
-                // send() errs only if there are no receivers, fine. Held under
-                // the scrollback lock so it can't interleave with a snapshot.
                 let _ = reader_tx.send(TerminalEvent::Output { data: encoded });
                 drop(sb);
                 pending.clear();
             };
-            // Block for the next read; a closed channel means the reader is
-            // done, so drop out and emit the exit below.
             while let Ok(first) = chunk_rx.recv() {
                 pending.extend_from_slice(&first);
-                // Drain whatever ELSE is already queued (a genuine flood, where
-                // reads pile up faster than we encode+broadcast) up to the byte
-                // cap, but DON'T wait for more. Interactive output (a keystroke
-                // echo, a prompt redraw on wrap) has nothing else queued, so it
-                // flushes on the same tick it arrives.
-                //
-                // This eager flush matters for rendering, not just latency: a
-                // WKWebView only re-composites the xterm canvas when it paints,
-                // and xterm paints once per write. Coalescing a wrap's redraw into
-                // a single delayed write produced a single paint that WKWebView
-                // would leave un-presented until the next "real" event (Enter,
-                // resize), the terminal went black mid-line. Writing each read
-                // through keeps the paint cadence high enough that every update is
-                // presented, matching a no-coalescing reference renderer.
                 let mut disconnected = false;
                 while pending.len() < FLUSH_BYTES {
                     match chunk_rx.try_recv() {
@@ -222,17 +143,10 @@ impl PtySession {
                     break;
                 }
             }
-            // EOF: the tail is already flushed above; emit the exit once the
-            // waiter has the code, keeping final output ahead of the exit event.
             let code = code_rx.recv().unwrap_or(None);
             let _ = reader_tx.send(TerminalEvent::Exited { code });
         });
 
-        // Waiter: reap the child (no zombie) for its real exit code, hand it to
-        // the reader, then drop the master. Dropping the master closes a
-        // lingering ConPTY so the reader's blocked read returns EOF on Windows;
-        // on Unix the reader already EOF'd when the child closed the slave, so
-        // the drop is a harmless no-op.
         std::thread::spawn(move || {
             let code = child.wait().ok().map(|s| s.exit_code() as i32);
             let _ = code_tx.send(code);
@@ -244,18 +158,10 @@ impl PtySession {
         Ok(session)
     }
 
-    /// Subscribe to the live output broadcast.
     pub fn subscribe(&self) -> broadcast::Receiver<TerminalEvent> {
         self.tx.subscribe()
     }
 
-    /// Atomically snapshot the retained scrollback and subscribe to live output,
-    /// returning both. Taken together under the scrollback lock, which the
-    /// coalescer thread also holds while appending each output batch to the ring
-    /// and broadcasting it, this closes the gap where a batch emitted between a
-    /// separate snapshot and subscribe would be in neither (lost) or both
-    /// (duplicated). The snapshot is the base64 scrollback for replay; live
-    /// output follows on the receiver.
     pub fn subscribe_with_scrollback(&self) -> (broadcast::Receiver<TerminalEvent>, String) {
         let sb = self.scrollback.lock().unwrap();
         let rx = self.tx.subscribe();
@@ -263,28 +169,20 @@ impl PtySession {
         (rx, snapshot)
     }
 
-    /// Snapshot the retained scrollback as raw bytes (no subscribe). Used to
-    /// capture a script run's output for the dock's read-only "last run" view.
     pub fn scrollback_bytes(&self) -> Vec<u8> {
         self.scrollback.lock().unwrap().iter().copied().collect()
     }
 
-    /// Drop the retained scrollback, keeping the process alive. Live output keeps
-    /// appending to the now-empty ring, so a later re-attach, and the exit
-    /// snapshot behind [`scrollback_bytes`], replay only what came after.
     pub fn clear_scrollback(&self) {
         self.scrollback.lock().unwrap().clear();
     }
 
-    /// Write raw bytes (keyboard input) to the PTY master.
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
         let mut w = self.writer.lock().unwrap();
         w.write_all(bytes)?;
         w.flush()
     }
 
-    /// Notify the PTY of a terminal-size change. A no-op once the child has
-    /// exited and the waiter has dropped the master.
     pub fn resize(&self, cols: u16, rows: u16) -> std::io::Result<()> {
         match self.master.lock().unwrap().as_ref() {
             Some(master) => master
@@ -299,16 +197,7 @@ impl PtySession {
         }
     }
 
-    /// Kill the shell and everything it spawned. On Unix the child is a session
-    /// leader, so we SIGKILL its whole process group, otherwise a foreground
-    /// child (e.g. `npm run dev`) or a `&` job is orphaned and survives Stop /
-    /// terminal close / archive teardown, leaking the process and its port. The
-    /// waiter thread then reaps the shell, the reader emits the final `Exited`,
-    /// and the master is dropped.
     pub fn kill(&self) {
-        // Group kill first (children), then the leader as a fallback. getpgid
-        // confirms the leader is still alive before signalling, narrowing the
-        // window where a reaped-then-reused pid could be hit.
         #[cfg(unix)]
         if let Some(pid) = self.pid {
             let pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
@@ -361,10 +250,6 @@ mod tests {
         s.kill();
     }
 
-    /// Mirrors the `terminal_open` path: subscribe via `subscribe_with_scrollback`
-    /// (as `attach_stream` does) and confirm live output is delivered on that rx.
-    /// Confirm that `SpawnTerminal::args` are forwarded: `/bin/echo hi` exits 0
-    /// and its output appears on the channel.
     #[tokio::test]
     async fn spawn_with_args_runs_and_exits() {
         let s = PtySession::spawn(SpawnTerminal {
@@ -428,14 +313,8 @@ mod tests {
         s.kill();
     }
 
-    /// Clear drops the ring without touching the process: output from before it
-    /// can't return via a re-attach (`subscribe_with_scrollback`, the path
-    /// `attach_stream` takes) nor via the exit snapshot (`scrollback_bytes`),
-    /// while output after it still lands. This is what lets the dock's Clear
-    /// survive a tab switch or dock collapse.
     #[tokio::test]
     async fn clear_scrollback_drops_prior_output_but_keeps_streaming() {
-        /// Poll the ring until `needle` shows up (it arrives asynchronously).
         async fn wait_for(s: &PtySession, needle: &str) {
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
             while tokio::time::Instant::now() < deadline {
@@ -459,10 +338,6 @@ mod tests {
         })
         .expect("spawn pty");
 
-        // The markers are split across printf's format + arg, so the tty's echo of
-        // the command line can never spell them, only printf's *output* does.
-        // Otherwise we could clear on the echo and race printf's output into the
-        // freshly-emptied ring.
         s.write_input(b"printf 'BEFORE%s\\n' _CLEAR\n").unwrap();
         wait_for(&s, "BEFORE_CLEAR").await;
 
@@ -491,8 +366,6 @@ mod tests {
         s.kill();
     }
 
-    /// `kill()` must reap the child's whole process group, not just the shell:
-    /// a backgrounded grandchild (`sleep 60 &`) must be gone after kill().
     #[tokio::test]
     async fn kill_reaps_child_process_group() {
         let s = PtySession::spawn(SpawnTerminal {
@@ -506,7 +379,6 @@ mod tests {
         })
         .expect("spawn pty");
 
-        // Read the backgrounded child's pid from the shell's output.
         let mut rx = s.subscribe();
         let mut seen = String::new();
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -536,7 +408,6 @@ mod tests {
         );
         s.kill();
 
-        // After the group kill the child must die (kill(pid, 0) -> ESRCH).
         let mut gone = false;
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         while tokio::time::Instant::now() < deadline {

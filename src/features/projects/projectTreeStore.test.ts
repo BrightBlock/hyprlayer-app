@@ -20,7 +20,6 @@ describe("toggleCollapsedPath", () => {
   });
 
   it("treats an unknown path as expanded, so new projects open by default", () => {
-    // The store holds *collapsed* paths; absence means expanded.
     expect(["/a", "/b"].includes("/fresh")).toBe(false);
     expect(toggleCollapsedPath(["/a"], "/fresh")).toEqual(["/a", "/fresh"]);
   });

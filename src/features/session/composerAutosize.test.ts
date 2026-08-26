@@ -6,9 +6,6 @@ import {
   type SizableTextarea,
 } from "./composerAutosize";
 
-/** A textarea stand-in whose scrollHeight depends on the width its scrollbar
- *  leaves behind: `hidden` gets the full line, a visible bar wraps one row
- *  more. That's the Linux/WebKitGTK geometry the sizing rule has to survive. */
 function fakeTextarea(
   rowsWhenUnobstructed: number,
   rowHeight = 24,
@@ -33,7 +30,6 @@ describe("fitComposerHeight", () => {
 
   it("measures with the scrollbar off, so a wrap can't cost a phantom row", () => {
     const ta = fakeTextarea(2);
-    // A bar showing mid-measurement would wrap to 3 rows and report 72.
     expect(fitComposerHeight(ta)).toBe(48);
   });
 
@@ -41,7 +37,6 @@ describe("fitComposerHeight", () => {
     const ta = fakeTextarea(3);
     fitComposerHeight(ta);
     expect(ta.style.overflowY).toBe("hidden");
-    // Re-running on the settled box is a fixed point, no oscillation.
     expect(fitComposerHeight(ta)).toBe(72);
     expect(ta.style.overflowY).toBe("hidden");
   });
@@ -66,7 +61,6 @@ describe("fitComposerHeight", () => {
     expect(style.height).toBe("120px");
     rows = 1;
     fitComposerHeight(ta);
-    // `height:auto` before measuring is what lets the box come back down.
     expect(style.height).toBe("24px");
   });
 });

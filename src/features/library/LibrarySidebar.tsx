@@ -22,19 +22,12 @@ type Props = {
   isError: boolean;
   error: unknown;
   onNewDoc: () => void;
-  /** Thoughts-repo sync state + trigger, rendered as the header's sync icon. */
   sync: ThoughtsSyncState;
-  /** Drag-resizable width (px), owned by the route so it survives navigation. */
   width: number;
-  /** Collapsed (hidden) state, toggled from the header, like the project panel. */
   collapsed: boolean;
-  /** True only while the resize handle is dragged, to suppress the width
-   *  transition so the panel tracks the cursor instead of trailing it. */
   resizing: boolean;
 };
 
-/** The mock's "LIBRARY" master panel: project switcher, filter input, type tabs,
- *  a collapsed advanced-filters disclosure, and the type-grouped doc list. */
 export function LibrarySidebar({
   search,
   onUpdate,
@@ -52,12 +45,6 @@ export function LibrarySidebar({
   const groups = groupDocsByType(result?.items ?? []);
   const now = Date.now();
 
-  // Width-animates between 0 and `width` so a collapse/expand glides instead of
-  // snapping (matching the project + diff panels). overflow-hidden clips the
-  // fixed-width inner shell so its content never reflows mid-animation; the
-  // transition is dropped while the resize handle is dragged. It is not gated on
-  // reduced motion, Windows maps that to the often-off "Animation effects"
-  // toggle, which would otherwise snap the panel.
   return (
     <aside
       className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
@@ -85,13 +72,9 @@ export function LibrarySidebar({
 
       <div className="shrink-0 space-y-2 border-b border-edge p-3">
         <ProjectSwitcher
-          // Folder projects have no thoughts mapping, so no docs scope.
           projects={projects.filter(isGitProject)}
           value={search.project}
           total={result?.total}
-          // Changing project scope drops the open doc: a doc is project-scoped,
-          // so keeping it would leave the detail pane on another project's
-          // document while the sidebar reads the new scope.
           onChange={(project) => onUpdate({ project, doc: undefined, mode: undefined })}
         />
         <TextInput
@@ -170,7 +153,6 @@ export function LibrarySidebar({
   );
 }
 
-/** Scope dropdown: "All projects" or one project (sets the `project` thoughts key). */
 function ProjectSwitcher({
   projects,
   value,
@@ -259,7 +241,6 @@ function SwitcherItem({
   );
 }
 
-/** ALL + each canonical type, horizontally scrollable; single-select. */
 function TypeTabs({
   value,
   onChange,
@@ -287,7 +268,6 @@ function TypeTabs({
   );
 }
 
-/** Collapsed disclosure for the less-used filters (status/scope/author/tag). */
 function MoreFilters({
   search,
   onUpdate,

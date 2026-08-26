@@ -1,4 +1,3 @@
-# Logs
 logs
 *.log
 npm-debug.log*
@@ -6,20 +5,15 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Dependencies / build output
 node_modules
-# pnpm is the package manager of record (see package.json packageManager);
-# an npm run would regenerate this orphan.
 package-lock.json
 dist
 dist-ssr
 *.local
 target/
 
-# Thoughts tooling (local symlinks to external thoughts repo)
 thoughts/
 
-# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea

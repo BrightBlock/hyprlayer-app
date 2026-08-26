@@ -3,12 +3,6 @@ import { Spinner } from "@/components/ui";
 import { isFolderWorkstream } from "@/lib/domain/projects";
 import { useReprovisionWorkstream } from "@/lib/queries";
 
-/**
- * Compact git status for the active workstream: branch name, change counters
- * ("●n ↑n ↓n", each only when non-zero), and a thoughts-broken warning with
- * an inline Fix (reprovision) action. A folder workstream has none of these,
- * it shows only a missing-folder warning.
- */
 export function WorkstreamChips({ view }: { view: WorkstreamView }) {
   const reprovision = useReprovisionWorkstream();
   const { git, item } = view;

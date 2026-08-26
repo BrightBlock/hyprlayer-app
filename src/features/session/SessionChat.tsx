@@ -154,7 +154,6 @@ const STAGE_INTRO: Record<StageKey, string> = {
   revise: "Addresses PR feedback (failing CI or requested changes), then pushes fixes to the branch.",
 };
 
-/** The live session-state chip shown in the workstream header for a tab. */
 export function SessionStatusBadge({ sessionId }: { sessionId?: string }) {
   const session = useSession(sessionId);
   if (!session) return <Badge tone="dim">idle</Badge>;
@@ -170,8 +169,6 @@ const DOT_COLOR: Record<ReturnType<typeof describeState>["tone"], string> = {
   accent: "bg-working",
 };
 
-/** A tiny status dot for an agent tab encoding the session's tone (none until a
- *  session starts). Carries the color only, the tab icon's glow signals "live". */
 export function SessionTabDot({ sessionId }: { sessionId?: string }) {
   const session = useSession(sessionId);
   if (!session) return null;
@@ -184,9 +181,6 @@ export function SessionTabDot({ sessionId }: { sessionId?: string }) {
   );
 }
 
-/** The mode badge leading an agent tab. Glows while the session is working (same
- *  `isWorking` signal as the elapsed counter), a session paused for a permission
- *  shows the warn dot, not a pulse. Subscribes per-session. */
 export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?: string }) {
   const session = useSession(sessionId);
   const working = session ? isWorking(session) : false;
@@ -202,46 +196,26 @@ type ComposerMenuOption = {
   label: string;
   hint?: string;
   icon?: ReactNode;
-  /** Render in red (e.g. "Bypass permissions") to flag a risky choice. */
   danger?: boolean;
-  /** Greyed and non-selectable, the model picker locks a started session to its
-   *  provider (see `lockedProvider` in SessionChat). Per-row, unlike a group's `disabled`. */
   disabled?: boolean;
-  /** Accent-tint this row (and the trigger when active) so a distinct choice like Ultracode stands out. */
   accent?: boolean;
 };
 
-/** A labelled section in a grouped menu (the model picker groups models by
- *  harness). A `disabled` group is greyed/non-selectable, for "soon" harnesses like Codex. */
 type MenuGroup = {
   key: string;
   label: string;
   icon?: ReactNode;
   items: ComposerMenuOption[];
   disabled?: boolean;
-  /** Rows folded behind a "more" row, revealed on click, the Claude group hides
-   *  the older models the CLI's catalog no longer lists. Auto-expanded when the
-   *  active selection lives in here, so the current pick is never hidden. */
   more?: { label: string; items: ComposerMenuOption[] };
 };
 
-/**
- * The composer's mark for a harness, used by both the model trigger and every
- * model-menu group so the two can't drift apart.
- *
- * Deliberately NOT `harnessIcon` from the design system: the composer shows
- * OpenCode as a generic `CodeIcon` (it fronts many providers, so its own logo
- * would misrepresent which one a model comes from), while Settings shows the
- * OpenCode mark because there it names the harness itself.
- */
 function composerMark(key: string, size = 13) {
   if (key === "codex") return <OpenAiIcon size={size} />;
   if (key === "opencode") return <CodeIcon size={size} />;
   return <ClaudeMarkIcon size={size} />;
 }
 
-/** A compact composer-toolbar dropdown (model / effort / mode). Opens upward,
- *  the composer sits at the bottom of the pane. */
 function ComposerMenu({
   leading,
   label,
@@ -259,36 +233,24 @@ function ComposerMenu({
   label: string;
   hint?: string;
   items?: ComposerMenuOption[];
-  /** When set, render a grouped menu instead of the flat `items` list (the model
-   *  picker groups models by harness). `items`/`custom` are ignored in grouped mode. */
   groups?: MenuGroup[];
-  /** An action row pinned to the bottom of the menu (e.g. "Harnesses →"). */
   footer?: { label: string; icon?: ReactNode; onClick: () => void };
   activeKey: string;
   onSelect: (key: string) => void;
   title: string;
-  /** Appends a free-text row for a value not in `items`, the model picker uses it
-   *  to accept ANY `--model` the CLI takes. Submitting calls `onSelect` with the text. */
   custom?: { label: string; placeholder?: string };
-  /** Icon-only trigger (label/hint/chevron hidden) when the composer is too narrow. */
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [editing, setEditing] = useState(false);
-  // Which groups have their `more` tail revealed. Reset when the menu closes so
-  // it reopens in the tidy state.
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
   const [text, setText] = useState("");
-  // Every selectable row across flat items and groups (disabled group/row excluded).
   const allItems = groups
     ? groups.flatMap((g) => (g.disabled ? [] : g.items.filter((it) => !it.disabled)))
     : items;
-  // The active selection is "custom" when it matches none of the preset items.
   const customActive = custom != null && !allItems.some((it) => it.key === activeKey);
-  // A risky active choice (e.g. "Bypass permissions") tints the whole trigger red.
   const activeDanger = allItems.some((it) => it.key === activeKey && it.danger);
-  // An accent active choice (e.g. "Ultracode") tints the whole trigger accent.
   const activeAccent = allItems.some((it) => it.key === activeKey && it.accent);
 
   const close = () => {
@@ -311,10 +273,6 @@ function ComposerMenu({
       e.preventDefault();
       commitCustom();
     } else if (e.key === "Escape") {
-      // Stop the keydown reaching the global dispatcher: without this, the
-      // Popover's own Escape handler (registered the moment the menu opens)
-      // would fire in the same keystroke and close the whole menu, not just
-      // cancel the free-text edit.
       e.preventDefault();
       e.stopPropagation();
       setEditing(false);
@@ -537,18 +495,11 @@ function ComposerMenu({
   );
 }
 
-/** The composer "+", opens upward into a small action menu for attaching
- *  context: library docs (centered modal) or files / screenshots (native OS
- *  file dialog). Available every turn, before a session starts a library doc
- *  becomes first-turn context; mid-conversation it rides the next message as an
- *  attachment (ProjectPage routes the lane). Unlike ComposerMenu these items are
- *  one-shot actions. */
 function AttachMenu({
   onLibrary,
   onFiles,
   onScreenshots,
 }: {
-  /** null hides the library item, folder projects have no docs scope. */
   onLibrary: (() => void) | null;
   onFiles: () => void;
   onScreenshots: () => void;
@@ -602,7 +553,6 @@ function AttachMenu({
   );
 }
 
-/** A ring whose arc fills with `pct` (0–1), greening → amber → red as it fills. */
 function ContextRing({ pct }: { pct: number }) {
   const r = 7;
   const circumference = 2 * Math.PI * r;
@@ -627,7 +577,6 @@ function ContextRing({ pct }: { pct: number }) {
   );
 }
 
-/** Context-window usage: a ring in the toolbar, click for the Context popover. */
 function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: number }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -677,14 +626,6 @@ function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: numb
   );
 }
 
-/**
- * Context-handoff nudge above the composer. Two flavours driven by `mode`:
- *  - `suggest`: context is filling up; offer to run /create_handoff now.
- *  - `ready`: a handoff doc was captured; one click clears the session and
- *    prefills /resume_handoff so a single Enter resumes against the doc.
- * Either flavour can be dismissed; `ready` re-arms only if the handoff is
- * detached or a fresh one is written.
- */
 function HandoffBanner({
   mode,
   contextPct,
@@ -695,8 +636,6 @@ function HandoffBanner({
 }: {
   mode: "suggest" | "ready";
   contextPct: number;
-  /** /create_handoff has already been sent or queued, disable the button so
-   *  a double-click can't queue a duplicate run. */
   suggestRequested: boolean;
   onCreateHandoff: () => void;
   onClearAndResume: () => void;
@@ -747,8 +686,6 @@ function HandoffBanner({
   );
 }
 
-/** Messages typed while a turn was running, shown above the composer until the
- *  turn finishes and they're delivered. Each can be cancelled before it sends. */
 function QueuedMessages({
   messages,
   onCancel,
@@ -788,17 +725,6 @@ function QueuedMessages({
   );
 }
 
-/**
- * The interactive answer panel for an `AskUserQuestion`, pinned just above the
- * composer. Questions are asked one at a time (a stepper): each question shows
- * its options (single- or multi-select) plus an always-present "Other" field for
- * a custom free-text answer when none of the options fit (parity with Claude
- * Code's question UI). "Next" advances, and the last question's "Submit" sends
- * every collected answer back to the agent in one go. Selections and custom text
- * accumulate across steps (keyed by question text) and "Back" revisits them.
- * "Skip" sends no answer, which the agent handles by asking again in prose.
- * Remounted per prompt (keyed on requestId) so state never leaks between asks.
- */
 function QuestionPrompt({
   pending,
   onSubmit,
@@ -807,13 +733,8 @@ function QuestionPrompt({
   onSubmit: (answers: Record<string, string>) => void;
 }) {
   const [selections, setSelections] = useState<Record<string, string[]>>({});
-  // Free-text "Other" answers, keyed by question text. A present entry means the
-  // field is open for that question; its text is sent alongside (multi) or
-  // instead of (single) the option picks.
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [step, setStep] = useState(0);
-  // Latch on the first submit/skip so a double-click can't answer twice (the
-  // panel unmounts once the optimistic resolve clears the pending question).
   const [submitted, setSubmitted] = useState(false);
 
   const send = (answers: Record<string, string>) => {
@@ -825,8 +746,6 @@ function QuestionPrompt({
   const total = pending.questions.length;
   const question = pending.questions[step];
 
-  // Defensive: a malformed payload can parse to zero questions, don't wedge the
-  // session, let the user dismiss it (the agent then re-asks in prose).
   if (!question) {
     return (
       <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-3.5">
@@ -841,14 +760,11 @@ function QuestionPrompt({
   }
 
   const chosen = selections[question.question] ?? [];
-  // A present `custom` entry means the "Other" free-text field is open for this
-  // question; its trimmed text counts as an answer alongside any option picks.
   const otherText = custom[question.question];
   const otherOpen = otherText !== undefined;
   const currentAnswered = chosen.length > 0 || (otherText ?? "").trim().length > 0;
   const isLast = step === total - 1;
 
-  // Close the "Other" field for this question, dropping its text.
   const closeOther = () =>
     setCustom((prev) => {
       if (!(question.question in prev)) return prev;
@@ -868,13 +784,9 @@ function QuestionPrompt({
       }
       return { ...prev, [question.question]: [label] };
     });
-    // Single-select: a preset option and the free-text "Other" are mutually
-    // exclusive, so picking an option closes the field.
     if (!question.multiSelect) closeOther();
   };
 
-  // Open/close the "Other" free-text field. Single-select clears any preset pick
-  // so the two stay mutually exclusive; multi-select keeps picks and appends.
   const toggleOther = () => {
     if (otherOpen) {
       closeOther();
@@ -886,16 +798,12 @@ function QuestionPrompt({
 
   const submitAll = () => send(buildQuestionAnswers(pending.questions, selections, custom));
 
-  // "Next" until the last question, which becomes "Submit"; both need an answer.
   const advance = () => {
     if (!currentAnswered) return;
     if (isLast) submitAll();
     else setStep((s) => s + 1);
   };
 
-  // The radio/checkbox dot for the "Other" row, filled (accent) when its
-  // free-text field is open. `mt` aligns it with the label's first line in the
-  // closed two-line layout; the open inline-input row centers it instead.
   const otherDot = (mt: string) => (
     <span
       className={`flex h-4 w-4 shrink-0 items-center justify-center border ${mt} ${
@@ -971,11 +879,6 @@ function QuestionPrompt({
             </button>
           );
         })}
-        {/* "Other": a free-text answer, always offered so the user isn't boxed
-            into the preset options (parity with Claude Code's question UI). When
-            open the option row itself becomes an inline input, its text is
-            appended to any picks for multi-select, or replaces them for
-            single-select. */}
         <div
           className={`rounded-lg border transition-colors ${
             otherOpen
@@ -1004,7 +907,6 @@ function QuestionPrompt({
                   setCustom((prev) => ({ ...prev, [question.question]: e.target.value }))
                 }
                 onKeyDown={(e) => {
-                  // Enter submits the custom answer (single-line inline field).
                   if (e.key === "Enter") {
                     e.preventDefault();
                     advance();
@@ -1059,41 +961,23 @@ type Props = {
   onModelChange: (key: string) => void;
   onEffortChange: (key: string) => void;
   onPermissionModeChange: (key: string) => void;
-  /** Persist the chosen harness (claude|codex|opencode) on the tab so it survives
-   *  a tab switch; fixed once the session starts. */
   onHarnessChange: (key: string) => void;
-  /** Persist the chosen OpenCode `provider/model` id on the tab (the Claude model
-   *  lives in `onModelChange`). */
   onOpencodeModelChange: (key: string) => void;
-  /** Persist the chosen Codex model id / reasoning effort on the tab. Separate
-   *  from the Claude setters because Codex's ids and effort ladder are its own. */
   onCodexModelChange: (key: string) => void;
   onCodexEffortChange: (key: string) => void;
-  /** Open Settings → Harnesses (the model menu's "Harnesses →" footer). */
   onOpenHarnessSettings: () => void;
   onSessionStarted: (sessionId: string) => void;
   onResetSession: () => void;
   onOpenDoc: (id: string) => void;
-  /** Remove a doc, detaches a manual doc, dismisses (and records) a suggested one. */
   onDetachDoc: (path: string) => void;
-  /** Reconcile the pane's auto-suggested doc (called by the mode-suggestion effect). */
   onSuggestDoc: (path: string | null, role: string) => void;
-  /** Hide the "context filling up" banner for this tab. */
   onDismissHandoffNudge: () => void;
-  /** Capture a freshly written handoff doc as a chip on this tab, survives Clear
-   *  Context so it auto-attaches to the next session this tab starts. */
   onAttachHandoffDoc: (path: string) => void;
-  /** Open the library picker (centered modal) to attach context docs. */
   onBrowseDocs: (() => void) | null;
-  /** Native OS file dialog → attach the chosen files as context. */
   onAddFiles: () => void;
-  /** Native OS file dialog filtered to images → attach screenshots. */
   onAddScreenshots: () => void;
-  /** Stage dropped/pasted attachments on this tab's composer. */
   onAddAttachments: (attachments: Attachment[]) => void;
-  /** Remove one staged attachment by path. */
   onRemoveAttachment: (path: string) => void;
-  /** Clear all staged attachments (after a turn is sent). */
   onClearAttachments: () => void;
 };
 
@@ -1130,27 +1014,13 @@ export function SessionChat({
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
-  // The add-attachments callback changes identity each render; keep the latest
-  // in a ref so the window-level drag-drop subscription can stay mounted once.
   const addAttachmentsRef = useRef(onAddAttachments);
   addAttachmentsRef.current = onAddAttachments;
   const workstreamId = view.item.id;
 
-  // Collapse the composer toolbar's pickers to icon-only when their labels would
-  // otherwise overflow the row, a narrow split pane, a long permission label
-  // ("Bypass permissions"), or a running session's extra meter/clear buttons.
-  // We detect *actual* overflow off the toolbar element instead of guessing from
-  // a pane-width threshold: the row's width is content-dependent, so any fixed
-  // number is wrong for some state (and silently regresses when a button is
-  // added). naturalWidthRef remembers the labelled width so we only expand again
-  // once it genuinely fits, the hysteresis that stops collapse/expand flapping.
   const toolbarRef = useRef<HTMLDivElement>(null);
   const naturalWidthRef = useRef(0);
   const [compactComposer, setCompactComposer] = useState(false);
-  // Re-evaluated on every render (content changes, a session starting, the
-  // permission label, the live token meter) and on every resize (the observer
-  // below, split-divider drags and window resizes, which don't re-render this
-  // component). Kept in a ref so the once-bound observer always runs the latest.
   const measureRef = useRef<() => void>(() => {});
   measureRef.current = () => {
     const el = toolbarRef.current;
@@ -1176,32 +1046,15 @@ export function SessionChat({
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
   const mode = asStageKey(shell.mode);
-  // The configurable "cycle agent stage" chord (default Shift+Tab). Matched in
-  // the composer because a chord with no primary modifier is inert in the global
-  // dispatcher's editable-target guard, so it never fires while the textarea is
-  // focused, onKeyDown picks it up here instead.
   const cycleStageChord = effectiveChord(
     useBootstrap().data?.settings.keybindings?.overrides ?? {},
     "ws.cycleStage",
     IS_MACOS,
   );
-  // Pinned prompt chips, anchored beside the task drawer's handle above the
-  // composer (they also drive that strip's space reservation).
   const pinnedPrompts = usePinnedPrompts(view.item.projectPath);
-  // A tab with no explicit pick falls back to the provider defaults configured
-  // in Settings → Models → Claude, then to claude's own defaults. `defaultPlanMode`
-  // seeds the permission posture to "plan" for fresh tabs.
   const claudeDefaults = useBootstrap().data?.settings.providers?.claude;
-  // The CLI's own catalog is the authority on which models this install can run
-  // (and each one's effort tiers); the static table is the fallback while it
-  // loads or if the probe can't run. See `claudeModels`.
   const claudeProbe = useClaudeProbe();
   const claudeCatalog = claudeModels(claudeProbe.data?.models);
-  // Fold anything newly on offer into a curated picker list, so a model shipped
-  // after the user last edited Settings → Models still shows up. Gated on the
-  // probe settling so the watermark never latches off the static fallback; a
-  // paused fetch (offline) counts as settled-static so new static presets still
-  // reach curated lists, as they did before the probe existed.
   useSyncClaudeModels(
     claudeCatalog,
     !claudeProbe.isPending || claudeProbe.fetchStatus === "paused",
@@ -1210,38 +1063,20 @@ export function SessionChat({
   const model = modelOption(shell.model ?? claudeDefaults?.defaultModel ?? undefined, claudeCatalog);
   const effort = effectiveEffort(shell.effort ?? claudeDefaults?.defaultEffort ?? undefined, model);
   const claudeEffortItems = effortsForModel(model);
-  // Live per-model context windows from the Models API (fetched once, reused);
-  // empty until it resolves, or if it can't (offline/logged out), the static
-  // `model.contextWindow` table then covers the meter.
   const modelWindows = useModelWindowMap();
   const permissionMode = permissionModeOption(
     shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
   );
   const modelItems = visibleModels(claudeDefaults?.visibleModels, claudeCatalog);
 
-  // The harness is implied by which model you pick: the model menu groups models
-  // by harness (Claude / Codex / OpenCode), so selecting one sets BOTH the model
-  // and the harness. Both persist on the tab, like effort, so switching tabs
-  // and coming back keeps the choice. Menu keys are namespaced `harness:key`
-  // so the select handler knows which harness a row belongs to.
   const bootstrap = useBootstrap().data;
   const bootstrapSettings = bootstrap?.settings;
   const opencodeDefaults = bootstrapSettings?.providers?.opencode;
   const ollamaDefaults = bootstrapSettings?.providers?.ollama;
   const codexDefaults = bootstrapSettings?.providers?.codex;
-  // Codex has no static preset list, its models come from a live probe. To offer
-  // them in the picker by default (like Claude's presets) we probe whenever Codex
-  // is installed, not only once a tab is already on it; otherwise you could never
-  // switch TO Codex from a Claude tab with no curated selection.
   const codexInstalled = (bootstrap?.binaries ?? []).some(
     (b) => b.kind === "codex" && b.state.state === "ok",
   );
-  // A started chat stays on the harness it LAUNCHED on, its transcript and tool
-  // history belong to that harness's session, and changing the default harness
-  // must only affect the next one. The session row is authoritative (the backend
-  // pins it at launch and resumes by it), so it outranks both the tab's pick and
-  // the current default; that also repairs a tab whose pick already drifted.
-  // Unstarted: the tab's own pick, else the configured default, else Claude.
   const startedHarness = useWorkstreamSessions(workstreamId, Boolean(shell.sessionId)).data?.find(
     (s) => s.id === shell.sessionId,
   )?.harness;
@@ -1253,8 +1088,6 @@ export function SessionChat({
   const usingOpencode = harness.key === "opencode";
   const usingCodex = harness.key === "codex";
   const ocModels = opencodeDefaults?.selectedModels ?? [];
-  // Ollama models run *through* the OpenCode harness as `ollama/<id>` ids, so they
-  // share the opencode harness/model machinery, they're just a separate picker group.
   const ollamaModels = (ollamaDefaults?.selectedModels ?? []).map((id) => `ollama/${id}`);
   const ocModel =
     shell.opencodeModel ??
@@ -1263,14 +1096,7 @@ export function SessionChat({
     ocModels[0] ??
     ollamaModels[0] ??
     null;
-  // One probe serves two needs: it enumerates the models (so the picker can offer
-  // them) AND reports each model's own effort tiers (GPT-5.6-Sol has `ultra`, Luna
-  // stops at `max`, offering a tier the model rejects would fail the turn). Gated
-  // on Codex being installed, and deduped by react-query across tabs, so it costs
-  // one app-server spawn regardless of how many composers are open.
   const codexCatalog = useCodexProbe(codexInstalled);
-  // No explicit selection ⇒ offer every model Codex reports, the same way Claude
-  // shows all its presets until you narrow them.
   const codexModels = resolveCodexModelIds(
     codexDefaults?.selectedModels,
     codexCatalog.data?.models ?? [],
@@ -1286,34 +1112,17 @@ export function SessionChat({
     codexSupportedEfforts,
   );
   const startModelFlag = usingOpencode ? ocModel : usingCodex ? codexModel : model.flag;
-  // Each harness gets its OWN effort ladder: Codex's values differ from Claude's,
-  // and OpenCode has no effort control at all (the driver ignores it). A null
-  // Claude effort means the model takes no --effort (Haiku), omit the flag.
   const startEffort = usingCodex ? codexEffort.key : usingOpencode ? null : (effort?.key ?? null);
-  // Friendly OpenCode model names from the models.dev catalog, the raw ids are
-  // long `provider/model` paths. Only fetched when this tab has OpenCode models
-  // to label; the query is cached hard and falls back to a bundled snapshot.
   const ocCatalog = useOpencodeCatalog(ocModels.length > 0);
   const ocNames = useMemo(
     () => opencodeModelNames(ocCatalog.data?.providers ?? []),
     [ocCatalog.data],
   );
 
-  // Once a session has started, its provider is LOCKED: a mid-session switch
-  // replays the session's tool history to a different API endpoint, and a stricter
-  // provider (e.g. OpenCode Zen / DeepSeek) rejects the synthesized tool_call_ids
-  // ("Duplicate value for 'tool_call_id'…"), hard-failing the turn. Same-provider
-  // model switches are safe (and are the only kind Claude or Codex ever offers,
-  // since all their models share one provider), so we grey out cross-provider rows
-  // until the user starts a new agent. The lock keys on the *underlying* provider,
-  // the id prefix (`openrouter/…`, `opencode/…`, `ollama/…`), not the harness,
-  // because e.g. Kimi (OpenRouter) → Big Pickle (Zen) is cross-provider within OpenCode.
   const lockedProvider = lockedSessionProvider(started, harness.key, ocModel);
   const lockOther = (itemProvider: string): Pick<ComposerMenuOption, "disabled"> =>
     lockedProvider !== null && itemProvider !== lockedProvider ? { disabled: true } : {};
 
-  // Org-disabled rows (a curated list can still name one) render greyed with
-  // the reason, and can't be picked into a session the CLI would refuse.
   const claudeRow = (m: ModelOption): ComposerMenuOption => ({
     key: `claude:${m.key}`,
     label: m.label,
@@ -1327,8 +1136,6 @@ export function SessionChat({
       key: "claude",
       label: "Claude Code",
       icon: composerMark("claude"),
-      // Current models up front; anything the CLI's catalog doesn't list folds
-      // behind "More models" so the older pins don't crowd the everyday picks.
       items: modelItems.filter((m) => !m.unlisted).map(claudeRow),
       more: {
         label: "More models",
@@ -1339,8 +1146,6 @@ export function SessionChat({
       key: "codex",
       label: "Codex",
       icon: composerMark("codex"),
-      // Codex model ids are already readable (`gpt-5.4-codex`), so, unlike
-      // OpenCode's long `provider/model` paths, they need no catalog lookup.
       items: codexModels.map((id) => ({
         key: `codex:${id}`,
         label: id,
@@ -1360,8 +1165,6 @@ export function SessionChat({
         ...lockOther(modelProvider("opencode", id) ?? ""),
       })),
     },
-    // Local models, routed through the OpenCode harness. Hidden until the user
-    // selects some in Settings → Harnesses → Ollama.
     ...(ollamaModels.length > 0
       ? [
           {
@@ -1379,7 +1182,6 @@ export function SessionChat({
         ]
       : []),
   ];
-  // Trigger reflects the active model; the active row carries a ✓ in the menu.
   const composerModelLabel = usingOpencode
     ? ocModel
       ? opencodeModelLabel(ocModel, ocNames)
@@ -1398,27 +1200,19 @@ export function SessionChat({
         : ""
       : `claude:${model.key}`;
 
-  // Picking a model selects its harness too: `onHarnessChange` + the per-harness
-  // model setter both patch the tab.
-  // Claude binds its model at launch, so switching the model on a LIVE session
-  // relaunches the process via --resume onto the new model (transcript preserved),
-  // the model analog of handlePermissionModeChange. Effort is re-resolved for
-  // the new model so ultracode only rides an xhigh-capable one. We confirm first
-  // when a turn is in flight (the restart interrupts it). Before a session starts
-  // (or when detached) we just record the choice; it applies at the next spawn.
   const applyClaudeModel = async (key: string) => {
-    if (key === model.key) return; // no change (re-picked the active model)
+    if (key === model.key) return;
     const next = modelOption(key, claudeCatalog);
-    if (next.disabled) return; // org policy, the row is greyed, belt and braces
+    if (next.disabled) return;
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
     if (live && session && isBusy(session)) {
       const ok = await confirm(
         `Restart this session to switch to ${next.label}? The active turn will be interrupted.`,
         { title: "Switch model?", kind: "warning" },
       );
-      if (!ok) return; // declined, leave the running session (and picker) as-is
+      if (!ok) return;
     }
-    onModelChange(key); // persist on the tab (composer label + next fresh session)
+    onModelChange(key);
     if (live && sid) {
       const nextEffort = effectiveEffort(
         shell.effort ?? claudeDefaults?.defaultEffort ?? undefined,
@@ -1432,16 +1226,12 @@ export function SessionChat({
     const sep = namespaced.indexOf(":");
     const pickedHarness = namespaced.slice(0, sep);
     const pickedModel = namespaced.slice(sep + 1);
-    // Enforce the provider lock even if a disabled row is somehow activated: a
-    // started session can only change models within its own provider.
     const pickedProvider = modelProvider(pickedHarness, pickedModel);
     if (lockedProvider !== null && pickedProvider !== lockedProvider) return;
     if (pickedHarness === "opencode") {
       onHarnessChange("opencode");
       onOpencodeModelChange(pickedModel);
     } else if (pickedHarness === "codex") {
-      // Codex takes its model per turn, so, unlike Claude, no relaunch or
-      // interrupt confirmation is needed even mid-conversation.
       onHarnessChange("codex");
       onCodexModelChange(pickedModel);
     } else {
@@ -1450,11 +1240,6 @@ export function SessionChat({
     }
   };
 
-  // A tab bound to a session but with no transcript in memory means we came
-  // back after an app restart, rebuild it from the persisted event log. Use the
-  // tab's OWN stored permission mode (not the plan-mode default), so resuming an
-  // old session re-applies what it actually started with rather than a default
-  // that may have been toggled on since.
   const restorePermissionFlag = permissionModeOption(shell.permissionMode).flag;
   useEffect(() => {
     if (shell.sessionId && !hasEntry) {
@@ -1462,13 +1247,6 @@ export function SessionChat({
     }
   }, [shell.sessionId, hasEntry, view.item.id, shell.mode, restorePermissionFlag]);
 
-  // Auto-resume terminal sessions on first sight, a session that came back
-  // crashed or killed. App-initiated teardown (quit, archive, relaunch) exits
-  // `detached` instead, which never lands terminal, so it isn't this path's job:
-  // those resume lazily on the next send. The ref guards against re-firing: if the
-  // resume itself fails and bounces back to terminal, we surface the banner
-  // for an explicit retry instead of looping. Cleared when the user opts
-  // out via "New session" (sessionId becomes undefined).
   const autoResumedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!shell.sessionId) {
@@ -1477,8 +1255,6 @@ export function SessionChat({
     }
     if (autoResumedRef.current === shell.sessionId) return;
     if (!session || !isTerminal(session.state)) return;
-    // Only attempt when there's actually something to resume, empty sessions
-    // (spawn_failed before any events) don't have a transcript worth chasing.
     if (session.items.length === 0) return;
     autoResumedRef.current = shell.sessionId;
     setError(null);
@@ -1488,25 +1264,15 @@ export function SessionChat({
       .finally(() => setResuming(false));
   }, [shell.sessionId, session]);
 
-  // Mode-aware suggestion: auto-attach the most recent relevant doc (research
-  // for plan-mode, plan for implement/validate) as a "suggested" chip while the
-  // session hasn't started yet. A ref absorbs the parent callback's identity
-  // churn so the effect can depend on the real inputs it reads, the resolved
-  // suggestion (path + kind) and whether the session has started, without a
-  // dependency suppression.
   const suggestKind = suggestedDocKind(mode);
   const recent = useMostRecentDoc(workstreamId, suggestKind);
   const suggestDocRef = useRef(onSuggestDoc);
   suggestDocRef.current = onSuggestDoc;
   useEffect(() => {
-    if (started) return; // suggestions only apply before a session is launched
+    if (started) return;
     suggestDocRef.current(recent?.path ?? null, recent?.kind ?? "other");
   }, [started, recent?.path, recent?.kind]);
 
-  // Drag-and-drop. Tauri intercepts OS file drops at the window level (HTML5
-  // drop events never fire), so we subscribe to the webview's drag-drop stream
-  // and hit-test the drop position against THIS pane's container, each pane
-  // handles only drops that land on it.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -1514,12 +1280,6 @@ export function SessionChat({
       const el = dropRef.current;
       if (!el || !pos) return false;
       const r = el.getBoundingClientRect();
-      // The event position already arrives in CSS/logical pixels on macOS
-      // (matching getBoundingClientRect) despite its PhysicalPosition type, so
-      // compare directly. Dividing by devicePixelRatio halves the coordinates
-      // on a Retina display and pulls every drop toward the window's top-left,
-      // harmless in a single full-width pane, but it made a split always route
-      // drops to the left pane instead of the one under the cursor.
       return pos.x >= r.left && pos.x <= r.right && pos.y >= r.top && pos.y <= r.bottom;
     };
     void getCurrentWebview()
@@ -1549,9 +1309,6 @@ export function SessionChat({
     };
   }, [workstreamId]);
 
-  // Paste an image straight from the clipboard (e.g. Cmd-Shift-Ctrl-4 screen
-  // grabs). The bytes are persisted into the worktree so the agent can read
-  // them; the paste of image data doesn't also insert text.
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -1571,12 +1328,6 @@ export function SessionChat({
       });
       return;
     }
-    // No image in the event, which is also exactly what a screenshot paste
-    // looks like on WebKitGTK, where the webview never surfaces clipboard
-    // images. Probe the OS clipboard, but only when the paste carried no text
-    // either, so an ordinary text paste neither pays for the round-trip nor
-    // risks attaching an unrelated image that happens to be on the clipboard.
-    // Nothing is inserted on this path, so the event is left to its default.
     if (e.clipboardData?.getData("text/plain")) return;
     void saveClipboardImageFromOs(workstreamId).then((att) => {
       if (att) onAddAttachments([att]);
@@ -1584,35 +1335,22 @@ export function SessionChat({
   };
 
   const busy = session ? isBusy(session) : started;
-  // `working` (actively computing) drives the transcript's running-tool spinner
-  // and smooth-scroll; `busy` (which also covers "blocked on the user") gates
-  // the composer. They diverge while a session is held on a permission/question.
-  // Falls back to false (not `started`) so a tab still rebuilding from the log
-  // after a restart shows the "Connecting…" spinner, not a fake running turn.
   const working = session ? isWorking(session) : false;
   const terminal = session ? isTerminal(session.state) : false;
   const pendingQuestion = session?.pendingQuestion ?? null;
   const draft = shell.draft;
-  // Tabs persisted before attachments existed rehydrate without the field; the
-  // store migration backfills it, but default here too so a stale in-memory tab
-  // can't crash on `.length` before the next reload.
   const attachments = shell.attachments ?? [];
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
   const sid = shell.sessionId;
 
-  // Background tasks bar.
   const backgroundTasks = useSessionBackgroundTasks(sid);
 
-  // Prompt history navigation: derive prompts from the live transcript,
-  // hold ephemeral nav state, and register focus-gated recall commands.
   const prompts = useMemo(
     () => (session ? userPrompts(session.items) : []),
     [session],
   );
   const [historyNav, setHistoryNav] = useState<HistoryNav>(IDLE_NAV);
   const [composerFocused, setComposerFocused] = useState(false);
-  // The value we last wrote via recall, so the textarea onChange can tell a
-  // programmatic recall apart from a real user edit.
   const recalledValueRef = useRef<string | null>(null);
 
   const applyRecall = useCallback(
@@ -1626,13 +1364,12 @@ export function SessionChat({
         if (!ta) return;
         ta.focus();
         const n = ta.value.length;
-        ta.setSelectionRange(n, n); // cursor to end for natural editing
+        ta.setSelectionRange(n, n);
       });
     },
     [onDraftChange],
   );
 
-  // Reset navigation when the bound session changes (Clear Context / restart).
   useEffect(() => {
     setHistoryNav(IDLE_NAV);
     recalledValueRef.current = null;
@@ -1650,29 +1387,12 @@ export function SessionChat({
       : null,
   );
 
-  // The plan/task list moved from the composer into the changes sidebar; keep the
-  // "Show / Hide Tasks" shortcut wired to that section's (persisted) collapse toggle.
   const toggleTasks = useUiStore((s) => s.toggleTasks);
   useCommand("session.togglePlan", toggleTasks);
 
   const transcriptRef = useRef<TranscriptHandle | null>(null);
 
-  // Handoff flow: at ≥60% context fill, nudge the user to create a handoff doc
-  // and start fresh. The flow is two banners and a button glow:
-  //   1. suggest, show while pct ≥ NUDGE_THRESHOLD and the user hasn't acted;
-  //      "Create handoff" sends `/create_handoff`.
-  //   2. ready, once the agent's Write produces a doc under `…/handoffs/…md`,
-  //      it auto-attaches to this tab as a regular doc chip (so it survives
-  //      `handleClear` and rides into the next session as an attachment). The
-  //      Eraser button lights up; "Clear & resume" runs handleClear and
-  //      prefills `/resume_handoff`.
   const HANDOFF_NUDGE_THRESHOLD = 0.6;
-  // The meter's denominator, in precedence order: the backend-reported window
-  // for this session (e.g. an Ollama model's fixed num_ctx); else the Models API
-  // value for the session's resolved model id (the live source of truth, keyed on
-  // the id `claude` echoed at init); else our static per-model table. The `model`
-  // table only knows Claude models, so for an OpenCode/Ollama session it would
-  // otherwise wrongly read the 1M Opus default.
   const contextWindow =
     session?.contextWindow ??
     apiContextWindow(session?.model, modelWindows) ??
@@ -1680,10 +1400,6 @@ export function SessionChat({
   const contextPct =
     session?.contextTokens != null ? session.contextTokens / contextWindow : 0;
   const handoffDoc = shell.docs.find((d) => d.role === "handoff") ?? null;
-  // Last handoff doc written in the CURRENT session's items, ignoring ones the
-  // user already dismissed. We scan the live transcript rather than the
-  // workstream-wide selector so an old handoff from a previous session of this
-  // workstream doesn't pop in as soon as the new session opens.
   const sessionItems = session?.items;
   const dismissedSet = useMemo(
     () => new Set(shell.dismissedSuggestions ?? []),
@@ -1694,9 +1410,6 @@ export function SessionChat({
     () => (sessionItems ? detectHandoffDoc(sessionItems, writtenDocs, dismissedSet) : null),
     [sessionItems, dismissedSet, writtenDocs],
   );
-  // The parent callback's identity churns; a ref keeps the effect deps tight to
-  // the input that actually matters (the detected path), so we don't re-fire on
-  // every parent render.
   const attachHandoffRef = useRef(onAttachHandoffDoc);
   attachHandoffRef.current = onAttachHandoffDoc;
   useEffect(() => {
@@ -1711,36 +1424,20 @@ export function SessionChat({
     !shell.handoffNudgeDismissed &&
     contextPct >= HANDOFF_NUDGE_THRESHOLD;
   const showHandoffReady = Boolean(handoffDoc) && started && !terminal;
-  // True once /create_handoff has been sent (queued mid-turn or already in the
-  // transcript) but before the handoff doc shows up, disables the suggest
-  // button so a double-click can't queue a second /create_handoff.
   const HANDOFF_COMMAND = "/create_handoff";
   const handoffRequested =
     session != null &&
     (session.queued.some((m) => m.text.trim() === HANDOFF_COMMAND) ||
       session.items.some((it) => it.kind === "user" && it.text.trim() === HANDOFF_COMMAND));
 
-  // Composer autocomplete: `/skill` commands and `@file` references, plus the
-  // recognized-skill highlight painted behind the textarea text.
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [composerScroll, setComposerScroll] = useState(0);
 
-  // Auto-grow the composer from a single row to fit its content (capped at
-  // MAX_COMPOSER_HEIGHT, then it scrolls). The composer is anchored at the
-  // bottom of the column, so a taller textarea pushes its own top edge up
-  // toward the transcript, the box grows *upward*, keeping the whole draft in
-  // view. Reset to one row is automatic: send/start clears `draft`, re-running
-  // this.
   const autosizeComposer = useCallback(() => {
     const ta = textareaRef.current;
     if (ta) fitComposerHeight(ta);
   }, []);
   useLayoutEffect(autosizeComposer, [autosizeComposer, draft]);
-  // Re-wrapping on a width change (split-pane drag, toolbar compaction) changes
-  // how tall the text needs to be, so recompute then too. We watch the wrapper,
-  // not the textarea: at the cap the textarea's own scrollbar eats content
-  // width, and measuring off that width would feed our own sizing back into the
-  // observer. The wrapper's width comes from the pane alone.
   const composerBoxRef = useRef<HTMLDivElement>(null);
   const composerWidthRef = useRef(0);
   useLayoutEffect(() => {
@@ -1756,11 +1453,6 @@ export function SessionChat({
     return () => ro.disconnect();
   }, [autosizeComposer]);
 
-  // Grab focus when something swaps this agent back on screen (e.g. the terminal
-  // is toggled away) so the user can type straight away. We consume the signal
-  // inside the frame, not in the effect body, so React 19 StrictMode's
-  // double-invoke (setup→cleanup→setup) can't consume-then-cancel and drop the
-  // focus, only the surviving frame claims it, exactly once.
   const pendingFocusShellId = useComposerFocusStore((s) => s.pendingShellId);
   useEffect(() => {
     if (pendingFocusShellId !== shell.id) return;
@@ -1776,28 +1468,18 @@ export function SessionChat({
     onChange: onDraftChange,
     textareaRef,
     enabled: !pendingQuestion,
-    // Picking from the @file dropdown stages the file as an attachment card
-    // (same lane as drop/paste/dialog) instead of leaving a raw path in the
-    // prompt. The search returns worktree-relative paths; the agent needs an
-    // absolute one.
     onPickFile: (rel) => {
       const root = view.item.worktreePath.replace(/\/+$/, "");
       onAddAttachments([{ path: `${root}/${rel}`, name: basename(rel), kind: "file" }]);
     },
   });
 
-  // `/slug` with its one argument still empty: the composer is that field, so
-  // hold the send and name what's missing instead of opening the dialog over it.
   const { matchPrompt } = autocomplete;
   const pendingArg = useMemo(() => {
     const hit = matchPrompt(draft);
     return hit ? pendingComposerArg(hit, view.item.projectPath) : null;
   }, [matchPrompt, draft, view.item.projectPath]);
 
-  // A draft whose first token is a custom prompt's `/slug` expands to that
-  // prompt's body before it goes anywhere, same arguments and transcript card
-  // the ⌘K palette produces. Null means don't send: the argument dialog was
-  // cancelled, or the expansion came back empty.
   type ExpandedDraft = { text: string; title: string | null };
   const expandDraft = async (text: string): Promise<ExpandedDraft | null> => {
     const hit = autocomplete.matchPrompt(text);
@@ -1809,9 +1491,6 @@ export function SessionChat({
       hit.typed,
     );
     if (!resolved) return null;
-    // An all-argument body (`{{input}}`) answered with nothing resolves to an
-    // empty turn, the same guard `runPromptTextInWorkstream` applies, which
-    // this path bypasses.
     if (!resolved.text.trim()) {
       setError(`${hit.prompt.name || "That prompt"} needs an argument, so nothing to send.`);
       return null;
@@ -1819,10 +1498,6 @@ export function SessionChat({
     return { text: resolved.text, title: resolved.title };
   };
 
-  // A pinned chip fills the composer with its `/slug` rather than firing, so the
-  // argument, and what will actually run, stays visible until Enter. A prompt
-  // with no expandable slug (unusable name, or one a real command owns) has no
-  // command to prefill, so it still runs outright.
   const pickPrompt = (prompt: CustomPrompt) => {
     const slug = promptSlug(prompt.name ?? "");
     if (!slug || autocomplete.offeredPrompts.get(slug) !== prompt) {
@@ -1843,8 +1518,6 @@ export function SessionChat({
   const handleStart = async () => {
     const input = draft.trim();
     if (!canSubmit || pendingArg || starting) return;
-    // A stored default can name a model org policy has since disabled; the CLI
-    // would refuse it anyway, so fail here with the reason instead.
     if (!usingOpencode && !usingCodex && model.disabled) {
       setError(`${model.label} is disabled by org policy. Pick another model.`);
       return;
@@ -1854,8 +1527,6 @@ export function SessionChat({
     try {
       const expanded = await expandDraft(input);
       if (!expanded) return;
-      // Library docs and staged files/screenshots both ride along as pin cards
-      // in the echo (so no raw path shows) and as paths in the backend prompt.
       const atts: Attachment[] = [
         ...shell.docs.map((d) => ({ path: d.path, name: chipLabel(d.path), kind: "file" as const })),
         ...attachments,
@@ -1872,9 +1543,6 @@ export function SessionChat({
         promptName: expanded.title,
       });
       onSessionStarted(created.id);
-      // Auto-title this tab from the first prompt (best-effort, fire-and-forget;
-      // a no-op for already-locked tabs and when the feature is off). Skip
-      // attachment-only starts, there's no prompt text to summarize.
       if (expanded.text) {
         void generateTabTitle({
           workstreamId: view.item.id,
@@ -1895,17 +1563,12 @@ export function SessionChat({
 
   const handleSend = async () => {
     const text = draft.trim();
-    // No `busy` guard: while a turn is in flight `sendMessage` queues the message
-    // and delivers it when the turn finishes (conversation steering).
     if ((!text && attachments.length === 0) || pendingArg || !sid) return;
     setError(null);
     try {
       const expanded = await expandDraft(text);
       if (!expanded) return;
       await sendMessage(sid, expanded.text, attachments, expanded.title);
-      // Sending is an explicit "bring me back to the conversation", re-stick to
-      // the bottom so the user sees their message (and the reply) even if they'd
-      // scrolled up. No-ops when already at the bottom.
       transcriptRef.current?.scrollToBottom();
       onDraftChange("");
       setHistoryNav(IDLE_NAV);
@@ -1916,12 +1579,6 @@ export function SessionChat({
     }
   };
 
-  // Clear context: detach this tab from its session so the next message opens a
-  // brand-new claude conversation (empty context, the manual escape hatch
-  // before auto-compaction kicks in). A live session is ended first so it can't
-  // keep running headless; the typed draft is kept so it can be resent fresh.
-  // `skipConfirm` is set when the user is already on the explicit "Clear &
-  // resume" path (handoff banner), the create-handoff step is implicit consent.
   const handleClear = async (opts: { skipConfirm?: boolean } = {}) => {
     if (!started) return;
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
@@ -1936,20 +1593,11 @@ export function SessionChat({
     onResetSession();
   };
 
-  // "Clear & resume" path triggered from the handoff-ready banner. The handoff
-  // doc is already pinned to `shell.docs` (so it'll ride as an attachment to the
-  // fresh session); also prefill `/resume_handoff` so a single Enter resumes.
   const handleClearAndResume = async () => {
     await handleClear({ skipConfirm: true });
     if (draft.trim() === "") onDraftChange("/resume_handoff");
   };
 
-  // Permission mode is a launch-time decision (claude won't switch a running
-  // session into bypass), so changing it on a LIVE session restarts the process
-  // via --resume with the new mode, the transcript is preserved. We confirm
-  // first only when a turn is in flight, since the restart interrupts it. Before
-  // a session starts (or for a detached one) we just record the choice; it
-  // applies at the next spawn/resume.
   const handlePermissionModeChange = async (key: string) => {
     const opt = permissionModeOption(key);
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
@@ -1958,21 +1606,14 @@ export function SessionChat({
         `Restart this session to apply “${opt.label}”? The active turn will be interrupted.`,
         { title: "Restart session?", kind: "warning" },
       );
-      if (!ok) return; // declined, leave the running session (and picker) as-is
+      if (!ok) return;
     }
-    onPermissionModeChange(key); // persist on the tab (badge + next fresh session)
+    onPermissionModeChange(key);
     if (live && sid) await applyPermissionMode(sid, opt.flag);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // The autocomplete owns arrows / Enter / Tab / Escape while its menu is open
-    // (accepting a pick must not also send the message).
     if (autocomplete.handleKeyDown(e)) return;
-    // Cycle the agent stage (default Shift+Tab) while the mode picker is live,
-    // once the session starts the stage is fixed at spawn, so it's a no-op. We
-    // only take a chord WITHOUT a primary modifier: that's exactly the case the
-    // global dispatcher skips in an editable target, so matching it here covers
-    // the composer without double-firing on a remapped ⌘/Ctrl/Alt chord.
     if (
       !started &&
       cycleStageChord &&
@@ -1990,9 +1631,6 @@ export function SessionChat({
     }
   };
 
-  // Stable across renders (deps are the session id + the draft setter) so the
-  // memoized transcript rows that receive these, UserMessage, PermissionCard,
-  // aren't forced to re-render on every streamed token.
   const permission: PermissionHandlers = useMemo(
     () => ({
       onAllow: (rid) => sid && void respondPermission(sid, rid, true, null),
@@ -2006,16 +1644,7 @@ export function SessionChat({
     () => ({
       onRewind: (itemId, text) => {
         if (!sid) return;
-        // Land the user back on the prompt they're rewinding to (Claude-Desktop
-        // behaviour): the composer is repopulated with the original text so they
-        // can edit and re-send, while the backend truncates the conversation in
-        // parallel.
         onDraftChange(text);
-        // The first turn has nothing before it for claude to rewind to, so an
-        // in-place truncation is impossible, a log-only prune there would leave
-        // the model remembering everything. Rewinding it means "start over", so
-        // reset the tab to a fresh session: the next send begins a brand-new
-        // conversation the model has no memory of.
         if (isFirstUserTurn(sid, itemId)) {
           onResetSession();
         } else {
@@ -2036,10 +1665,6 @@ export function SessionChat({
           </div>
         </div>
       )}
-      {/* Prompt-history stack: floats in the pane's top-right corner over the
-          transcript gutter. Gated to states where the composer is actually
-          editable (not terminal / not blocked on a question), since recall
-          targets the composer draft. */}
       {!terminal && !pendingQuestion && prompts.length > 0 && (
         <PromptHistoryStack
           prompts={prompts}
@@ -2116,9 +1741,6 @@ export function SessionChat({
             </div>
           ) : (
             <>
-              {/* The plan drawer floats up from the composer over this area;
-                  keep these banners in their own stacking context so the drawer
-                  never covers the handoff box or a pending question. */}
               <div className="relative z-30">
                 {(showHandoffSuggest || showHandoffReady) && (
                   <HandoffBanner
@@ -2154,10 +1776,6 @@ export function SessionChat({
                   />
                 )}
               </div>
-              {/* Top margin reserves room for the pinned prompt chips, which
-                  float on their own strip just above the composer (absolute
-                  bottom-full right) so they clear the banners above (queued
-                  messages / handoff nudge) with breathing room. */}
               <div
                 className={`relative rounded-xl bg-panel-2 ${
                   pinnedPrompts.length > 0 ? "mt-12" : ""
@@ -2171,11 +1789,6 @@ export function SessionChat({
                   />
                 )}
                 <AutocompleteDropdown state={autocomplete} />
-                {/* Staged context lives INSIDE the composer as cards, consistent
-                    whether or not the session has started. Pre-start, the app's
-                    automatic docs (the mode's auto-suggestion, a captured handoff)
-                    show as chips above the per-turn attachment cards, the picked
-                    docs and files the user staged. */}
                 {(attachments.length > 0 || (!started && shell.docs.length > 0)) && (
                   <div className="space-y-1.5 px-3.5 pt-3">
                     {!started && (
@@ -2200,9 +1813,6 @@ export function SessionChat({
                     value={draft}
                     onChange={(e) => {
                       const val = e.target.value;
-                      // A change we didn't originate via recall = a user edit: leave
-                      // navigation so further typing builds on this text and the stash
-                      // is dropped.
                       if (historyNav.index !== null && val !== recalledValueRef.current) {
                         setHistoryNav(IDLE_NAV);
                       }
@@ -2232,15 +1842,7 @@ export function SessionChat({
                     className="selectable relative block w-full resize-none bg-transparent px-3.5 py-4 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
                   />
                 </div>
-                {/* Single row, never wrapping: when the labelled pickers don't
-                    fit, the layout effect above flips compactComposer so they
-                    collapse to icons and everything stays on one line. We clip
-                    the horizontal axis only (overflow-x) to hide the one
-                    pre-collapse layout frame so the Send/attach cluster can't
-                    bleed past the pane edge, overflow-y stays visible so the
-                    pickers' upward dropdowns (bottom-full) aren't clipped. */}
                 <div ref={toolbarRef} className="flex items-center gap-0.5 overflow-x-clip px-2 pb-2">
-                  {/* Mode is fixed at spawn → a badge once running; a picker before. */}
                   {started ? (
                     <span
                       title={compactComposer ? stageLabel(mode) : undefined}
@@ -2264,10 +1866,6 @@ export function SessionChat({
                       compact={compactComposer}
                     />
                   )}
-                  {/* Model picker, grouped by harness, picking a model also picks
-                      its harness. Mid-session changes take effect on the next
-                      session this tab starts. The "Harnesses →" footer opens the
-                      settings where providers/models are configured. */}
                   <ComposerMenu
                     title="Model"
                     leading={composerMark(harness.key, 14)}
@@ -2283,10 +1881,6 @@ export function SessionChat({
                     }}
                     compact={compactComposer}
                   />
-                  {/* Effort + permission mode apply to Claude and Codex; OpenCode
-                      manages its own reasoning/permission settings. Codex has its
-                      own effort ladder, so it gets its own picker rather than
-                      being offered a Claude-only level the app-server rejects. */}
                   {usingCodex && (
                     <ComposerMenu
                       title="Reasoning effort"
@@ -2298,26 +1892,18 @@ export function SessionChat({
                       compact={compactComposer}
                     />
                   )}
-                  {/* Hidden entirely for a model the CLI says takes no `--effort`
-                      (Haiku): an empty tier list means "not applicable", not "we
-                      don't know". */}
                   {!usingOpencode && !usingCodex && claudeEffortItems.length > 0 && (
                     <ComposerMenu
                       title="Reasoning effort"
                       leading={<EffortIcon size={14} />}
                       label={effort?.label ?? "Default"}
                       items={claudeEffortItems.map((e) => {
-                        // Ultracode needs an xhigh-capable model; grey it out (with
-                        // the reason) on any other model so it can't be picked into
-                        // a session the CLI would reject.
                         const blocked = e.key === "ultracode" && !modelSupportsUltracode(model);
                         return {
                           key: e.key,
                           label: e.label,
                           hint: blocked ? "needs an xhigh-capable model" : undefined,
                           disabled: blocked,
-                          // Accent-tint Ultracode so it's spottable in the list and,
-                          // when selected, in the composer trigger.
                           accent: e.key === "ultracode",
                         };
                       })}
@@ -2350,11 +1936,6 @@ export function SessionChat({
                       onFiles={onAddFiles}
                       onScreenshots={onAddScreenshots}
                     />
-                    {/* Clear context: end this conversation and start fresh, the
-                        manual way to dodge auto-compaction. Only meaningful once a
-                        session exists. The handoff-ready state lights the button
-                        amber + adds a slow pulse so the user knows the next step
-                        is to clear and resume from the captured handoff doc. */}
                     {started && (
                       <button
                         type="button"
@@ -2374,19 +1955,13 @@ export function SessionChat({
                         <EraserIcon />
                       </button>
                     )}
-                    {/* Live background shells (Bash run_in_background): a pulsing
-                        terminal icon + count that opens a per-task popover. Sits
-                        by the context meter; renders nothing when none run. */}
                     <BackgroundTasksIndicator
                       tasks={backgroundTasks}
                       onJumpTo={(toolUseId) => transcriptRef.current?.scrollToTool(toolUseId)}
                     />
-                    {/* Drop or paste a screenshot anytime, see the pane drop overlay. */}
                     {session?.contextTokens != null && (
                       <ContextMeter tokens={session.contextTokens} windowSize={contextWindow} />
                     )}
-                    {/* Stop stays available while a turn runs; Send stays too, so
-                        a follow-up can be queued mid-turn (conversation steering). */}
                     {busy && started && (
                       <button
                         type="button"

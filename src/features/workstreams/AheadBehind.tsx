@@ -1,7 +1,3 @@
-/** Ahead/behind of the base branch, the `↑2 ↓0` chip. Rendered in the GIT
- *  panel header and mirrored into the app header's right cluster so divergence
- *  stays visible when the changes sidebar is collapsed. Both legs always render;
- *  the live one takes an accent, a zero leg stays dim. */
 export function AheadBehind({
   ahead,
   behind,

@@ -1,20 +1,13 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- Dark tile backdrop with a subtle top-down sheen (full height). -->
     <linearGradient id="bg" x1="512" y1="0" x2="512" y2="1024" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#1a1d24" />
       <stop offset="1" stop-color="#0a0b0d" />
     </linearGradient>
   </defs>
 
-  <!-- Windows treatment: unlike app-icon.svg (inset to Apple's Dock grid), the
-       tile goes full-bleed to the frame so the icon reads at full size in the
-       Windows taskbar / Start menu, where icons are near edge-to-edge. -->
   <rect x="0" y="0" width="1024" height="1024" rx="170" ry="170" fill="url(#bg)" />
 
-  <!-- Enlarged isometric stack, centered: translate(-64,-64) scale(36) over the
-       32-unit mark space (content spans x 4-28, y 6-26) => the mark fills
-       ~84% wide x ~70% tall of the frame, vs ~49% x ~41% before. -->
   <g transform="translate(-64 -64) scale(36)" fill="#d97757">
     <path d="M16 26 4 20l12-6 12 6-12 6Z" opacity="0.45" />
     <path d="M16 22 4 16l12-6 12 6-12 6Z" opacity="0.7" />

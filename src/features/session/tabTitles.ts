@@ -1,17 +1,3 @@
-/**
- * Auto-generated agent-tab titles. When a tab's first session starts, a small
- * model (Settings → General, default Claude Haiku) summarizes the first prompt
- * into a short title, applied once.
- *
- * One time only: the title applies only while the tab is still unlocked, i.e. a
- * default `Agent N` that was never auto-titled or renamed. Success locks it, so
- * a tab is never re-titled. The `enabled` switch is enforced backend-side, so a
- * disabled feature lands in the `catch` below with no title applied.
- *
- * A freshly titled tab also gets a one-shot "animate" signal so the strip can
- * type the title out. That signal lives in module state, not the persisted tab
- * strip, so it plays once and never replays on reload.
- */
 
 import { create } from "zustand";
 
@@ -21,8 +7,6 @@ import { updateWorkstreamTabs, useWorkstreamTabsStore } from "./workstreamTabs";
 
 const animKey = (workstreamId: string, shellId: number) => `${workstreamId}:${shellId}`;
 
-/** Transient, non-persisted set of tabs whose title was just auto-generated and
- *  should play the rename animation once. Mirrors the composer-focus signal. */
 const useTabTitleAnimStore = create<{ keys: Record<string, true> }>(() => ({ keys: {} }));
 
 function markTabTitleAnimation(workstreamId: string, shellId: number): void {
@@ -30,9 +14,6 @@ function markTabTitleAnimation(workstreamId: string, shellId: number): void {
   useTabTitleAnimStore.setState((s) => ({ keys: { ...s.keys, [key]: true } }));
 }
 
-/** Claim (and clear) the rename-animation signal for a tab, true exactly once
- *  after an auto-title. The [`TabTitle`] component calls this when its title
- *  changes to decide whether to type the new title out. */
 export function consumeTabTitleAnimation(workstreamId: string, shellId: number): boolean {
   const key = animKey(workstreamId, shellId);
   if (!useTabTitleAnimStore.getState().keys[key]) return false;
@@ -44,8 +25,6 @@ export function consumeTabTitleAnimation(workstreamId: string, shellId: number):
   return true;
 }
 
-/** Best-effort: title the tab from its first prompt and lock it. No-op if the
- *  tab was renamed/locked meanwhile, the feature is off, or the call fails. */
 export async function generateTabTitle(args: {
   workstreamId: string;
   shellId: number;
@@ -55,10 +34,6 @@ export async function generateTabTitle(args: {
     const title = (await unwrap(commands.suggestTabTitle(args.input))).trim();
     if (!title) return;
     const { workstreamId, shellId } = args;
-    // Synchronous from here (no `await`): check applicability, flag the
-    // animation, then patch, so the flag is set before the title-change
-    // re-render runs the TabTitle effect, and nothing can mutate the tab in
-    // between (single-threaded; no await splits this).
     const ws = useWorkstreamTabsStore.getState().byWs[workstreamId];
     const shell = ws?.shells.find((s) => s.id === shellId);
     if (!shell || shell.titleLocked || shell.title === title) return;
@@ -77,7 +52,5 @@ export async function generateTabTitle(args: {
       };
     });
   } catch {
-    /* Title generation is best-effort; keep the default "Agent N" on any failure
-       (feature disabled, no claude/opencode binary, logged out, timeout). */
   }
 }

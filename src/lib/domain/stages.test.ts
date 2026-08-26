@@ -12,7 +12,6 @@ describe("stage modes", () => {
   it("excludes ship from the selectable modes but keeps it as a known stage", () => {
     expect(MODE_STAGES.map((s) => s.key)).not.toContain("ship");
     expect(STAGES.map((s) => s.key)).toContain("ship");
-    // Every selectable mode is still a real stage.
     for (const mode of MODE_STAGES) {
       expect(STAGES.find((s) => s.key === mode.key)).toBeDefined();
     }
@@ -60,7 +59,6 @@ describe("stageCommand", () => {
   });
 });
 
-// Drives the "Cycle Agent Stage" keybinding (default Shift+Tab).
 describe("nextModeStage", () => {
   it("advances through the selectable stages in order", () => {
     expect(nextModeStage("general")).toBe("research");
@@ -74,8 +72,6 @@ describe("nextModeStage", () => {
   });
 
   it("starts at the first mode for stages outside the cycle", () => {
-    // commit/ship/revise are real stages but excluded from the mode picker; an
-    // unknown string is treated the same, both start the cycle at general.
     for (const stage of ["commit", "ship", "revise", "bogus"]) {
       expect(nextModeStage(stage)).toBe("general");
     }
@@ -89,6 +85,6 @@ describe("nextModeStage", () => {
       cur = nextModeStage(cur);
     }
     expect(seen.size).toBe(MODE_STAGES.length);
-    expect(cur).toBe(MODE_STAGES[0].key); // full loop returns to the start
+    expect(cur).toBe(MODE_STAGES[0].key);
   });
 });

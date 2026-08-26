@@ -129,64 +129,21 @@ import { Toast } from "@/components/Toast";
 import type { Project, WorkstreamView } from "@/lib/bindings";
 import { useLastRoute } from "@/lib/lastRoute";
 
-// Stable identity for "no overrides yet" so the dispatcher's memo/effect doesn't
-// churn on every Root render before settings have loaded a keybindings section.
 const EMPTY_OVERRIDES: Overrides = {};
 
-// The header's left controls (sidebar toggle, dashboard, and, on a project,
-// docs) live in an absolutely-positioned cluster, so they're out of flow: the
-// header content must be inset past the cluster's right edge or the breadcrumb
-// slides under it once the sidebar collapses below the cluster's width. These
-// mirror the cluster's Tailwind layout so the inset is derived, not hard-coded
-// (and stays correct as controls are added, the old fixed 148 only covered the
-// 2-icon macOS cluster and ignored the later-added docs button + all of Linux).
-// The cluster's left edge is decided at runtime (see `leftClusterLeft` in the
-// component): it clears the macOS traffic lights only when they're actually
-// present, i.e. on macOS AND not in fullscreen, which hides them.
-const LEFT_CLUSTER_WITH_LIGHTS = 92; // left-[92px]: clears the macOS traffic lights
-const LEFT_CLUSTER_NO_LIGHTS = 12; // left-3: no lights to clear (Windows/Linux, or fullscreen)
-const LEFT_CLUSTER_ICON = 28; // each control is h-7 w-7
-const LEFT_CLUSTER_GAP = 4; // gap-1 between controls
-/**
- * Header glyphs are matched on *ink height*, not on `size`.
- *
- * `size` scales an icon's viewBox, not its artwork, and the shared icons fill
- * their 24-unit box by very different amounts: the panel rect spans 18/24,
- * CodeIcon's chevrons only 8/24. One shared `size` renders a 2:1 spread in
- * visible height, which is what made the row look ragged even with every
- * button at the same 28px square.
- *
- * So pick the target once, then divide by each icon's fill fraction (artwork
- * span + stroke, over the viewBox). `HEADER_INK` is 13.2px because that is
- * what the panel toggles already rendered at, so normalizing raises the
- * undersized glyphs instead of shrinking the row.
- *
- *   panel / book   18+1.8 / 24 = 0.825 → 16
- *   terminal       16+1.8 / 24 = 0.742 → 18
- *   folder         14+1.8 / 24 = 0.658 → 20
- *   app icon (img) full-bleed         → 13
- *   mark           20 / 32     = 0.625 → 21
- *
- * CodeIcon is the exception: at 0.41 it would need a 32px box to reach the
- * target, wider than the button it sits in, so the header draws its own `<>`
- * on the panel glyphs' grid (`EditorGlyph`) instead.
- */
-const HEADER_GLYPH = 16; // panel toggles, book
+const LEFT_CLUSTER_WITH_LIGHTS = 92;
+const LEFT_CLUSTER_NO_LIGHTS = 12;
+const LEFT_CLUSTER_ICON = 28;
+const LEFT_CLUSTER_GAP = 4;
+const HEADER_GLYPH = 16;
 const HEADER_TERMINAL = 18;
 const HEADER_FOLDER = 20;
 const HEADER_APP_IMAGE = 13;
 const HEADER_MARK = 21;
 
-const HEADER_CONTENT_PAD = 16; // pl-4 on the content row, before the breadcrumb
-const LEFT_CLUSTER_CLEARANCE = 12; // breathing room between the cluster and the breadcrumb
+const HEADER_CONTENT_PAD = 16;
+const LEFT_CLUSTER_CLEARANCE = 12;
 
-// Cross-platform vector icons (Lucide family / native-style), currentColor so
-// they theme with the bar and stay pixel-crisp at every DPI on macOS + Windows.
-// A near-square panel glyph, symmetric padding, rect fills 18/24 of the box,
-// rendered at HEADER_GLYPH like the editor icon beside it, so both show a
-// ~12px visible square, a hair above the caption X, and read as an equal pair. The sidebar is marked by a light divider
-// line offset to its side (right here), not a filled pane, a quieter glyph
-// that still reads as a panel toggle. The button is a fixed h-7 w-7, glyph-only.
 function PanelRightIcon() {
   return (
     <svg
@@ -210,11 +167,6 @@ function PanelRightIcon() {
   );
 }
 
-/** The editor trigger's fallback `<>`, drawn on `PanelRightIcon`'s grid (3–21
- *  of a 24 box, 1.8 stroke) rather than reusing `CodeIcon`, whose chevrons span
- *  only 8/24 and so render half the ink at the same `size`. Local to the header
- *  because the shared icon is right for its own call sites (file rows, harness
- *  badges) at their own scales. */
 function EditorGlyph() {
   return (
     <svg
@@ -235,9 +187,6 @@ function EditorGlyph() {
   );
 }
 
-/** Mirror of `PanelRightIcon` with the divider line on the left, the header's
- *  explicit toggle for the left project panel (the diff sidebar's right-panel
- *  toggle uses the un-mirrored one). */
 function PanelLeftIcon() {
   return (
     <svg
@@ -261,10 +210,6 @@ function PanelLeftIcon() {
   );
 }
 
-/** Branch-fork glyph. One geometry, drawn twice: `limbClass` colours the
- *  diverged branch, and that colour is the *only* difference between a
- *  worktree-backed workstream and a main checkout that has branched off its
- *  base. The limb keeps its original gap before the trunk. */
 function ForkGlyph({ limbClass }: { limbClass?: string }) {
   return (
     <svg
@@ -291,22 +236,14 @@ function ForkGlyph({ limbClass }: { limbClass?: string }) {
   );
 }
 
-/** A worktree-backed workstream. It lives on its own branch in a dedicated
- *  worktree. */
 function GitBranchIcon() {
   return <ForkGlyph />;
 }
 
-/** The project's own checkout, sitting on a branch that isn't its merge base.
- *  Identical to `GitBranchIcon` but for the accent limb. */
 function BranchedCheckoutIcon() {
   return <ForkGlyph limbClass="text-accent" />;
 }
 
-/** Glyph for an in-place workstream: it has no dedicated worktree, so it runs in
- * the project's own checkout. A house reads as "home base / the main checkout",
- * distinct at a glance from the branch-fork used for worktree-backed rows.
- * Geometry from Lucide's `house` for crisp, properly-weighted rendering. */
 function MainCheckoutIcon() {
   return (
     <svg
@@ -347,10 +284,6 @@ function ArchiveIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-/** Rounded-square glyph for the nav rail's Home entry. A simple framed square
- *  reads as "home base / dashboard" and, paired with the accent-filled active
- *  state, becomes the white-on-accent square button from the mock. Tuned to the
- *  mock: a bold, generously rounded outline that fills ~40% of the button. */
 function SquareIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
@@ -373,9 +306,6 @@ function SquareIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-/** Isometric cube for the nav rail's Projects entry, a 3D box reads as "a
- *  project / a unit of work," distinct from the flat square (Home) and the book
- *  (Library). Geometry from Lucide's `box`; sized to the mock (~47% of button). */
 function CubeIcon({ size = 19 }: { size?: number }) {
   return (
     <svg
@@ -396,9 +326,6 @@ function CubeIcon({ size = 19 }: { size?: number }) {
   );
 }
 
-/** Book glyph for the nav rail's Library entry, the mock's book: a spine curve
- *  on the left plus the inside-cover line near the foot. Geometry from Lucide's
- *  `book`; distinct from the lined `BookIcon` used for project docs / chat. */
 function RailBookIcon({ size = 19 }: { size?: number }) {
   return (
     <svg
@@ -448,14 +375,9 @@ function routeSection(pathname: string): string {
 const topIconClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink";
 
-/** Primary nav-rail icon button, Home / Projects / Library up top and the
- *  Archive / Settings utilities at the foot. Active marks itself with the
- *  activity-bar edge bar, not a fill on the glyph; Home alone keeps the
- *  mockup's persistent accent square. */
 const RAIL_ICON_BASE =
   "relative flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors";
 const railHomeClass = `${RAIL_ICON_BASE} bg-accent text-white shadow-sm`;
-// -left-2 cancels the rail's 8px icon inset so the bar sits flush on its edge.
 const RAIL_ACTIVE_BAR =
   "before:absolute before:-left-2 before:top-1/2 before:h-8 before:w-[2px] " +
   "before:-translate-y-1/2 before:rounded-r-full before:bg-accent before:content-['']";
@@ -466,20 +388,6 @@ const railNavClass = (active: boolean): string =>
       : "text-ink-dim hover:bg-edge/60 hover:text-ink"
   }`;
 
-/** A row/trigger icon for a detected app: its real rasterized icon when the
- *  backend produced one, else a glyph for its kind.
- *
- *  Rasterized macOS icons sit in a full-bleed squircle with built-in padding,
- *  so at the bar's nominal 18px the glyph reads ~14px, too light beside the
- *  stroke icons. Rendering the squircle at 22px matches their optical weight.
- *
- *  Real icons carry their own baked-in background (VS Code's white square,
- *  Terminal's black), so they don't recolor with the theme. Kept anyway, for
- *  brand recognition over monochrome glyphs. */
-/** The trigger's icon, sized so each kind lands on `HEADER_INK`, see the
- *  fill-fraction table above. Separate from `appIcon`, which sizes the dropdown
- *  rows where one number is fine because they sit in a list, not a tight row of
- *  matched glyphs. */
 function headerAppIcon(app: EditorTarget | undefined): ReactNode {
   if (!app) return <EditorGlyph />;
   if (app.iconDataUrl) return appIcon(app, HEADER_APP_IMAGE);
@@ -509,18 +417,11 @@ function appIcon(app: EditorTarget, size = 22): ReactNode {
   }
 }
 
-/** Top-bar dropdown that opens the active worktree (or project) directory in
- *  any installed editor / terminal, detected by the backend so only apps the
- *  user actually has are listed, plus a Copy path fallback. Sits just left of
- *  the changes-sidebar toggle. */
 function OpenInMenu({ dir }: { dir: string }) {
   const [open, setOpen] = useState(false);
   const targets = useEditorTargets();
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // The default editor (what the trigger wears) is also pulled to the top of
-  // the dropdown so row 1, and the "1" accelerator, open the user's primary
-  // editor, instead of whichever app the backend happened to list first.
   const defaultApp = useMemo(() => {
     const apps = targets.data ?? [];
     return (
@@ -540,8 +441,6 @@ function OpenInMenu({ dir }: { dir: string }) {
         label: app.name,
         icon: appIcon(app),
         run: (): void => {
-          // Best-effort: a wrong/uninstalled handler shouldn't surface a scary
-          // error for a convenience action, but log so failures are debuggable.
           const p = app.openWith ? openPath(dir, app.openWith) : openPath(dir);
           void p.catch((e) => console.error(`Open in ${app.name} failed`, e));
         },
@@ -557,8 +456,6 @@ function OpenInMenu({ dir }: { dir: string }) {
     ];
   }, [targets.data, defaultApp, dir]);
 
-  // While open, number keys (1–9) trigger the matching row, mirroring the
-  // accelerators shown at the right of each item. Escape is the Popover's job.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -573,17 +470,7 @@ function OpenInMenu({ dir }: { dir: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, items]);
 
-  // The trigger wears the default editor's icon (computed above), so it reads
-  // as "open in editor". It is `topIconClass` like every
-  // other bar control, one 28px square with nothing riding outside it. A
-  // chevron sidecar used to, which made this the only control wider than 28px
-  // and opened a 48px gap where every other pair sits at 36px;
-  // `aria-haspopup`/`aria-expanded` still announce it as a menu.
   return (
-    // `flex items-center` (not a bare block) so the inline-flex button is a
-    // flex item, cleanly cross-axis-centered like its sibling icon buttons in
-    // the header row. As a plain block wrapper it aligned to the line-box text
-    // baseline instead, which pushed the icon a few px high vs. its neighbours.
     <div className="flex items-center">
       <button
         ref={triggerRef}
@@ -628,14 +515,6 @@ function OpenInMenu({ dir }: { dir: string }) {
   );
 }
 
-/** Yellow triangle on a project row when its configured worktree-copy files
- *  don't resolve against the checkout (e.g. a `.env` that doesn't exist on
- *  disk). Hovering lists the offending patterns. Renders nothing when the copy
- *  config is clean or the project has none. The check runs on app start and
- *  refreshes when the copy list changes (see `useWorktreeFilesCheck`). */
-/** Per-block transform for the drag-to-reorder gesture: the grabbed block follows
- *  the cursor (no transition); every other block slides by the grabbed block's
- *  height to open the landing gap (CSS transition makes it smooth). */
 function projectDragStyle(
   drag: ProjectDragState,
   path: string,
@@ -684,8 +563,6 @@ export function Root() {
     doc?: string;
     from?: string;
   };
-  // Left project-sidebar collapse lives in the persisted uiStore (alongside the
-  // right diff sidebar's `diffHidden`) so the app reopens with the same layout.
   const collapsed = useUiStore((state) => state.projectSidebarCollapsed);
   const setProjectSidebarCollapsed = useUiStore(
     (state) => state.setProjectSidebarCollapsed,
@@ -693,19 +570,9 @@ export function Root() {
   const toggleProjectSidebar = useUiStore(
     (state) => state.toggleProjectSidebar,
   );
-  // The narrow layout tier (see lib/layout): below NARROW_WIDTH the project
-  // sidebar clamps to its minimum; below COMPACT_WIDTH it becomes an overlay
-  // drawer. `narrowDrawer` is the ephemeral (non-persisted) slot that tracks
-  // which panel is currently open as that overlay.
   const { width, narrow, compact } = useViewport();
   const narrowDrawer = useUiStore((state) => state.narrowDrawer);
   const setNarrowDrawer = useUiStore((state) => state.setNarrowDrawer);
-  // Tier-exit cleanup: a drawer left open at a narrow/compact width must not
-  // silently reopen after the window widens and re-tiles. Nothing else clears
-  // `narrowDrawer`. Leaving the narrow tier entirely (diff drawer or project
-  // drawer) clears it outright; leaving just the compact tier (the project
-  // drawer's only home; it returns to an in-flow clamped column) clears it
-  // only when it holds "project".
   const prevNarrowRef = useRef(narrow);
   const prevCompactRef = useRef(compact);
   useEffect(() => {
@@ -717,11 +584,7 @@ export function Root() {
     prevNarrowRef.current = narrow;
     prevCompactRef.current = compact;
   }, [narrow, compact, setNarrowDrawer]);
-  // Default to the widest we allow; the user can drag it narrower if desired.
   const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
-  // True only while the resize handle is being dragged. The panel's width
-  // transition (which smooths the collapse/expand) is suppressed during a drag
-  // so the panel tracks the cursor instead of trailing it by the animation.
   const [resizingSidebar, setResizingSidebar] = useState(false);
 
   const projects = useMemo(
@@ -734,33 +597,10 @@ export function Root() {
     ? projects.find((project) => project.path === currentProjectPath)
     : null;
   const currentSection = routeSection(pathname);
-  // The Library owns the second column itself (its own list panel), so the
-  // shell's project tree steps aside on this route.
   const onLibrary = pathname.startsWith("/library");
-  // The Prompt library renders its own "Prompts" panel (like the Library's list
-  // panel), so the project panel hides there too.
   const onPrompts = pathname.startsWith("/prompts");
-  // Settings owns the second column too, its section list is a real sidebar
-  // panel, and a project tree beside it would be dead weight (nothing in
-  // Settings is project-scoped).
   const onSettings = pathname.startsWith("/settings");
-  // Agents renders its own sidebar (the root nav + agent tree, or an open
-  // agent's configuration sections), so the project tree steps aside there
-  // too — the two stacked would put a project column beside a panel that
-  // already owns the surface's navigation.
   const onAgents = pathname.startsWith("/agents");
-  // Route-exit cleanup, companion to the tier-exit cleanup above. Neither
-  // drawer renders on every route, and navigating away doesn't clear the slot.
-  // An open drawer on a route that can't paint it isn't just invisible: it
-  // shadows Escape, so the first Escape on Settings would do nothing. Each
-  // drawer is cleared by its owner, Root for the project drawer and ProjectPage
-  // for the changes drawer.
-  //
-  // This reacts to the route transition, not the slot. The open drawer is read
-  // via `getState()` and kept out of the deps, so only a route-category change
-  // runs it. Subscribing would let it fire between "open the drawer" and the
-  // router committing the new path, which is the order the rail's Projects
-  // button uses, and it would close the drawer again.
   const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings && !onAgents;
   const diffDrawerRoutable = pathname.startsWith("/projects");
   useEffect(() => {
@@ -769,26 +609,14 @@ export function Root() {
     const routable = open === "project" ? projectDrawerRoutable : diffDrawerRoutable;
     if (!routable) setNarrowDrawer(null);
   }, [projectDrawerRoutable, diffDrawerRoutable, setNarrowDrawer]);
-  // Breadcrumb title for the selected doc, cache-shared with the detail pane's
-  // own `useDoc`, so no extra fetch; disabled (empty id) off the library route.
   const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "");
   const libDocTitle = libDoc.data ? docTitle(libDoc.data.meta) : undefined;
-  // Best-effort "View on GitHub" for the open library doc, surfaced in the
-  // window's top-right (cache-shared with the detail pane's own usage).
   const libDocUrl = useDocWebUrl(onLibrary ? (locationSearch.doc ?? "") : "");
-  // When the Library was opened from a project (its "Docs" affordance set
-  // `from`), resolve that project so the breadcrumb can lead back to it. Dropped
-  // if the project no longer exists.
   const backProject =
     onLibrary && locationSearch.from
       ? projects.find((p) => p.path === locationSearch.from)
       : undefined;
 
-  // Remember the project the user is working in so the Library opens scoped to
-  // the most relevant project, not every project's docs at once. Keyed on the
-  // thoughts-project string (not the recomputed object) so it only writes on a
-  // real project switch. Resolved back to a live project before use, so a
-  // removed project simply falls back to "all".
   const setLastProject = useLibraryScope((s) => s.setLastProject);
   const lastProject = useLibraryScope((s) => s.lastProject);
   const currentThoughtsProject = currentProject?.thoughtsProject;
@@ -799,7 +627,6 @@ export function Root() {
     (p) => p.thoughtsProject === lastProject,
   )?.thoughtsProject;
 
-  // The sidebar tree: every project's active workstreams, nested beneath it.
   const allWorkstreams = useAllWorkstreams(projects.length > 0);
   const itemsByProject = new Map<string, WorkstreamView[]>();
   for (const view of allWorkstreams.data ?? []) {
@@ -808,13 +635,6 @@ export function Root() {
     itemsByProject.set(view.item.projectPath, group);
   }
 
-  // ── Drag-to-reorder the project list ──────────────────────────────────────
-  // A project block (header + its nested workstreams) drags as a unit: the
-  // grabbed block lifts and follows the cursor while the others slide to open its
-  // landing gap (see `projectDragStyle` / `useProjectDrag`). Nothing reorders in
-  // the DOM until the drop. On drop `dragOrder` holds the new order (rendered via
-  // `orderedProjects`) until the persisted bootstrap catches up, so the block
-  // never flashes back to its old slot.
   const reorderProjects = useReorderProjects();
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const projectDragRef = useRef<ProjectDragHandlers>({ commit: () => {} });
@@ -830,35 +650,24 @@ export function Root() {
     const out = dragOrder
       .map((path) => byPath.get(path))
       .filter((p): p is Project => p !== undefined);
-    // Never drop a project the drag order doesn't know about (e.g. one added
-    // out-of-band mid-drag), append it.
     for (const p of projects) if (!dragOrder.includes(p.path)) out.push(p);
     return out;
   }, [projects, dragOrder]);
 
-  // Repoint the drag handler at the latest project list + mutation each render
-  // (the long-lived pointer listeners read it through the ref).
   projectDragRef.current = {
     commit: (from, to) => {
       const paths = projects.map((p) => p.path);
       const next = [...paths];
       const [moved] = next.splice(from, 1);
       next.splice(Math.max(0, Math.min(to, next.length)), 0, moved);
-      if (next.every((p, i) => p === paths[i])) return; // unchanged, nothing to persist
-      // Show the new order immediately, then persist; clear the override once the
-      // write settles (success → the refetch matches; error → the mutation rolls back).
+      if (next.every((p, i) => p === paths[i])) return;
       setDragOrder(next);
       reorderProjects.mutate(next, { onSettled: () => setDragOrder(null) });
     },
   };
-  // Pinned worktrees, a user-curated shortcut list rendered above the project
-  // tree (see `pinStore`). Resolved against the live active list so a pin whose
-  // workstream was archived/deleted simply drops out; `projectByPath` gives each
-  // pinned row its project's repo avatar + name (it sits outside its tree).
   const pinnedIds = usePinStore((state) => state.pinnedIds);
   const pinnedSectionCollapsed = usePinStore((state) => state.collapsed);
   const togglePin = usePinStore((state) => state.togglePin);
-  // Per-project disclosure in the tree below (folder folding).
   const collapsedProjectPaths = useProjectTreeStore((state) => state.collapsedPaths);
   const toggleProjectCollapsed = useProjectTreeStore((state) => state.toggleCollapsed);
   const togglePinnedSection = usePinStore((state) => state.toggleCollapsed);
@@ -874,11 +683,7 @@ export function Root() {
         (view) => view.item.id === activeWorkstreamId,
       )
     : undefined;
-  // True when we're on a project route with no workstream selected, the board
-  // view. Used to suppress the diff-sidebar chrome that only applies to a chat.
   const onBoard = currentSection === "Agent" && !locationSearch.item;
-  // Breadcrumb: show "Board" on the project overview, the workstream name when
-  // one is selected, or the generic section label everywhere else.
   const crumb =
     currentSection === "Agent"
       ? onBoard
@@ -886,21 +691,11 @@ export function Root() {
         : (activeWorkstream?.item.title ?? "Workstreams")
       : currentSection;
 
-  // A single contextual Back affordance: only on secondary views (library,
-  // settings, docs, setup) so users can return to the agent view without
-  // re-clicking the worktree in the sidebar. Never shown on the agent view
-  // itself, and only when there is actual history to return to.
   const router = useRouter();
   const canGoBack = useCanGoBack();
 
-  // Right-click menu + archive flow for the worktree rows. The view itself
-  // carries its project path, so the targets are just the view.
   const navigate = useNavigate();
 
-  // Non-blocking first-run gate: when config is missing and the user hasn't
-  // dismissed the wizard this session, navigate to /onboarding. Not a
-  // beforeLoad guard, the shell renders immediately and the wizard slides in
-  // only once the bootstrap query resolves.
   useEffect(() => {
     if (
       bootstrap.data?.config.state === "missing" &&
@@ -912,10 +707,6 @@ export function Root() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrap.data?.config.state, pathname]);
 
-  // Toggling a "global destination" icon (Library / Settings / project docs)
-  // while already there backs out to the previous view, or runs `fallback`
-  // when this view was the entry point, instead of being a no-op the user has
-  // to escape manually. (This replaces the header's dedicated Back button.)
   const closeOrBack = (fallback: () => void) => {
     if (canGoBack) router.history.back();
     else fallback();
@@ -926,11 +717,6 @@ export function Root() {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
     } else if (target === "/library") {
-      // Resume the Library where the user left it, scope, filters, and the open
-      // document, so returning doesn't force them to re-find it. Read the saved
-      // view imperatively (not a subscription) so the shell doesn't re-render on
-      // every in-Library interaction. First-ever open (no saved view) falls back
-      // to the most-recently-used project scope; "All projects" can still widen.
       const lastSearch = useLibraryScope.getState().lastSearch;
       void navigate({
         to: "/library",
@@ -942,12 +728,6 @@ export function Root() {
       void navigate({ to: target });
     }
   };
-  // The per-project "Docs" affordance now opens the consolidated Library scoped
-  // to this project (the dedicated project-docs route is gone). It leaves the
-  // project context, the Library is its own top-level section (rail icon), so
-  // it records `from` (the repo path) to power the header's back-to-project link.
-  // It also resumes where the user last left this project's docs, the doc +
-  // filters read while scoped to it, re-stamping `from`; a bare scope first time.
   const openProjectDocs = (project: Project) => {
     const saved =
       useLibraryScope.getState().lastSearchByProject[project.thoughtsProject];
@@ -961,16 +741,11 @@ export function Root() {
     });
   };
 
-  // Remember the current view so the next launch can restore it (the actual
-  // restore happens before first paint in main.tsx, to avoid flashing the
-  // dashboard). Skip the onboarding wizard, never a "view" to come back to.
   const rememberRoute = useLastRoute((s) => s.remember);
   useEffect(() => {
     if (!pathname.startsWith("/onboarding")) rememberRoute(routeHref);
   }, [routeHref, pathname, rememberRoute]);
 
-  // When the viewed workstream is archived, fall back to its project view (only
-  // when it was the selected item, leaves background archives alone).
   const dismissToProject = useCallback(
     (projectPath: string, id: string) => {
       if (currentProjectPath === projectPath && activeWorkstreamId === id) {
@@ -984,15 +759,9 @@ export function Root() {
     [currentProjectPath, activeWorkstreamId, navigate],
   );
 
-  // Archive-on-merge: when the active workstream's PR is observed merged and
-  // the setting is on, archive it automatically. Archive is non-destructive
-  // (the worktree moves to archived-contexts/, branch is preserved), so no
-  // discard concern. Guarded so it fires once.
   const archiveOnMerge = bootstrap.data?.settings.git?.archiveOnMerge ?? false;
   const autoArchive = useArchiveWorkstream();
   const autoArchivedRef = useRef<Set<string>>(new Set());
-  // Observe the active workstream's PR for archive-on-merge. Shares the query
-  // cache with the GIT panel's PR controls, so it adds no extra `gh` calls.
   const activePr = useWorkstreamPr(
     activeWorkstreamId ?? "",
     Boolean(activeWorkstream && !isFolderWorkstream(activeWorkstream)),
@@ -1028,8 +797,6 @@ export function Root() {
   const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(
     null,
   );
-  // Detach acts on whichever item's menu is open; the id is passed at mutate time
-  // (the menu closes on click, so a hook-arg id would churn before it resolves).
   const detachPr = useDetachPr();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [projectMenu, setProjectMenu] = useState<{
@@ -1038,8 +805,6 @@ export function Root() {
     project: Project;
   } | null>(null);
   const settingsPath = useProjectSettingsStore((s) => s.path);
-  // Left-rail scripts/terminal dock: which ws it toggles, whether that dock is
-  // open, and whether ANY Run is alive (turns the rail icon green).
   const scriptsActiveWs = useScriptsStore((s) => s.activeWorkstream);
   const scriptsDockOpen = useScriptsStore((s) =>
     s.activeWorkstream ? !!s.dock[s.activeWorkstream]?.open : false,
@@ -1051,23 +816,12 @@ export function Root() {
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
   const toggleDiff = useUiStore((state) => state.toggleDiff);
-  // On the narrow tier the changes sidebar is an overlay drawer (see
-  // lib/layout), so its effective visibility is the drawer slot, not the
-  // persisted `diffHidden` preference, which is restored untouched the
-  // moment the window widens.
   const diffShown = narrow ? narrowDrawer === "diff" : !diffHidden;
   const toggleDiffOrDrawer = () => {
     if (narrow) setNarrowDrawer(narrowDrawer === "diff" ? null : "diff");
     else toggleDiff();
   };
-  // Multiplexer mode indicator (set in Settings, not a toggle).
   const mux = useMultiplexer();
-  // Toggle the scripts dock's visibility from the rail. When it's docked in the
-  // right sidebar, "showing" it also reveals that sidebar (the panel lives in it);
-  // "hiding" just closes the dock without collapsing the sidebar.
-  // Reads `diffShown`, not the persisted `diffHidden`: on the narrow tier the
-  // sidebar's visibility is the drawer slot, so gating on the preference would
-  // both mis-read "is it visible" and reveal the dock into an off-screen panel.
   const toggleScriptsDock = () => {
     if (!scriptsActiveWs) return;
     const inSidebar = scriptsPosition === "right";
@@ -1079,8 +833,6 @@ export function Root() {
       if (inSidebar && !diffShown) toggleDiffOrDrawer();
     }
   };
-  // ⌘⇧F: expand the dock to its full height (or restore it). Per-workstream, so
-  // it shares the dock toggle's active-workstream gate.
   const maximizeScriptsDock = () => {
     if (scriptsActiveWs) toggleDockMaximized(scriptsActiveWs);
   };
@@ -1089,28 +841,12 @@ export function Root() {
   const agentsCollapsed = useUiStore((state) => state.agentsCollapsed);
   const toggleAgents = useUiStore((state) => state.toggleAgents);
 
-  // On the compact tier the project panel is an overlay drawer (see
-  // lib/layout): its persisted `collapsed` flag is ignored and left untouched,
-  // shown iff the drawer slot holds "project" instead.
   const projectSidebarShown = compact ? narrowDrawer === "project" : !collapsed;
-  // The drawer overlays the shell row from the rail's right edge, so the room
-  // it has is the row less the rail, passing the raw viewport would size it
-  // one rail wider than the box it sits in.
   const projectDrawerWidth = drawerWidth(PROJECT_SIDEBAR_MIN, width - NAV_RAIL_WIDTH);
-  // Room the project column actually takes in flow: none while collapsed, on a
-  // route that swaps it out for its own panel, or on the compact tier where it
-  // has lifted out into a drawer. This is what separates the two drawers'
-  // territory, the changes drawer overlays only what starts past this column.
   const projectColumnWidth =
     compact || collapsed || !projectDrawerRoutable
       ? 0
       : projectSidebarWidth(sidebarWidth, width);
-  // The header sidebar toggle acts on whichever left panel the route shows: the
-  // Library's list panel on /library, the Agents sidebar on /agents, the project
-  // tree everywhere else. All three collapse the same way, so one button drives
-  // them (and reads each one's shown/hidden state for its label). The Prompt
-  // library's and Settings' panels are fixed (always shown), so the toggle is
-  // inert there rather than silently flipping the hidden project tree.
   const sidebarShown = onLibrary
     ? !libraryCollapsed
     : onAgents
@@ -1126,21 +862,11 @@ export function Root() {
     else toggleProjectSidebar();
   };
 
-  // Reserve the traffic-light inset only when the lights are actually present:
-  // macOS, and not in fullscreen (which hides them). Off macOS there are none,
-  // so the cluster hugs the edge. This drives both the cluster's own position
-  // and the breadcrumb floor (`minContentOffset`) derived from it.
   const isFullscreen = useIsFullscreen();
   const macTrafficLights = IS_MACOS && !isFullscreen;
   const leftClusterLeft = macTrafficLights
     ? LEFT_CLUSTER_WITH_LIGHTS
     : LEFT_CLUSTER_NO_LIGHTS;
-  // Floor for the header inset: clear the absolutely-positioned left cluster so
-  // the breadcrumb never collides with it when the sidebar is collapsed. The
-  // cluster carries the sidebar toggle (every route has a collapsible left
-  // panel) plus the docs button (project routes only), and, off macOS, the
-  // leading Hyprlayer mark (the product icon; macOS shows none, since its
-  // icon lives in the Dock, so the cluster there clears only the controls).
   const leftClusterIcons =
     (IS_MACOS ? 0 : 1) + 1 + (currentProject && isGitProject(currentProject) ? 1 : 0);
   const leftClusterRight =
@@ -1149,13 +875,6 @@ export function Root() {
     (leftClusterIcons - 1) * LEFT_CLUSTER_GAP;
   const minContentOffset =
     leftClusterRight + LEFT_CLUSTER_CLEARANCE - HEADER_CONTENT_PAD;
-  // The breadcrumb hugs the left, sitting just past the header's own controls
-  // rather than tracking the panels below it. It used to be inset by the rail +
-  // project panel so it started where the main content did, which put it over
-  // the workstream pane, and made it slide sideways whenever the sidebar was
-  // resized or collapsed. `minContentOffset` is the only real constraint: clear
-  // the absolutely-positioned left cluster (and, with it, the macOS traffic
-  // lights) so the title never collides with the controls.
   const contentOffset = minContentOffset;
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (collapsed) return;
@@ -1170,28 +889,12 @@ export function Root() {
     });
   };
 
-  // Point the backend's live worktree watcher at the workstream on screen, and
-  // clear it (null) when none is, leaving a project route, or deselecting on
-  // the board. Driven from the same `activeWorkstreamId` the PR query mounts
-  // for, and from the shell rather than the page, so the backend's notion of
-  // "active" can't drift from the UI's and no unmount races the next set.
-  // It gates more than the file watcher: `pr_watch` reads this slot to pick the
-  // one workstream that gets live (API-spending) PR polling.
   useEffect(() => {
     void commands.watchWorktree(activeWorkstreamId ?? null);
   }, [activeWorkstreamId]);
 
-  // Commit / Ship gating + actions, shared with the GIT panel's buttons via
-  // `useWorkstreamGitActions` so the keyboard commands below stay in lockstep
-  // with what the sidebar shows. The buttons (and the PR controls) now live in
-  // the GIT panel at the top of the changes sidebar, the header carries no git
-  // actions; ⌘ commit/ship remain the path when that sidebar is collapsed.
   const gitActions = useWorkstreamGitActions(activeWorkstream ?? null);
 
-  // Global keyboard shortcuts. The dispatcher reads the user's overrides from
-  // bootstrap; each command below registers its handler only while it's usable
-  // in the current context (a null handler = "not available now"), so the chord
-  // is simply inert elsewhere. Tab/session commands register from ProjectPage.
   useKeybindings(
     bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES,
   );
@@ -1206,8 +909,6 @@ export function Root() {
   );
   useCommand("nav.back", canGoBack ? () => router.history.back() : null);
   useCommand("view.toggleProjectSidebar", toggleSidebar);
-  // ⌘`: toggle the terminal & scripts dock, the same action as the rail's dock
-  // button. Inert without an active workstream (the dock is per-workstream).
   useCommand("terminal.open", scriptsActiveWs ? toggleScriptsDock : null);
   useCommand(
     "terminal.toggleFullscreen",
@@ -1227,13 +928,7 @@ export function Root() {
   );
   useCommand("search.open", () => toggleSearch());
   useCommand("prompts.palette", () => togglePromptPalette());
-  // Custom prompt shortcuts (built-ins ride ws.commit / ws.ship above).
   usePromptHotkeys(activeWorkstream ?? null);
-  // Escape closes an open narrow-tier drawer first (see lib/layout), else
-  // closes Settings, mirroring how ⌘, toggles it shut. A dialog/menu open over
-  // either shadows this on the shared Escape stack, so it closes first. A
-  // second `useEscape` call here would itself shadow the Settings handler
-  // below it, both priorities live in this one registration.
   useEscape(
     narrowDrawer
       ? () => setNarrowDrawer(null)
@@ -1250,8 +945,6 @@ export function Root() {
       listen("menu:check-for-updates", () => {
         void checkNow().then((result) => {
           if (result === "available") {
-            // Single update surface: a bottom-right toast carrying a one-click
-            // "Restart to update" button (no separate sidebar pill).
             showUpdateToast();
           } else if (result === "uptodate") {
             const v = useUpdate.getState().currentVersion;
@@ -1288,34 +981,14 @@ export function Root() {
 
   return (
     <div className="flex h-full flex-col bg-surface">
-      {/* A compact toolbar with the breadcrumb + window controls vertically
-          centered. On macOS the traffic lights
-          are pushed down to this bar's center via trafficLightPosition
-          (tauri.conf.json y ≈ header height / 2) so they line up with the
-          centered content. */}
-      {/* Stays opaque: nothing scrolls under it. The window bar sits above the
-          h-9 Projects band and the agent tab strip, both of which are solid, so
-          a backdrop-blur here would sample flat colour and render nothing. The
-          glass lives on those two bands instead, which do have scrollers
-          directly beneath them. */}
       <header
         className="relative flex h-10 shrink-0 items-center border-b border-edge bg-panel"
         {...dragRegion()}
       >
         <div
-          // gap-2, not gap-1: the same pitch the right cluster sits at, so the
-          // two ends of the bar share one 36px rhythm (28px box + 8px gap).
           className="absolute top-1/2 flex -translate-y-1/2 items-center gap-2"
           style={{ left: leftClusterLeft }}
         >
-          {/* Off macOS the native title bar is gone (decorations: false), so the
-              top-left corner is ours to fill, lead the cluster with the
-              Hyprlayer mark as the product icon. macOS keeps its
-              native traffic lights here and shows no in-app logo (its icon lives
-              in the Dock), so this renders only off macOS. `drag-region="deep"`
-              (not bare) so the glyph itself drags the window, not just the box's
-              padding ring, the SVG is the click target, and a bare region only
-              drags on a direct hit. */}
           {!IS_MACOS && (
             <span
               className="flex h-7 w-7 shrink-0 items-center justify-center"
@@ -1325,11 +998,6 @@ export function Root() {
               <HyprlayerMark size={HEADER_MARK} />
             </span>
           )}
-          {/* Explicit sidebar toggle, the discoverable way to collapse or show
-              the left panel (the project tree, or the Library's list panel on
-              /library). The nav rail's Projects entry also toggles the tree, but
-              less obviously. Sits in the traffic-light-aware cluster, so it stays
-              clear of the macOS lights and hugs the edge on Windows/fullscreen. */}
           <button
             type="button"
             onClick={toggleSidebar}
@@ -1339,9 +1007,6 @@ export function Root() {
           >
             <PanelLeftIcon />
           </button>
-          {/* Project docs lives here (a fixed left anchor) rather than in the
-              right cluster, so it doesn't shift when the diff sidebar inset
-              changes. */}
           {currentProject && isGitProject(currentProject) && (
             <button
               type="button"
@@ -1355,13 +1020,6 @@ export function Root() {
           )}
         </div>
 
-        {/* marginLeft tracks the sidebar width; not reduced-motion-gated so it
-            stays in lockstep with the (also un-gated) sidebar slide on Windows. */}
-        {/* No margin transition: the inset no longer follows the sidebar (see
-            `contentOffset`), so it only moves when the left cluster itself
-            changes, entering fullscreen, or a route that adds the docs button.
-            Those are instant elsewhere in the bar, and animating just this row
-            would drift it out of step with them. */}
         <div
           className={`flex min-w-0 flex-1 items-center justify-between gap-4 pl-4 ${
             IS_MACOS ? "pr-3" : "pr-1"
@@ -1389,9 +1047,6 @@ export function Root() {
               </>
             ) : onLibrary ? (
               <>
-                {/* Opened from a project ("Docs"): a back link to it, leading the
-                    breadcrumb. Goes straight to the project (deterministic, not
-                    history, which an in-Library navigation could have muddied). */}
                 {backProject && (
                   <>
                     <button
@@ -1417,8 +1072,6 @@ export function Root() {
                     </span>
                   </>
                 )}
-                {/* "Library" returns to the list (drops the selected doc) while
-                    keeping the current scope + filters. */}
                 <button
                   type="button"
                   onClick={() =>
@@ -1452,10 +1105,6 @@ export function Root() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {/* Multiplexer mode is signalled by the nav-rail Home button taking
-                the grid glyph (below), no separate top-right marker. */}
-            {/* "View on GitHub" for the open library doc lives at the window's
-                very top-right (onLibrary and currentProject are exclusive). */}
             {onLibrary && libDocUrl.data && (
               <a
                 href={libDocUrl.data}
@@ -1468,13 +1117,6 @@ export function Root() {
             )}
             {currentProject && (
               <>
-                {/* Ahead/behind of the active workstream's base, a fallback for the
-                    GIT panel header, shown ONLY while the changes sidebar is
-                    collapsed (otherwise the panel already shows it, so mirroring it
-                    here would just duplicate). Gated on a diverged branch so it
-                    stays out of the way when there's nothing to report. Keyed to
-                    `diffShown` rather than the persisted preference so the narrow
-                    tier's drawer counts as shown. */}
                 {!diffShown &&
                   activeWorkstream &&
                   (activeWorkstream.git.ahead > 0 ||
@@ -1485,11 +1127,6 @@ export function Root() {
                       className="px-1"
                     />
                   )}
-                {/* New workstream and the prompt library used to sit here as
-                    their own bar buttons. Both were redundant, the board owns
-                    workstream creation, and the palette has its chord (still
-                    registered below as `prompts.palette`), so the bar keeps
-                    only what has no other home. */}
                 <OpenInMenu
                   dir={
                     activeWorkstream?.item.worktreePath ?? currentProject.path
@@ -1519,28 +1156,16 @@ export function Root() {
           </div>
         </div>
 
-        {/* Off-macOS, the native title bar is removed (decorations: false), so
-            we draw our own caption buttons flush in the top-right corner.
-            macOS keeps its overlaid traffic lights, so the
-            component renders nothing there; Linux draws Close alone. */}
         <WindowControls />
       </header>
 
       <div className="relative flex min-h-0 flex-1" data-shell-row>
-        {/* Primary nav rail, the activity-bar column from the redesign. Home,
-            Projects and Library ride up top; Archive + Settings sit at the
-            foot. Always visible, independent of the project panel's collapse. */}
         <nav
           className="flex shrink-0 flex-col items-center border-r border-edge bg-surface py-2.5"
           style={{ width: NAV_RAIL_WIDTH }}
           aria-label="Primary"
         >
-          {/* 32px squares + gap-3 = 44px pitch. */}
           <div className="flex flex-col items-center gap-3">
-            {/* Home, its glyph doubles as the Multiplexer-mode indicator: the
-                lone rounded square "splits" into a 2×2 grid of panes while the
-                mode is on (set in Settings → Advanced), reverting when off. Still
-                navigates home; the mode lives in the tooltip. */}
             <Link
               to="/"
               className={railHomeClass}
@@ -1560,9 +1185,6 @@ export function Root() {
             <button
               type="button"
               onClick={() => {
-                // Clicking the active Projects entry collapses or re-opens the
-                // project panel (the nav rail stays). From elsewhere
-                // it opens a project with the panel shown. Inert with no projects.
                 if (pathname.startsWith("/projects")) {
                   if (compact) setNarrowDrawer(narrowDrawer === "project" ? null : "project");
                   else toggleProjectSidebar();
@@ -1570,11 +1192,6 @@ export function Root() {
                 }
                 const target = currentProjectPath ?? projects[0]?.path;
                 if (target) {
-                  // Both, because on the compact tier the persisted flag no
-                  // longer drives visibility, the drawer slot does, but it
-                  // still decides what the user sees the moment the window
-                  // widens back out. Clearing one without the other either
-                  // leaves the panel hidden now or hidden later.
                   setProjectSidebarCollapsed(false);
                   if (compact) setNarrowDrawer("project");
                   void navigate({
@@ -1612,8 +1229,6 @@ export function Root() {
               title="Prompt library"
               aria-label="Prompt library"
             >
-              {/* Sized with its neighbours (Cube / Book at 19), not the 16 of
-                  the foot icons, the top group runs visually larger. */}
               <ZapIcon size={19} strokeWidth={1.6} />
             </button>
             <button
@@ -1674,16 +1289,6 @@ export function Root() {
             </button>
           </div>
         </nav>
-        {/* Dismiss surface for whichever drawer is open, the thing DRAWER_PEEK
-            reserves room for. Escape closes a drawer too, but that is the only
-            way out otherwise, and an overlay that swallows clicks on the content
-            it covers reads as a freeze. Transparent (the peek strip is a hint,
-            not a modal veil) and z-20: under both drawers (z-30, in this same
-            stacking context, neither `main` nor ProjectPage's root establishes
-            one), over the in-flow content it guards. Starts past the rail and
-            past the project column, so neither of the two things that are still
-            live beside a drawer has its clicks eaten, at compact both of those
-            are zero-width or lifted out, and it starts at the rail's edge. */}
         {narrowDrawer && (
           <div
             role="presentation"
@@ -1692,19 +1297,6 @@ export function Root() {
             onClick={() => setNarrowDrawer(null)}
           />
         )}
-        {/* Project panel, width-animates between 0 and sidebarWidth so a
-            collapse/expand glides instead of snapping. overflow-hidden clips
-            the fixed-width inner shell (pinned to the rail edge) so its content
-            never reflows mid-animation; the transition is dropped while the
-            resize handle is dragged so the panel tracks the cursor. The Library,
-            Prompts and Settings routes hide it entirely, each renders its own
-            panel in that column. The width transition is not reduced-motion-gated
-           , Windows maps that to the often-off "Animation effects" toggle, which
-            would otherwise snap it. On the compact tier (see lib/layout) this
-            becomes an overlay drawer over the content instead of an in-flow
-            column, driven by `narrowDrawer` rather than the persisted
-            `collapsed` flag, which is left untouched and resumes the moment
-            the window widens back out of compact. */}
         {!onLibrary && !onPrompts && !onSettings && !onAgents && (
           <aside
             className={`shrink-0 overflow-hidden border-r border-edge bg-panel ${
@@ -1728,12 +1320,6 @@ export function Root() {
                   : projectSidebarWidth(sidebarWidth, width),
               }}
             >
-              {/* Header band, height-matched to the agent bar (h-9) so the
-              "Projects" label + add button sit vertically centered alongside it.
-              No bottom rule: the tree reads as one column, and the
-              band's glass already separates it from the list scrolling beneath.
-              The agent bar across the seam keeps its border, it divides two
-              different panes, where this only titles the one below it. */}
               <div
                 data-glass
                 className={`relative z-10 flex h-9 shrink-0 items-center justify-between pl-4 pr-3 ${GLASS_BAND}`}
@@ -1751,11 +1337,6 @@ export function Root() {
                   <PlusIcon size={14} />
                 </button>
               </div>
-              {/* -mt-9 lifts this scroller up behind the Projects band above, so
-                  the list slides under it and the band's backdrop-blur has real
-                  content to sample (Tahoe's in-window glass). pt-11 restores the
-                  original pt-2 gap on top of the band's h-9, keeping the first
-                  row exactly where it was at rest. */}
               <nav className="-mt-9 flex-1 overflow-y-auto px-2 pt-11">
                 {bootstrap.isLoading && (
                   <div className="flex justify-center py-4">
@@ -1777,10 +1358,6 @@ export function Root() {
                   </p>
                 )}
 
-                {/* Pinned worktrees: a quick-access list above the project tree.
-                Hidden when nothing is pinned, so the header never takes space
-                until the user pins something. Pin/unpin lives on the worktree
-                row's right-click menu. */}
                 {pinnedViews.length > 0 && (
                   <div className="mb-1 border-b border-edge/60 pb-1.5">
                     <button
@@ -1887,18 +1464,12 @@ export function Root() {
                           projectHighlight ? "bg-accent/15" : "hover:bg-edge/50"
                         } ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
                       >
-                        {/* The selected project wears the redesign's accent spine. */}
                         {projectHighlight && (
                           <span
                             className="absolute inset-y-0 left-0 w-[3px] bg-accent"
                             aria-hidden="true"
                           />
                         )}
-                        {/* Disclosure: folds this project's
-                            workstreams away. A project with none keeps the same
-                            gap so every row's avatar stays on one vertical line.
-                            data-no-drag so hitting the chevron toggles instead of
-                            starting a project reorder. */}
                         {children.length > 0 ? (
                           <button
                             type="button"
@@ -1924,7 +1495,6 @@ export function Root() {
                           params={{ projectPath: p.path }}
                           draggable={false}
                           onClick={(e) => {
-                            // A drag that ends on the header shouldn't also navigate.
                             if (projectDragSuppress.current) e.preventDefault();
                           }}
                           className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-1.5 pr-2.5 text-sm text-ink ${
@@ -1949,8 +1519,6 @@ export function Root() {
                         <span data-no-drag className="contents">
                           <ProjectCopyWarning projectPath={p.path} />
                         </span>
-                        {/* Workstream count at rest; the add affordance takes its
-                        place on hover (the mockup shows the count). */}
                         {children.length > 0 && (
                           <span className="shrink-0 px-1.5 text-xs tabular-nums text-ink-dim/60 group-hover:hidden">
                             {children.length}
@@ -1973,17 +1541,9 @@ export function Root() {
                         children.map((view) => {
                           const isActiveItem =
                             isCurrent && activeWorkstreamId === view.item.id;
-                        // In-place workstreams run in the project's own checkout (no
-                        // dedicated worktree). The row reads as a clean status-dot +
-                        // title to match the design, so the distinction lives in the
-                        // tooltip rather than a leading glyph.
                         const inplace = view.item.worktreeMode === "inplace";
-                        // A folder workstream has no branch at all.
                         const folder = isFolderWorkstream(view);
                         const detached = isDetachedHead(view);
-                        // The main checkout sits on a branch other than its merge
-                        // base. Suppressed while detached: the stored branch is
-                        // stale then, so naming it would contradict the tooltip.
                         const branchedInPlace = inplace && !detached && isOffBase(view);
                         return (
                           <Link
@@ -1996,14 +1556,9 @@ export function Root() {
                               setProjectMenu(null);
                               setItemMenu({ x: e.clientX, y: e.clientY, view });
                             }}
-                            // paddingLeft 40 puts this title on the project title's
-                            // x: it trails the header's chevron (ml-1 + w-4) + avatar.
                             className={rowClass({
                               tier: "standard",
                               selected: isActiveItem ? "spine" : "none",
-                              // Off while active: the tint already carries the
-                              // highlight, so a hover on top of it would flicker
-                              // the row back to the neutral colour.
                               interactive: !isActiveItem,
                               className: `flex gap-2.5 overflow-hidden pr-2 text-sm ${
                                 isActiveItem ? "text-ink" : "text-ink-dim hover:text-ink"
@@ -2032,12 +1587,6 @@ export function Root() {
                             <span className="min-w-0 flex-1 truncate">
                               {view.item.title}
                             </span>
-                            {/* Worktree-mode indicator: branch-fork for a dedicated
-                            worktree, house for an in-place (main-checkout) run.
-                            Kept on the trailing edge with the git chip so the
-                            leading status dot stays clean (the mock's look). An
-                            in-place checkout on a branch other than its merge base
-                            takes the fork too, with the limb in accent. */}
                             <span
                               className="flex shrink-0 items-center text-ink-dim/70"
                               title={
@@ -2070,11 +1619,6 @@ export function Root() {
           </aside>
         )}
 
-        {/* Only where the project panel itself renders, the routes that swap it
-            out for their own panel have no project width to drag. Gated off
-            the narrow tier too: the sidebar is clamped (or a drawer) there,
-            so there's nothing to drag, this is why the narrow content row is
-            473, not 465 (lib/layout's SPLIT_PANE_MIN comment). */}
         {!collapsed && !narrow && !onLibrary && !onPrompts && !onSettings && !onAgents && (
           <div
             role="separator"
@@ -2086,9 +1630,6 @@ export function Root() {
         )}
 
         <main className="min-w-0 flex-1 overflow-y-auto">
-          {/* Boundary for the code-split route chunks (see router.tsx): shows a
-              spinner during the one-time fetch of a heavy route (the Library's
-              CodeMirror, ProjectPage's xterm), then it's cached. */}
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center">
@@ -2133,8 +1674,6 @@ export function Root() {
           >
             Rename workstream…
           </ContextMenuItem>
-          {/* A folder workstream has no repo to attach a PR to. Detach below
-              stays: the escape hatch for a row that got one before this gate. */}
           {!isFolderWorkstream(itemMenu.view) && (
             <ContextMenuItem
               onClick={() => {
@@ -2249,7 +1788,6 @@ export function Root() {
         target={archiveTarget}
         onClose={() => setArchiveTarget(null)}
         onArchived={(id) => {
-          // If the archived item was the one selected, drop back to its project.
           if (archiveTarget)
             dismissToProject(archiveTarget.item.projectPath, id);
           setArchiveTarget(null);
@@ -2260,7 +1798,6 @@ export function Root() {
         target={removeTarget}
         onClose={() => setRemoveTarget(null)}
         onRemoved={(path) => {
-          // If the removed project was the one being viewed, drop back home.
           if (currentProjectPath === path) void navigate({ to: "/" });
           setRemoveTarget(null);
         }}

@@ -1,18 +1,3 @@
-/**
- * Native OS toasts for "agent needs your attention". The caller decides
- * *whether* to fire, based on whether the user is looking at the session. This
- * module decides *how*: settings, OS permission, dispatch.
- *
- * Two macOS adaptations:
- *  - The plugin's `sound` rides legacy `NSUserNotification`, which Apple
- *    silences on 13+. We play it out-of-band via the `play_sound` command
- *    instead, so the banner stays silent and the sound stays reliable.
- *  - `onAction` is mobile-only on 2.3.3, so desktop gets no banner-click
- *    event. We keep a small ring of recent `(workstreamId, projectPath,
- *    firedAt)` intents and route on the focus edge: regaining focus within
- *    `ROUTE_WINDOW_MS` of a fire jumps to that workstream. Cmd-tabbing back
- *    without clicking still routes, but only against a fresh intent.
- */
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -35,9 +20,6 @@ type NotifyArgs = {
 };
 
 const DEFAULT_CONFIG = { enabled: true, sound: true } as const;
-/** Window between a notification fire and a focus-edge in which we'll route
- *  to the originating workstream. Wider than human reaction time, narrower
- *  than "I came back for unrelated reasons." */
 const ROUTE_WINDOW_MS = 15_000;
 
 let cachedSettings: AppSettings | null = null;
@@ -47,8 +29,6 @@ let focusListenerInstalled = false;
 type Intent = { projectPath: string; workstreamId: string; firedAt: number };
 let lastIntent: Intent | null = null;
 
-/** Drop the in-memory settings copy so the next notification refetches. Call
- *  this after `setAppSettings` succeeds. */
 export function invalidateNotificationSettingsCache(): void {
   cachedSettings = null;
 }
@@ -75,23 +55,15 @@ async function ensurePermission(): Promise<boolean> {
   return permissionPromise;
 }
 
-/** Play the OS notification sound. macOS uses `afplay` (see `play_sound` in
- *  src-tauri); other OSes get it via the plugin's `sound` field at send time. */
 async function playSound(): Promise<void> {
   if (IS_MACOS) {
     try {
       await unwrap(commands.playSound());
     } catch {
-      /* afplay failed, swallow, banner already fired */
     }
   }
 }
 
-/**
- * Install a window-focus listener once. On focus-edge transitions (false→true)
- * we route to the most recent intent if it's still fresh and the route still
- * resolves. Called from main.tsx at startup.
- */
 export function setupNotificationActions(): void {
   if (focusListenerInstalled) return;
   focusListenerInstalled = true;
@@ -112,15 +84,6 @@ export function setupNotificationActions(): void {
   });
 }
 
-/**
- * Fire a needs-you toast. Caller is responsible for deciding the user can't
- * already see the session that paused; this function just does the
- * settings + permission + OS-side dispatch.
- *
- * On macOS the visual banner goes through the plugin (silent), and the sound
- * is played separately via `afplay`. Stamps `lastIntent` so the focus-edge
- * listener can route the user back when they cmd-tab/click in.
- */
 export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
   try {
     const settings = await getSettings();
@@ -137,8 +100,6 @@ export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
     sendNotification({
       title: `${args.workstreamTitle} needs you`,
       body: `Agent paused in ${args.stage} . Waiting for your input.`,
-      // On non-macOS the plugin delivers the sound reliably; on macOS we
-      // play it out-of-band below (the plugin's sound field is silent there).
       sound: !IS_MACOS && (cfg.sound ?? DEFAULT_CONFIG.sound) ? "default" : undefined,
     });
     if (cfg.sound ?? DEFAULT_CONFIG.sound) void playSound();
@@ -147,10 +108,6 @@ export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
   }
 }
 
-/** Fire a sample toast on demand, bypasses the enabled/visibility gates so
- *  the Settings "Send test" button can validate OS-level delivery (signing,
- *  TCC grant, focus mode) independently of the dispatch flow. Still respects
- *  the OS permission grant, requests it if missing. */
 export async function sendTestNotification(): Promise<{
   sent: boolean;
   reason?: "permission_denied" | "error";
@@ -170,8 +127,6 @@ export async function sendTestNotification(): Promise<{
   }
 }
 
-/** Look up the {projectPath, title} for a workstream from the react-query cache.
- *  Returns null if neither the "@all" list nor any project-scoped list holds it. */
 export function findWorkstreamForNotify(
   workstreamId: string,
 ): { projectPath: string; title: string } | null {

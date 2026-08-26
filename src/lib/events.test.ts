@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryClient } from "./queryClient";
 
-/** Every event the bridge subscribes to, recording its callback. */
 const listeners = vi.hoisted(() => new Map<string, (event: unknown) => void>());
 const stub = vi.hoisted(
   () => (name: string) => ({
@@ -38,8 +37,6 @@ describe("binariesChanged", () => {
     vi.restoreAllMocks();
   });
 
-  // The reported bug: a CLI upgrade + Re-detect left the AI Agents card on the
-  // old binary until restart.
   it("re-asks everything the hyprlayer binary's identity decides", () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
     attachEventListeners();

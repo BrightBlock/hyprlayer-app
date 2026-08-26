@@ -4,7 +4,6 @@ import type { DocMeta } from "@/lib/bindings";
 import { Badge, Card } from "@/components/ui";
 import { STATUS_TONE } from "./constants";
 
-/** Read-only frontmatter summary shown above the rendered preview. */
 export function FrontmatterCard({ meta }: { meta: DocMeta }) {
   const fm = meta.fm;
 

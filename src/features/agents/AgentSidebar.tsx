@@ -1,9 +1,3 @@
-/**
- * The Agents sidebar: root nav (Agents / System agents / Skills), the filter
- * and scope controls, and the folder/agent tree — the Prompts anatomy
- * (`PromptLibrary.tsx:610-747`) applied to the agent library. Presentational:
- * props in, callbacks out, no queries, no store reads except the width.
- */
 
 import { useRef, useState, type ReactNode } from "react";
 
@@ -40,63 +34,28 @@ import {
 } from "./agents";
 import { SoonBadge } from "./parts";
 
-/** Header band and inline icon buttons, matching Prompts' own
- *  (`PromptLibrary.tsx:618-649`) — the app's inline icon-button tier
- *  (ADR-0006 "Icon buttons"), not `IconButton`'s h-8 chrome tier. */
 const HEADER_ICON_BTN =
   "flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink";
 
-/** Where a `FolderRow`'s label starts, in px from the row's left edge: its own
- *  `px-2.5` inset (10) + the disclosure chevron (`w-2.5`, 10) + `gap-2` (8) +
- *  the folder icon (13) + `gap-2` (8). */
 const FOLDER_LABEL_X = 49;
 
-/** Left inset for a depth-0 agent row, chosen so its *label* lands on
- *  `FOLDER_LABEL_X`: the row's own leading chrome is a 6px dot, a `gap-2` (8)
- *  and its `border` (1), so it starts 15px earlier than its label.
- *
- *  That makes a loose agent's name align with a folder's name — they are
- *  siblings — and pushes a foldered agent (indent 14) one step further in, so
- *  its dot lands in the folder label's own column. Same relationship
- *  `ChangesPanel`'s file rows keep to their directory rows (`:88`, `:201`):
- *  the child's glyph sits at the parent's label, the child's label past it.
- *  Before this the base was a flat 10, which put a foldered agent's dot 24px
- *  left of its folder's label and read as outdented from its own parent. */
 const AGENT_ROW_BASE = FOLDER_LABEL_X - 15;
 
 export type AgentSidebarProps = {
-  /** Rendered width (px). Owned by `AgentLibrary`, which resolves the live
-   *  drag against the persisted store value — see `uiStore`'s `partialize`
-   *  note on why the drag itself must not reach the store. */
   width: number;
-  /** Collapsed to zero width by the header's sidebar toggle (`agentsCollapsed`). */
   collapsed: boolean;
-  /** Drops the width transition while the resize handle is being dragged, so
-   *  the panel tracks the cursor instead of easing behind it. */
   resizing: boolean;
   section: AgentSection;
   onSection: (section: AgentSection) => void;
-  /** The open agent, or null for the list. Drills the sidebar in — see
-   *  "Sidebar gains a drilled-in state" in the plan's Phase 2. */
   selectedAgent: AgentFile | null;
-  /** Clears the selection and any unsaved draft — the drilled-in header
-   *  band's only back affordance now that the editor no longer has its own. */
   onBack: () => void;
   editorTab: EditorTab;
   onEditorTab: (tab: EditorTab) => void;
 
-  /** Everything `agentRows()` produced for the current section — see
-   *  `AgentLibrary`, which derives `AgentTab` from `section` before calling it. */
   rows: AgentRow[];
-  /** Owned (non-system) agents in the current scope — the Agents root row's
-   *  count. Scope-aware (the caller's query is keyed by project path), but
-   *  unaffected by the search box. */
   agentsCount: number;
-  /** Resolves an agent's Draft status for the tree row's badge. */
   library: AgentLibrarySettings | undefined;
-  /** Every mapped project, for the scope picker. */
   projects: Project[];
-  /** Path of the project in scope, or null for the global library. */
   selectedProject: string | null;
   onSelectProject: (path: string | null) => void;
   search: string;
@@ -104,24 +63,15 @@ export type AgentSidebarProps = {
   onToggleFolder: (folder: string) => void;
   onOpen: (agent: AgentFile) => void;
   onMenu: (agent: AgentFile, at: { x: number; y: number }) => void;
-  /** Right-click on a folder header: "New agent in <folder>", and the delete
-   *  for a hand-made one. Same idiom as `onMenu` — the row reports the point,
-   *  `AgentLibrary` owns the menu. */
   onFolderMenu: (folder: string, at: { x: number; y: number }) => void;
-  /** The dot beside each agent's name, already resolved: the sidebar renders
-   *  the colour, it does not decide it (same contract as `AgentList` had). */
   dotColorOf: (agent: AgentFile) => string;
   loading: boolean;
 
   onCreate: () => void;
   onNewFolder: () => void;
-  /** State of the "Group uncategorized" switch, folded into the header's
-   *  overflow menu. Only meaningful for owned agents' folder derivation, so
-   *  the menu that carries it only renders on the Agents root. */
   groupUncategorized: boolean;
   onGroupUncategorized: (on: boolean) => void;
 
-  /** The bundle-freshness chip, now living in the footer band. */
   bundle: {
     state: BundleChipState;
     updating: boolean;
@@ -170,11 +120,6 @@ export function AgentSidebar(props: AgentSidebarProps) {
 
   const drilled = selectedAgent !== null;
 
-  // Root nav is present in both states (plan Phase 2, "Sidebar gains a
-  // drilled-in state"): Agents/Skills never leave the screen. Drilled in, the
-  // current root is marked but not filled — the fill belongs to the
-  // Configuration row below — so it renders a trailing "›" instead of its
-  // usual count/badge and the fill goes to whichever config row is active.
   const rootVariant = (s: AgentSection): "filled" | "trail" | "plain" =>
     s !== section ? "plain" : drilled ? "trail" : "filled";
   const rootNav = (
@@ -204,12 +149,6 @@ export function AgentSidebar(props: AgentSidebarProps) {
 
   const shellWidth = narrow ? SIDE_PANEL_MIN : width;
 
-  // Width-animates between 0 and `shellWidth` so a collapse/expand glides
-  // instead of snapping, matching the Library and project panels.
-  // `overflow-hidden` clips the fixed-width inner shell so its content never
-  // reflows mid-animation, and the transition is dropped while the resize
-  // handle is dragged. Not gated on reduced motion: Windows maps that to the
-  // often-off "Animation effects" toggle, which would snap the panel.
   return (
     <aside
       className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
@@ -236,9 +175,6 @@ export function AgentSidebar(props: AgentSidebarProps) {
           <button
             type="button"
             onClick={(e) => {
-              // The menu closes on any window click, so the opener has to keep
-              // its own click from reaching that listener. Anchor off the
-              // button, not the pointer, matching AgentEditor's own kebab.
               e.stopPropagation();
               const at = e.currentTarget.getBoundingClientRect();
               onMenu(selectedAgent, { x: at.right - 150, y: at.bottom + 6 });
@@ -308,10 +244,6 @@ export function AgentSidebar(props: AgentSidebarProps) {
         </div>
       )}
 
-      {/* Scope above filter, both in one bordered block — `LibrarySidebar`'s
-          own controls band (`:86-104`), down to its `space-y-2 p-3`. Scope
-          reads first because it decides *which* library the filter then
-          narrows; the rule closes the band off from the nav below. */}
       {!drilled && (
         <div className="shrink-0 space-y-2 border-b border-edge p-3">
           {section === "agents" && projects.length > 0 && (
@@ -327,10 +259,6 @@ export function AgentSidebar(props: AgentSidebarProps) {
       )}
 
 
-      {/* `space-y-5` is the break between the root nav and whatever follows it
-          (the tree, or the Skills placeholder): 20px, wider than the 2px
-          between sibling rows inside either, so the two read as separate
-          sections rather than one long list interrupted by a rule. */}
       <nav className="flex-1 space-y-5 overflow-y-auto px-2 pb-3 pt-2" aria-label="Agents">
         {rootNav}
 
@@ -407,8 +335,6 @@ export function AgentSidebar(props: AgentSidebarProps) {
   );
 }
 
-/** Config-row icon, keyed by `EditorTab` — one place mapping the section to
- *  its glyph, matching the `harnessIcon`/`ModeIcon` convention in icons.tsx. */
 function editorTabIcon(key: EditorTab) {
   switch (key) {
     case "setup":
@@ -424,9 +350,6 @@ function editorTabIcon(key: EditorTab) {
   }
 }
 
-/** A drilled-in Configuration row (Setup/Prompt/…): the same selectable-row
- *  treatment as `RootRow`'s filled variant, but content rows read at full
- *  `text-ink` unselected, not the root nav's dimmer `text-ink-dim`. */
 function ConfigSectionRow({
   label,
   icon,
@@ -453,10 +376,6 @@ function ConfigSectionRow({
   );
 }
 
-/** `"filled"` is the ordinary selected state (border + tint). `"trail"` is
- *  Phase 2's drilled-in marker: named and accent-iconed like filled, but with
- *  no border/tint of its own — that fill belongs to the active Configuration
- *  row — and a trailing "›" in place of the row's usual count/badge. */
 function RootRow({
   icon,
   label,
@@ -496,22 +415,6 @@ function RootRow({
   );
 }
 
-/**
- * Which library the list shows: the global `~/.claude/agents`, or one
- * project's own `.claude/agents`. Picking a project here is also what makes a
- * new agent land in that project — `AgentLibrary` uses the same selection as
- * the `projectPath` every query and write is keyed by.
- *
- * A picker rather than the Global|Project segmented control this replaces:
- * that one could only offer whichever project happened to be current
- * elsewhere in the app, so scoping to any other one meant leaving Agents,
- * selecting that project, and coming back.
- *
- * Copies `LibrarySidebar`'s `ProjectSwitcher` anatomy (`:173-241`) rather than
- * importing it — ADR-0003 allows another feature's domain API, not its
- * components — and is built from shared primitives only (`Popover`,
- * `RepoAvatar`).
- */
 function ScopePicker({
   projects,
   value,
@@ -597,9 +500,6 @@ function ScopeItem({
   );
 }
 
-/** A folder header: chevron, phase-coloured folder icon, name, count. Never
- *  selectable (only its own agents are), so it carries no border/tint state,
- *  just the disclosure toggle and its own right-click menu. */
 function FolderRow({
   folder,
   count,
@@ -638,17 +538,6 @@ function FolderRow({
   );
 }
 
-/** An agent row: dot, name, then a Draft badge when unpublished and a Default
- *  badge on the library's default agent. Weight (not size) separates it from
- *  `FolderRow` — both are `text-sm`, see the plan's note on why the old
- *  table's `text-xs` folder row inverted the hierarchy.
- *
- *  The Default badge is the only place the setting is visible: the context
- *  menu's "Set as default" writes it and the editor toggles it, but neither
- *  reads it back into the list. The old table drew it here too
- *  (`AgentList.tsx:560-563` before the sidebar rewrite) and the rewrite
- *  dropped it, which left the library with no way to answer "which one is
- *  default?" short of opening each agent. */
 function TreeAgentRow({
   agent,
   indent,
@@ -693,13 +582,6 @@ function TreeAgentRow({
   );
 }
 
-/**
- * The Agents view's bundle-freshness chip: up to date (with a manual
- * recheck), an update available (with the trigger), updating, or no verdict
- * to give. Icon-only for the trigger, not a labelled `Button` — the footer
- * band's only other content is descriptive text, and a primary button would
- * dominate it.
- */
 function BundleChip({
   state,
   updating,
@@ -716,10 +598,6 @@ function BundleChip({
   if (updating) {
     return (
       <div className="flex shrink-0 items-center gap-2 text-xs text-ink-dim">
-        {/* "Updating", not a phase name: the backup is a handful of local
-            copies that finish instantly and the rest of the wait is the CLI's
-            tarball download, so naming a phase here would be a guess that is
-            wrong for almost the whole mutation. */}
         <span>Updating agents…</span>
         <IconButton disabled title="Updating agents…" aria-label="Updating agents">
           <Spinner size={13} />
@@ -736,10 +614,6 @@ function BundleChip({
         <span className="hidden font-mono text-xs text-ink-dim sm:inline">
           {state.from ? `${state.from} → ${to}` : to}
         </span>
-        {/* The accent tint rides on the ICON, not the button: `cx` in
-            components/ui.tsx merges conflicting classes now, but the icon is
-            still a separate element from the button so `currentColor` has
-            nothing else to resolve against. */}
         <IconButton
           onClick={onUpdate}
           title={`Update agents to ${to}`}
@@ -751,10 +625,6 @@ function BundleChip({
     );
   }
 
-  // `busy` on both remaining branches: the recheck behind them spawns a
-  // `hyprlayer ai status` process AND makes an 8s-timeout round trip to
-  // GitHub, so without it the button sits inert long enough that a user
-  // clicks it again and queues a second pair.
   if (state.kind === "unknown") {
     return (
       <RefreshButton
@@ -770,10 +640,6 @@ function BundleChip({
     );
   }
 
-  // The steady state, so it stays a bare "Up to date": which bundle is
-  // installed and when it was last looked at are reference details, not
-  // something to read on every visit. They ride on `title` instead, which
-  // `RefreshButton` keeps distinct from the `aria-label` naming the action.
   const detail = [
     state.label,
     state.lastCheckedMs !== null ? `checked ${formatRelativeTime(state.lastCheckedMs)}` : null,
@@ -781,9 +647,6 @@ function BundleChip({
     .filter(Boolean)
     .join(" · ");
 
-  // Current bytes from a dead-end source, so neither the green dot nor the
-  // update trigger: the fix is a new CLI, which this chip cannot install.
-  // Settings names the version and offers the button.
   if (state.frozen) {
     return (
       <RefreshButton

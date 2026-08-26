@@ -2,9 +2,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// `scriptsStore` persists through zustand's `persist`, which needs a Storage at
-// module-eval time; vitest's jsdom doesn't expose one. Hoisted so it lands before
-// the store module below is evaluated.
 vi.hoisted(() => {
   const mem = new Map<string, string>();
   vi.stubGlobal("localStorage", {
@@ -22,7 +19,6 @@ vi.hoisted(() => {
 import { ScriptDock } from "./ScriptDock";
 import { requestRun, useScriptsStore } from "./scriptsStore";
 
-// Mock the data hooks so the dock renders off plain values, no react-query, no IPC.
 const q = vi.hoisted(() => ({
   useBootstrap: vi.fn(),
   useScriptOutput: vi.fn(),
@@ -39,8 +35,6 @@ const b = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/bindings", () => b);
 
-// Stub the terminal-backed bodies: this suite is about which body the dock picks
-// and whether a run is spawned at all, not about xterm.
 vi.mock("./ScriptRunView", () => ({ ScriptRunView: () => <div data-testid="run-view" /> }));
 vi.mock("./ScriptOutputView", () => ({
   ScriptOutputView: ({ output }: { output: string }) => <div data-testid="output-view">{output}</div>,
@@ -48,7 +42,6 @@ vi.mock("./ScriptOutputView", () => ({
 vi.mock("./TerminalTab", () => ({ TerminalTab: () => <div data-testid="terminal-tab" /> }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
-// The tab strip observes its own width; jsdom has no ResizeObserver.
 globalThis.ResizeObserver = class {
   observe() {}
   unobserve() {}
@@ -80,10 +73,8 @@ describe("ScriptDock ⌘R", () => {
     requestRun(WS);
     renderDock();
 
-    // No run view spawned; the tab explains why nothing happened.
     expect(screen.queryByTestId("run-view")).toBeNull();
     expect(screen.getByText(/No Run script configured/i)).toBeTruthy();
-    // The one-shot flag is still consumed, so it can't fire on a later mount.
     expect(pendingRun()).toBeUndefined();
   });
 
@@ -97,14 +88,12 @@ describe("ScriptDock ⌘R", () => {
   });
 
   it("waits for the project's scripts to load before deciding", () => {
-    // An unresolved query reads as "no run script", deciding now would swallow
-    // a legitimate ⌘R against a project that does have one.
     q.useScripts.mockReturnValue({ data: undefined, isPending: true });
     requestRun(WS);
     const { rerender } = renderDock();
 
     expect(screen.queryByTestId("run-view")).toBeNull();
-    expect(pendingRun()).toBe(true); // held, not consumed
+    expect(pendingRun()).toBe(true);
 
     q.useScripts.mockReturnValue(scripts("pnpm dev"));
     rerender(<ScriptDock workstreamId={WS} projectPath="/p" onEditScripts={vi.fn()} />);
@@ -131,7 +120,6 @@ describe("ScriptDock clear output", () => {
 
     fireEvent.click(screen.getByLabelText("Clear output"));
 
-    // No live PTY to wipe (the run is over), so no terminal id is passed.
     expect(b.commands.scriptClearOutput).toHaveBeenCalledWith(WS, "run", null);
     expect(q.forgetScriptOutput).toHaveBeenCalledWith(WS, "run");
   });

@@ -1,46 +1,17 @@
-//! Detect the editors, terminals, and file managers a user has installed, so
-//! the "Open in…" menu only offers apps that will launch and can show each
-//! app's real icon rather than a generic glyph.
-//!
-//! Detection is platform-specific:
-//! - **macOS**: locate `<name>.app` bundles and rasterize each `.icns` to a
-//!   small PNG (via `sips`), handed to the frontend as a `data:` URL.
-//! - **Windows**: probe well-known install locations for each `.exe` (the full
-//!   path becomes `openWith`), falling back to a PATHEXT-aware PATH lookup so
-//!   `.cmd` shims like VS Code's `code.cmd` are found.
-//! - **Linux**: PATH lookup of each command name.
-//!
-//! **Terminals are macOS-only.** `openPath(dir, app)` bottoms out in
-//! `Command::new(app).arg(dir)`: one program, one positional argument. Editors
-//! read that as "open this folder"; terminals want their own flag instead
-//! (`wt -d`, `kitty --directory`, `wezterm start --cwd`), and a single
-//! `openWith` string has nowhere to put one. Only macOS can express it, via
-//! `open -a Terminal <dir>`, so elsewhere terminals are omitted rather than
-//! listed and silently failing.
-//!
-//! The frontend opens through `@tauri-apps/plugin-opener`, passing `openWith`
-//! for the GUI apps below (Finder/Explorer use the default handler).
-
 #[cfg(target_os = "macos")]
 use std::path::Path;
 use std::path::PathBuf;
 
 use serde::Serialize;
 
-/// What sort of app an entry is, so the menu can group/label sensibly.
 #[derive(Debug, Clone, Copy, Serialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum EditorKind {
-    /// The OS file manager (Finder / Explorer / default handler).
     Files,
     Editor,
     Terminal,
 }
 
-/// One installed app the user can open a directory in. `openWith` is the value
-/// the frontend passes to `openPath(dir, openWith)`; `None` means "open with
-/// the OS default handler for a directory" (the file manager). `iconDataUrl` is
-/// a `data:image/png` of the app's real icon when we could rasterize one.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorTarget {
@@ -51,30 +22,18 @@ pub struct EditorTarget {
     pub icon_data_url: Option<String>,
 }
 
-/// A candidate app and how to find / open it on each platform.
 struct Candidate {
     id: &'static str,
     name: &'static str,
     kind: EditorKind,
-    /// macOS application name, used both to locate `<name>.app` and as the
-    /// `open -a` target the frontend passes as `openWith`. Unused off macOS.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     macos_app: &'static str,
-    /// Windows: executable paths relative to common install roots (see
-    /// [`windows_roots`]). The first existing match's full path becomes the
-    /// `openWith` value. Unused off Windows.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     windows_paths: &'static [&'static str],
-    /// Command names to look for on PATH (Linux, and as a PATHEXT-aware Windows
-    /// fallback). The matched name is the `openWith` value. Unused on macOS,
-    /// which detects via `.app` bundles instead, and unused for terminals
-    /// anywhere, since only macOS lists those (see the module docs).
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     bins: &'static [&'static str],
 }
 
-/// The catalog of apps we know how to detect and open. Order here is the order
-/// they appear in the menu (file manager first, then editors, then terminals).
 const CANDIDATES: &[Candidate] = &[
     Candidate {
         id: "cursor",
@@ -177,16 +136,9 @@ const CANDIDATES: &[Candidate] = &[
     },
 ];
 
-/// Detect every installed app from the catalog, with the platform file manager
-/// always first, and (on macOS) each app's rendered icon. Spawns `sips` per
-/// app, so callers should run it off the async runtime (spawn_blocking); the
-/// frontend caches the result for the session.
 pub fn detect() -> Vec<EditorTarget> {
-    // (target, bundle path used for icon extraction, macOS only).
     let mut entries: Vec<(EditorTarget, Option<PathBuf>)> = Vec::new();
 
-    // The OS file manager always exists; `openWith: None` opens the directory
-    // with the default handler (Finder on macOS, Explorer on Windows).
     entries.push((
         EditorTarget {
             id: "files".into(),
@@ -213,8 +165,6 @@ pub fn detect() -> Vec<EditorTarget> {
         }
     }
 
-    // The system terminal ships with macOS; surface it after the rest so it's a
-    // dependable fallback even when no third-party terminal is installed.
     #[cfg(target_os = "macos")]
     if let Some(path) = find_app_bundle("Terminal") {
         entries.push((
@@ -229,7 +179,6 @@ pub fn detect() -> Vec<EditorTarget> {
         ));
     }
 
-    // Rasterize each bundle's icon in parallel, one short-lived `sips` per app.
     #[cfg(target_os = "macos")]
     {
         let icons: Vec<Option<String>> = std::thread::scope(|scope| {
@@ -268,8 +217,6 @@ fn file_manager_name() -> &'static str {
     }
 }
 
-/// Returns the `openWith` value (and, on macOS, the bundle path for icon
-/// extraction) if the candidate is installed.
 fn detect_candidate(c: &Candidate) -> Option<(String, Option<PathBuf>)> {
     #[cfg(target_os = "macos")]
     {
@@ -280,8 +227,6 @@ fn detect_candidate(c: &Candidate) -> Option<(String, Option<PathBuf>)> {
         if matches!(c.kind, EditorKind::Terminal) {
             return None;
         }
-        // Prefer a concrete install (full exe path is the most reliable
-        // `openWith`); fall back to a CLI shim on PATH.
         for rel in c.windows_paths {
             for root in windows_roots() {
                 let exe = root.join(rel);
@@ -307,13 +252,12 @@ fn detect_candidate(c: &Candidate) -> Option<(String, Option<PathBuf>)> {
     }
 }
 
-/// Common install roots editors land in on Windows (user-scoped first).
 #[cfg(target_os = "windows")]
 fn windows_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         let local = PathBuf::from(local);
-        roots.push(local.join("Programs")); // per-user installs (VS Code, Cursor…)
+        roots.push(local.join("Programs"));
         roots.push(local);
     }
     for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
@@ -324,9 +268,6 @@ fn windows_roots() -> Vec<PathBuf> {
     roots
 }
 
-/// True if `bin` is found on the process PATH. On Windows the lookup honors
-/// PATHEXT so `.cmd`/`.bat` shims (e.g. VS Code's `code.cmd`) are matched, not
-/// just `.exe`.
 #[cfg(not(target_os = "macos"))]
 fn bin_on_path(bin: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
@@ -350,7 +291,6 @@ fn bin_on_path(bin: &str) -> bool {
     })
 }
 
-/// The path to `<name>.app` in any standard macOS location, if present.
 #[cfg(target_os = "macos")]
 fn find_app_bundle(app_name: &str) -> Option<PathBuf> {
     let bundle = format!("{app_name}.app");
@@ -369,16 +309,12 @@ fn find_app_bundle(app_name: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.exists())
 }
 
-/// Rasterize a macOS app's icon to a small PNG `data:` URL via the built-in
-/// `sips`. Returns `None` for apps that ship only an asset catalog (no loose
-/// `.icns`), the UI falls back to a glyph.
 #[cfg(target_os = "macos")]
 fn icon_data_url(app_path: &Path) -> Option<String> {
     use base64::Engine;
 
     let icns = resolve_icns(app_path)?;
 
-    // Distinct temp file per bundle so the parallel conversions don't collide.
     let stem = app_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -405,11 +341,6 @@ fn icon_data_url(app_path: &Path) -> Option<String> {
     ))
 }
 
-/// Locate a bundle's primary app-icon `.icns`. Prefers the `CFBundleIconFile`
-/// declared in Info.plist (read via the built-in `defaults`, which handles
-/// binary plists), since picking by file size mis-fires on apps that ship a
-/// larger document icon (e.g. Zed's `Document.icns`). Falls back to a
-/// name-matched then largest `.icns`.
 #[cfg(target_os = "macos")]
 fn resolve_icns(app_path: &Path) -> Option<PathBuf> {
     let resources = app_path.join("Contents/Resources");
@@ -434,7 +365,6 @@ fn resolve_icns(app_path: &Path) -> Option<PathBuf> {
         }
     }
 
-    // Fallbacks: an `.icns` named after the bundle, else the largest one.
     let app_stem = app_path.file_stem().and_then(|s| s.to_str());
     let mut largest: Option<(u64, PathBuf)> = None;
     for entry in std::fs::read_dir(&resources).ok()?.flatten() {

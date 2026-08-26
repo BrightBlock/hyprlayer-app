@@ -5,9 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateWorkstreamDialog } from "./CreateWorkstreamDialog";
 import type { ArchivedWorkstreamView, WorkstreamBases } from "@/lib/bindings";
 
-// Mock the data hooks so the dialog runs its real state logic against a plain
-// bases object, no react-query, no git subprocess. `vi.hoisted` lets the
-// (hoisted) vi.mock factory reach them.
 const q = vi.hoisted(() => ({
   useWorkstreamBases: vi.fn(),
   useCreateWorkstream: vi.fn(),
@@ -50,8 +47,6 @@ function mockBases(data: Partial<WorkstreamBases>, refetch = vi.fn()) {
   q.useWorkstreamBases.mockReturnValue(basesResult(data, refetch));
 }
 
-// Stable no-op mutations. `create.mutate` is re-stubbed per test that asserts on
-// what the dialog submits.
 const createMutate = vi.fn();
 function mockCreateOk() {
   q.useCreateWorkstream.mockReturnValue({
@@ -84,9 +79,6 @@ q.useRestoreWorkstream.mockReturnValue({
   error: null,
 });
 
-/** The resolved Type list, as `get_branch_prefixes` returns it (keywords already
- *  filled from the label backend-side). Always stubbed: the dialog reads it on
- *  every render, folder projects included. */
 function mockPrefixes(
   prefixes = [
     { label: "Bug fix", prefix: "fix/", keywords: ["fix", "bug", "crash"] },
@@ -102,7 +94,6 @@ function mockPrefixes(
 }
 mockPrefixes();
 
-/** Put the create mutation into its `checkout_dirty` failure state. */
 function mockCheckoutDirty(count = 2) {
   q.useCreateWorkstream.mockReturnValue({
     isPending: false,
@@ -128,19 +119,13 @@ function renderDialog(open: boolean) {
   );
 }
 
-// The "Branched from" base picker. It's a DropdownSelect, so the trigger is a
-// button whose label IS the current choice, and the options only exist in the
-// DOM while the menu is open.
 const baseTrigger = () => screen.getByRole("button", { name: "Branched from" });
 const baseValue = () => baseTrigger().textContent;
-/** Open the menu and click one option, the DropdownSelect equivalent of
- *  `fireEvent.change(select, …)`. */
 function pickBase(label: string) {
   fireEvent.click(baseTrigger());
   fireEvent.click(screen.getByRole("option", { name: label }));
 }
 
-// The branch-type picker, same DropdownSelect anatomy as the base one above.
 const typeTrigger = () => screen.getByRole("button", { name: "Type of work" });
 const typeValue = () => typeTrigger().textContent;
 function pickType(label: string) {
@@ -165,12 +150,10 @@ describe("CreateWorkstreamDialog remote branches", () => {
     });
     renderDialog(true);
 
-    // The remote-only branch is pickable and flagged as such.
     const row = screen.getByRole("button", { name: /origin\/linux-support/ });
     expect(row.textContent).toContain("remote");
     fireEvent.click(row);
 
-    // The hint names the local branch that will be created to track it.
     expect(
       screen.getByText(/Creates local branch linux-support tracking origin\/linux-support/),
     ).toBeDefined();
@@ -179,8 +162,6 @@ describe("CreateWorkstreamDialog remote branches", () => {
       target: { value: "Linux" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    // The backend resolves the ref to a local tracking branch, so the dialog
-    // hands it the ref verbatim.
     expect(createMutate).toHaveBeenCalledWith(
       {
         title: "Linux",
@@ -222,7 +203,6 @@ describe("CreateWorkstreamDialog remote branches", () => {
   });
 });
 
-/** An archived in-place row on `branch`, as `list_archived_workstreams` returns it. */
 function archivedRow(id: string, title: string, branch: string): ArchivedWorkstreamView {
   return {
     item: {
@@ -254,17 +234,13 @@ describe("CreateWorkstreamDialog checkout-dirty recovery", () => {
     q.useArchivedWorkstreams.mockReturnValue({
       data: [
         archivedRow("newest", "Agent work", "feature/x"),
-        // Same branch but older, and a same-age row on another branch: neither
-        // is the one that left the changes.
         archivedRow("older", "Earlier pass", "feature/x"),
         archivedRow("other", "Unrelated", "main"),
       ],
     });
     renderDialog(true);
 
-    // The row names the owner and its archive age, with one Unarchive action.
     expect(screen.getByText("Agent work")).toBeDefined();
-    // The newest matching row wins (the backend lists archived newest-first).
     fireEvent.click(screen.getByRole("button", { name: "Unarchive" }));
     expect(restoreMutate).toHaveBeenCalledWith("newest", expect.anything());
   });
@@ -288,7 +264,6 @@ describe("CreateWorkstreamDialog checkout-dirty recovery", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Discard 1 change" }));
     expect(discardMutate).not.toHaveBeenCalled();
-    // The confirm states what is destroyed, and what survives.
     expect(screen.getByText("Discard changes?")).toBeDefined();
     expect(screen.getByText(/untracked files are left alone/)).toBeDefined();
 
@@ -304,7 +279,6 @@ describe("CreateWorkstreamDialog checkout-dirty recovery", () => {
 
     expect(screen.getByText("Your checkout has uncommitted work")).toBeDefined();
     expect(screen.getByText("3 changes on feature/x")).toBeDefined();
-    // The raw backend string is replaced by the notice, not shown alongside it.
     expect(screen.queryByText(/uncommitted change\(s\)/)).toBeNull();
   });
 
@@ -344,7 +318,6 @@ describe("CreateWorkstreamDialog base detection", () => {
   });
 
   it("adopts a main branch that only appears on the open refetch", () => {
-    // First paint: repo has no main, the base falls back to the first branch.
     mockBases({
       branches: ["feature-x"],
       localBranches: ["feature-x"],
@@ -354,8 +327,6 @@ describe("CreateWorkstreamDialog base detection", () => {
     const { rerender } = renderDialog(true);
     expect(baseValue()).toBe("feature-x");
 
-    // The open refetch lands: `main` now exists on disk and is the detected
-    // default. The picker must follow it, the whole point of the fix.
     mockBases({
       branches: ["main", "feature-x"],
       localBranches: ["main", "feature-x"],
@@ -371,7 +342,6 @@ describe("CreateWorkstreamDialog base detection", () => {
       />,
     );
     expect(baseValue()).toBe("main");
-    // And `main` is offered as an option.
     fireEvent.click(baseTrigger());
     expect(screen.getByRole("option", { name: "main" })).toBeDefined();
   });
@@ -386,11 +356,9 @@ describe("CreateWorkstreamDialog base detection", () => {
     const { rerender } = renderDialog(true);
     expect(baseValue()).toBe("dev");
 
-    // User overrides the default.
     pickBase("feature-x");
     expect(baseValue()).toBe("feature-x");
 
-    // A later refetch surfaces `main` as the new default, the manual pick wins.
     mockBases({
       branches: ["main", "dev", "feature-x"],
       localBranches: ["main", "dev", "feature-x"],
@@ -422,7 +390,6 @@ describe("CreateWorkstreamDialog branch types", () => {
     mockBases(gitRepo);
     renderDialog(true);
 
-    // Nothing typed yet, so nothing to suggest.
     expect(typeValue()).toBe("General");
 
     fillTitle("Fix the login crash");
@@ -449,8 +416,6 @@ describe("CreateWorkstreamDialog branch types", () => {
     fillTitle("Fix the login crash");
     expect(typeValue()).toBe("Bug fix");
 
-    // The user overrides the suggestion back to General; a later keyword
-    // must not undo that choice.
     pickType("General");
     fillTitle("Fix the login crash on add");
     expect(typeValue()).toBe("General");
@@ -473,7 +438,6 @@ describe("CreateWorkstreamDialog branch types", () => {
     renderDialog(true);
 
     fillTitle("Fix the login crash");
-    // The 4-hex suffix is the backend's, so the preview ends in a placeholder.
     expect(screen.getByText(/Preview:/).textContent).toBe(
       "Preview: fix/fix-the-login-crash-xxxx",
     );
@@ -508,11 +472,9 @@ describe("CreateWorkstreamDialog branch types", () => {
     renderDialog(true);
     expect(typeTrigger()).toBeDefined();
 
-    // Adopting an existing branch names nothing, so there is no type to pick.
     fireEvent.click(screen.getByRole("button", { name: /feature-x/ }));
     expect(screen.queryByRole("button", { name: "Type of work" })).toBeNull();
 
-    // A folder project has no branch at all.
     cleanup();
     render(
       <CreateWorkstreamDialog

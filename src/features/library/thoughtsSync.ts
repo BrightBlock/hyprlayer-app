@@ -1,8 +1,5 @@
 import type { Project } from "@/lib/bindings";
 
-/** Minimum gap between automatic syncs (open/re-scope triggers). The thoughts repo
- *  is shared across projects, so any recent sync satisfies every scope; within this
- *  window auto-triggers are treated as covered. Manual clicks bypass it. */
 export const AUTO_SYNC_COOLDOWN_MS = 60_000;
 
 export function shouldAutoSync(
@@ -13,9 +10,6 @@ export function shouldAutoSync(
   return now - lastAttemptAt >= cooldownMs;
 }
 
-/** Repo path handed to `hyprlayer thoughts sync`; the CLI resolves from cwd, so it
- *  must be a mapped project. Falls back Library-origin → scoped/last-used → any; the
- *  thoughts repo is shared, so the host repo doesn't change what syncs. */
 export function resolveSyncProjectPath(
   search: { project?: string; from?: string },
   lastProject: string | null,

@@ -1,74 +1,6 @@
 #!/usr/bin/env bash
-# Build and install "Hyprlayer Dev" on Linux — a desktop install that tracks
-# origin/main, SIDE BY SIDE with the released app that pacman/apt/dnf owns.
-# (macOS: scripts/dev-install-macos.sh.)
-#
-# Why a separate install rather than `pnpm tauri dev`:
-#   * it survives a reboot and shows up in the app launcher, so main can be
-#     dogfooded all day instead of only while a terminal holds the dev server
-#   * it is a release-profile build (no vite dev server, no HMR), so what you're
-#     testing is what a release would feel like
-#
-# Three things keep it from colliding with the released install:
-#   * identifier  ai.brightblock.hyprlayer.main  → its own SQLite DB, settings,
-#     and webview storage under ~/.local/share and ~/.config. Nothing this build
-#     migrates can corrupt the stable app's database.
-#   * it installs under ~/.local, never /usr, so pacman still owns the release
-#   * a distinct binary name (Hyprlayer-Dev) → its own window class, so the
-#     compositor and taskbar treat the two as different apps
-#
-# The identifier says ".main" while the app is called "Hyprlayer Dev" on purpose:
-# ".dev" already belongs to the `verify` skill, which launches
-# `tauri dev --config src-tauri/tauri.dev.conf.json` under
-# ai.brightblock.hyprlayer.dev. Sharing that identifier would let a running
-# install hijack a verify run through the single-instance plugin, so this build
-# gets its own — named after the branch it tracks.
-#
-# What lands where:
-#   binary   ~/.local/bin/Hyprlayer-Dev          (bare ELF — Linux needs no bundle)
-#   launcher ~/.local/share/applications/Hyprlayer-Dev.desktop
-#   icons    ~/.local/share/icons/hicolor/*/apps/Hyprlayer-Dev.png
-#   data     ~/.local/share/ai.brightblock.hyprlayer.main
-#   settings ~/.config/ai.brightblock.hyprlayer.main
-#
-# The build happens in a throwaway clone under ~/.cache (never this working
-# tree), so it can run while you have uncommitted work in progress, and it
-# always builds exactly what's on the remote rather than whatever you had
-# checked out. The cargo target dir is persistent, so only the first build is
-# cold; after that it's an incremental rebuild of the app's own crates.
-#
-# Updater note: the in-app updater is notify-only on Linux (see src/lib/updater.ts),
-# so this build can never install over itself. Between releases it otherwise
-# reports the same version as the release it was cut from, so the version
-# carries a +main.<sha> suffix (Settings → Updates reads e.g. 0.5.10+main.d39276a)
-# to say which commit you're on. Pass --no-version-suffix for a bare x.y.z.
-#
-# Usage:
-#   ./scripts/dev-install-linux.sh              # fetch origin/main, build if it moved, install
-#   ./scripts/dev-install-linux.sh --force      # rebuild even if main hasn't moved
-#   ./scripts/dev-install-linux.sh --ref <ref>  # track something else (a branch, tag, SHA)
-#   ./scripts/dev-install-linux.sh --no-fetch   # use what's already fetched (offline)
-#   ./scripts/dev-install-linux.sh --uninstall  # remove the install (keeps its data dir)
-#
-# It also runs with no checkout at all — anyone with repo access can pull it
-# straight from GitHub, where `gh` supplies the auth the private repo needs:
-#
-#   bash <(gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-linux.sh \
-#            -H 'Accept: application/vnd.github.raw')            # add flags after the `)`
-#
-# Standalone it clones the repo itself; the flags above all still apply, and
-# HYPRLAYER_DEV_ORIGIN overrides the clone URL (a fork, or a local mirror).
-#
-# Prerequisites: the same toolchain the Linux release builder needs, minus every
-# secret — Rust, Node + pnpm, and webkit2gtk-4.1 / gtk3 / librsvg. No signing
-# key, no publish credentials.
 set -euo pipefail
 
-# Where the build clone comes from. Run from a checkout, that's the working tree
-# beside this script (fast — no network for the object transfer). Run standalone
-# — piped from `gh api`, so $0 is "bash" or a /dev/fd pipe — there is no tree to
-# clone, and the repo is fetched from GitHub instead. The `scripts/<self>` probe
-# is what tells the two apart: a real checkout has this file under it.
 SELF="$0"
 ORIGIN_SLUG="BrightBlock/hyprlayer-app"
 BOOTSTRAP="bash <(gh api repos/$ORIGIN_SLUG/contents/scripts/dev-install-linux.sh -H 'Accept: application/vnd.github.raw')"
@@ -83,7 +15,6 @@ fi
   exit 1
 }
 
-# ─── config ─────────────────────────────────────────────────────────
 CACHE_DIR="${HYPRLAYER_DEV_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/hyprlayer-dev}"
 SRC_DIR="$CACHE_DIR/src"
 TARGET_DIR="$CACHE_DIR/target"
@@ -91,17 +22,12 @@ STAMP="$CACHE_DIR/installed"
 PREFIX="${HYPRLAYER_DEV_PREFIX:-$HOME/.local}"
 APP_ID="ai.brightblock.hyprlayer.main"
 APP_NAME="Hyprlayer Dev"
-# The binary name doubles as the icon name, the .desktop basename, and the
-# window class — keep the three spellings identical or the taskbar shows a
-# blank icon.
 BIN_NAME="Hyprlayer-Dev"
 
 INSTALLED_BIN="$PREFIX/bin/$BIN_NAME"
 DESKTOP_FILE="$PREFIX/share/applications/$BIN_NAME.desktop"
 DATA_DIR="$HOME/.local/share/$APP_ID"
 CONFIG_DIR="$HOME/.config/$APP_ID"
-# hicolor size : source file, shared by install and uninstall so the two can't
-# drift. 128x128@2x.png is a 256px image.
 ICON_MAP=("32x32:32x32.png" "128x128:128x128.png" "256x256:128x128@2x.png")
 INSTALL_PATHS=("$INSTALLED_BIN" "$DESKTOP_FILE")
 for icon in "${ICON_MAP[@]}"; do
@@ -118,21 +44,15 @@ step() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-# The header doubles as the help text, but standalone there is no file to read
-# it back out of ($SELF is a pipe), so fall back to the flag list.
 usage() {
-  if [[ -f "$SELF" ]]; then
-    sed -n '2,/^set -euo/p' "$SELF" | sed '$d'
-  else
-    printf '%s\n' \
-      'dev-install-linux.sh - build and install "Hyprlayer Dev" from origin/main' \
-      '' \
-      '  --force               rebuild even if the ref has not moved' \
-      '  --ref <ref>           track something else (a branch, tag, SHA)' \
-      '  --no-fetch            use what is already fetched (offline)' \
-      '  --no-version-suffix   build a bare x.y.z' \
-      '  --uninstall           remove the install (keeps its data dir)'
-  fi
+  printf '%s\n' \
+    'dev-install-linux.sh - build and install "Hyprlayer Dev" from origin/main' \
+    '' \
+    '  --force               rebuild even if the ref has not moved' \
+    '  --ref <ref>           track something else (a branch, tag, SHA)' \
+    '  --no-fetch            use what is already fetched (offline)' \
+    '  --no-version-suffix   build a bare x.y.z' \
+    '  --uninstall           remove the install (keeps its data dir)'
 }
 
 refresh_caches() {
@@ -154,7 +74,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ─── uninstall ──────────────────────────────────────────────────────
 if [[ $UNINSTALL -eq 1 ]]; then
   step "Removing $APP_NAME"
   rm -fv "${INSTALL_PATHS[@]}" "$STAMP"
@@ -170,12 +89,6 @@ for tool in git cargo pnpm node install; do
   command -v "$tool" >/dev/null || die "missing required tool: $tool"
 done
 
-# ─── 1. a throwaway clone that tracks the remote ────────────────────
-# From a checkout: cloned from the local repo, then repointed at the real origin
-# so `origin/main` means the same thing here as it does in the working tree.
-# Standalone: cloned from GitHub through `gh repo clone`, which carries the gh
-# token and honours the user's ssh/https preference — a bare `git clone` of a
-# private repo only works if they have already run `gh auth setup-git`.
 if [[ ! -d "$SRC_DIR/.git" ]]; then
   step "Creating build clone at $SRC_DIR"
   mkdir -p "$CACHE_DIR"
@@ -210,9 +123,6 @@ if [[ $FORCE -eq 0 && -x "$INSTALLED_BIN" && -f "$STAMP" ]] && grep -qx "$SHA" "
   exit 0
 fi
 
-# ─── 2. check out the exact commit ──────────────────────────────────
-# `clean -fd` (no -x) drops stray tracked-turned-untracked files but keeps the
-# gitignored node_modules/ and dist/, which is what makes reruns cheap.
 step "Checking out $SHORT — $SUBJECT"
 git -C "$SRC_DIR" checkout --quiet --detach "$SHA"
 git -C "$SRC_DIR" reset --hard --quiet "$SHA"
@@ -220,10 +130,6 @@ git -C "$SRC_DIR" clean -qfd
 
 cd "$SRC_DIR"
 
-# ─── 3. config overlay ──────────────────────────────────────────────
-# Written into the build clone (not this repo) so nothing here needs committing.
-# createUpdaterArtifacts is forced off: signing them needs the release key, and
-# a Linux build never self-installs anyway.
 VERSION="$(node -p 'require("./package.json").version')"
 if [[ $VERSION_SUFFIX -eq 1 ]]; then
   BUILD_VERSION="$VERSION+main.$SHORT"
@@ -232,12 +138,6 @@ else
 fi
 
 OVERLAY="src-tauri/tauri.devinstall.conf.json"
-# The windows array is carried over WHOLESALE from tauri.linux.conf.json with
-# only `title` swapped. Tauri's config merge is recursive for objects but
-# REPLACES arrays, so an overlay that names `app.windows` at all discards every
-# key it doesn't restate — which is how the OS title bar came back the first
-# time (`decorations: false` lost). The assert below fails the build if that key
-# ever moves rather than silently shipping the wrong chrome.
 APP_NAME="$APP_NAME" APP_ID="$APP_ID" BUILD_VERSION="$BUILD_VERSION" \
   node -e '
     const fs = require("fs");
@@ -260,7 +160,6 @@ APP_NAME="$APP_NAME" APP_ID="$APP_ID" BUILD_VERSION="$BUILD_VERSION" \
     }, null, 2) + "\n");
   '
 
-# ─── 4. build ───────────────────────────────────────────────────────
 step "pnpm install (frozen lockfile)"
 pnpm install --frozen-lockfile
 
@@ -272,16 +171,11 @@ pnpm tauri build --no-bundle --config "$OVERLAY"
 BUILT_BIN="$TARGET_DIR/release/Hyprlayer"
 [[ -x "$BUILT_BIN" ]] || die "expected binary not found: $BUILT_BIN"
 
-# ─── 5. install under ~/.local ──────────────────────────────────────
 step "Installing to $PREFIX"
-# Stage then rename: writing straight over the target is ETXTBSY if the app is
-# running, and rename() swaps the directory entry while the live process keeps
-# its old inode — so refreshing while the dev app is open just works.
 mkdir -p "$PREFIX/bin"
 install -m 755 "$BUILT_BIN" "$INSTALLED_BIN.new"
 mv -f "$INSTALLED_BIN.new" "$INSTALLED_BIN"
 
-# Same three sizes the .deb ships.
 for icon in "${ICON_MAP[@]}"; do
   mkdir -p "$PREFIX/share/icons/hicolor/${icon%%:*}/apps"
   install -m 644 "src-tauri/icons/${icon##*:}" \

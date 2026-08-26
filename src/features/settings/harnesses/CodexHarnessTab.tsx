@@ -31,14 +31,9 @@ import { ModelMultiSelectDialog } from "./ModelMultiSelectDialog";
 
 const DOCS_URL = "https://developers.openai.com/codex";
 
-/** Module-scope so an unsaved-settings render doesn't mint fresh identities and
- *  invalidate every memo keyed on them. */
 const NO_MODELS: string[] = [];
 const EMPTY_CODEX: CodexSettings = { selectedModels: NO_MODELS };
 
-/** Settings → Harnesses → Codex. Auth lives in `~/.codex` (owned by
- *  `codex login`), so this tab only reads it; what it *writes* is which models
- *  the composer offers and which defaults new chats and the action agents use. */
 export function CodexHarnessTab({
   settings,
   status,
@@ -47,15 +42,11 @@ export function CodexHarnessTab({
   status?: BinaryStatus;
 }) {
   const installed = status?.state.state === "ok";
-  // One probe for account + models: it spawns an app-server, so don't even try
-  // without a binary, and never as two concurrent queries (see useCodexProbe).
   const probe = useCodexProbe(installed);
   const save = useSetAppSettings();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const codex: CodexSettings = settings.providers?.codex ?? EMPTY_CODEX;
-  // Stable `[]` (not a fresh literal) so the `effortChoices` memo below actually
-  // memoizes for the un-saved-settings case.
   const selectedModels = codex.selectedModels ?? NO_MODELS;
   const available = useMemo(() => probe.data?.models ?? [], [probe.data]);
   const displayName = useMemo(() => {
@@ -63,18 +54,11 @@ export function CodexHarnessTab({
     for (const m of available) map.set(m.id, m.displayName);
     return map;
   }, [available]);
-  // An empty selection means "not customised" → offer every model Codex reports,
-  // the dynamic-list twin of how Claude shows all its presets until you narrow
-  // them. Removing a model from that default set materialises an explicit list.
   const effectiveIds = useMemo(
     () => (selectedModels.length > 0 ? selectedModels : available.map((m) => m.id)),
     [selectedModels, available],
   );
   const usingAllDefault = selectedModels.length === 0 && available.length > 0;
-  // Effort tiers differ per model (GPT-5.6-Sol has `ultra`, Luna stops at `max`),
-  // so offer the union across the models actually on offer, these settings apply
-  // to whichever of them a chat runs on. Falls back to the common core before the
-  // list loads.
   const effortChoices = useMemo(
     () =>
       codexEfforts(
@@ -94,10 +78,6 @@ export function CodexHarnessTab({
   }
 
   function setSelectedModels(next: string[]) {
-    // Drop any default the new selection can no longer honor, in the SAME write,
-    // a separate clear could land before this one and be overwritten by the stale
-    // value. Efforts go too: tiers are per-model, and Commit/Ship sends its stored
-    // effort through unvalidated, so a tier no model offers would fail the turn.
     const efforts = new Set(
       available.filter((m) => next.includes(m.id)).flatMap((m) => m.supportedEfforts),
     );
@@ -140,7 +120,6 @@ export function CodexHarnessTab({
 
       {installed && <AuthenticationCard probe={probe} />}
 
-      {/* Models */}
       <Card>
         <div className="flex items-center justify-between">
           <CardTitle className="mb-0">
@@ -172,8 +151,6 @@ export function CodexHarnessTab({
             <Spinner size={12} /> Loading models from Codex…
           </p>
         ) : probe.isError ? (
-          // A probe that RAN and failed is an error, not "no models", showing the
-          // signed-out hint here would send the user to fix the wrong thing.
           <div className="mt-3">
             <ErrorNote error={probe.error} />
           </div>
@@ -268,9 +245,6 @@ export function CodexHarnessTab({
 
       {installed && <AdvancedCard status={status} />}
 
-      {/* Same picker OpenCode uses. Codex returns one flat model list rather
-          than a provider→model catalog, so it's a single unlabelled group.
-          Mounted only while open, that's what re-seeds its draft selection. */}
       {pickerOpen && (
         <ModelMultiSelectDialog
           open
@@ -288,22 +262,15 @@ export function CodexHarnessTab({
   );
 }
 
-/** Keep a stored model id only while it's still in the selected list. */
 function keepIfSelected(id: string | null | undefined, selected: string[]): string | null {
   return id && selected.includes(id) ? id : null;
 }
 
-/** Keep a stored effort only while some selected model still offers it. An empty
- *  set means the catalog hasn't loaded, keep the value rather than clearing it
- *  on a probe that simply hasn't answered yet. */
 function keepIfOffered(effort: string | null | undefined, offered: Set<string>): string | null {
   if (!effort) return null;
   return offered.size === 0 || offered.has(effort) ? effort : null;
 }
 
-/** The one control shape all four Codex defaults use: a fixed-width dropdown
- *  whose empty option means "let Codex decide". The width sets the trigger
- *  only; the open menu grows past it to fit the longest model id. */
 function DefaultSelect({
   label,
   value,
@@ -371,25 +338,11 @@ function EffortSelect({
   );
 }
 
-/**
- * Codex authentication, the same two-tile shape as the Claude tab: pick a
- * method, configure it below.
- *
- * The tiles are LOCAL UI state, not a stored setting (Claude persists
- * `authMode` because it injects credentials at spawn). Codex owns its own
- * credential store, `$CODEX_HOME/auth.json`, written by `codex login`, so
- * whichever method you last used is simply what `account/read` reports, and the
- * tiles just choose how you sign in next. Nothing is stored by Hyprlayer: no
- * plaintext key in `settings.json`, and no `OPENAI_API_KEY` at spawn (the
- * app-server ignores the env var; only `auth.json` counts).
- */
 function AuthenticationCard({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
   const signedInMethod = probe.data?.auth.method;
-  // Default the tile to whatever's already in use, else the subscription flow.
   const [mode, setMode] = useState<"chatgpt" | "apiKey">(
     signedInMethod === "apiKey" ? "apiKey" : "chatgpt",
   );
-  // Re-sync once the probe lands (it resolves after first render).
   const [seenMethod, setSeenMethod] = useState(signedInMethod);
   if (signedInMethod !== seenMethod) {
     setSeenMethod(signedInMethod);
@@ -421,7 +374,6 @@ function AuthenticationCard({ probe }: { probe: ReturnType<typeof useCodexProbe>
   );
 }
 
-/** Status + `codex login` (the browser OAuth flow). Mirrors Claude's CliAuthPanel. */
 function ChatgptAuthPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const data = probe.data?.auth;
@@ -469,9 +421,6 @@ function ChatgptAuthPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
   );
 }
 
-/** API-key sign-in. Mirrors Claude's ApiKeyAuthPanel, minus the base-URL and
- *  Bedrock rows, those configure env vars Claude's spawn injects, whereas Codex
- *  reads neither (its own `config.toml` covers custom providers). */
 function CodexApiKeyPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
   const [key, setKey] = useState("");
   const login = useCodexLoginWithApiKey();
@@ -513,7 +462,6 @@ function CodexApiKeyPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
   );
 }
 
-/** Connected badge + refresh/sign-out, shared by both Codex auth panels. */
 function AuthStatusRow({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
   const logout = useCodexLogout();
   const signedIn = Boolean(probe.data?.auth.method);
@@ -556,7 +504,6 @@ function AuthStatusRow({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
   );
 }
 
-/** Friendly name for the `Account.type` Codex reports. */
 function authMethodLabel(method: string | null | undefined): string | null {
   if (!method) return null;
   if (method === "chatgpt") return "ChatGPT";
@@ -565,9 +512,6 @@ function authMethodLabel(method: string | null | undefined): string | null {
   return method;
 }
 
-/** Before install this card is the primary setup CTA (so it starts open and is
- *  named for the job); once installed it's the collapsed "Advanced" drawer. Both
- *  follow from `status`, so that's the only prop. */
 function AdvancedCard({ status }: { status?: BinaryStatus }) {
   const installed = status?.state.state === "ok";
   const [open, setOpen] = useState(!installed);
@@ -621,9 +565,6 @@ function AdvancedCard({ status }: { status?: BinaryStatus }) {
           </div>
 
           {!installed && (
-            // No in-app installer: Codex ships via npm/Homebrew and its sign-in is
-            // an interactive browser flow, so pointing at the docs beats a
-            // half-working one-click path.
             <p className="text-xs text-ink-dim">
               Install with <code className="font-mono">npm i -g @openai/codex</code> or{" "}
               <code className="font-mono">brew install codex</code>, then run{" "}

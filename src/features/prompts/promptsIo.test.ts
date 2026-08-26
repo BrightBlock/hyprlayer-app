@@ -12,13 +12,11 @@ import {
   type PromptsFile,
 } from "./promptsIo";
 
-// A stable id minter so added-prompt ids are deterministic in assertions.
 function idMinter() {
   let n = 0;
   return () => `new-${++n}`;
 }
 
-/** A library snapshot with two built-ins and the given custom prompts. */
 function snapshot(overrides: Partial<LibrarySnapshot> = {}): LibrarySnapshot {
   return {
     builtins: [
@@ -57,7 +55,7 @@ describe("buildPromptsFile", () => {
       name: "Backfill tests",
       body: "Write tests for {{changed_files}}.",
       chord: "mod+shift+t",
-      overrides: { app: "vitest override" }, // keyed by project NAME, not path
+      overrides: { app: "vitest override" },
     });
   });
 
@@ -157,11 +155,10 @@ describe("planImport", () => {
   it("detects a taken chord and unknown override projects", () => {
     const rows = planImport(file, snap);
     expect(rows[2].chordTaken).toBe(true);
-    expect(rows[3].unknownProjects).toEqual(["ghost"]); // "app" exists, "ghost" doesn't
+    expect(rows[3].unknownProjects).toEqual(["ghost"]);
   });
 });
 
-/** Decisions helper: include all, with a per-key resolution override. */
 function decide(
   keys: string[],
   resolutions: Record<string, ImportDecision["resolution"]> = {},
@@ -212,7 +209,7 @@ describe("applyImport", () => {
     const out = applyImport(planImport(file, snap), decide(["0"]), base, snap, idMinter());
     expect(out.prompts.custom).toHaveLength(2);
     expect(out.prompts.custom?.[1].name).toBe("Mine (imported)");
-    expect(out.prompts.custom?.[0].body).toBe("existing"); // original untouched
+    expect(out.prompts.custom?.[0].body).toBe("existing");
   });
 
   it("replace overwrites a custom prompt's body in place", () => {

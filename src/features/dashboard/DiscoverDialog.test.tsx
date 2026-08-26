@@ -40,11 +40,9 @@ function setup(recents: Record<string, unknown>, projects: Array<{ originUrl: st
     });
 
   stub(recents);
-  // A fresh element each render: React bails out on an identical element ref.
   const dialog = () => <DiscoverDialog open onClose={onClose} onPick={onPick} />;
   const { rerender } = render(dialog());
 
-  /** Swap what the query returns, as a refetch would, and re-render in place. */
   const rerenderWith = (over: Record<string, unknown>) => {
     stub(over);
     rerender(dialog());
@@ -92,7 +90,6 @@ describe("DiscoverDialog org rail", () => {
     const { rerenderWith } = setup({ data: MULTI_ORG });
     fireEvent.click(org(/^acme\s*2$/));
     expect(screen.queryByText("thoughts")).toBeNull();
-    // The user left the acme org; the next fetch no longer carries its repos.
     rerenderWith({ data: [repo("jane/thoughts"), repo("bob/cli")] });
     expect(screen.getByText("thoughts")).toBeDefined();
     expect(screen.getByText("cli")).toBeDefined();
@@ -103,7 +100,6 @@ describe("DiscoverDialog org rail", () => {
     fireEvent.click(org(/^acme\s*2$/));
     rerenderWith({ data: [repo("jane/thoughts")] });
     expect(screen.getByText("thoughts")).toBeDefined();
-    // acme is back, but the user is browsing All now, don't yank the scope.
     rerenderWith({ data: MULTI_ORG });
     expect(screen.getByText("thoughts")).toBeDefined();
     expect(screen.getByText("api")).toBeDefined();
@@ -119,9 +115,9 @@ describe("DiscoverDialog footer and row metadata", () => {
 
   it("counts repos already cloned into projects, matching on the origin URL", () => {
     setup({ data: MULTI_ORG }, [
-      { originUrl: "https://github.com/ACME/api.git" }, // case-insensitive
-      { originUrl: "git@github.com:acme/web" }, // scp-style, no .git
-      { originUrl: null }, // local-only project
+      { originUrl: "https://github.com/ACME/api.git" },
+      { originUrl: "git@github.com:acme/web" },
+      { originUrl: null },
     ]);
     expect(screen.getByText("2 already cloned")).toBeDefined();
   });
@@ -135,13 +131,10 @@ describe("DiscoverDialog footer and row metadata", () => {
     const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
     setup({ data: [repo("acme/api", { pushedAt: twoDaysAgo, private: true })] });
     expect(screen.getByText("2d")).toBeDefined();
-    // The padlock is aria-hidden, so the row carries a text alternative.
     expect(screen.getByText("Private")).toBeDefined();
   });
 
   it("hands a picked repo to the Add-project wizard and closes", () => {
-    // Discover never clones directly, the pick routes into the wizard so the
-    // clone reviews the same location + thoughts steps as a pasted URL.
     const { onPick, onClose } = setup({ data: [repo("acme/api")] });
     fireEvent.click(screen.getByRole("button", { name: /acme\/api/ }));
     expect(onPick).toHaveBeenCalledWith(
@@ -151,7 +144,6 @@ describe("DiscoverDialog footer and row metadata", () => {
   });
 
   it("marks an already-cloned repo and refuses to pick it twice", () => {
-    // Re-cloning would land on the existing directory and fail with repo_exists.
     const { onPick } = setup({ data: [repo("acme/api")] }, [
       { originUrl: "https://github.com/acme/api.git" },
     ]);
@@ -177,7 +169,6 @@ describe("DiscoverDialog refresh", () => {
   });
 
   it("stays available when gh returns no repos", () => {
-    // The empty state is exactly when a refresh matters, after `gh auth login`.
     const { refetch } = setup({ data: [] });
     expect(screen.getByText(/No repositories found/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Refresh repositories" }));

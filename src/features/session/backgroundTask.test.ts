@@ -9,19 +9,12 @@ import {
 import { initialSessionView, reduceEvent, type TranscriptItem } from "./transcript";
 import fixture from "./__fixtures__/background-tasks.events.json";
 
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 const SPAWN_RESULT = (taskId: string) => ({
   content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/tasks/${taskId}.output. You will be notified when it completes. To check interim output, use Read on that file path.`,
   isError: false,
 });
 
-// The verbatim launch block, transcribed from a real run: nine lines, three
-// carrying identifiers (`Task ID:`, `Transcript dir:`, `Run ID:`). `Summary:`
-// is model-authored and can wrap, so nothing may key on line position. There
-// is no `async_launched` anywhere here — that key lives on the transcript
-// FILE's `toolUseResult` object, a sibling of `message`, and never reaches the
-// app: `parse_blocks` reads only `message.content`.
 const WORKFLOW_SPAWN_RESULT = (taskId: string) => ({
   content: `Workflow launched in background. Task ID: ${taskId}
 Summary: Map how hyprlayer-app drives spec-driven dev stages, and what each transition actually writes
@@ -118,9 +111,6 @@ function taskStop(
   return makeTool("TaskStop", JSON.stringify({ task_id: taskId }), toolUseId, result);
 }
 
-/** A background-task notification marker (the reduced `backgroundTaskUpdate`
- *  event). `spawnToolUseId` mirrors the notification carrying the spawning
- *  Bash tool-use id directly; pass null to exercise the task_id fallback. */
 function taskUpdate(
   taskId: string,
   spawnToolUseId: string | null,
@@ -129,12 +119,10 @@ function taskUpdate(
   return { kind: "taskUpdate", id: `up-${taskId}-${status}`, taskId, toolUseId: spawnToolUseId, status };
 }
 
-/** A process-boundary marker (backend relaunch). Clears tracked tasks. */
 function relaunchedMarker(id = "relaunch-1"): Extract<TranscriptItem, { kind: "relaunched" }> {
   return { kind: "relaunched", id };
 }
 
-/** A live-rewind boundary (SAME process). Must NOT clear tracked tasks. */
 function rewoundMarker(id = "rewound-1"): Extract<TranscriptItem, { kind: "rewound" }> {
   return { kind: "rewound", id };
 }
@@ -151,7 +139,6 @@ function replayFixture(events: unknown[]): TranscriptItem[] {
   return view.items;
 }
 
-// ─── isBackgroundSpawn ───────────────────────────────────────────────────────
 
 describe("isBackgroundSpawn", () => {
   it("returns true for a Bash item with run_in_background:true", () => {
@@ -187,7 +174,6 @@ describe("isBackgroundSpawn", () => {
   });
 });
 
-// ─── backgroundTasksFromItems ────────────────────────────────────────────────
 
 describe("backgroundTasksFromItems", () => {
   it("returns empty array for an empty transcript", () => {
@@ -228,7 +214,6 @@ describe("backgroundTasksFromItems", () => {
   });
 
   it("sets taskId to null before the spawn result arrives", () => {
-    // result === null means the toolResult event hasn't arrived yet
     const items: TranscriptItem[] = [bgBash("t1", { result: null })];
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
@@ -239,7 +224,7 @@ describe("backgroundTasksFromItems", () => {
   it("flips status to awaiting when TaskOutput result is pending", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
-      taskOutput("to1", "task-a", null), // result=null → agent is blocked
+      taskOutput("to1", "task-a", null),
     ];
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
@@ -250,8 +235,8 @@ describe("backgroundTasksFromItems", () => {
   it("resets status to running after a TaskOutput timeout result", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
-      taskOutput("to1", "task-a", null), // awaiting
-      taskOutput("to2", "task-a", TASKOUT_TIMEOUT("task-a")), // timeout → still running
+      taskOutput("to1", "task-a", null),
+      taskOutput("to2", "task-a", TASKOUT_TIMEOUT("task-a")),
     ];
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
@@ -274,11 +259,8 @@ describe("backgroundTasksFromItems", () => {
     expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
-  // ── completion notification (the fire-and-forget path) ─────────────────────
 
   it("removes a task on a terminal completion notification, agent never polled", () => {
-    // The screenshot bug: a `sleep`-style task the agent fires and forgets. No
-    // TaskOutput poll, no TaskStop, only claude's async notification clears it.
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
       taskUpdate("task-a", "t1", "completed"),
@@ -295,8 +277,6 @@ describe("backgroundTasksFromItems", () => {
   });
 
   it("matches the notification by task_id when it carries no toolUseId", () => {
-    // Defensive fallback: an update keyed only on task_id still resolves to the
-    // spawning tool via the spawn-result mapping.
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
       taskUpdate("task-a", null, "completed"),
@@ -333,7 +313,6 @@ describe("backgroundTasksFromItems", () => {
     expect(backgroundTasksFromItems(items)).toHaveLength(1);
   });
 
-  // ── Workflow launch (background-task ride-along) ────────────────────────────
 
   it("opens a task for a Workflow item, taking its id from the launch block's Task ID line", () => {
     const items: TranscriptItem[] = [
@@ -358,17 +337,12 @@ describe("backgroundTasksFromItems", () => {
   });
 
   it("opens no task for a parented Bash{run_in_background} item (a nested workflow agent's own spawn)", () => {
-    // Once the watcher (Phase 4) nests a workflow agent's tools, that agent's
-    // own background Bash calls carry the synthetic per-agent parentId. Its
-    // completion notification lands on the agent's file stream, never on this
-    // session's, so tracking it here would open a task that can never close.
     const items: TranscriptItem[] = [
       { ...bgBash("t1", { description: "Nested build", result: SPAWN_RESULT("task-a") }), parentId: "wf:wf_1:agent1" },
     ];
     expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
-  // ── errored spawn (denied / hook-blocked), no phantom ─────────────────────
 
   it("does not track a background spawn whose result is an error", () => {
     const items: TranscriptItem[] = [
@@ -380,7 +354,6 @@ describe("backgroundTasksFromItems", () => {
     expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
-  // ── process death (relaunch / exit) clears orphaned tasks ──────────────────
 
   it("clears tracked tasks at a relaunched boundary (resume/restart/log-only rewind)", () => {
     const items: TranscriptItem[] = [
@@ -403,9 +376,6 @@ describe("backgroundTasksFromItems", () => {
   });
 
   it("KEEPS tracked tasks at a rewound boundary (live rewind, same process)", () => {
-    // A live rewind peels the conversation but leaves the process (and its
-    // background shells) running, so the task must survive the boundary, unlike
-    // a relaunch, which kills the process.
     const items: TranscriptItem[] = [
       bgBash("t1", { description: "Long build", result: SPAWN_RESULT("task-a") }),
       rewoundMarker(),
@@ -423,7 +393,6 @@ describe("backgroundTasksFromItems", () => {
     expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
-  // ── output-file read (the dominant real-world terminus) ────────────────────
 
   it("ends a task when the agent reads its .output file via Read", () => {
     const items: TranscriptItem[] = [
@@ -437,10 +406,6 @@ describe("backgroundTasksFromItems", () => {
   });
 
   it("ends a task when the agent greps its .output file via foreground Bash (the screenshot bug)", () => {
-    // Real repro: the agent backgrounds `cargo test` to regenerate TS bindings,
-    // then greps the output file directly. claude suppresses the completion
-    // notification once the output is read, so this read is the only signal that
-    // ever clears the task.
     const items: TranscriptItem[] = [
       bgBash("t1", {
         command: "cargo test typescript_bindings_export",
@@ -458,8 +423,6 @@ describe("backgroundTasksFromItems", () => {
   });
 
   it("drops the read task as soon as the read tool-use appears, before its result", () => {
-    // The toolUse already carries the path in its input, so we clear promptly
-    // rather than waiting for the read's result to arrive.
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
       makeTool("Read", JSON.stringify({ file_path: "/tmp/tasks/task-a.output" }), "rd1", null),
@@ -492,7 +455,7 @@ describe("backgroundTasksFromItems", () => {
   it("does NOT remove a task when TaskStop has no result yet (not confirmed)", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
-      taskStop("ts1", "task-a", null), // result=null → stop not confirmed
+      taskStop("ts1", "task-a", null),
     ];
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
@@ -525,7 +488,7 @@ describe("backgroundTasksFromItems", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { description: "Task A", result: SPAWN_RESULT("task-a") }),
       bgBash("t2", { description: "Task B", result: SPAWN_RESULT("task-b") }),
-      taskOutput("to1", "task-a", null), // A is awaiting
+      taskOutput("to1", "task-a", null),
     ];
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(2);
@@ -559,7 +522,7 @@ describe("backgroundTasksFromItems", () => {
   it("ignores TaskOutput for an unknown task_id", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
-      taskOutput("to1", "completely-unknown", null), // unknown id → no effect
+      taskOutput("to1", "completely-unknown", null),
     ];
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
@@ -567,18 +530,14 @@ describe("backgroundTasksFromItems", () => {
   });
 });
 
-// ─── fixture replay ──────────────────────────────────────────────────────────
 
 describe("backgroundTasksFromItems, fixture replay", () => {
   it("ends up with zero live tasks after the full fixture sequence", () => {
     const items = replayFixture(fixture);
-    // The fixture goes: spawn → poll-timeout → poll-completed → turnDone
-    // After all events are replayed, the task is completed and removed.
     expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
   it("pins the Bash-birth wire format: extracts task_id from spawn result", () => {
-    // Replay only the first two events (toolUse + toolResult for spawn)
     const items = replayFixture(fixture.slice(0, 2));
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
@@ -588,7 +547,6 @@ describe("backgroundTasksFromItems, fixture replay", () => {
   });
 
   it("shows awaiting while TaskOutput result is pending (awaiting state)", () => {
-    // Replay spawn + result + turnDone + TaskOutput (NO toolResult yet)
     const items = replayFixture(fixture.slice(0, 4));
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
@@ -596,7 +554,6 @@ describe("backgroundTasksFromItems, fixture replay", () => {
   });
 
   it("resets to running after a timeout result", () => {
-    // Replay through the timeout result (events 0-4)
     const items = replayFixture(fixture.slice(0, 5));
     const tasks = backgroundTasksFromItems(items);
     expect(tasks).toHaveLength(1);
@@ -604,8 +561,6 @@ describe("backgroundTasksFromItems, fixture replay", () => {
   });
 
   it("a reduced backgroundTaskUpdate event drops a fire-and-forget task", () => {
-    // End-to-end: spawn a background task, end the turn (no poll), then deliver
-    // claude's async completion notification as a real event through the reducer.
     const events: SessionEvent[] = [
       { kind: "toolUse", id: "bg-1", name: "Bash", input: JSON.stringify({ command: "sleep 150", description: "Sleep 2.5 minutes", run_in_background: true }), parentId: null },
       { kind: "toolResult", toolUseId: "bg-1", content: SPAWN_RESULT("task-z").content, isError: false, parentId: null },
@@ -622,9 +577,6 @@ describe("backgroundTasksFromItems, fixture replay", () => {
   });
 
   it("a direct output-file read clears a fire-and-forget task end-to-end", () => {
-    // The real-world path: background a build, end the turn, then in a later
-    // turn read the output file directly (claude sends no completion
-    // notification once the output is consumed, so the read must clear it).
     const events: SessionEvent[] = [
       { kind: "toolUse", id: "bg-1", name: "Bash", input: JSON.stringify({ command: "cargo test", description: "Regenerate TS bindings", run_in_background: true }), parentId: null },
       { kind: "toolResult", toolUseId: "bg-1", content: SPAWN_RESULT("task-z").content, isError: false, parentId: null },
@@ -640,8 +592,6 @@ describe("backgroundTasksFromItems, fixture replay", () => {
   });
 
   it("keeps a fire-and-forget task alive across a later turn's init (init is per-turn, not a restart)", () => {
-    // Regression guard: `init` is per-turn (prod: 19 inits / 3 exits), so a task
-    // must SURVIVE a later turn's init. Clearing on init wrongly dropped it.
     const before = replayFixture([
       { kind: "init", claudeSessionId: "sess-1", model: "claude-haiku-4-5-20251001" },
       { kind: "toolUse", id: "bg-1", name: "Bash", input: JSON.stringify({ command: "sleep 600", description: "Long build", run_in_background: true }), parentId: null },

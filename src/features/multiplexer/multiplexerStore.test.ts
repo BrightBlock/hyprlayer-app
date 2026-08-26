@@ -32,7 +32,6 @@ describe("rollupForWorkstream", () => {
   });
 
   it("returns undefined for a workstream with no pty agents", () => {
-    // Keeps the sidebar unchanged when multiplexer is off / no agents.
     expect(rollupForWorkstream(agents, "ws3")).toBeUndefined();
     expect(rollupForWorkstream({}, "ws1")).toBeUndefined();
   });
@@ -45,8 +44,6 @@ describe("markAgentStarted", () => {
     useMultiplexerStore.getState().agents[agentKey(ws, shell)]?.started;
 
   it("seeds started=false on creation and flips it true on first keystroke", () => {
-    // The reported bug: a fresh tab must NOT resume (`claude --continue` → "No
-    // conversation found") until the user has actually typed something.
     upsertAgent("ws", 1, { engineId: "claude-code", state: "idle", started: false });
     expect(startedOf("ws", 1)).toBe(false);
 
@@ -58,15 +55,13 @@ describe("markAgentStarted", () => {
     upsertAgent("ws", 1, { engineId: "claude-code", state: "idle", started: false });
     markAgentStarted("ws", 1);
     const ref = useMultiplexerStore.getState().agents;
-    markAgentStarted("ws", 1); // already started → same object reference (no churn)
+    markAgentStarted("ws", 1);
     expect(useMultiplexerStore.getState().agents).toBe(ref);
-    markAgentStarted("ws", 99); // unknown → no-op
+    markAgentStarted("ws", 99);
     expect(startedOf("ws", 99)).toBeUndefined();
   });
 
   it("survives a state-only update so detection flushes don't reset resume", () => {
-    // setAgentStateBatch (the per-frame working/blocked/done write) must preserve
-    // `started`, else the shield would lose its resume mid-conversation.
     upsertAgent("ws", 1, { engineId: "claude-code", state: "idle", started: false });
     markAgentStarted("ws", 1);
     setAgentStateBatch(new Map([[agentKey("ws", 1), "working" as AgentState]]));

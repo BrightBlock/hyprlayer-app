@@ -1,7 +1,3 @@
-//! End-to-end driver smoke test against the REAL `claude` binary. Ignored by
-//! default, needs a logged-in claude and makes a (tiny) billed API call. Run:
-//!   cargo test -p hyprlayer-core --test claude_driver_smoke -- --ignored --nocapture
-
 use std::time::Duration;
 
 use hyprlayer_core::claude::{
@@ -42,8 +38,6 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         )
         .expect("send turn");
 
-    // A stream-json session stays alive between turns, so the turn completes at
-    // TurnDone (not Exited). Collect text + partials until the turn finishes.
     let mut text = String::new();
     let mut got_init = false;
     let mut turn_done = false;
@@ -66,7 +60,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
                 panic!("session exited before completing the turn: {outcome:?} code={code:?}");
             }
             Ok(Ok(other)) => println!("event: {other:?}"),
-            Ok(Err(_)) => break, // channel closed
+            Ok(Err(_)) => break,
             Err(_) => panic!("turn did not finish within 60s"),
         }
     }
@@ -78,7 +72,6 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         "assistant should have said pong, got: {text:?}"
     );
 
-    // A hard kill should drive the session to a terminal Exited event.
     driver.kill();
     let exited = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -97,8 +90,6 @@ async fn drives_a_real_no_tool_turn_to_completion() {
     );
 }
 
-/// Send `text` as a turn and drain events until the turn completes, returning the
-/// assistant's coalesced text. Panics if the turn doesn't finish in time.
 async fn run_turn(
     driver: &ClaudeDriver,
     events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
@@ -122,10 +113,6 @@ async fn run_turn(
     }
 }
 
-/// End-to-end: three turns, then `rewind_to_ordinal(2)` must drive claude's own
-/// `rewind_conversation` so the model genuinely forgets turns 2–3 while keeping
-/// turn 1. Exercises the whole integration: reading the turn uuids from claude's
-/// on-disk transcript, control-response routing, and tail-to-target peeling.
 #[tokio::test]
 #[ignore = "requires a logged-in claude; makes real API calls"]
 async fn rewind_to_ordinal_truncates_model_memory() {
@@ -168,7 +155,6 @@ async fn rewind_to_ordinal_truncates_model_memory() {
     )
     .await;
 
-    // Rewind to turn 2: drop turns 2 (number) and 3 (animal), keep turn 1 (color).
     driver
         .rewind_to_ordinal(2)
         .await
@@ -186,7 +172,6 @@ async fn rewind_to_ordinal_truncates_model_memory() {
         "model should have FORGOTTEN the otter (turn 3 was rewound away), got: {animal:?}"
     );
 
-    // Turn 1 survived the rewind, so the color must still be known.
     let color = run_turn(
         &driver,
         &mut events,
@@ -202,7 +187,6 @@ async fn rewind_to_ordinal_truncates_model_memory() {
     driver.kill();
 }
 
-/// Spawn a haiku session (fresh or `--resume`) in `cwd` under `session_id`.
 fn spawn_haiku(
     cwd: &std::path::Path,
     session_id: &str,
@@ -229,19 +213,12 @@ fn spawn_haiku(
     .expect("spawn claude")
 }
 
-/// THE REGRESSION (issue #1011): rewinding to a turn from BEFORE a `--resume`
-/// boundary. The driver reads the target uuids from claude's on-disk transcript,
-/// not the live process's replay echoes, so a resumed session can still
-/// truly-rewind its earlier turns. Every app restart resumes sessions, so before
-/// this fix a rewind of any pre-restart turn silently fell back to a log-only prune
-/// ("the agent still remembers the removed turns"), now the model actually forgets.
 #[tokio::test]
 #[ignore = "requires a logged-in claude; makes real API calls"]
 async fn rewind_across_resume_truncates_pre_resume_turns() {
     let cwd = std::env::temp_dir();
     let session_id = uuid::Uuid::new_v4().to_string();
 
-    // Generation 1: three turns, then kill the process, i.e. an app restart.
     {
         let (driver, mut events) = spawn_haiku(&cwd, &session_id, false);
         run_turn(
@@ -263,7 +240,6 @@ async fn rewind_across_resume_truncates_pre_resume_turns() {
         )
         .await;
         driver.kill();
-        // Let it exit so the resume can't race the still-dying process.
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if let Ok(SessionEvent::Exited { .. }) = events.recv().await {
@@ -275,16 +251,9 @@ async fn rewind_across_resume_truncates_pre_resume_turns() {
         .expect("generation 1 should exit after kill");
     }
 
-    // Generation 2: `--resume` the SAME session id. One neutral turn first, exactly
-    // as the app does, a resumed session is re-attached and interacted with (so
-    // claude has fully loaded `z`) well before the user clicks rewind. (Rewinding in
-    // the very first millisecond after `--resume`, mid-load, is racy on claude's
-    // side and never happens in the human-driven UI.)
     let (driver, mut events) = spawn_haiku(&cwd, &session_id, true);
     run_turn(&driver, &mut events, "Reply READY.").await;
 
-    // Rewind to turn 2, turns 2 and 3 are from the PREVIOUS generation, whose uuids
-    // this process never saw echoed; the driver reads them from claude's transcript.
     driver
         .rewind_to_ordinal(2)
         .await

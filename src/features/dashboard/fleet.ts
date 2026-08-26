@@ -1,15 +1,3 @@
-/**
- * The home dashboard's fleet fold: every active workstream classified by its
- * live agent activity, with the detail the Live-now strip renders (current
- * tool line, context-meter fill, elapsed anchor, queued follow-ups).
- *
- * Three sources merge per workstream, worst state first:
- *  - the in-memory session store (rich: transcript, pending permission, meter),
- *  - pty agents from multiplexer mode (blocked / working / done),
- *  - the backend session registry (live process states, covers sessions this
- *    webview never attached, e.g. right after a reload; push-refreshed by
- *    SessionLifecycle events).
- */
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 
@@ -33,27 +21,19 @@ export type FleetActivity = Exclude<WorkstreamActivity, "idle">;
 export type FleetItem = {
   view: WorkstreamView;
   activity: FleetActivity;
-  /** The most urgent session (the tab to select on open), when known. */
   sessionId: string | null;
-  /** Mono context line, the tool being run or awaited. */
   line: string | null;
-  /** Context-meter fill for a working session. */
   meter: { tokens: number; fraction: number } | null;
-  /** Epoch ms anchoring the row's elapsed counter (null = don't show one). */
   since: number | null;
-  /** Follow-up turns queued behind in-flight turns, across the workstream. */
   queued: number;
 };
 
 export type Fleet = {
-  /** Workstreams with live agent activity, most urgent first. */
   live: FleetItem[];
-  /** Active workstreams with nothing to flag, input order preserved. */
   idle: WorkstreamView[];
   counts: { running: number; needsYou: number; review: number; errors: number; queued: number };
 };
 
-// Worst-first, mirroring the sidebar dot's fold (WorkstreamActivityDot).
 const RANK: Record<WorkstreamActivity, number> = {
   idle: 0,
   review: 1,
@@ -78,35 +58,25 @@ const FILE_VERBS: Record<string, string> = {
   NotebookEdit: "editing",
 };
 
-/** One tool call as a low-key present-tense phrase ("editing Dashboard.tsx"). */
 function toolLine(name: string, input: string): string {
   const summary = toolSummary(name, input);
   const verb = FILE_VERBS[name];
   if (verb) return summary ? `${verb} ${baseName(summary)}` : verb;
   if (name === "Bash" || name === "BashOutput") return summary || "running a command";
-  // "Agent" is the current wire name; "Task" is the pre-rename name an older
-  // CLI still emits. Same tool, both kept.
   if (name === "Task" || name === "Agent")
     return summary ? `subagent: ${summary}` : "running a subagent";
   return summary ? `${name} · ${summary}` : name;
 }
 
-/** What a working session is on right now: its most recent tool call, else a
- *  generic "thinking". Scans from the tail, so long transcripts stay cheap.
- *
- *  Parented items are skipped so the line keeps describing the MAIN thread: a
- *  workflow's nested agents contribute hundreds of their own tool calls to the
- *  same array, and the tail is almost always one of theirs. */
 export function workingLine(items: readonly TranscriptItem[]): string {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
     if (item.kind === "tool" && !item.parentId) return toolLine(item.name, item.input);
-    if (item.kind === "user") break; // no tool call yet this turn
+    if (item.kind === "user") break;
   }
   return "thinking…";
 }
 
-/** What a parked session is waiting on: the pending ask's command/path. */
 function pendingLine(entry: SessionEntry): string {
   if (entry.pendingQuestion) return "waiting on an answer";
   const ask =
@@ -120,9 +90,6 @@ function pendingLine(entry: SessionEntry): string {
   return summary ? `${ask.toolName} · ${summary}` : `${ask.toolName} permission`;
 }
 
-// The picked-session fields, flattened to one string so `useShallow` can bail
-// out on streaming deltas that don't change what the dashboard shows. \0 is
-// safe: none of these fields carry NUL bytes, and the line is single-line.
 export type Picked = {
   activity: FleetActivity;
   sessionId: string;
@@ -134,12 +101,6 @@ export type Picked = {
   queued: number;
 };
 
-/**
- * Pure core of the store selector: for each workstream, the most urgent
- * session's dashboard-relevant fields as one key string, plus the queued
- * follow-up total across all of its sessions. Ordered by `wsIds`. Exported
- * for tests.
- */
 export function selectFleetKeys(
   sessions: Record<string, SessionEntry>,
   wsIds: readonly string[],
@@ -208,9 +169,6 @@ function parsePicked(keys: string[]): Map<string, Picked> {
   return out;
 }
 
-/** Registry states we can classify without a transcript. A bare "running" is
- *  ambiguous (mid-turn vs resting at ready), so it stays unmapped rather than
- *  reading as forever-working. */
 function registryActivity(state: string): FleetActivity | null {
   if (state === "awaiting_permission" || state === "awaiting_question") return "needs-you";
   if (state === "starting") return "working";
@@ -233,8 +191,6 @@ function registryFold(
   return out;
 }
 
-/** Fold one workstream's three sources into its dashboard row. Exported for
- *  tests. */
 export function foldFleetItem(
   view: WorkstreamView,
   picked: Picked | undefined,
@@ -283,16 +239,10 @@ export function foldFleetItem(
   };
 }
 
-/**
- * Classify `views` into the home dashboard's fleet: live rows (most urgent
- * first, ties keep input order) + quiet ones, with the summary-chip counts.
- */
 export function useFleet(views: WorkstreamView[]): Fleet {
   const wsIds = useMemo(() => views.map((v) => v.item.id), [views]);
   const storeKeys = useSessionStore(useShallow((s) => selectFleetKeys(s.sessions, wsIds)));
   const picked = useMemo(() => parsePicked(storeKeys), [storeKeys]);
-  // One rollup key per workstream (not the agents map) so pty output churn
-  // doesn't re-render the dashboard unless a rollup actually flips.
   const ptyKeys = useMultiplexerStore(
     useShallow((s) => wsIds.map((id) => rollupForWorkstream(s.agents, id) ?? "idle")),
   );

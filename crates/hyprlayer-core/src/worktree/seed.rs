@@ -1,7 +1,3 @@
-//! Seed a fresh worktree with untracked files from the canonical repo per the
-//! repo's `[worktree].copy` list. Best-effort, callers MUST NOT roll a worktree
-//! back when seeding fails.
-
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -10,11 +6,8 @@ use serde::Serialize;
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SeedReport {
-    /// Repo-relative paths actually written into the worktree.
     pub copied: Vec<String>,
-    /// Entries (literal or glob) that matched nothing in the repo.
     pub missing: Vec<String>,
-    /// Per-entry errors that didn't prevent other entries from copying.
     pub errors: Vec<SeedError>,
 }
 
@@ -26,16 +19,12 @@ pub struct SeedError {
     pub message: String,
 }
 
-/// Cap on entries visited per glob walk; mirrors `gitops::search_files`.
 const MAX_VISITED: usize = 50_000;
 
-/// Returns `true` if the pattern string contains any glob metacharacter.
 fn is_glob(p: &str) -> bool {
     p.contains(['*', '?', '[', '{'])
 }
 
-/// Validate that `rel` is a safe repo-relative path: not absolute, no `..`,
-/// no Windows drive prefix. Mirrors `gitops::safe_join`.
 fn safe_rel(rel: &str) -> Option<&Path> {
     let p = Path::new(rel);
     let bad = p.is_absolute()
@@ -48,8 +37,6 @@ fn safe_rel(rel: &str) -> Option<&Path> {
     (!bad).then_some(p)
 }
 
-/// Create parent dirs and overwrite `dst` with `src`'s contents. `std::fs::copy`
-/// dereferences symlinks on Unix (copies the target's content, not the link).
 fn copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)?;
@@ -57,9 +44,6 @@ fn copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::copy(src, dst).map(|_| ())
 }
 
-/// Recursively copy all files under `repo/dir_rel` into `worktree/dir_rel`.
-/// Skips `.git` and `.hyprlayer` entries at any depth. Does not follow symlinks
-/// for directories (but does copy symlinked file targets via `std::fs::copy`).
 fn copy_tree(repo: &Path, worktree: &Path, dir_rel: &Path, report: &mut SeedReport) {
     let src_dir = repo.join(dir_rel);
     let walker = walkdir::WalkDir::new(&src_dir)
@@ -106,23 +90,14 @@ fn copy_tree(repo: &Path, worktree: &Path, dir_rel: &Path, report: &mut SeedRepo
     }
 }
 
-/// Seed `worktree` from `repo`, copying every file matched by `patterns`.
-/// Literals stat+copy directly; globs drive one bounded `walkdir` (capped at
-/// `MAX_VISITED`, skipping `.git/`/`.hyprlayer/`). Best-effort: never panics or
-/// errors, failures land in `SeedReport::errors`, non-matches in `missing`.
 pub fn seed_worktree(repo: &Path, worktree: &Path, patterns: &[String]) -> SeedReport {
     run(repo, Some(worktree), patterns)
 }
 
-/// Dry-run [`seed_worktree`]: resolve `patterns` and report what WOULD be copied
-/// / matched nothing (`missing`) / errored, writing nothing. Drives the "copy
-/// files not found" warning so a bad copy config surfaces before any worktree.
 pub fn check_worktree_patterns(repo: &Path, patterns: &[String]) -> SeedReport {
     run(repo, None, patterns)
 }
 
-/// Shared engine. `dst = Some(worktree)` copies; `dst = None` is a dry run that
-/// only resolves matches (used by [`check_worktree_patterns`]).
 fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
     let mut report = SeedReport::default();
     if patterns.is_empty() {
@@ -134,7 +109,6 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
         .map(String::as_str)
         .partition(|p| !is_glob(p));
 
-    // ── Literal paths (no walk) ───────────────────────────────────────────────
     for lit in &literals {
         match safe_rel(lit) {
             None => report.errors.push(SeedError {
@@ -153,11 +127,9 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
                     }),
                     Ok(meta) if meta.is_dir() => match dst {
                         Some(worktree) => copy_tree(repo, worktree, rel, &mut report),
-                        // Dry run: an existing directory resolves; no need to walk it.
                         None => report.copied.push(lit.to_string()),
                     },
                     Ok(_) => match dst {
-                        // File or symlink, copy target content.
                         Some(worktree) => {
                             let out = worktree.join(rel);
                             match copy_file(&src, &out) {
@@ -179,8 +151,6 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
         return report;
     }
 
-    // ── Glob patterns (one bounded walk) ─────────────────────────────────────
-    // Compile each pattern to a GlobMatcher; compile failures go to errors.
     struct GlobEntry {
         pattern: String,
         matcher: globset::GlobMatcher,
@@ -206,7 +176,6 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
-            // Skip .git and .hyprlayer at any depth > 0.
             if e.depth() > 0 && e.file_type().is_dir() {
                 if let Some(name) = e.file_name().to_str() {
                     if name == ".git" || name == ".hyprlayer" {
@@ -222,8 +191,6 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
             tracing::warn!("worktree seed: glob walk truncated at {MAX_VISITED} entries");
             break;
         }
-        // Dry run only needs to know each pattern matches *something*; once every
-        // matcher has hit, the rest of the walk can't change the report.
         if dst.is_none() && matchers.iter().all(|ge| ge.hit) {
             break;
         }
@@ -259,7 +226,7 @@ fn run(repo: &Path, dst: Option<&Path>, patterns: &[String]) -> SeedReport {
                                     entry: rel_str,
                                     message: e.to_string(),
                                 });
-                                already_copied = true; // don't attempt again for this file
+                                already_copied = true;
                             }
                         }
                     }
@@ -283,7 +250,6 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// Create a temp dir pair (repo, worktree).
     fn dirs() -> (TempDir, TempDir) {
         (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap())
     }
@@ -295,8 +261,6 @@ mod tests {
         }
         fs::write(&path, content).unwrap();
     }
-
-    // ── Core cases ────────────────────────────────────────────────────────────
 
     #[test]
     fn empty_patterns_returns_empty_report() {
@@ -360,8 +324,6 @@ mod tests {
         assert_eq!(fs::read(wt.path().join(".env")).unwrap(), b"NEW");
     }
 
-    // ── Path-safety ───────────────────────────────────────────────────────────
-
     #[test]
     fn path_escape_parent_dir_goes_to_errors() {
         let (repo, wt) = dirs();
@@ -378,14 +340,11 @@ mod tests {
         assert!(r.copied.is_empty());
     }
 
-    // ── .git / .hyprlayer exclusion ───────────────────────────────────────────
-
     #[test]
     fn git_dir_not_copied_by_glob() {
         let (repo, wt) = dirs();
         write(repo.path(), ".git/config", b"[core]");
         write(repo.path(), "real.txt", b"real");
-        // A glob that would match .git/config if not excluded
         let r = seed_worktree(repo.path(), wt.path(), &["**/*".into()]);
         assert!(
             r.copied.iter().all(|p| !p.contains(".git")),
@@ -405,14 +364,12 @@ mod tests {
         );
     }
 
-    // ── Glob matching ─────────────────────────────────────────────────────────
-
     #[test]
     fn glob_copies_all_matches() {
         let (repo, wt) = dirs();
         write(repo.path(), "a.env", b"A");
         write(repo.path(), "b.env", b"B");
-        write(repo.path(), "c.txt", b"C"); // should NOT match
+        write(repo.path(), "c.txt", b"C");
         let r = seed_worktree(repo.path(), wt.path(), &["*.env".into()]);
         let mut copied = r.copied.clone();
         copied.sort();
@@ -435,14 +392,12 @@ mod tests {
         let (repo, wt) = dirs();
         write(repo.path(), "config/a.local.json", b"{}");
         write(repo.path(), "config/b.local.json", b"{}");
-        write(repo.path(), "config/prod.json", b"{}"); // should NOT match
+        write(repo.path(), "config/prod.json", b"{}");
         let r = seed_worktree(repo.path(), wt.path(), &["config/*.local.json".into()]);
         let mut copied = r.copied.clone();
         copied.sort();
         assert_eq!(copied, vec!["config/a.local.json", "config/b.local.json"]);
     }
-
-    // ── Dry-run check (check_worktree_patterns) ───────────────────────────────
 
     #[test]
     fn check_present_nested_literal_is_clean_and_writes_nothing() {
@@ -451,7 +406,6 @@ mod tests {
         let r = check_worktree_patterns(repo.path(), &["tools/operating-review/.env".into()]);
         assert!(r.missing.is_empty(), "should resolve: {r:?}");
         assert!(r.errors.is_empty());
-        // A check must never touch the filesystem.
         assert!(!wt.path().join("tools/operating-review/.env").exists());
     }
 

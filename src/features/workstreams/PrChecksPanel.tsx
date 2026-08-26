@@ -6,8 +6,6 @@ import { useWorkstreamPr } from "@/lib/queries";
 import { Spinner } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
 
-/** Overall-status dot for the CI Checks header: green passing, red failing,
- *  amber (pulsing) pending, dim when there are no checks. */
 function StatusDot({ state }: { state: ChecksState }) {
   const tone =
     state === "passing"
@@ -20,11 +18,10 @@ function StatusDot({ state }: { state: ChecksState }) {
   return <span className={`h-2 w-2 shrink-0 rounded-full ${tone}`} />;
 }
 
-/** Glyph + colour for a single check's outcome. */
 function CheckGlyph({ state }: { state: ChecksState }) {
   if (state === "pending") return <Spinner size={11} />;
   if (state === "failing") return <span className="text-bad">✕</span>;
-  return <span className="text-ok">✓</span>; // passing
+  return <span className="text-ok">✓</span>;
 }
 
 function ExternalLinkIcon() {
@@ -36,10 +33,6 @@ function ExternalLinkIcon() {
   );
 }
 
-/** A leading row in the expanded list for a branch that conflicts with its
- *  base. GitHub's CI rollup never reports this, so without it a conflicting PR
- *  looks all-green here while the Merge button is silently disabled. Opens the
- *  PR on GitHub, where the conflict is resolved. */
 function MergeConflictRow({ url }: { url: string }) {
   return (
     <div className="border-b border-edge px-3 py-2">
@@ -61,11 +54,6 @@ function MergeConflictRow({ url }: { url: string }) {
   );
 }
 
-/** A leading row for a PR whose required review isn't satisfied, waiting on a
- *  reviewer, or with changes requested. Like the merge-conflict row, GitHub's CI
- *  rollup never reports this, so without it a review-blocked PR looks all-green
- *  here while the Merge button is disabled. Warn (amber) tone, it's a wait on a
- *  person, not a failed check. Opens the PR on GitHub. */
 function ReviewBlockRow({
   decision,
   url,
@@ -97,19 +85,6 @@ function ReviewBlockRow({
   );
 }
 
-/**
- * The CI Checks breakdown at the bottom of the diff sidebar. Renders nothing
- * without an open PR, and stays minimized to its header until there are checks,
- * a merge conflict, or an unsatisfied required review.
- *
- * Once expanded it leads with the blocker rows GitHub's CI rollup never
- * reports: a merge-conflict row, and a review row while a required review is
- * outstanding or changes were requested. Then each check gets a line, opening
- * either the PR's Checks tab (Actions runs) or its external CI page.
- *
- * The header's status dot combines everything: red on a conflict or a failing
- * check, amber while waiting on a review.
- */
 export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
   const id = view?.item.id ?? "";
   const pr = useWorkstreamPr(id, view !== null);
@@ -119,17 +94,11 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
   if (!view || !data || data.state !== "open") return null;
 
   const isConflicting = data.mergeableState === "conflicting";
-  // The review decision when it blocks merging (waiting on a review, or changes
-  // requested), else null, narrowed so it can drive both the row and the header.
   const reviewBlock =
     data.reviewDecision === "reviewRequired" || data.reviewDecision === "changesRequested"
       ? data.reviewDecision
       : null;
   const hasChecks = data.checksList.length > 0;
-  // A conflict or an unsatisfied required review blocks merging even with no/green
-  // checks, so it opens the section and colours the header dot: red for a conflict
-  // or failing checks (hard problems), amber for a review still waiting on a person
-  // when checks are otherwise clean.
   const hasContent = hasChecks || isConflicting || reviewBlock !== null;
   const open = hasContent && !collapsed;
   const base: ChecksState = isConflicting ? "failing" : data.checks;

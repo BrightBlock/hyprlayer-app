@@ -1,13 +1,9 @@
 import { useMemo, useRef, type ReactNode } from "react";
 
-/** One token per quoted string, `$VAR`/`%VAR%`, whitespace run, or word. */
 const TOKEN_RE = /("[^"]*"|'[^']*'|\$\{?\w+\}?|%\w+%|\s+|[^\s]+)/g;
 const LINE_PX = 22;
 const ZWSP = "​";
 
-/** Light shell highlighting: comments, the leading command, strings, env vars,
- *  and flags. Deliberately heuristic, enough colour to scan, not a real parser
- *  (matches the design mockup). */
 function highlightLine(line: string): ReactNode {
   if (line.replace(/^\s+/, "").startsWith("#")) {
     return <span className="italic text-ink-dim/60">{line || ZWSP}</span>;
@@ -18,11 +14,11 @@ function highlightLine(line: string): ReactNode {
   return parts.map((p, i) => {
     if (/^\s+$/.test(p)) return <span key={i}>{p}</span>;
     let cls = "text-ink";
-    if (/^["']/.test(p)) cls = "text-ship"; // string
-    else if (/^[$%]/.test(p)) cls = "text-commit"; // env var
-    else if (p.startsWith("-")) cls = "text-warn"; // flag
+    if (/^["']/.test(p)) cls = "text-ship";
+    else if (/^[$%]/.test(p)) cls = "text-commit";
+    else if (p.startsWith("-")) cls = "text-warn";
     else if (!sawCommand) {
-      cls = "text-brand"; // the command itself
+      cls = "text-brand";
       sawCommand = true;
     }
     return (
@@ -36,18 +32,11 @@ function highlightLine(line: string): ReactNode {
 type Props = {
   value: string;
   onChange: (next: string) => void;
-  /** Min visible rows; the editor auto-grows beyond this with content. */
   minRows?: number;
   placeholder?: string;
   "aria-label"?: string;
 };
 
-/**
- * Small multi-line command editor: monospace `<textarea>` with a line-number
- * gutter and a synced highlight overlay. Auto-grows so gutter/overlay/textarea
- * stay aligned without scroll math; long lines scroll horizontally in sync.
- * No deps, the app's CodeMirror is read-only/heavier, not wired for editing.
- */
 export function ScriptEditor({
   value,
   onChange,

@@ -1,35 +1,20 @@
-//! Matching, scoring, and ordering helpers behind [`ThoughtsIndex::query`].
-//! Trait-free and linear by design: for a small personal corpus (<= 5k docs)
-//! every query full-scans (Unicode-exact lowercase title/tags per candidate,
-//! an `aho-corasick` multi-needle search over a size-capped body read fresh
-//! from disk at query time, no body text is cached), with no inverted index
-//! or caching (< 1 ms per 1000 docs plus one bounded read per candidate with
-//! text). Body matching is ASCII-case-insensitive only: a needle that is the
-//! lowercase form of a *cased non-ASCII* letter (e.g. `"δ"` vs body `"Δ"`)
-//! will not match in the body, though title/tag matching stays Unicode-exact.
-//! Measured against the real corpus this affects a single symbolic
-//! occurrence; see the plan's "Accepted divergences" for the full accounting.
-
 use std::cmp::Ordering;
 
 use aho_corasick::{AhoCorasick, MatchKind};
 
 use super::indexer::{DocMeta, SortKey, TagMode, ThoughtQuery};
 
-/// Case-insensitive multi-needle matcher, built once per query.
 pub(crate) struct TextMatcher {
     needles: Vec<String>,
     ac: AhoCorasick,
 }
 
 impl TextMatcher {
-    /// `None` when there is no text to search for.
     pub(crate) fn new(needles: Vec<String>) -> Option<Self> {
         if needles.is_empty() {
             return None;
         }
         let ac = AhoCorasick::builder()
-            // Standard is required by `find_overlapping_iter`.
             .match_kind(MatchKind::Standard)
             .ascii_case_insensitive(true)
             .build(&needles)
@@ -41,16 +26,6 @@ impl TextMatcher {
         &self.needles
     }
 
-    /// Per-needle occurrence counts, reproducing `memchr::memmem::find_iter`
-    /// (leftmost, non-overlapping, *per needle*) exactly.
-    ///
-    /// A plain `find_iter` would be non-overlapping across *all* patterns, so
-    /// needles `["ab","bc"]` on `"abc"` would lose the `bc` hit and wrongly
-    /// exclude the document. `find_overlapping_iter` reports every match;
-    /// `last_end` then discards only the self-overlaps memmem would have
-    /// skipped (`"aa"` in `"aaa"` counts 1, not 2). Matches for a fixed-length
-    /// pattern arrive in increasing end order, hence increasing start order,
-    /// so the greedy test is correct.
     pub(crate) fn count_each(&self, haystack: &[u8]) -> Vec<u32> {
         let mut counts = vec![0u32; self.needles.len()];
         let mut last_end = vec![0usize; self.needles.len()];
@@ -65,7 +40,6 @@ impl TextMatcher {
     }
 }
 
-/// Lowercased whitespace-split search terms; empty when there is no text.
 pub(crate) fn parse_needles(text: Option<&str>) -> Vec<String> {
     text.unwrap_or("")
         .split_whitespace()
@@ -73,11 +47,6 @@ pub(crate) fn parse_needles(text: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-/// Non-text filters: AND across fields, OR within a field. types/statuses/
-/// authors/tags compare case-insensitively against frontmatter; `projects`
-/// accepts either the path-derived project or `fm.project`; `scopes` matches
-/// the derived scope; date bounds compare lexicographically against `fm.date`
-/// (docs without a date are excluded only when a date bound is set).
 pub(crate) fn passes_filters(q: &ThoughtQuery, meta: &DocMeta) -> bool {
     if !matches_any_ci(&q.types, meta.fm.doc_type.as_deref()) {
         return false;
@@ -123,11 +92,6 @@ pub(crate) fn passes_filters(q: &ThoughtQuery, meta: &DocMeta) -> bool {
     true
 }
 
-/// AND over needles: every needle must hit title, tags, or body. Returns the
-/// summed rank (`title_hits*8 + tag_hits*4 + body_count` per needle), or
-/// `None` when any needle misses everywhere. Title/tag matching stays exact
-/// Unicode lowercasing; body matching goes through `matcher`, which is
-/// ASCII-case-insensitive only (see the module-level divergence note).
 pub(crate) fn text_score(matcher: &TextMatcher, meta: &DocMeta, body: &[u8]) -> Option<u32> {
     let title_lc = meta
         .fm
@@ -160,8 +124,6 @@ pub(crate) fn text_score(matcher: &TextMatcher, meta: &DocMeta, body: &[u8]) -> 
     Some(score)
 }
 
-/// Total order for query results; `(meta, score)` pairs. Relevance without
-/// text falls through to date. Final tiebreak on id keeps results stable.
 pub(crate) fn compare_docs(
     sort: SortKey,
     has_text: bool,
@@ -193,8 +155,6 @@ fn count_occurrences(haystack: &str, needle: &str) -> u32 {
         .unwrap_or(u32::MAX)
 }
 
-/// Empty filter list always passes; otherwise the value must be present and
-/// equal (ASCII case-insensitive) to one of the filters.
 fn matches_any_ci(filters: &[String], value: Option<&str>) -> bool {
     if filters.is_empty() {
         return true;
@@ -288,12 +248,9 @@ mod tests {
 
     #[test]
     fn overlapping_needles_both_count_and_document_is_not_excluded() {
-        // A plain non-overlapping-across-all-patterns `find_iter` would lose
-        // the "bc" hit here and wrongly exclude the doc.
         let m = matcher("ab bc");
         let doc = meta("other", &[], None, 0.0);
         let score = text_score(&m, &doc, b"abc").unwrap();
-        // Both needles hit the body once: (0*8+0*4+1) + (0*8+0*4+1) = 2.
         assert_eq!(score, 2);
     }
 
@@ -301,7 +258,6 @@ mod tests {
     fn self_overlapping_needle_counts_once_like_memmem() {
         let m = matcher("aa");
         let doc = meta("other", &[], None, 0.0);
-        // memmem::find_iter("aaa", "aa") yields exactly one match.
         let score = text_score(&m, &doc, b"aaa").unwrap();
         assert_eq!(score, 1);
     }
@@ -314,10 +270,6 @@ mod tests {
         assert_eq!(score, 3);
     }
 
-    /// Accepted divergence 1: body matching is ASCII-case-insensitive only.
-    /// A needle that is the lowercase form of a *cased non-ASCII* letter does
-    /// not match its uppercase body form, while ASCII needles still match
-    /// across case as before.
     #[test]
     fn body_case_folding_is_ascii_only() {
         let doc = meta("other", &[], None, 0.0);
@@ -341,7 +293,6 @@ mod tests {
         assert_eq!(cmp(&newer, &older), Ordering::Less);
         assert_eq!(cmp(&older, &none), Ordering::Less);
         assert_eq!(cmp(&none, &newer), Ordering::Greater);
-        // Same date: higher mtime first.
         assert_eq!(cmp(&tie, &newer), Ordering::Less);
     }
 
@@ -384,7 +335,6 @@ mod tests {
             &doc
         ));
 
-        // OR: one of two tags present suffices; AND: all must be present.
         let or_q = ThoughtQuery {
             tags: vec!["security".into(), "missing".into()],
             ..Default::default()

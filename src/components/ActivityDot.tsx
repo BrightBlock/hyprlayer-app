@@ -1,14 +1,3 @@
-/**
- * A small activity dot summarising a workstream/session's live state: blue
- * pulse = a turn is running, amber pulse = blocked on you (permission/
- * question), red = a session errored, green = a turn finished and wants
- * review. Nothing renders when there's no activity to flag, so a quiet
- * workstream stays visually quiet. Shared by the sidebar tree
- * (`WorkstreamActivityDot`, features/session/WorkstreamActivity.tsx) and the
- * search palette — callers own reading the activity itself; this is
- * presentation only, which is what keeps it in `src/components` rather than
- * `src/features` (ADR-0003: this layer never imports a feature).
- */
 import type { WorkstreamActivity } from "@/lib/domain/activity";
 
 type DotAnim = "ping" | "work" | "none";
@@ -17,22 +6,13 @@ const ACTIVITY_STYLE: Record<
   Exclude<WorkstreamActivity, "idle">,
   { color: string; anim: DotAnim; label: string }
 > = {
-  // Radar ping reads as "alert", fits a session blocked on you.
   "needs-you": { color: "bg-warn", anim: "ping", label: "Waiting on you" },
-  // Soft breathing reads as "live, ongoing work", same language as the tab glow.
   working: { color: "bg-working text-working", anim: "work", label: "Working" },
   error: { color: "bg-bad", anim: "none", label: "Errored" },
   review: { color: "bg-ok", anim: "none", label: "Turn done, ready for review" },
-  // Violet breathing = "passive background work" (turn done, but shells running).
-  // Distinct hue from blue "working" so the two are visually separable.
   background: { color: "bg-background text-background", anim: "work", label: "Background tasks running" },
 };
 
-/**
- * Idle is invisible by default (`idle="hide"`); pass `idle="dot"` to render a
- * muted placeholder dot instead, so a list reads as an even column of status
- * dots, the sidebar tree's look.
- */
 export function ActivityDot({
   activity,
   idle = "hide",

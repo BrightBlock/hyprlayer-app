@@ -1,7 +1,3 @@
-//! Integration test for the filesystem watcher: create/modify/remove a doc
-//! and assert the index events arrive. Uses polling with a generous deadline
-//! rather than fixed sleeps.
-
 use std::fs;
 use std::path::Path;
 use std::sync::mpsc;
@@ -33,8 +29,6 @@ fn wait_for<F: Fn(&IndexEvent) -> bool>(
 #[test]
 fn watcher_indexes_created_modified_and_removed_files() {
     let tmp = TempDir::new().unwrap();
-    // FSEvents reports real paths; canonicalize so ids line up regardless of
-    // the /var -> /private/var symlink on macOS.
     let root_path = fs::canonicalize(tmp.path()).unwrap();
     fs::create_dir_all(root_path.join("repos/myproj/jt/plans")).unwrap();
 
@@ -59,7 +53,6 @@ fn watcher_indexes_created_modified_and_removed_files() {
     )
     .expect("watcher should start");
 
-    // Create: an Updated event carrying the new doc's id.
     let doc = root_path.join("repos/myproj/jt/plans/2026-06-12-watched.md");
     let id = doc.to_string_lossy().into_owned();
     fs::write(
@@ -76,7 +69,6 @@ fn watcher_indexes_created_modified_and_removed_files() {
     let meta = index.get(&id).expect("doc should be indexed");
     assert_eq!(meta.fm.title.as_deref(), Some("Watched Doc"));
 
-    // Modify: another Updated event, and the index reflects the new content.
     fs::write(
         &doc,
         "---\ntitle: Watched Doc v2\ntype: plan\ndate: 2026-06-12\n---\n\nhello again\n",
@@ -92,7 +84,6 @@ fn watcher_indexes_created_modified_and_removed_files() {
         Some("Watched Doc v2")
     );
 
-    // Remove: a Removed event, and the doc is gone from the index.
     fs::remove_file(&doc).unwrap();
     let removed = wait_for(
         &rx,
@@ -101,7 +92,6 @@ fn watcher_indexes_created_modified_and_removed_files() {
     assert!(removed.is_some(), "expected Removed event for {id}");
     assert!(index.get(&id).is_none());
 
-    // Ignored paths never produce events or index entries.
     let ignored = root_path.join("repos/myproj/jt/plans/.hidden.md");
     fs::write(&ignored, "ignored").unwrap();
     let ignored_id = ignored.to_string_lossy().into_owned();
@@ -112,7 +102,6 @@ fn watcher_indexes_created_modified_and_removed_files() {
     drop(handle);
 }
 
-/// Drain events for `window`, returning any that mention `id`.
 fn wait_for_quiet(
     rx: &mpsc::Receiver<IndexEvent>,
     window: Duration,

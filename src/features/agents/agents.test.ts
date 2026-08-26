@@ -119,7 +119,6 @@ describe("tools", () => {
   });
 
   it("spells the rest out when the first tool is turned off", () => {
-    // The file has no way to say "all but one", so the toggle materializes the list.
     const next = setTool(agent({ tools: [] }), "Bash", false);
     expect(next).toHaveLength(AGENT_TOOLS.length - 1);
     expect(next).not.toContain("Bash");
@@ -319,7 +318,6 @@ describe("visibleAgents", () => {
   });
 });
 
-/** `MUTED_DOT` in agents.ts, the colour a non-phase folder paints with. */
 const MUTED = "color-mix(in oklab, var(--color-ink-dim) 55%, transparent)";
 
 describe("agentRows", () => {
@@ -378,8 +376,6 @@ describe("agentRows", () => {
   });
 
   it("renders a folder absent from closedFolders open, including one that appears later", () => {
-    // Nothing has ever been collapsed (the set is empty), a brand-new folder
-    // must still default open rather than needing to be explicitly listed.
     const rows = rowsOf([loose, filed], new Set());
     const group = rows.find((r) => r.kind === "group");
     expect(group).toEqual({ kind: "group", folder: "Review", count: 1, open: true });
@@ -433,9 +429,6 @@ describe("phaseFolder", () => {
   });
 
   it("files an agent whose description names no stage by AGENT_PHASE's name entry", () => {
-    // The eleven shipped agents written before the "Spawn during the <Stage>
-    // stage" convention. With `category:` gone from the files they have
-    // nothing else to go on.
     const expected: Record<string, string> = {
       "adversarial-reviewer": "Verify",
       ship: "Deliver",
@@ -471,9 +464,6 @@ describe("phaseFolder", () => {
   });
 
   it("never resolves a name through Object.prototype", () => {
-    // `name` is free text from a user's frontmatter, so the table has to be
-    // read through a Map: `AGENT_PHASE["toString"]` would otherwise be a
-    // function, and that function would become the folder.
     for (const name of ["toString", "constructor", "hasOwnProperty", "__proto__", "valueOf"]) {
       expect(phaseFolder(agent({ name, description: "Names no stage." }))).toBe(ANY_STAGE);
     }
@@ -509,9 +499,6 @@ describe("folderOf", () => {
   });
 
   it("a legacy overlay folder still wins over a derived phase, so clearing it must be deliberate", () => {
-    // The move mutation and the editor both clear `overlay.folder` when they
-    // write `category`. Without that, an agent moved to "no folder" would
-    // land right back here.
     const a = agent({ description: "Spawn during the Plan stage" });
     expect(folderOf(a, { ...DEFAULT_OVERLAY, folder: "Old" }, true)).toBe("Old");
     expect(folderOf({ ...a, category: null }, { ...DEFAULT_OVERLAY, folder: "" }, true)).toBe(
@@ -531,8 +518,6 @@ describe("folderList", () => {
   });
 
   it("keeps a persisted folder that is named like a phase", () => {
-    // Creating "Build" while nothing is filed in it must still list it,
-    // otherwise the create dialog accepts a name that never appears.
     expect(folderList([], library({ folders: ["Build"] }), true)).toEqual(["Build"]);
   });
 
@@ -542,9 +527,6 @@ describe("folderList", () => {
   });
 
   it("lists a folder once when a plugin agent is moved into a user-created one", () => {
-    // The overlay-filed plugin agent and `library.folders` name the same
-    // folder; listing it twice renders two identical headers and emits
-    // duplicate React keys for both the group and the agent under it.
     const plugin = agent({ path: "/p/a.md", source: "plugin", plugin: "pr-toolkit" });
     const lib = library({ folders: ["Review"], overlays: { "/p/a.md": { folder: "Review" } } });
     expect(folderList([plugin], lib, true)).toEqual(["Review"]);
@@ -629,8 +611,6 @@ describe("status and scope", () => {
   });
 
   it("never resolves a folder name through Object.prototype", () => {
-    // `category` is free text from a user's frontmatter: a folder called
-    // "toString" must read as an unknown folder, not as a function.
     for (const name of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
       expect(folderColor(name)).toBe(MUTED);
     }
@@ -659,7 +639,6 @@ describe("duplicateAgent", () => {
     const copy = duplicateAgent(source);
     expect(copy.name).toBe("codebase-locator copy");
     expect(copy.path).toBe("");
-    // Deep copy: editing the copy's tools must not reach back into the source.
     copy.tools.push("Bash");
     expect(source.tools).toEqual(["Read", "Grep"]);
   });
@@ -696,7 +675,6 @@ describe("labels", () => {
 
 describe("bundleChipState", () => {
   const SHA = "4c5cf370aed5fffee3b98f741bd6d911965c9033";
-  /** A CLI 1.6.0 machine: version comparison, so no SHA probe runs. */
   const status = (over: Partial<AgentBundleStatus> = {}): AgentBundleStatus => ({
     manageable: true,
     installedSha: SHA,
@@ -721,8 +699,6 @@ describe("bundleChipState", () => {
   });
 
   it("update available: names the version pair, not the SHA pair", () => {
-    // `installedSha` is still set — 1.6.0 records master's HEAD whatever it
-    // unpacked — and showing it here would name a comparison nobody made.
     const s = status({ installedVersion: "1.5.9", updateAvailable: true });
     expect(bundleChipState(s, settled)).toEqual({
       kind: "updateAvailable",
@@ -759,8 +735,6 @@ describe("bundleChipState", () => {
   });
 
   it("legacy CLI, unknown latest (a failed probe) reads as up to date, not as an error", () => {
-    // Not knowing whether a newer bundle exists is not the same as being
-    // unable to look: the CLI answered, the network did not.
     const s = legacy({ latestSha: null, updateAvailable: false });
     expect(bundleChipState(s, settled)).toEqual({
       kind: "upToDate",
@@ -770,17 +744,12 @@ describe("bundleChipState", () => {
     });
   });
 
-  // Current bytes from a dead-end source: a pre-1.6.0 CLI tracks the frozen
-  // `claude/` tree, which receives no new skills however fresh its SHA is.
   it("marks a legacy CLI's up-to-date bundle as frozen", () => {
     expect(bundleChipState(legacy(), settled)).toMatchObject({ kind: "upToDate", frozen: true });
     expect(bundleChipState(status(), settled)).toMatchObject({ frozen: false });
   });
 
   it("a failed query is unknown, NOT a green up-to-date claim", () => {
-    // `agentBundleStatus` errors outright when the hyprlayer binary is
-    // missing or its JSON won't parse. Folding that into `upToDate` asserted
-    // a bundle was current that the app could not read at all.
     expect(bundleChipState(undefined, { loading: false, error: true }).kind).toBe("unknown");
     expect(bundleChipState(undefined, settled).kind).toBe("unknown");
   });
@@ -793,9 +762,6 @@ describe("bundleChipState", () => {
   });
 
   it("a tool this app cannot manage is unknown, not an update prompt", () => {
-    // The CLI prints `{}` for an unconfigured machine and installs into a
-    // different tree entirely for Copilot/OpenCode, so `manageable: false`
-    // must never render the warn badge or the download trigger.
     const s = status({ manageable: false, installedSha: null, updateAvailable: false });
     expect(bundleChipState(s, settled).kind).toBe("unknown");
   });

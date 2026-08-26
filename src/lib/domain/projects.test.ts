@@ -17,7 +17,6 @@ describe("shortBranch", () => {
   it("strips the remote prefix so a base compares against a branch name", () => {
     expect(shortBranch("origin/main")).toBe("main");
     expect(shortBranch("main")).toBe("main");
-    // Only the leading prefix, a branch legitimately named `x/origin/y` survives.
     expect(shortBranch("feature/origin/thing")).toBe("feature/origin/thing");
   });
 });
@@ -26,7 +25,6 @@ describe("isOffBase", () => {
   it("is false while the checkout sits on its merge target", () => {
     expect(isOffBase(view({ branch: "main", baseBranch: "origin/main" }))).toBe(false);
     expect(isOffBase(view({ branch: "develop", baseBranch: "origin/develop" }))).toBe(false);
-    // A base stored without the remote prefix compares the same way.
     expect(isOffBase(view({ branch: "main", baseBranch: "main" }))).toBe(false);
   });
 

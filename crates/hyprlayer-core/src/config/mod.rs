@@ -1,9 +1,3 @@
-//! Loading and caching of the hyprlayer CLI config file.
-//!
-//! Ownership rule: the CLI writes the config, the app reads it. The service
-//! re-reads on mtime change (pull-based; callers re-query after any CLI
-//! invocation and on window focus).
-
 mod profiles;
 mod types;
 
@@ -18,19 +12,10 @@ use tokio::sync::RwLock;
 
 use crate::error::{CoreError, Result};
 
-/// `dirs::config_dir()/hyprlayer/config.json`, matches the CLI's
-/// `get_default_config_path` (`~/Library/Application Support` on macOS,
-/// `%APPDATA%` on Windows, `~/.config` on Linux).
 pub fn default_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("hyprlayer").join("config.json"))
 }
 
-/// Parse config JSON, failing loudly when the schema version isn't the one we
-/// mirror and tolerating everything else. Pre-v4 files exist in the wild (the
-/// CLI migrates lazily on its next run); reading them through the v4 structs
-/// would silently misreport a configured user as unconfigured (v1) or fail
-/// with a bare serde error (v2/v3), so both directions are dedicated errors
-/// with remedies. The CLI's `load()` treats an absent `version` as v0.
 pub fn parse_config(raw: &str, path: &Path) -> Result<HyprlayerConfig> {
     let value: serde_json::Value =
         serde_json::from_str(raw).map_err(|source| CoreError::ConfigParse {
@@ -62,37 +47,14 @@ pub fn parse_config(raw: &str, path: &Path) -> Result<HyprlayerConfig> {
 pub struct LoadedConfig {
     pub config: Arc<HyprlayerConfig>,
     pub path: PathBuf,
-    /// Cache key: (mtime, len). mtime alone misses same-tick rewrites on
-    /// coarse-granularity filesystems; length catches most of those.
     pub mtime: Option<SystemTime>,
     pub len: u64,
 }
 
-/// TEMPORARY exception to the single-writer rule (ADR 0002): a true first run
-/// has no config at all, and `hyprlayer thoughts init --yes` refuses to run
-/// without one. Write the minimal v4 config (git backend, `~/thoughts`) and hand
-/// ownership straight back to the CLI. Thin wrapper around
-/// [`ensure_thoughts_config`] for the existing `AddProjectDialog` first-run path.
-/// Delete once upstream `thoughts init` gains a `--user` flag.
 pub fn write_bootstrap_config(path: &Path, user: &str) -> Result<()> {
     ensure_thoughts_config(path, user, DEFAULT_THOUGHTS_REPO)
 }
 
-/// Merge-tolerant thoughts-config writer used by the onboarding wizard.
-///
-/// Three cases:
-/// - **Missing** → create a fresh v4 config with the `thoughts` section.
-/// - **Exists without `thoughts`** → inject the section, preserving every
-///   other key (`ai`, `telemetry`, …), then atomic tmp+rename.
-/// - **Exists with `thoughts`** → repoint it: set `user`: point the git
-///   backend at `thoughts_repo` (filling empty `reposDir`/`globalDir`), and
-///   preserve `repoMappings`/`profiles`. Setup is an explicit user action, so
-///   the selected repo wins, a half-written or stale section must not
-///   dead-end the wizard with "already configured".
-///
-/// Never rewrites a config it doesn't understand: newer-than-v4 errors
-/// `config_version_too_new`; pre-v4 with a `thoughts` section errors
-/// `config_needs_migration` (the CLI migrates losslessly; we would drop data).
 pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> Result<()> {
     let user = user.trim();
     if user.is_empty() {
@@ -114,8 +76,6 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
 
     let value = if path.exists() {
         let raw = std::fs::read_to_string(path)?;
-        // Parsing into a Map (not a bare Value) also rejects a non-object
-        // root, which the `v[…] = …` writes below would panic on.
         let map: serde_json::Map<String, serde_json::Value> =
             serde_json::from_str(&raw).map_err(|e| CoreError::ConfigParse {
                 path: path.to_path_buf(),
@@ -142,8 +102,6 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
             let t = &mut v["thoughts"];
             t["user"] = user.into();
             if t["backend"]["kind"] == "git" {
-                // Keep custom reposDir/globalDir; fill them when empty so a
-                // half-written section comes out fully configured.
                 let b = &mut t["backend"];
                 b["thoughtsRepo"] = thoughts_repo.into();
                 for (key, default) in [
@@ -170,8 +128,6 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
                 "profiles": {}
             });
         }
-        // Stamp v4 on version-less files (e.g. an ai-only config written by
-        // `ai configure` before version was established).
         if version < MAX_SUPPORTED_CONFIG_VERSION {
             v["version"] = serde_json::json!(MAX_SUPPORTED_CONFIG_VERSION);
         }
@@ -191,8 +147,6 @@ pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> R
     write_config_atomic(path, &value)
 }
 
-/// Atomically replace `path` with pretty-printed `value` (tmp + rename),
-/// ADR-0002's write discipline, in one place.
 fn write_config_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::write(
@@ -203,10 +157,6 @@ fn write_config_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-/// Shared scaffold for the app's surgical config edits (the ADR-0002
-/// exceptions): read → parse → version guards → `edit` → atomic tmp+rename.
-/// Never rewrites a schema the app doesn't own, a missing file is
-/// `config_missing`, newer/older schemas error instead of being clobbered.
 pub(crate) fn edit_config(
     path: &Path,
     edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> Result<()>,
@@ -251,8 +201,6 @@ pub(crate) fn edit_config(
     write_config_atomic(path, &value)
 }
 
-/// Cached config reader. `load()` is cheap to call repeatedly: it re-reads
-/// the file only when its mtime changes.
 pub struct ConfigService {
     path: PathBuf,
     cache: RwLock<Option<LoadedConfig>>,
@@ -315,8 +263,6 @@ impl ConfigService {
         Ok(loaded)
     }
 
-    /// Drop the cache so the next `load()` re-reads from disk (used after CLI
-    /// invocations that may have rewritten the file).
     pub async fn invalidate(&self) {
         *self.cache.write().await = None;
     }
@@ -353,12 +299,10 @@ mod tests {
         let cfg = parse_config(raw, Path::new("test.json")).unwrap();
         let thoughts = cfg.thoughts.as_ref().unwrap();
 
-        // String mapping → default (git) backend.
         let eff = thoughts.effective_config_for("/work/repo-a");
         assert_eq!(eff.mapped_name.as_deref(), Some("repo-a"));
         assert_eq!(eff.backend.kind(), BackendKind::Git);
 
-        // Object mapping with profile → obsidian backend from the profile.
         let eff = thoughts.effective_config_for("/work/repo-b");
         assert_eq!(eff.mapped_name.as_deref(), Some("repo-b"));
         assert_eq!(eff.profile_name.as_deref(), Some("personal"));
@@ -366,8 +310,6 @@ mod tests {
             BackendConfig::Obsidian(o) => {
                 assert_eq!(o.vault_path, "~/Obsidian/Vault");
                 assert_eq!(o.vault_subpath.as_deref(), Some("hyprlayer"));
-                // Path::ends_with matches whole components, so it's correct on
-                // Windows (backslashes) without a forward-slash string compare.
                 assert!(o
                     .content_root()
                     .unwrap()
@@ -376,7 +318,6 @@ mod tests {
             other => panic!("expected obsidian backend, got {other:?}"),
         }
 
-        // Unmapped repo → default backend, no mapping.
         let eff = thoughts.effective_config_for("/elsewhere");
         assert_eq!(eff.mapped_name, None);
     }
@@ -392,9 +333,6 @@ mod tests {
 
     #[test]
     fn pre_v4_configs_require_migration_instead_of_misparsing() {
-        // v1 shape: no version field, flat thoughts keys, no backend object.
-        // Reading it through v4 structs would "succeed" with an unconfigured
-        // backend, a configured user shown as unconfigured.
         let v1 = r#"{"thoughts": {"user": "alice", "thoughtsRepo": "~/thoughts",
                      "reposDir": "repos", "globalDir": "global"}}"#;
         match parse_config(v1, Path::new("test.json")) {
@@ -405,8 +343,6 @@ mod tests {
             other => panic!("expected ConfigNeedsMigration for v1, got {other:?}"),
         }
 
-        // v2 shape: backend is a bare string, which the tagged enum rejects
-        // with an unhelpful serde error if it reaches deserialization.
         let v2 = r#"{"version": 2, "thoughts": {"user": "alice", "backend": "git"}}"#;
         match parse_config(v2, Path::new("test.json")) {
             Err(CoreError::ConfigNeedsMigration {
@@ -416,7 +352,6 @@ mod tests {
             other => panic!("expected ConfigNeedsMigration for v2, got {other:?}"),
         }
 
-        // Both carry an actionable remedy.
         let err = parse_config(v2, Path::new("test.json")).unwrap_err();
         assert_eq!(err.code(), "config_needs_migration");
         assert!(err.remedy().is_some());
@@ -438,14 +373,11 @@ mod tests {
     fn ensure_thoughts_config_merges_into_ai_only_config() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
-        // Write an ai-only config first (as `ai configure` might create)
         std::fs::write(&path, r#"{"version":4,"ai":{"agentTool":"claude"}}"#).unwrap();
         ensure_thoughts_config(&path, "bob", "~/my-thoughts").unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        // `ai` section preserved
         assert_eq!(v["ai"]["agentTool"], "claude");
-        // `thoughts` section injected
         assert_eq!(v["thoughts"]["user"], "bob");
         assert_eq!(v["thoughts"]["backend"]["thoughtsRepo"], "~/my-thoughts");
     }
@@ -468,7 +400,6 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["thoughts"]["user"], "bob");
         assert_eq!(v["thoughts"]["backend"]["thoughtsRepo"], "/data/thoughts");
-        // Custom dirs, mappings, profiles, and other sections survive the repoint.
         assert_eq!(v["thoughts"]["backend"]["reposDir"], "custom");
         assert_eq!(v["thoughts"]["backend"]["globalDir"], "shared");
         assert_eq!(v["thoughts"]["repoMappings"]["/w/a"], "a");
@@ -478,8 +409,6 @@ mod tests {
 
     #[test]
     fn ensure_thoughts_config_completes_half_written_section() {
-        // The stuck-wizard state: `thoughts` present but unconfigured (empty
-        // fields), which used to error "already configured" on every submit.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         std::fs::write(
@@ -520,7 +449,6 @@ mod tests {
     fn ensure_thoughts_config_never_rewrites_foreign_versions() {
         let dir = tempfile::tempdir().unwrap();
 
-        // Pre-v4 with a thoughts section: the CLI must migrate it first.
         let old = dir.path().join("old.json");
         std::fs::write(
             &old,
@@ -530,7 +458,6 @@ mod tests {
         let err = ensure_thoughts_config(&old, "alice", "~/thoughts").unwrap_err();
         assert_eq!(err.code(), "config_needs_migration");
 
-        // Newer than we understand: never touched.
         let new = dir.path().join("new.json");
         let raw = r#"{"version":5,"thoughts":{"user":"alice"}}"#;
         std::fs::write(&new, raw).unwrap();
@@ -549,8 +476,6 @@ mod tests {
 
     #[test]
     fn tolerates_cli_emitted_nulls_for_empty_maps() {
-        // Observed live: `thoughts profile delete` serializes an emptied
-        // profiles map as `null` (not `{}`). The mirror must read it back.
         let raw = r#"{"version": 4, "thoughts": {
             "user": "jt",
             "backend": {"kind": "git", "thoughtsRepo": "~/thoughts", "reposDir": "repos", "globalDir": "global"},

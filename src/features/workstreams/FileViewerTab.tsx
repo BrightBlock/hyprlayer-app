@@ -15,10 +15,8 @@ import { useSaveWorktreeFile, useWorktreeFile } from "@/lib/queries";
 import { codeBase, useLangForPath } from "./codeView";
 
 const MARKDOWN_RE = /\.(md|markdown|mdx)$/i;
-// A NUL byte marks a binary file the read lossily decoded; keep those read-only.
 const NUL = String.fromCharCode(0);
 
-// codeBase supplies the gutter + syntax highlighting, so drop the defaults.
 const BASIC_SETUP = {
   foldGutter: true,
   lineNumbers: false,
@@ -26,8 +24,6 @@ const BASIC_SETUP = {
   highlightActiveLine: true,
 } as const;
 
-/** Editable CodeMirror view of a worktree file, opened from the "All Files"
- *  tree. Cmd/Ctrl+S saves; markdown files get a raw⇄preview toggle. */
 export function FileViewerTab({ id, path }: { id: string; path: string }) {
   const file = useWorktreeFile(id, path);
 
@@ -51,7 +47,6 @@ export function FileViewerTab({ id, path }: { id: string; path: string }) {
   }
   if (!file.data) return null;
 
-  // Keyed on file identity, not mtime, so a save doesn't remount and drop the cursor.
   return (
     <FileEditor
       key={`${id}:${path}`}
@@ -63,7 +58,6 @@ export function FileViewerTab({ id, path }: { id: string; path: string }) {
   );
 }
 
-/** The pane frame: a path bar (with optional controls) over the body. */
 function Shell({ path, controls, children }: { path: string; controls?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -90,7 +84,6 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
   const save = useSaveWorktreeFile(id, path);
 
   const [content, setContent] = useState(initialContent);
-  // The last-saved baseline; `dirty` is the buffer diverging from it.
   const [savedContent, setSavedContent] = useState(initialContent);
   const [baseMtimeMs, setBaseMtimeMs] = useState(initialMtimeMs);
   const [preview, setPreview] = useState(false);
@@ -102,7 +95,6 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
 
   useCommand("view.toggleMarkdownPreview", isMarkdown ? () => setPreview((p) => !p) : null);
 
-  // Transient "Saved" flash.
   const savedTimer = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -111,7 +103,6 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
     [],
   );
 
-  // Read via ref by the keymap and the File-menu registry to avoid a stale closure.
   const saveRef = useRef<() => void>(() => {});
 
   function doSave() {
@@ -132,7 +123,6 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
   }
   saveRef.current = doSave;
 
-  // Active target for File ▸ Save; re-assert on focus, release on unmount.
   const tokenRef = useRef<object>({});
   const registerActive = () => setActiveFileSave(tokenRef.current, () => saveRef.current());
   useEffect(() => {
@@ -143,7 +133,6 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
 
   const extensions = useMemo(() => {
     const exts = [...codeBase, EditorView.lineWrapping, ...(lang ? [lang] : [])];
-    // On macOS the native File ▸ Save accelerator handles ⌘S; only bind it here elsewhere.
     if (!IS_MACOS) {
       exts.push(
         Prec.high(
@@ -214,7 +203,6 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
   );
 }
 
-/** Save-state indicator: unsaved dot, saving spinner, transient "Saved" check. */
 function SaveStatus({
   saving,
   dirty,

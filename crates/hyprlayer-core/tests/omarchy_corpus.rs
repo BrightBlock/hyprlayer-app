@@ -1,13 +1,3 @@
-//! Sweeps the vendored 22-theme Omarchy fixture corpus through parse,
-//! validate, resolve, and the resolved-token contrast gates.
-//!
-//! Vendored, not read from `/usr/share/omarchy`, because the release
-//! builders are macOS and Windows (ADR-0001) and a corpus test that silently
-//! skips off Omarchy is a corpus test that only ever ran once. This is the
-//! opposite choice from `docs_corpus_smoke.rs`, whose corpus is the user's
-//! own thoughts tree and genuinely cannot be vendored — noted here so nobody
-//! "fixes" this file to match that one later.
-
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -17,8 +7,6 @@ fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/omarchy")
 }
 
-/// Every vendored theme name (one directory per theme, each holding a
-/// `colors.toml`), sorted for deterministic failure output.
 fn theme_names() -> Vec<String> {
     let mut names: Vec<String> = walkdir::WalkDir::new(fixtures_dir())
         .min_depth(1)
@@ -32,9 +20,6 @@ fn theme_names() -> Vec<String> {
     names
 }
 
-/// Stage a vendored fixture at the nested path [`omarchy::read_palette`]
-/// expects (`<dir>/theme/colors.toml`, mirroring
-/// `~/.local/state/omarchy/current/`) and parse it.
 fn read_fixture(name: &str) -> omarchy::OmarchyPalette {
     let staged = tempfile::tempdir().expect("tempdir");
     let theme_dir = staged.path().join("theme");
@@ -49,7 +34,6 @@ fn read_fixture(name: &str) -> omarchy::OmarchyPalette {
         .unwrap_or_else(|e| panic!("{name}: failed to parse/validate: {e}"))
 }
 
-/// Stage and resolve a vendored fixture in one step.
 fn resolve_fixture(name: &str) -> omarchy::OmarchyTheme {
     let palette = read_fixture(name);
     omarchy::resolve(name.to_string(), &palette)
@@ -58,8 +42,6 @@ fn resolve_fixture(name: &str) -> omarchy::OmarchyTheme {
 #[test]
 fn corpus_has_exactly_22_vendored_themes() {
     let names = theme_names();
-    // A lost or mis-copied fixture must fail loudly rather than silently
-    // shrinking the corpus.
     assert_eq!(
         names.len(),
         22,
@@ -75,18 +57,6 @@ fn every_fixture_parses_and_validates() {
     }
 }
 
-// ---------------------------------------------------------------------
-// Phase 2: resolved-token contrast gates.
-//
-// `luminance`/`contrast` are re-implemented here rather than imported —
-// `omarchy::resolve`'s own copies are private (Phase 2's design: "private
-// helpers, each with unit tests" in `omarchy.rs`'s own `mod tests`) — so
-// this suite checks `resolve()`'s *output* against an independent
-// implementation of the same WCAG formula, rather than exercising one
-// implementation to validate itself.
-// ---------------------------------------------------------------------
-
-/// WCAG 2.1 relative luminance of an sRGB colour, in `[0.0, 1.0]`.
 fn luminance(rgb: [u8; 3]) -> f64 {
     let channel = |c: u8| {
         let c = c as f64 / 255.0;
@@ -99,16 +69,12 @@ fn luminance(rgb: [u8; 3]) -> f64 {
     0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2])
 }
 
-/// WCAG 2.1 contrast ratio between two colours, order-independent.
 fn contrast(a: [u8; 3], b: [u8; 3]) -> f64 {
     let (la, lb) = (luminance(a), luminance(b));
     let (hi, lo) = if la >= lb { (la, lb) } else { (lb, la) };
     (hi + 0.05) / (lo + 0.05)
 }
 
-/// The resolved value of `name` in `theme.tokens`, panicking with the theme
-/// name if it is missing — every assertion below wants failures to name
-/// both the theme and the token.
 fn token_value<'a>(theme: &'a omarchy::OmarchyTheme, name: &str) -> &'a str {
     theme
         .tokens
@@ -125,13 +91,6 @@ fn token_rgb(theme: &omarchy::OmarchyTheme, name: &str) -> [u8; 3] {
         .unwrap_or_else(|| panic!("{}: {name} = {value:?} is not valid hex", theme.name))
 }
 
-/// The 31 `--color-*` custom properties declared in the `@theme` block at
-/// `src/index.css:76-166`, before the `--color-ansi-*` block Phase 5
-/// appends (see [`EXPECTED_ANSI_TOKEN_NAMES`] below), minus `--color-bad`
-/// (deliberately never derived — see the comment inside `omarchy::resolve`).
-/// Verified directly against the file — `awk 'NR==76,NR==141' src/index.css
-/// | grep -oE '^\s*--color-[a-z0-9-]+:'` — rather than transcribed from the
-/// plan, and listed here in the same order `resolve()` emits them.
 const EXPECTED_TOKEN_NAMES: [&str; 30] = [
     "--color-surface",
     "--color-panel",
@@ -165,10 +124,6 @@ const EXPECTED_TOKEN_NAMES: [&str; 30] = [
     "--color-nebula-5",
 ];
 
-/// The 16 `--color-ansi-*` custom properties Phase 5 appends to the same
-/// `@theme` block, immediately after [`EXPECTED_TOKEN_NAMES`]
-/// (`src/index.css:143-165`). Listed in ANSI index order (0-15), the same
-/// order `omarchy::resolve` appends them in.
 const EXPECTED_ANSI_TOKEN_NAMES: [&str; 16] = [
     "--color-ansi-black",
     "--color-ansi-red",
@@ -213,9 +168,6 @@ fn every_fixture_resolves_to_exactly_the_46_expected_tokens() {
             !actual.contains("--color-bad"),
             "{name}: --color-bad must never be derived"
         );
-        // Phase 5 strictly APPENDS the ANSI block; it must never reorder or
-        // interleave with the 30 tokens Phase 2 already committed, so the
-        // first 30 stay positionally identical to EXPECTED_TOKEN_NAMES.
         let first_30: Vec<&str> = theme.tokens[..30].iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
             first_30,
@@ -369,14 +321,6 @@ fn stage_doc_and_activity_hues_clear_3_0_against_surface_on_all_22() {
 
 #[test]
 fn edge_panel_2_contrast_stays_within_the_measured_band_on_all_22() {
-    // mix(panel_2, ink, 0.20) brackets the app's own reference dividers
-    // (Dark+ #333333 on #0c0c0c is 1.52:1; html.light's #d4d0c8 on #faf9f6
-    // is 1.44:1) tighter than either raw Omarchy candidate considered and
-    // rejected for this token (Omarchy's `selection`: 1.129-2.455;
-    // `muted`: 1.321-4.895 — see the doc comment on `rank_backgrounds` in
-    // omarchy.rs). The upper bound is asserted, not just the floor: an
-    // unbounded check would pass a harsh ~4.9:1 rule, which is what picking
-    // `muted` for this token would have produced.
     let mut min = (f64::INFINITY, String::new());
     let mut max = (f64::NEG_INFINITY, String::new());
     for name in theme_names() {
@@ -403,14 +347,6 @@ fn edge_panel_2_contrast_stays_within_the_measured_band_on_all_22() {
 
 #[test]
 fn attention_and_handoff_literals_on_the_orange_and_brown_fallback_themes() {
-    // The three built-ins missing both `orange` and `brown`
-    // (`missing_orange_and_brown_fall_back_through_bright_red` in
-    // omarchy.rs's own tests covers the raw fallback values). Neither of
-    // these three needs clamping — each raw fallback already clears 3.0
-    // against its theme's surface — so the resolved value is the raw
-    // fallback verbatim. Pinned here as literals because the contrast gates
-    // above cannot catch a hue regression of this kind: a future change to
-    // either fallback chain must show up as a diff, not pass silently.
     let cases = [
         ("last-horizon", "#c38b7b"),
         ("solitude", "#de6145"),
@@ -433,14 +369,6 @@ fn attention_and_handoff_literals_on_the_orange_and_brown_fallback_themes() {
 
 #[test]
 fn ink_floor_fires_on_a_synthetic_low_contrast_palette() {
-    // None of the 22 built-in themes exercises the floor in `resolve_ink`
-    // (measured: every built-in clears 4.5:1 on its own foreground family,
-    // minimum 6.66 on rose-pine) — the floor exists for user-installed
-    // themes the vendored corpus cannot cover by construction, so it needs
-    // a hand-built palette. Every `*foreground` field here sits within 2:1
-    // contrast of the ranked-darkest background (`darker_background`,
-    // #181818 — the best candidate, light_foreground, only reaches
-    // ~1.71:1), so the flooring branch to max(black, white) must fire.
     let palette = omarchy::OmarchyPalette {
         mode: "dark".to_string(),
         accent: "#d97757".to_string(),
@@ -484,9 +412,6 @@ fn ink_floor_fires_on_a_synthetic_low_contrast_palette() {
         ratio >= 4.5,
         "ink floor did not fire: ink={ink:?} surface={surface:?} contrast={ratio:.4}"
     );
-    // None of the four raw *foreground* candidates clears 4.5 on their own,
-    // so a passing ink here can only be the max(black, white) floor —
-    // confirmed directly rather than just inferred from the ratio.
     assert_eq!(
         ink,
         [0xff, 0xff, 0xff],

@@ -73,12 +73,10 @@ impl From<FmPatchDto> for FmPatch {
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDocInput {
-    /// Repo path of the project the doc belongs to (None for global scope).
     pub project_repo_path: Option<String>,
     pub scope: String,
     pub doc_type: String,
     pub title: String,
-    /// Today's date from the user's locale, YYYY-MM-DD.
     pub date: String,
     pub ticket: Option<String>,
     #[serde(default)]
@@ -112,8 +110,6 @@ fn file_mtime_ms(path: &Path) -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Optimistic-concurrency guard: fail if the file's mtime drifted (beyond rounding
-/// noise) since the caller read it. Centralizes the conflict policy for doc writes.
 fn ensure_not_stale(abs: &Path, base_mtime_ms: f64) -> CmdResult<()> {
     if (file_mtime_ms(abs) - base_mtime_ms).abs() > 0.5 {
         return Err(doc_conflict());
@@ -121,8 +117,6 @@ fn ensure_not_stale(abs: &Path, base_mtime_ms: f64) -> CmdResult<()> {
     Ok(())
 }
 
-/// Atomic write + immediate re-index + change event (no waiting on the
-/// filesystem watcher debounce).
 async fn write_and_reindex(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -136,10 +130,6 @@ async fn write_and_reindex(
             let tmp = abs.with_extension("md.tmp");
             std::fs::write(&tmp, &content)?;
             std::fs::rename(&tmp, &abs)?;
-            // `upsert_path` returns None when the record needs no change, a
-            // real outcome now that the basis is the frontmatter prefix plus
-            // size rather than whole-file bytes. Fall back to resolving the
-            // id instead of reporting a write that succeeded as a failure.
             let written = index.upsert_path(&root, &abs);
             Ok(written.or_else(|| index.resolve_id(&abs.to_string_lossy())))
         })
@@ -159,7 +149,6 @@ async fn write_and_reindex(
     Ok(meta)
 }
 
-/// The root a doc id (absolute path) belongs to, per current config.
 async fn root_for_doc(state: &AppState, abs: &Path) -> CmdResult<ThoughtsRoot> {
     let loaded = state.config.load().await.map_err(AppError::from)?;
     thoughts_roots(&loaded.config)
@@ -185,7 +174,6 @@ pub async fn query_docs(state: State<'_, AppState>, query: ThoughtQuery) -> CmdR
 #[tauri::command]
 #[specta::specta]
 pub async fn get_doc(state: State<'_, AppState>, id: String) -> CmdResult<DocContent> {
-    // Indexed library docs: rich metadata straight from the in-memory index.
     if let Some(resolved) = state.index.resolve_id(&id) {
         if let Some(meta) = state.index.get(&resolved) {
             let path = PathBuf::from(&resolved);
@@ -200,11 +188,6 @@ pub async fn get_doc(state: State<'_, AppState>, id: String) -> CmdResult<DocCon
         }
     }
 
-    // Fallback: an agent-created doc outside every configured thoughts root (e.g. a
-    // plan under `~/.claude/plans/`). Surfaces in a workstream's Changes panel but is
-    // never indexed, so render it read-only from disk with best-effort meta. Gated to
-    // `.md` so this can't become an arbitrary-file reader; a missing file falls through
-    // to the "deleted or moved" message.
     let abs = PathBuf::from(&id);
     if !abs
         .extension()
@@ -306,8 +289,6 @@ pub async fn create_doc(
         remedy: Some("Create the document in the backend's own app instead.".into()),
     })?;
 
-    // Layout mirrors the CLI: repos/<mapped>/<user|shared>/<typedir>/ or
-    // global/<user|shared>/<typedir>/.
     let (repos_dir, global_dir) = match &effective.backend {
         hyprlayer_core::config::BackendConfig::Git(g) => {
             (g.repos_dir.clone(), g.global_dir.clone())
@@ -369,9 +350,6 @@ pub async fn create_doc(
 #[tauri::command]
 #[specta::specta]
 pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    // Only reveal paths the index knows, the frontend can't point this at
-    // arbitrary filesystem locations. resolve_id also maps a worktree-symlink
-    // path back to the canonical indexed id before the index check.
     let id = state
         .index
         .resolve_id(&id)
@@ -381,10 +359,6 @@ pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()>
         .map_err(|e| AppError::internal(format!("reveal: {e}")))
 }
 
-/// Best-effort "View on GitHub" URL for a library doc, from its own git repo (the
-/// thoughts repo, not the project's) at the current branch. `None` (link hidden) on
-/// any miss, unknown id, not a git repo, no GitHub origin, detached HEAD, so it
-/// never errors.
 #[tauri::command]
 #[specta::specta]
 pub async fn doc_web_url(state: State<'_, AppState>, id: String) -> CmdResult<Option<String>> {

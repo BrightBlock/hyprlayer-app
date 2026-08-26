@@ -2,7 +2,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { xtermThemeFromCss } from "./terminalTheme";
 
-/** All 16 `ITheme` ANSI slot keys, ANSI index order (0-15). */
 const ANSI_SLOTS = [
   "black",
   "red",
@@ -24,7 +23,6 @@ const ANSI_SLOTS = [
 
 describe("xtermThemeFromCss", () => {
   afterEach(() => {
-    // Reset any inline vars between tests.
     document.documentElement.removeAttribute("style");
   });
 
@@ -51,14 +49,11 @@ describe("xtermThemeFromCss", () => {
     expect(theme.foreground).toBe("#aabbcc");
     expect(theme.background).toBe("#112233");
     expect(theme.cursor).toBe("#ffcc00");
-    // --color-ink drives both foreground and white
     expect(theme.white).toBe("#aabbcc");
   });
 
   it("fills all 16 ANSI slots with their documented fallback when no vars are set", () => {
     const theme = xtermThemeFromCss();
-    // The eight xterm already filled for us pre-Phase-5: its own stock Tango
-    // palette, verbatim (@xterm/xterm ThemeService.ts:36-52).
     expect(theme.black).toBe("#2e3436");
     expect(theme.brightRed).toBe("#ef2929");
     expect(theme.brightGreen).toBe("#8ae234");
@@ -67,8 +62,6 @@ describe("xtermThemeFromCss", () => {
     expect(theme.brightMagenta).toBe("#ad7fa8");
     expect(theme.brightCyan).toBe("#34e2e2");
     expect(theme.brightWhite).toBe("#eeeeec");
-    // The eight that fall through to the semantic token they read before
-    // --color-ansi-* existed — the preservation proof for the ANSI slots.
     expect(theme.red).toBe("#ef5350");
     expect(theme.green).toBe("#4caf50");
     expect(theme.yellow).toBe("#f0b13a");

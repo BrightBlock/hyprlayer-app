@@ -15,16 +15,12 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      "no-empty": ["error", { allowEmptyCatch: true }],
     },
     languageOptions: {
       globals: { ...globals.browser },
     },
   },
-  // Layering contract (docs/adr/0003-frontend-layering.md): the import
-  // direction is routes → features → lib/components. Wiring (main.tsx,
-  // router.tsx) may import anything; everything below it only imports
-  // downward. Cross-directory imports use the @/ alias, but the relative
-  // spellings are banned too so the rule can't be dodged.
   {
     files: ["src/lib/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
     rules: {

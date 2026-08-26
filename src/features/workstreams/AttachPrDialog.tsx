@@ -6,30 +6,21 @@ import { GitPullRequestIcon } from "@/components/icons";
 import { useAttachPr, useWorkstreamOpenPrs, useWorkstreamPrPreview } from "@/lib/queries";
 
 type Props = {
-  /** The workstream to attach a PR to; null keeps the dialog closed. */
   target: WorkstreamView | null;
   onClose: () => void;
 };
 
-/** Parse a bare PR number (`123` or `#123`) from input; null for anything else. */
 function parsePrNumber(s: string): number | null {
   const t = s.trim();
   return /^#?\d+$/.test(t) ? Number(t.replace(/^#/, "")) : null;
 }
 
-/**
- * The "Attach PR" picker (from the workstream context menu). Stays empty until
- * the user types: a PR number resolves to a single live preview (confirming it
- * exists before attaching), while free text searches the repo's open PRs. We
- * deliberately don't dump every open PR on open, that list can get long.
- */
 export function AttachPrDialog({ target, onClose }: Props) {
   const id = target?.item.id ?? "";
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
   const attach = useAttachPr(id);
 
-  // Reset to a clean slate each time the dialog opens for a new workstream.
   useEffect(() => {
     if (target) {
       setInput("");
@@ -39,7 +30,6 @@ export function AttachPrDialog({ target, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
 
-  // Debounce the fetch so each keystroke doesn't spawn a `gh` subprocess.
   useEffect(() => {
     const t = setTimeout(() => setQuery(input.trim()), 250);
     return () => clearTimeout(t);
@@ -50,7 +40,6 @@ export function AttachPrDialog({ target, onClose }: Props) {
   const inputNumber = parsePrNumber(input);
   const isSearch = query.length > 0 && queryNumber === null;
 
-  // Number → single preview; text → scoped search. Only one runs at a time.
   const preview = useWorkstreamPrPreview(id, queryNumber, open);
   const search = useWorkstreamOpenPrs(id, query, open && isSearch);
 
@@ -67,10 +56,6 @@ export function AttachPrDialog({ target, onClose }: Props) {
   const searchRows = search.data ?? [];
 
   return (
-    // `closable`: this picker has no footer, so without the × the only ways out
-    // are Escape and a backdrop click — neither of them visible. With a failure
-    // showing, the ErrorNote's own × was otherwise the sole control in the
-    // modal, making "dismiss the error" the one thing a stuck user could click.
     <Dialog open={open} onClose={close} title="Attach PR" closable>
       <div className="space-y-3">
         <TextInput
@@ -80,7 +65,6 @@ export function AttachPrDialog({ target, onClose }: Props) {
           autoFocus
           disabled={attach.isPending}
           onKeyDown={(e) => {
-            // Enter on a bare number attaches it straight away.
             if (e.key === "Enter" && inputNumber !== null) {
               e.preventDefault();
               choose(inputNumber);
@@ -96,7 +80,6 @@ export function AttachPrDialog({ target, onClose }: Props) {
               Search by title, or enter a PR number.
             </p>
           ) : queryNumber !== null ? (
-            // Number entered → preview that exact PR.
             preview.isLoading ? (
               <div className="flex justify-center py-6">
                 <Spinner size={16} />
@@ -111,17 +94,11 @@ export function AttachPrDialog({ target, onClose }: Props) {
                 onClick={() => choose(preview.data!.number)}
               />
             ) : attach.isError ? (
-              // The note above already says why, in GitHub's own words. This
-              // line would restate it less precisely: `preview_workstream_pr`
-              // (workstreams.rs:1785) folds every lookup failure into
-              // `Ok(None)`, so "No PR #N found" is what a broken `gh` renders
-              // too. Whenever the attach has a real message, that is the one
-              // to show. Dismissing the note brings this line back.
               null
             ) : (
               <p className="py-6 text-center text-sm text-ink-dim">No PR #{queryNumber} found</p>
             )
-          ) : // Free text → scoped search of the repo's open PRs.
+          ) :
           search.isLoading ? (
             <div className="flex justify-center py-6">
               <Spinner size={16} />

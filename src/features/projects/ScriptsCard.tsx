@@ -8,7 +8,7 @@ import { useScripts, useSetScripts } from "@/lib/queries";
 import { ScriptEditor } from "./ScriptEditor";
 import { SectionHeading, SettingsSection } from "./settingsSection";
 
-type ScriptKey = keyof ScriptSettings; // "setup" | "run" | "archive"
+type ScriptKey = keyof ScriptSettings;
 
 const EMPTY: ScriptSettings = { setup: "", run: "", archive: "" };
 const AUTOSAVE_MS = 500;
@@ -49,29 +49,20 @@ const ROWS: RowMeta[] = [
   },
 ];
 
-/**
- * Project Settings → "Scripts": edits the three lifecycle blocks (Setup / Run /
- * Archive), autosaving to `.hyprlayer/settings.toml` (debounced). Pills describe
- * each script's trigger; live per-workstream last-run status shows in the dock.
- */
 export function ScriptsCard({ projectPath }: { projectPath: string }) {
   const scripts = useScripts(projectPath);
   const setScripts = useSetScripts(projectPath);
   const [draft, setDraft] = useState<ScriptSettings | null>(null);
 
-  // Refs so the debounce timer + unmount flush read the latest values without
-  // re-subscribing on every keystroke.
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<ScriptSettings | null>(null);
   const mutateRef = useRef(setScripts.mutate);
   mutateRef.current = setScripts.mutate;
 
-  // Seed the local draft once the saved scripts load.
   useEffect(() => {
     if (scripts.data && draft === null) setDraft(scripts.data);
   }, [scripts.data, draft]);
 
-  // Flush any pending save when the dialog closes mid-debounce.
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);

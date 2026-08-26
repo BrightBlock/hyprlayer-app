@@ -9,9 +9,6 @@ import { useCommitFiles } from "@/lib/queries";
 import { GLYPH } from "./changeGlyph";
 import { renamedLabel } from "./renamedLabel";
 
-/** One commit on the workstream's branch, expanding in place to the files it
- *  touched. Fetches its file list lazily, only once expanded, and never
- *  refetches on a second expansion: `useCommitFiles` is `staleTime: Infinity`. */
 function CommitRow({
   id,
   commit,
@@ -61,9 +58,6 @@ function CommitRow({
               cls: "text-ink-dim",
               label: entry.change,
             };
-            // A rename shows both names, but opens under the new one: the sides
-            // read re-derives the old path from the commit's own diff, so
-            // nothing downstream needs a second path.
             const label = renamedLabel(entry.path, entry.oldPath);
             return (
               <button
@@ -93,10 +87,6 @@ function CommitRow({
   );
 }
 
-/** The Commits tab body: this workstream's own commits, newest first, each
- *  expanding in place to the files it changed. The header owns the commit
- *  list query (its refresh button needs a `refetch` handle); this component
- *  owns only per-commit expansion state. */
 export function CommitsPanel({
   id,
   commits,

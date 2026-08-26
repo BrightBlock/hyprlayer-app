@@ -1,20 +1,3 @@
-/**
- * Live agent-session state, keyed by backend session id. The store outlives any
- * one component, so a transcript survives switching tabs or visiting the
- * Library: the Tauri `Channel` feeding it is held at module scope.
- *
- * Flow:
- *  - `startSession` opens a Channel, calls `start_stage_session`, and pumps
- *    every `SessionEvent` through the pure `reduceEvent`. Events arriving
- *    before the command resolves are buffered, then flushed in order behind
- *    the optimistic first user message.
- *  - `attachIfNeeded` re-binds a Channel for a session with a tab but no
- *    in-memory transcript, e.g. after an HMR reload. `attach_session` replays
- *    the SQLite log then tails the live stream. It only ever targets an ABSENT
- *    entry, so replay can't duplicate a transcript.
- *
- * The store is a plain `{ sessions }` bag; mutations are module functions.
- */
 
 import { useMemo } from "react";
 import { Channel } from "@tauri-apps/api/core";
@@ -91,41 +74,15 @@ import {
 export type SessionEntry = SessionView & {
   workstreamId: string;
   stage: string;
-  /** Tool names the user chose to auto-approve for the rest of this session. */
   autoAllow: string[];
-  /** Whether a live claude process is attached. False for a session restored
-   *  from the log after a restart, it resumes on the next message. */
   live: boolean;
-  /** The `--permission-mode` this session launched with (null = stage default).
-   *  Remembered so a resume re-applies it, a running session can't switch into
-   *  `bypassPermissions`, so changing the mode restarts (kill + resume) with it. */
   permissionMode: PermissionMode | null;
-  /** True only during a permission-mode restart: the kill→resume swap. Lets the
-   *  kill's `exited` event be swallowed so the transcript doesn't flash "ended". */
   reloading?: boolean;
-  /** Messages the user sent while a turn was still in flight, awaiting delivery.
-   *  Delivered one-per-turn as each turn finishes (conversation steering). Each
-   *  carries its own staged attachments. */
   queued: QueuedMessage[];
-  /** Epoch ms when the current working stretch began, or null when idle,
-   *  drives the live "time working" counter. Maintained outside the pure
-   *  reducer (it needs a clock) by `setEntry`, so every mutation keeps it right. */
   workingSince: number | null;
-  /** Epoch ms when each background task (keyed by `toolUseId`) was first
-   *  observed, drives the bar's per-task elapsed timer. Rebuilt from the live
-   *  task set on every `setEntry`, so a task's stamp drops as soon as it ends
-   *  (TaskStop or a completed poll). It is NOT cleared by session exit on its
-   *  own, an un-stopped spawn stays in `items`, so the bar is kept from
-   *  showing phantom tasks one layer up: a terminal session renders the "ended"
-   *  banner instead of the composer, and `useSessionBackgroundTasks` guards on
-   *  `isTerminal`. In-memory only; never persisted. Maintained outside the pure
-   *  reducer like `workingSince`. */
   taskStartedAt: Record<string, number>;
 };
 
-/** A follow-up turn the user sent mid-turn, held until the current turn ends.
- *  `promptName` survives the wait so a queued custom-prompt run still lands as a
- *  card rather than its raw body. */
 export type QueuedMessage = {
   text: string;
   attachments: Attachment[];
@@ -136,10 +93,8 @@ type State = { sessions: Record<string, SessionEntry> };
 
 export const useSessionStore = create<State>(() => ({ sessions: {} }));
 
-/** Live channels, kept alive past component unmount; dropped on exit. */
 const channels = new Map<string, Channel<SessionEvent>>();
 
-/** Sessions whose transcript is mid-restore from the SQLite log (dedupe). */
 const restoring = new Set<string>();
 
 function entryOf(sessionId: string): SessionEntry | undefined {
@@ -153,32 +108,13 @@ function setEntry(sessionId: string, next: SessionEntry): void {
     const taskStartedAt = nextTaskStartedAt(prev, next);
     return { sessions: { ...s.sessions, [sessionId]: { ...next, workingSince, taskStartedAt } } };
   });
-  // Every mutation passes through here, so stamping the workstream here catches
-  // all of them — the same funnel `workingSince` already uses.
   if (isWorking(next)) lastWorkingAt.set(next.workstreamId, Date.now());
 }
 
-/** Epoch ms each workstream was last seen working, stamped from `setEntry`.
- *  Read by `activeWorkstreamIds` to attribute a thoughts-index event to the
- *  workstream(s) whose agent could have caused it. In-memory only: it matters
- *  while the app runs, and a restart has nothing to attribute yet. */
 const lastWorkingAt = new Map<string, number>();
 
-/** The watcher that feeds the thoughts index debounces 300ms
- *  (`crates/hyprlayer-core/src/index/watcher.rs:73`) before it emits, so a doc
- *  written by a turn's final tool call reports after the turn has already gone
- *  idle. Widen the "is this workstream working" window past that debounce, or
- *  the last write of every turn arrives too late to attribute. */
 const ATTRIBUTION_GRACE_MS = 30_000;
 
-/**
- * Workstreams whose agents are writing right now, or were within the last
- * `ATTRIBUTION_GRACE_MS`, for attributing thoughts-index events
- * (`writtenDocs.recordWrittenDocs`) to the workstream(s) that could have caused
- * them. With two workstreams working at once this returns a superset, which is
- * fine: `docFromTool` still requires the mention to sit in a write position in
- * *that workstream's own* Bash command.
- */
 export function activeWorkstreamIds(): string[] {
   const { sessions } = useSessionStore.getState();
   const cutoff = Date.now() - ATTRIBUTION_GRACE_MS;
@@ -192,20 +128,7 @@ export function activeWorkstreamIds(): string[] {
   return [...ids];
 }
 
-/**
- * Drop the in-memory transcripts for a workstream's sessions, called when the
- * workstream is archived. The store otherwise only ever grows: every session's
- * full transcript (messages, thinking, tool I/O) stays resident for the app's
- * lifetime. The backend has already killed the live drivers, and the SQLite
- * event log remains the source of truth if the workstream is restored, so
- * nothing is lost by releasing them here.
- */
 export function removeSessionsForWorkstream(workstreamId: string): void {
-  // Drop this workstream's written-doc slice and activity stamp regardless of
-  // whether it has any in-memory sessions (e.g. archived before its sessions
-  // were restored after a restart) — otherwise a lingering stamp inside the
-  // grace window could attribute a later index event to a workstream that no
-  // longer exists.
   forgetWorkstreamDocs(workstreamId);
   lastWorkingAt.delete(workstreamId);
 
@@ -220,18 +143,6 @@ export function removeSessionsForWorkstream(workstreamId: string): void {
   });
 }
 
-/**
- * Release a single session's in-memory transcript and live channel. Called from
- * the UI's "gone for good" paths, closing a tab, tearing down a split, forgetting
- * an archived handle, and for a terminal session on archive. Without this the
- * entry outlives every UI handle to it and only `removeSessionsForWorkstream`
- * (workstream archive) ever frees it, so closed sessions pile up in the heap for
- * the app's lifetime. The SQLite event log stays the source of truth: a reopened
- * tab rebuilds the transcript via `restoreSessionIfNeeded` on mount, so nothing is
- * lost. Unconditional, callers decide when an entry is safe to drop (e.g. only
- * for a non-`live` session on archive, so a still-running archived turn keeps its
- * channel).
- */
 export function dropSession(sessionId: string): void {
   channels.delete(sessionId);
   useSessionStore.setState((s) => {
@@ -242,13 +153,6 @@ export function dropSession(sessionId: string): void {
   });
 }
 
-/**
- * Epoch-ms start timestamp for each live background task (by `toolUseId`).
- * Stamped on first appearance, preserved across subsequent `setEntry` calls,
- * and naturally dropped when a task ends (it won't be in the live set anymore).
- * Mirrors the `workingSince` mechanism: maintained here (outside the pure
- * reducer) because it needs a clock.
- */
 function nextTaskStartedAt(
   prev: SessionEntry | undefined,
   next: SessionEntry,
@@ -261,30 +165,13 @@ function nextTaskStartedAt(
   return out;
 }
 
-/**
- * The working-start timestamp for the elapsed counter: stamp `now` the moment a
- * session begins working, keep it untouched while it stays working, clear it the
- * moment it stops. Recomputed on every `setEntry` so it's correct whichever path
- * changed the entry, live events, an optimistic send, or a permission answer.
- *
- * Keyed on [`isWorking`] (actively computing), not [`isBusy`]: a session parked
- * on a permission/question is busy but not working, so the counter pauses while
- * it waits on the user, and a restored, permission-held session never shows a
- * ticking timer (the restart bug).
- */
 function nextWorkingSince(prev: SessionEntry | undefined, next: SessionEntry): number | null {
   if (!isWorking(next)) return null;
   const wasWorking = prev ? isWorking(prev) : false;
   return wasWorking ? (prev?.workingSince ?? Date.now()) : Date.now();
 }
 
-/**
- * A Tauri Channel that buffers events until we know which session they belong to.
- * Events can arrive before the start/resume command resolves (and we learn the
- * id), so they queue; `activate(id)` binds the channel and flushes the backlog in
- * order. Call `activate` only AFTER the session's entry exists, so `dispatch`
- * finds something to fold into. Shared by [`startSession`] and [`resumeSession`].
- */
+// Events can arrive before the command returns the session id.
 function bufferedChannel(): {
   channel: Channel<SessionEvent>;
   activate: (sessionId: string) => void;
@@ -306,22 +193,13 @@ function bufferedChannel(): {
   };
 }
 
-/** Fold one event into a session's transcript and run its side effects. */
 function dispatch(sessionId: string, event: SessionEvent): void {
   const current = entryOf(sessionId);
   if (!current) return;
 
-  // Permission-mode change: swallow the kill's `exited` so the session detaches
-  // (live:false, idle) instead of flashing "session ended". Claude can't switch a
-  // running session into bypass, so we relaunch lazily, the next message resumes
-  // with the new mode (the proven resume-then-send path), rather than eagerly
-  // resuming into an idle process that emits no `init` and hangs on "connecting".
+  // A mode restart must not mark the transcript terminal.
   if (event.kind === "exited" && current.reloading) {
     channels.delete(sessionId);
-    // The kill abandoned whatever turn was in flight, so cancel any permission
-    // card or pending question it was parked on, its request id died with the
-    // old process, so leaving it open would strand the session `isBusy` forever
-    // (composer locked, queue frozen) on an ask no live claude can answer.
     const cleared = cancelPendingPrompts(current);
     setEntry(sessionId, {
       ...current,
@@ -340,10 +218,6 @@ function dispatch(sessionId: string, event: SessionEvent): void {
   const nextEntry: SessionEntry = { ...current, ...reduceEvent(current, event) };
   setEntry(sessionId, nextEntry);
 
-  // Fire an OS toast when a session *transitions* into needs-you, so the user
-  // notices an attention dot while the window is unfocused. Skip when the user
-  // pre-allowed this tool (the auto-respond below clears it immediately) so we
-  // don't toast for permissions the user never sees.
   const isNeedsYou = classifyEntry(nextEntry) === "needs-you";
   const autoApproved =
     event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName);
@@ -352,36 +226,23 @@ function dispatch(sessionId: string, event: SessionEvent): void {
   }
 
   if (event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName)) {
-    // "Allow for this agent" was chosen earlier, answer this one automatically.
     void respondPermission(sessionId, event.requestId, true, null);
   }
   if (event.kind === "turnDone" || event.kind === "exited") {
-    // The agent likely touched the worktree; refresh the Changes panel
-    // (git-status), any open diffs (file-sides), and the sidebar's line counts.
     invalidateWorktreeGit(current.workstreamId);
-    // A finished turn may have opened or updated a PR (Ship, Fix CI). One `gh`
-    // call per turn end, unlike the worktree watcher's per-file-change firing.
     invalidateWorkstreamPr(current.workstreamId);
   }
   if (event.kind === "turnDone") {
-    // The turn is free, deliver the next message queued while it ran.
     flushQueuedMessage(sessionId);
   }
   if (event.kind === "exited") {
     channels.delete(sessionId);
     const latest = entryOf(sessionId);
     if (latest) setEntry(sessionId, { ...latest, live: false });
-    // Ahead/behind and link status may have changed (commits, pushes).
     void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
   }
 }
 
-/** Fire the needs-you toast unless the user is already looking right at this
- *  session, i.e., the window is OS-focused AND the project route shows this
- *  workstream AND the session is bound to one of the active panes' tabs.
- *  Errs toward firing: any uncertainty (URL not canonical, tabs missing, the
- *  Tauri runtime missing in tests) is treated as not-visible. Always
- *  fire-and-forget, never lets a notification failure escape into dispatch. */
 async function maybeNotifyTransition(
   sessionId: string,
   workstreamId: string,
@@ -398,8 +259,6 @@ async function maybeNotifyTransition(
       stage,
     });
   } catch {
-    /* Notifications are a side effect; a failure here must not perturb the
-       dispatch path (jsdom has no Tauri runtime, e.g.). */
   }
 }
 
@@ -418,27 +277,15 @@ async function isSessionVisible(sessionId: string, workstreamId: string): Promis
   return main?.sessionId === sessionId || right?.sessionId === sessionId;
 }
 
-/**
- * Start a new agent session for a workstream stage and bind its event stream.
- * Returns the persisted [`Session`] row (its `id` becomes the tab's binding).
- */
 export async function startSession(args: {
   workstreamId: string;
   stage: Stage;
   input: string;
-  /** Files/library docs attached to the first turn. Their paths go to the
-   *  backend prompt; they render as pin cards in the echo so no raw path shows. */
   attachments?: Attachment[];
-  /** Which harness to run (default claude). */
   harness?: Harness | null;
-  /** Claude: a `--model` value. OpenCode: a `provider/model` id. Null = default. */
   model?: string | null;
-  /** `--effort` level, or null/undefined for claude's default. */
   effort?: string | null;
-  /** `--permission-mode` override, or null/undefined to use the stage default. */
   permissionMode?: PermissionMode | null;
-  /** Set when a custom prompt opened this session, so the echoed first turn
-   *  renders as a card instead of the composed body. */
   promptName?: string | null;
 }): Promise<Session> {
   const { channel, activate } = bufferedChannel();
@@ -461,15 +308,10 @@ export async function startSession(args: {
     ),
   );
 
-  // Synchronous from here: no `await`, so no buffered onmessage can interleave.
   channels.set(session.id, channel);
 
   let view = initialSessionView("starting");
   view = { ...view, model: session.model, claudeSessionId: session.claudeSessionId };
-  // Echo the prompt the backend composed (skill command / action body + input,
-  // including any Settings → Prompts override), but NOT the doc/path list the
-  // backend appends; those render as pin cards instead, so the agent's raw
-  // paths never appear in the user bubble.
   view = addUserMessage(view, prompt, args.stage, attachments, Date.now(), args.promptName ?? null);
   setEntry(session.id, {
     ...view,
@@ -483,15 +325,10 @@ export async function startSession(args: {
     queued: [],
   });
 
-  activate(session.id); // bind + flush any events that raced the command
+  activate(session.id);
   return session;
 }
 
-/**
- * Re-attach a live claude process to a restored (detached) session via
- * `--resume`, so the conversation continues after an app restart. Keeps the
- * existing transcript; new events append. No-op if already live.
- */
 export async function resumeSession(sessionId: string): Promise<void> {
   const current = entryOf(sessionId);
   if (!current || channels.has(sessionId)) return;
@@ -501,9 +338,6 @@ export async function resumeSession(sessionId: string): Promise<void> {
   setEntry(sessionId, { ...current, live: true, state: "starting" });
 
   try {
-    // Resume with claude's original session settings (model/effort null), but
-    // re-apply the chosen permission mode. Claude doesn't restore it, and it's
-    // how a restart carries a mode (e.g. bypass) a live session can't switch to.
     await unwrap(commands.resumeSession(sessionId, null, null, current.permissionMode, channel));
   } catch (e) {
     channels.delete(sessionId);
@@ -512,18 +346,9 @@ export async function resumeSession(sessionId: string): Promise<void> {
     throw e;
   }
 
-  activate(sessionId); // bind + flush events buffered during the resume call
+  activate(sessionId);
 
-  // A resumed harness is silent until the next message, claude emits `init` only
-  // with a turn, codex/opencode emit a bare one on spawn, so a re-attach onto a
-  // quiet process would look mid-turn forever: "Connecting…" never clears,
-  // `isWorking` keeps the pill pulsing, and a follow-up queues behind a turn that
-  // never arrives. Settle to the resting state and release any queued follow-up
-  // unless a turn is already in flight. That can be proven by the resume burst, or
-  // by an optimistic user message added before this call (`deliverMessage` resumes
-  // a detached session before sending it). `starting` alone is therefore not proof
-  // that the process is idle. The terminal check leaves a dead-on-arrival resume
-  // alone.
+  // A quiet Claude resume emits no init event.
   const after = entryOf(sessionId);
   if (after && !isTerminal(after.state) && !after.streaming) {
     setEntry(sessionId, {
@@ -536,19 +361,6 @@ export async function resumeSession(sessionId: string): Promise<void> {
   }
 }
 
-/**
- * Restart a live session into a new permission mode via the backend's atomic
- * `restart_session` (kill the old process, wait for it to die, resume with the
- * new mode). Doing the kill+wait+respawn server-side removes the frontend race
- * where a resume could land on the still-dying old process and inherit its mode.
- *
- * Channel handling: the old process's kill-`exited` is still routed to the old
- * channel, so we drop that channel and flag `reloading` first, the dispatch
- * swallow turns that exit into a clean detach (no "session ended"). Only after
- * the backend has respawned do we bind the fresh channel, so the swallow can't
- * race-delete it. The resumed `claude` is alive but silent until the next
- * message, so we settle to idle/ready rather than hanging on "connecting".
- */
 async function restartSession(
   sessionId: string,
   mode: PermissionMode | null,
@@ -558,13 +370,11 @@ async function restartSession(
   const current = entryOf(sessionId);
   if (!current) return;
 
-  channels.delete(sessionId); // detach the old channel; its kill-exit is swallowed
+  channels.delete(sessionId);
   setEntry(sessionId, { ...current, permissionMode: mode, reloading: true, live: false, state: "starting" });
 
   const { channel, activate } = bufferedChannel();
   try {
-    // model/effort null → claude keeps the session's original values on --resume
-    // (a mode-only restart); non-null switches them mid-conversation.
     await unwrap(commands.restartSession(sessionId, model, effort, mode, channel));
   } catch (e) {
     const latest = entryOf(sessionId);
@@ -572,14 +382,10 @@ async function restartSession(
     throw e;
   }
 
-  channels.set(sessionId, channel); // bind the fresh stream now that the old one is gone
+  channels.set(sessionId, channel);
   activate(sessionId);
   const after = entryOf(sessionId);
   if (after) {
-    // The restart abandoned the in-flight turn (the resumed claude is silent until
-    // the next message), so cancel any permission/question it was parked on,
-    // otherwise the session stays `isBusy` forever on a dead ask and the composer
-    // (and the queue behind it) lock up with no way to recover. Settle to ready.
     const cleared = cancelPendingPrompts(after);
     setEntry(sessionId, {
       ...after,
@@ -590,17 +396,10 @@ async function restartSession(
       streaming: false,
       state: "idle",
     });
-    // The turn is free again, deliver the next queued follow-up under the new
-    // mode, the same one-per-turn steering as a turn finishing normally.
     flushQueuedMessage(sessionId);
   }
 }
 
-/** The 1-based ordinal of the user-kind item at `itemId` among all user-kind
- *  items in the session. The backend's rewind/fork commands consume this
- *  ordinal (mapping it to the N-th `userMessage` event in the persisted log),
- *  so the frontend doesn't need to know about seqs. Returns 0 if not found,
- *  callers treat that as "no-op". */
 function userTurnOrdinal(items: SessionEntry["items"], itemId: string): number {
   let n = 0;
   for (const item of items) {
@@ -611,42 +410,23 @@ function userTurnOrdinal(items: SessionEntry["items"], itemId: string): number {
   return 0;
 }
 
-/** Whether `itemId` is the FIRST user turn of `sessionId`. That turn is the one
- *  case a live rewind can't truncate. Claude has no turn before it to land on,
- *  so the UI routes a first-turn rewind to a fresh session (Clear Context) instead
- *  of a misleading log-only prune that leaves the model remembering everything. */
 export function isFirstUserTurn(sessionId: string, itemId: string): boolean {
   const entry = entryOf(sessionId);
   return entry ? userTurnOrdinal(entry.items, itemId) === 1 : false;
 }
 
-/**
- * Rewind a session to the user turn identified by `itemId`, dropping that turn
- * and everything after it, Claude-Desktop-style "rewind to here". Drives the
- * backend's `rewind_session`, which prefers a TRUE live rewind (it peels claude's
- * own conversation on the running process, so the model genuinely forgets the
- * dropped turns) and falls back to a log-only prune (the transcript is trimmed but
- * the model keeps its memory, we warn when that happens). Either way the persisted
- * tail is deleted and the user can re-prompt from that point.
- */
 export async function rewindToMessage(sessionId: string, itemId: string): Promise<void> {
   const current = entryOf(sessionId);
   if (!current) return;
   const ordinal = userTurnOrdinal(current.items, itemId);
   if (ordinal === 0) return;
 
-  // Drop the old channel BEFORE the backend kills the live driver, the kill's
-  // `exited` event is routed to the old channel, and we want it absorbed (the
-  // session isn't ending; it's re-spawning), so flag it like `restartSession`.
   channels.delete(sessionId);
   setEntry(sessionId, { ...current, reloading: true, live: false, state: "starting" });
 
   const { channel, activate } = bufferedChannel();
   let liveRewound: boolean;
   try {
-    // Re-apply the tab's current permission mode on the re-spawn, claude binds
-    // its mode at launch, so without carrying it a rewound bypass session drops
-    // back to the stage default and starts prompting again (as resume/restart do).
     const result = await unwrap(
       commands.rewindSession(sessionId, ordinal, current.permissionMode, channel),
     );
@@ -657,9 +437,6 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
     throw e;
   }
 
-  // A log-only rewind pruned the transcript but the model still remembers the
-  // dropped turns (not live / OpenCode / a pre-resume or first turn / a refusal).
-  // Say so, otherwise "rewind" silently overstates what happened.
   if (!liveRewound) {
     useToast.getState().show(
       "Rewound the transcript only",
@@ -668,15 +445,6 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
     );
   }
 
-  // Drop the truncated tail from the visible transcript immediately, the
-  // backend has removed them from SQLite, and we don't want a stale post-cut
-  // tail to linger until the next attach/restore cycle.
-  //
-  // Leave context-window / cost / turn-count fields untouched. On a log-only
-  // rewind the model keeps its full memory, so the pre-rewind values ARE current;
-  // on a live rewind the model shrank, so they briefly over-report. Either way the
-  // next assistant message's `usage` event repopulates them, so any drift
-  // self-corrects on the very next turn, no need to guess a reset value.
   const latest = entryOf(sessionId);
   if (latest) {
     const truncated = truncateAtUserOrdinal(latest, ordinal);
@@ -697,11 +465,6 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
   activate(sessionId);
 }
 
-/**
- * Drop every item from `view.items` at or after the N-th user turn, restoring
- * the view to the state right before that prompt was sent. The reducer
- * `counter` is left untouched (item ids are still unique).
- */
 function truncateAtUserOrdinal(view: SessionView, ordinal: number): SessionView {
   let seen = 0;
   for (let i = 0; i < view.items.length; i += 1) {
@@ -712,16 +475,6 @@ function truncateAtUserOrdinal(view: SessionView, ordinal: number): SessionView 
   return view;
 }
 
-/**
- * Change a session's permission mode. Claude can't switch a *running* session
- * into `bypassPermissions` (it's a launch-time decision), so applying a new mode
- * to an existing conversation means relaunching the process with the new flag,
- * continuing via `--resume` so the full transcript is preserved (see
- * [`restartSession`]). A not-live session just records the choice. It takes
- * effect on the next start/resume. The caller confirms first if a turn is in
- * flight (the restart interrupts it). `mode` is the `--permission-mode` flag, or
- * null for the stage default.
- */
 export async function applyPermissionMode(
   sessionId: string,
   mode: PermissionMode | null,
@@ -736,16 +489,6 @@ export async function applyPermissionMode(
   await restartSession(sessionId, mode);
 }
 
-/**
- * Switch a live session's model, the model analog of [`applyPermissionMode`].
- * Claude binds its model at launch, so a change on a running conversation
- * relaunches the process via `--resume` onto the new model (transcript
- * preserved). `modelFlag` is the `--model` value: an explicit id/alias, never
- * null, a null `--model` on resume would keep the original model. `effort`
- * re-applies the effort for the new model; `mode` keeps the current permission
- * mode. A not-live session is a no-op, the tab's selection already rides into
- * the next start via the composer.
- */
 export async function applyModel(
   sessionId: string,
   modelFlag: string,
@@ -757,18 +500,10 @@ export async function applyModel(
   await restartSession(sessionId, mode, modelFlag, effort);
 }
 
-/**
- * Send a follow-up turn, or, if a live turn is already in flight, queue it for
- * delivery when that turn finishes, so the user can keep steering the
- * conversation without waiting. A detached
- * (restored) session has nothing running to queue behind, so it's delivered
- * immediately, resuming the process first.
- */
 export async function sendMessage(
   sessionId: string,
   text: string,
   attachments: Attachment[] = [],
-  /** Set when `text` is a custom prompt's body, so the bubble renders a card. */
   promptName: string | null = null,
 ): Promise<void> {
   const current = entryOf(sessionId);
@@ -783,11 +518,6 @@ export async function sendMessage(
   await deliverMessage(sessionId, text, attachments, promptName);
 }
 
-/** Actually send a turn: optimistic user bubble (text + attachment cards),
- *  resume if detached, hand to the driver. Attachment paths go to the backend
- *  as `attached_docs` (composed into the prompt server-side, so the agent can
- *  read them) but never into the bubble. The delivery half of [`sendMessage`];
- *  also used to flush the queue. */
 async function deliverMessage(
   sessionId: string,
   text: string,
@@ -810,10 +540,6 @@ async function deliverMessage(
       ),
     );
   } catch (e) {
-    // The turn never reached the driver, so no `userMessage` event will be
-    // persisted. Drop the optimistic bubble so the visible transcript stays in
-    // lockstep with the log, an orphaned bubble would shift every later user
-    // turn's ordinal and misaim a subsequent rewind.
     const latest = entryOf(sessionId);
     if (latest) {
       setEntry(sessionId, { ...latest, items: latest.items.filter((it) => it.id !== optimisticId) });
@@ -822,12 +548,6 @@ async function deliverMessage(
   }
 }
 
-/**
- * Deliver the next queued message once a turn finishes (conversation steering).
- * One per turn so each queued message gets its own turn, in order; a no-op while
- * the session is still parked on a permission/question (the user owes an answer
- * first), it retries on the next `turnDone`.
- */
 function flushQueuedMessage(sessionId: string): void {
   const entry = entryOf(sessionId);
   if (!entry || entry.queued.length === 0 || isBusy(entry)) return;
@@ -836,14 +556,12 @@ function flushQueuedMessage(sessionId: string): void {
   void deliverMessage(sessionId, next.text, next.attachments, next.promptName);
 }
 
-/** Drop a still-queued message before it's delivered (the user changed course). */
 export function cancelQueuedMessage(sessionId: string, index: number): void {
   const current = entryOf(sessionId);
   if (!current) return;
   setEntry(sessionId, { ...current, queued: current.queued.filter((_, i) => i !== index) });
 }
 
-/** Answer a pending permission ask. */
 export async function respondPermission(
   sessionId: string,
   requestId: string,
@@ -857,10 +575,6 @@ export async function respondPermission(
       ...resolvePermission(current, requestId, allow ? "allow" : "deny"),
     });
   }
-  // A restored (post-restart) session has no live process and its original
-  // request id is dead, so the answer can't be delivered to it. Resume instead:
-  // claude re-establishes the turn and re-issues the ask, auto-allowed if the
-  // user chose "allow for this agent" (the tool is already in `autoAllow`).
   if (!channels.has(sessionId)) {
     await resumeSession(sessionId);
     return;
@@ -868,12 +582,6 @@ export async function respondPermission(
   await unwrap(commands.respondPermission(sessionId, requestId, allow, message));
 }
 
-/**
- * Answer an `AskUserQuestion` prompt. `answers` maps each question's text to the
- * chosen answer string (multi-select choices joined by ", "); an empty map means
- * the user dismissed without answering. Optimistically un-parks the session,
- * then sends the answer to the driver.
- */
 export async function answerQuestion(
   sessionId: string,
   requestId: string,
@@ -883,9 +591,6 @@ export async function answerQuestion(
   if (current) {
     setEntry(sessionId, { ...current, ...resolveQuestion(current, requestId) });
   }
-  // Restored sessions are detached (see `respondPermission`): resume so claude
-  // re-issues the question rather than sending an answer its dead process can't
-  // receive.
   if (!channels.has(sessionId)) {
     await resumeSession(sessionId);
     return;
@@ -893,7 +598,6 @@ export async function answerQuestion(
   await unwrap(commands.answerQuestion(sessionId, requestId, JSON.stringify(answers)));
 }
 
-/** Allow this ask AND auto-approve future asks for the same tool this session. */
 export async function allowForSession(
   sessionId: string,
   requestId: string,
@@ -906,31 +610,14 @@ export async function allowForSession(
   await respondPermission(sessionId, requestId, true, null);
 }
 
-/** Gracefully interrupt the current turn (the session stays alive). */
 export async function interruptSession(sessionId: string): Promise<void> {
   await unwrap(commands.interruptSession(sessionId));
 }
 
-/**
- * Stop the current turn for the composer's stop button. Sends claude's graceful
- * control-protocol interrupt first; if claude can't respond (model call wedged,
- * a tool hung mid-execution, etc.) and the session is still actively computing
- * after a short grace window, escalates to a hard kill so the user is never
- * stuck with a frozen turn and no way out. A detached session has no live turn
- * to stop. Sessions parked on a permission/question are already un-working, so
- * the watchdog resolves immediately and we don't kill, the interrupt still
- * delivers when they're answered.
- */
 const STOP_ESCALATION_MS = 3000;
 export async function stopSession(sessionId: string): Promise<void> {
   if (!channels.has(sessionId)) return;
 
-  // A turn parked on a permission/question isn't computing, it's blocked on the
-  // user, and claude is blocked on stdin waiting for that control response. "Stop"
-  // here means cancel the ask: decline the permission (or dismiss the question) so
-  // the live driver unblocks, and clear the card so the composer unlocks. The
-  // decline goes out FIRST, while the request id is still live, so it lands even
-  // if the interrupt below can't reach a claude that's still blocked on the ask.
   const parked = entryOf(sessionId);
   if (parked && isBusy(parked) && !isWorking(parked)) {
     const cleared = cancelPendingPrompts(parked);
@@ -943,28 +630,21 @@ export async function stopSession(sessionId: string): Promise<void> {
         if (requestId) await unwrap(commands.respondPermission(sessionId, requestId, false, null));
       }
     } catch {
-      // The driver may already be gone; the interrupt/kill below still runs.
     }
   }
 
   try {
     await interruptSession(sessionId);
   } catch {
-    // Interrupt couldn't be delivered (stdin already closed, etc.). Fall through
-    // to the watchdog: if the session is still working, the kill below ends it.
   }
   const settled = await waitForView(sessionId, (v) => !isWorking(v), STOP_ESCALATION_MS);
   if (settled) return;
   try {
     await killSession(sessionId);
   } catch {
-    // Best-effort hard stop; the user can't do anything more from the composer.
   }
 }
 
-/** The request id of the permission ask a parked session owes an answer to: the
- *  tracked `pendingPermission`, else the first still-open card (a subagent can
- *  hold one open while `pendingPermission` tracks another). Null if none. */
 function openPermissionRequestId(entry: SessionEntry): string | null {
   if (entry.pendingPermission) return entry.pendingPermission.requestId;
   for (const it of entry.items) {
@@ -973,9 +653,6 @@ function openPermissionRequestId(entry: SessionEntry): string | null {
   return null;
 }
 
-/** Resolve as soon as the session's view matches `predicate`, or `false` if the
- *  timeout fires first. Used by [`stopSession`] to watch for the turn settling
- *  before escalating to a kill. */
 function waitForView(
   sessionId: string,
   predicate: (view: SessionEntry) => boolean,
@@ -997,8 +674,6 @@ function waitForView(
   });
 }
 
-/** Hard-stop the session (kills the process tree). A detached (restored, not
- *  live) session has no process, just mark it ended locally. */
 export async function killSession(sessionId: string): Promise<void> {
   if (!channels.has(sessionId)) {
     const current = entryOf(sessionId);
@@ -1014,55 +689,29 @@ export async function killSession(sessionId: string): Promise<void> {
   await unwrap(commands.killSession(sessionId));
 }
 
-/** The Commit/Ship/Revise launch defaults resolved from current settings (read
- *  from the bootstrap query cache, always populated on the project page). */
 function commitShipDefaults(): ActionAgentDefaults {
   return actionAgentDefaults(queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings);
 }
 
-/** The Claude catalog as the composer would see it: the cached probe when one
- *  has resolved (any mounted composer fetches it), else the static presets. */
 function claudeCatalogSnapshot(): ModelOption[] {
   return claudeModels(queryClient.getQueryData<ClaudeProbe>(["claude-probe"])?.models);
 }
 
-/** The effective Commit body for a FOLLOW-UP run in a live commit tab: the
- *  Settings → Prompts override with its `{{variables}}` resolved from the
- *  worktree, else the stock `/commit`. Session STARTS get the same treatment
- *  backend-side (`start_stage_session`); this covers the one prompt the
- *  frontend sends itself. */
 async function effectiveCommitText(workstreamId: string): Promise<string> {
   const boot = queryClient.getQueryData<Bootstrap>(["bootstrap"]);
   const raw = effectiveBuiltinBody(boot?.settings, boot?.promptDefaults, "commit");
-  // A blank override reads as unset (matching the backend's launch path), the
-  // re-run must never send an empty turn.
   const body = raw.trim() ? raw : (boot?.promptDefaults?.commit ?? "/commit");
   if (!bodyHasVars(body)) return body;
   const ctx = await unwrap(commands.workstreamPromptContext(workstreamId));
   return substitutePromptVars(body, ctx);
 }
 
-/** Workstreams with a prompt-run session start in flight, a double-click or a
- *  held-down shortcut must not spawn N sessions (N−1 of them orphaned). */
 const promptStartsInFlight = new Set<string>();
 
-/**
- * Run an already-resolved prompt text in a workstream, the shared delivery
- * path for the prompt library's surfaces (composer chips, ⌘K palette, prompt
- * shortcuts). The focused agent tab gets it as a follow-up turn when it has a
- * usable session (queued if a turn is in flight, resumed if detached after an
- * app restart); an untouched plain-chat tab is started in place; anything else
- * (doc preview, diff/file viewer, terminal, multiplexer, dead action tab) gets
- * a fresh agent tab named after the prompt.
- */
 export async function runPromptTextInWorkstream(
   workstreamId: string,
   text: string,
-  /** The prompt's name. Titles a freshly-opened tab, and titles the transcript
-   *  card that stands in for `text` so a long body doesn't flood the chat. */
   title: string,
-  /** Deliver into this shell instead of the focused one, the composer chips
-   *  pass their own tab so a chip in a split pane can't cross-fire. */
   targetShellId?: number,
 ): Promise<void> {
   if (!text.trim()) return;
@@ -1072,9 +721,6 @@ export async function runPromptTextInWorkstream(
   const active = tabs?.shells.find((s) => s.id === (targetShellId ?? activeId));
 
   if (active?.sessionId) {
-    // After an app restart the tab binding survives but the in-memory entry
-    // doesn't, rebuild it first so the run continues the conversation instead
-    // of spawning a duplicate session next to it.
     if (!entryOf(active.sessionId)) {
       await restoreSessionIfNeeded(
         active.sessionId,
@@ -1094,9 +740,6 @@ export async function runPromptTextInWorkstream(
   promptStartsInFlight.add(workstreamId);
   try {
     const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
-    // Reuse only a plain, untouched chat tab. Every non-chat tab variant (doc
-    // preview, diff/file viewer, terminal, multiplexer PTY) renders something
-    // other than SessionChat, so binding a session there would run it headless.
     const reuseShell =
       active &&
       !active.sessionId &&
@@ -1110,8 +753,6 @@ export async function runPromptTextInWorkstream(
       workstreamId,
       stage: "general",
       input: text,
-      // Launch on what pressing Enter in that tab would use: the reused tab's
-      // own composer picks, else the configured new-chat defaults.
       ...newChatLaunchArgs(settings, reuseShell ? active : null, claudeCatalogSnapshot()),
       promptName: title,
     });
@@ -1125,22 +766,13 @@ export async function runPromptTextInWorkstream(
   }
 }
 
-/**
- * Commit a workstream's changes from the header action: start a commit-stage
- * session, stage + commit, then an ask-before-push (never a PR), in a
- * dedicated, reusable "Commit" tab and select it. Lets users checkpoint
- * incrementally and open the PR later via Ship. If a commit session is still
- * live, re-run the commit prompt in it as a follow-up turn (focusing the tab)
- * so a second click after making more changes checkpoints them in the same
- * agent window rather than no-op'ing.
- */
 export async function commitWorkstream(workstreamId: string): Promise<void> {
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
   const commitTab = tabs?.shells.find((s) => s.mode === "commit");
   if (commitTab?.sessionId) {
     const entry = entryOf(commitTab.sessionId);
     if (entry && !isTerminal(entry.state)) {
-      openCommitTab(workstreamId, commitTab.sessionId); // focus the live commit tab
+      openCommitTab(workstreamId, commitTab.sessionId);
       await sendMessage(commitTab.sessionId, await effectiveCommitText(workstreamId));
       return;
     }
@@ -1155,21 +787,13 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
   openCommitTab(workstreamId, session.id, defaults);
 }
 
-/**
- * Ship a workstream from the GIT-panel action (rather than a chat mode): start a
- * ship-stage session, commit, push, open a PR, in a dedicated, reusable
- * "Ship" tab and select it. If a ship session is already running for this
- * workstream, just focus its tab instead of spawning a second one. The ship
- * directive names the workstream's target branch, the backend composes it from
- * its own copy of the base (plus any Settings → Prompts override).
- */
 export async function shipWorkstream(workstreamId: string): Promise<void> {
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
   const shipTab = tabs?.shells.find((s) => s.mode === "ship");
   if (shipTab?.sessionId) {
     const entry = entryOf(shipTab.sessionId);
     if (entry && !isTerminal(entry.state)) {
-      openShipTab(workstreamId, shipTab.sessionId); // re-select the live ship tab
+      openShipTab(workstreamId, shipTab.sessionId);
       return;
     }
   }
@@ -1183,14 +807,6 @@ export async function shipWorkstream(workstreamId: string): Promise<void> {
   openShipTab(workstreamId, session.id, defaults);
 }
 
-/**
- * Hand PR feedback back to the agent on the same branch. CI failures and
- * requested changes both route here from the PR status bar. Reuses the
- * workstream's "PR conversation" (the ship tab): if its session is still live,
- * the instruction is sent as a verbatim follow-up turn (preserving context);
- * otherwise a fresh `revise`-stage session is started (its first prompt is the
- * REVISE_PROMPT directive, never SHIP_PROMPT, so the agent won't open a 2nd PR).
- */
 export async function addressPrFeedback(
   workstreamId: string,
   kind: "ci" | "comments",
@@ -1210,7 +826,7 @@ export async function addressPrFeedback(
   if (shipTab?.sessionId) {
     const entry = entryOf(shipTab.sessionId);
     if (entry && !isTerminal(entry.state)) {
-      openShipTab(workstreamId, shipTab.sessionId); // focus the PR conversation
+      openShipTab(workstreamId, shipTab.sessionId);
       await sendMessage(shipTab.sessionId, instruction);
       return;
     }
@@ -1225,55 +841,29 @@ export async function addressPrFeedback(
   openShipTab(workstreamId, session.id, defaults);
 }
 
-/**
- * Rebuild a session's transcript from its persisted SQLite log when we have a
- * tab bound to it but no transcript in memory, i.e. after an app restart (the
- * tab binding survives in localStorage; the in-memory store does not).
- *
- * The claude child does not outlive the app (`kill_on_drop`), so a session we
- * don't already hold live is detached. If its log already ended terminally
- * (completed/crashed/killed) we keep it terminal; otherwise it was just left
- * mid-conversation, we mark it `idle` and `live: false`, so the next message
- * transparently resumes it (`--resume`) rather than forcing a new session. A
- * no-op if we already hold the transcript or a live channel.
- */
 export async function restoreSessionIfNeeded(
   sessionId: string,
   workstreamId: string,
   stage: string,
-  /** The tab's persisted `--permission-mode` flag (null = stage default), so a
-   *  resume after an app restart re-applies the user's choice rather than
-   *  silently dropping back to the stage default. */
   permissionMode: PermissionMode | null = null,
 ): Promise<void> {
   if (entryOf(sessionId) || channels.has(sessionId) || restoring.has(sessionId)) return;
   restoring.add(sessionId);
   try {
     const log = await unwrap(commands.getSessionLog(sessionId));
-    // A live start may have raced us while the log was loading.
     if (entryOf(sessionId) || channels.has(sessionId)) return;
 
     let view = initialSessionView("starting");
     for (const stored of log) {
       try {
         view = reduceEvent(view, JSON.parse(stored.payload) as SessionEvent);
-        // The reducer is clock-free, so a replayed user turn lands with
-        // `createdAt: null`. Backfill from the stored event's `createdAt`
-        // (epoch ms) so the toolbar timestamp survives the restart.
         const last = view.items[view.items.length - 1];
         if (stored.kind === "userMessage" && last?.kind === "user" && last.createdAt === null) {
           view = { ...view, items: [...view.items.slice(0, -1), { ...last, createdAt: stored.createdAt }] };
         }
       } catch {
-        // A single corrupt row shouldn't sink the whole transcript.
       }
     }
-    // Settle the replayed transcript into a consistent resting state: a session
-    // parked on a permission/question stays HELD (so the conversation pauses for
-    // the user, rather than looking like a running turn); one cut off mid-turn
-    // settles to idle. Answering a held prompt resumes the process, the request
-    // id died with the old process, so the answer can't reach it directly, but
-    // `respondPermission`/`answerQuestion` resume first and claude re-issues.
     view = restoredView(view);
     setEntry(sessionId, {
       ...view,
@@ -1281,8 +871,6 @@ export async function restoreSessionIfNeeded(
       stage,
       autoAllow: [],
       live: false,
-      // The session log doesn't store the mode, but the tab does, re-apply it so
-      // a resume keeps the user's choice (e.g. bypass) across an app restart.
       permissionMode,
       workingSince: null,
       taskStartedAt: {},
@@ -1295,30 +883,19 @@ export async function restoreSessionIfNeeded(
   }
 }
 
-/** Plain-text transcript for "Copy transcript". */
 export function transcriptToText(sessionId: string): string {
   const entry = useSessionStore.getState().sessions[sessionId];
   return entry ? viewToText(entry) : "(no transcript)";
 }
 
-/** Subscribe a component to one session's live state. */
 export function useSession(sessionId: string | undefined): SessionEntry | undefined {
   return useSessionStore((s) => (sessionId ? s.sessions[sessionId] : undefined));
 }
 
 export type CreatedDoc = { path: string; kind: DocKind; title: string };
 
-/**
- * Research/plan docs the agent created across all of a workstream's sessions,
- * newest last, deduped by path, derived from the `Write`/`Edit`/`Bash` tool
- * calls that wrote them (see `docFromTool`), with shell writes confirmed and
- * resolved against the thoughts index (see `writtenDocs`). Used to surface docs
- * for in-app review without leaving the project.
- */
 export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
   const written = useWrittenDocs(workstreamId);
-  // Select a flat list of "kind\tpath" keys with shallow equality so streaming
-  // events don't re-render this unless the set of docs actually changes.
   const keys = useSessionStore(
     useShallow((s) => {
       if (!workstreamId) return [] as string[];
@@ -1347,15 +924,6 @@ export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
   );
 }
 
-/**
- * The most recently created doc of `kind` in a workstream, or null.
- * Recency is defined by traversal order (session insertion order → transcript
- * order within a session), the last matching write/edit wins. This is
- * deliberately NOT derived from `useWorkstreamDocs`: that selector dedups by
- * keeping the *first* occurrence of a path, whereas here a re-edited older doc
- * must win over a newer one of the same kind, so the two cannot be unified
- * without changing which doc gets suggested.
- */
 export function useMostRecentDoc(
   workstreamId: string | null,
   kind: DocKind | null,
@@ -1364,8 +932,6 @@ export function useMostRecentDoc(
   const key = useSessionStore(
     useShallow((s) => {
       if (!workstreamId || !kind) return null;
-      // Project every session to the docs it created, keep those of the
-      // requested kind, the last in traversal order is the most recent.
       const docs = Object.values(s.sessions)
         .filter((entry) => entry.workstreamId === workstreamId)
         .flatMap((entry) => sessionDocs(entry.items, written))
@@ -1379,16 +945,7 @@ export function useMostRecentDoc(
   );
 }
 
-/**
- * Artifacts the agent published across all of a workstream's sessions, in
- * first-published order, deduped by URL. Same `useShallow` string-key pattern as
- * `useWorkstreamDocs`, so a streaming turn doesn't churn the sidebar.
- *
- * Scoped to sessions currently in the store, like `useWorkstreamDocs`: a
- * workstream's other tabs contribute once they've been mounted and replayed.
- */
 export function useWorkstreamArtifacts(workstreamId: string | null): SessionArtifact[] {
-  // Key: "url\0title\0description\0filePath"  (\0 is safe, none carry NUL bytes).
   const keys = useSessionStore(
     useShallow((s) => {
       if (!workstreamId) return [] as string[];
@@ -1414,27 +971,12 @@ export function useWorkstreamArtifacts(workstreamId: string | null): SessionArti
 
 export type LiveBackgroundTask = BackgroundTask & { startedAt: number | null };
 
-/**
- * Live background tasks for one session, with per-task elapsed timestamps.
- * Follows the `useWorkstreamDocs` pattern: a `useShallow` selector builds a
- * flat list of stable string keys so streaming deltas don't churn the bar
- * unless the task set or their statuses actually change; `useMemo` converts
- * the keys to typed objects only on real changes.
- *
- * `startedAt` is taken from `taskStartedAt` (maintained in the store layer
- * outside the pure reducer, like `workingSince`).
- */
 export function useSessionBackgroundTasks(sessionId: string | undefined): LiveBackgroundTask[] {
-  // Key: "toolUseId\0taskId\0status\0startedAt\0label\0command"
-  // \0 is safe because none of these fields contain NUL bytes.
   const keys = useSessionStore(
     useShallow((s) => {
       if (!sessionId) return [] as string[];
       const entry = s.sessions[sessionId];
       if (!entry) return [] as string[];
-      // No live process → its background shells are dead (a terminal session, or
-      // one restored detached after an app restart), so an un-stopped spawn in
-      // `items` can never complete-notify. Don't surface it as a phantom.
       if (isTerminal(entry.state) || !entry.live) return [] as string[];
       const tasks = backgroundTasksFromItems(entry.items);
       return tasks.map((t) => {
@@ -1460,15 +1002,7 @@ export function useSessionBackgroundTasks(sessionId: string | undefined): LiveBa
   );
 }
 
-/**
- * The agent's live plan/to-do list for one session, derived from the transcript
- * by `planTasksFromItems`. Same `useShallow` string-key pattern as
- * `useSessionBackgroundTasks` so streaming deltas don't churn the list. Unlike
- * background shells the plan is conversation-scoped, so it's kept for terminal
- * and restored sessions too.
- */
 export function useSessionPlanTasks(sessionId: string | undefined): PlanTask[] {
-  // Key: "id\0subject\0status"  (\0 is safe, none of these carry NUL bytes).
   const keys = useSessionStore(
     useShallow((s) => {
       if (!sessionId) return [] as string[];
@@ -1487,16 +1021,8 @@ export function useSessionPlanTasks(sessionId: string | undefined): PlanTask[] {
   );
 }
 
-/**
- * `WorkstreamActivity` itself lives in `lib/domain/activity` — the search
- * palette renders it too, so it graduated out of this feature — and is
- * re-exported here so existing imports from this module keep working. See
- * that file for what each state means; below is the per-session fold that
- * decides which one a workstream shows.
- */
 export type { WorkstreamActivity } from "@/lib/domain/activity";
 
-// Higher number = more urgent. A workstream surfaces the max across its sessions.
 const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
   idle: 0,
   review: 1,
@@ -1517,14 +1043,7 @@ export function classifyEntry(entry: SessionEntry): WorkstreamActivity {
   }
   if (isWorking(entry)) return "working";
   if (entry.state === "crashed" || entry.state === "spawn_failed") return "error";
-  // Turn finished but the session is alive and rests at "ready", or the session
-  // ran to completion, either way there's a result to look at.
   if (entry.state === "completed" || (entry.state === "running" && !entry.streaming)) {
-    // A live (non-terminal) session resting between turns with background
-    // shells still running gets the distinct pulse instead of the static
-    // "review" green. A "completed" session is terminal, its process group and
-    // its shells are already dead, so it reads as "review", not "background".
-    // `live` too: a detached/restored session's leftover spawns aren't running.
     if (entry.live && !isTerminal(entry.state) && backgroundTasksFromItems(entry.items).length > 0) {
       return "background";
     }
@@ -1546,11 +1065,6 @@ export function useWorkstreamActivity(workstreamId: string | null): WorkstreamAc
   });
 }
 
-/**
- * Pure core of {@link useWorkstreamShipBusy}, true when one of this
- * workstream's Ship sessions is mid-turn ("working", or "needs-you" while paused
- * on a permission/question during that turn). Exported for testing.
- */
 export function workstreamShipBusy(
   sessions: Record<string, SessionEntry>,
   workstreamId: string | null,
@@ -1564,16 +1078,6 @@ export function workstreamShipBusy(
   return false;
 }
 
-/**
- * True while this workstream's Ship session is mid-turn, actively
- * committing / pushing / opening the PR. Ship commits the worktree's current
- * changes itself, so the manual Commit button is redundant (and racy) while this
- * holds; Root hides it until the ship turn parks. By then the turn-done
- * invalidation has refreshed the live git-status count to 0, so Commit reappears
- * only for changes made *after* the ship, never for the ones Ship just
- * committed. Goes false once the ship turn finishes (parks at "review"/idle) or
- * the session ends, so a failed ship still leaves Commit available as a fallback.
- */
 export function useWorkstreamShipBusy(workstreamId: string | null): boolean {
   return useSessionStore((s) => workstreamShipBusy(s.sessions, workstreamId));
 }

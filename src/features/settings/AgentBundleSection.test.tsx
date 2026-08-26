@@ -26,7 +26,6 @@ vi.mock("@/lib/bindings", () => ({
   },
 }));
 
-// The section's "Manage Agents" link; jsdom has no router to resolve it.
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, ...rest }: { children?: unknown; [k: string]: unknown }) => (
     <a {...rest}>{children as never}</a>
@@ -38,7 +37,6 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-/** `latestSha: null` is not an omission: a versioned CLI runs no SHA probe. */
 const FRESHNESS = {
   manageable: true,
   installedSha: "9a2a33c6fc0648e8cd7bac278365c8a9dcca220b",
@@ -88,7 +86,6 @@ const VERSIONS: AiVersions = {
   ],
 };
 
-/** `ai status` from a CLI too old to report any version field. */
 const LEGACY_STATUS: AiStatus = {
   agentTool: "Claude Code",
   installed: true,
@@ -122,9 +119,6 @@ function renderSection(status: AiStatus | undefined = STATUS, freshness: unknown
   );
 }
 
-/** Open the listbox. The trigger only mounts once the freshness probe has
- *  answered `manageable`, so finding it already waits for that; the version
- *  list itself is fetched lazily by this very open. */
 async function openMenu() {
   const trigger = (await screen.findByRole("button", {
     name: /agent bundle version/i,
@@ -133,15 +127,12 @@ async function openMenu() {
   return trigger;
 }
 
-/** Open the listbox and pick an option by its visible label. */
 async function choose(match: RegExp) {
   await openMenu();
   fireEvent.click(await screen.findByRole("option", { name: match }));
 }
 
 describe("AgentBundleSection", () => {
-  // One row, not two: the version stands where the install SHA used to, and is
-  // itself the control.
   it("names the installed version in the bundle row, as the picker trigger", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection();
@@ -150,8 +141,6 @@ describe("AgentBundleSection", () => {
     expect(screen.getByText(/Agent bundle/)).toBeTruthy();
   });
 
-  // The list spawns a CLI process that can reach GitHub; a Settings visit that
-  // never opens the menu must never pay for it.
   it("fetches the version list only when the picker is opened", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection();
@@ -161,9 +150,6 @@ describe("AgentBundleSection", () => {
     await waitFor(() => expect(b.agentBundleVersions).toHaveBeenCalled());
   });
 
-  // `ai versions` follows the CLI's configured harness, and the install
-  // command refuses anything but Claude Code — so on another tool the picker
-  // would be a dead-end control. The row degrades to the read-only SHA.
   it("shows a read-only SHA instead of a picker when the tool is not manageable", async () => {
     renderSection({ ...STATUS, agentTool: "OpenCode" }, { ...FRESHNESS, manageable: false });
     expect(await screen.findByText(/9a2a33c/)).toBeTruthy();
@@ -172,9 +158,6 @@ describe("AgentBundleSection", () => {
     expect(b.agentBundleVersions).not.toHaveBeenCalled();
   });
 
-  // A 1.6.0 CLI over a bundle installed before versioned assets existed:
-  // `assetsVersion` is null but the picker is live, and the SHA is still the
-  // bundle's only identity — not the literal "unknown".
   it("falls back to the install SHA when the bundle predates versioned assets", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection({ ...STATUS, assetsVersion: null, pinnedVersion: null });
@@ -183,16 +166,12 @@ describe("AgentBundleSection", () => {
     expect(trigger.textContent).not.toContain("unknown");
   });
 
-  // Picking a version is what pins it, so saying "pinned" narrates the control
-  // the user just used. Being pinned is surfaced by Clear pin, which is
-  // actionable; only a pin that disagrees with the binary gets words.
   it("does not narrate pin state on the row", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection();
     await screen.findByRole("button", { name: /agent bundle version/i });
     expect(screen.queryByText(/not pinned/)).toBeNull();
     expect(screen.queryByText(/·\s*pinned/)).toBeNull();
-    // ...but the affordance that reveals the pin is still there.
     expect(screen.getByRole("button", { name: /clear pin/i })).toBeTruthy();
   });
 
@@ -203,8 +182,6 @@ describe("AgentBundleSection", () => {
     expect(screen.queryByText(/9a2a33c/)).toBeNull();
   });
 
-  // The state users get stuck in: the pin keeps reinstalling a bundle the
-  // current binary did not ship, on every upgrade, silently.
   it("says so when the pin no longer matches the binary", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection({ ...STATUS, pinnedVersion: "1.6.0-rc.2", binaryVersion: "1.6.0" });
@@ -215,7 +192,6 @@ describe("AgentBundleSection", () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection();
     await openMenu();
-    // Wait past the lazy fetch's disabled "Loading versions…" row.
     await screen.findByRole("option", { name: /1\.6\.0-rc\.2/ });
     const options = screen.getAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual([
@@ -224,10 +200,6 @@ describe("AgentBundleSection", () => {
     ]);
   });
 
-  // The arm/disarm rule: the icon means "this is not what you have". On an
-  // unpinned machine the pin is null, so a pin-only comparison could never
-  // disarm once anything was picked — returning to the installed version has
-  // to read as "no change".
   it("disarms the install affordance when the selection returns to the current version", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection({ ...STATUS, pinnedVersion: null });
@@ -245,7 +217,6 @@ describe("AgentBundleSection", () => {
     b.installAgentBundleVersion.mockReturnValue(ok(install({})));
     renderSection();
     await choose(/1\.6\.0-rc\.2/);
-    // Choosing alone must not rewrite ~/.claude.
     expect(b.installAgentBundleVersion).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: /install 1\.6\.0-rc\.2/i }));
     await waitFor(() => expect(b.installAgentBundleVersion).toHaveBeenCalledWith("1.6.0-rc.2"));
@@ -267,11 +238,6 @@ describe("AgentBundleSection", () => {
     expect(screen.queryByText(/not pinned/)).toBeNull();
   });
 
-  /**
-   * The whole point of reading stdout. This run exits 0 and the config records
-   * the requested version, so every other signal available says "success"
-   * while `~/.claude` holds master's tree instead.
-   */
   it("reports a silent fallback install as a problem, not a success", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     b.installAgentBundleVersion.mockReturnValue(
@@ -291,10 +257,6 @@ describe("AgentBundleSection", () => {
     expect(screen.queryByText(/Bundle reinstalled from the published release/)).toBeNull();
   });
 
-  // A fallback on --unpin is the CLI legitimately installing the repository
-  // tree because its own version has no published asset (a source-built or
-  // nightly binary) — there is no "version shown" left to mismatch, so the
-  // corruption warning would be a false alarm.
   it("reports an unpin that fell back as informational, not corruption", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     b.installAgentBundleVersion.mockReturnValue(
@@ -312,9 +274,6 @@ describe("AgentBundleSection", () => {
     expect(screen.queryByText(/no longer matches the version shown/i)).toBeNull();
   });
 
-  // The tripwire's decay mode: a reworded CLI success line lands on `unknown`,
-  // and for a picked version "could not confirm" must not read calmer than
-  // "confirmed bad".
   it("treats an unconfirmed source as a caution for a picked version", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     b.installAgentBundleVersion.mockReturnValue(
@@ -326,7 +285,6 @@ describe("AgentBundleSection", () => {
     expect(await screen.findByText(/treat the installed files as unverified/i)).toBeTruthy();
   });
 
-  // `ai reinstall` has no --json, so its own words are all the user gets.
   it("shows the CLI's output when the reinstall exits non-zero", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     b.installAgentBundleVersion.mockReturnValue(
@@ -337,16 +295,11 @@ describe("AgentBundleSection", () => {
     fireEvent.click(await screen.findByRole("button", { name: /install 1\.6\.0-rc\.2/i }));
     expect(await screen.findByText(/exit 1/)).toBeTruthy();
     expect(screen.getByText(/could not verify the bundle digest/)).toBeTruthy();
-    // The CLI can die mid-sync, so the failure copy must not claim the disk is
-    // untouched — it names the kept pre-install copy instead...
     expect(screen.queryByText(/left as it was/i)).toBeNull();
     expect(screen.getByText(/hyprlayer-backup/)).toBeTruthy();
-    // ...and the selection survives, so the Install button stands for a retry.
     expect(screen.getByRole("button", { name: /install 1\.6\.0-rc\.2/i })).toBeTruthy();
   });
 
-  // Offline with a cold CLI cache. The row above is read from `ai status`,
-  // which is local, so the list failing must not take the whole card down.
   it("degrades to a readable message when the version list cannot be fetched", async () => {
     b.agentBundleVersions.mockReturnValue(
       Promise.resolve({
@@ -361,7 +314,6 @@ describe("AgentBundleSection", () => {
     renderSection();
     const trigger = await openMenu();
     expect(await screen.findByText(/Could not reach GitHub for the version list/i)).toBeTruthy();
-    // Still names the installed version: it comes from `ai status`, not the list.
     expect(trigger.textContent).toContain("1.6.0");
   });
 
@@ -372,7 +324,6 @@ describe("AgentBundleSection", () => {
     expect(await screen.findByText(/No recent release publishes an agent bundle/i)).toBeTruthy();
   });
 
-  // A pre-1.6.0 binary has no `ai versions` to call at all.
   it("prompts for a CLI upgrade instead of calling a command it lacks", async () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
     renderSection(LEGACY_STATUS);
@@ -394,7 +345,6 @@ describe("AgentBundleSection", () => {
     renderSection({ ...STATUS, assetsVersion: "1.5.9", pinnedVersion: null }, BEHIND);
     fireEvent.click(await screen.findByRole("button", { name: /update to 1\.6\.0/i }));
     await waitFor(() => expect(b.updateAgentBundle).toHaveBeenCalled());
-    // Not `installAgentBundleVersion("1.6.0")`: that is the pinning command.
     expect(b.installAgentBundleVersion).not.toHaveBeenCalled();
     expect(await screen.findByText(/Updated to 1\.6\.0/)).toBeTruthy();
   });
@@ -437,8 +387,6 @@ describe("AgentBundleSection", () => {
     expect(screen.queryByRole("button", { name: /update to/i })).toBeNull();
   });
 
-  // The pre-1.6.0 branch: name the version that fixes it, not an essay about
-  // what a frozen bundle is.
   it("names the installable CLI version and offers to install it", async () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(
       ok({ current: "1.5.9", latest: "1.6.2", hint: "brew upgrade hyprlayer" }),
@@ -460,8 +408,6 @@ describe("AgentBundleSection", () => {
     expect(await screen.findByText(/hyprlayer updated/i)).toBeTruthy();
   });
 
-  // A package manager that wants to prompt gets /dev/null on stdin and dies.
-  // The command it needs is the only thing that helps then.
   it("hands over the manual command when the in-app update fails", async () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(
       ok({ current: "1.5.9", latest: "1.6.2", hint: "brew upgrade hyprlayer" }),
@@ -475,8 +421,6 @@ describe("AgentBundleSection", () => {
     expect(screen.getByText(/no tty present/)).toBeTruthy();
   });
 
-  // An unreachable release source (AUR with no helper) answers with nothing.
-  // A dead Update button would be worse than none.
   it("offers no button when the check cannot name a version", async () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
     renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });

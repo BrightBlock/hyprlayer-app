@@ -14,8 +14,6 @@ afterEach(() => {
   openPath.mockClear();
 });
 
-/** A `Read` call: `ToolArg` renders these as a `FileCard`, whose filename is a
- *  button. Any file-targeting tool (Read/Write/Edit/…) reaches the same card. */
 const readTool: TranscriptItem = {
   kind: "tool",
   id: "t1",
@@ -43,8 +41,6 @@ function renderTranscript(items: TranscriptItem[]) {
 
 describe("tool row with a file card", () => {
   it("nests no button inside another button", () => {
-    // The defect this guards: the row used to be a <button> and the card's
-    // filename is one, which React rejects as invalid HTML.
     const { container } = renderTranscript([readTool]);
     expect(container.querySelector("button button")).toBeNull();
   });
@@ -65,8 +61,6 @@ describe("tool row with a file card", () => {
   });
 
   it("opens the file without also toggling the row it sits in", () => {
-    // The user-visible half of the same defect: the inner click bubbled out to
-    // the row, so opening a file expanded a disclosure nobody asked for.
     const { container } = renderTranscript([readTool]);
     const row = container.querySelector('[role="button"]')!;
 

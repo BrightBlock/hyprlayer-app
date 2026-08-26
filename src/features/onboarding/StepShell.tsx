@@ -1,5 +1,3 @@
-/** Shared chrome for every onboarding step. Separate module so steps can share
- *  it without a circular import. */
 import type { ReactNode } from "react";
 
 import { HyprlayerLogo } from "@/components/Logo";

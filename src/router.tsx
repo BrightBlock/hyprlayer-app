@@ -7,10 +7,6 @@ import type { LibrarySearch } from "./features/library/librarySearch";
 import { registerAppNav } from "./lib/appNav";
 import { useLastRoute } from "./lib/lastRoute";
 
-// The shell (Root) and the landing dashboard load eagerly; everything else is
-// code-split so the initial bundle doesn't carry CodeMirror + its language
-// grammars (the Library's doc editor / file viewer) or xterm (ProjectPage's
-// terminal). Each chunk loads on first navigation, behind Root's Suspense.
 const Archive = lazy(() => import("./routes/Archive").then((m) => ({ default: m.Archive })));
 const Onboarding = lazy(() =>
   import("./routes/Onboarding").then((m) => ({ default: m.Onboarding })),
@@ -38,9 +34,6 @@ const rootRoute = createRootRoute({ component: Root });
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  // The home dashboard is the landing surface. We deliberately do NOT block in
-  // beforeLoad on a bootstrap IPC, that delayed first paint. The shell renders
-  // instantly. Setup/config lives under Settings now.
   component: Dashboard,
 });
 
@@ -50,7 +43,6 @@ const onboardingRoute = createRoute({
   component: Onboarding,
 });
 
-/** Deep-link a Settings section (e.g. the composer's "Harnesses →" footer). */
 export type SettingsSearch = {
   section?: string;
 };
@@ -70,8 +62,6 @@ const archiveRoute = createRoute({
   component: Archive,
 });
 
-/** The Prompt library's selection lives in the URL; a bare `/prompts` shows the
- *  default (the built-in Commit prompt). */
 export type PromptsSearch = {
   prompt?: string;
 };
@@ -85,10 +75,6 @@ const promptsRoute = createRoute({
   }),
 });
 
-/** The agent library's selection lives in the URL; a bare `/agents` is the list.
- *  `section` names the sidebar's root nav choice (agents/system/skills); an
- *  old link without it lands on `agents`, see `AgentsPage`. `project` is the
- *  path of the project the list is scoped to; absent means the global library. */
 export type AgentsSearch = {
   agent?: string;
   tab?: string;
@@ -126,8 +112,6 @@ const libraryRoute = createRoute({
   }),
 });
 
-/** Work-item selection lives in the URL so the sidebar tree can highlight
- *  and deep-link it; `create` pops the create dialog once, then is stripped. */
 export type ProjectSearch = {
   item?: string;
   create?: boolean;
@@ -154,12 +138,6 @@ const routeTree = rootRoute.addChildren([
   projectRoute,
 ]);
 
-// Restore the previous session's view by seeding the URL before the router reads
-// it at construction, so a cold start mounts straight into the last workstream/
-// view instead of flashing the dashboard while a post-mount effect navigates.
-// Only when we actually booted to "/", a deep link sets its own URL first. A
-// since-deleted project (→ PageError) or a missing config (→ onboarding gate) is
-// handled downstream once bootstrap resolves; the route is re-persisted by Root.
 const lastHref = useLastRoute.getState().href;
 if (lastHref && lastHref !== "/" && window.location.pathname === "/") {
   window.history.replaceState(null, "", lastHref);
@@ -167,8 +145,6 @@ if (lastHref && lastHref !== "/" && window.location.pathname === "/") {
 
 export const router = createRouter({ routeTree });
 
-// Wire the lower layers' navigation seam to the real router (lib and feature
-// modules must not import the router singleton directly).
 registerAppNav({
   currentLocation: () => {
     const loc = router.state.location;

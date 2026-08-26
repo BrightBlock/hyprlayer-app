@@ -1,6 +1,3 @@
-//! PTY terminal IPC commands: open, attach, write, resize, close.
-//! Mirrors the session-command pattern from `sessions.rs`.
-
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,12 +16,8 @@ use crate::terminal_registry::TerminalRegistry;
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
-/// Sessions whose mtime is within this window *before* a tab's launch are still
-/// considered (clock granularity / a file written a beat before the watermark).
 const CAPTURE_SKEW_MS: f64 = 2000.0;
 
-/// Open a new PTY for the workstream (user's shell in the worktree), forwarding
-/// output to `on_event`. Returns the `terminal_id` for write/resize/close.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_open(
@@ -49,8 +42,6 @@ pub async fn terminal_open(
 
     let session = PtySession::spawn(SpawnTerminal {
         shell: default_shell(),
-        // Login shell: sources the full profile chain
-        // (`~/.zprofile`/`~/.zlogin`/`~/.zshrc`) so it matches the user's shell.
         args: vec!["-l".to_string()],
         cwd: PathBuf::from(&ws.worktree_path),
         cols,
@@ -74,8 +65,6 @@ pub async fn terminal_open(
     Ok(terminal_id)
 }
 
-/// Attach to an existing PTY: replay scrollback then tail live output. Returns
-/// `false` if the PTY is gone (e.g. after restart), caller opens a fresh one.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_attach(
@@ -90,7 +79,6 @@ pub async fn terminal_attach(
     Ok(true)
 }
 
-/// Forward base64-encoded keyboard input to the PTY.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_write(
@@ -108,7 +96,6 @@ pub async fn terminal_write(
     Ok(())
 }
 
-/// Notify the PTY of a terminal-size change so it can reflow output.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_resize(
@@ -123,7 +110,6 @@ pub async fn terminal_resize(
     Ok(())
 }
 
-/// Kill the shell process and remove the terminal from the registry.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> CmdResult<()> {
@@ -133,9 +119,6 @@ pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> 
     Ok(())
 }
 
-/// Open a new PTY running `hyprlayer <args>` (no workstream context). Used by
-/// onboarding to embed interactive CLI flows (`hyprlayer ai configure`). Reuses
-/// the id-based write/resize/close/attach commands.
 #[tauri::command]
 #[specta::specta]
 pub async fn spawn_cli_terminal(
@@ -178,9 +161,6 @@ pub async fn spawn_cli_terminal(
     Ok(terminal_id)
 }
 
-/// Open a PTY running a single command line through the user's login shell in
-/// the home dir. Used by Harnesses settings for interactive non-CLI flows (e.g.
-/// `claude auth login`, the OpenCode installer), run as if the user typed it.
 #[tauri::command]
 #[specta::specta]
 pub async fn spawn_shell_terminal(
@@ -193,7 +173,6 @@ pub async fn spawn_shell_terminal(
     let path = state.binaries.augmented_path().await;
     let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
 
-    // Login shell so the command sees the user's full PATH/profile.
     let args = login_shell_args(&command);
 
     let session = PtySession::spawn(SpawnTerminal {
@@ -221,11 +200,6 @@ pub async fn spawn_shell_terminal(
     Ok(terminal_id)
 }
 
-/// Open a PTY running a Multiplexer engine CLI (Claude Code / Codex / Gemini /
-/// custom) in the workstream's worktree. Runs through the login shell; on unix
-/// it's `exec`'d so the CLI takes over the shell's PID and SIGINT/exit stay
-/// clean. Shares the id-based write/resize/close/attach lifecycle with
-/// [`terminal_open`] (e.g. frontend sends `\x03` via `terminal_write` to Stop).
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_open(
@@ -279,11 +253,6 @@ pub async fn agent_open(
     Ok(terminal_id)
 }
 
-/// Resize an agent PTY, then "nudge" it so an idle TUI child (Claude/Codex/
-/// Gemini) actually repaints: a lone SIGWINCH while idle often doesn't trigger a
-/// redraw, stranding the composer at the old bottom. Resizing off-by-one, pausing,
-/// then back to the real size forces it (mirrors herdr's `nudge_child_redraw`).
-/// For discrete resizes (dock toggle, (re)attach); drags use [`terminal_resize`].
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_resize(
@@ -304,16 +273,6 @@ pub async fn agent_resize(
     Ok(())
 }
 
-/// Read back the conversation id a "capture-mode" CLI (Codex/Antigravity, which
-/// auto-generate ids unlike Claude/Gemini) assigned itself, by scanning its
-/// on-disk store, launched fresh, then resumed by this id.
-///
-/// Returns the newest session created after `after_ms` (epoch ms, the tab's
-/// launch) not already claimed (`exclude`); for Codex it must also match this
-/// worktree's cwd, so another worktree's session can't be mis-attributed. `None`
-/// until the session hits disk (first message), so the frontend polls. Best-
-/// effort: two tabs opened in the same worktree at once may swap ids (no per-
-/// process key); `exclude` still keeps them distinct.
 #[tauri::command]
 #[specta::specta]
 pub async fn capture_agent_session(
@@ -338,12 +297,6 @@ pub async fn capture_agent_session(
     Ok(id)
 }
 
-/// Mint a Codex conversation id *deterministically*, sidestepping the disk-scan
-/// attribution race: run `codex exec --json` (first event is
-/// `{"type":"thread.started","thread_id":…}`), take that id, wait for its rollout
-/// to hit disk (so `resume <id>` finds it), then kill the probe. Reading the id
-/// from our own process can't confuse it with a sibling tab's. `None` if Codex
-/// can't run or never announces a thread (caller falls back to disk capture).
 #[tauri::command]
 #[specta::specta]
 pub async fn mint_codex_session(
@@ -363,9 +316,6 @@ pub async fn mint_codex_session(
     let path = state.binaries.augmented_path().await;
     let worktree = PathBuf::from(&ws.worktree_path);
     let path = path.to_string_lossy().into_owned();
-    // Bound the probe: a hung CLI (auth/network) must not block the tab forever,
-    // time out to None and let the caller fall back. The orphaned probe exits on
-    // its own once its turn ends.
     let id = tokio::time::timeout(
         std::time::Duration::from_secs(90),
         tokio::task::spawn_blocking(move || mint_codex_blocking(&command, &worktree, &path)),
@@ -377,10 +327,6 @@ pub async fn mint_codex_session(
     Ok(id)
 }
 
-/// Whether `session_id` is actually persisted in `engine_id`'s on-disk store,
-/// the authoritative resume gate. A pinned-but-never-used id has no file yet, so
-/// resuming would exit "No conversation found"; this lets the caller launch fresh.
-/// Unknown engines (Gemini, custom) return false, caller uses its own heuristic.
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_session_exists(
@@ -405,11 +351,6 @@ pub async fn agent_session_exists(
     Ok(exists)
 }
 
-/// Build the single command line handed to [`login_shell_args`] for an engine.
-/// On unix we `exec` the program so the CLI inherits the login shell's PID,
-/// then Ctrl-C and the process-group kill on close hit the CLI directly. Windows
-/// PowerShell has no `exec`; the program runs as a child via the call operator
-/// (`&`), and the registry still tears it down by process group.
 fn agent_command_line(command: &str, args: &[String]) -> String {
     #[cfg(not(windows))]
     {
@@ -428,19 +369,16 @@ fn agent_command_line(command: &str, args: &[String]) -> String {
     }
 }
 
-/// POSIX single-quote: wrap in `'…'`, escaping embedded quotes as `'\''`.
 #[cfg(not(windows))]
 fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// PowerShell single-quote: wrap in `'…'`, doubling embedded single quotes.
 #[cfg(windows)]
 fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// File/dir mtime as epoch milliseconds.
 fn mtime_ms(path: &Path) -> Option<f64> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     Some(
@@ -451,9 +389,6 @@ fn mtime_ms(path: &Path) -> Option<f64> {
     )
 }
 
-/// `(path, mtime_ms)` for every `*.jsonl` under `dir` (bounded depth) whose mtime
-/// is at or after `cutoff_ms`. Stats are cheap and the cutoff is recent, so only a
-/// handful survive, the caller reads contents for just those.
 fn recent_jsonl(dir: &Path, max_depth: usize, cutoff_ms: f64) -> Vec<(PathBuf, f64)> {
     fn walk(dir: &Path, depth: usize, cutoff: f64, out: &mut Vec<(PathBuf, f64)>) {
         if depth == 0 {
@@ -481,7 +416,6 @@ fn recent_jsonl(dir: &Path, max_depth: usize, cutoff_ms: f64) -> Vec<(PathBuf, f
     out
 }
 
-/// First-line `session_meta` of a Codex rollout → `(session_id, cwd)`.
 fn codex_session_meta(file: &Path) -> Option<(String, String)> {
     let f = std::fs::File::open(file).ok()?;
     let mut first = String::new();
@@ -493,9 +427,6 @@ fn codex_session_meta(file: &Path) -> Option<(String, String)> {
     Some((id, cwd))
 }
 
-/// Newest Codex session created after the watermark whose recorded cwd matches the
-/// worktree and that isn't already claimed. See [`capture_agent_session`]. Codex
-/// lays sessions out as `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (depth 4).
 fn capture_codex(worktree: Option<&str>, after_ms: f64, exclude: &[String]) -> Option<String> {
     let root = dirs::home_dir()?.join(".codex").join("sessions");
     let cutoff = after_ms - CAPTURE_SKEW_MS;
@@ -514,10 +445,6 @@ fn capture_codex(worktree: Option<&str>, after_ms: f64, exclude: &[String]) -> O
     best.map(|(_, id)| id)
 }
 
-/// Spawn `codex exec --json` in `worktree`, read its first `thread.started` event
-/// for the id, wait for the session's rollout to be on disk (so `resume` works),
-/// then kill the probe. Read-only sandbox so the throwaway prompt can't mutate the
-/// tree. See [`mint_codex_session`].
 fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<String> {
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(command);
@@ -540,9 +467,6 @@ fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<Str
         .ok()?;
     let mut id = None;
     if let Some(stdout) = child.stdout.take() {
-        // Drain to EOF, let the seed turn finish and the process exit, so the
-        // session is persisted *complete*. Killing mid-turn leaves it "interrupted",
-        // which codex then surfaces on resume. The id is the first event.
         for line in std::io::BufReader::new(stdout)
             .lines()
             .map_while(Result::ok)
@@ -563,8 +487,6 @@ fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<Str
     id
 }
 
-/// Whether Claude has a transcript for `session_id` under this worktree. Claude
-/// stores it at `~/.claude/projects/<cwd-with-non-alnum→->/<session_id>.jsonl`.
 fn claude_session_exists(worktree: Option<&str>, session_id: &str) -> bool {
     let (Some(worktree), Some(home)) = (worktree, dirs::home_dir()) else {
         return false;
@@ -580,8 +502,6 @@ fn claude_session_exists(worktree: Option<&str>, session_id: &str) -> bool {
         .exists()
 }
 
-/// Whether a Codex rollout file for `session_id` exists yet (its id is in the
-/// `rollout-<ts>-<id>.jsonl` filename).
 fn codex_rollout_exists(session_id: &str) -> bool {
     let Some(root) = dirs::home_dir().map(|h| h.join(".codex").join("sessions")) else {
         return false;
@@ -593,7 +513,6 @@ fn codex_rollout_exists(session_id: &str) -> bool {
     })
 }
 
-/// Whether an Antigravity conversation dir for `session_id` exists.
 fn antigravity_brain_exists(session_id: &str) -> bool {
     dirs::home_dir()
         .map(|h| {
@@ -606,9 +525,6 @@ fn antigravity_brain_exists(session_id: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Newest Antigravity conversation dir created after the watermark and not already
-/// claimed. The store (`~/.gemini/antigravity-cli/brain/<id>/`) isn't cwd-scoped,
-/// so this is timestamp-only (no worktree match available).
 fn capture_antigravity(after_ms: f64, exclude: &[String]) -> Option<String> {
     let root = dirs::home_dir()?
         .join(".gemini")
@@ -634,10 +550,6 @@ fn capture_antigravity(after_ms: f64, exclude: &[String]) -> Option<String> {
     best.map(|(_, id)| id)
 }
 
-/// Replay scrollback then forward live output, the shared open/attach path.
-/// Snapshots scrollback and subscribes atomically (see
-/// [`PtySession::subscribe_with_scrollback`]) so no output is lost or duplicated
-/// across the handoff, then streams the rest onto the UI channel.
 pub(crate) fn attach_stream(
     session: &PtySession,
     on_event: Channel<TerminalEvent>,
@@ -651,7 +563,6 @@ pub(crate) fn attach_stream(
     forward(rx, on_event, registry, terminal_id);
 }
 
-/// Forward a PTY's broadcast onto a UI Channel; remove from the registry on exit.
 fn forward(
     mut rx: broadcast::Receiver<TerminalEvent>,
     on_event: Channel<TerminalEvent>,
@@ -681,9 +592,6 @@ fn forward(
 
 #[cfg(not(windows))]
 pub(crate) fn default_shell() -> PathBuf {
-    // `$SHELL` is the user's login shell (folded in from the login environment
-    // for GUI launches); `/bin/sh` is the POSIX-guaranteed fallback when it's
-    // unset, which `/bin/zsh` is not on every Unix.
     std::env::var_os("SHELL")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/bin/sh"))
@@ -691,11 +599,6 @@ pub(crate) fn default_shell() -> PathBuf {
 
 #[cfg(windows)]
 pub(crate) fn default_shell() -> PathBuf {
-    // Windows has no `$SHELL`, and the Unix `/bin/sh` fallback doesn't exist,
-    // it would fail to spawn and leave the terminal blank. Prefer PowerShell 7
-    // (`pwsh`), fall back to the built-in Windows PowerShell, then `%ComSpec%`
-    // (cmd.exe). Resolved to a full path so the PTY's CreateProcess doesn't
-    // depend on its own PATH search.
     which::which("pwsh")
         .or_else(|_| which::which("powershell"))
         .ok()
@@ -703,9 +606,6 @@ pub(crate) fn default_shell() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("powershell.exe"))
 }
 
-/// The default shell's display name, its file stem (e.g. "zsh", "bash", "pwsh",
-/// "powershell", "cmd"). Labels the dock's ad-hoc terminal tabs by the shell they
-/// actually spawn, instead of a hardcoded guess.
 #[tauri::command]
 #[specta::specta]
 pub fn default_shell_name() -> CmdResult<String> {
@@ -716,8 +616,6 @@ pub fn default_shell_name() -> CmdResult<String> {
         .to_string())
 }
 
-/// Args to run `command` through [`default_shell`]: `-lc` on unix, PowerShell's
-/// `-NoProfile -Command` on Windows.
 pub(crate) fn login_shell_args(command: &str) -> Vec<String> {
     #[cfg(not(windows))]
     {

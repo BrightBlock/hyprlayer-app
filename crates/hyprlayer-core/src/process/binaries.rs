@@ -1,11 +1,3 @@
-//! Locating the external binaries the app depends on.
-//!
-//! macOS GUI apps inherit launchd's minimal PATH (`/usr/bin:/bin:...`), which
-//! contains none of homebrew/cargo/npm. The resolver builds an augmented PATH
-//! once (process PATH + login-shell PATH + well-known directories) and
-//! resolves binaries against it; explicit per-binary overrides always win.
-//! The augmented PATH is also what every spawned child should receive.
-
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
@@ -55,38 +47,20 @@ impl BinaryKind {
         }
     }
 
-    /// Minimum supported version, when the app depends on specific features.
     fn min_version(self) -> Option<(&'static str, [u64; 3])> {
         match self {
-            // Control-protocol floor for the headless session driver.
             BinaryKind::Claude => Some(("2.1.0", [2, 1, 0])),
-            // Server mode (`opencode serve`) + the HTTP/SSE session API the
-            // OpenCode driver speaks. A conservative floor, tune if needed.
             BinaryKind::OpenCode => Some(("1.0.0", [1, 0, 0])),
-            // `codex app-server`'s v2 thread protocol (thread/*, turn/*,
-            // item/* notifications, the server-side approval requests). The
-            // surface is flagged experimental upstream, so the floor is the
-            // build the driver was written against, bump it in step with
-            // regenerating the contract (`codex app-server generate-ts`).
             BinaryKind::Codex => Some(("0.145.0", [0, 145, 0])),
             _ => None,
         }
     }
 
-    /// Whether a *resolved* binary must answer `--version` with a parseable
-    /// semver to count as present. True only for our own CLI: the version is how
-    /// we tell the real `hyprlayer` from the desktop app's `Hyprlayer.exe`, which
-    /// shares the name case-insensitively on Windows and can be resolved through
-    /// winget's portable shim (`Commands: [hyprlayer]`). The GUI prints no
-    /// version, so a versionless hit is the desktop app, not the CLI.
     fn requires_version(self) -> bool {
         matches!(self, BinaryKind::Hyprlayer)
     }
 
-    /// Whether the app can function without this binary.
     pub fn optional(self) -> bool {
-        // The app runs fine on Claude alone; the other harnesses, gh, and Ollama
-        // are extras.
         matches!(
             self,
             BinaryKind::Gh | BinaryKind::OpenCode | BinaryKind::Codex | BinaryKind::Ollama
@@ -120,24 +94,13 @@ pub struct BinaryResolver {
     augmented_path: RwLock<OsString>,
     overrides: RwLock<HashMap<BinaryKind, PathBuf>>,
     cache: RwLock<HashMap<BinaryKind, BinaryStatus>>,
-    /// Bumped whenever resolution inputs change (PATH enrichment, overrides,
-    /// redetect). A probe started under an old generation must not populate
-    /// the cache. It could pin a stale `Missing` after the PATH improved.
     generation: AtomicU64,
 }
 
 impl BinaryResolver {
-    /// Build the resolver synchronously from the process PATH plus well-known
-    /// install dirs. Cheap, safe to call during app setup. Call
-    /// [`enrich_with_login_shell`](Self::enrich_with_login_shell) afterwards
-    /// (in the background) to fold in the user's shell PATH.
     pub fn initialize(overrides: HashMap<BinaryKind, PathBuf>) -> Self {
         let mut segments: Vec<PathBuf> = Vec::new();
         if let Some(process_path) = env::var_os("PATH") {
-            // An AppImage prepends its own bin dirs, which hold nothing but our
-            // launcher and a fallback xdg-open. This PATH is handed to terminals
-            // and harnesses *after* the AppImage env scrub, so leaving the
-            // entries in would undo it.
             segments.extend(
                 env::split_paths(&process_path).filter(|p| !super::appimage::is_appdir_path(p)),
             );
@@ -152,9 +115,6 @@ impl BinaryResolver {
         }
     }
 
-    /// Capture the login-shell PATH (unix; best effort, hard timeout so a
-    /// misbehaving rc can't wedge us) and merge it in. Returns true when the
-    /// augmented PATH actually changed (callers should re-probe / notify).
     pub async fn enrich_with_login_shell(&self) -> bool {
         #[cfg(unix)]
         {
@@ -182,12 +142,10 @@ impl BinaryResolver {
         }
     }
 
-    /// The PATH value to inject into every spawned child process.
     pub async fn augmented_path(&self) -> OsString {
         self.augmented_path.read().await.clone()
     }
 
-    /// Absolute path for a binary, if resolvable. Does not probe versions.
     pub async fn resolve(&self, kind: BinaryKind) -> Option<PathBuf> {
         if let Some(p) = self.overrides.read().await.get(&kind) {
             return Some(p.clone());
@@ -196,7 +154,6 @@ impl BinaryResolver {
         which_in_augmented(kind.command_name(), &path)
     }
 
-    /// Resolve, requiring a healthy probe (cached). Errors carry remedies.
     pub async fn require(&self, kind: BinaryKind) -> Result<PathBuf> {
         let status = self.status(kind).await;
         match (&status.state, &status.path) {
@@ -212,22 +169,18 @@ impl BinaryResolver {
         }
     }
 
-    /// Probed status for one binary, cached until `redetect`.
     pub async fn status(&self, kind: BinaryKind) -> BinaryStatus {
         if let Some(cached) = self.cache.read().await.get(&kind) {
             return cached.clone();
         }
         let generation = self.generation.load(Ordering::SeqCst);
         let status = self.probe(kind).await;
-        // Cache only if resolution inputs didn't change while we probed.
         if generation == self.generation.load(Ordering::SeqCst) {
             self.cache.write().await.insert(kind, status.clone());
         }
         status
     }
 
-    /// All statuses, probed concurrently, worst case is one probe timeout,
-    /// not N in a row.
     pub async fn status_all(&self) -> Vec<BinaryStatus> {
         let [a, b, c, d, e, f, g] = BinaryKind::ALL;
         let (a, b, c, d, e, f, g) = tokio::join!(
@@ -270,9 +223,6 @@ impl BinaryResolver {
 
         let version = probe_version(&path).await;
         let state = state_for(kind, version.as_deref());
-        // `Missing` from a path that *did* resolve means the binary answered but
-        // isn't our CLI, the Windows `Hyprlayer.exe` desktop-exe collision. Drop
-        // the path so nothing downstream runs the GUI as if it were the CLI.
         if state == BinaryState::Missing {
             return missing_status(kind, overridden);
         }
@@ -289,8 +239,6 @@ impl BinaryResolver {
     }
 }
 
-/// A `BinaryStatus` for a binary we couldn't resolve to a usable path. Path and
-/// version are cleared. There is nothing to hand back or display.
 fn missing_status(kind: BinaryKind, overridden: bool) -> BinaryStatus {
     BinaryStatus {
         kind,
@@ -303,15 +251,6 @@ fn missing_status(kind: BinaryKind, overridden: bool) -> BinaryStatus {
     }
 }
 
-/// Decide a resolved binary's state from its probed `--version` output.
-///
-/// A parseable version below the kind's floor is `TooOld`; at/above it (or when
-/// the kind has no floor) it's `Ok`. When `--version` yielded nothing:
-/// - third-party binaries stay `Ok`: some shims only answer in a full
-///   invocation, so a bare resolved path is still worth handing back;
-/// - our own `hyprlayer` CLI becomes `Missing`: because a versionless hit is the
-///   desktop app's `Hyprlayer.exe` wearing the CLI's name (see
-///   [`BinaryKind::requires_version`]), not the CLI.
 fn state_for(kind: BinaryKind, version: Option<&str>) -> BinaryState {
     match (version, kind.min_version()) {
         (Some(v), Some((min_str, min))) => {
@@ -334,29 +273,15 @@ fn join_deduped(mut segments: Vec<PathBuf>) -> OsString {
     env::join_paths(segments).unwrap_or_else(|_| env::var_os("PATH").unwrap_or_default())
 }
 
-/// Is `dir` a cargo profile output dir (`target/debug`, `target/release`)?
-///
-/// Identified by the bookkeeping cargo always leaves alongside the binaries,
-/// because the directory name alone proves nothing.
 fn is_cargo_build_dir(dir: &Path) -> bool {
     dir.join(".fingerprint").is_dir() || dir.join(".cargo-lock").is_file()
 }
 
-/// Directories the resolver must never hand a binary back from: `cargo run`
-/// puts `target/<profile>` on PATH, where the GUI binary matches a search for
-/// `hyprlayer` and we would spawn a second copy of ourselves.
-///
-/// Scoped to cargo output dirs on purpose. A packaged Linux install puts the
-/// app at `/usr/bin/Hyprlayer`, so blindly forbidding `current_exe()`'s parent
-/// blacklisted all of `/usr/bin`, hiding the real `hyprlayer` CLI, `git`, and
-/// `gh` (which then fell through to a mise shim that prints a banner on stdout
-/// and corrupted every parse). Empty for any normal install location.
+// Exclude Cargo output without blacklisting install dirs such as /usr/bin.
 fn build_artifact_dirs(exe: Option<&Path>) -> Vec<PathBuf> {
     let Some(dir) = exe.and_then(Path::parent) else {
         return Vec::new();
     };
-    // The running binary is either in `target/<profile>/` or the `deps/` copy
-    // cargo keeps beside it.
     let root = match dir.file_name() {
         Some(name) if name == "deps" => dir.parent().unwrap_or(dir),
         _ => dir,
@@ -384,8 +309,6 @@ fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> 
             .is_some_and(|parent| forbidden.contains(&parent))
     };
 
-    // On Windows, prefer a real .exe over npm's .cmd shims, CreateProcess
-    // cannot spawn .cmd directly and the session driver needs a true child.
     #[cfg(windows)]
     {
         if let Ok(mut hits) = which::which_in_all(format!("{name}.exe"), Some(augmented_path), &cwd)
@@ -421,23 +344,15 @@ fn well_known_dirs() -> Vec<PathBuf> {
         PathBuf::from("/usr/local/bin"),
     ];
     #[cfg(target_os = "windows")]
-    // scoop shims + winget link shims + standard npm global prefix
     let platform = [
         dirs::data_local_dir().map(|local| local.join("Programs")),
         dirs::home_dir().map(|profile| profile.join("scoop").join("shims")),
-        // winget shim dir, else a winget-installed CLI isn't found until restart.
         dirs::data_local_dir().map(|local| local.join("Microsoft").join("WinGet").join("Links")),
         dirs::data_dir().map(|appdata| appdata.join("npm")),
     ]
     .into_iter()
     .flatten()
     .collect::<Vec<_>>();
-    // Linux: an AppImage launched from a desktop file inherits the session's
-    // PATH, which on most desktops is /usr/bin only, no Nix, no Snap, no
-    // Flatpak exports. The login-shell capture above usually fills those in,
-    // but it needs $SHELL set and an rc file that exports them, and neither is
-    // guaranteed from a .desktop launch. These cover the package managers a
-    // developer's claude/codex/gh most often comes from.
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let platform = [
         Some(PathBuf::from("/usr/local/bin")),
@@ -453,9 +368,6 @@ fn well_known_dirs() -> Vec<PathBuf> {
     common.chain(platform).collect()
 }
 
-/// Ask the user's login shell for its PATH. Interactive (`-i`) so rc files
-/// that guard on interactivity still contribute; stdin is null and the call
-/// is bounded so a prompt-heavy rc can't hang us.
 #[cfg(unix)]
 async fn capture_login_shell_path() -> Option<OsString> {
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
@@ -483,8 +395,6 @@ async fn probe_version(path: &PathBuf) -> Option<String> {
         return None;
     }
     let line = output.stdout.lines().next()?.trim();
-    // "git version 2.49.0", "gh version 2.62.0 (2024-…)", "hyprlayer 1.5.6",
-    // "2.1.173 (Claude Code)", take the first semver-looking token.
     line.split_whitespace()
         .find(|tok| parse_semver(tok).is_some())
         .map(|s| s.to_string())
@@ -514,9 +424,6 @@ mod tests {
 
     #[test]
     fn versionless_hyprlayer_is_missing_but_third_party_stays_present() {
-        // The crux of the Windows desktop-exe misdetection: a `hyprlayer` that
-        // resolved but printed no version is the GUI wearing the CLI's name, so
-        // it must be Missing, while gh/git and friends keep the lenient path.
         assert_eq!(state_for(BinaryKind::Hyprlayer, None), BinaryState::Missing);
         assert_eq!(
             state_for(BinaryKind::Hyprlayer, Some("1.5.6")),
@@ -528,10 +435,6 @@ mod tests {
 
     #[test]
     fn an_installed_app_forbids_nothing() {
-        // The 0.5.8 Linux regression: the deb/rpm/AUR packages put the app at
-        // /usr/bin/Hyprlayer, so forbidding current_exe()'s parent blacklisted
-        // all of /usr/bin, `hyprlayer` and `git` resolved to nothing and `gh`
-        // fell through to a mise shim. A normal bin dir must forbid nothing.
         assert!(build_artifact_dirs(Some(Path::new("/usr/bin/Hyprlayer"))).is_empty());
         assert!(build_artifact_dirs(Some(Path::new("/usr/local/bin/Hyprlayer"))).is_empty());
         assert!(build_artifact_dirs(None).is_empty());
@@ -539,8 +442,6 @@ mod tests {
 
     #[test]
     fn a_cargo_profile_dir_is_still_forbidden() {
-        // ...but the guard it was added for must survive: `cargo run` puts
-        // target/<profile> on PATH, where the GUI binary answers to `hyprlayer`.
         let tmp = tempfile::tempdir().unwrap();
         let profile = tmp.path().join("target").join("debug");
         std::fs::create_dir_all(profile.join(".fingerprint")).unwrap();
@@ -561,7 +462,6 @@ mod tests {
 
     #[test]
     fn a_bin_dir_that_merely_looks_like_a_target_is_not_forbidden() {
-        // Name-based detection would trip on this; the cargo marker doesn't.
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("target").join("release");
         std::fs::create_dir_all(&dir).unwrap();
@@ -584,10 +484,6 @@ mod tests {
 
     #[tokio::test]
     async fn resolved_hyprlayer_without_version_reports_missing() {
-        // End-to-end: an override points `hyprlayer` at a path that yields no
-        // `--version` (here, one that won't spawn, so `probe_version` is None).
-        // Detection must report Missing with no path, and `require` must error,
-        // never hand back the wrong exe as if it were the CLI.
         let resolver = BinaryResolver::initialize(HashMap::new());
         resolver
             .set_override(
@@ -604,17 +500,12 @@ mod tests {
     #[tokio::test]
     async fn resolves_git_on_dev_machines() {
         let resolver = BinaryResolver::initialize(HashMap::new());
-        // git exists everywhere we develop and in CI.
         let status = resolver.status(BinaryKind::Git).await;
         assert_eq!(
             status.state,
             BinaryState::Ok,
             "git should resolve: {status:?}"
         );
-        // probe() treats a resolved binary whose `--version` didn't yield a
-        // parseable token as Ok-but-versionless (see its `_ => Ok` arm). The
-        // Windows runner's git hits that path, so only assert the version where
-        // probing is reliable; resolution is the contract this test guards.
         #[cfg(not(windows))]
         assert!(status.version.is_some());
     }
@@ -628,7 +519,6 @@ mod tests {
             .await;
         assert_eq!(resolver.resolve(BinaryKind::Claude).await, Some(fake));
         resolver.set_override(BinaryKind::Claude, None).await;
-        // After clearing, resolution falls back to PATH (may or may not exist).
         let _ = resolver.resolve(BinaryKind::Claude).await;
     }
 }

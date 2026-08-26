@@ -1,11 +1,3 @@
-/**
- * A compact footer indicator for live background shell tasks, sitting in the
- * composer toolbar next to the context meter. Renders nothing when no tasks are
- * running. While tasks run it shows a pulsing terminal icon with a count;
- * clicking opens an upward popover (mirroring `ContextMeter`) that lists each
- * task, spinner, label, elapsed timer, and a running/waiting hint, where a row
- * click jumps the transcript to the spawning `Bash` call.
- */
 
 import { useEffect, useRef, useState } from "react";
 import { Popover, Spinner } from "@/components/ui";
@@ -25,7 +17,6 @@ export function BackgroundTasksIndicator({
   const [now, setNow] = useState(() => Date.now());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Tick the elapsed counters every second while there are live tasks.
   useEffect(() => {
     if (tasks.length === 0) {
       if (intervalRef.current !== null) {
@@ -45,8 +36,6 @@ export function BackgroundTasksIndicator({
     };
   }, [tasks.length]);
 
-  // Drop the popover automatically once the last task ends, so it can't linger
-  // open over nothing.
   useEffect(() => {
     if (tasks.length === 0 && open) setOpen(false);
   }, [tasks.length, open]);

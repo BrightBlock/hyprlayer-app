@@ -1,4 +1,3 @@
-/** Small controls the Agents list and editor share. */
 
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
@@ -9,12 +8,9 @@ import { folderColor } from "./agents";
 export type SegmentedOption<T extends string> = {
   key: T;
   label: ReactNode;
-  /** Renders the label monospaced, used for the project-scoped segment. */
   mono?: boolean;
 };
 
-/** A pill-grouped exclusive choice: the list's Your/System and scope switches,
- *  and the editor's tab strip, effort and harness pickers. */
 export function Segmented<T extends string>({
   options,
   value,
@@ -60,20 +56,6 @@ export function Segmented<T extends string>({
   );
 }
 
-/**
- * A free-text folder field with autocomplete suggestions. `category` (and a
- * plugin's `overlay.folder`) is free text, a user or plugin author can file
- * an agent under a folder that isn't a derived phase, so this is a text
- * input offering the known folders, not a closed `DropdownSelect`. Used by
- * both the editor's Folder field and the move dialog's target picker.
- *
- * The suggestions used to be a native `<datalist>`. The dropdown a datalist
- * draws is the platform's, not the app's: it takes no theme token, no radius
- * and no type scale, so inside the Move dialog it rendered as a bare system
- * list against the dialog's own panel. `Popover` gets the app's styling, and
- * (ADR-0006 "Floating panels") the Escape handling, the `z-50` and the portal
- * that keeps the panel from being clipped by the dialog body's own scroll.
- */
 export function FolderCombo({
   id,
   value,
@@ -82,7 +64,6 @@ export function FolderCombo({
   placeholder,
   "aria-label": ariaLabel,
 }: {
-  /** Unique per instance, backs the suggestion listbox's id. */
   id: string;
   value: string;
   onChange: (value: string) => void;
@@ -91,14 +72,12 @@ export function FolderCombo({
   "aria-label"?: string;
 }) {
   const [open, setOpen] = useState(false);
-  /** Index into `suggestions`, or -1 for "the user hasn't arrowed in yet". */
   const [active, setActive] = useState(-1);
   const anchorRef = useRef<HTMLDivElement>(null);
   const listId = `${id}-folders`;
 
   const q = value.trim().toLowerCase();
   const matches = folders.filter((f) => f.toLowerCase().includes(q));
-  // An exact match means the field already says what the only row would say.
   const suggestions = matches.length === 1 && matches[0].toLowerCase() === q ? [] : matches;
 
   const close = () => {
@@ -123,9 +102,6 @@ export function FolderCombo({
       setActive((i) => (i + step + suggestions.length) % suggestions.length);
       return;
     }
-    // Only with a row highlighted. A bare Enter belongs to the dialog's own
-    // primary action — swallowing it would break "type a new name, press
-    // Enter", which is the whole reason this is a combobox and not a listbox.
     if (e.key === "Enter" && open && active >= 0 && active < suggestions.length) {
       e.preventDefault();
       commit(suggestions[active]);
@@ -139,8 +115,6 @@ export function FolderCombo({
         aria-expanded={open && suggestions.length > 0}
         aria-controls={listId}
         aria-autocomplete="list"
-        // The browser's own history dropdown would cover the suggestions with
-        // a second, unstyled panel saying the same names back.
         autoComplete="off"
         value={value}
         onChange={(e) => {
@@ -148,9 +122,6 @@ export function FolderCombo({
           setActive(-1);
           setOpen(true);
         }}
-        // Click, not focus: the panel comes with a full-viewport backdrop that
-        // swallows the next click anywhere, so tabbing through the editor's
-        // Folder field must not arm it.
         onClick={() => setOpen(true)}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
@@ -169,8 +140,6 @@ export function FolderCombo({
               key={f}
               role="option"
               aria-selected={f === value}
-              // Pointer and keyboard drive one highlight, so arrowing down and
-              // then moving the mouse can't leave two rows looking chosen.
               onMouseEnter={() => setActive(i)}
               onClick={() => commit(f)}
               className={`flex items-center gap-2 ${i === active ? "bg-panel-2" : ""}`}
@@ -187,8 +156,6 @@ export function FolderCombo({
   );
 }
 
-/** A radio row: the ring + fill dot, a label, and an optional trailing hint or
- *  description block. Used by the model grid and the permission-mode list. */
 export function RadioRow({
   checked,
   onSelect,
@@ -203,12 +170,9 @@ export function RadioRow({
   onSelect: () => void;
   disabled?: boolean;
   label: ReactNode;
-  /** Short trailing qualifier on the same line (e.g. a context window). */
   hint?: ReactNode;
-  /** A second, muted line beneath the label. */
   description?: ReactNode;
   labelClassName?: string;
-  /** Groups the radios for assistive tech. */
   name: string;
 }) {
   return (
@@ -247,10 +211,6 @@ export function RadioRow({
   );
 }
 
-/** The Skills placeholder's "not live yet" marker — the sidebar's root row
- *  and the content pane's heading both carry it, matching the same treatment
- *  the "proj" and "Overrides global in…" tags already use elsewhere in the
- *  app (`bg-brand/15` / `text-brand`), rather than inventing a new tone. */
 export function SoonBadge() {
   return (
     <span className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand">
@@ -259,11 +219,6 @@ export function SoonBadge() {
   );
 }
 
-/**
- * A labelled run of [`EditorCard`]s. The eyebrow names the concern the cards
- * share; the caller's wider gap between groups is what separates them, so a
- * tab of otherwise-identical cards reads as sections rather than one stack.
- */
 export function CardGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2.5">
@@ -273,7 +228,6 @@ export function CardGroup({ label, children }: { label: string; children: ReactN
   );
 }
 
-/** A titled panel in the editor body. */
 export function EditorCard({
   title,
   description,
@@ -284,11 +238,9 @@ export function EditorCard({
 }: {
   title?: ReactNode;
   description?: ReactNode;
-  /** Controls pinned to the title row's right edge. */
   action?: ReactNode;
   children?: ReactNode;
   className?: string;
-  /** Drops the vertical inset so a divided row list runs to the card's edges. */
   bare?: boolean;
 }) {
   return (
@@ -309,8 +261,6 @@ export function EditorCard({
   );
 }
 
-/** An inline note, the system-agent explainer and the bypass-permissions
- *  warning. `tone` picks the tint. */
 export function Callout({
   tone,
   icon,

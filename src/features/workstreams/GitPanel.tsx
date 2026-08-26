@@ -26,7 +26,6 @@ import { PrStatusBar } from "./PrStatusBar";
 import { AttachPrDialog } from "./AttachPrDialog";
 import { ArchiveWorkstreamDialog } from "./ArchiveWorkstreamDialog";
 
-/** Circular-arrow refresh glyph for the branch-list reload control. */
 function RefreshIcon({ size = 12 }: { size?: number }) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -41,7 +40,6 @@ function RefreshIcon({ size = 12 }: { size?: number }) {
   );
 }
 
-/** Arrow-down-to-a-line glyph for the "pull base commits in" action. */
 function PullIcon({ size = 13 }: { size?: number }) {
   return (
     <svg
@@ -62,30 +60,16 @@ function PullIcon({ size = 13 }: { size?: number }) {
   );
 }
 
-/** The branch → base row inside the PULL REQUEST card. The base is a functional
- *  dropdown: picking a branch re-targets the merge destination (and re-points an
- *  open PR via `gh pr edit`), so git-flow teams can merge into `develop`. */
 function BranchTargetRow({ view }: { view: WorkstreamView }) {
   const [open, setOpen] = useState(false);
   const setBase = useSetWorkstreamBase(view.item.id);
-  // Branch list fetched lazily, only while the menu is open.
   const bases = useWorkstreamBases(view.item.projectPath, open);
-  // The list is built from the local repo's remote-tracking refs, so deleting a
-  // branch on the remote doesn't change it until a `git fetch --prune`. Refresh
-  // therefore prunes first (network), THEN re-scans, otherwise it just re-reads
-  // the same stale `origin/*` refs and the deleted branches linger.
   const fetchRemote = useFetchWorkstreamRemote(view.item.id);
   const refreshBranches = async () => {
-    await fetchRemote.mutateAsync().catch(() => {}); // offline: still re-scan local
+    await fetchRemote.mutateAsync().catch(() => {});
     await bases.refetch();
   };
   const refreshing = fetchRemote.isPending || bases.isFetching;
-  // A PR base must exist on the remote, so offer only remote-tracking branches
-  // (`origin/*`). A local-only branch, e.g. another workstream's unpushed
-  // feature branch, isn't on GitHub, so `gh pr edit --base` rejects it with
-  // "Proposed base branch … was not found". The full `origin/<name>` ref is
-  // stored (it revparse-resolves locally for ahead/behind and is stripped for
-  // gh + the Ship prompt); the menu shows it without the prefix.
   const baseShort = shortBranch(view.item.baseBranch);
   const detached = isDetachedHead(view);
   const choices = (bases.data?.branches ?? [])
@@ -96,8 +80,6 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
-        {/* Source branch, the checkout's live branch: an in-place workstream
-        follows its checkout, so this tracks a `git checkout` done out of band. */}
         <span
           className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-edge bg-panel px-2 py-1"
           title={
@@ -112,7 +94,6 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
           </span>
         </span>
         <span className="shrink-0 text-ink-dim">→</span>
-        {/* Target (base) branch, the functional picker. */}
         <div className="relative shrink-0">
           <button
             type="button"
@@ -128,11 +109,8 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
           </button>
           {open && (
             <>
-              {/* Backdrop closes the menu on any outside click. */}
               <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
               <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-md border border-edge bg-panel p-1 shadow-2xl">
-                {/* Header + refresh: re-runs the branch scan so a branch added
-                    since the list was cached (staleTime 30s) shows up on demand. */}
                 <div className="flex items-center justify-between gap-2 px-2 py-1">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
                     Target branch
@@ -189,17 +167,9 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
   );
 }
 
-/**
- * The GIT section at the top of the changes sidebar (the mockup): ahead/behind,
- * a PULL REQUEST card (source → target picker + either an attach-PR link or the
- * live PR's controls), and the Commit / Ship buttons. Consolidates every git
- * action here so the app header carries none. Renders a bare "GIT" band when no
- * workstream is selected. Owns its own Attach-PR + Archive dialogs.
- */
 export function GitPanel({ view }: { view: WorkstreamView | null }) {
   const navigate = useNavigate();
   const actions = useWorkstreamGitActions(view);
-  // Effective chords for the button tooltips, these run the same commands.
   const kbOverrides = useBootstrap().data?.settings.keybindings?.overrides ?? {};
   const chordHint = (commandId: string): string => {
     const chord = effectiveChord(kbOverrides, commandId, IS_MACOS);
@@ -207,9 +177,6 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
   };
   const [attachTarget, setAttachTarget] = useState<WorkstreamView | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<WorkstreamView | null>(null);
-  // "Update from base" lives here (not a child) so the small pull button and its
-  // full-width conflict/error message share one mutation. Reset on workstream
-  // switch so a prior branch's result doesn't bleed into the next.
   const pull = useUpdateFromBase(view?.item.id ?? "");
   useEffect(() => {
     pull.reset();
@@ -217,7 +184,6 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
   }, [view?.item.id]);
   const behind = view?.git.behind ?? 0;
   const conflicts = pull.data?.kind === "conflicts" ? pull.data : null;
-  // Fetch the remote on demand so ahead/behind + PR reflect remote branch changes.
   const refresh = useFetchWorkstreamRemote(view?.item.id ?? "");
 
   return (
@@ -242,14 +208,11 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
 
         {view && (
           <div className="space-y-2.5 px-3 pb-3">
-            {/* PULL REQUEST card. */}
             <div className="space-y-2 rounded-lg border border-edge bg-panel-2 p-2.5">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
                 Pull Request
               </div>
               <BranchTargetRow view={view} />
-              {/* Footer: the attach-PR link (or live-PR controls) on the left, and
-                  a small "pull base commits in" arrow on the right when behind. */}
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   {actions.hasLivePr ? (
@@ -289,13 +252,9 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
               {pull.data?.kind === "upToDate" && (
                 <p className="px-1 text-[11px] text-ink-dim">Already up to date.</p>
               )}
-              {/* Dismiss clears the mutation back to idle; re-running the local
-                  merge (the pull button) re-throws and re-shows it on failure. */}
               {pull.isError && <ErrorNote error={pull.error} onDismiss={() => pull.reset()} />}
             </div>
 
-            {/* Commit / Ship. Both gate on the live changed-count; neither shows
-                when there's nothing to do (clean tree + live PR). */}
             {(actions.canCommit || actions.canShip) && (
               <div className="flex gap-2">
                 {actions.canCommit && (
@@ -333,7 +292,6 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
         target={archiveTarget}
         onClose={() => setArchiveTarget(null)}
         onArchived={() => {
-          // Drop back to the project board, the archived worktree is gone.
           const archived = archiveTarget;
           setArchiveTarget(null);
           if (archived)

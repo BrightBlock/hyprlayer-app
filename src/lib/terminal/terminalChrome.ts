@@ -1,9 +1,3 @@
-//! Shared terminal "chrome", font-size zoom, live theme recolor, and the
-//! clipboard chords, used by every mounted terminal (TerminalTab, the
-//! multiplexer AgentPtyTab, the script views, onboarding). These act purely on
-//! the TerminalEngine abstraction (setFontSize / setTheme / selectionText) and
-//! never touch the PTY spawn/attach/resize data flow, so every terminal shares
-//! one implementation instead of copying the effects.
 
 import { useEffect, type RefObject } from "react";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -16,15 +10,6 @@ import type { TerminalEngine } from "./terminalEngine";
 import { useTerminalFontSize } from "./terminalFontSize";
 import { xtermThemeFromCss } from "./terminalTheme";
 
-/**
- * Register the `terminal.zoom*` keyboard commands and apply zoom in place: set
- * the engine's font, refit to the new cell size, and tell the PTY its new grid.
- * Returns the live font size so the caller can build its engine at that size.
- *
- * Registering the commands here is the context gate, ⌘+/⌘-/⌘0 are inert when
- * no terminal is on screen. `appliedFontSizeRef` (which the caller seeds to the
- * current size right after creating the engine at it) skips the no-op first run.
- */
 export function useTerminalZoom(
   engineRef: RefObject<TerminalEngine | null>,
   idRef: RefObject<string | undefined>,
@@ -50,12 +35,6 @@ export function useTerminalZoom(
   return fontSize;
 }
 
-/**
- * Recolor the engine live when the theme changes. Re-read on the next frame so
- * the <html> theme class (toggled by the theme store's own subscriber) has
- * applied before sampling the CSS variables; also covers "system" → OS
- * appearance.
- */
 export function useTerminalThemeSync(engineRef: RefObject<TerminalEngine | null>): void {
   useEffect(() => {
     const recolor = () => engineRef.current?.setTheme(xtermThemeFromCss());
@@ -73,44 +52,17 @@ export function useTerminalThemeSync(engineRef: RefObject<TerminalEngine | null>
   }, [engineRef]);
 }
 
-/**
- * Give a terminal the Ctrl+Shift+C / Ctrl+Shift+V clipboard chords its emulator
- * doesn't provide off macOS. Every Linux and Windows terminal follows that
- * convention, and it is the only way to move text to the composer.
- *
- * Without this there is no copy path off macOS at all. xterm rewrites
- * Ctrl+letter to a control byte and preventDefaults it (Ctrl+C is SIGINT), so
- * the webview's native copy never fires and xterm's own `copy` handler is never
- * reached. On macOS ⌘C/⌘V match none of xterm's key branches and fall through
- * to the webview, so this is a no-op there.
- *
- * Clipboard I/O goes through Tauri, not `navigator.clipboard`: the async
- * clipboard is the surface WebKitGTK has already been caught lying about (see
- * the image-paste fallback in src-tauri/src/lib.rs). Needs
- * `clipboard-manager:allow-read-text` / `allow-write-text` in the capability file.
- *
- * Call once after `engine.mount(host)`. An engine holds a single filter, torn
- * down with the engine.
- */
 export function attachTerminalClipboard(engine: TerminalEngine): void {
   if (IS_MACOS) return;
   engine.interceptKeys((e) => {
-    // keypress consults the same filter; only judge the keydown.
     if (e.type !== "keydown") return true;
     if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true;
     const key = e.key.toLowerCase();
     if (key !== "c" && key !== "v") return true;
-    // Ours: keep it from the emulator, from the webview, and from the
-    // window-level keybinding dispatcher, `mod+shift+v` is Toggle Markdown
-    // Preview, which is live whenever a markdown file viewer sits beside the
-    // terminal. Returning false stops xterm but does NOT preventDefault, so
-    // both calls are on us.
     e.preventDefault();
     e.stopPropagation();
     if (key === "c") {
       const text = engine.selectionText();
-      // Nothing selected: swallow the chord rather than letting it through as a
-      // control byte. Copying "" would also blank whatever is on the clipboard.
       if (text) void writeText(text).catch(() => {});
     } else {
       void readText().then(

@@ -1,18 +1,3 @@
-//! Workstream lifecycle-script commands.
-//!
-//! Reads/writes the per-project `[scripts]` config and runs the Setup/Run/
-//! Archive command blocks. Two execution paths:
-//!
-//! - [`script_run`] (the dock ▶ / "Run setup"): spawns a **PTY** and streams
-//!   output over a per-invoke `Channel` (like `terminal_open`), tracking the
-//!   live Run so it can be stopped/restarted and the rail can show it's alive.
-//! - [`run_lifecycle_script`] (create/archive hooks): runs the block to
-//!   completion via [`Exec`] and returns pass/fail, no streaming needed (there
-//!   is no dock during worktree creation/teardown).
-//!
-//! Both record a last-run status in [`ScriptRegistry`] and emit
-//! [`ScriptRunChanged`] so the UI's pills, dock tabs, and rail stay in sync.
-
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -39,17 +24,9 @@ use crate::state::AppState;
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
-/// Setup can be slow (dependency installs, browser downloads), so give it a
-/// generous ceiling; Archive teardown should be quicker.
 const SETUP_TIMEOUT_SECS: u64 = 600;
 const ARCHIVE_TIMEOUT_SECS: u64 = 300;
 
-// ---------------------------------------------------------------------------
-// Config read/write (the Settings → Scripts card)
-// ---------------------------------------------------------------------------
-
-/// Read the project's `[scripts]` block off disk (empty strings when
-/// unconfigured). Shared by [`get_scripts`] and the run path's [`resolve_script`].
 async fn read_script_settings(project_path: &str) -> CmdResult<ScriptSettings> {
     let repo = PathBuf::from(project_path);
     let settings = blocking("read_scripts", move || repo_settings::read(&repo))
@@ -58,7 +35,6 @@ async fn read_script_settings(project_path: &str) -> CmdResult<ScriptSettings> {
     Ok(settings.scripts)
 }
 
-/// Read the project's `[scripts]` block (empty strings when unconfigured).
 #[tauri::command]
 #[specta::specta]
 pub async fn get_scripts(
@@ -69,7 +45,6 @@ pub async fn get_scripts(
     read_script_settings(&project_path).await
 }
 
-/// Overwrite the project's `[scripts]` block (autosave target for the card).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_scripts(
@@ -86,12 +61,6 @@ pub async fn set_scripts(
     .map_err(AppError::from)
 }
 
-// ---------------------------------------------------------------------------
-// Runtime snapshot (dock/rail hydration)
-// ---------------------------------------------------------------------------
-
-/// Current script runtime for a workstream: the live Run (if any) + last-run
-/// statuses. Lets the dock/rail recover state after a remount or ws switch.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_script_runtime(
@@ -101,16 +70,12 @@ pub async fn get_script_runtime(
     Ok(state.scripts.get_runtime(&workstream_id).await)
 }
 
-/// Workstreams that currently have a live Run process. Lets the rail's green
-/// "Run alive" indicator hydrate on app start (it's otherwise event-driven).
 #[tauri::command]
 #[specta::specta]
 pub async fn list_running_scripts(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
     Ok(state.scripts.running_ids().await)
 }
 
-/// The captured output of a script's last run this session (terminal text incl.
-/// ANSI), or `null` if it hasn't run. Backs the dock's read-only Setup view.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_script_output(
@@ -121,11 +86,6 @@ pub async fn get_script_output(
     Ok(state.scripts.get_output(&workstream_id, kind).await)
 }
 
-/// Clear a script's output (the dock's Clear button). Drops the captured last-run
-/// snapshot, and, when the run is still live, `terminal_id` naming its PTY,
-/// wipes that PTY's retained scrollback too. Without the second half a re-attach
-/// (tab switch, dock collapse) or the exit snapshot would replay the very text
-/// that was just cleared. The process itself keeps running; only the log is gone.
 #[tauri::command]
 #[specta::specta]
 pub async fn script_clear_output(
@@ -143,15 +103,6 @@ pub async fn script_clear_output(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Streaming run (the dock)
-// ---------------------------------------------------------------------------
-
-/// Run a script in a PTY and stream output to `on_event`. For `Run`, any prior
-/// Run process is stopped first; the live handle + detected port are tracked so
-/// the dock can show Stop / Open :PORT and the rail can show it's alive.
-/// Returns the `terminal_id` (use the existing `terminal_*` commands to
-/// write/resize/close, and `terminal_attach` to re-attach after a remount).
 #[tauri::command]
 #[specta::specta]
 pub async fn script_run(
@@ -176,7 +127,6 @@ pub async fn script_run(
         });
     }
 
-    // ▶ restarts: stop any prior Run process group before starting fresh.
     if kind == ScriptKind::Run {
         state.scripts.stop_run(&workstream_id).await;
     }
@@ -193,12 +143,8 @@ pub async fn script_run(
             .register_run(&workstream_id, terminal_id.clone(), session.clone())
             .await;
     }
-    // No port yet: "Open :PORT" surfaces only once it's detected from the output
-    // (the user's server may land on a different port than the allocated $HL_PORT).
     emit_changed(&app, &workstream_id, kind, RunPhase::Running, None, None);
 
-    // Monitor the broadcast independently of the UI channel so port detection +
-    // final status are recorded even if the dock is closed.
     spawn_monitor(
         app,
         state.scripts.clone(),
@@ -216,7 +162,6 @@ pub async fn script_run(
     Ok(terminal_id)
 }
 
-/// Stop the live Run process for a workstream (the dock Stop / ⌘R).
 #[tauri::command]
 #[specta::specta]
 pub async fn script_stop(state: State<'_, AppState>, workstream_id: String) -> CmdResult<()> {
@@ -224,15 +169,6 @@ pub async fn script_stop(state: State<'_, AppState>, workstream_id: String) -> C
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Blocking run (create/archive lifecycle hooks)
-// ---------------------------------------------------------------------------
-
-/// Run a lifecycle script to completion via [`Exec`] and return its outcome, or
-/// `None` if that script is unconfigured (so the caller skips it). Records the
-/// last-run status and emits [`ScriptRunChanged`]. Used by `create_workstream`
-/// (Setup) and `archive_workstream` (Archive) where there is no dock to stream
-/// to and the caller must block on the result.
 pub(crate) async fn run_lifecycle_script(
     app: &AppHandle,
     state: &AppState,
@@ -241,7 +177,7 @@ pub(crate) async fn run_lifecycle_script(
 ) -> Option<RunPhase> {
     let commands = match resolve_script(&item.project_path, kind).await {
         Ok(c) if !c.trim().is_empty() => c,
-        Ok(_) => return None, // unconfigured, nothing to run
+        Ok(_) => return None,
         Err(e) => {
             log::warn!("read {} script: {}", kind.as_str(), e.message);
             return None;
@@ -265,8 +201,6 @@ pub(crate) async fn run_lifecycle_script(
     let mut exec = Exec::new(default_shell())
         .args(args)
         .cwd(item.worktree_path.clone())
-        // Own process group so the timeout kills the whole tree, not just the
-        // shell, a Setup/Archive script that backgrounds work can't leak it.
         .own_process_group()
         .timeout(Duration::from_secs(timeout));
     for (key, value) in script_env(item, port, &augmented) {
@@ -286,8 +220,6 @@ pub(crate) async fn run_lifecycle_script(
                 );
                 RunPhase::Failed
             };
-            // Combine stdout + stderr (Exec captures them separately) for the
-            // dock's read-only "last run" view.
             let mut combined = out.stdout;
             if !out.stderr.is_empty() {
                 if !combined.is_empty() && !combined.ends_with('\n') {
@@ -309,13 +241,6 @@ pub(crate) async fn run_lifecycle_script(
     Some(phase)
 }
 
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
-
-/// The `PATH` + injected `$HL_*` environment shared by every script run, so the
-/// blocking [`Exec`] path (create/archive hooks) and the streaming PTY path (the
-/// dock) stay in lockstep, the single place to add or change an injected var.
 fn script_env(item: &Workstream, port: u16, augmented: &OsStr) -> Vec<(String, String)> {
     vec![
         ("PATH".to_string(), augmented.to_string_lossy().into_owned()),
@@ -330,10 +255,6 @@ fn script_env(item: &Workstream, port: u16, augmented: &OsStr) -> Vec<(String, S
     ]
 }
 
-/// Spawn a script command block on a PTY in the workstream's worktree root, with
-/// the injected `$HL_*` env. Inserts the session into the terminal registry
-/// (keyed by a fresh id, tagged with the workstream so archive teardown reaps
-/// it). Returns `(terminal_id, session, hl_port)`.
 async fn spawn_script(
     state: &AppState,
     item: &Workstream,
@@ -365,9 +286,6 @@ async fn spawn_script(
     Ok((terminal_id, session))
 }
 
-/// Tail a run's broadcast: detect the dev-server port (Run only) and record the
-/// final status on exit. Independent of the UI channel so it survives a closed
-/// dock. Runs on the tauri runtime.
 fn spawn_monitor(
     app: AppHandle,
     scripts: Arc<crate::script_registry::ScriptRegistry>,
@@ -406,8 +324,6 @@ fn spawn_monitor(
                         RunPhase::Failed
                     };
                     scripts.set_status(&workstream_id, kind, phase, code).await;
-                    // Snapshot the scrollback so the dock can show this run's output
-                    // even after the live PTY is gone.
                     scripts
                         .set_output(
                             &workstream_id,
@@ -428,7 +344,6 @@ fn spawn_monitor(
     });
 }
 
-/// Decode a base64 output batch and return the first dev-server port in it.
 fn scan_for_port(b64: &str) -> Option<u16> {
     let bytes = B64.decode(b64).ok()?;
     let text = String::from_utf8_lossy(&bytes);

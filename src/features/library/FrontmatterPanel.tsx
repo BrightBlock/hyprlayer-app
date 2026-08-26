@@ -4,8 +4,6 @@ import type { DocMeta, FmPatchDto } from "@/lib/bindings";
 import { DropdownSelect, TextInput } from "@/components/ui";
 import { DOC_STATUSES, DOC_TYPES } from "./constants";
 
-/** Keep a non-canonical current value selectable instead of silently dropping it,
- *  plus a leading em-dash option for clearing the field. */
 function optionsFor(canonical: readonly string[], current: string) {
   const values = current && !canonical.includes(current) ? [current, ...canonical] : [...canonical];
   return [{ value: "", label: "—" }, ...values.map((v) => ({ value: v, label: v }))];
@@ -24,18 +22,11 @@ function Labeled({ label, children }: { label: string; children: ReactNode }) {
 
 type Props = {
   meta: DocMeta;
-  /** True while the editor buffer is dirty, patching would clobber it. */
   disabled: boolean;
   busy: boolean;
-  /** Apply a single-field frontmatter patch (set or remove). */
   onApply: (patch: FmPatchDto) => void;
 };
 
-/**
- * Inline frontmatter card; each field applied on change as a one-field FmPatchDto.
- * Patching writes the file (mtime-guarded), so the card is disabled while the body
- * buffer is dirty, parent remounts it (`key`) to reseed values + base mtime.
- */
 export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
   const fm = meta.fm;
   const [type, setType] = useState(fm.type ?? "");
@@ -48,7 +39,6 @@ export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
 
   const locked = disabled || busy;
 
-  // Apply one string field if it actually changed; a cleared value is a removal.
   const applyField = (key: string, next: string) => {
     const original = (fm[key as keyof typeof fm] as string | null | undefined) ?? "";
     const value = next.trim();

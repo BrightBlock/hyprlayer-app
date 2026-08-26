@@ -1,8 +1,5 @@
 use std::path::PathBuf;
 
-/// Errors produced by hyprlayer-core. Each variant carries enough context to
-/// render an actionable message in the UI; `remedy()` supplies the suggested
-/// fix shown alongside it.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
     #[error("hyprlayer config not found at {path}")]
@@ -50,9 +47,6 @@ pub enum CoreError {
     #[error("worktree has {0} uncommitted change(s)")]
     WorktreeDirty(u32),
 
-    /// The project's own checkout is dirty, blocking an in-place branch switch.
-    /// Distinct from [`CoreError::WorktreeDirty`]: there is no worktree here to
-    /// commit in or archive, so the remedies are different.
     #[error("the project checkout has {count} uncommitted change(s)")]
     CheckoutDirty { count: u32 },
 
@@ -84,17 +78,6 @@ pub enum CoreError {
     Io(#[from] std::io::Error),
 }
 
-/// The command's own stderr is the whole message whenever it wrote one: that is
-/// the part the user can act on, and the `program`/exit framing around it is
-/// noise they did not ask for. `attach_pr_error`
-/// (`src-tauri/src/commands/workstreams.rs:1836`) already strips that framing by
-/// hand for `gh`, and `codex/protocol.rs:817` applies the same
-/// prefer-output-else-name-the-code shape.
-///
-/// A silent failure has nothing to show, so it falls back to naming the program
-/// rather than rendering an empty string. `exit: None` means a signal killed the
-/// child on Unix (`ExitStatus::code()` returns `None` there), so it says the
-/// process was terminated instead of printing a placeholder code.
 fn fmt_exec(
     program: &str,
     exit: &Option<i32>,
@@ -112,7 +95,6 @@ fn fmt_exec(
 }
 
 impl CoreError {
-    /// A short, user-facing suggestion for how to fix the error, when one exists.
     pub fn remedy(&self) -> Option<String> {
         match self {
             CoreError::ConfigMissing { .. } => Some(
@@ -144,10 +126,6 @@ impl CoreError {
                 } else if program.contains("hyprlayer")
                     && stderr_tail.contains("No AI tool configured")
                 {
-                    // Settings › AI tool runs `hyprlayer ai configure --force`
-                    // in an embedded terminal (src/routes/Settings.tsx:660), so
-                    // this is a real in-app fix, not just a restatement of the
-                    // CLI's own advice.
                     Some("Open Settings › AI tool and click Configure.".into())
                 } else {
                     None
@@ -175,7 +153,6 @@ impl CoreError {
         }
     }
 
-    /// Stable machine-readable code for the frontend to branch on.
     pub fn code(&self) -> &'static str {
         match self {
             CoreError::ConfigMissing { .. } => "config_missing",
@@ -228,7 +205,6 @@ mod tests {
     fn exec_without_stderr_names_the_program_and_code() {
         let msg = exec(Some(1), "").to_string();
         assert_eq!(msg, "`git` failed with exit code 1");
-        // The old format left a dangling colon with nothing after it.
         assert!(!msg.ends_with(':'), "dangling colon: {msg}");
     }
 

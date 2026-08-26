@@ -1,4 +1,3 @@
-// Status glyph + color per change kind (the colored badge before each path).
 export const GLYPH: Record<string, { ch: string; cls: string; label: string }> = {
   added: { ch: "+", cls: "text-ok", label: "added" },
   untracked: { ch: "+", cls: "text-ok", label: "untracked" },

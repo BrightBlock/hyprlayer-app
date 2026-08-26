@@ -6,17 +6,8 @@ import { PromptRowIcon, ShareCheck } from "./promptShareUi";
 import type { ExportEntry, ExportOptions } from "./promptsIo";
 import { PROMPTS_FILE_EXT } from "./promptsIo";
 
-/** The default multi-prompt export bundle name (matches the mock). */
 export const DEFAULT_EXPORT_NAME = `hyprlayer-prompts.${PROMPTS_FILE_EXT}`;
 
-/**
- * The "Export prompts" dialog, opened from the prompt library's sidebar header.
- * Pick which prompts (built-in and custom) to bundle, whether to carry keyboard
- * shortcuts and project overrides, then hand the selection back to the page,
- * which drives the native save dialog and writes the file.
- *
- * Mounted only while open, so its selection state resets each time it opens.
- */
 export function ExportPromptsDialog({
   entries,
   chordLabel,
@@ -101,7 +92,6 @@ export function ExportPromptsDialog({
         </p>
       </div>
 
-      {/* Prompt checklist */}
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-3">
         {entries.length === 0 && (
           <div className="rounded-md border border-dashed border-edge px-3 py-5 text-center text-xs leading-relaxed text-ink-dim">

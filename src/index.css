@@ -1,27 +1,5 @@
 @import "tailwindcss";
 
-/* ────────────────────────────────────────────────────────────────────────
-   Typography.
-
-   The UI font is bundled, not borrowed from the host. Relying on the system
-   stack (`ui-sans-serif, system-ui, …`) meant the app looked different on
-   every machine, and on a typical Linux box it broke outright: all of those
-   families resolve through fontconfig to Liberation Sans, which ships only
-   Regular (400) and Bold (700). With no 500 or 600 face, CSS weight matching
-   collapses the UI's two emphasis levels — `font-medium` (500) falls back to
-   400 and reads as plain body text, `font-semibold` (600) jumps to 700 and
-   reads as full bold. The app uses those two utilities ~200 times, so the
-   type hierarchy simply stopped existing. `ui-monospace` had the same
-   problem in a louder way: it resolved to Liberation Sans, a *proportional*
-   face, so `font-mono` text wasn't monospaced at all.
-
-   Both faces are variable (`font-weight: 100 900`), so every weight the UI
-   asks for genuinely exists on all three platforms. Latin subsets only
-   (88KB total) — the `unicode-range` descriptors let anything outside it
-   fall through to the host's fonts rather than bloating the bundle with
-   subsets a developer tool's chrome will never render.
-   ──────────────────────────────────────────────────────────────────────── */
-
 @font-face {
   font-family: "Inter Variable";
   font-style: normal;
@@ -46,9 +24,7 @@
 }
 
 @theme {
-  /* Overrides Tailwind's defaults, whose first entries (`ui-sans-serif`,
-     `ui-monospace`) are exactly the keywords that misresolve above. The
-     system stack stays behind ours as a fallback for non-Latin text. */
+
   --font-sans:
     "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, sans-serif;
@@ -56,26 +32,12 @@
     "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, "Liberation Mono", monospace;
 
-  /* One named step below text-xs. Five arbitrary sizes were improvising it
-     (text-[10px], [10.5px], [11px], [11.5px]), none with a paired line-height,
-     so they each inherited whatever the parent had. */
-  --text-2xs: 0.6875rem; /* 11px */
+  --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
 }
 
-/* ────────────────────────────────────────────────────────────────────────
-   Color themes.
-
-   Every surface/text/border in the app is bound to one of the theme tokens
-   below, so a theme is just a re-assignment of those CSS variables. The
-   `@theme` block is the DARK+ palette (the app's default look); the
-   `html.<name>` blocks below override the same tokens for the other themes.
-   `applyTheme()` (src/lib/theme.ts) toggles the matching class on <html>.
-   ──────────────────────────────────────────────────────────────────────── */
-
 @theme {
-  /* "Dark+" — neutral charcoal surfaces with the terracotta accent. This is
-     the default palette; the @theme block IS the dark theme (no html class). */
+
   --color-surface: #0c0c0c;
   --color-panel: #141414;
   --color-panel-2: #1c1c1c;
@@ -84,54 +46,27 @@
   --color-ink-dim: #a8a6a2;
   --color-accent: #d97757;
   --color-accent-ink: #0c0c0c;
-  /* Status + brand hues. Tuned for the Dark+ charcoal surface here, but each
-     html.<name> block below retunes them so chat code blocks AND the file/diff
-     viewer (both bind syntax tokens — strings to --color-ok, numbers to
-     --color-warn, functions to --color-brand, types to --color-brand-soft,
-     invalid to --color-bad) read native to that theme's palette instead of
-     bright-on-dark defaults bleeding onto cream/navy/phosphor surfaces. */
+
   --color-ok: #4caf50;
   --color-warn: #f0b13a;
   --color-bad: #ef5350;
   --color-brand: #60a5fa;
   --color-brand-soft: #7dd3fc;
-  /* "Needs you" attention hue for the home dashboard (summary chip, banner,
-     list pills). Deliberately NOT --color-warn: that token doubles as a syntax
-     hue and its Dark+ value (#f0b13a) reads neon on charcoal, so attention
-     surfaces use this muted amber instead — the Claude theme's warn. Themes
-     that don't override it inherit this default; light deepens it below. */
+
   --color-attention: #d4a056;
-  /* Header action-button hues (Ship/Merge = green, Commit = teal). Their own
-     tokens — not the shared status hues — so the light theme can deepen them
-     for contrast without disturbing OK/WARN/BAD. These bright tints read well
-     on the dark themes; `html.light` overrides them to a darker shade so the
-     buttons don't wash out against the cream surface. The Ship/Commit pipeline
-     stages reuse these same tokens (see MODE_STYLES in features/session/stages.ts),
-     so a stage badge and its matching header action always read the same hue. */
+
   --color-ship: #34d399;
   --color-commit: #2dd4bf;
-  /* Pipeline-stage + doc-type + activity accent hues. Each agent stage, library
-     doc type, and live-activity dot owns one hue here instead of a hardcoded
-     Tailwind shade, so they (a) recolor per theme and (b) can be deepened for the
-     light surface. Defaults are the bright Tailwind -400 tints that read on the
-     dark themes; `html.light` deepens every one. Stage research/plan also drive
-     the matching doc-type chips; working/background are the two live-activity
-     dot hues (blue = a turn running, violet = passive background shells). */
-  --color-research: #38bdf8; /* sky-400 — Research stage + research docs */
-  --color-plan: #fbbf24; /* amber-400 — Plan stage + plan docs */
-  --color-implement: #34d399; /* emerald-400 — Implement stage */
-  --color-validate: #a78bfa; /* violet-400 — Validate stage */
-  --color-revise: #c084fc; /* purple-400 — Revise stage + PR Archive */
-  --color-handoff: #fb923c; /* orange-400 — handoff docs */
-  --color-working: #38bdf8; /* sky-400 — live "working" activity */
-  --color-background: #a78bfa; /* violet-400 — passive background activity */
-  /* Knowledge-graph nebula (the home card's preview and the full interactive
-     view): a radial backdrop plus a five-stop star family swept across the
-     layout (nodes, glows, and the edge gradient's 1/3/5 stops — see
-     NEBULA_COLORS in features/dashboard/graph.ts). Every theme re-tunes the
-     whole set so the constellation reads native: Dark+ keeps the sky→blue→
-     violet family from design pass 5a, and each html.<name> block below
-     swaps in its own family. */
+
+  --color-research: #38bdf8;
+  --color-plan: #fbbf24;
+  --color-implement: #34d399;
+  --color-validate: #a78bfa;
+  --color-revise: #c084fc;
+  --color-handoff: #fb923c;
+  --color-working: #38bdf8;
+  --color-background: #a78bfa;
+
   --color-nebula-bg-0: #151a26;
   --color-nebula-bg-1: #0c0d11;
   --color-nebula-1: #7dd3fc;
@@ -140,13 +75,6 @@
   --color-nebula-4: #818cf8;
   --color-nebula-5: #a78bfa;
 
-  /* Terminal ANSI slots. Not a design vocabulary — nothing in the app may use
-     `bg-ansi-*`; these exist solely for xtermThemeFromCss() to read.
-     The eight below default to the semantic token that already drives them
-     (terminalTheme.ts:38-45), so all seven existing themes keep their exact
-     current terminal palette. The eight after default to xterm's own stock
-     Tango values (@xterm/xterm ThemeService.ts:36-52), which is what xterm
-     fills them with today when we leave them unset. */
   --color-ansi-red: var(--color-bad);
   --color-ansi-green: var(--color-ok);
   --color-ansi-yellow: var(--color-warn);
@@ -165,27 +93,15 @@
   --color-ansi-bright-white: #eeeeec;
 }
 
-/* Tell the engine the page is dark, so the chrome we DON'T draw ourselves —
-   text carets, native focus rings, the form-control internals WebKit paints,
-   and any scrollbar that falls back off our `::-webkit-scrollbar` pills —
-   renders dark instead of defaulting to the light scheme. Most visible on
-   Linux/WebKitGTK, which otherwise paints those in the GTK light palette over
-   a charcoal app. Lives here rather than in `@theme`: that block takes theme
-   VARIABLES only, and this is a plain property. `html.light` overrides it (and
-   wins on specificity); the other themes are all dark and inherit this. */
 :root {
   color-scheme: dark;
 }
 
-/* Light — warm neutral creams + ivories, terracotta accent shifted darker so
-   it keeps contrast on the light surface. */
 html.light {
   --color-surface: #faf9f6;
   --color-panel: #f3f1ec;
   --color-panel-2: #ebe8e1;
-  /* Nebula — a faint cool wash fading into the cream panel tones, with the
-     star family deepened to -600 tints so it keeps contrast without a dark
-     inset. */
+
   --color-nebula-bg-0: #edf0f7;
   --color-nebula-bg-1: #e8e6df;
   --color-nebula-1: #0284c7;
@@ -197,39 +113,31 @@ html.light {
   --color-ink: #1c1b1a;
   --color-ink-dim: #55534f;
   --color-accent: #c25e3d;
-  /* White on the deepened terracotta (the dark default #0c0c0c reads muddy on
-     it) — matches the nav rail's white-on-accent Home button. */
+
   --color-accent-ink: #ffffff;
-  /* Deepen the Ship/Commit hues so the tinted header buttons keep contrast on
-     the light surface (the bright dark-theme tints wash out on cream). */
+
   --color-ship: #047857;
   --color-commit: #0f766e;
-  /* Syntax tokens — deepened so strings/numbers/types/functions keep contrast
-     on the cream surface. Default sky/yellow/pale-cyan wash out on light. */
+
   --color-ok: #15803d;
   --color-warn: #b45309;
   --color-brand: #1d4ed8;
   --color-brand-soft: #7c3aed;
   --color-bad: #b91c1c;
-  /* Attention matches warn on light — the deepened amber already reads calm
-     on cream; only the dark themes need the softer split. */
+
   --color-attention: #b45309;
-  /* Stage/doc/activity accent hues — deepened to -600/-700 tints so the stage
-     badges, doc-type chips, and activity dots keep contrast on the cream surface
-     (the bright -400 defaults wash out on light). */
-  --color-research: #0284c7; /* sky-600 */
-  --color-plan: #b45309; /* amber-700 */
-  --color-implement: #047857; /* emerald-700 */
-  --color-validate: #6d28d9; /* violet-700 */
-  --color-revise: #7e22ce; /* purple-700 */
-  --color-handoff: #c2410c; /* orange-700 */
-  --color-working: #0284c7; /* sky-600 */
-  --color-background: #6d28d9; /* violet-700 */
+
+  --color-research: #0284c7;
+  --color-plan: #b45309;
+  --color-implement: #047857;
+  --color-validate: #6d28d9;
+  --color-revise: #7e22ce;
+  --color-handoff: #c2410c;
+  --color-working: #0284c7;
+  --color-background: #6d28d9;
   color-scheme: light;
 }
 
-/* Claude — warm charcoal palette (terax-ai's "Claude"). Chrome sits one stop
-   lighter than the main content area. */
 html.claude {
   --color-surface: #1f1e1d;
   --color-panel: #262624;
@@ -238,15 +146,12 @@ html.claude {
   --color-ink: #f5f4ee;
   --color-ink-dim: #b0a89a;
   --color-accent: #d97757;
-  /* Syntax tokens — warm-tuned (sage strings, warm-amber numbers, muted teal
-     functions, peach-tan types) so syntax sits with the terracotta accent
-     rather than fighting it with bright sky/lime defaults. */
+
   --color-ok: #8fb579;
   --color-warn: #d4a056;
   --color-brand: #5ba3a0;
   --color-brand-soft: #c89a78;
-  /* Nebula — warm-black radial, stars sweeping the theme's own accents:
-     muted teal → sage → peach-tan → warm amber → terracotta. */
+
   --color-nebula-bg-0: #252019;
   --color-nebula-bg-1: #171410;
   --color-nebula-1: #5ba3a0;
@@ -256,7 +161,6 @@ html.claude {
   --color-nebula-5: #d97757;
 }
 
-/* Cobalt — Wes Bos's Cobalt 2. Deep navy surfaces, bright sky-blue accent. */
 html.cobalt {
   --color-surface: #193549;
   --color-panel: #1f4662;
@@ -265,15 +169,12 @@ html.cobalt {
   --color-ink: #e1efff;
   --color-ink-dim: #aacdee;
   --color-accent: #66c4ff;
-  /* Syntax tokens — pull from Wes Bos's Cobalt2 palette so syntax sits
-     native to the deep navy (lime strings, pink numbers, yellow functions,
-     cyan types). */
+
   --color-ok: #a5ff90;
   --color-warn: #ff628c;
   --color-brand: #ffc600;
   --color-brand-soft: #9effff;
-  /* Nebula — deeper navy radial than the surface, stars in Cobalt2's
-     cyan→sky→periwinkle range so they pop without leaving the theme. */
+
   --color-nebula-bg-0: #1c3a55;
   --color-nebula-bg-1: #102538;
   --color-nebula-1: #9effff;
@@ -283,8 +184,6 @@ html.cobalt {
   --color-nebula-5: #a06bff;
 }
 
-/* Matrix — CRT phosphor vibe. Near-black green-tinted surfaces, calm green
-   accent (not retina-burning #00ff41), warm off-white text for readability. */
 html.matrix {
   --color-surface: #050905;
   --color-panel: #0d130d;
@@ -293,14 +192,12 @@ html.matrix {
   --color-ink: #c8cdc4;
   --color-ink-dim: #8b918a;
   --color-accent: #3fb950;
-  /* Syntax tokens — mono-green phosphor palette so code stays in the CRT
-     vibe instead of mixing bright sky-blue and yellow into the green wash.
-     --color-bad stays red so invalid tokens still alarm. */
+
   --color-ok: #7ee787;
   --color-warn: #d4ec78;
   --color-brand: #56d364;
   --color-brand-soft: #aff5b4;
-  /* Nebula — green-black CRT radial, mono-green phosphor stars. */
+
   --color-nebula-bg-0: #0c150c;
   --color-nebula-bg-1: #050a05;
   --color-nebula-1: #aff5b4;
@@ -310,9 +207,6 @@ html.matrix {
   --color-nebula-5: #2ea043;
 }
 
-/* Solarized Dark — Ethan Schoonover's palette (base03/02 + base0/1), with the
-   accent shifted to solarized orange (#cb4b16) since terracotta clashes with
-   the cool teal base. */
 html.solarized {
   --color-surface: #002b36;
   --color-panel: #073642;
@@ -322,16 +216,13 @@ html.solarized {
   --color-ink-dim: #839496;
   --color-accent: #cb4b16;
   --color-accent-ink: #ffffff;
-  /* Syntax tokens — Ethan Schoonover's canonical solarized accents (cyan
-     strings, magenta numbers, blue functions, violet types, red invalid)
-     so code reads as solarized instead of default-dark on the teal base. */
+
   --color-ok: #2aa198;
   --color-warn: #d33682;
   --color-brand: #268bd2;
   --color-brand-soft: #6c71c4;
   --color-bad: #dc322f;
-  /* Nebula — base03-adjacent radial, stars sweeping Ethan's canonical
-     accents: cyan → blue → violet → magenta. */
+
   --color-nebula-bg-0: #04313e;
   --color-nebula-bg-1: #002028;
   --color-nebula-1: #2aa198;
@@ -341,13 +232,6 @@ html.solarized {
   --color-nebula-5: #d33682;
 }
 
-/* Accessibility → Display → Reduce Transparency / Increase Contrast. Apple
-   requires Liquid Glass surfaces to answer both, and ours are CSS rather than a
-   system material, so nothing does it for us: hand every glass band back a solid
-   fill and drop the blur. Marked with `data-glass` at the call site rather than
-   matched structurally, so a new glass surface opts in by saying so. `!important`
-   beats the single-class utilities it overrides (bg-panel/70, backdrop-blur-xl),
-   which would otherwise tie on specificity and win on source order. */
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   [data-glass] {
     background-color: var(--color-panel) !important;
@@ -359,40 +243,27 @@ html,
 body,
 #root {
   height: 100%;
-  /* Desktop app: lock the document itself. The window never scrolls or
-     rubber-band-bounces when the wheel/trackpad lands on a non-scrolling area
-     (the header, composer, sidebars, gaps) — every real scroll region inside
-     opts into its own `overflow-*`. `overscroll-behavior: none` also stops the
-     WebKit elastic bounce on the page even when nothing actually overflows. */
+
   overflow: hidden;
   overscroll-behavior: none;
 }
 
 body {
   @apply bg-surface text-ink antialiased;
-  /* `--font-sans` (see the typography block at the top) rather than a second
-     hardcoded stack — this one predated the theme token and silently won,
-     so the bundled face would never have been reached. */
+
   font-family: var(--font-sans);
-  /* WebKit (the Tauri runtime) needs the prefix, else this is ignored and
-     everything — chrome included — stays selectable. */
+
   -webkit-user-select: none;
   user-select: none;
   cursor: default;
 }
 
-/* Text content areas opt back in to selection. */
 .selectable {
   -webkit-user-select: text;
   user-select: text;
   cursor: auto;
 }
 
-/* This is a desktop app, not a web page: nothing should be HTML5-draggable.
-   Otherwise links drag out a "localhost" URL ghost and icons/images can be
-   dragged off. Tauri's window drag region (data-tauri-drag-region) and the
-   app's pointer-based tab/panel dragging are unaffected — those don't use the
-   native drag-and-drop the property disables. */
 * {
   -webkit-user-drag: none;
 }
@@ -403,7 +274,6 @@ a {
   user-drag: none;
 }
 
-/* Scrollable that still scrolls (trackpad/shift-wheel) but shows no bar. */
 .no-scrollbar {
   scrollbar-width: none;
 }
@@ -411,19 +281,6 @@ a {
   display: none;
 }
 
-/* ────────────────────────────────────────────────────────────────────────
-   Scrollbars. A slim themed pill (panel-2 thumb on a transparent track) so
-   every bar reads as part of the surface; hover lifts the thumb to the edge
-   tone for affordance. Vars resolve per-theme, so bars recolor automatically.
-   `.no-scrollbar` opts out.
-
-   NB: we deliberately do NOT set the standard `scrollbar-width` /
-   `scrollbar-color` properties. In WebKit/Blink, setting either one disables
-   the `::-webkit-scrollbar` pseudo-elements and falls back to the native bar:
-   `scrollbar-width: thin` in particular renders the light macOS overlay bar,
-   which ignores our color and reads as a bright stripe — most visibly on
-   xterm's always-on terminal viewport. Leaving them at their `auto` default
-   lets these webkit pills render everywhere, the terminal included. */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -434,8 +291,7 @@ a {
 ::-webkit-scrollbar-thumb {
   background-color: var(--color-panel-2);
   border-radius: 9999px;
-  /* Transparent border + padding-box clip insets the thumb so it floats as a
-     slim pill in the track rather than filling its full width. */
+
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -446,11 +302,6 @@ a {
   background: transparent;
 }
 
-/* The terminal viewport refuses the slim webkit pills above (xterm always
-   falls back to a native bar), and that native bar reads wrong in every state:
-   fat next to the app's 8px pills, and a bright stripe when the buffer is empty
-   (e.g. right after `clear`). Scrolling a terminal is discoverable on its own,
-   so we hide the bar entirely — the viewport still scrolls via wheel/trackpad. */
 .xterm-viewport {
   scrollbar-width: none;
 }
@@ -458,8 +309,6 @@ a {
   display: none;
 }
 
-/* Soft breathing halo for an agent tab icon while its session is working.
-   Uses currentColor so the glow matches each mode's accent automatically. */
 @keyframes tab-glow {
   0%,
   100% {
@@ -479,10 +328,6 @@ a {
   }
 }
 
-/* ── Knowledge-graph nebula (Observatory hero) ──────────────────────────────
-   The top hub node wears an expanding pulse ring. A transform (not SMIL) so
-   prefers-reduced-motion can pin it static; the svg group needs
-   fill-box/center so the scale stays node-local. */
 @keyframes kg-pulse {
   0% {
     transform: scale(1);
@@ -505,8 +350,6 @@ a {
   }
 }
 
-/* Gentle breathing for a workstream's "working" activity dot — a soft pulse +
-   halo that reads as live, ongoing work without the radar-ping's urgency. */
 @keyframes work-pulse {
   0%,
   100% {
@@ -530,11 +373,6 @@ a {
   }
 }
 
-/* Animated Hyprlayer mark, shown beside the elapsed-time counter while a session
-   is working. Each layer dims to half its resting weight and lights back up; the
-   per-layer stagger (bottom→top) makes the glow travel up the stack — live work
-   without a spinner's spin. Resting opacity comes in via --hl-base (set per path
-   in HyprlayerMark) so one keyframe serves all three layers. */
 @keyframes hl-layer-pulse {
   0%,
   100% {
@@ -548,14 +386,14 @@ a {
   animation: hl-layer-pulse 1.5s ease-in-out infinite;
 }
 .hl-layer:nth-child(2) {
-  /* bottom layer (first <path>, after <defs>) — leads the wave */
+
   animation-delay: 0s;
 }
 .hl-layer:nth-child(3) {
   animation-delay: 0.16s;
 }
 .hl-layer:nth-child(4) {
-  /* top layer — trails, so the brightest layer lights last */
+
   animation-delay: 0.32s;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -565,19 +403,6 @@ a {
   }
 }
 
-/* ── Background window: stop the looping animations ──────────────────────────
-   A WebKitGTK window keeps painting when it is not on screen — the Page
-   Visibility API stays "visible" for a window on another workspace, so the
-   throttling a browser would normally apply never engages. Painting is the
-   expensive part: on a 4K 144 Hz output the single `kg-pulse` ring below costs
-   a whole CPU core, and no amount of layer promotion (will-change, opacity-only
-   keyframes, a composited HTML ring) brings it under half of one. Not animating
-   is the only lever that works, so an unfocused window stops.
-
-   Only the infinite decorative loops are paused; one-shot transitions (toasts,
-   step-in) still finish. `lib/motion.ts` sets the attribute from Tauri's
-   window-focus signal — `visibilitychange` and DOM focus/blur never fire here.
-   Paused (not cancelled) so each resumes mid-cycle rather than restarting. */
 :root[data-window-blurred] .animate-tab-glow,
 :root[data-window-blurred] .kg-pulse,
 :root[data-window-blurred] .animate-work-pulse,
@@ -587,14 +412,12 @@ a {
   animation-play-state: paused;
 }
 
-/* ── Toast enter / exit animations ──────────────────────────────────────── */
 @keyframes toast-in {
   0%   { opacity: 0; transform: translateY(calc(100% + 48px)); }
   70%  { opacity: 1; transform: translateY(-8px); }
   100% { opacity: 1; transform: translateY(0); }
 }
 
-/* Bump up then slide down off-screen */
 @keyframes toast-out {
   0%   { opacity: 1; transform: translateY(0); }
   20%  { opacity: 1; transform: translateY(-8px); }
@@ -616,9 +439,6 @@ a {
   }
 }
 
-/* ── Task toast: a tab that merges into the composer ────────────────────── */
-/* Each ::before/::after paints a concave quarter-circle fillet just outside a
-   bottom corner, in --color-panel-2, bridging the tab into the composer. */
 .task-toast::before,
 .task-toast::after {
   content: "";
@@ -635,13 +455,12 @@ a {
   right: -0.5rem;
   background: radial-gradient(circle at top right, transparent 0.5rem, var(--color-panel-2) 0.5rem);
 }
-/* Once retracted (cleared) drop the fillets, else they linger as nubs. */
+
 .task-toast.is-folded::before,
 .task-toast.is-folded::after {
   content: none;
 }
 
-/* ── Onboarding step transition ─────────────────────────────────────────── */
 @keyframes step-in {
   0%   { opacity: 0; transform: translateY(12px); }
   100% { opacity: 1; transform: translateY(0); }

@@ -78,8 +78,6 @@ describe("columnOf", () => {
   });
 
   it("maps an unknown stage to backlog", () => {
-    // Simulates a NEWER backend: the wire union can't produce this today, but
-    // columnOf must still fall back to backlog rather than crash.
     expect(columnOf(makeView({ stage: "unknown_future_stage" as Stage }))).toBe("backlog");
   });
 

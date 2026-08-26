@@ -26,8 +26,6 @@ function combo(props: Partial<Parameters<typeof FolderCombo>[0]> = {}) {
 
 describe("FolderCombo", () => {
   it("draws its own listbox, not a native datalist", () => {
-    // The datalist this replaced took none of the app's styling — the panel
-    // has to be the app's own markup for any of it to apply.
     const { input } = combo();
     fireEvent.click(input);
     expect(document.querySelector("datalist")).toBeNull();
@@ -70,8 +68,6 @@ describe("FolderCombo", () => {
   });
 
   it("leaves a bare Enter to the surrounding dialog", () => {
-    // Typing a folder that doesn't exist yet and pressing Enter has to submit,
-    // not get swallowed by a list the user never arrowed into.
     const { input, onChange } = combo({ value: "Brand new" });
     fireEvent.click(input);
     const enter = fireEvent.keyDown(input, { key: "Enter" });

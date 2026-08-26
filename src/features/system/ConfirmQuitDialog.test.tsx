@@ -7,7 +7,6 @@ import { ConfirmQuitDialog } from "./ConfirmQuitDialog";
 const b = vi.hoisted(() => {
   let listener: (() => void) | null = null;
   return {
-    /** Fire the backend's quit-requested event at the mounted component. */
     requestQuit: () => listener?.(),
     quitApp: vi.fn(() => Promise.resolve({ status: "ok", data: null })),
     events: {
@@ -29,7 +28,6 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-/** Mount, then raise the event a ⌘Q / window-close produces. */
 function openPrompt() {
   const view = render(<ConfirmQuitDialog />);
   act(() => b.requestQuit());
@@ -63,8 +61,6 @@ describe("ConfirmQuitDialog", () => {
     expect(b.quitApp).toHaveBeenCalledWith(true);
   });
 
-  // The opt-out rides with the confirmation: cancelling leaves the setting
-  // alone, and the backend has already cancelled the exit itself.
   it("does nothing on cancel, even with the box checked", () => {
     openPrompt();
     fireEvent.click(checkbox());
@@ -82,8 +78,6 @@ describe("ConfirmQuitDialog", () => {
     expect(checkbox().checked).toBe(false);
   });
 
-  // The command only returns if the exit did NOT happen (the settings write
-  // failed), so the dialog has to recover rather than hang on a spinner.
   it("surfaces a failed quit and re-arms the button", async () => {
     b.quitApp.mockResolvedValueOnce({ status: "error", error: "disk full" } as never);
     openPrompt();

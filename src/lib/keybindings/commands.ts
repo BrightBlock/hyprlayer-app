@@ -1,13 +1,3 @@
-/**
- * The keyboard-command catalog, the single source of truth for every bindable
- * operation, its per-OS default chord, and the context in which it's available.
- *
- * Defaults live here (not in the backend) so they can evolve per-OS without a
- * settings migration: a user who hasn't overridden a command always tracks the
- * catalog. Chords use the abstract `mod` modifier, which formats and matches as
- * ⌘ on macOS and Ctrl elsewhere, so the per-OS pair is usually identical, but
- * the structure still lets a single command diverge a default later.
- */
 
 import { normalizeChord, type Chord } from "./chord";
 
@@ -19,37 +9,22 @@ export type CommandCategory =
   | "Session"
   | "Library";
 
-/** Where a command is available, informational, and drives UI grouping. It is
- *  NOT the runtime gate: whether a handler is registered (see `registry.ts`) is
- *  the real context predicate. */
 export type CommandWhen = "always" | "project" | "workstream" | "session";
 
 export type CommandDef = {
-  /** Stable id, persisted in settings overrides, never rename. */
   id: string;
   label: string;
   category: CommandCategory;
-  /** Default chord per OS; null = no default binding. */
   defaults: { mac: Chord | null; other: Chord | null };
-  /** Extra chords that also fire this command, for actions the platform spells
-   *  two ways (Safari cycles tabs with both ⌃⇥ and ⌘⇧]). Not rebindable on their
-   *  own. They belong to the default binding, so an override drops them: Settings
-   *  has no row to show them on. A primary binding beats an alternate on
-   *  collision. */
   alternates?: { mac: Chord[]; other: Chord[] };
-  /** Where the command is available (informational + drives UI grouping). */
   when: CommandWhen;
 };
 
-/** How many tabs `tab.select1`…`tab.selectN` address directly. Safari stops at
- *  eight and gives the ninth chord to "last tab", however many tabs there are. */
 export const TAB_SELECT_COUNT = 8;
 
-/** Command id selecting the `index`-th tab (0-based) of the focused pane. */
 export const tabSelectId = (index: number): string => `tab.select${index + 1}`;
 
 export const COMMANDS: CommandDef[] = [
-  // Navigation
   {
     id: "search.open",
     label: "Search Everything",
@@ -69,11 +44,6 @@ export const COMMANDS: CommandDef[] = [
     label: "Go to Dashboard",
     category: "Navigation",
     when: "always",
-    // ⌘1–⌘3 belong to the tabs (Safari's jump-to-tab), so app navigation sits a
-    // modifier over. On macOS that's the *literal* Control key; elsewhere physical
-    // Ctrl maps to `mod`, which the tabs use, so those platforms take Alt. ⌃1–⌃3
-    // also switch Spaces on macOS when several desktops exist: the OS wins, and
-    // the user can rebind.
     defaults: { mac: "ctrl+1", other: "alt+1" },
   },
   {
@@ -104,7 +74,6 @@ export const COMMANDS: CommandDef[] = [
     when: "always",
     defaults: { mac: "mod+bracketleft", other: "mod+bracketleft" },
   },
-  // View
   {
     id: "view.toggleProjectSidebar",
     label: "Toggle Project Sidebar",
@@ -131,11 +100,8 @@ export const COMMANDS: CommandDef[] = [
     label: "Toggle Markdown Preview",
     category: "View",
     when: "workstream",
-    // Only registered while a markdown file is open in the file viewer (see
-    // FileViewerTab), inert everywhere else via the registry's context gate.
     defaults: { mac: "mod+shift+v", other: "mod+shift+v" },
   },
-  // Workspace
   {
     id: "tab.new",
     label: "New Agent Tab",
@@ -148,11 +114,6 @@ export const COMMANDS: CommandDef[] = [
     label: "Close Agent Tab",
     category: "Workspace",
     when: "project",
-    // ⌘W, as in Safari, and the same action as the tab's × button: an agent is
-    // archived (conversation, branch and worktree intact, restorable with ⌘⇧T),
-    // a terminal or viewer closes. The destructive close is one modifier away on
-    // `tab.close`. ⌘W is free only because the macOS menu omits Close Window
-    // (see src-tauri/src/lib.rs).
     defaults: { mac: "mod+w", other: "mod+w" },
   },
   {
@@ -160,7 +121,6 @@ export const COMMANDS: CommandDef[] = [
     label: "Close Agent Tab & End Session",
     category: "Workspace",
     when: "project",
-    // Irreversible: kills the session and drops the transcript.
     defaults: { mac: "mod+shift+w", other: "mod+shift+w" },
   },
   {
@@ -168,9 +128,6 @@ export const COMMANDS: CommandDef[] = [
     label: "Reopen Last Closed Agent Tab",
     category: "Workspace",
     when: "project",
-    // Safari's ⌘⇧T. Restores the most recently archived agent, so it undoes a ⌘W
-    // (or an × click) but not a ⌘⇧W, which ended the session for good. Inert with
-    // an empty archive, no handler is registered, so the keystroke passes through.
     defaults: { mac: "mod+shift+t", other: "mod+shift+t" },
   },
   {
@@ -185,14 +142,7 @@ export const COMMANDS: CommandDef[] = [
     label: "Next Agent Tab",
     category: "Workspace",
     when: "project",
-    // Cycle agent tabs the way every browser/editor does: the *literal* Control
-    // key, not the `mod` abstraction. On macOS that's `ctrl+tab` (⌘Tab is the OS
-    // app switcher, reserved). Elsewhere physical Ctrl maps to `mod`, so Ctrl+Tab
-    // would be `mod+tab`, also reserved, so the non-mac default uses the other
-    // standard tab-cycle chord, Ctrl+PageDown.
     defaults: { mac: "ctrl+tab", other: "mod+pagedown" },
-    // Safari's second spelling. Only matchable because `keyToken` folds the
-    // shifted `}` back onto `bracketright`.
     alternates: { mac: ["mod+shift+bracketright"], other: ["mod+shift+bracketright"] },
   },
   {
@@ -208,8 +158,6 @@ export const COMMANDS: CommandDef[] = [
     label: `Select Agent Tab ${i + 1}`,
     category: "Workspace",
     when: "project",
-    // Safari's ⌘1–⌘8: the n-th tab of the focused pane, a no-op when there is no
-    // n-th tab. App navigation lives on ⌃1–⌃3.
     defaults: { mac: `mod+${i + 1}`, other: `mod+${i + 1}` },
   })),
   {
@@ -217,7 +165,6 @@ export const COMMANDS: CommandDef[] = [
     label: "Select Last Agent Tab",
     category: "Workspace",
     when: "project",
-    // Safari's ⌘9 always means "rightmost", never "the ninth".
     defaults: { mac: "mod+9", other: "mod+9" },
   },
   {
@@ -246,15 +193,8 @@ export const COMMANDS: CommandDef[] = [
     label: "Cycle Agent Stage",
     category: "Workspace",
     when: "workstream",
-    // Steps the focused agent through its pipeline stages (General → Research →
-    // Plan → Implement → Validate, wrapping) before it starts; once the session
-    // is running the stage is fixed at spawn, so it's inert. Bare Shift+Tab has
-    // no primary modifier, so the composer textarea handles it directly (the
-    // global dispatcher's editable-target guard ignores it there), see
-    // SessionChat's onKeyDown.
     defaults: { mac: "shift+tab", other: "shift+tab" },
   },
-  // Terminal
   {
     id: "terminal.open",
     label: "Toggle Terminal & Scripts Dock",
@@ -267,8 +207,6 @@ export const COMMANDS: CommandDef[] = [
     label: "Toggle Dock Full Height",
     category: "Terminal",
     when: "workstream",
-    // Shift+punctuation can't be a binding here (the dispatcher matches on
-    // e.key, so Shift+` is "~"); a shift+letter chord round-trips cleanly.
     defaults: { mac: "mod+shift+f", other: "mod+shift+f" },
   },
   {
@@ -297,10 +235,8 @@ export const COMMANDS: CommandDef[] = [
     label: "Run / Stop Workstream Run",
     category: "Terminal",
     when: "workstream",
-    // Runs the project's Run script (stopping a prior one), or stops it if live.
     defaults: { mac: "mod+r", other: "mod+r" },
   },
-  // Session
   {
     id: "session.stop",
     label: "Stop / Interrupt Turn",
@@ -320,8 +256,6 @@ export const COMMANDS: CommandDef[] = [
     label: "Show / Hide Tasks",
     category: "Session",
     when: "session",
-    // ⌘⇧T belongs to Reopen Last Closed Agent Tab, per Safari. ⌘⇧J sits beside
-    // the other session command, Clear Context (⌘⇧K).
     defaults: { mac: "mod+shift+j", other: "mod+shift+j" },
   },
   {
@@ -329,9 +263,6 @@ export const COMMANDS: CommandDef[] = [
     label: "Recall Previous Prompt",
     category: "Session",
     when: "session",
-    // Arrow combos need a primary modifier to fire while the composer textarea
-    // is focused (see useKeybindings' editable-target guard); Alt+↑/↓ are free,
-    // non-reserved, and read as the classic "step through history" gesture.
     defaults: { mac: "alt+up", other: "alt+up" },
   },
   {
@@ -341,7 +272,6 @@ export const COMMANDS: CommandDef[] = [
     when: "session",
     defaults: { mac: "alt+down", other: "alt+down" },
   },
-  // Library
   {
     id: "doc.new",
     label: "New Document",
@@ -351,7 +281,6 @@ export const COMMANDS: CommandDef[] = [
   },
 ];
 
-/** Categories in display order (matches the catalog's grouping above). */
 export const CATEGORY_ORDER: CommandCategory[] = [
   "Navigation",
   "View",
@@ -361,9 +290,6 @@ export const CATEGORY_ORDER: CommandCategory[] = [
   "Library",
 ];
 
-/** Commands grouped by category in display order, with empty groups dropped.
- *  The catalog owns the grouping so the UI renders from it directly instead of
- *  re-scanning and re-filtering the flat list on every render. */
 export const COMMANDS_BY_CATEGORY: ReadonlyArray<{
   category: CommandCategory;
   commands: CommandDef[];
@@ -372,19 +298,16 @@ export const COMMANDS_BY_CATEGORY: ReadonlyArray<{
   commands: COMMANDS.filter((c) => c.category === category),
 })).filter((group) => group.commands.length > 0);
 
-/** The catalog default chord for a command on this OS, normalized; null = none. */
 export function defaultChord(cmd: CommandDef, isMac: boolean): Chord | null {
   const raw = isMac ? cmd.defaults.mac : cmd.defaults.other;
   return raw ? normalizeChord(raw) : null;
 }
 
-/** The command's alternate chords on this OS, normalized (empty when it has none). */
 export function alternateChords(cmd: CommandDef, isMac: boolean): Chord[] {
   const raw = (isMac ? cmd.alternates?.mac : cmd.alternates?.other) ?? [];
   return raw.map(normalizeChord);
 }
 
-/** Lookup a command definition by id. */
 export function commandById(id: string): CommandDef | undefined {
   return COMMANDS.find((c) => c.id === id);
 }

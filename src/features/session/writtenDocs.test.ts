@@ -51,21 +51,19 @@ describe("recordWrittenDocs", () => {
     expect(slice("ws2")["only-a.md"]).toBeUndefined();
   });
 
-  // A re-write must not keep its original insertion position, or a doc still in
-  // active use ages out of the bounded slice while newer, idle docs survive.
   it("bounds each slice at 200, evicting least-recently-written first", () => {
     const id = (n: number) => `/t/shared/plans/doc-${n}.md`;
     recordWrittenDocs(
       Array.from({ length: 200 }, (_, i) => id(i)),
       ["ws1"],
     );
-    recordWrittenDocs([id(0)], ["ws1"]); // touch the oldest
+    recordWrittenDocs([id(0)], ["ws1"]);
     recordWrittenDocs(["/t/shared/plans/fresh.md"], ["ws1"]);
 
     const names = Object.keys(slice("ws1"));
     expect(names).toHaveLength(200);
-    expect(names).toContain("doc-0.md"); // touched, so it survived
-    expect(names).not.toContain("doc-1.md"); // next-oldest was evicted instead
+    expect(names).toContain("doc-0.md");
+    expect(names).not.toContain("doc-1.md");
     expect(names).toContain("fresh.md");
   });
 });
@@ -81,7 +79,7 @@ describe("forgetWrittenDocs", () => {
   it("keeps the entry when another id owns that filename now", () => {
     recordWrittenDocs(["/t/a/plans/dup.md"], ["ws1"]);
     recordWrittenDocs(["/t/b/plans/dup.md"], ["ws1"]);
-    forgetWrittenDocs(["/t/a/plans/dup.md"]); // the stale one, already superseded
+    forgetWrittenDocs(["/t/a/plans/dup.md"]);
     expect(slice("ws1")["dup.md"]).toBe("/t/b/plans/dup.md");
   });
 });

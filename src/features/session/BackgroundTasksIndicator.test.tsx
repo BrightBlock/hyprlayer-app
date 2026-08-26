@@ -22,7 +22,6 @@ function awaiting(toolUseId = "tu-2"): LiveBackgroundTask {
   return { ...running(toolUseId, Date.now()), status: "awaiting" };
 }
 
-/** Open the indicator popover by clicking its toolbar button. */
 function openPopover() {
   fireEvent.click(screen.getByRole("button", { name: /background task/ }));
 }
@@ -99,7 +98,6 @@ describe("BackgroundTasksIndicator", () => {
     openPopover();
     fireEvent.click(screen.getByTitle("Jump to transcript"));
     expect(onJumpTo).toHaveBeenCalledWith("tu-42");
-    // Popover closes after a jump.
     expect(screen.queryByText("sleep 999 (tu-42)")).toBeNull();
   });
 
@@ -107,8 +105,6 @@ describe("BackgroundTasksIndicator", () => {
     render(<BackgroundTasksIndicator tasks={[running("tu-1")]} onJumpTo={vi.fn()} />);
     openPopover();
     expect(screen.getByText("sleep 999 (tu-1)")).toBeTruthy();
-    // The Popover portals its backdrop onto document.body, not into this
-    // component's own container.
     const overlay = document.body.querySelector('div.fixed.inset-0[aria-hidden="true"]');
     expect(overlay).toBeTruthy();
     fireEvent.click(overlay!);

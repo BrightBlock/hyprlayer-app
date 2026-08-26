@@ -29,7 +29,6 @@ describe("PromptHistoryStack", () => {
   });
 
   it("shows a 'more above' marker when the window is scrolled", () => {
-    // 12 prompts → start=4, so 4 items are above the window
     const many = Array.from({ length: 12 }, (_, i) => `prompt ${i + 1}`);
     render(<PromptHistoryStack prompts={many} activeIndex={null} onRecall={vi.fn()} />);
     expect(screen.getByText("···")).toBeTruthy();
@@ -44,14 +43,11 @@ describe("PromptHistoryStack", () => {
     render(<PromptHistoryStack prompts={SAMPLE} activeIndex={null} onRecall={vi.fn()} />);
     const buttons = screen.getAllByRole("button");
 
-    // Initially not visible
     expect(screen.queryByText("second prompt")).toBeNull();
 
-    // Hover the second line
     fireEvent.mouseEnter(buttons[1]);
     expect(screen.getByText("second prompt")).toBeTruthy();
 
-    // Leave
     fireEvent.mouseLeave(buttons[1]);
     expect(screen.queryByText("second prompt")).toBeNull();
   });
@@ -69,7 +65,6 @@ describe("PromptHistoryStack", () => {
   });
 
   it("passes the original (full-array) index to onRecall when the window is scrolled", () => {
-    // 12 prompts, window shows indices 4–11; clicking the first visible button → idx 4
     const many = Array.from({ length: 12 }, (_, i) => `prompt ${i + 1}`);
     const onRecall = vi.fn();
     render(<PromptHistoryStack prompts={many} activeIndex={null} onRecall={onRecall} />);
@@ -83,7 +78,6 @@ describe("PromptHistoryStack", () => {
     render(<PromptHistoryStack prompts={SAMPLE} activeIndex={1} onRecall={vi.fn()} />);
     const buttons = screen.getAllByRole("button");
 
-    // The bar span inside button[1] should have the accent class
     const activeBar = buttons[1].querySelector("span");
     expect(activeBar?.className).toContain("bg-accent");
   });
@@ -102,11 +96,9 @@ describe("PromptHistoryStack", () => {
     render(<PromptHistoryStack prompts={SAMPLE} activeIndex={null} onRecall={vi.fn()} />);
     const buttons = screen.getAllByRole("button");
 
-    // Last button (newest) → bg-ink-dim/60
     const newestBar = buttons[2].querySelector("span");
     expect(newestBar?.className).toContain("bg-ink-dim/60");
 
-    // Non-newest, non-active → bg-ink-dim/30
     const olderBar = buttons[0].querySelector("span");
     expect(olderBar?.className).toContain("bg-ink-dim/30");
   });

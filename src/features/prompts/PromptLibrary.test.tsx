@@ -7,8 +7,6 @@ import { useState } from "react";
 import { PromptLibrary } from "./PromptLibrary";
 import type { AppSettings } from "@/lib/bindings";
 
-/** Selection is URL-owned in the app (PromptsPage); the harness stands in with
- *  plain state so list clicks drive the editor the same way. */
 function Harness({ settings }: { settings: AppSettings }) {
   const [selectedId, setSelectedId] = useState("commit");
   return <PromptLibrary settings={settings} selectedId={selectedId} onSelect={setSelectedId} />;
@@ -55,10 +53,8 @@ function bodyTextarea(): HTMLTextAreaElement {
 describe("PromptLibrary", () => {
   it("selects Commit by default and shows its stock body from promptDefaults", () => {
     render(<Harness settings={EMPTY} />);
-    // "Built-in" appears as both the list group header and the editor badge.
     expect(screen.getAllByText("Built-in").length).toBeGreaterThan(0);
     expect(bodyTextarea().value).toBe("/commit");
-    // Stock text → no Modified badge, no reset button.
     expect(screen.queryByText("Modified")).toBeNull();
     expect(screen.queryByText("Reset to default")).toBeNull();
   });
@@ -93,9 +89,7 @@ describe("PromptLibrary", () => {
     fireEvent.change(bodyTextarea(), { target: { value: "  " } });
     fireEvent.blur(bodyTextarea());
     const saved = mutate.mock.calls[mutate.mock.calls.length - 1][0] as AppSettings;
-    // A blank override means "stock text", never persisted as an empty prompt.
     expect(saved.prompts?.builtinBodies?.commit).toBeUndefined();
-    // The local draft stays as typed so the textarea doesn't snap back mid-rewrite.
     expect(bodyTextarea().value).toBe("  ");
   });
 
@@ -111,7 +105,6 @@ describe("PromptLibrary", () => {
     const saved = mutate.mock.calls[mutate.mock.calls.length - 1][0] as AppSettings;
     expect(saved.prompts?.custom).toHaveLength(1);
     expect(saved.prompts?.custom?.[0].name).toBe("Untitled prompt");
-    // The editor switches to the new prompt: name input + pin toggle visible.
     expect(screen.getByLabelText("Prompt name")).toBeTruthy();
     expect(screen.getByLabelText("Pin to composer")).toBeTruthy();
   });
@@ -159,7 +152,6 @@ describe("PromptLibrary", () => {
 
   it("records a built-in chord as its catalog command's keybinding override", () => {
     render(<Harness settings={EMPTY} />);
-    // Commit is selected; its shortcut IS ws.commit's binding.
     fireEvent.click(screen.getByText("Edit"));
     fireEvent.keyDown(window, { key: "9", ctrlKey: true });
     fireEvent.click(screen.getByText("Save"));
@@ -181,7 +173,6 @@ describe("PromptLibrary", () => {
     fireEvent.click(screen.getByText("app"));
     const saved = mutate.mock.calls[mutate.mock.calls.length - 1][0] as AppSettings;
     expect(saved.prompts?.custom?.[0].overrides?.["/repos/app"]).toBe("global body");
-    // Now editing the override scope, with a way back.
     expect(screen.getByText(/Editing the override used only in app/)).toBeTruthy();
     expect(screen.getByText("Remove override")).toBeTruthy();
   });

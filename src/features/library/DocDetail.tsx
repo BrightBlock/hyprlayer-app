@@ -19,25 +19,14 @@ import { FrontmatterPanel } from "./FrontmatterPanel";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { docTitle, splitFrontmatter } from "./text";
 
-// Theme-bound editor chrome + syntax colors (shared with the diff/file viewers
-// via `codeBase`) so the editor recolors with the active theme; `lineWrapping`
-// wraps long lines instead of scrolling horizontally, markdown grammar on top.
 const editorExtensions = [...codeBase, EditorView.lineWrapping, markdown()];
 
 type Props = {
-  /** Absolute-path doc id. */
   id: string;
   mode: "edit" | "preview";
   onSetMode: (mode: "edit" | "preview") => void;
 };
 
-/**
- * The library's detail pane. Loads the doc, then hands it to {@link DocBody}
- * keyed on the doc's identity *and* mtime: switching documents, or a refetch
- * after a save/frontmatter patch bumps the mtime, mints a fresh editor buffer
- * rather than carrying a stale (possibly dirty) one across, which could
- * otherwise save one document's body over another's.
- */
 export function DocDetail({ id, mode, onSetMode }: Props) {
   const doc = useDoc(id);
   if (doc.isLoading) return <PageSpinner />;
@@ -56,15 +45,6 @@ export function DocDetail({ id, mode, onSetMode }: Props) {
 
 type BodyProps = Props & { doc: DocContent };
 
-/**
- * The rendered detail: a path bar (with the edit/preview/save controls), the
- * title, the inline-editable frontmatter card, and the body, rendered prose in
- * preview, raw CodeMirror in edit. Folds in the old full-page DocPage's
- * save/patch/reveal machinery; the body's mtime-guarded save still gates
- * frontmatter patches (the card disables while the buffer is dirty). The editor
- * buffer is seeded from `doc` at mount and lives only as long as this instance,
- * see {@link DocDetail} for why that lifetime is tied to the doc's mtime.
- */
 function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
   const saveDoc = useSaveDoc(id);
   const patchFrontmatter = usePatchDocFrontmatter(id);
@@ -78,9 +58,6 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
 
   const body = useMemo(() => splitFrontmatter(content).body, [content]);
 
-  // One button does edit ⇄ save: in preview it enters edit mode; in edit it
-  // saves (when there are changes) and returns to preview, or just exits when
-  // clean. A failed save keeps you in edit so the buffer + error survive.
   function primaryAction() {
     if (mode === "preview") {
       onSetMode("edit");
@@ -116,10 +93,6 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
           {dirty && <Badge tone="warn">unsaved</Badge>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {/* Narrow ↔ wide layout: a centered readable column or the full pane
-              for more real estate (tables, code, side-by-side). Both states are
-              shown so the choice is obvious; persisted, so it sticks across docs
-              and applies to preview + the editor alike. */}
           <div
             role="group"
             aria-label="Document width"
@@ -144,7 +117,6 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
               </button>
             ))}
           </div>
-          {/* Reveal in the OS file manager, icon only to keep the bar light. */}
           <button
             type="button"
             onClick={() => revealDoc.mutate(meta.id)}
@@ -155,9 +127,6 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
           >
             <FolderIcon size={16} />
           </button>
-          {/* One toggle: a pencil to edit, a magnifying glass to preview (saving
-              on the way out when there are changes). Accent-tinted while there
-              are unsaved edits, to flag the save the magnifying glass performs. */}
           <button
             type="button"
             onClick={primaryAction}
@@ -197,8 +166,6 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
         <div className={`mx-auto px-8 py-6 ${docWide ? "max-w-none" : "max-w-3xl"}`}>
           <h1 className="selectable mb-5 text-2xl font-semibold text-ink">{docTitle(meta)}</h1>
 
-          {/* A successful patch invalidates the doc query; the refetched mtime
-              re-keys this whole pane (see DocDetail), so no local refresh here. */}
           <FrontmatterPanel
             meta={meta}
             disabled={dirty}
@@ -220,8 +187,6 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
                 extensions={editorExtensions}
                 basicSetup={{
                   foldGutter: true,
-                  // `codeBase` supplies the themed gutter + syntax highlighting;
-                  // disable the defaults so they don't double up / re-color.
                   lineNumbers: false,
                   syntaxHighlighting: false,
                   highlightActiveLine: true,

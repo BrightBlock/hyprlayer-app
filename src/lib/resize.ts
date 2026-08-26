@@ -5,27 +5,16 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 type EdgeDragOptions = {
-  /** Starting size (px) along the drag axis. */
   startWidth: number;
   min: number;
   max: number;
-  /** +1 when dragging toward the axis-positive direction (right / down) grows
-   *  the panel, -1 when it shrinks it. */
   direction: 1 | -1;
-  /** Drag axis, horizontal (width, default) or vertical (height). */
   axis?: "x" | "y";
   onResize: (size: number) => void;
-  /** Fired on pointer-down / release, e.g. to suppress a transition while
-   *  dragging so the panel tracks the cursor instead of trailing it. */
   onStart?: () => void;
   onEnd?: () => void;
 };
 
-/**
- * Pointer-drag handler for a panel-resize separator: tracks the pointer,
- * clamps the size, and restores the body cursor/selection on release. Works on
- * either axis (horizontal width or vertical height).
- */
 export function startEdgeDrag(
   event: ReactPointerEvent<HTMLElement>,
   { startWidth, min, max, direction, axis = "x", onResize, onStart, onEnd }: EdgeDragOptions,

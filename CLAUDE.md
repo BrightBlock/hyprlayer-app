@@ -96,65 +96,11 @@ not evidence your change shipped. Check the bundle's contents instead.
 
 ## Comments
 
-Match the density of the file you are editing. This codebase comments heavily —
-16% of Rust lines, 5% of TypeScript — and the existing comments are the spec for
-new ones. Do not strip them to look terse, and do not pad a diff to look thorough.
-
-A comment earns its place when it records something the code cannot say. Four
-things qualify:
-
-**The failure that produced this code.** Name the version, platform, and symptom.
-
-```rust
-// The 0.5.8 Linux regression: the deb/rpm/AUR packages put the app at
-// /usr/bin/Hyprlayer, so forbidding current_exe()'s parent blacklisted
-// all of /usr/bin, `hyprlayer` and `git` resolved to nothing and `gh`
-// fell through to a mise shim. A normal bin dir must forbid nothing.
-```
-`crates/hyprlayer-core/src/process/binaries.rs:531`
-
-**The alternative that was rejected, and why.** The reader's first instinct is
-usually the thing you already tried, so name it: `crates/hyprlayer-core/src/repos.rs:235`
-explains why it uses `gh api /user/repos` and not `gh repo list`.
-
-**The constraint that makes obvious-looking code wrong.**
-
-```ts
-// Build the binary string in chunks: `String.fromCharCode(...bytes)` spreads
-// every byte as an argument, which overflows the call stack on a large paste.
-```
-`src/lib/terminal/terminalCodec.ts:10`
-
-**The accepted gap.** Say what the code does not handle and why that is fine:
-`crates/hyprlayer-core/src/opencode/config.rs:118` records that a JSONC config is
-left untouched rather than risk dropping the user's comments.
-
-Cite the receipt where one exists — `issue #1011`, `PR #221`, `ADR-0002`,
-`0.5.8`. A comment that survives is one a reader can go verify.
-
-### What does not earn a comment
-
-- Restating the next line. `// Increment the counter` above `count += 1`.
-- Narrating the diff. No `// Added to fix the bug`, `// Changed from the old
-  approach`, `// New helper`. Git already knows. Comments describe the code as
-  it stands, not its history.
-- Section headers inside a function — `// --- Validation ---`. If a function
-  needs signposting, it needs splitting.
-- Restating a type the signature already declares.
-- Hedging about the code's own quality: `// This could probably be optimized`,
-  `// Note that this is a simple implementation`.
-
-### Form
-
-- Above the code, never trailing at end of line.
-- Doc comments (`///`, `//!`) carry the contract: what the caller must know,
-  edge cases, degradation behavior. Inline `//` carries the local surprise.
-- Module docs (`//!`) explain how the module fits the whole, not what its
-  functions are named.
-- Write the prose like the rest of the codebase: active voice, no adverb
-  padding, no throat-clearing openers, no "it's not just X, it's Y".
-- Delete a comment when the code it describes changes. A stale comment costs
-  more than no comment.
+Prefer names, types, and small functions that make comments unnecessary. Add a
+comment only for a surprising platform/protocol constraint, safety invariant,
+or tool directive that the code cannot express. Keep it short and place it
+above the relevant code. Never narrate control flow, restate a signature, add
+section banners, or preserve implementation history.
 
 @docs/adr/0001-tauri-workspace-and-cli-types.md
 @docs/adr/0002-config-ownership.md

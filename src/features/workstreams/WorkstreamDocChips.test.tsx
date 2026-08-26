@@ -4,8 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WorkstreamDocChips, chipLabel } from "./WorkstreamDocChips";
 
-// No vitest globals -> RTL can't register its own auto-cleanup; without this,
-// a previous test's mounted copy steals the next test's queries and clicks.
 afterEach(cleanup);
 
 const RESEARCH = {

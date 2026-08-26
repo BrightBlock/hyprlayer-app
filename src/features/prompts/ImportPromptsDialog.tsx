@@ -12,9 +12,6 @@ const RESOLUTIONS: { value: ImportResolution; label: string }[] = [
   { value: "skip", label: "Skip" },
 ];
 
-/** The notes shown under a checked row: a chord we can't honour, and overrides
- *  with no matching project here. Mirrors the mock's rules, the chord note is
- *  suppressed on "replace" since replacing keeps the existing prompt's chord. */
 function rowNotes(c: ImportCandidate, resolution: ImportResolution, chordLabel: (c: string) => string): string[] {
   const notes: string[] = [];
   const chordShown = !c.conflict || resolution !== "replace";
@@ -31,15 +28,6 @@ function rowNotes(c: ImportCandidate, resolution: ImportResolution, chordLabel: 
   return notes;
 }
 
-/**
- * The "Import prompts" review dialog. The page has already picked a file
- * (native open dialog), read and parsed it, and planned each entry against the
- * current library; this dialog lets the user choose which prompts to bring in
- * and how to resolve name collisions (keep both / replace / skip), then hands
- * the decisions back for the merge.
- *
- * Mounted only while reviewing a file, so decision state resets per file.
- */
 export function ImportPromptsDialog({
   fileName,
   source,
@@ -103,7 +91,6 @@ export function ImportPromptsDialog({
         </div>
       }
     >
-      {/* File info band */}
       <div className="flex items-center gap-2 border-b border-edge bg-panel-2/40 px-4 py-2.5">
         <DocIcon size={14} className="shrink-0 text-ink-dim" />
         <span className="truncate font-mono text-[11px] text-ink">{fileName}</span>
@@ -117,7 +104,6 @@ export function ImportPromptsDialog({
         </button>
       </div>
 
-      {/* Review rows */}
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
         {candidates.map((c) => {
           const d = decisions[c.key] ?? { include: true, resolution: "keep-both" as ImportResolution };

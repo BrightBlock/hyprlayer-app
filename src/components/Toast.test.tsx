@@ -5,8 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Toast } from "./Toast";
 import { useToast } from "@/lib/toast";
 
-// The exit animation (EXIT_MS) and auto-dismiss (DURATION_MS) live on timers, so
-// drive time deterministically rather than waiting on the wall clock.
 const DURATION_MS = 5000;
 const EXIT_MS = 380;
 
@@ -41,11 +39,8 @@ describe("Toast", () => {
   it("a plain toast shows a countdown and auto-dismisses", () => {
     render(<Toast />);
     act(() => useToast.getState().show("Up to date", "Latest version"));
-    // The countdown badge (e.g. "5s") is the visible auto-dismiss timer.
     expect(screen.getByText(/^\d+s$/)).toBeTruthy();
     expect(useToast.getState().visible).toBe(true);
-    // The countdown fires hide() at DURATION_MS; the exit animation (a separate
-    // effect-scheduled timer) then unmounts it after EXIT_MS.
     act(() => vi.advanceTimersByTime(DURATION_MS));
     expect(useToast.getState().visible).toBe(false);
     act(() => vi.advanceTimersByTime(EXIT_MS));
@@ -61,9 +56,7 @@ describe("Toast", () => {
       }),
     );
     expect(screen.getByText("Restart to update")).toBeTruthy();
-    // No countdown badge while an action is pending.
     expect(screen.queryByText(/^\d+s$/)).toBeNull();
-    // Well past the plain auto-dismiss window, it's still on screen.
     act(() => vi.advanceTimersByTime(DURATION_MS * 3));
     expect(screen.getByText("v9.9.9")).toBeTruthy();
   });

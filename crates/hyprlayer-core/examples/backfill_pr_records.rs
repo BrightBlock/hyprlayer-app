@@ -1,17 +1,3 @@
-//! One-off backfill for PR records that predate the merge-time promotion in
-//! `src-tauri/src/pr_watch.rs`.
-//!
-//! The watcher only polls *active* workstreams, so records whose workstream was
-//! archived long ago can never self-heal. This walks a `prs/` directory and runs
-//! the same `pr_record::promote_merged_record` the watcher calls, for exactly
-//! the PR numbers fed on stdin (one per line, the caller decides which PRs are
-//! merged; this does not talk to GitHub).
-//!
-//! Usage:
-//!   printf '%s\n' 216 215 | cargo run -p hyprlayer-core --example backfill_pr_records -- <prs-dir> [--apply]
-//!
-//! Without `--apply` it is a dry run and writes nothing.
-
 use std::collections::HashSet;
 use std::io::Read;
 use std::path::PathBuf;
@@ -73,7 +59,6 @@ fn main() {
                 }
             }
         } else {
-            // Dry run: same decision, no write.
             let content = std::fs::read_to_string(&path).expect("read record");
             match pr_record::promote_merged(&content) {
                 Ok(Some(_)) => {

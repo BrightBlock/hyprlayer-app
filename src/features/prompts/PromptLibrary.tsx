@@ -66,10 +66,6 @@ import {
 const EMPTY_OVERRIDES: Overrides = {};
 const SAVE_DEBOUNCE_MS = 600;
 
-/** What actually goes to disk: a blank built-in override means "stock text",
- *  so drop the key rather than persisting an empty body that would run as an
- *  empty prompt. The LOCAL draft keeps the empty string while editing, the
- *  textarea must not snap back to the stock text mid-rewrite. */
 function sanitizedForSave(prompts: PromptSettings): PromptSettings {
   const bodies = Object.fromEntries(
     Object.entries(prompts.builtinBodies ?? {}).filter(([, body]) => body.trim() !== ""),
@@ -77,8 +73,6 @@ function sanitizedForSave(prompts: PromptSettings): PromptSettings {
   return { ...prompts, builtinBodies: bodies };
 }
 
-/** Chord recorder, mirroring KeyboardSettings: a capture-phase listener beats
- *  the global dispatcher; Escape cancels, Enter commits. */
 function useChordRecorder(
   recording: boolean,
   onCommit: (chord: Chord) => void,
@@ -132,13 +126,6 @@ function newPromptId(): string {
     : `p-${Math.random().toString(36).slice(2)}`;
 }
 
-/**
- * The Prompt library view (route `/prompts`, see `PromptsPage`): a master panel
- * of built-in (Commit/Ship) and custom prompts beside an editor for the selected
- * one, body, `{{variable}}` insertion, per-project overrides (custom only),
- * shortcut, pin-to-composer. Selection is URL-owned; edits persist debounced via
- * the whole-settings mutation.
- */
 export function PromptLibrary({
   settings,
   selectedId,
@@ -153,16 +140,10 @@ export function PromptLibrary({
   const defaults = bootstrap.data?.promptDefaults ?? null;
   const projects = useMemo(() => bootstrap.data?.projects ?? [], [bootstrap.data?.projects]);
 
-  // Drag-resizable master-panel width, in the UI store so it survives leaving
-  // and re-opening the route (session-only, like the Library's list panel).
   const promptsWidth = useUiStore((s) => s.promptsWidth);
   const setPromptsWidth = useUiStore((s) => s.setPromptsWidth);
-  // On the narrow tier (see lib/layout) the dragged width can reach
-  // SIDE_PANEL_MAX (480), which with the rail is 528px and won't fit a 640px
-  // viewport, so it's clamped to the minimum there rather than dragged.
   const { narrow } = useViewport();
 
-  // ── Draft state: the single source of truth while this page is open. ──────
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const [prompts, setPrompts] = useState<PromptSettings>(() => ({
@@ -187,11 +168,9 @@ export function PromptLibrary({
       save.mutate({ ...settingsRef.current, prompts: sanitizedForSave(promptsRef.current) });
     }, SAVE_DEBOUNCE_MS);
   };
-  /** Flush a debounce-pending save immediately (blur); no-op when idle. */
   const flushPending = () => {
     if (timer.current !== null) persistNow();
   };
-  // Flush a pending debounced save on unmount so no keystrokes are lost.
   useEffect(
     () => () => {
       if (timer.current !== null) {
@@ -220,9 +199,8 @@ export function PromptLibrary({
       opts,
     );
 
-  // ── Selection (owned by the page via the URL). ────────────────────────────
   const custom = useMemo(() => prompts.custom ?? [], [prompts.custom]);
-  const [scope, setScope] = useState<string>("global"); // "global" | project path
+  const [scope, setScope] = useState<string>("global");
   const [recording, setRecording] = useState(false);
   const [varPickerOpen, setVarPickerOpen] = useState(false);
   const varPickerTriggerRef = useRef<HTMLButtonElement>(null);
@@ -237,8 +215,6 @@ export function PromptLibrary({
   } | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
-  // Switching prompts resets the per-prompt editor state (scope tab, an
-  // in-progress chord recording, open pickers) regardless of who navigated.
   useEffect(() => {
     setScope("global");
     setRecording(false);
@@ -259,7 +235,6 @@ export function PromptLibrary({
   const kbOverrides = settings.keybindings?.overrides ?? EMPTY_OVERRIDES;
   const asSettings = useMemo(() => ({ ...settings, prompts }), [settings, prompts]);
 
-  // ── Selected prompt's derived fields. ─────────────────────────────────────
   const isBuiltin = selection.kind === "builtin";
   const builtinDef = isBuiltin
     ? BUILTIN_PROMPTS.find((b) => b.id === (selection as { id: BuiltinPromptId }).id)!
@@ -285,7 +260,6 @@ export function PromptLibrary({
   const projectName = (path: string) =>
     projects.find((p) => p.path === path)?.mappedName ?? path.split("/").pop() ?? path;
 
-  // ── Edit actions. ──────────────────────────────────────────────────────────
   const writeBody = (next: string) => {
     if (builtinDef) {
       update((p) => ({
@@ -311,8 +285,6 @@ export function PromptLibrary({
     const end = el?.selectionEnd ?? cur.length;
     writeBody(cur.slice(0, start) + token + cur.slice(end));
     setVarPickerOpen(false);
-    // Put the caret after the inserted token (post-commit) so consecutive
-    // inserts land where the user expects instead of at the end of the body.
     const caret = start + token.length;
     requestAnimationFrame(() => {
       const t = bodyRef.current;
@@ -367,8 +339,6 @@ export function PromptLibrary({
   const commitChord = (chord: Chord) => {
     const normalized = normalizeChord(chord);
     if (builtinDef) {
-      // A built-in's shortcut IS its catalog command's binding, write the same
-      // override Settings → Keyboard edits.
       persistNow({
         keybindings: { overrides: { ...kbOverrides, [builtinDef.commandId]: normalized } },
       });
@@ -390,8 +360,6 @@ export function PromptLibrary({
 
   const candidate = useChordRecorder(recording, commitChord, () => setRecording(false));
 
-  // Conflicts: catalog commands (excluding this built-in's own command) plus
-  // other prompts' chords. Warn, don't block, matching KeyboardSettings.
   const conflictLabels = useMemo(() => {
     if (!candidate) return [];
     const selfCommandId = builtinDef?.commandId ?? "";
@@ -406,7 +374,6 @@ export function PromptLibrary({
   }, [candidate, builtinDef, kbOverrides, custom, selPrompt]);
   const reserved = candidate ? isReserved(candidate, IS_MACOS) : false;
 
-  // ── List rows. ─────────────────────────────────────────────────────────────
   const fq = filter.trim().toLowerCase();
   const matches = (name: string, body: string) =>
     !fq || name.toLowerCase().includes(fq) || body.toLowerCase().includes(fq);
@@ -455,14 +422,11 @@ export function PromptLibrary({
     (p) => selPrompt && selPrompt.overrides?.[p.path] === undefined,
   );
 
-  // ── Import / export ────────────────────────────────────────────────────────
   const chordLabel = (c: string) => formatChord(normalizeChord(c), IS_MACOS);
   const basename = (p: string) => p.split(/[\\/]/).pop() || p;
   const slugify = (name: string) =>
     name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "prompt";
 
-  // Everything exportable, resolved to effective bodies/chords. Built-ins first,
-  // then custom, the order the sidebar and the export dialog both show.
   const exportEntries: ExportEntry[] = useMemo(() => {
     const builtins = BUILTIN_PROMPTS.map((b) => ({
       id: b.id,
@@ -483,9 +447,6 @@ export function PromptLibrary({
     return [...builtins, ...customs];
   }, [asSettings, defaults, kbOverrides, custom]);
 
-  // The export dialog omits stock built-ins, identical to what every recipient
-  // already has, so just noise; a built-in earns a row only once edited. (The
-  // editor's own Export button still exports whatever prompt is open.)
   const exportListEntries = useMemo(
     () =>
       exportEntries.filter(
@@ -494,8 +455,6 @@ export function PromptLibrary({
     [exportEntries, asSettings, defaults],
   );
 
-  // What an incoming file is matched against: existing names, bound chords, and
-  // the project name→path map used to re-home overrides.
   const librarySnapshot: LibrarySnapshot = useMemo(() => {
     const takenChords = new Set<string>();
     for (const b of BUILTIN_PROMPTS) {
@@ -513,8 +472,6 @@ export function PromptLibrary({
     };
   }, [kbOverrides, custom, projects]);
 
-  /** Write `content` to a user-chosen path, forcing the `.hlprompts` suffix.
-   *  Returns the final basename on success, null if cancelled, or throws. */
   const writeToChosenPath = async (defaultName: string, content: string): Promise<string | null> => {
     const chosen = await saveFileDialog({
       title: "Export prompts",
@@ -592,8 +549,6 @@ export function PromptLibrary({
     );
   };
 
-  // The editor's one-click export of the selected prompt, no options, carries
-  // its chord and any overrides as-is.
   const exportSelected = async () => {
     const entry = exportEntries.find((e) => e.id === selectedId);
     if (!entry) return;
@@ -609,8 +564,6 @@ export function PromptLibrary({
 
   return (
     <div className="flex h-full min-h-0">
-      {/* ── "Prompts" master panel, the mock's sidebar, styled like the
-             project/Library panels (h-9 header band, bg-panel, border seam). ── */}
       <aside
         className="flex shrink-0 flex-col border-r border-edge bg-panel"
         style={{ width: narrow ? SIDE_PANEL_MIN : promptsWidth }}
@@ -708,7 +661,6 @@ export function PromptLibrary({
             </div>
           </div>
         </nav>
-        {/* Footer: where prompts can be invoked from, the mock's bottom band. */}
         <div className="shrink-0 border-t border-edge px-4 py-3">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
             Invoke anywhere
@@ -742,7 +694,6 @@ export function PromptLibrary({
         />
       )}
 
-      {/* ── Editor ── */}
       <section className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl space-y-4 p-8">
           {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
@@ -867,8 +818,6 @@ export function PromptLibrary({
                         key={p.path}
                         onClick={() => {
                           if (!selPrompt) return;
-                          // Seed the override from the global body so editing
-                          // starts from something, not a blank page.
                           updateCustom(
                             selPrompt.id!,
                             (c) => ({
@@ -900,7 +849,6 @@ export function PromptLibrary({
             )}
           </div>
 
-          {/* Body */}
           <div className="mt-4 space-y-1.5">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
@@ -994,7 +942,6 @@ export function PromptLibrary({
             </div>
           </div>
 
-          {/* Shortcut + availability/pin */}
           <div className="mt-4 grid grid-cols-2 gap-5 border-t border-edge/50 pt-4">
             <div className="space-y-1.5">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">

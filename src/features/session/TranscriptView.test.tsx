@@ -9,19 +9,12 @@ import {
   stickAfterScroll,
 } from "./TranscriptView";
 
-// stickAfterScroll(prevTop, top, gap, wasStuck), `gap` is the distance to the
-// bottom (scrollHeight - clientHeight - scrollTop). Releases only on a genuine
-// scroll-up; a scrollTop drop that keeps the gap ~0 is a layout clamp, not a
-// gesture, and must hold the stick.
 describe("stickAfterScroll", () => {
   it("releases on a genuine scroll-up (scrollTop dropped, real gap opened)", () => {
     expect(stickAfterScroll(1000, 500, 500, true)).toBe(false);
   });
 
   it("holds the stick when the viewport grows (composer shrank) and scrollTop clamps", () => {
-    // Was pinned at the bottom; the composer collapsed, so clientHeight grew and
-    // the browser clamped scrollTop down, but the gap stays ~0. The reported bug:
-    // this used to read as a scroll-up and unpin the view.
     expect(stickAfterScroll(1000, 960, 0, true)).toBe(true);
   });
 
@@ -30,8 +23,6 @@ describe("stickAfterScroll", () => {
   });
 
   it("does not release on streaming growth (gap opens but scrollTop did not drop)", () => {
-    // Content grew below the fold before the pin loop caught up: large gap, but
-    // scrollTop held, not a gesture, so the stick stays.
     expect(stickAfterScroll(1000, 1000, 200, true)).toBe(true);
   });
 
@@ -52,9 +43,6 @@ describe("stickAfterScroll", () => {
   });
 });
 
-// releaseOnWheel(deltaX, deltaY, ctrlKey, scrollTop), should this wheel event
-// drop the bottom-stick? Only a genuine upward, vertical-dominant wheel with
-// scrollback above it can.
 describe("releaseOnWheel", () => {
   it("releases on a plain wheel/trackpad scroll-up", () => {
     expect(releaseOnWheel(0, -40, false, 500)).toBe(true);
@@ -73,14 +61,10 @@ describe("releaseOnWheel", () => {
   });
 
   it("ignores a wheel-up with no scrollback above (short transcript)", () => {
-    // The old handler unpinned here, and with the content not overflowing no
-    // scroll event ever fires again, the pin was dead for the whole session.
     expect(releaseOnWheel(0, -40, false, 0)).toBe(false);
   });
 });
 
-// insideNestedScroller(target, root), wheel-ups inside an expanded tool
-// output's own scroller must not drop the transcript pin.
 describe("insideNestedScroller", () => {
   function chain() {
     const root = document.createElement("div");
@@ -93,7 +77,6 @@ describe("insideNestedScroller", () => {
 
   it("holds when an inner scroller has scrollback of its own", () => {
     const { root, box, target } = chain();
-    // jsdom doesn't clamp; a real browser only allows this on a scroller.
     box.scrollTop = 5;
     expect(insideNestedScroller(target, root)).toBe(true);
   });
@@ -126,13 +109,7 @@ describe("insideNestedScroller", () => {
   });
 });
 
-// Resizing the window (or the split pane) moves the bottom without firing a
-// scroll event, so a stuck transcript used to drift off the bottom and read as
-// if the chat scrolled with the window. A ResizeObserver on the scroller and
-// its content re-pins instead.
 describe("re-pinning on resize", () => {
-  /** jsdom has no layout engine, so it never delivers a resize, capture the
-   *  observer callbacks and fire them by hand. */
   let resizes: ResizeObserverCallback[] = [];
 
   beforeEach(() => {
@@ -154,8 +131,6 @@ describe("re-pinning on resize", () => {
     vi.unstubAllGlobals();
   });
 
-  /** Render the transcript and hand back its scroller with fake metrics: 1000px
-   *  of content in a 400px viewport, scrolled to the exact bottom. */
   function renderStuck() {
     const { container } = render(
       <TranscriptView
@@ -180,7 +155,7 @@ describe("re-pinning on resize", () => {
 
   it("re-pins to the new bottom when the viewport shrinks", () => {
     const { el, shrinkViewportTo } = renderStuck();
-    shrinkViewportTo(300); // window dragged shorter, opens a 100px gap
+    shrinkViewportTo(300);
     resize();
     expect(el.scrollTop).toBe(700);
   });

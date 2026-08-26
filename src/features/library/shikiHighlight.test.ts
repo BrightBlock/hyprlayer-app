@@ -1,8 +1,3 @@
-// Guards the hand-maintained pair that replaced Shiki's full bundle: the alias
-// table and the curated GRAMMARS map. Both are keyed on canonical grammar
-// names, so a package bump that renames one, or an alias pointing at a grammar
-// nobody imports, fails here rather than silently dropping a language to plain
-// text in the chat pane.
 
 import { describe, expect, it } from "vitest";
 import { highlightToHast, resolveLang } from "./shikiHighlight";
@@ -28,11 +23,6 @@ describe("shikiHighlight", () => {
     }
   }, 60_000);
 
-  // Every fence info-string found across the thoughts corpus, this repo's
-  // markdown and the installed skills, minus the ones Shiki has no grammar
-  // for at all (abnf, bnf, bru, gitignore, roff, sshconfig, webidl) — those
-  // render plain whatever this module does. Curating GRAMMARS is only safe
-  // while it still covers what actually gets written.
   it("covers the fence languages in real documents", async () => {
     const inUse = [
       "bash", "cmd", "console", "css", "csv", "diff", "go", "html",

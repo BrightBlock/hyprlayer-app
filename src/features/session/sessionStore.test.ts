@@ -4,11 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionEvent } from "@/lib/bindings";
 
-// Hoisted so the (hoisted) vi.mock factories below can reference these safely.
-// A `FakeChannel` stands in for the Tauri `Channel`: `onmessage` is just a
-// settable callback the store wires up, and the tests drive events by calling
-// it. `startStageSession` captures the channel it's handed (the store's event
-// sink) and hands back a minimal Session row.
 const h = vi.hoisted(() => {
   class FakeChannel {
     onmessage: ((event: unknown) => void) | null = null;
@@ -17,8 +12,6 @@ const h = vi.hoisted(() => {
   const startStageSession = vi.fn(async (...args: unknown[]) => {
     state.lastChannel = args[args.length - 1] as FakeChannel;
     const id = `s${(state.nextId += 1)}`;
-    // Mirrors the backend's StartedSession: the row plus the composed prompt
-    // (here just the raw input, composition is the backend's concern).
     return {
       status: "ok",
       data: {
@@ -33,8 +26,6 @@ const h = vi.hoisted(() => {
   const killSession = vi.fn(async () => ({ status: "ok", data: null }));
   const respondPermission = vi.fn(async () => ({ status: "ok", data: null }));
   const answerQuestion = vi.fn(async () => ({ status: "ok", data: null }));
-  // A permission-mode restart: capture the fresh channel the store hands over so
-  // post-restart `emit`s reach it, exactly like `startStageSession`.
   const restartSession = vi.fn(async (...args: unknown[]) => {
     state.lastChannel = args[args.length - 1] as FakeChannel;
     return { status: "ok", data: null };
@@ -67,7 +58,6 @@ vi.mock("../../lib/bindings", () => ({
   },
 }));
 
-// Imported after the mocks so the store binds to them.
 const {
   activeWorkstreamIds,
   startSession,
@@ -94,7 +84,6 @@ const TURN_DONE: SessionEvent = {
   contextTokens: null,
 };
 
-/** Drive an event through the live channel, exactly like the backend would. */
 function emit(event: SessionEvent): void {
   h.state.lastChannel?.onmessage?.(event);
 }
@@ -136,8 +125,6 @@ describe("dropSession (transcript eviction)", () => {
     dropSession(id);
     expect(useSessionStore.getState().sessions[id]).toBeUndefined();
 
-    // The channel is detached, a straggler event must not rebuild the entry
-    // (that's `restoreSessionIfNeeded`'s job, on remount, from the SQLite log).
     emit(TURN_DONE);
     expect(useSessionStore.getState().sessions[id]).toBeUndefined();
   });
@@ -150,7 +137,7 @@ describe("dropSession (transcript eviction)", () => {
 
 describe("conversation steering (mid-turn message queue)", () => {
   it("queues a message sent while a turn is in flight instead of sending it", async () => {
-    const id = await startBusySession(); // state "starting" → busy
+    const id = await startBusySession();
     await sendMessage(id, "follow-up");
 
     expect(queued(id)).toEqual(["follow-up"]);
@@ -174,12 +161,12 @@ describe("conversation steering (mid-turn message queue)", () => {
     expect(queued(id)).toEqual(["A", "B"]);
 
     emit(INIT);
-    emit(TURN_DONE); // first turn done → flush "A"
+    emit(TURN_DONE);
     await Promise.resolve();
     expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A", [], null);
     expect(queued(id)).toEqual(["B"]);
 
-    emit(TURN_DONE); // "A"'s turn done → flush "B"
+    emit(TURN_DONE);
     await Promise.resolve();
     expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B", [], null);
     expect(queued(id)).toEqual([]);
@@ -189,7 +176,6 @@ describe("conversation steering (mid-turn message queue)", () => {
     const id = await startBusySession();
     await sendMessage(id, "later");
 
-    // A turn that ends parked on a permission must NOT flush the queue.
     emit({ kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
     emit(TURN_DONE);
     await Promise.resolve();
@@ -212,17 +198,14 @@ describe("stopSession (interrupt → kill escalation)", () => {
     vi.useFakeTimers();
     try {
       const id = await startBusySession();
-      emit(INIT); // streaming → isWorking true → watchdog will arm
+      emit(INIT);
 
       const done = stopSession(id);
-      // The graceful interrupt is sent immediately…
       expect(h.interruptSession).toHaveBeenCalledWith(id);
-      // …then claude acks by emitting a turnDone, un-busying the session.
       emit(TURN_DONE);
       await vi.runAllTimersAsync();
       await done;
 
-      // No escalation: the watchdog observed isWorking flip false in time.
       expect(h.killSession).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -233,12 +216,10 @@ describe("stopSession (interrupt → kill escalation)", () => {
     vi.useFakeTimers();
     try {
       const id = await startBusySession();
-      emit(INIT); // streaming → isWorking true
+      emit(INIT);
 
       const done = stopSession(id);
       expect(h.interruptSession).toHaveBeenCalledWith(id);
-      // Claude never emits a result: drive past the grace window so the watchdog
-      // gives up and the hard kill fires.
       await vi.runAllTimersAsync();
       await done;
 
@@ -251,8 +232,6 @@ describe("stopSession (interrupt → kill escalation)", () => {
   it("still kills when the interrupt itself fails to deliver", async () => {
     vi.useFakeTimers();
     try {
-      // A wedged session whose stdin is gone, interrupt rejects, but we still
-      // want the kill to land so the user isn't stuck.
       h.interruptSession.mockRejectedValueOnce(new Error("stdin closed"));
       const id = await startBusySession();
       emit(INIT);
@@ -268,7 +247,6 @@ describe("stopSession (interrupt → kill escalation)", () => {
   });
 });
 
-// ─── background task timestamps (taskStartedAt) ──────────────────────────────
 
 const SPAWN_RESULT = (taskId: string) =>
   `Command running in background with ID: ${taskId}. Output is being written to: /tmp/tasks/${taskId}.output. You will be notified when it completes. To check interim output, use Read on that file path.`;
@@ -321,7 +299,6 @@ describe("taskStartedAt, per-task elapsed timestamps", () => {
     const firstStamp = useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"];
     expect(firstStamp).toBeTruthy();
 
-    // A new event arrives, stamp should remain unchanged.
     emit(TURN_DONE);
     const afterTurnDone = useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"];
     expect(afterTurnDone).toBe(firstStamp);
@@ -335,7 +312,6 @@ describe("taskStartedAt, per-task elapsed timestamps", () => {
     emit(TURN_DONE);
     expect(useSessionStore.getState().sessions[id]?.taskStartedAt?.["tu-1"]).toBeTruthy();
 
-    // claude's async completion notification, the agent never polled the task.
     emit({ kind: "backgroundTaskUpdate", taskId: "task-a", toolUseId: "tu-1", status: "completed" });
 
     const taskStartedAt = useSessionStore.getState().sessions[id]?.taskStartedAt;
@@ -350,7 +326,6 @@ describe("taskStartedAt, per-task elapsed timestamps", () => {
     emit(BASH_BG_RESULT("tu-1", "task-a"));
     emit(TURN_DONE);
 
-    // Agent stops the task.
     const stopResult = JSON.stringify({
       message: "Successfully stopped task: task-a (sleep 999)",
       task_id: "task-a",
@@ -366,15 +341,9 @@ describe("taskStartedAt, per-task elapsed timestamps", () => {
   });
 });
 
-// ─── classifyEntry, background activity ────────────────────────────────────
 
 const entryOf = (id: string) => useSessionStore.getState().sessions[id]!;
 
-// ─── recovering a turn parked on a permission/question ───────────────────────
-// Changing the permission mode or hitting Stop while claude is asking for an
-// approval/question used to strand the session `isBusy` forever (the dangling
-// card kept the composer locked and the queue frozen, with no live claude able
-// to answer the dead request). These guard the recovery.
 
 describe("parked-turn recovery (permission mode change / stop)", () => {
   const PERMISSION_ASK: SessionEvent = {
@@ -395,17 +364,14 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     const id = await startBusySession();
     emit(INIT);
     emit(PERMISSION_ASK);
-    expect(isBusy(entryOf(id))).toBe(true); // parked → composer locked
+    expect(isBusy(entryOf(id))).toBe(true);
 
-    await applyPermissionMode(id, "bypassPermissions"); // restart into the new mode
+    await applyPermissionMode(id, "bypassPermissions");
     await Promise.resolve();
 
-    // A mode-only restart passes null model/effort (claude keeps the session's
-    // originals on --resume); the new mode rides in the permission_mode slot.
     expect(h.restartSession).toHaveBeenCalledWith(id, null, null, "bypassPermissions", expect.anything());
     const entry = entryOf(id);
     expect(entry.pendingPermission).toBeNull();
-    // The dangling card is resolved (deny = the tool never ran), so isBusy clears.
     expect(entry.items.some((it) => it.kind === "permission" && it.decision === null)).toBe(false);
     expect(isBusy(entry)).toBe(false);
   });
@@ -414,24 +380,21 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     const id = await startBusySession();
     emit(INIT);
     emit(PERMISSION_ASK);
-    await sendMessage(id, "do it now"); // parked → queued, not sent
+    await sendMessage(id, "do it now");
     expect(queued(id)).toEqual(["do it now"]);
     expect(h.sendUserMessage).not.toHaveBeenCalled();
 
     await applyPermissionMode(id, "acceptEdits");
     await Promise.resolve();
 
-    // The restart freed the turn, so the queue flushes under the new mode.
     expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", [], null);
     expect(queued(id)).toEqual([]);
   });
 
   it("switching the model on a live session resumes it on the new model", async () => {
-    const id = await startBusySession(); // live session (channel bound)
+    const id = await startBusySession();
     emit(INIT);
 
-    // applyModel(id, modelFlag, effort, mode) relaunches via --resume onto the
-    // new model → commands.restartSession(id, model, effort, permission_mode, ch).
     await applyModel(id, "sonnet[1m]", "ultracode", "default");
     await Promise.resolve();
 
@@ -452,8 +415,6 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
 
     await stopSession(id);
 
-    // The decline goes to the LIVE driver (releases a claude blocked on the ask),
-    // then the interrupt halts the turn. No hard kill, it wasn't wedged-computing.
     expect(h.respondPermission).toHaveBeenCalledWith(id, "req-1", false, null);
     expect(h.interruptSession).toHaveBeenCalledWith(id);
     expect(h.killSession).not.toHaveBeenCalled();
@@ -472,7 +433,7 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
 
     await stopSession(id);
 
-    expect(h.answerQuestion).toHaveBeenCalledWith(id, "q-1", "{}"); // empty = dismiss
+    expect(h.answerQuestion).toHaveBeenCalledWith(id, "q-1", "{}");
     expect(h.interruptSession).toHaveBeenCalledWith(id);
     expect(h.respondPermission).not.toHaveBeenCalled();
 
@@ -482,12 +443,6 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
   });
 });
 
-// ─── resuming a silent process ───────────────────────────────────────────────
-// A `--resume`d claude emits `init` only with a turn, never on bare spawn, so a
-// re-attach onto a quiet process leaves the session in `starting` forever:
-// "Connecting…" never clears, the activity pill keeps pulsing (`isWorking` stays
-// true), and a queued follow-up never flushes. resumeSession settles out of
-// `starting` once the (empty) resume burst has flushed.
 
 const EXITED: SessionEvent = { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" };
 
@@ -496,26 +451,24 @@ describe("resuming a silent process settles out of `starting`", () => {
     const id = await startBusySession();
     emit(INIT);
     emit(TURN_DONE);
-    emit(EXITED); // process gone, channel dropped → detached
+    emit(EXITED);
 
-    await resumeSession(id); // backend re-attaches; the process stays silent (no events)
+    await resumeSession(id);
 
     const entry = entryOf(id);
-    expect(entry.state).not.toBe("starting"); // not stuck "Connecting…"
-    expect(isWorking(entry)).toBe(false); // pill stops pulsing
+    expect(entry.state).not.toBe("starting");
+    expect(isWorking(entry)).toBe(false);
     expect(classifyEntry(entry)).not.toBe("working");
   });
 
   it("flushes a queued follow-up after a silent resume", async () => {
-    const id = await startBusySession(); // "starting" → busy
-    await sendMessage(id, "later"); // queued behind the in-flight turn
+    const id = await startBusySession();
+    await sendMessage(id, "later");
     expect(queued(id)).toEqual(["later"]);
-    emit(EXITED); // turn dies with a follow-up still queued → detached
+    emit(EXITED);
 
     await resumeSession(id);
 
-    // The resumed process is idle, so the queued turn is released rather than
-    // sitting forever behind a turn that will never arrive.
     expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null);
     expect(queued(id)).toEqual([]);
   });
@@ -537,9 +490,6 @@ describe("resuming a silent process settles out of `starting`", () => {
     expect(queued(id)).toEqual(["follow-up"]);
   });
 
-  // codex/opencode emit `init` on every spawn. Claude only with a turn. Reading a
-  // bare one as "a turn started" left a restarted app's codex tabs on a phantom
-  // turn: ticking counter, composer stuck on "it'll queue…", Stop button.
   const resumeEmitting = (...burst: SessionEvent[]) =>
     h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
       const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
@@ -557,8 +507,8 @@ describe("resuming a silent process settles out of `starting`", () => {
     await resumeSession(id);
 
     const entry = entryOf(id);
-    expect(isWorking(entry)).toBe(false); // no phantom "time working" counter
-    expect(isBusy(entry)).toBe(false); // composer isn't locked behind a ghost turn
+    expect(isWorking(entry)).toBe(false);
+    expect(isBusy(entry)).toBe(false);
   });
 
   it("flushes a queued follow-up after a bare-`init` resume", async () => {
@@ -577,11 +527,8 @@ describe("resuming a silent process settles out of `starting`", () => {
     const id = await startBusySession();
     emit(INIT);
     emit(TURN_DONE);
-    emit(EXITED); // detach
+    emit(EXITED);
 
-    // Resume, but this time the re-attached process IS mid-turn: its stream lands
-    // during the resume burst, advancing us past `starting`. The settle must leave
-    // that real working state alone.
     h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
       const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
       ch.onmessage?.({ kind: "partialText", text: "thinking" } as SessionEvent);
@@ -590,15 +537,10 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     await resumeSession(id);
 
-    expect(isWorking(entryOf(id))).toBe(true); // still streaming, not settled to idle
+    expect(isWorking(entryOf(id))).toBe(true);
   });
 });
 
-// ─── closing the streaming caret on turn abandonment ─────────────────────────
-// An open assistant block renders a blinking caret while `streaming: true`. A
-// turn that's abandoned (permission-mode restart, or a mid-turn crash) used to
-// settle the session's `streaming` flag but leave the block's own flag set, so
-// the caret kept pulsing after the conversation had already stopped.
 
 const PARTIAL = (text: string): SessionEvent =>
   ({ kind: "partialText", text, parentId: null }) as SessionEvent;
@@ -610,12 +552,12 @@ describe("turn abandonment closes the streaming caret", () => {
     const id = await startBusySession();
     emit(INIT);
     emit(PARTIAL("thinking…"));
-    expect(hasStreamingBlock(id)).toBe(true); // caret pulsing
+    expect(hasStreamingBlock(id)).toBe(true);
 
-    await applyPermissionMode(id, "bypassPermissions"); // restart interrupts the turn
+    await applyPermissionMode(id, "bypassPermissions");
     await Promise.resolve();
 
-    expect(hasStreamingBlock(id)).toBe(false); // caret stopped
+    expect(hasStreamingBlock(id)).toBe(false);
     expect(entryOf(id).streaming).toBe(false);
   });
 
@@ -625,7 +567,7 @@ describe("turn abandonment closes the streaming caret", () => {
     emit(PARTIAL("thinking…"));
     expect(hasStreamingBlock(id)).toBe(true);
 
-    emit(EXITED); // process dies mid-turn
+    emit(EXITED);
 
     expect(hasStreamingBlock(id)).toBe(false);
   });
@@ -637,7 +579,7 @@ describe("classifyEntry, background activity state", () => {
     emit(INIT);
     emit(BASH_BG_SPAWN("tu-1", "task-a"));
     emit(BASH_BG_RESULT("tu-1", "task-a"));
-    emit(TURN_DONE); // running && !streaming, task still un-stopped
+    emit(TURN_DONE);
 
     const entry = entryOf(id);
     expect(entry.state).toBe("running");
@@ -646,7 +588,6 @@ describe("classifyEntry, background activity state", () => {
   });
 
   it("returns 'review' (not 'background') for a DETACHED session (live:false)", async () => {
-    // Restored-after-restart: no live process, so its leftover spawn isn't running.
     const id = await startBusySession();
     emit(INIT);
     emit(BASH_BG_SPAWN("tu-1", "task-a"));
@@ -654,7 +595,7 @@ describe("classifyEntry, background activity state", () => {
     emit(TURN_DONE);
 
     const live = entryOf(id);
-    expect(classifyEntry(live)).toBe("background"); // sanity: live → background
+    expect(classifyEntry(live)).toBe("background");
     expect(classifyEntry({ ...live, live: false })).toBe("review");
   });
 
@@ -666,8 +607,6 @@ describe("classifyEntry, background activity state", () => {
     emit(TURN_DONE);
     expect(classifyEntry(entryOf(id))).toBe("background");
 
-    // The screenshot bug: the task finished but stayed "background" forever
-    // because the agent never polled it. The async notification now clears it.
     emit({ kind: "backgroundTaskUpdate", taskId: "task-a", toolUseId: "tu-1", status: "completed" });
 
     const entry = entryOf(id);
@@ -677,10 +616,6 @@ describe("classifyEntry, background activity state", () => {
   });
 
   it("stays 'background' while a workflow's parented events keep arriving", async () => {
-    // The whole point of the parented-`streaming` rule: ~800 file-derived
-    // agent events land across a 17-minute run, all after `turnDone`. Without
-    // it `isWorking` pre-empts `background` and the sidebar dot stays blue for
-    // the entire run.
     const id = await startBusySession();
     emit(INIT);
     emit({
@@ -700,7 +635,6 @@ describe("classifyEntry, background activity state", () => {
     emit(TURN_DONE);
     expect(classifyEntry(entryOf(id))).toBe("background");
 
-    // A nested agent's own tool call, arriving minutes later.
     emit({
       kind: "toolUse",
       id: "wf:wf_1:agent1",
@@ -726,7 +660,6 @@ describe("classifyEntry, background activity state", () => {
     emit(INIT);
     emit(BASH_BG_SPAWN("tu-1", "task-a"));
     emit(BASH_BG_RESULT("tu-1", "task-a"));
-    // No turnDone → still streaming → working takes precedence over background.
     const entry = entryOf(id);
     expect(entry.streaming).toBe(true);
     expect(classifyEntry(entry)).toBe("working");
@@ -737,9 +670,6 @@ describe("classifyEntry, background activity state", () => {
     emit(INIT);
     emit(BASH_BG_SPAWN("tu-1", "task-a"));
     emit(BASH_BG_RESULT("tu-1", "task-a"));
-    // The process exits cleanly while the shell is still un-stopped: it died
-    // with the process group, so the dead session reads as review, not a
-    // phantom "background" pulse.
     emit({ kind: "exited", outcome: "completed", code: 0, stderrTail: "" });
 
     const entry = entryOf(id);
@@ -760,8 +690,6 @@ describe("classifyEntry, background activity state", () => {
   });
 
   it("a DETACHED session drops its live flag but stays non-terminal", async () => {
-    // The app quit and took the process with it. The tab must come back to a
-    // clean, resumable session, not a terminal one that auto-resumes on sight.
     const id = await startBusySession();
     emit(INIT);
     emit(BASH_BG_SPAWN("tu-1", "task-a"));
@@ -774,19 +702,18 @@ describe("classifyEntry, background activity state", () => {
   });
 });
 
-// ─── workstreamShipBusy, hide Commit while Ship commits ────────────────────
 
 describe("workstreamShipBusy", () => {
   const shipBusy = (ws: string) => workstreamShipBusy(useSessionStore.getState().sessions, ws);
 
   it("is true while the ship session is mid-turn, false once that turn parks", async () => {
     await startSession({ workstreamId: "ws1", stage: "ship", input: "" });
-    expect(shipBusy("ws1")).toBe(true); // "starting" → working
-
-    emit(INIT); // streaming
     expect(shipBusy("ws1")).toBe(true);
 
-    emit(TURN_DONE); // commit/push/PR done, parks at "review"
+    emit(INIT);
+    expect(shipBusy("ws1")).toBe(true);
+
+    emit(TURN_DONE);
     expect(shipBusy("ws1")).toBe(false);
   });
 
@@ -798,11 +725,9 @@ describe("workstreamShipBusy", () => {
   });
 
   it("ignores non-ship sessions and other workstreams' ship sessions", async () => {
-    // A working *general*-stage session must not suppress Commit…
     await startSession({ workstreamId: "ws1", stage: "general", input: "" });
     expect(shipBusy("ws1")).toBe(false);
 
-    // …nor a ship session belonging to a different workstream.
     await startSession({ workstreamId: "ws2", stage: "ship", input: "" });
     expect(shipBusy("ws1")).toBe(false);
     expect(shipBusy("ws2")).toBe(true);
@@ -857,15 +782,15 @@ describe("activeWorkstreamIds", () => {
 
   it("includes a workstream with a session currently working", async () => {
     await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
-    expect(activeWorkstreamIds()).toContain("ws1"); // still "starting": isWorking
+    expect(activeWorkstreamIds()).toContain("ws1");
   });
 
   it("excludes a workstream idle past the attribution grace window", async () => {
     vi.useFakeTimers();
     await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
     emit(INIT);
-    emit(TURN_DONE); // settles to idle, not working
-    vi.advanceTimersByTime(31_000); // just past ATTRIBUTION_GRACE_MS
+    emit(TURN_DONE);
+    vi.advanceTimersByTime(31_000);
     expect(activeWorkstreamIds()).not.toContain("ws1");
   });
 
@@ -879,16 +804,10 @@ describe("activeWorkstreamIds", () => {
   });
 
   it("does not include a workstream with no session that has ever worked", () => {
-    // Other tests in this suite stamp their own workstream ids into the
-    // (module-scoped, never reset between tests) activity map, so assert
-    // against an id this suite never uses rather than global emptiness.
     expect(activeWorkstreamIds()).not.toContain("ws-never-started");
   });
 });
 
-// Wrong attribution costs the most at the suggested-doc chip: it hands a
-// foreign plan to the next stage as context, with nothing on screen to say so
-// (2026-08-21-scope-sidebar-docs-to-workstream.md).
 describe("useMostRecentDoc", () => {
   function toolUse(id: string, name: string, input: Record<string, unknown>): SessionEvent {
     return { kind: "toolUse", id, name, input: JSON.stringify(input), parentId: null };
@@ -903,7 +822,6 @@ describe("useMostRecentDoc", () => {
   });
 
   it("returns null for a workstream whose only reference to the plan is a read", async () => {
-    // ws1 writes the plan; ws2 only `cat`s it (no proof ws2 ever wrote it).
     await startSession({ workstreamId: "ws1", stage: "general", input: "go" });
     emit(toolUse("tu1", "Write", { file_path: "/t/shared/plans/2026-08-21-a.md" }));
 

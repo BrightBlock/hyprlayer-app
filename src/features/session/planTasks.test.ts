@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { planTasksFromItems, type PlanTask } from "./planTasks";
 import type { TranscriptItem } from "./transcript";
 
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 function makeTool(
   name: string,
@@ -16,7 +15,6 @@ function makeTool(
 
 const ok = (content: string) => ({ content, isError: false });
 
-/** A TaskCreate, with its result by default (id `#n`, echoing the subject). */
 function taskCreate(
   toolUseId: string,
   subject: string,
@@ -36,7 +34,6 @@ function taskUpdate(
   return makeTool("TaskUpdate", JSON.stringify(fields), toolUseId, ok(`Updated task #${fields.taskId} status`));
 }
 
-/** A TaskUpdate that deletes a task (`status:"deleted"` per the tool schema). */
 function taskDelete(toolUseId: string, taskId: string): Extract<TranscriptItem, { kind: "tool" }> {
   return makeTool(
     "TaskUpdate",
@@ -57,7 +54,6 @@ function todoWrite(
   return makeTool("TodoWrite", JSON.stringify({ todos }), toolUseId, ok("Todos updated"));
 }
 
-// ─── planTasksFromItems ───────────────────────────────────────────────────────
 
 describe("planTasksFromItems", () => {
   it("returns empty for an empty transcript", () => {
@@ -169,21 +165,16 @@ describe("planTasksFromItems", () => {
   });
 
   it("does not count deleted tasks after a recreate (the 'TASKS 3/6' bug)", () => {
-    // Repro of the reported bug: create three, delete all three, then recreate
-    // three and mark them completed. The deleted #1–#3 must NOT linger and
-    // inflate the total to six, the list is exactly the three live tasks.
     const items: TranscriptItem[] = [
       taskCreate("t1", "Design the data model", { id: 1 }),
       taskCreate("t2", "Implement the API endpoints", { id: 2 }),
       taskCreate("t3", "Write integration tests", { id: 3 }),
       taskUpdate("t4", { taskId: "1", status: "completed" }),
       taskUpdate("t5", { taskId: "2", status: "in_progress" }),
-      // clean up: delete all three
       taskDelete("t6", "1"),
       taskDelete("t7", "2"),
       taskDelete("t8", "3"),
       taskList("t9", "No tasks found"),
-      // recreate three and complete them
       taskCreate("t10", "Design the data model", { id: 4 }),
       taskCreate("t11", "Implement the API endpoints", { id: 5 }),
       taskCreate("t12", "Write integration tests", { id: 6 }),
@@ -217,7 +208,6 @@ describe("planTasksFromItems", () => {
     const items: TranscriptItem[] = [
       makeTool("TaskCreate", JSON.stringify({ subject: "Nope" }), "t1", { content: "boom", isError: true }),
     ];
-    // No id parsed → shown optimistically with a null id, never a phantom "#NaN".
     expect(planTasksFromItems(items)).toEqual<PlanTask[]>([{ id: null, subject: "Nope", status: "pending" }]);
   });
 
@@ -246,7 +236,6 @@ describe("planTasksFromItems", () => {
       taskCreate("t2", "Test primes", { id: 2 }),
       taskUpdate("t3", { taskId: "1", status: "completed" }),
       taskUpdate("t4", { taskId: "2", status: "completed" }),
-      // A new plan in a later turn, the old completed batch should drop away.
       taskCreate("t5", "Build fizzbuzz", { id: 3 }),
       taskCreate("t6", "Test fizzbuzz", { id: 4 }),
     ];
@@ -260,7 +249,7 @@ describe("planTasksFromItems", () => {
     const items: TranscriptItem[] = [
       taskCreate("t1", "First", { id: 1 }),
       taskUpdate("t2", { taskId: "1", status: "in_progress" }),
-      taskCreate("t3", "Second", { id: 2 }), // added mid-plan, First not done
+      taskCreate("t3", "Second", { id: 2 }),
     ];
     expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
       { id: "1", subject: "First", status: "in_progress" },

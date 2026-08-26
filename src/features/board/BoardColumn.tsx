@@ -2,11 +2,6 @@ import type { ReactNode } from "react";
 import { ModeIcon } from "@/components/icons";
 import { MODE_STYLES, type StageKey } from "@/lib/domain/stages";
 
-/** One stage tile in the project kanban board, styled like the home dashboard's
- *  Add / Discover / Settings tiles, a rounded, bordered panel with an icon chip
- *  and a title + subtitle header, so the board reads as part of the same family.
- *  The stage hue lives in the chip's icon; the card list fills the rest of the
- *  tile and scrolls once a stage gets busy. */
 export function BoardColumn({
   label,
   stageKey,

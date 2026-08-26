@@ -26,8 +26,6 @@ import type { ArchivedWorkstreamView, Project } from "@/lib/bindings";
 
 const MS_PER_DAY = 86_400_000;
 
-/** Coarse buckets the user can reason about at a glance: today, yesterday,
- *  N days, weeks, months, years. The labels match the screenshot reference. */
 type Bucket = { label: string; order: number; views: ArchivedWorkstreamView[] };
 
 function bucketFor(archivedAt: number, now: number): { label: string; order: number } {
@@ -49,7 +47,6 @@ function bucketFor(archivedAt: number, now: number): { label: string; order: num
 }
 
 function formatDate(ms: number): string {
-  // Short, locale-aware, matches the screenshot's "Jun 19" / "Apr 30" style.
   return new Date(ms).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
@@ -80,8 +77,6 @@ export function Archive() {
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [restoreError, setRestoreError] = useState<unknown>(null);
 
-  // Memoise so the bucket-grouping useMemo doesn't re-run on every render
-  // just because we built a fresh empty array each time.
   const projects = useMemo<Project[]>(
     () => bootstrap.data?.projects ?? [],
     [bootstrap.data?.projects],
@@ -93,8 +88,6 @@ export function Archive() {
     const needle = filter.trim().toLowerCase();
     const groups = new Map<string, Bucket>();
     for (const view of archived.data) {
-      // archivedAt is always set on archived rows; the chain is just to satisfy
-    // the binding's `number | null` (specta widens f64 to nullable in TS).
     const at: number = view.item.archivedAt ?? view.item.updatedAt ?? 0;
       if (needle) {
         const haystack = `${view.item.title} ${view.item.branch} ${projectName(projects, view.item.projectPath)}`.toLowerCase();
@@ -119,7 +112,6 @@ export function Archive() {
     setRestoreError(null);
     restore.mutate(view.item.id, {
       onSuccess: (restored) => {
-        // Drop the user straight into the restored workstream.
         void navigate({
           to: "/projects/$projectPath",
           params: { projectPath: restored.item.projectPath },

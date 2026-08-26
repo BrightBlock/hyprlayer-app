@@ -94,8 +94,6 @@ describe("launched skill bodies", () => {
   const SKILL_BODY =
     "Base directory for this skill: /Users/jt/.claude/skills/describe_pr\n\n# Generate PR Description\nYou are ...";
 
-  /** The handshake claude settles a `Skill` call with just before it injects
-   *  that skill's body — the only result shape that promises one is coming. */
   const launched = (toolUseId: string, skill: string): SessionEvent => ({
     kind: "toolResult",
     toolUseId,
@@ -106,8 +104,6 @@ describe("launched skill bodies", () => {
 
   it("folds the injected body into the Skill invocation row, not a second block", () => {
     let view = initialSessionView("running");
-    // Real flow: the assistant says it'll run the skill, the Skill tool runs,
-    // then its SKILL.md arrives as an assistant block right after the result.
     view = reduceEvent(view, { kind: "assistantText", text: "I'll run the doctor skill.", parentId: null });
     view = reduceEvent(view, {
       kind: "toolUse",
@@ -125,7 +121,6 @@ describe("launched skill bodies", () => {
     });
     view = reduceEvent(view, { kind: "assistantText", text: SKILL_BODY, parentId: null });
 
-    // One prose block + one tool row, the body folds into the row, no extra block.
     expect(kinds(view)).toEqual(["assistant", "tool"]);
     expect(view.items[1]).toMatchObject({ kind: "tool", name: "Skill", skillBody: SKILL_BODY });
   });
@@ -138,16 +133,11 @@ describe("launched skill bodies", () => {
     view = reduceEvent(view, launched("s2", "b"));
     view = reduceEvent(view, { kind: "assistantText", text: `${SKILL_BODY} (one)`, parentId: null });
     view = reduceEvent(view, { kind: "assistantText", text: `${SKILL_BODY} (two)`, parentId: null });
-    // Bodies attach to the earliest still-awaiting row first, in order.
     expect(view.items[0]).toMatchObject({ toolUseId: "s1", skillBody: `${SKILL_BODY} (one)` });
     expect(view.items[1]).toMatchObject({ toolUseId: "s2", skillBody: `${SKILL_BODY} (two)` });
     expect(kinds(view)).toEqual(["tool", "tool"]);
   });
 
-  // A bundled skill that ships no auxiliary files gets no `Base directory for
-  // this skill:` line, so the prefix alone never recognized it and 11KB of
-  // `artifact-design` dumped into the transcript. `injected` (claude's
-  // `isSynthetic`) is what marks it.
   it("folds a prefix-less injected body into its Skill row", () => {
     const body = "Approach this as the design lead at a small studio known for their versatility…";
     let view = initialSessionView("running");
@@ -165,9 +155,6 @@ describe("launched skill bodies", () => {
     expect(view.items[0]).toMatchObject({ kind: "tool", name: "Skill", skillBody: body });
   });
 
-  // `/code-review` forks its execution and injects nothing, so its row stays
-  // body-less for the rest of the session. Before the launch-handshake guard it
-  // sat at the front of the scan and swallowed the *next* skill's body.
   it("does not fold a body into a skill row that was never going to get one", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, {
@@ -193,8 +180,6 @@ describe("launched skill bodies", () => {
     expect(view.items[1]).toMatchObject({ toolUseId: "s2", skillBody: SKILL_BODY });
   });
 
-  // Not every synthetic user turn is a skill body — "[Request interrupted…]"
-  // markers ride the same flag. With no skill row waiting, it stays prose.
   it("leaves injected text with no skill row awaiting a body as an assistant block", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, {
@@ -282,7 +267,6 @@ describe("tool blocks", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Read", input: "{}", parentId: null });
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
-    // A different tool finishing must not un-park a Bash permission.
     view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "ok", isError: false, parentId: null });
     expect(hasPendingPermission(view)).toBe(true);
     expect(view.state).toBe("awaiting_permission");
@@ -301,9 +285,6 @@ describe("thinking", () => {
 
 describe("OpenCode: late final text coalesces (no duplicate around tools)", () => {
   it("does not duplicate the intro when its text part ends after the tool starts", () => {
-    // From a live `opencode serve` trace: the intro's text part gets its `time.end`
-    // only *after* the tool, so `toolUse` closes the streamed block and the final
-    // `assistantText` lands with nothing open. It must reunite, not duplicate it.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "partialText", text: "I'm going to run the echo command.", parentId: null });
     view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: '{"command":"echo hi"}', parentId: null });
@@ -314,8 +295,6 @@ describe("OpenCode: late final text coalesces (no duplicate around tools)", () =
   });
 
   it("completes a stream that was cut off mid-part by the tool", () => {
-    // The stream was closed by the tool before the last delta; the longer final
-    // still coalesces into the streamed block (prefix match) rather than dupes.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "partialText", text: "Reading the", parentId: null });
     view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Read", input: "{}", parentId: null });
@@ -348,19 +327,16 @@ describe("OpenCode: inline <think> reasoning is split out of prose", () => {
   });
 
   it("treats an orphaned leading </think> (stripped opener) as reasoning", () => {
-    // The exact shape in the reported transcript: reasoning, a bare </think>, answer.
     let view = initialSessionView("running");
     const raw = "We need to find the homepage. Let's list src. </think>I'll add it near the bottom.";
     view = reduceEvent(view, { kind: "assistantText", text: raw, parentId: null });
     expect(kinds(view)).toEqual(["thinking", "assistant"]);
     expect(view.items[0]).toMatchObject({ kind: "thinking", text: "We need to find the homepage. Let's list src." });
     expect(view.items[1]).toMatchObject({ text: "I'll add it near the bottom." });
-    // The raw closing tag never reaches the rendered/copied transcript.
     expect(viewToText(view)).not.toContain("</think>");
   });
 
   it("places the thought where the text streamed, before a tool it preceded", () => {
-    // Reasoning leaked inline, the block was closed by a tool, then the final lands.
     let view = initialSessionView("running");
     const raw = "<think>Plan the edit.</think>Editing now.";
     view = reduceEvent(view, { kind: "partialText", text: raw, parentId: null });
@@ -384,7 +360,6 @@ describe("OpenCode: inline <think> reasoning is split out of prose", () => {
     expect(splitInlineThinking("<thinking>R</thinking>A")).toEqual({ reasoning: "R", answer: "A" });
     expect(splitInlineThinking("R</think>A")).toEqual({ reasoning: "R", answer: "A" });
     expect(splitInlineThinking("<think>R only")).toEqual({ reasoning: "R only", answer: "" });
-    // Answer prose that genuinely precedes a real think pair is preserved.
     expect(splitInlineThinking("A1<think>R</think>A2")).toEqual({ reasoning: "R", answer: "A1A2" });
   });
 });
@@ -392,11 +367,8 @@ describe("OpenCode: inline <think> reasoning is split out of prose", () => {
 describe("subagent nesting", () => {
   it("does not duplicate the main block when subagent steps interleave its stream", () => {
     let view = initialSessionView("running");
-    // Main agent starts streaming a progress message…
     view = reduceEvent(view, { kind: "partialText", text: "7 agents running. ", parentId: null });
-    // …a parallel subagent emits a step, landing after the open main block…
     view = reduceEvent(view, { kind: "toolUse", id: "s1", name: "Read", input: "{}", parentId: "task1" });
-    // …the main agent keeps streaming, then finalizes.
     view = reduceEvent(view, { kind: "partialText", text: "Waiting.", parentId: null });
     view = reduceEvent(view, { kind: "assistantText", text: "7 agents running. Waiting.", parentId: null });
 
@@ -416,7 +388,6 @@ describe("subagent nesting", () => {
       input: '{"description":"research"}',
       parentId: null,
     });
-    // Subagent activity, all parented to the Task.
     view = reduceEvent(view, { kind: "partialText", text: "streaming…", parentId: "task1" });
     view = reduceEvent(view, { kind: "assistantText", text: "sub answer", parentId: "task1" });
     view = reduceEvent(view, { kind: "toolUse", id: "s1", name: "Read", input: "{}", parentId: "task1" });
@@ -427,7 +398,6 @@ describe("subagent nesting", () => {
       isError: false,
       parentId: "task1",
     });
-    // The Task's own result comes back on the main thread.
     view = reduceEvent(view, {
       kind: "toolResult",
       toolUseId: "task1",
@@ -438,13 +408,11 @@ describe("subagent nesting", () => {
 
     const task = view.items.find((i) => i.kind === "tool" && i.toolUseId === "task1");
     expect(task).toMatchObject({ result: { content: "report" }, parentId: null });
-    // Subagent text + tool are tagged with the parent and stay out of the main flow.
     const subItems = view.items.filter(
       (i): i is Extract<TranscriptItem, { parentId?: string | null }> =>
         "parentId" in i && i.parentId === "task1",
     );
     expect(subItems.map((i) => i.kind)).toEqual(["assistant", "tool"]);
-    // The suppressed subagent partial created no main-thread assistant block.
     const mainAssistants = view.items.filter(
       (i) => i.kind === "assistant" && !("parentId" in i && i.parentId),
     );
@@ -471,11 +439,6 @@ describe("permission flow", () => {
   });
 
   it("a parented toolUse/toolResult leaves `streaming` untouched", () => {
-    // A workflow's file-derived agent events arrive for many minutes after the
-    // launching turn's own `turnDone`. Re-setting `streaming` on each would pin
-    // `isWorking` true for the whole run: the session would read `working`
-    // rather than `background`, and `isBusy` would queue any typed follow-up
-    // with no reachable flush path.
     const resting = { ...initialSessionView("running"), streaming: false };
 
     const afterUse = reduceEvent(resting, {
@@ -496,7 +459,6 @@ describe("permission flow", () => {
     });
     expect(afterResult.streaming).toBe(false);
 
-    // An UNparented tool still starts the turn streaming, as before.
     expect(
       reduceEvent(resting, {
         kind: "toolUse",
@@ -531,7 +493,6 @@ describe("permission flow", () => {
   });
 
   it("stays parked across parallel asks until the last is answered", () => {
-    // A subagent firing parallel Bash calls produces several open asks at once.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-2", toolName: "Bash", input: "{}" });
@@ -548,9 +509,6 @@ describe("permission flow", () => {
   });
 
   it("a turnDone while an ask is open keeps the session parked, not idle", () => {
-    // Regression: a subagent finishing emitted turnDone and dropped the session
-    // to "running"/not-busy while permission cards were still unanswered, so the
-    // stop button vanished and the composer looked ready mid-block.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
     view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null });
@@ -559,9 +517,6 @@ describe("permission flow", () => {
   });
 
   it("cancelPendingPrompts denies every open card and clears both pending prompts", () => {
-    // The escape hatch when a turn is abandoned (permission-mode restart / Stop)
-    // rather than answered: the parked state must clear or the session is stuck
-    // `isBusy` forever on an ask no live claude can resolve.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-2", toolName: "Bash", input: "{}" });
@@ -573,7 +528,6 @@ describe("permission flow", () => {
     expect(view.pendingQuestion).toBeNull();
     expect(hasPendingPermission(view)).toBe(false);
     expect(view.items.every((it) => it.kind !== "permission" || it.decision === "deny")).toBe(true);
-    // Nothing is parked anymore, so once the caller settles state the turn is free.
     expect(isBusy({ ...view, state: parkedState(view), streaming: false })).toBe(false);
   });
 });
@@ -598,7 +552,6 @@ describe("question flow", () => {
         },
       ],
     });
-    // The questions render above the composer, not as a transcript item.
     expect(view.items).toHaveLength(0);
   });
 
@@ -638,7 +591,6 @@ describe("question flow", () => {
   it("parseQuestions drops malformed payloads instead of throwing", () => {
     expect(parseQuestions("not json")).toEqual([]);
     expect(parseQuestions(JSON.stringify({ not: "an array" }))).toEqual([]);
-    // A question with no text is skipped; valid siblings survive.
     const mixed = JSON.stringify([
       { header: "x", options: [] },
       { question: "Real?", options: [{ label: "Yes" }, { bogus: true }] },
@@ -652,25 +604,20 @@ describe("question flow", () => {
     const single: Question = { question: "Color?", header: "", multiSelect: false, options: [] };
     const multi: Question = { question: "Langs?", header: "", multiSelect: true, options: [] };
 
-    // Single-select via a preset pick.
     expect(buildQuestionAnswers([single], { "Color?": ["Red"] }, {})).toEqual({ "Color?": "Red" });
 
-    // Single-select via "Other" only (no pick), the custom text is the answer.
     expect(buildQuestionAnswers([single], {}, { "Color?": "Chartreuse" })).toEqual({
       "Color?": "Chartreuse",
     });
 
-    // Multi-select appends the custom text after the picks.
     expect(
       buildQuestionAnswers([multi], { "Langs?": ["Rust", "TS"] }, { "Langs?": "Zig" }),
     ).toEqual({ "Langs?": "Rust, TS, Zig" });
 
-    // Custom text is trimmed; whitespace-only and absent answers are omitted.
     expect(
       buildQuestionAnswers([single, multi], {}, { "Color?": "  Teal  ", "Langs?": "   " }),
     ).toEqual({ "Color?": "Teal" });
 
-    // Nothing chosen anywhere → empty map (the "dismissed" signal).
     expect(buildQuestionAnswers([single, multi], {}, {})).toEqual({});
   });
 
@@ -698,8 +645,6 @@ describe("turn + exit lifecycle", () => {
   });
 
   it("contextWindow sets the meter denominator without touching anything else", () => {
-    // The backend reports a model's real window (e.g. an Ollama model's fixed
-    // num_ctx) so the meter doesn't fall back to the Claude 1M default.
     let view = initialSessionView("running");
     expect(view.contextWindow).toBeNull();
     view = reduceEvent(view, { kind: "contextWindow", tokens: 32768 });
@@ -727,9 +672,6 @@ describe("turn + exit lifecycle", () => {
   });
 
   it("a detached exit leaves no notice and stays resumable", () => {
-    // Quitting the app (or relaunching a session under a new model/mode) kills
-    // the process, but the user never ended the conversation, so the transcript
-    // stays exactly as it was and the session rests idle, not terminal.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "assistantText", text: "hi", parentId: null });
     const before = view.items.length;
@@ -742,8 +684,6 @@ describe("turn + exit lifecycle", () => {
   });
 
   it("a detached exit cancels open asks so the session can't strand busy", () => {
-    // The request ids died with the process; an open card would keep the
-    // composer locked on an ask no live agent can answer.
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
     view = reduceEvent(view, { kind: "exited", outcome: "detached", code: null, stderrTail: "" });
@@ -760,7 +700,6 @@ describe("turn + exit lifecycle", () => {
 
   it("commandLifecycle draws a seam on started, naming the wakeup and reusing its reason", () => {
     let view = initialSessionView("running");
-    // The agent schedules a wakeup, then ends its turn.
     view = reduceEvent(view, {
       kind: "toolUse",
       id: "t1",
@@ -769,20 +708,16 @@ describe("turn + exit lifecycle", () => {
       parentId: null,
     });
     view = reduceEvent(view, { kind: "partialText", text: "waiting…", parentId: null });
-    // …the wakeup fires: claude injects the queued prompt and a new turn begins.
     view = reduceEvent(view, {
       kind: "commandLifecycle",
       commandUuid: "cd3eda46",
       state: "started",
     });
-    // The seam says what the wakeup was for, rather than inventing copy, the detail
-    // is the scheduling call's own `reason`.
     expect(view.items[view.items.length - 1]).toMatchObject({
       kind: "queuedCommand",
       label: "Scheduled wakeup",
       detail: "waiting for Vercel",
     });
-    // The open prose block is closed so the seam doesn't land mid-stream.
     expect(view.items.find((i) => i.kind === "assistant")).toMatchObject({ streaming: false });
   });
 
@@ -835,9 +770,6 @@ describe("turn + exit lifecycle", () => {
     view = reduceEvent(view, { kind: "partialText", text: "thinking…", parentId: null });
     expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: true });
     view = reduceEvent(view, { kind: "compactBoundary", trigger: "auto", preTokens: 182_431 });
-    // The open assistant block is closed so the divider doesn't land mid-stream,
-    // but a turn that was in flight (`streaming: true`) stays in flight, the
-    // post-compact turn keeps the spinner alive until its own `turnDone`.
     expect(view.items[0]).toMatchObject({ kind: "assistant", streaming: false });
     expect(view.items[1]).toMatchObject({ kind: "compact", trigger: "auto", preTokens: 182_431 });
     expect(view.streaming).toBe(true);
@@ -846,8 +778,6 @@ describe("turn + exit lifecycle", () => {
 });
 
 describe("post-compact summary", () => {
-  // claude delivers the summary as one big assistant block right after the
-  // boundary; it always opens with this system-injected preamble.
   const SUMMARY =
     "This session is being continued from a previous conversation that ran out of context. " +
     "The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request…";
@@ -863,10 +793,8 @@ describe("post-compact summary", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "compactBoundary", trigger: "auto", preTokens: 167_335 });
     view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
-    // Just the divider, the 12–18KB summary folds into it, never dumped inline.
     expect(kinds(view)).toEqual(["compact"]);
     expect(view.items[0]).toMatchObject({ kind: "compact", trigger: "auto", summary: SUMMARY });
-    // The turn is still in flight; its real continuation renders as normal prose.
     view = reduceEvent(view, { kind: "assistantText", text: "Now I'll read the file.", parentId: null });
     expect(kinds(view)).toEqual(["compact", "assistant"]);
     expect(view.items[1]).toMatchObject({ kind: "assistant", text: "Now I'll read the file." });
@@ -875,8 +803,6 @@ describe("post-compact summary", () => {
   it("drops a streamed partial summary so it isn't shown twice", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "compactBoundary", trigger: "manual", preTokens: null });
-    // If the summary streamed as partials first, an open assistant block holds
-    // them, folding the completed summary in must remove that partial block.
     view = reduceEvent(view, { kind: "partialText", text: SUMMARY.slice(0, 40), parentId: null });
     expect(kinds(view)).toEqual(["compact", "assistant"]);
     view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
@@ -887,7 +813,6 @@ describe("post-compact summary", () => {
   it("leaves a summary-prefixed block as prose when no boundary is awaiting one", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "assistantText", text: SUMMARY, parentId: null });
-    // No compact divider to fold into → render it rather than silently drop it.
     expect(kinds(view)).toEqual(["assistant"]);
     expect(view.items[0]).toMatchObject({ kind: "assistant", text: SUMMARY });
   });
@@ -913,8 +838,6 @@ describe("connecting state (leaves 'starting' on first sign of life)", () => {
   });
 
   it("streamed text clears 'starting' even with no init (a re-tailed live session)", () => {
-    // After an HMR/UI reload the backend re-tails the still-live process without
-    // re-emitting `init`; the next streamed event must drop the connecting state.
     let view = reduceEvent(initialSessionView("starting"), {
       kind: "partialText",
       text: "Resuming…",
@@ -934,7 +857,6 @@ describe("connecting state (leaves 'starting' on first sign of life)", () => {
   });
 
   it("a fresh 'starting' view with no events stays connecting", () => {
-    // Nothing has streamed yet, the spinner should still show.
     expect(initialSessionView("starting").state).toBe("starting");
     expect(initialSessionView("starting").streaming).toBe(false);
   });
@@ -947,7 +869,6 @@ describe("relaunched process-boundary marker", () => {
     view = reduceEvent(view, { kind: "relaunched" });
 
     expect(view.items.filter((i) => i.kind === "relaunched")).toHaveLength(1);
-    // Non-rendering: the copied transcript is just the assistant block.
     expect(viewToText(view).trim()).toBe("## Assistant\nbefore relaunch");
   });
 });
@@ -971,7 +892,6 @@ describe("replay determinism", () => {
     expect(view.state).toBe("running");
     expect(view.streaming).toBe(false);
     expect(isBusy(view)).toBe(false);
-    // No item id collisions.
     expect(new Set(view.items.map((i) => i.id)).size).toBe(view.items.length);
   });
 
@@ -995,7 +915,6 @@ describe("derived helpers", () => {
   it("isBusy stays true while a permission is unanswered, even if state looks idle", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
-    // Force the not-busy shape a stray turnDone would have left behind.
     view = { ...view, state: "running", streaming: false };
     expect(hasPendingPermission(view)).toBe(true);
     expect(isBusy(view)).toBe(true);
@@ -1005,8 +924,6 @@ describe("derived helpers", () => {
     expect(isWorking({ ...initialSessionView("starting") })).toBe(true);
     expect(isWorking({ ...initialSessionView("running"), streaming: true })).toBe(true);
     expect(isWorking({ ...initialSessionView("running"), streaming: false })).toBe(false);
-    // Parked on a permission/question is busy but NOT working (blocked on you),
-    // even though the reducer leaves `streaming` true on the ask.
     expect(isWorking({ ...initialSessionView("awaiting_permission"), streaming: true })).toBe(false);
     expect(isWorking({ ...initialSessionView("awaiting_question"), streaming: true })).toBe(false);
     expect(isWorking({ ...initialSessionView("completed") })).toBe(false);
@@ -1015,7 +932,7 @@ describe("derived helpers", () => {
   it("isWorking ignores a stray streaming flag while a permission card is open", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
-    view = { ...view, state: "running", streaming: true }; // stray turnDone shape
+    view = { ...view, state: "running", streaming: true };
     expect(hasPendingPermission(view)).toBe(true);
     expect(isWorking(view)).toBe(false);
   });
@@ -1023,8 +940,6 @@ describe("derived helpers", () => {
 
 describe("restoredView (rebuild after an app restart)", () => {
   it("holds a session parked on a permission instead of faking a running turn", () => {
-    // Replay a log that ends mid-turn on a permission ask (the app was closed
-    // before the user answered).
     let view = initialSessionView("starting");
     view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "claude-opus-4-8" });
     view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null });
@@ -1032,12 +947,10 @@ describe("restoredView (rebuild after an app restart)", () => {
 
     const restored = restoredView(view);
 
-    // HELD: the conversation pauses for the user, the card stays answerable…
     expect(restored.state).toBe("awaiting_permission");
     expect(hasPendingPermission(restored)).toBe(true);
     expect(restored.pendingPermission?.requestId).toBe("req-1");
     expect(isBusy(restored)).toBe(true);
-    // …but it is NOT shown as a running turn. This is the restart bug.
     expect(restored.streaming).toBe(false);
     expect(isWorking(restored)).toBe(false);
   });
@@ -1075,9 +988,6 @@ describe("restoredView (rebuild after an app restart)", () => {
   });
 
   it("does not re-show an already-answered question after a restart", () => {
-    // Mirrors the bug report: two AskUserQuestion calls, both answered, then the
-    // turn completes with a recap. On reload nothing should be pending and the
-    // composer must not be locked on a stale question.
     let view = initialSessionView("starting");
     view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
     for (const [tool, req] of [
@@ -1113,8 +1023,6 @@ describe("restoredView (rebuild after an app restart)", () => {
   });
 
   it("replays persisted user turns so the prompts survive a restart", () => {
-    // The user's side of the conversation is persisted as `userMessage` events
-    // (claude never echoes the prompt); replaying must rebuild both sides.
     let view = initialSessionView("starting");
     view = reduceEvent(view, { kind: "userMessage", text: "/research_codebase widgets", stage: "research" });
     view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
@@ -1137,8 +1045,6 @@ describe("restoredView (rebuild after an app restart)", () => {
   });
 
   it("replays a prompt run as a named card, keeping the body the agent got", () => {
-    // The card is reconstructed from the persisted event, not from live state,
-    // otherwise a restart would dump the whole prompt body back into the chat.
     let view = initialSessionView("starting");
     view = reduceEvent(view, {
       kind: "userMessage",
@@ -1155,8 +1061,6 @@ describe("restoredView (rebuild after an app restart)", () => {
   });
 
   it("replays a turn persisted before prompt cards existed", () => {
-    // `promptName` is absent from those rows; it must read as a typed message,
-    // not crash or render an untitled card.
     let view = initialSessionView("starting");
     view = reduceEvent(view, { kind: "userMessage", text: "hello", stage: null });
 

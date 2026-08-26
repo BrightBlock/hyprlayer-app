@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChangesPanel } from "./ChangesPanel";
 import type { SessionArtifact } from "@/features/session/artifacts";
 
-// Plain values instead of react-query/IPC, so the panel runs its real logic.
 const q = vi.hoisted(() => ({
   useWorktreeGitStatus: vi.fn(),
   useWorktreeDir: vi.fn(),

@@ -14,23 +14,14 @@ export type RepoSource =
 type Props = {
   value: RepoSource;
   onChange: (next: RepoSource) => void;
-  /** Which modes to show. Defaults to ["clone", "disk"]. */
   modes?: Array<RepoSource["mode"]>;
-  /** Override the button label for each mode. */
   labels?: Partial<Record<RepoSource["mode"], string>>;
-  /** Default value for the location/path field when mode switches. */
   defaultLocation?: string;
   disabled?: boolean;
-  /** Whether to show the GitHub recent repos list (clone mode only). */
   showRecents?: boolean;
-  /** Extra content rendered under the disk path field, e.g. a hint that the
-   *  folder isn't a git repo. Disk mode only. */
   diskFooter?: ReactNode;
-  /** Field label for the disk path. Override when the target isn't a repo. */
   diskLabel?: string;
-  /** Title of the disk mode's native folder picker. */
   diskBrowseTitle?: string;
-  /** Placeholder for the disk path field. */
   diskPlaceholder?: string;
 };
 
@@ -40,10 +31,6 @@ const MODE_LABELS: Record<RepoSource["mode"], string> = {
   create: "Create new",
 };
 
-/**
- * Shared repo-source picker: clone URL + recents, disk browse, or create new.
- * Used by AddProjectDialog (clone + disk) and OnboardingWizard (+ create).
- */
 export function RepoSourcePicker({
   value,
   onChange,
@@ -59,7 +46,6 @@ export function RepoSourcePicker({
 }: Props) {
   const recents = useRecentRepos(showRecents && value.mode === "clone");
 
-  // Seed the location/path field when the component first mounts or modes change.
   useEffect(() => {
     if (!defaultLocation) return;
     if (value.mode === "clone" && !(value as { mode: "clone"; url: string; location: string }).location) {
@@ -91,7 +77,6 @@ export function RepoSourcePicker({
 
   return (
     <div className="space-y-3">
-      {/* Mode toggle, only shown when there are ≥2 modes */}
       {modes.length > 1 && (
         <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 text-sm">
           {modes.map((m) => (
@@ -204,14 +189,12 @@ export function RepoSourcePicker({
   );
 }
 
-/** GitHub recent repos picker (clone mode only). */
 function RecentRepos({
   query,
   selectedUrl,
   onPick,
 }: {
   query: ReturnType<typeof useRecentRepos>;
-  /** The current URL-field value, so the picked row stays highlighted. */
   selectedUrl: string;
   onPick: (repo: GithubRepo) => void;
 }) {
@@ -234,8 +217,6 @@ function RecentRepos({
         />
       </div>
       {repos.length === 0 ? (
-        // Keep the refresh above reachable: signing in with gh is the fix, and
-        // it happens in a terminal while this dialog stays open.
         <p className="rounded-md border border-edge bg-panel-2 px-3 py-2 text-xs text-ink-dim">
           None found. Sign in with <span className="font-mono">gh auth login</span>, then refresh.
         </p>

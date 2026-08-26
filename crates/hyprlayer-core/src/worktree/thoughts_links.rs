@@ -1,12 +1,3 @@
-//! Per-worktree hyprlayer provisioning.
-//!
-//! A fresh worktree has no `thoughts/` directory (the links are untracked in
-//! the main checkout), and the hyprlayer CLI resolves a repo's project by
-//! exact cwd path, so each worktree needs (1) the three symlinks re-created
-//! and (2) a `repoMappings` entry. The mapping write is the documented
-//! ADR-0002 exception #2: a Value-preserving, atomic read-modify-rename edit
-//! of the CLI's config that never touches keys the app doesn't own.
-
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -18,19 +9,11 @@ use crate::error::{CoreError, Result};
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum LinkStatus {
-    /// Links exist and resolve.
     Ok,
-    /// Backend has no filesystem tree (notion/anytype), nothing to link.
     Unsupported,
-    /// Links missing or broken.
     Broken,
 }
 
-/// Expected `<repo>/thoughts/` entries and their targets in the thoughts
-/// tree: `<root>/<reposDir>/<mapped>/{<user>,shared}` and `<root>/<globalDir>`.
-/// The single source of the link layout, provisioning creates exactly these
-/// and the health check verifies against them. None when the backend has no
-/// filesystem tree or the repo is unmapped.
 fn expected_targets(effective: &EffectiveConfig) -> Option<Vec<(String, PathBuf)>> {
     let (repos_dir, global_dir) = match &effective.backend {
         BackendConfig::Git(g) => (g.repos_dir.as_str(), g.global_dir.as_str()),
@@ -62,13 +45,6 @@ fn expected_targets(effective: &EffectiveConfig) -> Option<Vec<(String, PathBuf)
     Some(targets)
 }
 
-/// Create `<worktree>/thoughts/{<user>,shared,global}` mirroring the CLI's
-/// `setup_symlinks_into` layout, creating the target directories in the
-/// thoughts tree when absent (`thoughts init` skips mapped checkouts wholesale,
-/// so after a repoint nobody else recreates them). On Windows, falls back to
-/// junctions when real symlinks need privileges. Idempotent, replaces
-/// whatever occupies the link slots, including stale links into a previous
-/// thoughts root.
 pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Result<LinkStatus> {
     if !effective.backend.kind().uses_filesystem() || effective.backend.thoughts_root().is_none() {
         return Ok(LinkStatus::Unsupported);
@@ -86,7 +62,7 @@ pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Resul
         });
     }
     let Some(targets) = expected_targets(effective) else {
-        return Ok(LinkStatus::Unsupported); // unreachable given the guards
+        return Ok(LinkStatus::Unsupported);
     };
 
     let thoughts_dir = worktree.join(super::THOUGHTS_DIR);
@@ -99,11 +75,6 @@ pub fn provision_thoughts(worktree: &Path, effective: &EffectiveConfig) -> Resul
     Ok(check_thoughts(worktree, effective))
 }
 
-/// Expected entries under `<repo>/thoughts/` that are missing, dangling, or
-/// pointing outside the current thoughts tree (stale, e.g. left behind after
-/// the config was repointed at a different thoughts repo). The single
-/// definition of link health, status polling and the backend health checks
-/// both build on it.
 pub fn broken_thoughts_links(repo: &Path, effective: &EffectiveConfig) -> Vec<String> {
     let thoughts_dir = repo.join(super::THOUGHTS_DIR);
     match expected_targets(effective) {
@@ -112,7 +83,6 @@ pub fn broken_thoughts_links(repo: &Path, effective: &EffectiveConfig) -> Vec<St
             .filter(|(name, target)| !links_to(&thoughts_dir.join(name), target))
             .map(|(name, _)| name)
             .collect(),
-        // No computable targets (e.g. unmapped repo): existence-only checks.
         None => {
             let mut expected = vec!["shared".to_string(), "global".to_string()];
             if !effective.user.is_empty() {
@@ -126,10 +96,6 @@ pub fn broken_thoughts_links(repo: &Path, effective: &EffectiveConfig) -> Vec<St
     }
 }
 
-/// True when `link` resolves to `target`. Both sides canonicalized so
-/// symlinked parents (`/tmp` → `/private/tmp` on macOS) and Windows verbatim
-/// `\\?\` junction paths compare equal; a dangling link fails canonicalize
-/// and reports broken, same as a missing one.
 fn links_to(link: &Path, target: &Path) -> bool {
     match (std::fs::canonicalize(link), std::fs::canonicalize(target)) {
         (Ok(a), Ok(b)) => a == b,
@@ -137,7 +103,6 @@ fn links_to(link: &Path, target: &Path) -> bool {
     }
 }
 
-/// Current health of the links (used by status polling).
 pub fn check_thoughts(worktree: &Path, effective: &EffectiveConfig) -> LinkStatus {
     if !effective.backend.kind().uses_filesystem() {
         return LinkStatus::Unsupported;
@@ -151,8 +116,6 @@ pub fn check_thoughts(worktree: &Path, effective: &EffectiveConfig) -> LinkStatu
 
 fn link_dir(target: &Path, link: &Path) -> Result<()> {
     match std::fs::symlink_metadata(link) {
-        // Replace whatever is there (broken link, stale dir), the link
-        // location is app-owned inside an app-created worktree.
         Ok(meta) => remove_existing_link(link, &meta)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.into()),
@@ -167,8 +130,6 @@ fn link_dir(target: &Path, link: &Path) -> Result<()> {
     {
         match std::os::windows::fs::symlink_dir(target, link) {
             Ok(()) => Ok(()),
-            // ERROR_PRIVILEGE_NOT_HELD: no Developer Mode/admin. Junctions
-            // need no privilege and are equivalent for absolute local dirs.
             Err(e) if e.raw_os_error() == Some(1314) => {
                 junction::create(target, link)?;
                 Ok(())
@@ -178,14 +139,8 @@ fn link_dir(target: &Path, link: &Path) -> Result<()> {
     }
 }
 
-/// Remove whatever occupies a link slot, without ever recursing into a link's
-/// target. Split by platform because a directory symlink/junction must be
-/// removed with `remove_dir` on Windows, `remove_file` there fails with
-/// "Access is denied", which broke idempotent re-provisioning.
 #[cfg(unix)]
 fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
-    // symlink_metadata: a symlink (even to a dir) is not is_dir(), so only a
-    // real directory takes the recursive branch.
     if meta.is_dir() {
         std::fs::remove_dir_all(link)?;
     } else {
@@ -202,24 +157,19 @@ fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
 
     let attrs = meta.file_attributes();
     if attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        // A symlink or junction: drop only the link. Directory reparse points
-        // need remove_dir; file symlinks need remove_file.
         if attrs & FILE_ATTRIBUTE_DIRECTORY != 0 {
             std::fs::remove_dir(link)?;
         } else {
             std::fs::remove_file(link)?;
         }
     } else if attrs & FILE_ATTRIBUTE_DIRECTORY != 0 {
-        std::fs::remove_dir_all(link)?; // a real directory
+        std::fs::remove_dir_all(link)?;
     } else {
         std::fs::remove_file(link)?;
     }
     Ok(())
 }
 
-/// Add `repoMappings[worktree] = {repo, profile?}` (or plain string when no
-/// profile) to the CLI config, preserving every other byte of structure via
-/// serde_json::Value editing + atomic rename.
 pub fn add_worktree_mapping(
     config_path: &Path,
     worktree: &Path,
@@ -236,8 +186,6 @@ pub fn add_worktree_mapping(
     })
 }
 
-/// Remove the worktree's mapping. Missing entries are fine (the CLI's own
-/// orphan cleanup may have raced us).
 pub fn remove_worktree_mapping(config_path: &Path, worktree: &Path) -> Result<()> {
     edit_mappings(config_path, |mappings| {
         mappings.remove(&worktree.display().to_string());
@@ -292,19 +240,16 @@ mod tests {
         let status = provision_thoughts(worktree.path(), &eff).unwrap();
         assert_eq!(status, LinkStatus::Ok);
 
-        // The links resolve to the right targets.
         let user_link = worktree.path().join("thoughts/jt");
         assert!(user_link.join("..").exists());
         std::fs::write(user_link.join("note.md"), "x").unwrap();
         assert!(thoughts.path().join("repos/myproj/jt/note.md").exists());
 
-        // Idempotent.
         assert_eq!(
             provision_thoughts(worktree.path(), &eff).unwrap(),
             LinkStatus::Ok
         );
 
-        // Breaking a target turns the check Broken.
         std::fs::remove_dir_all(thoughts.path().join("repos/myproj/shared")).unwrap();
         assert_eq!(check_thoughts(worktree.path(), &eff), LinkStatus::Broken);
     }
@@ -325,16 +270,12 @@ mod tests {
             LinkStatus::Ok
         );
 
-        // The links still resolve (the old root exists) but point at the wrong
-        // tree, an exists()-style check would call this healthy.
         assert_eq!(
             check_thoughts(worktree.path(), &new_eff),
             LinkStatus::Broken
         );
         assert_eq!(broken_thoughts_links(worktree.path(), &new_eff).len(), 3);
 
-        // Re-provisioning against a completely empty new root creates the
-        // target tree, replaces the links in place, and writes land in it.
         assert_eq!(
             provision_thoughts(worktree.path(), &new_eff).unwrap(),
             LinkStatus::Ok
@@ -397,13 +338,11 @@ mod tests {
 
         let value: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-        // App-owned edits landed…
         assert_eq!(value["thoughts"]["repoMappings"]["/wt/auth-ab12"], "myproj");
         assert_eq!(
             value["thoughts"]["repoMappings"]["/wt/pay-cd34"]["profile"],
             "work"
         );
-        // …and everything the app doesn't own survived byte-meaningfully.
         assert_eq!(value["telemetry"]["installationId"], "abc");
         assert_eq!(value["futureKey"][2], 3);
         assert_eq!(value["thoughts"]["repoMappings"]["/main/repo"], "myproj");
@@ -412,14 +351,11 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert!(value["thoughts"]["repoMappings"]["/wt/auth-ab12"].is_null());
-        // Removing a non-existent mapping is fine.
         remove_worktree_mapping(&config_path, Path::new("/never/was")).unwrap();
     }
 
     #[test]
     fn mapping_edits_never_rewrite_foreign_schema_versions() {
-        // Shared `edit_config` guard: a v5 (or pre-v4) file that happens to
-        // carry repoMappings must error, not be rewritten.
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("config.json");
         let raw = r#"{"version":5,"thoughts":{"repoMappings":{}}}"#;

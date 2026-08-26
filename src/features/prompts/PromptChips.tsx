@@ -6,11 +6,6 @@ import { ChordHint } from "@/components/ui";
 import { ZapIcon } from "@/components/icons";
 import { customPrompts, isRunnablePrompt } from "./prompts";
 
-/**
- * The pinned prompts that should surface as composer chips for a project.
- * Exported so SessionChat can reserve the drawer strip's space only when chips
- * will show.
- */
 export function usePinnedPrompts(projectPath: string): CustomPrompt[] {
   const settings = useBootstrap().data?.settings;
   return useMemo(
@@ -19,17 +14,6 @@ export function usePinnedPrompts(projectPath: string): CustomPrompt[] {
   );
 }
 
-/**
- * Pinned custom prompts as one-click chips. SessionChat anchors this to the
- * composer's top edge (`absolute bottom-full right-*`) so the chips share the
- * strip the task drawer's handle occupies on the left, one line, chips right,
- * TASKS tab left, instead of stacking their own row above it. A chip doesn't
- * run anything itself: it hands the prompt to the host, which fills the composer
- * with the matching `/command` so an argument can be typed before sending. No
- * edit affordance here on purpose, the library is already reachable three ways
- * (nav rail ⚡, agent-bar ⚡, the ⌘K palette's manage row). Renders nothing when
- * no usable prompt is pinned.
- */
 export function PromptChips({
   view,
   onPick,
@@ -37,7 +21,6 @@ export function PromptChips({
 }: {
   view: WorkstreamView;
   onPick: (prompt: CustomPrompt) => void;
-  /** Positioning classes from the host (e.g. the composer-anchored absolute). */
   className?: string;
 }) {
   const pinned = usePinnedPrompts(view.item.projectPath);

@@ -1,6 +1,3 @@
-/** One selectable authentication method tile. Shared by the harness tabs so
- *  "sign in with your subscription" vs "use an API key" reads identically
- *  whichever harness you're configuring. */
 export function AuthCard({
   label,
   sublabel,
@@ -32,7 +29,6 @@ export function AuthCard({
   );
 }
 
-/** The bordered key/value table both tabs use to show who's signed in. */
 export function AuthDetailRows({ rows }: { rows: Array<[string, string | null | undefined]> }) {
   return (
     <div className="overflow-hidden rounded-md border border-edge">

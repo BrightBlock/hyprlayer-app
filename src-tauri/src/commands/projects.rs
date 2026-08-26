@@ -8,7 +8,6 @@ use hyprlayer_core::hyprcli::{HyprCli, StorageInfo};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repos;
 use hyprlayer_core::store::{NewProject, ProjectSource};
-// Items, not the module: `create_thoughts_profile` has an arg of the same name.
 use hyprlayer_core::thoughts_repo::{classify_root, scaffold as scaffold_thoughts_root, RootState};
 use hyprlayer_core::worktree::thoughts_links;
 use hyprlayer_core::CoreError;
@@ -24,20 +23,13 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
-    /// Absolute path of the app-owned clone (`~/hyprlayer/repos/<name>`).
     pub path: String,
-    /// Human-facing project name (the app registry name, e.g. `brightblock.ai`).
     pub mapped_name: String,
-    /// The thoughts `repoMappings` key this repo resolves to, what docs are
-    /// indexed and worktrees created under. CLI-sanitized, so it can differ from
-    /// `mapped_name` (`brightblock.ai` → `brightblock_ai`). Filter docs by THIS.
     pub thoughts_project: String,
     pub profile: Option<String>,
     pub backend_kind: String,
     pub exists_on_disk: bool,
-    /// The git source this clone tracks; None for a local-only repo.
     pub origin_url: Option<String>,
-    /// How it was added. `folder` has no git and no thoughts mapping.
     pub source: ProjectSource,
 }
 
@@ -48,9 +40,9 @@ pub struct Project {
     tag = "state"
 )]
 pub enum ConfigSummary {
-    /// No config file: first-run, onboarding should offer bootstrap.
-    Missing { path: String },
-    /// Config exists but can't be used (parse error, future schema, ...).
+    Missing {
+        path: String,
+    },
     Error {
         path: String,
         code: String,
@@ -65,14 +57,10 @@ pub enum ConfigSummary {
     },
 }
 
-/// The stock bodies of the built-in prompts, what Settings → Prompts shows,
-/// edits against, and resets to. Owned by `hyprlayer_core::pipeline` (the
-/// composer), surfaced here so the frontend never mirrors the literals.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptDefaults {
     pub commit: String,
-    /// A template, `{{base_branch}}` resolves at send time.
     pub ship: String,
 }
 
@@ -92,7 +80,6 @@ pub struct Bootstrap {
     pub projects: Vec<Project>,
     pub binaries: Vec<BinaryStatus>,
     pub settings: AppSettings,
-    /// Stock built-in prompt bodies (see [`PromptDefaults`]).
     pub prompt_defaults: PromptDefaults,
 }
 
@@ -100,8 +87,6 @@ pub struct Bootstrap {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDetail {
     pub project: Project,
-    /// None for `folder` projects. They have no thoughts mapping, so the
-    /// `hyprlayer storage info` subprocess is never run for them.
     pub storage: Option<StorageInfo>,
     pub thoughts_root: Option<String>,
 }
@@ -110,17 +95,11 @@ pub struct ProjectDetail {
 #[serde(rename_all = "lowercase")]
 pub enum CheckStatus {
     Pass,
-    // Visual-polish-v1 Phase 4 deleted `binary.gh`, the only check that ever
-    // constructed this. It stays in the enum anyway: it's a specta-exported
-    // type the frontend's CheckStatus binding and ProjectSettingsDialog's
-    // CHECK_TONE map both switch on, and a future per-project check may want
-    // a non-fatal warning verdict again.
     #[allow(dead_code)]
     Warn,
     Fail,
 }
 
-/// `Pass` when the condition holds, else `Fail`, the common health verdict.
 fn pass_if(ok: bool) -> CheckStatus {
     if ok {
         CheckStatus::Pass
@@ -151,9 +130,6 @@ pub struct SyncReport {
     pub output: String,
 }
 
-/// The app's explicit project registry, NOT the thoughts config's `repoMappings`
-/// (those also carry every worktree's `thoughts init` entry). Each row is enriched
-/// best-effort with backend/profile; a missing/locked config yields the git default.
 pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
     let records = match db_task(state.db.clone(), |db| db.list_projects()).await {
         Ok(records) => records,
@@ -173,11 +149,6 @@ pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
                 .as_ref()
                 .map(|e| e.backend.kind().as_str().to_string())
                 .unwrap_or_else(|| "git".to_string());
-            // The CLI-sanitized `repoMappings` key, separate from the display
-            // name so doc queries can filter on it. Falls back to the registry
-            // name when the project isn't mapped into thoughts yet. A folder
-            // project is never mapped: empty, so a same-named mapped project's
-            // docs can't leak into its surfaces.
             let thoughts_project = if r.source.is_git() {
                 eff.as_ref()
                     .and_then(|e| e.mapped_name.clone())
@@ -199,9 +170,6 @@ pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
         .collect()
 }
 
-/// How a registered project was added, the switch every git/thoughts surface
-/// reads. An unregistered path answers `Disk`, the git-backed default, so a
-/// stale caller can never accidentally get the skip-everything treatment.
 pub(crate) async fn project_source(state: &AppState, path: &str) -> ProjectSource {
     let path = path.to_string();
     db_task(state.db.clone(), move |db| db.get_project_record(&path))
@@ -212,8 +180,6 @@ pub(crate) async fn project_source(state: &AppState, path: &str) -> ProjectSourc
         .unwrap_or(ProjectSource::Disk)
 }
 
-/// The config health summary shown during onboarding. The project list is
-/// derived separately now, see [`registry_projects`].
 pub(crate) async fn config_summary(state: &AppState) -> ConfigSummary {
     let path = state.config.path().display().to_string();
     match state.config.load().await {
@@ -275,7 +241,6 @@ fn find_project(projects: &[Project], path: &str) -> CmdResult<Project> {
 pub async fn get_project(state: State<'_, AppState>, path: String) -> CmdResult<ProjectDetail> {
     let project = find_project(&registry_projects(&state).await, &path)?;
 
-    // A folder project has no thoughts mapping: no CLI call, no thoughts root.
     if !project.source.is_git() {
         return Ok(ProjectDetail {
             project,
@@ -307,9 +272,6 @@ async fn effective_thoughts_root(state: &AppState, repo_path: &str) -> Option<St
         .map(|p| p.display().to_string())
 }
 
-/// Ensure a hyprlayer config exists before the CLI runs (the ADR-0002
-/// bootstrap exception): on a true first run, write the minimal v4 config from
-/// the supplied username, then hand ownership back to the CLI.
 async fn ensure_config(state: &AppState, bootstrap_user: Option<String>) -> CmdResult<()> {
     if state.config.exists() {
         return Ok(());
@@ -328,8 +290,6 @@ async fn ensure_config(state: &AppState, bootstrap_user: Option<String>) -> CmdR
         .map_err(AppError::from)
 }
 
-/// Where new project clones land: an explicit per-call `location`, else the
-/// configured repos root, else `~/hyprlayer/repos`.
 async fn repos_root(state: &AppState, location: Option<&str>) -> PathBuf {
     if let Some(l) = location.map(str::trim).filter(|l| !l.is_empty()) {
         return PathBuf::from(l);
@@ -343,8 +303,6 @@ async fn repos_root(state: &AppState, location: Option<&str>) -> PathBuf {
         .unwrap_or_else(repos::default_repos_root)
 }
 
-/// A project directory name: an explicit override, else derived from the
-/// source URL, else the on-disk folder name.
 fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> String {
     directory_name
         .map(|d| d.trim().to_string())
@@ -358,29 +316,17 @@ fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> St
         })
 }
 
-/// Recursively delete a directory tree on the blocking pool, a repo clone's
-/// `node_modules`/`.git`/`target` would stall a tokio worker for seconds if
-/// deleted synchronously. Best-effort; the caller decides what a failure means.
 async fn remove_dir_all_bg(path: &Path) {
     let path = path.to_path_buf();
     let _ = blocking("remove_dir", move || std::fs::remove_dir_all(path)).await;
 }
 
-/// Where a new project maps into thoughts, the dialog's Thoughts step.
-/// `dir` overrides the folder (default: the project name); `profile` picks a
-/// named profile (default: the default backend).
 #[derive(Clone, Copy, Default)]
 struct ThoughtsTarget<'a> {
     dir: Option<&'a str>,
     profile: Option<&'a str>,
 }
 
-/// Provision thoughts inside `repo`, register it as a project, and surface it.
-/// `owned` = a fresh clone the app created vs. an in-place disk import. On
-/// failure we roll back so no half-set-up project lingers: an owned clone is
-/// deleted outright; an in-place repo (the user's working copy) is never
-/// deleted, only its thoughts provisioning is undone.
-// Arity mirrors the IPC contract this command exposes.
 #[allow(clippy::too_many_arguments)]
 async fn register_repo(
     app: &tauri::AppHandle,
@@ -426,9 +372,6 @@ async fn register_repo(
     find_project(&registry_projects(state).await, &path)
 }
 
-/// Clone `source` into the repos root as `<name>`, provision thoughts inside
-/// the clone, and register it. The clone is rolled back if provisioning or
-/// registration fails, so a half-set-up project never lingers.
 async fn provision_project(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -460,28 +403,14 @@ async fn provision_project(
     register_repo(app, state, &git, &dest, name, thoughts, kind, true).await
 }
 
-/// Classify a disk path for the Add-project dialog: import in place, offer
-/// `git init` for a non-git folder, or refuse a bare repo. See
-/// [`repos::RepoPathStatus`].
 #[tauri::command]
 #[specta::specta]
 pub fn inspect_repo_path(path: String) -> CmdResult<repos::RepoPathStatus> {
     Ok(repos::classify_repo_path(Path::new(&path)))
 }
 
-/// Import a local on-disk folder as a project, registered *in place*, never
-/// re-cloned or copied. Worktrees are cut directly from it via `git worktree
-/// add`. Classifies the path and does whatever git setup it needs first:
-///
-/// - **non-git folder** → `git init -b <branch>` (default `main`) + an empty
-///   initial commit.
-/// - **unborn repo** (has `.git`: no commits) → just the initial commit, on its
-///   existing branch.
-/// - **ready repo** → adopted as-is (`branch` ignored).
-/// - **bare repo** → refused, since worktrees can't be cut from it.
 #[tauri::command]
 #[specta::specta]
-// Arity mirrors the IPC contract this command exposes.
 #[allow(clippy::too_many_arguments)]
 pub async fn import_project(
     app: tauri::AppHandle,
@@ -517,10 +446,6 @@ pub async fn import_project(
         _ => {}
     }
 
-    // Refuse a path already registered as a folder project, the upsert would
-    // silently flip its kind while old folder workstreams keep WorktreeMode::
-    // Folder, and the git init below would mutate a folder the user was
-    // promised stays untouched. Checked before any side effect.
     let canonical = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let key = canonical.display().to_string();
     let existing = db_task(state.db.clone(), move |db| db.get_project_record(&key)).await?;
@@ -540,8 +465,6 @@ pub async fn import_project(
         .await
         .map_err(AppError::from)?;
 
-    // Only a non-git folder gets its `.git` created here; never delete an
-    // unborn repo's pre-existing `.git`.
     let created = matches!(status, repos::RepoPathStatus::NonGit);
 
     let setup: Result<(), AppError> = match status {
@@ -570,9 +493,6 @@ pub async fn import_project(
         Err(e) => Err(e),
     };
 
-    // Roll back a `.git` we created if setup or registration failed afterward,
-    // so the folder is left as we found it. An unborn repo's commit is left in
-    // place either way, it's harmless and makes the repo usable.
     if result.is_err() && created {
         remove_dir_all_bg(&repo.join(".git")).await;
     }
@@ -580,13 +500,6 @@ pub async fn import_project(
     result
 }
 
-/// Register a plain local directory as a project, no git, no thoughts, no
-/// hyprlayer CLI, and no config bootstrap. The folder is left exactly as
-/// found; workstreams run agent sessions in it directly (see
-/// `WorktreeMode::Folder`).
-///
-/// Refuses a path that IS a git repo: a repo belongs in `import_project`,
-/// where it keeps its branches, worktrees, and thoughts mapping.
 #[tauri::command]
 #[specta::specta]
 pub async fn import_local_folder(
@@ -615,14 +528,9 @@ pub async fn import_local_folder(
         }
     }
 
-    // Same canonicalization as the repo import: a stable registered path so
-    // later lookups and removals match exactly.
     let dir = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let name = project_name(directory_name, &dir.to_string_lossy(), &dir);
     let registered = dir.display().to_string();
-    // The classify check above already rejects live repos; this catches a
-    // registered repo whose `.git` vanished out-of-band, which would otherwise
-    // flip the project's kind under its existing workstreams.
     let key = registered.clone();
     let existing = db_task(state.db.clone(), move |db| db.get_project_record(&key)).await?;
     if existing.is_some_and(|r| r.source.is_git()) {
@@ -643,13 +551,9 @@ pub async fn import_local_folder(
     })
     .await?;
 
-    // No ConfigChanged / index rebuild: nothing about thoughts changed. The
-    // caller invalidates the project list on its own.
     find_project(&registry_projects(&state).await, &registered)
 }
 
-/// Canonicalize an on-disk repo path, derive its project name, and register it,
-/// the disk-import tail of `import_project`, after any needed git setup.
 async fn register_disk_project(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -658,10 +562,6 @@ async fn register_disk_project(
     directory_name: Option<String>,
     thoughts: ThoughtsTarget<'_>,
 ) -> CmdResult<Project> {
-    // Canonicalize for a stable registered path (no trailing slash, symlinks
-    // resolved) so later lookups/removals match exactly. `dunce` strips the
-    // Windows `\\?\` verbatim prefix `std::fs::canonicalize` adds. It leaks
-    // into project URLs and trips git/tools.
     let repo = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let name = project_name(directory_name, &repo.to_string_lossy(), &repo);
     register_repo(
@@ -677,11 +577,8 @@ async fn register_disk_project(
     .await
 }
 
-/// Clone a hosted repo (e.g. a GitHub URL) into `~/hyprlayer/repos` and
-/// register it as a project.
 #[tauri::command]
 #[specta::specta]
-// Arity mirrors the IPC contract this command exposes.
 #[allow(clippy::too_many_arguments)]
 pub async fn clone_project(
     app: tauri::AppHandle,
@@ -730,10 +627,6 @@ pub async fn clone_project(
     .await
 }
 
-/// Remove a project from the registry; with `delete_files`, also delete its
-/// directory (clones and in-place imports alike, user opts in per removal).
-/// Refused while active workstreams exist: they own live worktrees cut from this
-/// repo, so removal would orphan them.
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_project(
@@ -744,8 +637,6 @@ pub async fn remove_project(
 ) -> CmdResult<()> {
     let repo = PathBuf::from(&path);
 
-    // Active workstreams own live worktrees cut from this repo; removal would
-    // orphan them, so refuse until they're archived.
     let path_for_count = path.clone();
     let active = db_task(state.db.clone(), move |db| {
         db.list_workstreams(&path_for_count, false)
@@ -763,11 +654,8 @@ pub async fn remove_project(
         });
     }
 
-    // A folder project was never mapped into thoughts, so there's nothing to
-    // uninit, and no CLI to run.
     let git_backed = project_source(&state, &path).await.is_git();
 
-    // Drop the thoughts repoMapping (best-effort; the directory may be gone).
     if git_backed && repo.is_dir() {
         let _ = HyprCli::new(&state.binaries).thoughts_uninit(&repo).await;
     }
@@ -775,7 +663,6 @@ pub async fn remove_project(
     let path_for_db = path.clone();
     db_task(state.db.clone(), move |db| db.delete_project(&path_for_db)).await?;
 
-    // Guarded above (no active workstreams), so deleting on opt-in is safe.
     if delete_files && repo.is_dir() {
         remove_dir_all_bg(&repo).await;
     }
@@ -788,9 +675,6 @@ pub async fn remove_project(
     Ok(())
 }
 
-/// Persist the user's drag-to-reorder of the project sidebar. `paths` is the full
-/// project list in its new top-to-bottom order; each project's stored `position`
-/// is set to its index, so the next `get_bootstrap` returns them in this order.
 #[tauri::command]
 #[specta::specta]
 pub async fn reorder_projects(state: State<'_, AppState>, paths: Vec<String>) -> CmdResult<()> {
@@ -798,9 +682,6 @@ pub async fn reorder_projects(state: State<'_, AppState>, paths: Vec<String>) ->
     Ok(())
 }
 
-/// The user's GitHub repos for the clone dialog's "Recent repos" list. Returns
-/// an empty list (never an error) when gh is missing or unauthenticated, the
-/// URL field still works, so recents are purely a convenience.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repos::GithubRepo>> {
@@ -816,11 +697,6 @@ pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repo
     }
 }
 
-/// The thoughts destinations for the Add-project dialog's Thoughts step: the
-/// default backend plus every named profile, each with its existing repo
-/// folders. A missing config (true first run) or a config without a
-/// `thoughts` section yields the entry bootstrap will create, so the step
-/// stays truthful before any config exists.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_thoughts_profiles(state: State<'_, AppState>) -> CmdResult<Vec<ThoughtsProfile>> {
@@ -829,7 +705,6 @@ pub async fn list_thoughts_profiles(state: State<'_, AppState>) -> CmdResult<Vec
         Err(CoreError::ConfigMissing { .. }) => None,
         Err(e) => return Err(AppError::from(e)),
     };
-    // Folder resolution walks the thoughts tree on disk.
     blocking("list_thoughts_profiles", move || match thoughts {
         Some(t) => list_profiles(&t),
         None => vec![bootstrap_default_profile()],
@@ -837,12 +712,6 @@ pub async fn list_thoughts_profiles(state: State<'_, AppState>) -> CmdResult<Vec
     .await
 }
 
-/// Create a named thoughts profile, the dialog's "New profile…". The write
-/// goes through the CLI (`thoughts profile create`, ADR-0002's single-writer
-/// rule), so the app can never drift from the CLI's config structure. App-side
-/// name rules run first (structured codes for what the CLI would accept or
-/// silently sanitize), and the returned entry is read back from the config the
-/// CLI wrote. An empty `thoughts_repo` defaults to `~/<name>-thoughts`.
 #[tauri::command]
 #[specta::specta]
 pub async fn create_thoughts_profile(
@@ -854,8 +723,6 @@ pub async fn create_thoughts_profile(
     let name = name.trim().to_string();
     validate_profile_name(&name).map_err(AppError::from)?;
 
-    // Pre-check for the structured `profile_exists` code; a racing writer
-    // still gets caught by the CLI's own duplicate error.
     let loaded = state.config.load().await.map_err(AppError::from)?;
     if loaded
         .config
@@ -873,9 +740,6 @@ pub async fn create_thoughts_profile(
         .map(String::from)
         .unwrap_or_else(|| format!("~/{name}-thoughts"));
 
-    // `thoughts profile create` only writes config, so without this the
-    // profile's first use dies on the CLI's "not a git repository". An
-    // `Occupied` root is left for the CLI to refuse rather than restructured.
     let root = hyprlayer_core::config::expand_path(&repo);
     if matches!(
         classify_root(&root, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR),
@@ -897,8 +761,6 @@ pub async fn create_thoughts_profile(
             .map_err(AppError::from)?;
     }
 
-    // Not repo-scoped (the config is global); the config's own directory is a
-    // cwd that's guaranteed to exist here.
     let cwd = state
         .config
         .path()
@@ -911,13 +773,8 @@ pub async fn create_thoughts_profile(
         .map_err(AppError::from)?;
 
     state.config.invalidate().await;
-    // Emit now so the UI refreshes without waiting on the 2s config poller;
-    // the poller's own pass covers the thoughts-index rebuild, and the new
-    // profile's root has nothing to scan yet anyway.
     let _ = crate::events::ConfigChanged.emit(&app);
 
-    // Read back through the config the CLI just wrote, the returned entry
-    // reflects what actually landed, not what we asked for.
     let loaded = state.config.load().await.map_err(AppError::from)?;
     let thoughts = loaded
         .config
@@ -941,18 +798,10 @@ pub async fn sync_thoughts(
     let output = HyprCli::new(&state.binaries)
         .thoughts_sync(Path::new(&path), message.as_deref())
         .await?;
-    // The CLI may have rewritten its config (e.g. orphan cleanup).
     state.config.invalidate().await;
     Ok(SyncReport { output })
 }
 
-/// Per-project health, not per-binary: `run_backend_health` used to also emit
-/// four `binary.*` rows from `state.binaries.status_all()`, but a single
-/// `BinaryResolver` has no project argument, so those four rows were
-/// identical for every project shown inside a per-project dialog. Settings →
-/// Binaries (`Settings.tsx` → `BinariesCard`) already renders all seven
-/// `BinaryKind`s from that same call, strictly more complete, so the binary
-/// checks were dropped here rather than kept in two places.
 #[tauri::command]
 #[specta::specta]
 pub async fn run_backend_health(
@@ -961,12 +810,8 @@ pub async fn run_backend_health(
 ) -> CmdResult<HealthReport> {
     let mut checks = Vec::new();
 
-    // A folder project needs neither git nor the hyprlayer CLI, and has no
-    // mapping or links to check, only an agent to run and a folder to run in.
     let git_backed = project_source(&state, &path).await.is_git();
 
-    // A folder project has no remote, no mapping, and no links, the folder
-    // being there is the whole contract.
     if !git_backed {
         let dir = Path::new(&path);
         let exists = dir.is_dir();
@@ -982,7 +827,6 @@ pub async fn run_backend_health(
         return Ok(HealthReport { checks });
     }
 
-    // 1. Project mapping resolves via the CLI.
     match HyprCli::new(&state.binaries)
         .storage_info(Path::new(&path))
         .await
@@ -1020,15 +864,11 @@ pub async fn run_backend_health(
         }
     }
 
-    // 2 & 3. Thoughts root + per-repo symlinks (filesystem backends only).
     checks.extend(thoughts_health_checks(&state, &path).await);
 
     Ok(HealthReport { checks })
 }
 
-/// The thoughts-storage health checks: the storage root exists, and the repo's
-/// `thoughts/` symlinks are intact. Empty for non-filesystem backends or when
-/// thoughts aren't configured, the early returns keep the happy path flat.
 async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck> {
     let Ok(loaded) = state.config.load().await else {
         return Vec::new();
@@ -1043,7 +883,6 @@ async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck
 
     let mut checks = Vec::new();
 
-    // 3. Thoughts root exists.
     if let Some(root) = effective.backend.thoughts_root() {
         let exists = root.is_dir();
         checks.push(HealthCheck {
@@ -1055,8 +894,6 @@ async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck
         });
     }
 
-    // 4. Per-repo thoughts symlinks, same definition of link health as the
-    // per-workstream status chips.
     let repo = Path::new(path);
     let repo_thoughts = repo.join(hyprlayer_core::worktree::THOUGHTS_DIR);
     let broken = thoughts_links::broken_thoughts_links(repo, &effective);
@@ -1084,7 +921,7 @@ pub async fn get_worktree_files(
     state: State<'_, AppState>,
     path: String,
 ) -> CmdResult<Vec<String>> {
-    let _ = &state; // project path comes from the arg; state kept for signature symmetry
+    let _ = &state;
     blocking("read_repo_settings", move || {
         hyprlayer_core::repo_settings::read(std::path::Path::new(&path)).map(|s| s.worktree.copy)
     })
@@ -1115,10 +952,6 @@ pub async fn set_worktree_files(
     Ok(saved)
 }
 
-/// Dry-run the project's worktree-copy patterns against its checkout so the UI
-/// can flag missing copy files (e.g. a `.env` absent on disk) BEFORE a workstream
-/// is created. Mirrors `create_workstream`'s seed step, minus the copy. Never
-/// errors, an unreadable settings file yields an empty (clean) report.
 #[tauri::command]
 #[specta::specta]
 pub async fn check_worktree_files(
@@ -1138,9 +971,6 @@ pub async fn check_worktree_files(
 
 #[cfg(test)]
 mod tests {
-    /// `import_project` canonicalizes the repo path for stable identity. On Windows
-    /// `std::fs::canonicalize` returns a `\\?\` verbatim path, which leaks into
-    /// project URLs and trips git/tools; `dunce::canonicalize` must strip it.
     #[test]
     fn canonicalized_project_path_has_no_verbatim_prefix() {
         let here = dunce::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();

@@ -1,30 +1,6 @@
-//! Undo the AppImage runtime's environment for children we spawn.
-//!
-//! Linux ships as distro packages now (see docs/RELEASING.md), so nothing sets
-//! `APPDIR` and every function here is inert. Kept because it costs one env
-//! lookup per spawn and is all that stands between a reintroduced AppImage and
-//! the bug below.
-//!
-//! AppImage's `AppRun` repoints the environment at the mounted AppDir: `PATH`,
-//! `LD_LIBRARY_PATH`, `XDG_DATA_DIRS`, the GTK/GIO caches, and worst of all
-//! `PYTHONHOME`/`PYTHONPATH`. We ship no Python, so `PYTHONHOME` names a tree
-//! with no stdlib and every `python` from a hyprlayer terminal dies with
-//! `ModuleNotFoundError: No module named 'encodings'`. The same leak makes
-//! children load our bundled GTK/webkit libs and pins `GDK_BACKEND=x11` on
-//! Wayland.
-//!
-//! Those variables are correct for us, since the webview's helper processes
-//! need them, so we scrub per-spawn rather than globally at startup. Recovery
-//! is best-effort: our `AppRun` saves no `APPIMAGE_ORIGINAL_*` copies, so we
-//! drop AppDir-owned entries and leave whatever was underneath.
-
 use std::env;
 use std::path::Path;
 
-/// Variables whose value is a `:`-separated search path. AppDir entries are
-/// filtered out; if nothing survives, the variable is unset entirely (an empty
-/// `PATH` or `LD_LIBRARY_PATH` means "current directory" to some loaders,
-/// which is both wrong and a security footgun).
 const PATH_LIST_VARS: &[&str] = &[
     "PATH",
     "LD_LIBRARY_PATH",
@@ -41,8 +17,6 @@ const PATH_LIST_VARS: &[&str] = &[
     "GIO_EXTRA_MODULES",
 ];
 
-/// Variables holding a single AppDir path (a prefix or a module cache file).
-/// Unset when the value points inside the AppDir, left alone otherwise.
 const APPDIR_VALUE_VARS: &[&str] = &[
     "PYTHONHOME",
     "GTK_DATA_PREFIX",
@@ -51,11 +25,6 @@ const APPDIR_VALUE_VARS: &[&str] = &[
     "GDK_PIXBUF_MODULE_FILE",
 ];
 
-/// Variables the AppImage runtime owns outright: it either invents them or
-/// overwrites whatever was there, so for a child they are pure noise.
-/// `GDK_BACKEND` is the notable one, `AppRun` forces it to `x11` to dodge a
-/// Tauri/Wayland crash, and a GUI app launched from a hyprlayer terminal
-/// should not inherit that.
 const ALWAYS_UNSET: &[&str] = &[
     "APPDIR",
     "APPIMAGE",
@@ -67,12 +36,6 @@ const ALWAYS_UNSET: &[&str] = &[
     "GTK_THEME",
 ];
 
-/// Environment edits to apply to a child process: `(key, Some(value))` to
-/// override, `(key, None)` to unset. Empty when we are not running from an
-/// AppImage, which is every non-Linux platform and every Linux dev build.
-///
-/// Apply these *before* any caller-supplied env, so an explicit override still
-/// wins.
 pub fn child_env_overrides() -> Vec<(String, Option<String>)> {
     let Some(appdir) = env::var_os("APPDIR") else {
         return Vec::new();
@@ -84,9 +47,6 @@ pub fn child_env_overrides() -> Vec<(String, Option<String>)> {
     overrides_for(&appdir, |key| env::var(key).ok())
 }
 
-/// The pure core of [`child_env_overrides`], with the AppDir and the
-/// environment lookup injected so it can be tested without touching the
-/// process-wide environment.
 fn overrides_for(
     appdir: &str,
     lookup: impl Fn(&str) -> Option<String>,
@@ -100,7 +60,7 @@ fn overrides_for(
             .filter(|entry| !entry.is_empty() && !is_under(entry, appdir))
             .collect();
         if kept.len() == value.split(':').filter(|e| !e.is_empty()).count() {
-            continue; // nothing of ours in there, leave it untouched
+            continue;
         }
         out.push((
             (*key).to_string(),
@@ -123,28 +83,15 @@ fn overrides_for(
     out
 }
 
-/// Is `path` inside the mounted AppDir? Always false when we are not running
-/// from an AppImage.
-///
-/// Used to keep AppDir entries out of the PATH the binary resolver builds and
-/// hands to children, that PATH is applied *after* [`child_env_overrides`],
-/// so without this filter it would put them straight back.
 pub fn is_appdir_path(path: &Path) -> bool {
     env::var_os("APPDIR")
         .is_some_and(|appdir| !appdir.is_empty() && path.starts_with(Path::new(&appdir)))
 }
 
-/// Is `path` the AppDir itself, or something inside it?
-///
-/// Compared as a path rather than a string prefix so a sibling mount named
-/// `/tmp/.mount_AbcXYZ` isn't swallowed by `/tmp/.mount_Abc`. `AppRun` emits
-/// doubled separators (`$APPDIR//usr/lib`), which `Path`'s component-wise
-/// comparison normalises for free.
 fn is_under(path: &str, appdir: &str) -> bool {
     Path::new(path).starts_with(Path::new(appdir))
 }
 
-/// Apply [`child_env_overrides`] to a `std::process::Command`.
 pub fn scrub_std(cmd: &mut std::process::Command) {
     for (key, value) in child_env_overrides() {
         match value {
@@ -154,7 +101,6 @@ pub fn scrub_std(cmd: &mut std::process::Command) {
     }
 }
 
-/// Apply [`child_env_overrides`] to a `tokio::process::Command`.
 pub fn scrub_tokio(cmd: &mut tokio::process::Command) {
     for (key, value) in child_env_overrides() {
         match value {
@@ -180,8 +126,6 @@ mod tests {
 
     #[test]
     fn unsets_pythonhome_pointing_into_the_appdir() {
-        // The reported failure: python can't find its stdlib and dies with
-        // "No module named 'encodings'".
         let out = overrides(&[("PYTHONHOME", "/tmp/.mount_HyprlaAbc12/usr/")]);
         assert_eq!(out.get("PYTHONHOME"), Some(&None));
     }
@@ -206,8 +150,6 @@ mod tests {
 
     #[test]
     fn unsets_a_search_path_that_was_entirely_ours() {
-        // AppRun writes LD_LIBRARY_PATH from scratch and leaves a trailing `:`.
-        // Keeping an empty value would tell the loader to search the cwd.
         let out = overrides(&[(
             "LD_LIBRARY_PATH",
             "/tmp/.mount_HyprlaAbc12/usr/lib/:/tmp/.mount_HyprlaAbc12/lib64/:",
@@ -253,8 +195,6 @@ mod tests {
 
     #[test]
     fn is_inert_outside_an_appimage() {
-        // No APPDIR in the environment -> nothing to undo. Guards the dev build
-        // and every non-Linux platform.
         let out = overrides_for("", |_| None);
         assert!(out.is_empty());
         assert!(overrides(&[]).is_empty());

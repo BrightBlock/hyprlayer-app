@@ -95,8 +95,6 @@ describe("AgentSidebar bundle chip", () => {
     expect(screen.queryByText("CLI out of date")).toBeNull();
   });
 
-  // Current bytes, dead-end source: the SHA matches master, but a pre-1.6.0
-  // CLI tracks the frozen tree. A green "Up to date" reads as "nothing to do".
   it("blames the CLI, not the bundle, when the tree it tracks is frozen", () => {
     chip({ kind: "upToDate", label: "9a2a33c", lastCheckedMs: null, frozen: true });
     expect(screen.getByText("CLI out of date")).toBeTruthy();
@@ -112,7 +110,6 @@ describe("AgentSidebar folder rows", () => {
   });
 
   it("keeps the folder's own menu off the agent menu", () => {
-    // Both rows carry an onContextMenu; a folder must not report as an agent.
     const { onMenu } = sidebar();
     fireEvent.contextMenu(screen.getByText("Review"));
     expect(onMenu).not.toHaveBeenCalled();
@@ -120,7 +117,6 @@ describe("AgentSidebar folder rows", () => {
 
   it("draws an empty folder that agentRows kept, with its zero count", () => {
     sidebar([{ kind: "group", folder: "Brand new", count: 0, open: true }]);
-    // Scoped to the row: the Agents root row also reads 0 with no agents.
     const row = screen.getByText("Brand new").closest("button");
     expect(row).toBeTruthy();
     expect(within(row as HTMLElement).getByText("0")).toBeTruthy();

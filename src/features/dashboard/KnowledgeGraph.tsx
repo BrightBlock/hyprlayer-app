@@ -13,61 +13,33 @@ const WIDTH = 960;
 const HEIGHT = 640;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 6;
-/** Layout margin inside the stage, small, so stars reach near the edges. */
 const STAGE_PAD = 28;
-/** Radial density equalizer (< 1): the force layout settles into a
- *  center-heavy blob, and raising each star's normalized center distance to
- *  this power pushes the dense core outward so the constellation fills the
- *  whole hero. 1 = off. */
 const SPREAD = 0.68;
-/** How many of the most-linked nodes get a glow halo. Capped so the blur
- *  filter doesn't multiply across a 200-node corpus. */
 const GLOW_NODES = 12;
 
 type Props = {
-  /** The full graph (built once by the parent, we don't rebuild it here). */
   graph: Graph;
 };
 
-/**
- * Interactive nebula view of the thoughts index, the Observatory home's
- * full-bleed hero stage. Every doc is a star in the theme's nebula family,
- * every resolved link a curved gradient edge; the most-linked docs wear glow
- * halos and the top hub a pulse ring. Connected docs pull into clusters; node
- * size reflects how linked a doc is. Scroll to zoom, drag the background to
- * pan, drag a node to arrange, hover to spotlight a doc's neighbourhood,
- * click to open it. Renders edge-to-edge in whatever box it's given: the
- * backdrop over-scans the stage, so `meet` letterboxing never shows a seam,
- * and an empty or still-settling graph paints the bare nebula.
- */
 export function KnowledgeGraph({ graph: full }: Props) {
   const navigate = useNavigate();
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Show only the *linked* docs, the connection story. Isolated docs (no
-  // resolved link) would otherwise bury the structure in a dot-cloud. If
-  // nothing is linked at all, fall back to showing everything.
   const graph = useMemo(() => {
     const connected = full.nodes.filter((n) => n.degree > 0);
     return connected.length > 0 ? { nodes: connected, edges: full.edges } : full;
   }, [full]);
 
-  // The force layout is O(n²), heavy enough to stall first paint if run inline.
-  // Defer it to after the shell paints (rAF) so the page is always instant; a
-  // spinner shows for the one frame it takes to settle.
   const [layout, setLayout] = useState<Point[] | null>(null);
   const [overrides, setOverrides] = useState<Record<string, Point>>({});
   const [hovered, setHovered] = useState<string | null>(null);
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
 
-  // Refs so the imperative wheel/pointer handlers read live values without
-  // re-binding listeners.
   const viewRef = useRef(view);
   viewRef.current = view;
   const dragNode = useRef<{ id: string; moved: boolean } | null>(null);
   const pan = useRef<{ x: number; y: number; moved: boolean } | null>(null);
 
-  // New graph → recompute the layout after paint and reset drags + camera.
   useEffect(() => {
     setLayout(null);
     setOverrides({});
@@ -75,9 +47,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
     const iterations = graph.nodes.length > 140 ? 220 : 300;
     const run = () =>
       setLayout(spread(simulate(graph, { width: WIDTH, height: HEIGHT, iterations })));
-    // rAF defers the O(n²) pass past first paint, but a hidden webview never
-    // ticks rAF (occluded window, app launched minimized), which would leave
-    // the hero starless until a repaint. Compute on a timer instead there.
     let raf = 0;
     let timer: number | undefined;
     if (document.visibilityState === "hidden") timer = window.setTimeout(run, 50);
@@ -94,9 +63,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
     return m;
   }, [graph]);
 
-  // Edge tint: a link between two docs of the same type wears that type's
-  // hue (a mesh of PR docs reads green, like their stars); mixed-type links
-  // keep the neutral nebula strand.
   const idToType = useMemo(() => {
     const m = new Map<string, string>();
     for (const n of graph.nodes) m.set(n.id, n.type);
@@ -113,7 +79,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
     return m;
   }, [graph]);
 
-  // The most-linked docs get halos; the single top hub also wears the pulse.
   const { glowIds, hubId } = useMemo(() => {
     const ranked = [...graph.nodes].sort((a, b) => b.degree - a.degree);
     const glowIds = new Set(
@@ -122,8 +87,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
     return { glowIds, hubId: ranked[0] && ranked[0].degree > 0 ? ranked[0].id : null };
   }, [graph]);
 
-  // Client → root SVG (viewBox) coords. Independent of the pan/zoom transform,
-  // which lives on the inner <g>, so it stays valid mid-gesture.
   const clientToRoot = (clientX: number, clientY: number): Point | null => {
     const svg = svgRef.current;
     const ctm = svg?.getScreenCTM();
@@ -141,8 +104,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
     return { x: (root.x - v.tx) / v.scale, y: (root.y - v.ty) / v.scale };
   };
 
-  // Wheel zoom toward the cursor. Bound manually (non-passive) so we can
-  // preventDefault and not scroll the page underneath.
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -160,9 +121,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
     return () => svg.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Failsafe: clear any in-flight drag/pan if the window loses focus or the OS
-  // cancels the gesture (trackpad, app switch). Without this a lost pointerup
-  // leaves dragNode/pan set and later moves drag stale state.
   useEffect(() => {
     const reset = () => {
       dragNode.current = null;
@@ -253,10 +211,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
           <stop offset="0.55" stopColor="var(--color-nebula-3)" />
           <stop offset="1" stopColor="var(--color-nebula-5)" />
         </linearGradient>
-        {/* Anchored to the WIDTH×HEIGHT stage in user space (the matrix
-            reproduces the default objectBoundingBox mapping) so the fill
-            looks identical but no longer depends on the backdrop rect's
-            size, letting that rect over-scan without shifting the glow. */}
         <radialGradient
           id="kgf-bg"
           cx="0.58"
@@ -265,12 +219,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
           gradientUnits="userSpaceOnUse"
           gradientTransform={`matrix(${WIDTH} 0 0 ${HEIGHT} 0 0)`}
         >
-          {/* One cool backdrop, tuned to the 2a mock: a tight nebula bloom
-              just right of center (behind the search bar) that falls to the
-              plain surface tone within ~a third of the stage, so the outer
-              field and borders read near-black. A single gradient,
-              layering a second wash over it reads as a muddy temperature
-              clash and multiplies banding. */}
           <stop offset="0" stopColor="var(--color-nebula-bg-0)" />
           <stop offset="0.18" stopColor="var(--color-nebula-bg-1)" />
           <stop offset="0.42" stopColor="var(--color-surface)" />
@@ -278,13 +226,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
         <filter id="kgf-glow" x="-80%" y="-80%" width="260%" height="260%">
           <feGaussianBlur stdDeviation="6" />
         </filter>
-        {/* Viewport-fixed vignette for the star layer ONLY. Fading the smooth
-            nebula backdrop too (e.g. a CSS mask over the whole svg) multiplies
-            two near-black gradients and 8-bit compositing turns the product
-            into visible concentric rings; stars and edges are high-frequency,
-            so masking just them can't band. Stop opacities follow a smoothstep
-            curve; the gradient is anchored to the stage so pan/zoom slides the
-            world under a fixed porthole. */}
         <radialGradient
           id="kgf-fade"
           cx="0.5"
@@ -312,19 +253,12 @@ export function KnowledgeGraph({ graph: full }: Props) {
             fill="url(#kgf-fade)"
           />
         </mask>
-        {/* Fine monochrome grain, dithers away any residual banding in the
-            nebula's own low-contrast radial (a smooth gradient this large
-            steps every ~50px on 8-bit displays without it). */}
         <filter id="kgf-grain">
           <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" stitchTiles="stitch" />
           <feColorMatrix type="saturate" values="0" />
         </filter>
       </defs>
 
-      {/* Nebula backdrop doubles as the pan / reset surface. It over-scans
-          the stage (3×, centered) so the anchored gradient bleeds past any
-          xMidYMid-meet letterbox band, the nebula reaches the container's
-          edges with no seam at any aspect ratio. */}
       <rect
         x={-WIDTH}
         y={-HEIGHT}
@@ -339,14 +273,10 @@ export function KnowledgeGraph({ graph: full }: Props) {
       {layout && (
         <g mask="url(#kgf-vignette)">
           <g transform={`translate(${view.tx} ${view.ty}) scale(${scale})`}>
-            {/* Edges first, so nodes sit on top. Curved gradient strands, the
-                bow alternates by index so the mesh weaves instead of fanning. */}
             {graph.edges.map((edge, i) => {
               const a = posOf(edge.source, idToIndex.get(edge.source) ?? 0);
               const b = posOf(edge.target, idToIndex.get(edge.target) ?? 0);
               const litEdge = !active || edge.source === active || edge.target === active;
-              // Resting opacity: explicit refs read a touch stronger than
-              // inferred topic links. Hairline weights to match the fine stars.
               const base = edge.kind === "ref" ? 0.45 : 0.25;
               const typeA = idToType.get(edge.source);
               const stroke =
@@ -368,14 +298,9 @@ export function KnowledgeGraph({ graph: full }: Props) {
 
             {graph.nodes.map((node, idx) => {
               const p = posOf(node.id, idx);
-              // Fine stars (≈3–10px on screen): the hero reads as a wide field
-              // of small points, not a bubble chart. Degree still sizes them,
-              // gently. An invisible hit circle keeps hover/click forgiving.
               const r = 1.4 + Math.min(Math.sqrt(node.degree) * 0.7, 2.8);
               const color = typeColor(node.type);
               const lit = isLit(node.id);
-              // Labels only on hover (the spotlit neighbourhood), the resting
-              // hero stays a clean constellation under the overlaid dashboard.
               const showLabel = active != null && lit;
               return (
                 <g
@@ -432,10 +357,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
         </g>
       )}
 
-      {/* Grain sits over everything (backdrop, stars, glows) at imperceptible
-          strength, pure dither, not texture. Stage + 25% overscan keeps the
-          filter raster small; beyond it the field is flat near-black with
-          nothing left to band. */}
       <rect
         x={-WIDTH * 0.25}
         y={-HEIGHT * 0.25}
@@ -449,14 +370,6 @@ export function KnowledgeGraph({ graph: full }: Props) {
   );
 }
 
-/**
- * Fan a settled layout out across the whole stage. Two passes: stretch each
- * axis independently to the padded box (the sim's blob rarely matches the
- * stage's aspect), then relax the center-heavy density by raising each
- * point's normalized distance from center to SPREAD, inner points move
- * outward a lot, the rim barely moves, and relative arrangement (clusters,
- * neighbourhoods) survives.
- */
 function spread(pos: Point[]): Point[] {
   if (pos.length < 2) return pos;
   let minX = Infinity;
@@ -490,8 +403,6 @@ function spread(pos: Point[]): Point[] {
   });
 }
 
-/** A gently curved edge: quadratic bezier bowed perpendicular to the chord,
- *  alternating side by index so the mesh weaves instead of fanning one way. */
 function curvedPath(a: Point, b: Point, index: number): string {
   const dx = b.x - a.x;
   const dy = b.y - a.y;

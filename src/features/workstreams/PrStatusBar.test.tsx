@@ -5,8 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrStatusBar } from "./PrStatusBar";
 import type { PrStatus, WorkstreamView } from "@/lib/bindings";
 
-// Mock the data hooks so the bar renders off a plain PrStatus, no react-query,
-// no gh subprocess. `vi.hoisted` lets the (hoisted) vi.mock factory reach them.
 const q = vi.hoisted(() => ({
   useWorkstreamPr: vi.fn(),
   useMergePr: vi.fn(),
@@ -85,7 +83,6 @@ describe("PrStatusBar merge gate", () => {
 
   it("does not queue auto-merge for changes-requested (author's turn)", () => {
     renderBar(makePr({ reviewDecision: "changesRequested" }), true);
-    // Stays a plain, disabled Merge, no Auto-merge affordance.
     expect(screen.queryByRole("button", { name: "Auto-merge" })).toBeNull();
     expect(mergeBtn().disabled).toBe(true);
   });
@@ -95,22 +92,15 @@ describe("PrStatusBar merge menu", () => {
   it("floats fixed and right-aligned to the Merge button", () => {
     renderBar(makePr());
     const btn = mergeBtn();
-    // jsdom reports a zero rect; stand in for a button inside the right sidebar.
     btn.getBoundingClientRect = () => ({ bottom: 120, right: 900 }) as DOMRect;
     Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
 
     fireEvent.click(btn);
     const menu = screen.getByText("Squash and merge").closest("div");
 
-    // Must be `fixed`, not `absolute`: the diff sidebar is `overflow-hidden`
-    // (for its width animation) and clips the menu at its left edge.
     expect(menu?.className).toContain("fixed");
     expect(menu?.className).not.toContain("absolute");
     expect(menu?.style.top).toBe("124px");
-    // Popover always positions off `left` (right-aligning by subtracting its
-    // own width from the anchor's right edge), never a `right` style — jsdom
-    // reports a 0-width panel, so the anchor's own right edge (900) is where
-    // the panel's left edge lands too.
     expect(menu?.style.left).toBe("900px");
     expect(menu?.style.right).toBe("");
   });

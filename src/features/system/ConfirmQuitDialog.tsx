@@ -4,17 +4,6 @@ import { commands, events } from "@/lib/bindings";
 import { ConfirmDialog } from "@/components/ui";
 import { IS_MACOS } from "@/lib/platform";
 
-/**
- * "Quit Hyprlayer?", raised by the backend on every user-initiated quit (⌘Q,
- * the window's close button) while Settings → General → "Confirm before
- * quitting" is on.
- *
- * The backend has already cancelled that exit before the event lands, so
- * dismissing this just resumes the app; only `quitApp` actually exits. Checking
- * "Don't ask again" rides along with the confirmation, the same command
- * persists the preference before exiting, so the write can't lose a race with
- * the process going away.
- */
 export function ConfirmQuitDialog() {
   const [open, setOpen] = useState(false);
   const [dontAskAgain, setDontAskAgain] = useState(false);
@@ -23,7 +12,6 @@ export function ConfirmQuitDialog() {
 
   useEffect(() => {
     const unlisten = events.quitRequested.listen(() => {
-      // Every prompt starts fresh: an unchecked box, no stale error.
       setDontAskAgain(false);
       setError(null);
       setQuitting(false);
@@ -45,8 +33,6 @@ export function ConfirmQuitDialog() {
     setError(null);
     void commands.quitApp(dontAskAgain).then(
       (res) => {
-        // Only reachable if the exit didn't happen, e.g. persisting
-        // "Don't ask again" failed, which aborts before `app.exit`.
         if (res.status === "error") {
           setError(res.error);
           setQuitting(false);
@@ -76,8 +62,6 @@ export function ConfirmQuitDialog() {
         Running agents, terminals, and lifecycle scripts all stop when the app quits.
       </p>
 
-      {/* Deliberately quiet: the opt-out rides along with the confirmation
-          rather than competing with it. */}
       <label
         className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-dim hover:text-ink"
         title={`${IS_MACOS ? "⌘Q" : "Closing the window"} quits immediately. Re-enable in Settings → General.`}

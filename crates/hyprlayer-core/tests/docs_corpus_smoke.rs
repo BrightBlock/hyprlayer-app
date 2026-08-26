@@ -1,21 +1,9 @@
-//! Smoke test against the real thoughts corpus, when present on this machine.
-//! Skips silently elsewhere (CI), the in-module unit tests carry coverage.
-//!
-//! The corpus location comes from this machine's hyprlayer config (every
-//! filesystem-backed root it configures), falling back to `~/thoughts` when
-//! there is no usable config. It is deliberately *not* a hardcoded path: one
-//! used to live here, and because a missing corpus skips silently, it made
-//! this file a no-op on every machine but the one it was written on.
-
 use std::path::PathBuf;
 
 use hyprlayer_core::config::ConfigService;
 use hyprlayer_core::docs::frontmatter::{self, FmPatch, FmValue};
 use hyprlayer_core::index::thoughts_roots;
 
-/// Filesystem thoughts roots to smoke-test: whatever the real config points
-/// at, or `~/thoughts` when this machine has no usable config. Empty when
-/// neither exists, which the tests treat as "skip".
 async fn corpus_roots() -> Vec<PathBuf> {
     let from_config = match ConfigService::with_default_path() {
         Ok(service) => match service.load().await {
@@ -24,8 +12,6 @@ async fn corpus_roots() -> Vec<PathBuf> {
                 .map(|r| r.root)
                 .filter(|p| p.is_dir())
                 .collect(),
-            // An absent or unparseable config is a "no corpus here" signal,
-            // not a failure of what this file tests.
             Err(_) => Vec::new(),
         },
         Err(_) => Vec::new(),
@@ -62,8 +48,6 @@ async fn corpus_parses_and_noop_patch_is_identity() {
         eprintln!("corpus not present; skipping");
         return;
     }
-    // Say the size out loud: a silent skip is indistinguishable from a pass
-    // in the summary line, which is how the old hardcoded path went unnoticed.
     eprintln!("corpus: {} files", files.len());
     assert!(
         files.len() >= 10,
@@ -72,9 +56,9 @@ async fn corpus_parses_and_noop_patch_is_identity() {
     );
     for path in &files {
         let Ok(content) = std::fs::read_to_string(path) else {
-            continue; // non-UTF8 etc., out of scope
+            continue;
         };
-        let parsed = frontmatter::parse(&content); // must never panic
+        let parsed = frontmatter::parse(&content);
         let _ = &parsed.fm;
 
         let out = frontmatter::patch_frontmatter(&content, &FmPatch::default())
@@ -108,7 +92,6 @@ async fn corpus_status_patch_only_touches_frontmatter() {
             "{}",
             path.display()
         );
-        // Body bytes are never modified.
         assert_eq!(
             &out[after.body_offset..],
             &content[before.body_offset..],

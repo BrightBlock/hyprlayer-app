@@ -61,8 +61,6 @@ describe("buildGraph", () => {
   });
 
   it("does not resolve a related ref to a filename shared by multiple docs", () => {
-    // "plan.md" is ambiguous across two projects, so a bare `related: plan.md`
-    // must resolve to nothing rather than silently pick one project's doc.
     const docs = [
       doc({ id: "/projA/plan.md", relPath: "projA/plan.md", fm: { related: ["plan.md"] } }),
       doc({ id: "/projB/plan.md", relPath: "projB/plan.md" }),
@@ -96,7 +94,6 @@ describe("buildGraph", () => {
       doc({ id: "/b.md", fm: { ticket: "ENG-1" } }),
       doc({ id: "/c.md", fm: { ticket: "ENG-1" } }),
     ];
-    // 3 docs → a triangle (3 edges), all topic.
     const edges = buildGraph(docs).edges;
     expect(edges).toHaveLength(3);
     expect(edges.every((e) => e.kind === "topic")).toBe(true);

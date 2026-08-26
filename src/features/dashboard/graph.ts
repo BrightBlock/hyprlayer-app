@@ -1,31 +1,19 @@
 import type { DocMeta } from "@/lib/bindings";
 import { docTitle } from "@/features/library/text";
 
-/** A document, as one node in the knowledge graph. */
 export type GraphNode = {
-  /** Doc id (absolute path), also the key used by edges. */
   id: string;
   title: string;
-  /** Frontmatter `type`, lowercased; `"other"` when absent. */
   type: string;
-  /** Number of resolved links touching this node (used to size it). */
   degree: number;
 };
 
-/** An undirected link between two docs.
- *  - `ref`  : an explicit `related` reference (a deliberate link).
- *  - `topic`: an inferred link: the two docs share a ticket or a tag. */
 export type GraphEdge = { source: string; target: string; kind: "ref" | "topic" };
 
 export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 
-/** Tags shared by more than this many docs are too generic to imply a
- *  meaningful pairwise link (they'd create a dense blob), so they're skipped. */
 const TOPIC_GROUP_MAX = 6;
 
-/** The nebula star family, five themed tokens (src/index.css) so each theme
- *  supplies its own sweep. The edge gradients use stops 1/3/5; stars of
- *  non-canonical doc types pick a stable hue from this family. */
 export const NEBULA_COLORS = [
   "var(--color-nebula-1)",
   "var(--color-nebula-2)",
@@ -34,10 +22,6 @@ export const NEBULA_COLORS = [
   "var(--color-nebula-5)",
 ];
 
-/** Semantic hues for the canonical doc types, the same themed tokens the
- *  library's type chips bind (research/plan/handoff), plus the Ship/Merge
- *  green for `pr` docs and the commit teal for notes, so every theme
- *  recolors them and the light theme deepens them. */
 const TYPE_COLORS: Record<string, string> = {
   research: "var(--color-research)",
   plan: "var(--color-plan)",
@@ -46,10 +30,6 @@ const TYPE_COLORS: Record<string, string> = {
   note: "var(--color-commit)",
 };
 
-/** A star's hue for a doc `type` (lowercased; "other" = untyped). Canonical
- *  types wear their semantic token; unknown types hash to a stable nebula
- *  hue so distinct off-schema families still read apart; untyped docs rest
- *  on the neutral mid-blue. */
 export function typeColor(type: string): string {
   const known = TYPE_COLORS[type];
   if (known) return known;
@@ -67,7 +47,6 @@ function normalize(value: string): string {
     .replace(/\]\]$/, "");
 }
 
-/** Every string a `related` entry might be written as, for one doc. */
 function docKeys(doc: DocMeta): string[] {
   const base = doc.relPath.split("/").pop() ?? doc.relPath;
   return unique([
@@ -79,7 +58,6 @@ function docKeys(doc: DocMeta): string[] {
   ]);
 }
 
-/** Candidate keys a single `related` reference could resolve against. */
 function relatedCandidates(related: string): string[] {
   const n = normalize(related);
   const base = n.split("/").pop() ?? n;
@@ -90,13 +68,6 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-/**
- * Build the node-link graph from a doc set. Nodes are the docs themselves;
- * edges come from each doc's `related` frontmatter, resolved best-effort against
- * the other docs' ids/paths/filenames/titles. References that don't resolve to a
- * doc in this set (or point at the doc itself) are dropped, so the graph only
- * ever shows links you can actually click through.
- */
 export function buildGraph(docs: DocMeta[]): Graph {
   const nodes: GraphNode[] = docs.map((doc) => ({
     id: doc.id,
@@ -105,11 +76,6 @@ export function buildGraph(docs: DocMeta[]): Graph {
     degree: 0,
   }));
 
-  // key -> doc id. A key that two different docs share (e.g. a common filename
-  // like "plan.md" or an identical title across projects) is *ambiguous*: we
-  // drop it entirely rather than resolve a `related` reference to whichever doc
-  // happened to come first in query order, which would be silent cross-project
-  // misinformation. Exact ids/relPaths are effectively unique and survive.
   const keyToId = new Map<string, string>();
   const ambiguous = new Set<string>();
   for (const doc of docs) {
@@ -125,13 +91,8 @@ export function buildGraph(docs: DocMeta[]): Graph {
   const seen = new Set<string>();
   const edges: GraphEdge[] = [];
 
-  // Undirected, deduped. `ref` is added before `topic` and the first edge for a
-  // pair wins, so an explicit reference always outranks an inferred one.
   const addEdge = (a: string, b: string, kind: GraphEdge["kind"]): void => {
     if (a === b) return;
-    // Collision-proof key: doc ids are filesystem paths and may contain spaces,
-    // so a plain `${a} ${b}` join is ambiguous. JSON-encoding the sorted pair
-    // is unambiguous regardless of the characters in either path.
     const pairKey = JSON.stringify(a < b ? [a, b] : [b, a]);
     if (seen.has(pairKey)) return;
     seen.add(pairKey);
@@ -151,9 +112,6 @@ export function buildGraph(docs: DocMeta[]): Graph {
     }
   }
 
-  // 2. Topical links: docs sharing a ticket or a (non-generic) tag cluster
-  //    together. Each such group becomes a clique of `topic` edges, which
-  //    dedupe against the `ref` edges above via the shared `addEdge`.
   const buckets = new Map<string, string[]>();
   const pushBucket = (key: string, id: string): void => {
     const list = buckets.get(key);
@@ -187,14 +145,6 @@ export type SimulateOptions = {
   iterations?: number;
 };
 
-/**
- * Deterministic Fruchterman–Reingold force layout. No dependencies, no RNG,
- * nodes seed onto a circle by index so the same graph always lays out the same
- * way (stable across re-renders and unit-testable). Repulsion pushes every pair
- * apart; edges pull their endpoints together; a per-iteration cooling cap keeps
- * it from oscillating. Returns one point per node, aligned to `nodes` order and
- * clamped inside the box.
- */
 export function simulate(graph: Graph, opts: SimulateOptions): Point[] {
   const { width, height } = opts;
   const iterations = opts.iterations ?? 300;
@@ -206,13 +156,11 @@ export function simulate(graph: Graph, opts: SimulateOptions): Point[] {
   graph.nodes.forEach((node, i) => index.set(node.id, i));
 
   const area = width * height;
-  const k = Math.sqrt(area / n); // ideal edge length
+  const k = Math.sqrt(area / n);
   const cx = width / 2;
   const cy = height / 2;
   const seed = Math.min(width, height) / 4;
 
-  // Seed on a circle, with a deterministic golden-ratio radius jitter so the
-  // initial layout isn't perfectly symmetric (symmetry can stall the solver).
   const pos: Point[] = graph.nodes.map((_, i) => {
     const angle = (2 * Math.PI * i) / n;
     const r = seed * (0.55 + 0.45 * ((i * 0.6180339887) % 1));
@@ -225,7 +173,7 @@ export function simulate(graph: Graph, opts: SimulateOptions): Point[] {
 
   const disp: Point[] = pos.map(() => ({ x: 0, y: 0 }));
   const maxStep = Math.min(width, height) / 8;
-  const gravity = 0.04; // gentle pull to center so components don't drift apart
+  const gravity = 0.04;
 
   for (let iter = 0; iter < iterations; iter++) {
     const temp = maxStep * (1 - iter / iterations);
@@ -234,14 +182,12 @@ export function simulate(graph: Graph, opts: SimulateOptions): Point[] {
       d.y = 0;
     }
 
-    // Repulsion (every pair).
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         let dx = pos[i].x - pos[j].x;
         let dy = pos[i].y - pos[j].y;
         let dist = Math.hypot(dx, dy);
         if (dist < 0.01) {
-          // Coincident: nudge deterministically so the direction is defined.
           dx = (i - j) * 0.01;
           dy = 0.01;
           dist = Math.hypot(dx, dy);
@@ -256,7 +202,6 @@ export function simulate(graph: Graph, opts: SimulateOptions): Point[] {
       }
     }
 
-    // Attraction (along edges).
     for (const [a, b] of edges) {
       const dx = pos[a].x - pos[b].x;
       const dy = pos[a].y - pos[b].y;
@@ -270,9 +215,6 @@ export function simulate(graph: Graph, opts: SimulateOptions): Point[] {
       disp[b].y += fy;
     }
 
-    // Centering gravity + apply, capped by temperature. No wall clamp: letting
-    // the layout settle freely (then fitting it afterward) avoids the classic
-    // pile-up of nodes pinned against the borders.
     for (let i = 0; i < n; i++) {
       disp[i].x += (cx - pos[i].x) * gravity * k;
       disp[i].y += (cy - pos[i].y) * gravity * k;
@@ -285,9 +227,6 @@ export function simulate(graph: Graph, opts: SimulateOptions): Point[] {
   return fitToBox(pos, width, height, 32);
 }
 
-/** Scale + translate a settled layout uniformly so its bounding box fills the
- *  viewport (minus padding) and is centered, guarantees the graph uses the
- *  whole canvas regardless of the simulation's absolute scale. */
 function fitToBox(pos: Point[], width: number, height: number, pad: number): Point[] {
   let minX = Infinity;
   let minY = Infinity;

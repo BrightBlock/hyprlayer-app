@@ -5,19 +5,11 @@ import { isAppError } from "@/lib/ipc";
 import { useArchiveWorkstream } from "@/lib/queries";
 
 type Props = {
-  /** The item being archived; null keeps the dialog closed. */
   target: WorkstreamView | null;
   onClose: () => void;
-  /** Called after a successful archive so the caller can fix tab selection. */
   onArchived: (id: string) => void;
 };
 
-/**
- * Non-destructive archive: the worktree is moved (not deleted) to
- * `<project>/archived-contexts/<slug>/` and the branch is preserved. The
- * Archive view restores from there. No discard branch, uncommitted work
- * survives by construction.
- */
 export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) {
   const archive = useArchiveWorkstream();
 
@@ -42,10 +34,7 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
     );
   };
 
-  // The backend aborts archive (before any teardown) when the project's Archive
-  // script fails, so the user can fix it and retry, or skip the script.
   const scriptFailed = isAppError(archive.error) && archive.error.code === "archive_script_failed";
-  // Folder rows archive as a pure status flip, no worktree, no branch.
   const folder = target !== null && isFolderWorkstream(target);
 
   return (

@@ -1,7 +1,3 @@
-//! Per-repo hyprlayer settings at `<repo>/.hyprlayer/settings.toml`. App-owned,
-//! repo-local, safe to commit (distinct from the global CLI config, ADR-0002).
-//! Reads use serde; writes use toml_edit so comments + unrelated sections survive.
-
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -25,29 +21,18 @@ pub struct RepoSettings {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case", default)]
 pub struct WorktreeSettings {
-    /// Files/globs copied from the repo into each new worktree.
     pub copy: Vec<String>,
 }
 
-/// Per-project lifecycle scripts, inherited by every workstream. Each value is a
-/// free-form multi-line block of shell commands run in the workstream's worktree
-/// root; an empty string means "unconfigured". Run sequentially, a non-zero
-/// exit halts the block (see `crate::scripts::build_block`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case", default)]
 pub struct ScriptSettings {
-    /// Runs once when a new worktree is created.
     pub setup: String,
-    /// Runs each time the user presses Run; the prior Run process is stopped first.
     pub run: String,
-    /// Runs before a workstream is archived.
     pub archive: String,
 }
 
-/// Per-repo branch vocabulary. An empty `prefixes` means "inherit" — the global
-/// list if the user has one, else the built-ins (see
-/// `crate::branch_prefix::resolve_prefixes`). Never merged with the level above.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "kebab-case", default)]
@@ -59,10 +44,6 @@ pub fn settings_path(repo: &Path) -> PathBuf {
     repo.join(HYPRLAYER_DIR).join(SETTINGS_FILE)
 }
 
-/// Resolve the settings path, refusing a symlinked `.hyprlayer` directory. The
-/// repo is untrusted input: if it ships `.hyprlayer` as a symlink we refuse to
-/// follow it (it could redirect a read, or our atomic write, to an out-of-tree
-/// location). A real directory, or none yet, is fine.
 fn checked_settings_path(repo: &Path) -> Result<PathBuf> {
     let dir = repo.join(HYPRLAYER_DIR);
     if std::fs::symlink_metadata(&dir)
@@ -76,7 +57,6 @@ fn checked_settings_path(repo: &Path) -> Result<PathBuf> {
     Ok(settings_path(repo))
 }
 
-/// Read repo settings. Absent file → default (empty). Parse error → `RepoSettingsParse`.
 pub fn read(repo: &Path) -> Result<RepoSettings> {
     let path = checked_settings_path(repo)?;
     match std::fs::read_to_string(&path) {
@@ -89,11 +69,6 @@ pub fn read(repo: &Path) -> Result<RepoSettings> {
     }
 }
 
-/// Load `<repo>/.hyprlayer/settings.toml` as an editable document (empty if
-/// absent), apply `edit` (which receives the document + its path, for error
-/// messages), then write it back atomically (tmp + rename), preserving
-/// comments, ordering, and unrelated sections. Shared scaffolding behind the
-/// `[worktree]` and `[scripts]` setters.
 fn edit_settings_doc(
     repo: &Path,
     edit: impl FnOnce(&mut toml_edit::DocumentMut, &Path) -> Result<()>,
@@ -113,7 +88,6 @@ fn edit_settings_doc(
 
     edit(&mut doc, &path)?;
 
-    // Atomic tmp+rename (mirrors settings.rs:206 discipline).
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -123,7 +97,6 @@ fn edit_settings_doc(
     Ok(())
 }
 
-/// Overwrite `[worktree].copy`, preserving comments/order/other sections via toml_edit.
 pub fn set_worktree_copy(repo: &Path, patterns: &[String]) -> Result<()> {
     edit_settings_doc(repo, |doc, _path| {
         let mut arr = toml_edit::Array::new();
@@ -135,14 +108,8 @@ pub fn set_worktree_copy(repo: &Path, patterns: &[String]) -> Result<()> {
     })
 }
 
-/// Overwrite `[scripts]` (setup/run/archive), preserving comments/order/other
-/// sections via toml_edit. Mirrors [`set_worktree_copy`]. Multi-line blocks
-/// round-trip (toml_edit renders them as multi-line basic strings).
 pub fn set_scripts(repo: &Path, scripts: &ScriptSettings) -> Result<()> {
     edit_settings_doc(repo, |doc, path| {
-        // Force a real (non-inline) `[scripts]` table so it renders as a section
-        // header, index-assigning a brand-new key on an already-parsed document
-        // yields an inline `scripts = { … }` table otherwise.
         let table = doc
             .entry("scripts")
             .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
@@ -159,15 +126,8 @@ pub fn set_scripts(repo: &Path, scripts: &ScriptSettings) -> Result<()> {
     })
 }
 
-/// Overwrite `[branches].prefixes`, preserving comments/order/other sections
-/// via toml_edit. Mirrors [`set_scripts`]. Written as an array-of-tables so the
-/// committed file reads as `[[branches.prefixes]]` blocks a human can edit.
 pub fn set_branch_prefixes(repo: &Path, prefixes: &[BranchPrefix]) -> Result<()> {
     edit_settings_doc(repo, |doc, path| {
-        // Force a real (non-inline) `[branches]` table for the same reason
-        // `set_scripts` does: index-assigning a brand-new key on an
-        // already-parsed document yields an inline `branches = { … }` table
-        // otherwise.
         let table = doc
             .entry("branches")
             .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
@@ -229,7 +189,6 @@ mod tests {
         let repo = make_repo();
         let dir = repo.path().join(".hyprlayer");
         std::fs::create_dir_all(&dir).unwrap();
-        // Write an initial file with a comment and an unrelated section.
         std::fs::write(
             dir.join("settings.toml"),
             "# repo-level hyprlayer settings\n[other]\nfoo = \"bar\"\n\n[worktree]\ncopy = []\n",
@@ -239,19 +198,15 @@ mod tests {
         set_worktree_copy(repo.path(), &[".env".to_string(), "certs/".to_string()]).unwrap();
 
         let raw = std::fs::read_to_string(dir.join("settings.toml")).unwrap();
-        // Comment must survive.
         assert!(
             raw.contains("# repo-level hyprlayer settings"),
             "comment missing: {raw}"
         );
-        // Unrelated section must survive.
         assert!(raw.contains("[other]"), "[other] missing: {raw}");
         assert!(raw.contains("foo = \"bar\""), "foo missing: {raw}");
-        // New copy array must be present.
         assert!(raw.contains(".env"), ".env missing: {raw}");
         assert!(raw.contains("certs/"), "certs/ missing: {raw}");
 
-        // Roundtrip via read() as well.
         let settings = read(repo.path()).unwrap();
         assert_eq!(settings.worktree.copy, vec![".env", "certs/"]);
     }
@@ -375,7 +330,6 @@ mod tests {
         assert!(raw.contains(".env"), "worktree copy missing: {raw}");
         assert!(raw.contains("[scripts]"), "[scripts] missing: {raw}");
 
-        // Round-trips, including the multi-line setup block.
         let s = read(repo.path()).unwrap();
         assert_eq!(s.scripts.setup, "npm ci\nnpx playwright install");
         assert_eq!(s.scripts.run, "npm run dev -- --port $HL_PORT");
@@ -447,10 +401,6 @@ mod tests {
 
     #[test]
     fn set_branch_prefixes_with_empty_list_reads_back_empty() {
-        // An empty write is exactly how the Phase 5 editor spells "inherit";
-        // toml_edit renders a zero-entry ArrayOfTables as nothing under a
-        // `set_implicit(false)` [branches] table, so this asserts the
-        // round-trip rather than assuming it.
         let repo = make_repo();
         let prefixes = vec![BranchPrefix {
             label: "Feature".to_string(),
@@ -467,7 +417,6 @@ mod tests {
     #[test]
     fn symlinked_hyprlayer_dir_is_refused() {
         let repo = make_repo();
-        // A second dir holding a real settings.toml that `.hyprlayer` links to.
         let outside = make_repo();
         std::fs::write(
             outside.path().join("settings.toml"),
@@ -476,10 +425,8 @@ mod tests {
         .unwrap();
         std::os::unix::fs::symlink(outside.path(), repo.path().join(".hyprlayer")).unwrap();
 
-        // Reads must refuse the symlinked dir rather than following it out of tree.
         let err = read(repo.path()).unwrap_err();
         assert_eq!(err.code(), "invalid_path");
-        // Writes too.
         let err = set_scripts(repo.path(), &ScriptSettings::default()).unwrap_err();
         assert_eq!(err.code(), "invalid_path");
         let err = set_branch_prefixes(repo.path(), &[]).unwrap_err();

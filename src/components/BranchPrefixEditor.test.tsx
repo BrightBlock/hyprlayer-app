@@ -36,24 +36,16 @@ const addType = () => screen.getByRole("button", { name: "Add branch type" });
 const confirmAdd = () => screen.getByRole("button", { name: "Add" });
 const cancelAdd = () => screen.getByRole("button", { name: "Cancel add" });
 
-/** A saved row renders as TEXT — its pencil is the only way to the inputs, so
- *  every test that edits an existing row starts here. */
 function editRow(name: string) {
   fireEvent.click(screen.getByRole("button", { name: `Edit ${name}` }));
 }
 
-/** Type into a controlled input the way a user commits: change, then blur. */
 function type(input: HTMLInputElement, text: string) {
   fireEvent.change(input, { target: { value: text } });
 }
 
 describe("BranchPrefixEditor", () => {
   it("opens an add form without touching the list", () => {
-    // The regression guard for the original bug: a half-typed type used to be a
-    // real row in the table (kept out of the payload by an "isNew" flag that
-    // never noticed a row with a label but no prefix), so it could sit there
-    // indefinitely with no sign it hadn't saved. Now nothing reaches the table
-    // until the form is confirmed.
     const { onChange } = renderEditor();
     fireEvent.click(addType());
 
@@ -64,8 +56,6 @@ describe("BranchPrefixEditor", () => {
   });
 
   it("disables Add while a field is still blank, without an error message", () => {
-    // Blank is not yet an ERROR — the user has not finished, so nothing should
-    // shout at them for it. The Add button being disabled is the only signal.
     renderEditor();
     fireEvent.click(addType());
 
@@ -76,8 +66,6 @@ describe("BranchPrefixEditor", () => {
   });
 
   it("disables Add and explains why once the prefix is invalid", () => {
-    // The rules are mirrored from `validate_prefix`, so a bad prefix is caught
-    // before Add is even clickable, not after a rejected write.
     renderEditor();
     fireEvent.click(addType());
 
@@ -91,7 +79,6 @@ describe("BranchPrefixEditor", () => {
   });
 
   it("disables Add when the prefix duplicates an existing type's", () => {
-    // The saved rows are text, so the add form's fields are the only inputs.
     const { onChange } = renderEditor({ value: TWO });
     fireEvent.click(addType());
 
@@ -115,22 +102,16 @@ describe("BranchPrefixEditor", () => {
     expect(onChange).toHaveBeenCalledWith([
       { label: "Spike", prefix: "spike/", keywords: [] },
     ]);
-    // The form is gone — its job was to gate entry to the table, not to stay
-    // open as a second editor for the row it just created.
     expect(screen.queryByRole("button", { name: "Cancel add" })).toBeNull();
   });
 
   it("renders a just-added row as text until its edit icon is clicked", () => {
-    // The reported confusion: a row that just left the add form used to render
-    // as one more set of live inputs, indistinguishable from the form it just
-    // came out of. It should read as a finished entry instead.
     renderEditor();
     fireEvent.click(addType());
     type(labels()[0], "Spike");
     type(prefixes()[0], "spike/");
     fireEvent.click(confirmAdd());
 
-    // No editable Label/Prefix input for it — just its text and an edit icon.
     expect(screen.queryByLabelText("Label")).toBeNull();
     expect(screen.getByText("Spike")).toBeTruthy();
     expect(screen.getByText("spike/")).toBeTruthy();
@@ -142,11 +123,6 @@ describe("BranchPrefixEditor", () => {
   });
 
   it("renders SAVED rows as text on a fresh mount, the way a restart arrives", () => {
-    // The regression guard for the restart bug. Read-only used to mean "added
-    // during this session", so after a relaunch — where every row is simply a
-    // saved row — the boxes came back around all of them. A saved row renders
-    // as text because that is what a saved row is, with no session state
-    // involved, so a fresh mount looks the same as the moment after adding.
     renderEditor({ value: TWO });
 
     expect(screen.queryByLabelText("Label")).toBeNull();
@@ -167,14 +143,11 @@ describe("BranchPrefixEditor", () => {
       { ...TWO[0], prefix: "bugfix/" },
       TWO[1],
     ]);
-    // Back to text, not left as an open input.
     expect(screen.queryByLabelText("Prefix")).toBeNull();
     expect(screen.getByText("bugfix/")).toBeTruthy();
   });
 
   it("keeps an invalid row in edit mode so its message stays visible", () => {
-    // Snapping back to text on blur would hide the very error explaining why
-    // nothing saved.
     const { onChange } = renderEditor({ value: TWO });
 
     editRow("Bug fix");
@@ -225,10 +198,6 @@ describe("BranchPrefixEditor", () => {
   });
 
   it("blocks the save and marks the field when a saved row is blanked", () => {
-    // The regression guard for silent data loss. An EXISTING row's errors are
-    // never dropped from the payload — `validate_prefixes` would reject a blank
-    // prefix by name, so the row is kept and the save is blocked instead, with
-    // the reason shown right on the field.
     const { onChange } = renderEditor({ value: TWO });
 
     editRow("Bug fix");
@@ -237,17 +206,12 @@ describe("BranchPrefixEditor", () => {
 
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("needs a prefix");
-    // The blanked row is still on screen and still editable, waiting to be
-    // corrected — the other row stays text, so this is the only Label input.
     expect(labels()).toHaveLength(1);
     expect(labels()[0].value).toBe("Bug fix");
     expect(screen.getByText("Feature")).toBeTruthy();
   });
 
   it("marks an invalid prefix inline rather than round-tripping a save", () => {
-    // The rules are mirrored from `validate_prefix`, so the field goes red on
-    // the keystroke instead of after a rejected write. The backend still gets
-    // the final say for anything that reaches it another way.
     const { onChange } = renderEditor({ value: TWO });
 
     editRow("Bug fix");
@@ -277,8 +241,6 @@ describe("BranchPrefixEditor", () => {
   });
 
   it("drafts text edits and commits them on blur, not per keystroke", () => {
-    // An intermediate `fix//` typed on the way to `fix/x/` would fail
-    // `validate_prefix` and put an ErrorNote on screen mid-word.
     const { onChange } = renderEditor({ value: TWO });
 
     editRow("Bug fix");
@@ -336,8 +298,6 @@ describe("BranchPrefixEditor", () => {
   });
 
   it("disables every row control", () => {
-    // Rows are text while disabled, so there are no inputs to check — the
-    // buttons, including the pencil that would open one, are the surface.
     renderEditor({ value: TWO, disabled: true });
 
     for (const name of [
@@ -354,8 +314,6 @@ describe("BranchPrefixEditor", () => {
   });
 
   it("re-seeds from a changed value, unless the draft is blocked", () => {
-    // The rejected-save regression guard: while `save.isError` holds, a refetch
-    // must not wipe the text the ErrorNote is asking the user to fix.
     const onChange = vi.fn();
     const { rerender } = render(
       <BranchPrefixEditor
@@ -378,7 +336,6 @@ describe("BranchPrefixEditor", () => {
         inheritedNote="Built-in types"
       />,
     );
-    // The edited row keeps its in-progress text; the other stays text-only.
     expect(prefixes()[0].value).toBe("my fix/");
     expect(screen.getByText("Feature")).toBeTruthy();
 
@@ -390,7 +347,6 @@ describe("BranchPrefixEditor", () => {
         inheritedNote="Built-in types"
       />,
     );
-    // Re-seeded: one row, and the edit is gone with the row it belonged to.
     expect(screen.queryByLabelText("Prefix")).toBeNull();
     expect(screen.getByText("feat/")).toBeTruthy();
   });

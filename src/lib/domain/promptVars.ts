@@ -1,9 +1,3 @@
-/**
- * The `{{variable}}` tokens a prompt body may reference, resolved from the
- * focused workstream's worktree when the prompt runs
- * (`workstream_prompt_context`). Shared vocabulary: the prompt library offers
- * them in its editor, the agent library in its system-prompt editor.
- */
 
 import type { PromptContext } from "@/lib/bindings";
 

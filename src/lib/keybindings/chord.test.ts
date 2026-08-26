@@ -15,9 +15,7 @@ describe("eventToChord", () => {
   });
 
   it("keeps the non-primary Cmd/Ctrl key as its literal token", () => {
-    // Control on macOS is the literal `ctrl`, not `mod`.
     expect(eventToChord(key({ key: "k", ctrlKey: true }), true)).toBe("ctrl+k");
-    // The Windows/Super key on non-mac is the literal `meta`.
     expect(eventToChord(key({ key: "k", metaKey: true }), false)).toBe("meta+k");
   });
 
@@ -33,7 +31,6 @@ describe("eventToChord", () => {
   });
 
   it("normalizes letters, digits, and punctuation to stable tokens", () => {
-    // Shift carries the case, so the letter token is always lowercase.
     expect(eventToChord(key({ key: "K", metaKey: true, shiftKey: true }), true)).toBe(
       "mod+shift+k",
     );
@@ -47,9 +44,6 @@ describe("eventToChord", () => {
   });
 
   it("folds a shifted character back onto its unshifted key token", () => {
-    // The browser reports ⌘⇧] as key "}". Without folding, a chord spelled
-    // `mod+shift+bracketright` could never match, and Safari's next/previous-tab
-    // alternates need it to.
     expect(eventToChord(key({ key: "}", metaKey: true, shiftKey: true }), true)).toBe(
       "mod+shift+bracketright",
     );
@@ -59,7 +53,6 @@ describe("eventToChord", () => {
     expect(eventToChord(key({ key: "~", metaKey: true, shiftKey: true }), true)).toBe(
       "mod+shift+backquote",
     );
-    // Digits too, so `mod+shift+3` means what reserved.ts says it means.
     expect(eventToChord(key({ key: "#", metaKey: true, shiftKey: true }), true)).toBe(
       "mod+shift+3",
     );

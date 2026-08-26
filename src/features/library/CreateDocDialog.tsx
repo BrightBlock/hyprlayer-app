@@ -10,12 +10,10 @@ import { parseTagsInput } from "./text";
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** Preselect this project (its thoughts key), e.g. the library's active filter. */
   initialProjectName?: string;
 };
 
 export function CreateDocDialog({ open, onClose, initialProjectName }: Props) {
-  // Remount the form on every open so state resets without effects.
   if (!open) return null;
   return <CreateDocForm onClose={onClose} initialProjectName={initialProjectName} />;
 }
@@ -25,7 +23,6 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
   const createDoc = useCreateDoc();
   const navigate = useNavigate();
 
-  // Folder projects have no thoughts mapping, docs can't be created in them.
   const projects = (bootstrap.data?.projects ?? []).filter(isGitProject);
 
   const [title, setTitle] = useState("");

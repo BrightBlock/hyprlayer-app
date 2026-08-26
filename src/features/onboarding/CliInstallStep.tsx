@@ -1,8 +1,3 @@
-/**
- * Onboarding step 2, install the Hyprlayer CLI. The app needs it, so Next is
- * gated until it resolves. Offers a one-click install per available package
- * manager (run in the background), plus a manual copy/locate fallback.
- */
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { Badge, Button, Card, Spinner } from "@/components/ui";
@@ -59,7 +54,6 @@ export function CliInstallStep({ onNext }: { onNext: () => void }) {
             {hl?.path ? (
               <>
                 {" "}
-                {/* break-all: Windows install paths are long and unbreakable */}
                 at <span className="break-all font-mono text-xs">{hl.path}</span>
               </>
             ) : null}
@@ -73,8 +67,6 @@ export function CliInstallStep({ onNext }: { onNext: () => void }) {
   );
 }
 
-/** Shown when the CLI is missing. Owns its own queries, the parent renders it
- *  only in the not-installed branch. */
 function InstallPicker() {
   const bootstrap = useBootstrap();
   const methods = useCliInstallMethods();
@@ -87,8 +79,6 @@ function InstallPicker() {
   const installingLabel = install.isPending
     ? (all.find((m) => m.id === install.variables)?.label ?? null)
     : null;
-  // The parent renders this only while the CLI is missing, so a successful
-  // install that's settled (not re-fetching) means it's still undetected.
   const installedButMissing = install.isSuccess && !bootstrap.isFetching;
 
   async function locate() {
@@ -184,7 +174,6 @@ function InstallPicker() {
   );
 }
 
-/** A copyable install command, badged when its manager isn't installed. */
 function CommandRow({ method }: { method: CliInstallMethod }) {
   const { copied, trigger } = useCopyFeedback();
 

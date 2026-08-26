@@ -22,33 +22,19 @@ import {
 } from "@/features/prompts/prompts";
 import type { CustomPrompt } from "@/lib/bindings";
 
-/** A live autocomplete trigger detected at the caret: a `/command` or `@file`
- *  token, either of which can open any whitespace-delimited token in the draft.
- *  `start` is the index of the `/`/`@` itself, so applying a pick can splice
- *  from there. */
 type Trigger = { type: "command" | "file"; start: number; query: string };
 
-/** What the dropdown renders for one row, normalized across command/file modes. */
 export type Suggestion = {
-  /** The text inserted after the trigger char (command name or file path). */
   value: string;
-  /** Primary label (command name / file basename). */
   label: string;
-  /** Secondary detail (description / directory), shown dimmed. */
   detail: string;
-  /** Trailing tag, set for prompt-library entries, which the app expands
-   *  itself rather than handing to the harness as a command. */
   badge?: string;
 };
 
 const FILE_LIMIT = 20;
 const FILE_DEBOUNCE_MS = 100;
 
-/** Detect whether the caret sits inside an autocomplete trigger. Either a `/`
- *  or `@` that opens the current whitespace-delimited token fires, anywhere
- *  in the draft, matching the in-prompt skill highlight. */
 export function detectTrigger(text: string, caret: number): Trigger | null {
-  // Walk back to the start of the whitespace-delimited token under the caret.
   let i = caret;
   while (i > 0 && !/\s/.test(text[i - 1])) i -= 1;
   const token = text.slice(i, caret);
@@ -62,8 +48,6 @@ export function detectTrigger(text: string, caret: number): Trigger | null {
   return null;
 }
 
-/** Rank a command against the typed query: prefix matches first, then any
- *  substring, dropping non-matches. Keeps the original order within a tier. */
 function filterCommands(all: SlashCommand[], query: string): SlashCommand[] {
   const q = query.toLowerCase();
   if (!q) return all;
@@ -83,43 +67,22 @@ function dirname(path: string): string {
 }
 
 export type ComposerAutocomplete = {
-  /** Whether the dropdown should be visible. */
   open: boolean;
   mode: "command" | "file" | null;
   suggestions: Suggestion[];
   activeIndex: number;
   setActiveIndex: (i: number) => void;
-  /** A file search is in flight (shows a hint instead of "no matches"). */
   loading: boolean;
-  /** Names of every known command, drives the in-prompt skill highlight. */
   commandNames: Set<string>;
-  /** The custom prompt `draft` would expand to when sent, or null. */
   matchPrompt: (draft: string) => ComposerPromptMatch | null;
-  /** The prompts this composer will actually expand, by slug, one that collided
-   *  with a real command, or came from an unusable name, is absent. */
   offeredPrompts: ReadonlyMap<string, CustomPrompt>;
-  /** Apply the suggestion at `index`, splicing it into the draft. */
   apply: (index: number) => void;
-  /** Call FIRST inside the textarea's onKeyDown. Returns true when it consumed
-   *  the key (navigation / accept / dismiss) so the caller skips its own
-   *  handling (e.g. Enter-to-send). */
   handleKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
-  /** Keep the tracked caret in sync after any selection change. */
   syncCaret: () => void;
 };
 
-/** Drives `/command` and `@file` autocomplete plus the recognized-skill
- *  highlight for the composer textarea. The caller owns the `value`/`onChange`
- *  of the (controlled) textarea and the ref; this hook only reads the caret and
- *  splices accepted picks back through `onChange`.
- *
- *  When `onPickFile` is provided, an accepted `@file` pick is promoted to an
- *  attachment card instead of being spliced back into the textarea: the
- *  `@query` token is removed from the draft and the worktree-relative path is
- *  handed to the host. Falls back to the inline `@path ` splice when omitted. */
 export function useComposerAutocomplete(opts: {
   workstreamId: string;
-  /** Project the workstream belongs to, picks the right per-project prompt body. */
   projectPath: string;
   value: string;
   onChange: (next: string) => void;
@@ -129,19 +92,13 @@ export function useComposerAutocomplete(opts: {
 }): ComposerAutocomplete {
   const { workstreamId, projectPath, value, onChange, textareaRef, enabled, onPickFile } = opts;
 
-  // Null until the harness list lands, the collision rule below can't be
-  // applied without it, so no prompt is offered while it's in flight.
   const [slashCommands, setSlashCommands] = useState<SlashCommand[] | null>(null);
   const [caret, setCaret] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  // Trigger signature the user dismissed with Escape; suppresses the dropdown
-  // until the query changes (so Escape doesn't fight the live trigger).
   const dismissed = useRef<string | null>(null);
 
-  // Discover available slash commands once per worktree (and on focus changes
-  // the worktree id is stable, so this is effectively load-once).
   useEffect(() => {
     let alive = true;
     unwrap(ipc.listSlashCommands(workstreamId))
@@ -152,9 +109,6 @@ export function useComposerAutocomplete(opts: {
     };
   }, [workstreamId]);
 
-  // The user's own prompts answer to `/slug` as well, offered above claude's so
-  // they lead the dropdown. One map decides both what the dropdown lists and
-  // what a draft expands to, so the two can't disagree.
   const settings = useBootstrap().data?.settings;
   const prompts = useMemo(() => customPrompts(settings), [settings]);
   const offered = useMemo(
@@ -185,7 +139,6 @@ export function useComposerAutocomplete(opts: {
   );
   const triggerKey = trigger ? `${trigger.type}:${trigger.start}:${trigger.query}` : null;
 
-  // Debounced file search whenever an `@file` trigger is active.
   useEffect(() => {
     if (trigger?.type !== "file") {
       setFiles([]);
@@ -235,7 +188,6 @@ export function useComposerAutocomplete(opts: {
     return [];
   }, [trigger, allCommands, files]);
 
-  // Reset the highlighted row whenever the candidate set changes.
   useEffect(() => {
     setActiveIndex(0);
   }, [triggerKey]);
@@ -255,9 +207,6 @@ export function useComposerAutocomplete(opts: {
       if (!item || !trigger) return;
 
       if (trigger.type === "file" && onPickFile) {
-        // Promote the @file pick to an attachment card: delete the `@query`
-        // from the draft and hand the path off to the host. If the deletion
-        // would leave a doubled space, eat one to keep the draft tidy.
         let removeTo = caret;
         if (value[trigger.start - 1] === " " && value[removeTo] === " ") {
           removeTo += 1;
@@ -284,8 +233,6 @@ export function useComposerAutocomplete(opts: {
       onChange(next);
       const newCaret = trigger.start + insert.length;
       dismissed.current = null;
-      // The textarea re-renders from the new value first; restore the caret on
-      // the next frame so it lands after the inserted token.
       requestAnimationFrame(() => {
         const el = textareaRef.current;
         if (el) {
@@ -350,8 +297,6 @@ export function useComposerAutocomplete(opts: {
   };
 }
 
-/** The popover list of `/command` or `@file` suggestions, anchored above the
- *  composer (which sits at the bottom of the pane). */
 export function AutocompleteDropdown({
   state,
   emptyHint,
@@ -387,7 +332,6 @@ export function AutocompleteDropdown({
               <button
                 ref={active ? activeRef : undefined}
                 type="button"
-                // Keep the textarea focused: prevent the mousedown from blurring it.
                 onMouseDown={(e) => {
                   e.preventDefault();
                   state.apply(i);
@@ -417,8 +361,6 @@ export function AutocompleteDropdown({
   );
 }
 
-/** Tokenize `text` into plain runs and recognized `/skill` runs (a slash token,
- *  bounded by start/whitespace, whose name is a known command). */
 export function highlightSegments(
   text: string,
   commandNames: Set<string>,
@@ -439,10 +381,6 @@ export function highlightSegments(
   return segments;
 }
 
-/** A transparent-text mirror of the textarea, sitting behind it, that paints a
- *  highlight pill behind any recognized `/skill` token. The textarea's own text
- *  renders on top (its background is transparent), so only the pill shows
- *  through. Typography/padding/scroll must match the textarea exactly. */
 export function HighlightBackdrop({
   value,
   commandNames,
@@ -452,8 +390,6 @@ export function HighlightBackdrop({
   value: string;
   commandNames: Set<string>;
   scrollTop: number;
-  /** Ghost text trailing the draft, naming the argument the `/command` still
-   *  wants. Only set when nothing follows the command, so it can't shift text. */
   argHint?: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -487,7 +423,6 @@ export function HighlightBackdrop({
       {argHint && (
         <span className="text-ink-dim/70">{/\s$/.test(value) ? argHint : ` ${argHint}`}</span>
       )}
-      {/* Trailing newline guard so the box height matches the textarea's. */}
       {"\n"}
     </div>
   );

@@ -12,32 +12,14 @@ import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 type Props = {
   workstreamId: string;
   kind: ScriptKind;
-  /** A live PTY to attach to (replays scrollback + tails); null → start fresh. */
   attachId: string | null;
-  /** Bump to force a fresh run (▶ / restart). The effect keys on this. */
   gen: number;
-  /** Bump to wipe the screen without touching the process (the dock's Clear).
-   *  The backend drops its retained scrollback in the same breath. */
   clearNonce: number;
-  /** Fired with the new terminal id once a fresh run spawns. */
   onStarted?: (terminalId: string) => void;
-  /** Fired when the process exits (finished or stopped). */
   onExit?: () => void;
-  /** Fired when re-attaching to an `attachId` whose PTY is already gone (the run
-   *  exited): the caller should show the captured last-run output instead. */
   onDead?: () => void;
 };
 
-/**
- * Streams one script run into an xterm view, either attaching to a live PTY or
- * spawning a fresh one via `script_run`. Reuses the same engine as
- * {@link TerminalTab}; trimmed of zoom and focus-repaint (the run log
- * self-heals on the next output). Live theme is no longer trimmed: a theme
- * change with no output pending has nothing to self-heal from, so this calls
- * the same `useTerminalThemeSync` every other terminal does. Unmounting never
- * kills the PTY, collapsing the dock keeps a Run alive (the rail's green dot
- * is the signal); teardown is the backend's job (Stop, archive, or app exit).
- */
 export function ScriptRunView({
   workstreamId,
   kind,
@@ -68,17 +50,12 @@ export function ScriptRunView({
     const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
     engineRef.current = engine;
     engine.mount(host);
-    // Ctrl+Shift+C / Ctrl+Shift+V off macOS, the emulator has no copy
-    // path of its own there (see attachTerminalClipboard).
     attachTerminalClipboard(engine);
     let lastGrid = engine.fit();
     engine.focus();
 
     let disposed = false;
     let id: string | undefined = attachRef.current ?? undefined;
-    // A non-null attachId means we were handed an existing run to re-attach to
-    // (▶ always passes null and spawns fresh). If that PTY is gone the run has
-    // already exited, fall back to its captured output, never spawn a new one.
     const reattaching = id != null;
 
     const newChannel = (): Channel<TerminalEvent> => {
@@ -86,9 +63,6 @@ export function ScriptRunView({
       channel.onmessage = (ev) => {
         if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
         else if (ev.kind === "exited") {
-          // `\x1b[?25l` hides the cursor: the finished run is a read-only log, not
-          // a live prompt (the dead PTY ignores input anyway, a blinking cursor
-          // would just imply you can type into it).
           engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n\x1b[?25l");
           onExitRef.current?.();
         }
@@ -99,17 +73,13 @@ export function ScriptRunView({
     void (async () => {
       if (id) {
         const ok = await unwrap(commands.terminalAttach(id, newChannel()));
-        if (!ok) id = undefined; // PTY gone
+        if (!ok) id = undefined;
       }
       if (reattaching && !id) {
-        // Re-attach target is gone: the run finished. Let the caller swap in the
-        // captured last-run output rather than spawning a rogue new process.
         if (!disposed) onDeadRef.current?.();
         return;
       }
       if (!id && !disposed) {
-        // Wait two frames so xterm has measured its real grid before the PTY
-        // opens at that size (see TerminalTab for the "garbage dims" rationale).
         await new Promise<void>((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         );
@@ -119,15 +89,10 @@ export function ScriptRunView({
           const opened = await unwrap(
             commands.scriptRun(workstreamId, kind, lastGrid.cols, lastGrid.rows, newChannel()),
           );
-          // If we unmounted mid-spawn, leave the run alive (collapse keeps it
-          // running); the backend tracks it and the rail shows it's live.
           if (disposed) return;
           id = opened;
           onStartedRef.current?.(opened);
         } catch (e) {
-          // `unwrap` throws the AppError envelope, a plain object, so a bare
-          // String(e) renders "[object Object]". Read it through the helpers,
-          // and surface the backend's remedy when it supplied one.
           const remedy = errorRemedy(e);
           const crlf = (s: string): string => s.replace(/\r?\n/g, "\r\n");
           engine.write(
@@ -171,14 +136,9 @@ export function ScriptRunView({
       engineRef.current = null;
       engine.dispose();
     };
-    // Re-mount on a real identity change or an explicit restart (`gen`). attachId
-    // is read once at mount via the ref so a post-start id change can't remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, gen]);
 
-  // Clear: wipe screen + scrollback, leaving the PTY (and its stream) untouched.
-  // Seeded from the current nonce so neither mount nor a `gen` remount, which
-  // already starts from a blank engine, counts as a clear.
   const appliedClear = useRef(clearNonce);
   useEffect(() => {
     if (clearNonce === appliedClear.current) return;

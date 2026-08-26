@@ -1,9 +1,3 @@
-/**
- * The workstream-scoped "Archived agents" view, a full-pane takeover of the
- * agent area listing agents archived out of this workstream's tab strip, with
- * unarchive (restore + resume) and remove actions. Purely presentational: state
- * lives in the tab store; the actions come from ProjectPage.
- */
 
 import { useMemo, useState } from "react";
 
@@ -31,7 +25,6 @@ const STATUS: Record<ArchivedStatus, { label: string; tone: BadgeTone }> = {
   idle: { label: "Idle", tone: "dim" },
 };
 
-/** The LLM/engine the agent ran on, as a short label for the row. */
 function modelLabel(shell: ShellTab): string {
   if (shell.ptyAgent) return engineLabel(shell.ptyAgent.engineId);
   if (shell.harness === "opencode") return shell.opencodeModel ?? "OpenCode";
@@ -57,12 +50,9 @@ function ArchivedMeta({ shell, branch, archivedAt }: { shell: ShellTab; branch: 
 
 type ArchivedAgentsViewProps = {
   workstreamTitle: string;
-  /** The workstream branch, shared by every agent in this workstream. */
   branch: string;
   archived: ArchivedShell[];
   onUnarchive: (shellId: number) => void;
-  /** Drop an archived entry for good (its branch/worktree/transcript persist;
-   *  only the resumable tab handle is removed). */
   onRemove: (shellId: number) => void;
 };
 

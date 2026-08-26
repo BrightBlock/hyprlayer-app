@@ -2,20 +2,6 @@ import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "
 
 import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
 
-/**
- * A horizontally-scrollable tab strip. Once tabs overflow an edge, that edge
- * gets a chevron which signals "more this way" and nudges the scroll on click.
- *
- * The chevrons overlay the scroll area (absolute, with a fade to the bar
- * colour) so toggling them never reflows the tabs, and the hidden native
- * scrollbar underneath keeps trackpad and shift-wheel scrolling working.
- * `trailing` (the new-tab button) is pinned OUTSIDE the scroll area so it
- * stays reachable however far the tabs scroll.
- *
- * Layout: the wrapper takes the flex role the bare scroller had, with `min-w-0`
- * so it can shrink and let the inner scroller overflow. `grow` adds `flex-1`
- * for call sites that must fill their strip, like the split's right pane.
- */
 export function ScrollableTabStrip({
   children,
   trailing,
@@ -23,14 +9,8 @@ export function ScrollableTabStrip({
   grow = false,
 }: {
   children: ReactNode;
-  /** Always-visible content pinned to the right of the scroll area, past the
-   *  right chevron, so a control like "new tab" never scrolls out of reach. */
   trailing?: ReactNode;
-  /** The selected tab's id; when it changes, that tab is scrolled into view so a
-   *  freshly-opened (or newly-focused) tab is never left off-screen. Pills must
-   *  carry a matching `data-tab-id`. */
   activeId?: number | null;
-  /** Fill the parent flex row (right-pane strip); omit for content-width (main). */
   grow?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -41,8 +21,6 @@ export function ScrollableTabStrip({
   const sync = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // 1px slack absorbs sub-pixel rounding so a chevron never sticks on at a
-    // hard scroll boundary.
     setCanLeft(el.scrollLeft > 1);
     setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
   }, []);
@@ -52,16 +30,12 @@ export function ScrollableTabStrip({
     const content = contentRef.current;
     if (!viewport || !content) return;
     sync();
-    // Observe both boxes: the content grows/shrinks as tabs are added, renamed,
-    // or closed; the viewport changes when the window or a split pane resizes.
     const ro = new ResizeObserver(sync);
     ro.observe(viewport);
     ro.observe(content);
     return () => ro.disconnect();
   }, [sync]);
 
-  // Reveal the active tab whenever it changes, covers opening a tab (it lands
-  // at the far end) and focusing one that's scrolled off either edge.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || activeId == null) return;

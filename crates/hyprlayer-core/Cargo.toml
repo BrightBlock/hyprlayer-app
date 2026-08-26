@@ -7,8 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-# Derive specta::Type on IPC-facing types so the Tauri shell can export
-# TypeScript bindings without mirroring DTOs.
 specta = ["dep:specta"]
 
 [dependencies]
@@ -22,8 +20,6 @@ which = "7"
 shellexpand = "3"
 regex = "1"
 serde_yaml = "0.9"
-# Local-only git operations (status/ahead-behind); no network transports, so
-# no openssl. Network git stays with the system binary (credential helpers).
 git2 = { version = "0.19", default-features = false }
 memchr = "2"
 aho-corasick = "1"
@@ -46,7 +42,6 @@ tempfile = "3"
 
 [target."cfg(windows)".dependencies]
 junction = "2.0.0"
-# Job objects, so a spawned tree cannot outlive us (see process/job.rs).
 windows-sys = { version = "0.60", features = [
   "Win32_Foundation",
   "Win32_Security",

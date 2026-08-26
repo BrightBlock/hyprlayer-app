@@ -54,7 +54,6 @@ describe("FullDiskAccessNotice", () => {
     expect(show).not.toHaveBeenCalled();
   });
 
-  /** Non-macOS, or the probe file is absent: never nag. */
   it("stays silent when the probe is inconclusive", () => {
     renderNotice("unknown");
     expect(show).not.toHaveBeenCalled();
@@ -72,8 +71,6 @@ describe("FullDiskAccessNotice", () => {
   });
 
   it("dismisses against the freshest settings, not a stale snapshot", () => {
-    // Toast fires with worktreeRoot "/a"; the user then changes it to "/b"
-    // (a re-render) before dismissing. The persisted dismissal must carry "/b".
     const { rerender } = renderNotice("denied", {
       fullDiskAccessNoticeDismissed: false,
       worktreeRoot: "/a",

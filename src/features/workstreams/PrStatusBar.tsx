@@ -7,12 +7,9 @@ import { addressPrFeedback } from "@/features/session/sessionStore";
 import { MenuItem, Popover, Spinner } from "@/components/ui";
 import { GitPullRequestIcon } from "@/components/icons";
 
-// Pill matching the header "Ship" action's height/treatment (border + tint), so
-// the PR controls sit cleanly alongside it on the top row.
 const pill =
   "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50";
 
-/** A tinted header action pill (Fix CI / Address comments / Archive). */
 function PillButton({
   tint,
   onClick,
@@ -37,13 +34,6 @@ const MERGE_OPTIONS: { method: MergeMethod; label: string }[] = [
   { method: "rebase", label: "Rebase and merge" },
 ];
 
-/**
- * Pull-request controls for the header's right action cluster (next to Ship): a
- * PR link that opens in the default browser, agent feedback actions (Fix CI /
- * Address comments), a gated Merge menu, and, once merged, a purple Archive
- * button that hands off to Root's shared archive flow (`onArchive`). Renders
- * nothing until the branch has a PR, so the header is unchanged before shipping.
- */
 export function PrStatusBar({
   view,
   onArchive,
@@ -57,10 +47,6 @@ export function PrStatusBar({
   const bootstrap = useBootstrap();
   const automerge = bootstrap.data?.settings.git?.automerge ?? false;
   const [mergeOpen, setMergeOpen] = useState(false);
-  // The menu is wider than the gap between the Merge button and the sidebar's
-  // left edge, and the sidebar clips (`overflow-hidden`, for its width
-  // animation). Popover positions off the button's own rect, so it floats
-  // over the main pane instead of being cut off at the fold.
   const mergeBtnRef = useRef<HTMLButtonElement>(null);
 
   const data = pr.data;
@@ -68,14 +54,6 @@ export function PrStatusBar({
 
   const isMerged = data.state === "merged";
   const isOpen = data.state === "open";
-  // Gate on green CI + a satisfied review + mergeable. A repo with no checks
-  // (`none`) has nothing to wait on; `failing` never merges. A required review
-  // that's still outstanding (`reviewRequired`) or negative (`changesRequested`)
-  // blocks a direct merge too, GitHub's `mergeable` bool reflects conflicts
-  // only, not branch protection, so without this the button looks enabled and a
-  // `gh pr merge` would just error. Auto-merge (when enabled) queues for anything
-  // GitHub clears on its own, pending checks or a pending review, but never a
-  // hard failure (won't clear itself) or changes-requested (author's turn).
   const reviewRequired = data.reviewDecision === "reviewRequired";
   const changesRequested = data.reviewDecision === "changesRequested";
   const reviewBlocks = reviewRequired || changesRequested;
@@ -97,9 +75,7 @@ export function PrStatusBar({
   };
 
   return (
-    // flex-wrap so the pills stack cleanly inside the narrow GIT-panel card.
     <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-      {/* The PR link, opens in the user's default browser. */}
       <button
         type="button"
         onClick={() => void openUrl(data.url)}

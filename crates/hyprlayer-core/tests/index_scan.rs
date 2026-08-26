@@ -1,5 +1,3 @@
-//! Integration tests for the thoughts indexer: scan, classify, query, upsert.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -22,12 +20,8 @@ fn write(root: &Path, rel: &str, content: &str) -> PathBuf {
     path
 }
 
-/// repos/myproj/{jt,shared}/{plans,research}/… and global/{shared,jt}/…,
-/// including a doc with no frontmatter and one with malformed YAML.
 fn build_tree() -> (TempDir, ThoughtsRoot) {
     let tmp = TempDir::new().unwrap();
-    // macOS temp dirs live behind a /var -> /private/var symlink; canonicalize
-    // so ids match what the watcher sees.
     let root = fs::canonicalize(tmp.path()).unwrap();
 
     write(
@@ -48,21 +42,17 @@ fn build_tree() -> (TempDir, ThoughtsRoot) {
         "---\ntitle: Shared Roadmap\ntype: plan\ndate: 2026-05-20\nstatus: draft\n\
          tags: [roadmap]\nauthor: alice\n---\n\nQuarterly goals.\n",
     );
-    // Real-corpus case: no frontmatter at all (cf. global/shared/pr_description.md).
     write(
         &root,
         DOC_NO_FM,
         "## describe_pr template\n\nNo frontmatter here.\n",
     );
-    // Malformed YAML frontmatter degrades to warnings + path fallbacks.
     write(
         &root,
         DOC_MALFORMED,
         "---\n: : : not yaml [\n---\n\nBody of the malformed doc.\n",
     );
-    // Outside the repos/global layout -> Area::Other.
     write(&root, DOC_STRAY, "---\nscope: global\n---\nstray body\n");
-    // Never indexed.
     write(&root, "repos/myproj/jt/.obsidian/cache.md", "ignored");
     write(&root, "repos/myproj/jt/plans/readme.txt", "not markdown");
 
@@ -103,7 +93,6 @@ fn full_scan_counts_and_skips() {
     let stats = index.full_scan(std::slice::from_ref(&root));
 
     assert_eq!(stats.indexed, 6, "six markdown docs are indexable");
-    // readme.txt is visited and skipped; .obsidian is pruned before visiting.
     assert_eq!(stats.skipped, 1);
     assert_eq!(stats.errors, 0);
 
@@ -114,7 +103,6 @@ fn full_scan_counts_and_skips() {
         .get(&id_of(&root, "repos/myproj/jt/plans/readme.txt"))
         .is_none());
 
-    // Rescan replaces, not duplicates.
     let stats = index.full_scan(std::slice::from_ref(&root));
     assert_eq!(stats.indexed, 6);
     assert_eq!(index.query(&ThoughtQuery::default()).total, 6);
@@ -143,7 +131,6 @@ fn classification_project_area_scope() {
     assert_eq!(doc.project, None);
     assert_eq!(doc.area, Area::Shared);
     assert_eq!(doc.scope, "global");
-    // No frontmatter: warning recorded, title falls back to the filename.
     assert!(!doc.fm_warnings.is_empty());
     assert_eq!(doc.fm.title.as_deref(), Some("pr description"));
     assert_eq!(doc.fm.date, None);
@@ -152,16 +139,13 @@ fn classification_project_area_scope() {
     assert_eq!(doc.area, Area::User { name: "jt".into() });
     assert_eq!(doc.scope, "global");
     assert!(doc.fm_warnings.iter().any(|w| w.contains("YAML")));
-    // Path fallbacks still fill date and type.
     assert_eq!(doc.fm.date.as_deref(), Some("2026-04-01"));
     assert_eq!(doc.fm.doc_type.as_deref(), Some("note"));
 
-    // Area::Other takes its scope from fm.scope when present.
     let doc = index.get(&id_of(&root, DOC_STRAY)).unwrap();
     assert_eq!(doc.area, Area::Other);
     assert_eq!(doc.scope, "global");
 
-    // doc_path round-trips the id.
     let id = id_of(&root, DOC_AUTH_PLAN);
     assert_eq!(index.doc_path(&id), Some(PathBuf::from(&id)));
     assert!(index.doc_path("/nope.md").is_none());
@@ -199,8 +183,6 @@ fn query_filters_combine_with_and() {
         sort: SortKey::Title,
         ..Default::default()
     };
-    // malformed (title "malformed"), pr_description ("pr description"),
-    // stray ("stray"), title sort ascending.
     assert_eq!(
         rel_paths(&index, &q),
         vec![DOC_MALFORMED, DOC_NO_FM, DOC_STRAY]
@@ -239,7 +221,6 @@ fn tag_filters_respect_or_and_modes() {
 fn text_search_ranks_title_hits_above_body_hits() {
     let (_tmp, _root, index) = scanned();
 
-    // "refactor" is in the auth plan's title and the cache research's body.
     let q = ThoughtQuery {
         text: Some("refactor".into()),
         sort: SortKey::Relevance,
@@ -250,7 +231,6 @@ fn text_search_ranks_title_hits_above_body_hits() {
     assert_eq!(result.items[0].rel_path, DOC_AUTH_PLAN);
     assert_eq!(result.items[1].rel_path, DOC_CACHE_RESEARCH);
 
-    // Every needle must match: only the auth plan has both words.
     let q = ThoughtQuery {
         text: Some("refactor tokens".into()),
         ..Default::default()
@@ -264,9 +244,6 @@ fn text_search_ranks_title_hits_above_body_hits() {
     assert_eq!(index.query(&q).total, 0);
 }
 
-/// Bodies are read fresh from disk in query pass 2. A doc whose title and
-/// tags don't contain the needle at all must still be found via its body,
-/// and still rank below a doc whose title matches the same needle.
 #[test]
 fn body_only_match_ranks_below_title_match_and_is_returned() {
     let (_tmp, root, index) = scanned();
@@ -283,8 +260,6 @@ fn body_only_match_ranks_below_title_match_and_is_returned() {
         Some(abs.to_string_lossy().into_owned())
     );
 
-    // "refactor" is in DOC_AUTH_PLAN's title, DOC_CACHE_RESEARCH's body, and
-    // now this new doc's body only (title/tags don't contain it).
     let q = ThoughtQuery {
         text: Some("refactor".into()),
         sort: SortKey::Relevance,
@@ -301,10 +276,6 @@ fn body_only_match_ranks_below_title_match_and_is_returned() {
     assert!(tail.contains(&rel), "{tail:?}");
 }
 
-/// A file removed from disk between the filter pass (pass 1, under the read
-/// lock) and the body-read pass (pass 2, unlocked I/O) must drop out of a
-/// text query cleanly rather than panicking. A non-text query never opens
-/// the file, so the (now stale) record it still holds is unaffected.
 #[test]
 fn file_removed_between_query_passes_drops_out_of_text_search_only() {
     let (_tmp, root, index) = scanned();
@@ -321,14 +292,10 @@ fn file_removed_between_query_passes_drops_out_of_text_search_only() {
     assert!(all.contains(&DOC_CACHE_RESEARCH.to_string()), "{all:?}");
 }
 
-/// No frontmatter block at all means `body_offset_bytes` returns 0, the
-/// whole file is searched as body, matching `extract_block`'s degradation.
 #[test]
 fn doc_with_no_frontmatter_is_body_searchable_over_whole_content() {
     let (_tmp, _root, index) = scanned();
 
-    // "describe_pr" only occurs in DOC_NO_FM's body text, never in its
-    // filename-derived title ("pr description").
     let q = ThoughtQuery {
         text: Some("describe_pr".into()),
         ..Default::default()
@@ -336,14 +303,6 @@ fn doc_with_no_frontmatter_is_body_searchable_over_whole_content() {
     assert_eq!(rel_paths(&index, &q), vec![DOC_NO_FM]);
 }
 
-/// A frontmatter block too large for the capped reads never shows its
-/// closing delimiter, and both halves of the path then degrade exactly as
-/// they do for genuinely unterminated frontmatter: at query time
-/// `body_offset_bytes` returns 0, so the raw header text is scored as body;
-/// at scan time `frontmatter::parse` falls back to path-derived metadata, so
-/// the title matched here is the filename-derived one (asserted directly in
-/// `scan_time_oversized_frontmatter_degrades_to_path_fallbacks_with_warning`).
-/// The doc stays findable and nothing panics anywhere in the path.
 #[test]
 fn oversized_frontmatter_degrades_at_query_time_without_panic() {
     let (_tmp, root, index) = scanned();
@@ -370,24 +329,20 @@ fn oversized_frontmatter_degrades_at_query_time_without_panic() {
 fn date_sort_and_bounds_handle_missing_dates() {
     let (_tmp, _root, index) = scanned();
 
-    // Default sort: date desc, docs without a date last.
     let all = rel_paths(&index, &ThoughtQuery::default());
     assert_eq!(
         &all[..4],
         [
-            DOC_CACHE_RESEARCH, // 2026-06-03
-            DOC_AUTH_PLAN,      // 2026-06-01
-            DOC_SHARED_ROADMAP, // 2026-05-20
-            DOC_MALFORMED,      // 2026-04-01 (filename fallback)
+            DOC_CACHE_RESEARCH,
+            DOC_AUTH_PLAN,
+            DOC_SHARED_ROADMAP,
+            DOC_MALFORMED,
         ]
     );
-    // The two undated docs come last; their mutual order is an mtime
-    // tiebreak that depends on file-creation timing.
     let mut tail = vec![all[4].as_str(), all[5].as_str()];
     tail.sort_unstable();
     assert_eq!(tail, vec![DOC_NO_FM, DOC_STRAY]);
 
-    // Date bounds exclude undated docs entirely.
     let q = ThoughtQuery {
         date_from: Some("2026-05-01".into()),
         ..Default::default()
@@ -437,12 +392,10 @@ fn upsert_hash_short_circuit_and_content_change() {
     let abs = root.root.join(DOC_AUTH_PLAN);
     let id = id_of(&root, DOC_AUTH_PLAN);
 
-    // Rewriting identical bytes (mtime touch) does not reindex.
     let original = fs::read(&abs).unwrap();
     fs::write(&abs, &original).unwrap();
     assert_eq!(index.upsert_path(&root, &abs), None);
 
-    // A real content change does, and the meta reflects it.
     let updated = String::from_utf8(original)
         .unwrap()
         .replace("title: Auth Refactor Plan", "title: Auth Refactor Plan v2");
@@ -454,7 +407,6 @@ fn upsert_hash_short_circuit_and_content_change() {
     );
     assert_eq!(index.query(&ThoughtQuery::default()).total, 6);
 
-    // Ignored and unreadable paths yield None.
     assert_eq!(
         index.upsert_path(&root, &root.root.join("repos/myproj/jt/plans/readme.txt")),
         None
@@ -465,10 +417,6 @@ fn upsert_hash_short_circuit_and_content_change() {
     );
 }
 
-/// A bare mtime touch (`git checkout`, `hyprlayer thoughts sync` rewriting
-/// identical bytes) must not be reported as a change, but the stored
-/// `mtime_ms` is still refreshed silently, so mtime-sorted lists and the
-/// Dashboard's most-recent window stay accurate.
 #[test]
 fn bare_mtime_touch_returns_none_but_refreshes_stored_mtime() {
     let (_tmp, root, index) = scanned();
@@ -477,7 +425,6 @@ fn bare_mtime_touch_returns_none_but_refreshes_stored_mtime() {
 
     let before_mtime = index.get(&id).unwrap().mtime_ms;
 
-    // Bump mtime without changing a single byte.
     let bumped = SystemTime::now() + Duration::from_secs(5);
     std::fs::File::open(&abs)
         .unwrap()
@@ -492,9 +439,6 @@ fn bare_mtime_touch_returns_none_but_refreshes_stored_mtime() {
     );
 }
 
-/// A body-only edit that changes the file's total size is a real change
-/// under the new (frontmatter-prefix-hash + size) basis, even though the
-/// frontmatter block itself is untouched.
 #[test]
 fn body_edit_that_changes_size_reindexes() {
     let (_tmp, root, index) = scanned();
@@ -514,17 +458,10 @@ fn body_edit_that_changes_size_reindexes() {
     assert_eq!(doc.size_bytes, updated.len() as f64);
 }
 
-/// Accepted divergence 2: a body edit that lands *past* the scan-time
-/// `FRONTMATTER_READ_CAP` prefix and preserves total file size leaves the
-/// (frontmatter-prefix-hash + size) basis unchanged, so it is treated the
-/// same as a bare mtime touch, refreshed silently, no `Some(id)`.
 #[test]
 fn body_edit_past_frontmatter_cap_that_preserves_size_refreshes_silently() {
     let (_tmp, root, index) = scanned();
 
-    // Frontmatter is tiny; a long body pushes the file well past the 64 KiB
-    // scan-time prefix cap, so a marker swap deep inside it falls outside
-    // the window the prefix hash covers.
     let filler = "x".repeat(80 * 1024);
     let content = format!("---\ntitle: Big Body Doc\ntype: note\n---\n\n{filler}MARKER_A end.\n");
     let rel = "repos/myproj/jt/notes/2026-06-07-big-body.md";
@@ -534,7 +471,6 @@ fn body_edit_past_frontmatter_cap_that_preserves_size_refreshes_silently() {
 
     let before_mtime = index.get(&id).unwrap().mtime_ms;
 
-    // Same-length swap, past the prefix cap.
     let updated = content.replace("MARKER_A", "MARKER_B");
     assert_eq!(updated.len(), content.len());
     fs::write(&abs, &updated).unwrap();
@@ -544,9 +480,7 @@ fn body_edit_past_frontmatter_cap_that_preserves_size_refreshes_silently() {
         .set_modified(bumped)
         .unwrap();
 
-    // No event-worthy change is reported...
     assert_eq!(index.upsert_path(&root, &abs), None);
-    // ...but the stored record is still refreshed (mtime moves).
     let after_mtime = index.get(&id).unwrap().mtime_ms;
     assert!(
         after_mtime > before_mtime,
@@ -554,12 +488,6 @@ fn body_edit_past_frontmatter_cap_that_preserves_size_refreshes_silently() {
     );
 }
 
-/// Accepted divergence 3, scan-time half: a frontmatter block itself larger
-/// than `FRONTMATTER_READ_CAP` never shows its closing delimiter within the
-/// scan-time prefix read, so `frontmatter::parse` degrades to
-/// `Frontmatter::default()` + path fallbacks + a warning, the doc still
-/// indexes (with `size_bytes` from the real, uncapped stat) rather than the
-/// scan erroring.
 #[test]
 fn scan_time_oversized_frontmatter_degrades_to_path_fallbacks_with_warning() {
     let (_tmp, root, index) = scanned();
@@ -572,8 +500,6 @@ fn scan_time_oversized_frontmatter_degrades_to_path_fallbacks_with_warning() {
 
     assert_eq!(index.upsert_path(&root, &abs), Some(id.clone()));
     let doc = index.get(&id).unwrap();
-    // Path fallback fills the title from the filename, not the (unreachable)
-    // frontmatter title.
     assert_eq!(doc.fm.title.as_deref(), Some("huge frontmatter scan"));
     assert!(
         doc.fm_warnings
@@ -582,7 +508,6 @@ fn scan_time_oversized_frontmatter_degrades_to_path_fallbacks_with_warning() {
         "{:?}",
         doc.fm_warnings
     );
-    // size_bytes still reflects the real (uncapped) file size from stat.
     assert_eq!(doc.size_bytes, content.len() as f64);
 }
 
@@ -598,7 +523,6 @@ fn remove_drops_the_doc() {
     assert!(index.doc_path(&id).is_none());
     assert_eq!(index.query(&ThoughtQuery::default()).total, 5);
 
-    // Removing again is a no-op.
     assert_eq!(index.remove_path(&abs), None);
 }
 
@@ -608,17 +532,12 @@ fn full_scan_preserves_other_roots() {
     let (_tmp_b, root_b) = build_tree();
 
     index.full_scan(std::slice::from_ref(&root_b));
-    // Both roots' docs coexist…
     assert_eq!(index.query(&ThoughtQuery::default()).total, 12);
-    // …and rescanning one root does not disturb the other.
     index.full_scan(std::slice::from_ref(&root_a));
     assert_eq!(index.query(&ThoughtQuery::default()).total, 12);
     assert!(index.get(&id_of(&root_b, DOC_AUTH_PLAN)).is_some());
 }
 
-/// A doc the agent wrote through a worktree's `thoughts/` symlink is opened by
-/// that symlinked path, but the index keys it by its real location under the
-/// thoughts root. `resolve_id` must bridge the two so the doc still loads.
 #[cfg(unix)]
 #[test]
 fn resolve_id_follows_worktree_symlinks() {
@@ -626,12 +545,9 @@ fn resolve_id_follows_worktree_symlinks() {
 
     let (_tmp, root, index) = scanned();
 
-    // An already-canonical id resolves to itself (the library's fast path).
     let canonical = id_of(&root, DOC_SHARED_ROADMAP);
     assert_eq!(index.resolve_id(&canonical), Some(canonical.clone()));
 
-    // Mirror the per-worktree layout: <wt>/thoughts/shared -> the repo's shared
-    // tree, the symlink an agent's `Write` tool path points through.
     let wt = TempDir::new().unwrap();
     let thoughts = wt.path().join("thoughts");
     fs::create_dir_all(&thoughts).unwrap();
@@ -641,7 +557,6 @@ fn resolve_id_follows_worktree_symlinks() {
     )
     .unwrap();
 
-    // The symlinked path the UI captured resolves to the canonical index id.
     let via_link = thoughts
         .join("shared/plans/2026-05-20-shared-roadmap.md")
         .to_string_lossy()
@@ -649,8 +564,6 @@ fn resolve_id_follows_worktree_symlinks() {
     assert_ne!(via_link, canonical);
     assert_eq!(index.resolve_id(&via_link), Some(canonical));
 
-    // A symlinked path to a file that isn't indexed (and a plain missing path)
-    // stay unresolved rather than resolving to some unindexed id.
     let missing = thoughts
         .join("shared/plans/2026-01-01-nope.md")
         .to_string_lossy()

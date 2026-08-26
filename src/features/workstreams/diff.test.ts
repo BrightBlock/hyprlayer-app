@@ -43,7 +43,6 @@ describe("classifyPatchLine", () => {
   });
 
   it("treats +++/--- lookalikes inside content as content", () => {
-    // A removed line that begins with a single '-' then dashes is still a del.
     expect(classifyPatchLine("-- comment")).toBe("del");
     expect(classifyPatchLine("+- mixed")).toBe("add");
   });
@@ -113,11 +112,9 @@ describe("diffStrings", () => {
 });
 
 describe("intraLineRanges", () => {
-  // "aaa\nbbbb\nccc"  →  line offsets: aaa[0..3] \n[3] bbbb[4..8] \n[8] ccc[9..12]
   const doc = "aaa\nbbbb\nccc";
 
   it("keeps a mid-line slice (a word changed inside a modified line)", () => {
-    // Highlight just "bb" within "bbbb".
     expect(intraLineRanges(doc, 5, 7)).toEqual([[5, 7]]);
   });
 
@@ -126,18 +123,14 @@ describe("intraLineRanges", () => {
   });
 
   it("drops a span that covers a whole line (a wholly-new/removed line)", () => {
-    // The entire "bbbb" line, no intra-line tint, line background only.
     expect(intraLineRanges(doc, 4, 8)).toEqual([]);
   });
 
   it("drops every whole line inside a multi-line span", () => {
-    // The whole document is three complete lines → nothing to word-highlight.
     expect(intraLineRanges(doc, 0, doc.length)).toEqual([]);
   });
 
   it("keeps only the partial edges of a span crossing several lines", () => {
-    // From mid-"aaa" through all of "bbbb" into mid-"ccc": the two ragged edges
-    // are kept, the wholly-covered middle line is dropped.
     expect(intraLineRanges(doc, 1, 11)).toEqual([
       [1, 3],
       [9, 11],

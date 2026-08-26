@@ -1,42 +1,22 @@
-//! Thoughts profile listing for the Add-project dialog.
-//!
-//! Listing resolves each destination's existing repo folders so the dialog
-//! can offer them. Creation goes through the CLI (`hyprlayer thoughts profile
-//! create`, see `HyprCli::thoughts_profile_create`) per ADR-0002's
-//! single-writer rule, this module only supplies the app-side name rules the
-//! CLI doesn't enforce, and the read-back of what the CLI wrote.
-
 use serde::Serialize;
 
 use crate::error::{CoreError, Result};
 
 use super::{BackendConfig, GitConfig, ThoughtsConfig, DEFAULT_THOUGHTS_REPO};
 
-/// One selectable thoughts destination: the default backend (`name: None`) or
-/// a named profile.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ThoughtsProfile {
-    /// Profile name; `None` is the default backend (mapped without `--profile`).
     pub name: Option<String>,
     pub backend_kind: String,
-    /// Thoughts root as written in config (tilde kept, e.g. `~/thoughts`), for
-    /// display; None for backends without a filesystem tree (notion, anytype).
     pub thoughts_repo: Option<String>,
     pub repos_dir: Option<String>,
     pub global_dir: Option<String>,
-    /// Existing folder names under `<root>/<reposDir>`, the "existing folder"
-    /// choices for the dialog's folder select.
     pub folders: Vec<String>,
-    /// Why `folders` couldn't be read (e.g. permission denied), when the tree
-    /// exists but is inaccessible. An unreadable tree must not masquerade as
-    /// an empty one, the dialog surfaces this next to the folder select.
     pub folders_error: Option<String>,
 }
 
-/// All destinations a project can map into: the default backend first, then
-/// profiles sorted by name. Walks the filesystem for each entry's folders.
 pub fn list_profiles(thoughts: &ThoughtsConfig) -> Vec<ThoughtsProfile> {
     let mut out = vec![profile_entry(None, &thoughts.backend)];
     let mut names: Vec<&String> = thoughts.profiles.keys().collect();
@@ -49,9 +29,6 @@ pub fn list_profiles(thoughts: &ThoughtsConfig) -> Vec<ThoughtsProfile> {
     out
 }
 
-/// The entry a true first run will get once bootstrap writes the minimal
-/// config: git backend at `~/thoughts`. Folders are listed when the tree
-/// already exists (e.g. a CLI user opening the app for the first time).
 pub fn bootstrap_default_profile() -> ThoughtsProfile {
     profile_entry(
         None,
@@ -73,7 +50,6 @@ fn profile_entry(name: Option<String>, backend: &BackendConfig) -> ThoughtsProfi
     }
 }
 
-/// The root as the user wrote it (tilde kept), preview text, not a real path.
 fn display_root(backend: &BackendConfig) -> Option<String> {
     match backend {
         BackendConfig::Git(g) if !g.thoughts_repo.is_empty() => Some(g.thoughts_repo.clone()),
@@ -87,10 +63,6 @@ fn display_root(backend: &BackendConfig) -> Option<String> {
     }
 }
 
-/// Existing project folders under `<thoughts root>/<reposDir>`, sorted
-/// case-insensitively. An absent tree is legitimately empty; any other read
-/// failure (permission denied, I/O) is returned as a message instead of
-/// being silently flattened to "no folders".
 fn existing_folders(backend: &BackendConfig) -> (Vec<String>, Option<String>) {
     let (Some(root), Some((repos_dir, _))) = (backend.thoughts_root(), backend.tree_dirs()) else {
         return (Vec::new(), None);
@@ -114,7 +86,6 @@ fn existing_folders(backend: &BackendConfig) -> (Vec<String>, Option<String>) {
     (folders, None)
 }
 
-/// The entry for one named profile, the read-back after the CLI creates it.
 pub fn get_profile(thoughts: &ThoughtsConfig, name: &str) -> Option<ThoughtsProfile> {
     thoughts
         .profiles
@@ -122,12 +93,6 @@ pub fn get_profile(thoughts: &ThoughtsConfig, name: &str) -> Option<ThoughtsProf
         .map(|p| profile_entry(Some(name.to_string()), &p.backend))
 }
 
-/// App-side name rules, checked before shelling out to `thoughts profile
-/// create`. The CLI is more permissive than the app can represent: it accepts
-/// `default` (collides with the built-in default backend) and `__`-prefixed
-/// names (the dialog's select sentinels), and silently sanitizes other
-/// characters (`bad name` → `bad_name`), rejecting those up front keeps the
-/// created name identical to what the user typed.
 pub fn validate_profile_name(name: &str) -> Result<()> {
     let invalid = |detail: String| CoreError::ProfileInvalid { detail };
     if name.is_empty() {
@@ -183,7 +148,6 @@ mod tests {
         assert_eq!(profiles[0].thoughts_repo.as_deref(), Some("~/thoughts"));
         assert_eq!(profiles[0].repos_dir.as_deref(), Some("repos"));
         assert_eq!(profiles[0].folders_error, None);
-        // Notion has no filesystem tree: no root, no dirs, no folders.
         assert_eq!(profiles[1].backend_kind, "notion");
         assert_eq!(profiles[1].thoughts_repo, None);
         assert_eq!(profiles[1].repos_dir, None);
@@ -221,7 +185,6 @@ mod tests {
         let backend = BackendConfig::Git(GitConfig::standard(dir.path().display().to_string()));
         let entry = profile_entry(None, &backend);
 
-        // Restore so tempdir cleanup can delete the tree.
         std::fs::set_permissions(&repos, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         assert!(entry.folders.is_empty());
@@ -242,9 +205,6 @@ mod tests {
 
     #[test]
     fn validates_app_side_name_rules_with_branchable_code() {
-        // The CLI accepts these (or silently sanitizes them); the app rejects
-        // them up front so the created name always equals what was typed and
-        // never collides with the built-in default or the select sentinels.
         for bad in ["", "default", "__auto", "bad name!"] {
             let err = validate_profile_name(bad).unwrap_err();
             assert_eq!(err.code(), "invalid_profile_name", "for {bad:?}");

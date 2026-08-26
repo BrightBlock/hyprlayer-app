@@ -50,7 +50,6 @@ describe("detectState", () => {
   });
 
   it("does NOT block on a ready shell prompt", () => {
-    // A trailing prompt char means ready, not waiting on an answer.
     expect(detectState("custom-cli", "user@host project %", true, "idle")).toBe("idle");
   });
 
@@ -64,7 +63,6 @@ describe("detectState", () => {
   });
 
   it("ignores a y/n that isn't on the live prompt (last 2 lines)", () => {
-    // The y/n was answered earlier; the foot now ends at a ready prompt.
     const tail = "Continue? (y/n) y\nRunning task…\n● Done\n❯ ";
     expect(detectState("custom-cli", tail, true, "working")).toBe("done");
   });
@@ -76,7 +74,6 @@ describe("detectState", () => {
   });
 
   it("never matches blocked patterns sitting in old scrollback", () => {
-    // The y/n was answered long ago; the foot is now a fresh prompt.
     const tail = `Overwrite? (y/n) y\n${"output line\n".repeat(20)}❯ `;
     const next: AgentState = detectState("claude-code", tail, true, "working");
     expect(next).toBe("done");

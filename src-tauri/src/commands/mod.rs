@@ -23,7 +23,6 @@ use hyprlayer_core::CoreError;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-/// Run a closure against the SQLite store on the blocking pool.
 pub(crate) async fn db_task<T, F>(db: Arc<Db>, f: F) -> CmdResult<T>
 where
     T: Send + 'static,
@@ -35,9 +34,6 @@ where
         .map_err(AppError::from)
 }
 
-/// Env vars carrying Claude API-key-mode auth/routing into a spawned `claude`.
-/// Empty for CLI-login auth (the child inherits the user's `~/.claude`). Shared
-/// by the session driver and the tab-title generator so the two never drift.
 pub(crate) fn claude_auth_env(cfg: &crate::settings::ClaudeSettings) -> Vec<(String, String)> {
     let mut env = Vec::new();
     if cfg.auth_mode.as_deref() != Some("apiKey") {
@@ -58,7 +54,6 @@ pub(crate) fn claude_auth_env(cfg: &crate::settings::ClaudeSettings) -> Vec<(Str
     env
 }
 
-/// Run filesystem/CPU-bound work on the blocking pool.
 pub(crate) async fn blocking<T, F>(label: &str, f: F) -> CmdResult<T>
 where
     T: Send + 'static,
@@ -69,14 +64,6 @@ where
         .map_err(|e| AppError::internal(format!("{label} task: {e}")))
 }
 
-/// Trim a branch-type list to the bytes that get stored: labels and prefixes
-/// trimmed, keywords trimmed, lowercased and stripped of empties.
-///
-/// Shared by the two write paths — `set_branch_prefixes` (per-repo) and
-/// `set_app_settings` (global) — so the same list saved from the same editor
-/// cannot end up normalized differently depending on which surface it came
-/// from. It also makes each write path validate exactly what it stores, since
-/// `validate_prefixes` compares after trimming.
 pub(crate) fn normalize_branch_prefixes(prefixes: Vec<BranchPrefix>) -> Vec<BranchPrefix> {
     prefixes
         .into_iter()
@@ -93,10 +80,6 @@ pub(crate) fn normalize_branch_prefixes(prefixes: Vec<BranchPrefix>) -> Vec<Bran
         .collect()
 }
 
-/// Reject a `project_path` that isn't a registered project. These commands are
-/// webview-callable with an arbitrary path and read/write a file under it, so
-/// they must not act on paths the user never added (the run paths instead take
-/// the project from a db-loaded workstream, already trusted).
 pub(crate) async fn ensure_registered_project(
     state: &AppState,
     project_path: &str,
@@ -113,7 +96,6 @@ pub(crate) async fn ensure_registered_project(
     Ok(())
 }
 
-/// The effective hyprlayer config for one project path.
 pub(crate) async fn effective_for(
     state: &AppState,
     project_path: &str,

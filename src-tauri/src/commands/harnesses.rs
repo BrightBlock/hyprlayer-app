@@ -1,9 +1,3 @@
-//! Tauri commands backing the Harnesses settings page:
-//!   - the models.dev provider/model catalog (network → cache → bundled),
-//!   - OpenCode provider credentials (`auth.json`) and default model,
-//!   - Claude authentication status (`claude auth status --json`),
-//!   - Codex authentication + model list (one-shot `codex app-server` probes).
-
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -24,11 +18,7 @@ use crate::state::AppState;
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 const CATALOG_CACHE_FILE: &str = "opencode-catalog.json";
 const CATALOG_TTL: Duration = Duration::from_secs(24 * 60 * 60);
-/// Offline safety net so the picker is never empty on first run (generated from
-/// models.dev; refreshed whenever we regenerate it).
 const CATALOG_SNAPSHOT: &str = include_str!("opencode_catalog_snapshot.json");
-
-/* ------------------------------ catalog -------------------------------- */
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -42,8 +32,6 @@ pub struct CatalogModel {
 pub struct CatalogProvider {
     pub id: String,
     pub name: String,
-    /// Env var names the provider's API key maps to (e.g. `["ANTHROPIC_API_KEY"]`).
-    /// An empty list usually signals an OAuth-only provider.
     pub env: Vec<String>,
     pub doc: Option<String>,
     pub models: Vec<CatalogModel>,
@@ -53,11 +41,9 @@ pub struct CatalogProvider {
 #[serde(rename_all = "camelCase")]
 pub struct OpencodeCatalog {
     pub providers: Vec<CatalogProvider>,
-    /// `"network"` | `"cache"` | `"bundled"`, lets the UI show an offline hint.
     pub source: String,
 }
 
-/// Disk cache wrapper (does not cross the IPC boundary).
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CachedCatalog {
@@ -65,13 +51,11 @@ struct CachedCatalog {
     providers: Vec<CatalogProvider>,
 }
 
-/// Shape of the bundled snapshot file.
 #[derive(Deserialize)]
 struct SnapshotCatalog {
     providers: Vec<CatalogProvider>,
 }
 
-// --- models.dev api.json (only the fields we surface) ---
 #[derive(Deserialize)]
 struct RawProvider {
     id: Option<String>,
@@ -166,9 +150,6 @@ async fn fetch_catalog() -> Result<Vec<CatalogProvider>, String> {
     parse_api_json(&body).map_err(|e| e.to_string())
 }
 
-/// The models.dev catalog. Fresh in-memory-of-disk cache first (unless `force`),
-/// then a live fetch (cached on success), then any stale cache, then the bundled
-/// snapshot. `source` tells the UI which tier answered.
 #[tauri::command]
 #[specta::specta]
 pub async fn opencode_catalog(app: tauri::AppHandle, force: bool) -> CmdResult<OpencodeCatalog> {
@@ -204,7 +185,6 @@ pub async fn opencode_catalog(app: tauri::AppHandle, force: bool) -> CmdResult<O
             })
         }
         Err(net_err) => {
-            // Offline: any cache (even stale), else the bundled snapshot.
             if let Some(ref p) = cache {
                 if let Some(c) = read_cache(p) {
                     return Ok(OpencodeCatalog {
@@ -226,8 +206,6 @@ pub async fn opencode_catalog(app: tauri::AppHandle, force: bool) -> CmdResult<O
     }
 }
 
-/* --------------------------- opencode auth ----------------------------- */
-
 #[tauri::command]
 #[specta::specta]
 pub async fn opencode_auth_list() -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
@@ -242,10 +220,6 @@ pub async fn opencode_set_provider_key(
     key: String,
 ) -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
     oc::set_provider_key(&provider, &key).map_err(AppError::from)?;
-    // `opencode serve` snapshots auth.json once at startup, so recycle the shared
-    // server: the next session re-reads it and sees the new credential. Without
-    // this the provider's models stay unknown (ProviderModelNotFoundError) until
-    // the whole app is restarted.
     state.opencode.invalidate().await;
     oc::list_auth().map_err(AppError::from)
 }
@@ -257,14 +231,10 @@ pub async fn opencode_remove_provider(
     provider: String,
 ) -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
     oc::remove_provider(&provider).map_err(AppError::from)?;
-    // See `opencode_set_provider_key`: recycle so the removed provider stops
-    // being served without a full app restart.
     state.opencode.invalidate().await;
     oc::list_auth().map_err(AppError::from)
 }
 
-/// Set the OpenCode default model: persisted to app settings (drives the
-/// composer) AND mirrored into `opencode.json`'s `model` so the CLI agrees.
 #[tauri::command]
 #[specta::specta]
 pub async fn opencode_set_default_model(
@@ -278,8 +248,6 @@ pub async fn opencode_set_default_model(
         .await?;
     oc::set_default_model(normalized.as_deref()).map_err(AppError::from)
 }
-
-/* ---------------------------- claude auth ------------------------------ */
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -311,9 +279,6 @@ fn title_case(s: &str) -> String {
     }
 }
 
-/// Current Claude authentication, parsed from `claude auth status --json`.
-/// Never errors on a logged-out / missing CLI, returns a disconnected status so
-/// the UI degrades gracefully.
 #[tauri::command]
 #[specta::specta]
 pub async fn claude_auth_status(state: State<'_, AppState>) -> CmdResult<ClaudeAuthStatus> {
@@ -321,8 +286,6 @@ pub async fn claude_auth_status(state: State<'_, AppState>) -> CmdResult<ClaudeA
         return Ok(ClaudeAuthStatus::disconnected());
     };
     let path = state.binaries.augmented_path().await;
-    // `claude auth status` prints JSON on stdout even when logged out (exit 1),
-    // so use run_unchecked and parse whatever we got.
     let Ok(out) = Exec::new(&bin)
         .args(["auth", "status", "--json"])
         .env("PATH", path)
@@ -365,17 +328,6 @@ pub async fn claude_auth_status(state: State<'_, AppState>) -> CmdResult<ClaudeA
     })
 }
 
-/// The model catalog the `claude` CLI's own `/model` picker offers, read with a
-/// one-shot `list_models` control request.
-///
-/// Authoritative for what this install can run, provider, settings cascade, and
-/// org policy are already applied, but NARROWER than what `--model` accepts:
-/// legacy ids are absent from it yet still launch. The composer merges these
-/// rows over its static table rather than replacing it.
-///
-/// A missing CLI is a benign empty catalog (the composer falls back to the static
-/// table); a probe that ran and failed errors, so a transient failure can't be
-/// cached as "this install has no models".
 #[tauri::command]
 #[specta::specta]
 pub async fn claude_probe(state: State<'_, AppState>) -> CmdResult<ClaudeProbe> {
@@ -389,18 +341,6 @@ pub async fn claude_probe(state: State<'_, AppState>) -> CmdResult<ClaudeProbe> 
         .map_err(Into::into)
 }
 
-/* ------------------------------- codex --------------------------------- */
-
-/// Account + model list for the Codex settings tab, from ONE app-server session.
-///
-/// Deliberately a single command rather than one per question: these used to be
-/// two commands the tab fired concurrently, which spawned two app-servers that
-/// interfered, the loser answered with a null account or an empty model list, so
-/// a working install rendered as "not signed in" or "no models".
-///
-/// A missing CLI is still a benign empty probe (the tab renders the install
-/// hint), but a probe that RAN and failed now errors instead of masquerading as
-/// an empty result, so a transient failure can't be cached as fact.
 #[tauri::command]
 #[specta::specta]
 pub async fn codex_probe(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
@@ -411,18 +351,6 @@ pub async fn codex_probe(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
     codex::probe::probe(&bin, &path).await.map_err(Into::into)
 }
 
-/// Sign Codex in with an API key (the enterprise path, mirroring Claude's
-/// "API key" auth mode).
-///
-/// Unlike Claude, where the app stores the key in `settings.json` and injects
-/// `ANTHROPIC_API_KEY` into every spawn, Codex owns its own credential store:
-/// `codex login --with-api-key` reads the key from stdin and writes
-/// `$CODEX_HOME/auth.json`. An env-injected `OPENAI_API_KEY` is IGNORED by the
-/// app-server (verified: `account/read` still reports `account: null`), so the
-/// Claude approach wouldn't work here even if we wanted it.
-///
-/// The upside is that we never persist the secret: it goes straight to the CLI's
-/// stdin (never argv, so it can't leak into a process listing) and is dropped.
 #[tauri::command]
 #[specta::specta]
 pub async fn codex_login_with_api_key(
@@ -453,12 +381,9 @@ pub async fn codex_login_with_api_key(
         .await
         .map_err(AppError::from)?;
 
-    // Full probe, not just the account: which models Codex offers depends on who
-    // is signed in, so the caller can seed both from one answer.
     Ok(codex::probe::probe(&bin, &path).await.unwrap_or_default())
 }
 
-/// Sign Codex out (`codex logout`), clearing whichever credential is active.
 #[tauri::command]
 #[specta::specta]
 pub async fn codex_logout(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
@@ -468,40 +393,21 @@ pub async fn codex_logout(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
         .await
         .map_err(AppError::from)?;
     let path = state.binaries.augmented_path().await;
-    // Already-signed-out is not an error worth surfacing, the status we return
-    // is the source of truth either way.
     let _ = Exec::new(&bin)
         .arg("logout")
         .env("PATH", path.clone())
         .timeout(Duration::from_secs(15))
         .run_unchecked()
         .await;
-    // Full probe, not just the account: which models Codex offers depends on who
-    // is signed in, so the caller can seed both from one answer.
     Ok(codex::probe::probe(&bin, &path).await.unwrap_or_default())
 }
 
-/* --------------------------- opencode install -------------------------- */
-
-/// Install OpenCode in the background, no terminal UI. The frontend shows a
-/// spinner and reacts to ok/err; on success we re-detect binaries so the version
-/// badge flips to "Installed". `run()` fails on a non-zero exit, carrying the
-/// stderr tail into the error message the UI shows.
-///
-/// The installer differs by platform: OpenCode's `curl … | bash` one-liner needs
-/// a Unix shell, which Windows doesn't have (piping it through PowerShell just
-/// fails with "Program 'curl.exe' failed to run: The pipe is being closed"). On
-/// Windows we use `npm install -g opencode-ai` instead, OpenCode's documented
-/// cross-platform method, and surface an actionable remedy if npm is missing.
 #[tauri::command]
 #[specta::specta]
 pub async fn install_opencode(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
     let path = state.binaries.augmented_path().await;
     let shell = super::terminal::default_shell();
 
-    // Windows installs via npm, which is frequently absent, probe for it first so
-    // a missing npm yields a clean "install Node.js" message instead of PowerShell's
-    // raw "term 'npm' is not recognized" stderr dump reaching the UI.
     #[cfg(windows)]
     {
         let has_npm = Exec::new(&shell)
@@ -530,13 +436,11 @@ pub async fn install_opencode(app: tauri::AppHandle, state: State<'_, AppState>)
         }
     }
 
-    // unix: login shell (`-lc`) so the installer sees the user's full PATH/profile.
     #[cfg(not(windows))]
     let args = vec![
         "-lc".to_string(),
         "curl -fsSL https://opencode.ai/install | bash".to_string(),
     ];
-    // windows: npm via PowerShell `-Command` (no bash to pipe to).
     #[cfg(windows)]
     let args = vec![
         "-NoProfile".to_string(),
@@ -551,8 +455,6 @@ pub async fn install_opencode(app: tauri::AppHandle, state: State<'_, AppState>)
         .run()
         .await;
 
-    // On Windows the most common failure is npm not being on PATH; point the user
-    // at the alternatives OpenCode supports rather than leaking a raw npm error.
     #[cfg(windows)]
     result.map_err(|e| AppError {
         code: "opencode_install_failed".into(),

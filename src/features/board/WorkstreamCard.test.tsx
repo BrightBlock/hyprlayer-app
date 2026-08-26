@@ -5,8 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkstreamView } from "@/lib/bindings";
 import { WorkstreamCard } from "./WorkstreamCard";
 
-// No vitest globals -> RTL can't register its own auto-cleanup; without this,
-// a previous test's mounted copy steals the next test's queries and clicks.
 afterEach(cleanup);
 
 function makeView(

@@ -14,7 +14,6 @@ describe("StateCoalescer", () => {
     c.queue("ws:1", "working");
     c.queue("ws:1", "done");
 
-    // Nothing committed until the frame runs, no mid-frame repaints.
     expect(flush).not.toHaveBeenCalled();
     expect(ticks).toHaveLength(1);
 

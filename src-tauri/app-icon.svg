@@ -1,24 +1,13 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- Dark squircle backdrop with a subtle top-down sheen. -->
     <linearGradient id="bg" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#1a1d24" />
       <stop offset="1" stop-color="#0a0b0d" />
     </linearGradient>
   </defs>
 
-  <!-- Inset to Apple's macOS icon grid: an 824×824 rounded square centered in
-       the 1024 canvas (~100px transparent margin), so the icon reads the same
-       size as other apps in the Dock / app switcher rather than oversized. -->
   <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bg)" />
 
-  <!-- The isometric stack, centered on the tile: translate(48,48) scale(29)
-       over the 32-unit mark space (content spans x 4-28, y 6-26, centered at
-       16,16). The mark fills ~84% wide x ~70% tall of the 824 tile, the same
-       proportion app-icon-windows.svg gives its frame, leaving 64px of side
-       clearance. Flat brand terracotta, matching the accent token the in-app
-       mark fills (Logo.tsx). Layer opacities run hotter than the app's
-       0.35/0.6 so the lower slabs still separate from the tile at 32px. -->
   <g transform="translate(48 48) scale(29)" fill="#d97757">
     <path d="M16 26 4 20l12-6 12 6-12 6Z" opacity="0.45" />
     <path d="M16 22 4 16l12-6 12 6-12 6Z" opacity="0.7" />

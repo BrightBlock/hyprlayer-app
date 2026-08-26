@@ -1,18 +1,3 @@
-/**
- * A subtle stacked-lines graphic in the top-right corner of the agent pane that
- * visualises the current session's prompt history. One thin line per prompt,
- * oldest at top and newest at bottom (within the visible window). Hovering a
- * line previews the prompt text; clicking recalls it into the composer. The
- * line for the currently parked-on entry (via keyboard or click) is highlighted
- * with the accent colour.
- *
- * It floats over the transcript's empty right gutter (the pane is the positioned
- * ancestor); `pointer-events-none` on the container with `pointer-events-auto`
- * on the lines lets clicks fall through the gaps to the transcript underneath.
- *
- * Purely presentational, holds no history state. Parent supplies `prompts`,
- * `activeIndex`, and `onRecall`.
- */
 import { useState } from "react";
 import { stackWindow } from "./promptHistory";
 

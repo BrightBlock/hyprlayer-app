@@ -1,81 +1,6 @@
 #!/usr/bin/env bash
-# Build and install "Hyprlayer Dev" on macOS — a desktop install that tracks
-# origin/main, SIDE BY SIDE with the released app from the Homebrew cask.
-# (Linux: scripts/dev-install-linux.sh.)
-#
-# Why a separate install rather than `pnpm tauri dev`:
-#   * it survives a reboot and shows up in Spotlight and Launchpad, so main can
-#     be dogfooded all day instead of only while a terminal holds the dev server
-#   * it is a release-profile build (no vite dev server, no HMR), so what you're
-#     testing is what a release would feel like
-#
-# Three things keep it from colliding with the released install:
-#   * identifier  ai.brightblock.hyprlayer.main  → its own SQLite DB, settings,
-#     and webview storage under ~/Library. Nothing this build migrates can
-#     corrupt the stable app's database.
-#   * it installs into ~/Applications, never /Applications, so the cask still
-#     owns the release
-#   * a distinct bundle name (Hyprlayer Dev.app) → its own Dock tile and
-#     app-switcher entry
-#
-# The identifier says ".main" while the app is called "Hyprlayer Dev" on purpose:
-# ".dev" already belongs to the `verify` skill, which launches
-# `tauri dev --config src-tauri/tauri.dev.conf.json` under
-# ai.brightblock.hyprlayer.dev. Sharing that identifier would let a running
-# install hijack a verify run through the single-instance plugin, so this build
-# gets its own — named after the branch it tracks.
-#
-# What lands where:
-#   bundle   ~/Applications/Hyprlayer Dev.app
-#   data     ~/Library/Application Support/ai.brightblock.hyprlayer.main
-#            (macOS keeps settings under the same identifier)
-#
-# The build happens in a throwaway clone under ~/.cache (never this working
-# tree), so it can run while you have uncommitted work in progress, and it
-# always builds exactly what's on the remote rather than whatever you had
-# checked out. The cargo target dir is persistent, so only the first build is
-# cold; after that it's an incremental rebuild of the app's own crates.
-#
-# Signing: this build is deliberately left UNSIGNED. APPLE_SIGNING_IDENTITY and
-# the notary-key variables are unset before the build so a dev install never
-# reaches for the Developer ID cert or triggers notarization, even if your shell
-# has them exported from a release run. A locally-built .app carries no
-# quarantine attribute, so Gatekeeper lets it run. Updater artifacts are off for
-# the same reason — signing those needs the ed25519 release key.
-#
-# Updater note: unlike Linux, a macOS build CAN self-install an update. The
-# +main.<sha> version below is not a release version, so the manifest's x.y.z
-# never compares as newer and the nudge stays quiet. That suffix is also what
-# tells you which commit you're on (Settings → Updates reads e.g.
-# 0.5.10+main.d39276a). Apple documents CFBundleShortVersionString as up to
-# three period-separated integers; nothing enforces it for a local run, but
-# --no-version-suffix gives you a bare x.y.z if anything downstream objects.
-#
-# Usage:
-#   ./scripts/dev-install-macos.sh              # fetch origin/main, build if it moved, install
-#   ./scripts/dev-install-macos.sh --force      # rebuild even if main hasn't moved
-#   ./scripts/dev-install-macos.sh --ref <ref>  # track something else (a branch, tag, SHA)
-#   ./scripts/dev-install-macos.sh --no-fetch   # use what's already fetched (offline)
-#   ./scripts/dev-install-macos.sh --uninstall  # remove the install (keeps its data dir)
-#
-# It also runs with no checkout at all — anyone with repo access can pull it
-# straight from GitHub, where `gh` supplies the auth the private repo needs:
-#
-#   bash <(gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-macos.sh \
-#            -H 'Accept: application/vnd.github.raw')            # add flags after the `)`
-#
-# Standalone it clones the repo itself; the flags above all still apply, and
-# HYPRLAYER_DEV_ORIGIN overrides the clone URL (a fork, or a local mirror).
-#
-# Prerequisites: Rust, Node + pnpm, and the Xcode command line tools. No signing
-# key, no notary key, no publish credentials.
 set -euo pipefail
 
-# Where the build clone comes from. Run from a checkout, that's the working tree
-# beside this script (fast — no network for the object transfer). Run standalone
-# — piped from `gh api`, so $0 is "bash" or a /dev/fd pipe — there is no tree to
-# clone, and the repo is fetched from GitHub instead. The `scripts/<self>` probe
-# is what tells the two apart: a real checkout has this file under it.
 SELF="$0"
 ORIGIN_SLUG="BrightBlock/hyprlayer-app"
 BOOTSTRAP="bash <(gh api repos/$ORIGIN_SLUG/contents/scripts/dev-install-macos.sh -H 'Accept: application/vnd.github.raw')"
@@ -90,13 +15,10 @@ fi
   exit 1
 }
 
-# ─── config ─────────────────────────────────────────────────────────
 CACHE_DIR="${HYPRLAYER_DEV_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/hyprlayer-dev}"
 SRC_DIR="$CACHE_DIR/src"
 TARGET_DIR="$CACHE_DIR/target"
 STAMP="$CACHE_DIR/installed"
-# ~/Applications needs no sudo and is indexed by Spotlight and Launchpad exactly
-# like /Applications.
 APPDIR="${HYPRLAYER_DEV_APPDIR:-$HOME/Applications}"
 APP_ID="ai.brightblock.hyprlayer.main"
 APP_NAME="Hyprlayer Dev"
@@ -115,21 +37,15 @@ info() { printf '    %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-# The header doubles as the help text, but standalone there is no file to read
-# it back out of ($SELF is a pipe), so fall back to the flag list.
 usage() {
-  if [[ -f "$SELF" ]]; then
-    sed -n '2,/^set -euo/p' "$SELF" | sed '$d'
-  else
-    printf '%s\n' \
-      'dev-install-macos.sh - build and install "Hyprlayer Dev" from origin/main' \
-      '' \
-      '  --force               rebuild even if the ref has not moved' \
-      '  --ref <ref>           track something else (a branch, tag, SHA)' \
-      '  --no-fetch            use what is already fetched (offline)' \
-      '  --no-version-suffix   build a bare x.y.z' \
-      '  --uninstall           remove the install (keeps its data dir)'
-  fi
+  printf '%s\n' \
+    'dev-install-macos.sh - build and install "Hyprlayer Dev" from origin/main' \
+    '' \
+    '  --force               rebuild even if the ref has not moved' \
+    '  --ref <ref>           track something else (a branch, tag, SHA)' \
+    '  --no-fetch            use what is already fetched (offline)' \
+    '  --no-version-suffix   build a bare x.y.z' \
+    '  --uninstall           remove the install (keeps its data dir)'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -144,7 +60,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ─── uninstall ──────────────────────────────────────────────────────
 if [[ $UNINSTALL -eq 1 ]]; then
   step "Removing $APP_NAME"
   rm -rfv "$APP_BUNDLE" "$STAMP"
@@ -158,12 +73,6 @@ for tool in git cargo pnpm node; do
   command -v "$tool" >/dev/null || die "missing required tool: $tool"
 done
 
-# ─── 1. a throwaway clone that tracks the remote ────────────────────
-# From a checkout: cloned from the local repo, then repointed at the real origin
-# so `origin/main` means the same thing here as it does in the working tree.
-# Standalone: cloned from GitHub through `gh repo clone`, which carries the gh
-# token and honours the user's ssh/https preference — a bare `git clone` of a
-# private repo only works if they have already run `gh auth setup-git`.
 if [[ ! -d "$SRC_DIR/.git" ]]; then
   step "Creating build clone at $SRC_DIR"
   mkdir -p "$CACHE_DIR"
@@ -198,9 +107,6 @@ if [[ $FORCE -eq 0 && -d "$APP_BUNDLE" && -f "$STAMP" ]] && grep -qx "$SHA" "$ST
   exit 0
 fi
 
-# ─── 2. check out the exact commit ──────────────────────────────────
-# `clean -fd` (no -x) drops stray tracked-turned-untracked files but keeps the
-# gitignored node_modules/ and dist/, which is what makes reruns cheap.
 step "Checking out $SHORT — $SUBJECT"
 git -C "$SRC_DIR" checkout --quiet --detach "$SHA"
 git -C "$SRC_DIR" reset --hard --quiet "$SHA"
@@ -208,9 +114,6 @@ git -C "$SRC_DIR" clean -qfd
 
 cd "$SRC_DIR"
 
-# ─── 3. config overlay ──────────────────────────────────────────────
-# Written into the build clone (not this repo) so nothing here needs committing.
-# createUpdaterArtifacts is forced off: signing them needs the release key.
 VERSION="$(node -p 'require("./package.json").version')"
 if [[ $VERSION_SUFFIX -eq 1 ]]; then
   BUILD_VERSION="$VERSION+main.$SHORT"
@@ -219,15 +122,6 @@ else
 fi
 
 OVERLAY="src-tauri/tauri.devinstall.conf.json"
-# The windows array is carried over WHOLESALE from the config Tauri itself would
-# resolve for macOS, with only `title` swapped. Tauri's config merge is
-# recursive for objects but REPLACES arrays, so an overlay that names
-# `app.windows` at all discards every key it doesn't restate — that is how the
-# OS title bar came back on the Linux side once (`decorations: false` lost).
-# Here the keys at stake are titleBarStyle/hiddenTitle/trafficLightPosition; the
-# assert below fails the build if they ever move rather than silently shipping
-# the wrong chrome. There is no tauri.macos.conf.json today, so the base config
-# supplies the window — but read the override if one is ever added.
 APP_NAME="$APP_NAME" APP_ID="$APP_ID" BUILD_VERSION="$BUILD_VERSION" \
   node -e '
     const fs = require("fs");
@@ -254,15 +148,12 @@ APP_NAME="$APP_NAME" APP_ID="$APP_ID" BUILD_VERSION="$BUILD_VERSION" \
     }, null, 2) + "\n");
   '
 
-# ─── 4. build ───────────────────────────────────────────────────────
 step "pnpm install (frozen lockfile)"
 pnpm install --frozen-lockfile
 
 step "Building $APP_NAME $BUILD_VERSION (release profile, .app bundle)"
 info "target dir: $TARGET_DIR — first run is a cold build, later runs are incremental"
 export CARGO_TARGET_DIR="$TARGET_DIR"
-# A dev install must never reach for the Developer ID cert or the notary key,
-# even if this shell happens to have them exported from a release run.
 unset APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
       APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH \
       APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
@@ -272,23 +163,17 @@ pnpm tauri build --bundles app --config "$OVERLAY"
 BUILT_APP="$TARGET_DIR/release/bundle/macos/$APP_NAME.app"
 [[ -d "$BUILT_APP" ]] || die "expected bundle not found: $BUILT_APP"
 
-# ─── 5. install into ~/Applications ─────────────────────────────────
 step "Installing to $APPDIR"
-# Replacing a bundle out from under a running app leaves it on unlinked inodes
-# — it survives, but anything it lazy-loads afterwards is gone.
 if pgrep -f "$APP_BUNDLE/Contents/MacOS/" >/dev/null 2>&1; then
   warn "$APP_NAME is running — quit it and rerun for a clean swap"
 fi
 
 mkdir -p "$APPDIR"
-# Stage beside the destination, then swap, so a failed copy can't leave a
-# half-written bundle where the old working one was.
 STAGE="$APPDIR/.$APP_NAME.app.new"
 rm -rf "$STAGE"
 ditto "$BUILT_APP" "$STAGE"
 rm -rf "$APP_BUNDLE"
 mv "$STAGE" "$APP_BUNDLE"
-# Nudge Launch Services so the Dock and Spotlight pick up the new copy.
 touch "$APP_BUNDLE"
 
 printf '%s\n' "$SHA" > "$STAMP"

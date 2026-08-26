@@ -64,15 +64,12 @@ afterEach(() => {
 });
 
 describe("useSyncClaudeModels", () => {
-  // A curated pre-watermark install: the sync has new keys to deliver against
-  // both the static table (the Opus 4.8 pins) and the live catalog (nova).
   const curated = { visibleModels: ["opus"], seenModelKeys: null } as unknown as ClaudeSettings;
 
   it("does nothing until the probe settles", () => {
     seedBootstrap(curated);
     const { rerender } = renderSync({ catalog: STATIC, settled: false, live: false });
     expect(cmds.claudeSyncModels).not.toHaveBeenCalled();
-    // The moment it settles (here: probe failed → static fallback), it syncs.
     rerender({ catalog: STATIC, settled: true, live: false });
     expect(cmds.claudeSyncModels).toHaveBeenCalledTimes(1);
   });
@@ -88,8 +85,6 @@ describe("useSyncClaudeModels", () => {
   });
 
   it("lets a live catalog re-sync after an error-path static sync", async () => {
-    // Probe errors → static sync latches only the static TIER; when a refetch
-    // later lands the live catalog, its live-only keys still get delivered.
     seedBootstrap(curated);
     const { rerender } = renderSync({ catalog: STATIC, settled: true, live: false });
     await waitFor(() => expect(cmds.claudeSyncModels).toHaveBeenCalledTimes(1));
@@ -97,7 +92,6 @@ describe("useSyncClaudeModels", () => {
     rerender({ catalog: LIVE, settled: true, live: true });
     await waitFor(() => expect(cmds.claudeSyncModels).toHaveBeenCalledTimes(2));
     expect(cmds.claudeSyncModels.mock.calls[1][0]).toContain("claude-nova-6");
-    // The live sync is the final latch.
     rerender({ catalog: LIVE, settled: true, live: true });
     expect(cmds.claudeSyncModels).toHaveBeenCalledTimes(2);
   });

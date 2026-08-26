@@ -1,16 +1,3 @@
-//! Persisting prompt attachments (dropped files, pasted screenshots) into the
-//! workstream's worktree, so volatile sources survive long enough for the agent
-//! to read them. The motivating case is a macOS screenshot dragged straight off
-//! the capture thumbnail, its source lives under
-//! `/var/folders/.../TemporaryItems/NSIRD_screencaptureui_*/` and the OS reaps
-//! it moments later, but the same applies to clipboard image bytes (which have
-//! no path at all).
-//!
-//! Files land in `<worktree>/.hyprlayer/attachments/`. The worktree is the
-//! agent's cwd, so it can `Read` them with no extra `--add-dir`. A self-ignoring
-//! `.gitignore` (`*`) in `.hyprlayer/` keeps them out of git, and the diff
-//! surface filters `.hyprlayer/` regardless (see `gitops::worktree_diff`).
-
 use std::path::{Path, PathBuf};
 
 use tauri::State;
@@ -19,7 +6,6 @@ use super::db_task;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-/// The worktree path for a workstream, or `workstream_not_found`.
 async fn worktree_path(state: &AppState, workstream_id: &str) -> CmdResult<String> {
     let id = workstream_id.to_string();
     db_task(state.db.clone(), move |db| db.get_workstream(&id))
@@ -32,8 +18,6 @@ async fn worktree_path(state: &AppState, workstream_id: &str) -> CmdResult<Strin
         })
 }
 
-/// `<worktree>/.hyprlayer/attachments`, created on demand. Drops a self-ignoring
-/// `.gitignore` into `.hyprlayer/` the first time so nothing here is ever staged.
 fn ensure_attachments_dir(worktree: &str) -> CmdResult<PathBuf> {
     let internal = Path::new(worktree).join(".hyprlayer");
     let dir = internal.join("attachments");
@@ -46,7 +30,6 @@ fn ensure_attachments_dir(worktree: &str) -> CmdResult<PathBuf> {
     Ok(dir)
 }
 
-/// Reduce an arbitrary file name to a safe basename for the attachments dir.
 fn sanitize_file_name(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let cleaned: String = base
@@ -67,15 +50,11 @@ fn sanitize_file_name(name: &str) -> String {
     }
 }
 
-/// A collision-proof destination inside `dir` for `file_name`, a short random
-/// prefix means re-pasting the same name never clobbers an earlier attachment.
 fn unique_dest(dir: &Path, file_name: &str) -> PathBuf {
     let id = uuid::Uuid::new_v4().simple().to_string();
     dir.join(format!("{}-{}", &id[..8], sanitize_file_name(file_name)))
 }
 
-/// Copy a dropped file (often a volatile screenshot temp file) into the
-/// workstream's attachments dir. Returns the new stable absolute path.
 #[tauri::command]
 #[specta::specta]
 pub async fn import_attachment(
@@ -98,8 +77,6 @@ pub async fn import_attachment(
     .await
 }
 
-/// Write raw bytes (a pasted clipboard image) into the workstream's attachments
-/// dir under `file_name`. Returns the new stable absolute path.
 #[tauri::command]
 #[specta::specta]
 pub async fn save_attachment(
@@ -119,8 +96,6 @@ pub async fn save_attachment(
     .await
 }
 
-/// Run attachment filesystem work off the async runtime, flattening the join
-/// error. Copies and writes can be multi-MB, so they must not block a worker.
 async fn blocking_fs<F>(f: F) -> CmdResult<String>
 where
     F: FnOnce() -> CmdResult<String> + Send + 'static,

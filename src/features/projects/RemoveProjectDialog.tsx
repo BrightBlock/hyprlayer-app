@@ -6,28 +6,18 @@ import { isUserDirectory } from "@/lib/domain/projects";
 import { useRemoveProject } from "@/lib/queries";
 
 type Props = {
-  /** The project being removed; null keeps the dialog closed. */
   target: Project | null;
   onClose: () => void;
-  /** Called after a successful removal so the caller can fix navigation. */
   onRemoved: (path: string) => void;
 };
 
-/**
- * Remove a project from the sidebar. Always drops it from the registry; the
- * checkbox additionally deletes the directory from disk. For disk and folder
- * projects that directory is the user's own, so we warn harder.
- */
 export function RemoveProjectDialog({ target, onClose, onRemoved }: Props) {
   const remove = useRemoveProject();
   const [deleteFiles, setDeleteFiles] = useState(false);
 
-  // On-disk projects can be deleted (backend refuses while workstreams are
-  // active). Only a clone is the app's to drop quietly.
   const canDeleteFiles = Boolean(target?.existsOnDisk);
   const userOwned = isUserDirectory(target);
 
-  // Reset the toggle whenever a different project opens the dialog.
   useEffect(() => {
     setDeleteFiles(false);
   }, [target?.path]);

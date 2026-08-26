@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-//
-// Drives the real `useWorkstreamDocs` selector through a real `sessionStore`,
-// where `ChangesPanel.artifacts.test.tsx` mocks it, so this pins attribution at
-// the sidebar surface: a doc a workstream's own agent wrote lists, one it only
-// read does not, per PR #237 and the plan that closed its gap
-// (`2026-08-21-scope-sidebar-docs-to-workstream.md`).
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,8 +19,6 @@ vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/queryClient", () => ({ queryClient: { invalidateQueries: vi.fn() } }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
-// A `FakeChannel` stands in for the Tauri `Channel` the real `startSession`
-// binds to, same shape as `sessionStore.test.ts`'s harness.
 const h = vi.hoisted(() => {
   class FakeChannel {
     onmessage: ((event: unknown) => void) | null = null;

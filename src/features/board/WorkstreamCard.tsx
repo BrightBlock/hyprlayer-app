@@ -4,9 +4,6 @@ import { WorkstreamGitChip } from "@/features/workstreams/WorkstreamGitChip";
 import { Badge } from "@/components/ui";
 import { isDetachedHead, isFolderWorkstream, isOffBase, shortBranch } from "@/lib/domain/projects";
 
-/** A clickable kanban card representing one active workstream. Clicking (or
- *  pressing Enter / Space) calls `onOpen` with the workstream's id; right-click
- *  opens the card's context menu via `onContextMenu` (e.g. Attach PR). */
 export function WorkstreamCard({
   view,
   onOpen,
@@ -17,16 +14,9 @@ export function WorkstreamCard({
   onContextMenu?: (view: WorkstreamView, x: number, y: number) => void;
 }) {
   const { item } = view;
-  // In-place workstreams have no dedicated worktree, they run in the project's
-  // own checkout. Flag that so the branch pill isn't mistaken for a worktree.
   const inplace = item.worktreeMode === "inplace";
-  // A folder workstream has no branch to pill at all.
   const folder = isFolderWorkstream(view);
   const detached = isDetachedHead(view);
-  // The checkout is on a branch other than its merge base. Only flagged for
-  // in-place rows (a worktree-backed one is off its base by construction), and
-  // never while detached, the stored branch is stale then, so it would
-  // contradict the "detached HEAD" chip beside it.
   const branchedInPlace = inplace && !detached && isOffBase(view);
   return (
     <div

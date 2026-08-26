@@ -1,105 +1,5 @@
-<#
-.SYNOPSIS
-  Build and install "Hyprlayer Dev" on Windows: a desktop install that tracks
-  origin/main, SIDE BY SIDE with the released app the NSIS installer owns.
-  (macOS: scripts/dev-install-macos.sh. Linux: scripts/dev-install-linux.sh.)
-
-.DESCRIPTION
-  Why a separate install rather than 'pnpm tauri dev':
-    * it survives a reboot and shows up in the Start menu and on PATH, so main
-      can be dogfooded all day instead of only while a terminal holds the dev
-      server
-    * it is a release-profile build (no vite dev server, no HMR), so what you
-      are testing is what a release would feel like
-
-  Three things keep it from colliding with the released install:
-    * identifier  ai.brightblock.hyprlayer.main  -> its own SQLite DB, settings
-      and WebView2 profile under AppData. Nothing this build migrates can
-      corrupt the stable app's database.
-    * it installs under %LOCALAPPDATA%\Programs, never Program Files, so the
-      NSIS installer still owns the release and no elevation is needed
-    * a distinct executable name (Hyprlayer-Dev.exe) at a distinct path, so the
-      taskbar and Alt-Tab treat the two as different apps
-
-  The identifier says ".main" while the app is called "Hyprlayer Dev" on
-  purpose: ".dev" already belongs to the 'verify' skill, which launches
-  'tauri dev --config src-tauri/tauri.dev.conf.json' under
-  ai.brightblock.hyprlayer.dev. Sharing that identifier would let a running
-  install hijack a verify run through the single-instance plugin, so this build
-  gets its own, named after the branch it tracks.
-
-  What lands where:
-    exe       %LOCALAPPDATA%\Programs\Hyprlayer-Dev\Hyprlayer-Dev.exe
-              (that directory is added to the user PATH, so 'Hyprlayer-Dev'
-              launches it from any shell)
-    shortcut  %APPDATA%\Microsoft\Windows\Start Menu\Programs\Hyprlayer Dev.lnk
-    data      %APPDATA%\ai.brightblock.hyprlayer.main
-    webview   %LOCALAPPDATA%\ai.brightblock.hyprlayer.main\EBWebView
-
-  The exe is named Hyprlayer-Dev.exe rather than Hyprlayer.exe because PATH is
-  also where the app's own binary resolver looks for the hyprlayer CLI, and
-  that lookup is case-insensitive on Windows (see the version gate in
-  crates/hyprlayer-core/src/process/binaries.rs). A GUI Hyprlayer.exe on PATH
-  is exactly the shape that has been mistaken for the CLI before.
-
-  The build happens in a throwaway clone under %USERPROFILE% (never this
-  working tree), so it can run while you have uncommitted work in progress, and
-  it always builds exactly what is on the remote rather than whatever you had
-  checked out. Paths stay short on purpose: a deep node_modules or cargo tree
-  under a long prefix still trips MAX_PATH on stock Windows. The cargo target
-  dir is persistent, so only the first build is cold; after that it is an
-  incremental rebuild of the app's own crates.
-
-  Signing: this build is deliberately left UNSIGNED, so SmartScreen may warn
-  the first time you launch it ("More info" -> "Run anyway"). Updater artifacts
-  are off for the same reason: signing those needs the ed25519 release key.
-
-  Updater note: the in-app updater on Windows installs an update passively, but
-  the +main.<sha> version below is not a release version, and semver ignores
-  build metadata, so the manifest's x.y.z never compares as newer and the nudge
-  stays quiet. That suffix is also what tells you which commit you are on
-  (Settings -> Updates reads e.g. 0.5.10+main.d39276a). Pass -NoVersionSuffix
-  for a bare x.y.z.
-
-  Prerequisites: the same toolchain the Windows release builder needs, minus
-  every secret: Rust (MSVC toolchain), Node + pnpm, the Windows SDK (for
-  rc.exe) and the WebView2 runtime. No signing key, no publish credentials.
-
-  NOTE: keep this file pure ASCII. PowerShell 5.1 reads BOM-less scripts as
-  ANSI, so any non-ASCII byte (em dash, smart quote) corrupts the parser.
-
-.PARAMETER Ref
-  Track something else than origin/main (a branch, tag or SHA).
-
-.PARAMETER Force
-  Rebuild even if the tracked ref has not moved.
-
-.PARAMETER NoFetch
-  Use what is already fetched into the build clone (offline).
-
-.PARAMETER NoVersionSuffix
-  Build a bare x.y.z instead of x.y.z+main.<sha>.
-
-.PARAMETER Uninstall
-  Remove the install (keeps its data dir).
-
-.EXAMPLE
-  .\scripts\dev-install-windows.ps1
-  Fetch origin/main, build if it moved, install.
-
-.EXAMPLE
-  & ([scriptblock]::Create((gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-windows.ps1 -H 'Accept: application/vnd.github.raw' | Out-String)))
-  Run it with no checkout at all, straight from GitHub -- gh supplies the auth
-  the private repo needs. Standalone it clones the repo itself, and
-  HYPRLAYER_DEV_ORIGIN overrides the clone URL (a fork, or a local mirror).
-  Parameters bind as usual: append -Force or -Ref <ref> after the closing paren.
-
-.EXAMPLE
-  .\scripts\dev-install-windows.ps1 -Ref feature/my-branch -Force
-  Build a specific ref even if the stamp says it is current.
-#>
-
 #requires -Version 5
+# Keep this BOM-less script ASCII for PowerShell 5.1.
 
 [CmdletBinding()]
 param(
@@ -111,18 +11,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-# Keep pnpm / cargo / tauri progress bars from flooding an SSH pipe.
 $ProgressPreference = 'SilentlyContinue'
 
 if ($env:OS -ne 'Windows_NT') {
   throw 'this is the Windows installer; use scripts/dev-install-macos.sh or scripts/dev-install-linux.sh'
 }
 
-# Where the build clone comes from. Run from a checkout, that is the working
-# tree beside this script (fast, no network for the object transfer). Run
-# standalone -- created from a script block fetched through 'gh api', where
-# $PSScriptRoot is empty -- there is no tree to clone, and the repo is fetched
-# from GitHub instead.
 $OriginSlug = 'BrightBlock/hyprlayer-app'
 $OriginUrl  = if ($env:HYPRLAYER_DEV_ORIGIN) { $env:HYPRLAYER_DEV_ORIGIN } else { "https://github.com/$OriginSlug.git" }
 $Bootstrap  = "& ([scriptblock]::Create((gh api repos/$OriginSlug/contents/scripts/dev-install-windows.ps1 -H 'Accept: application/vnd.github.raw' | Out-String)))"
@@ -135,7 +29,6 @@ if ($PSScriptRoot) {
   }
 }
 
-# --- config --------------------------------------------------------
 $CacheDir  = if ($env:HYPRLAYER_DEV_CACHE) { $env:HYPRLAYER_DEV_CACHE } else { Join-Path $env:USERPROFILE '.hyprlayer-dev' }
 $SrcDir    = Join-Path $CacheDir 'src'
 $TargetDir = Join-Path $CacheDir 'target'
@@ -144,7 +37,6 @@ $Stamp     = Join-Path $CacheDir 'installed'
 $Prefix   = if ($env:HYPRLAYER_DEV_PREFIX) { $env:HYPRLAYER_DEV_PREFIX } else { Join-Path $env:LOCALAPPDATA 'Programs' }
 $AppId    = 'ai.brightblock.hyprlayer.main'
 $AppName  = 'Hyprlayer Dev'
-# The executable name doubles as the PATH command and the install dir name.
 $BinName  = 'Hyprlayer-Dev'
 
 $InstallDir   = Join-Path $Prefix $BinName
@@ -158,21 +50,11 @@ function Step($m) { Write-Host ('==> ' + $m) -ForegroundColor Cyan }
 function Info($m) { Write-Host ('    ' + $m) }
 function Warn($m) { Write-Warning $m }
 
-# Run a build tool through cmd so its exit code is reliable and its stderr does
-# not trip $ErrorActionPreference. Pass the full command line as one string.
 function Run($cmdline) {
   cmd /c $cmdline
   if ($LASTEXITCODE -ne 0) { throw ('command failed (' + $LASTEXITCODE + '): ' + $cmdline) }
 }
 
-# Named RunGit, not Git: PowerShell resolves a function before an executable
-# of the same name, so a 'Git' function calling 'git' recurses until the stack
-# overflows. git is called directly rather than through Run: it is a real exe (unlike the
-# pnpm .cmd shim) so its exit code is already reliable, and an argument array
-# dodges cmd's '^' and '%' escaping, which would mangle 'origin/main^{commit}'.
-# The local $ErrorActionPreference is what makes 2>&1 safe: at 'Stop', anything
-# a native command writes to a redirected stderr becomes a terminating error,
-# and git narrates plenty on stderr while succeeding.
 function RunGit([string[]] $GitArgs, [switch] $Quiet) {
   $ErrorActionPreference = 'Continue'
   $out = & git @GitArgs 2>&1
@@ -183,9 +65,6 @@ function RunGit([string[]] $GitArgs, [switch] $Quiet) {
   return @($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
 }
 
-# First line of a git command's output, or $null if it failed. The @() is load
-# bearing: PowerShell unwraps a one-element array on return, so a bare $out[0]
-# indexes the first CHARACTER of a single-line result.
 function GitLine([string[]] $GitArgs) {
   $out = RunGit $GitArgs -Quiet
   if ($null -eq $out) { return $null }
@@ -194,11 +73,6 @@ function GitLine([string[]] $GitArgs) {
   return ([string]$lines[0]).Trim()
 }
 
-# --- user PATH -----------------------------------------------------
-# Read and write the raw registry value rather than going through
-# [Environment]::GetEnvironmentVariable('Path','User'): that expands a
-# REG_EXPAND_SZ Path, and SetEnvironmentVariable would then bake the expansion
-# back in as a REG_SZ, permanently flattening entries like %USERPROFILE%\bin.
 function GetUserPath {
   $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $false)
   try {
@@ -212,8 +86,6 @@ function GetUserPath {
 function SetUserPath($value, $kind) {
   $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
   try { $key.SetValue('Path', $value, $kind) } finally { if ($key) { $key.Close() } }
-  # Without the broadcast, only processes started after the next sign-in see the
-  # change: explorer.exe hands its own stale environment to everything it spawns.
   try {
     if (-not ('Win32.EnvBroadcast' -as [type])) {
       Add-Type -Namespace Win32 -Name EnvBroadcast -MemberDefinition @'
@@ -222,7 +94,6 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
 '@
     }
     $result = [System.UIntPtr]::Zero
-    # HWND_BROADCAST, WM_SETTINGCHANGE, SMTO_ABORTIFHUNG, 5s.
     [Win32.EnvBroadcast]::SendMessageTimeout([System.IntPtr]0xffff, 0x1A, [System.UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$result) | Out-Null
   } catch {
     Warn 'could not broadcast the PATH change; open a new terminal or sign out and back in'
@@ -236,7 +107,6 @@ function PathEntries($value) {
 function AddToUserPath($dir) {
   $current = GetUserPath
   $entries = PathEntries $current.Value
-  # Compare expanded, so an existing %LOCALAPPDATA%\Programs\... entry counts.
   $already = $entries | Where-Object {
     [System.Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $dir.TrimEnd('\')
   }
@@ -257,7 +127,6 @@ function RemoveFromUserPath($dir) {
   return $true
 }
 
-# --- uninstall -----------------------------------------------------
 if ($Uninstall) {
   Step "Removing $AppName"
   foreach ($p in @($InstallDir, $Shortcut, $Stamp)) {
@@ -277,14 +146,6 @@ foreach ($tool in @('git', 'cargo', 'pnpm', 'node')) {
   }
 }
 
-# --- 1. a throwaway clone that tracks the remote -------------------
-# From a checkout: cloned from the local repo, then repointed at the real origin
-# so 'origin/main' means the same thing here as it does in the working tree.
-# Standalone: cloned from GitHub through 'gh repo clone', which carries the gh
-# token and honours the user's ssh/https preference -- a bare 'git clone' of a
-# private repo only works if they have already run 'gh auth setup-git'. It goes
-# through Run (cmd) because gh narrates on stderr, which $ErrorActionPreference
-# 'Stop' would turn into a terminating error.
 if (-not (Test-Path (Join-Path $SrcDir '.git'))) {
   Step "Creating build clone at $SrcDir"
   New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
@@ -321,9 +182,6 @@ if ((-not $Force) -and (Test-Path $InstalledExe) -and $StampSha -eq $Sha) {
   exit 0
 }
 
-# --- 2. check out the exact commit ---------------------------------
-# 'clean -qfd' (no -x) drops stray tracked-turned-untracked files but keeps the
-# gitignored node_modules/ and dist/, which is what makes reruns cheap.
 Step "Checking out $Short - $Subject"
 RunGit @('-C', $SrcDir, 'checkout', '--quiet', '--detach', $Sha) | Out-Null
 RunGit @('-C', $SrcDir, 'reset', '--hard', '--quiet', $Sha) | Out-Null
@@ -331,25 +189,10 @@ RunGit @('-C', $SrcDir, 'clean', '-qfd') | Out-Null
 
 Set-Location $SrcDir
 
-# --- 3. config overlay ---------------------------------------------
-# Written into the build clone (not this repo) so nothing here needs
-# committing. createUpdaterArtifacts is forced off: signing them needs the
-# release key.
 $Version = (Get-Content (Join-Path $SrcDir 'package.json') -Raw | ConvertFrom-Json).version
 $BuildVersion = if ($NoVersionSuffix) { $Version } else { "$Version+main.$Short" }
 
 $Overlay = 'src-tauri/tauri.devinstall.conf.json'
-# The overlay is generated by node rather than ConvertTo-Json: PowerShell 5.1
-# reorders keys, caps depth and re-escapes content, which would corrupt the CSP
-# and the other nested config (same reason release-win-remote.ps1 does a literal
-# text swap instead).
-#
-# The windows array is carried over WHOLESALE from tauri.windows.conf.json with
-# only 'title' swapped. Tauri's config merge is recursive for objects but
-# REPLACES arrays, so an overlay that names 'app.windows' at all discards every
-# key it does not restate, which is how the OS title bar came back on the Linux
-# side once ('decorations: false' lost). The assert below fails the build if
-# that key ever moves rather than silently shipping the wrong chrome.
 $OverlayJs = Join-Path $CacheDir 'overlay.js'
 Set-Content -Path $OverlayJs -Encoding ASCII -Value @'
 const fs = require("fs");
@@ -377,14 +220,9 @@ $env:APP_ID = $AppId
 $env:BUILD_VERSION = $BuildVersion
 Run ('node "' + $OverlayJs + '"')
 
-# --- 4. build ------------------------------------------------------
 Step 'pnpm install (frozen lockfile)'
 Run 'pnpm install --frozen-lockfile'
 
-# tauri-winres shells out to the Windows SDK resource compiler (rc.exe) to embed
-# the app icon/version. Over a bare SSH session the SDK bin is not always on
-# PATH, so the build script panics with "have RC.EXE in your $PATH ... or $RC is
-# set?". Pin $RC to the newest x64 rc.exe so the build works regardless of PATH.
 if (-not $env:RC) {
   $rc = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter rc.exe -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -like '*\x64\*' } |
@@ -394,28 +232,18 @@ if (-not $env:RC) {
 }
 
 Step "Building $AppName $BuildVersion (release profile, no bundler)"
-# A dev install must never reach for the release updater key, even if this shell
-# has it exported from a release run.
 Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
 Info "target dir: $TargetDir - first run is a cold build, later runs are incremental"
 $env:CARGO_TARGET_DIR = $TargetDir
 Run ('pnpm tauri build --no-bundle --config "' + $Overlay + '"')
 
-# The overlay leaves mainBinaryName alone, so cargo's own bin name is what lands
-# here; the install step is what renames it to Hyprlayer-Dev.exe.
 $BuiltExe = Join-Path $TargetDir 'release\Hyprlayer.exe'
 if (-not (Test-Path $BuiltExe)) { throw "expected binary not found: $BuiltExe" }
 
-# --- 5. install under %LOCALAPPDATA%\Programs ----------------------
 Step "Installing to $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-# Windows refuses to overwrite or delete a running exe, but it does allow
-# renaming one: the live process keeps its open handle while the directory entry
-# moves. So park the old exe aside, drop the new one in, then try to delete the
-# parked copy (which fails harmlessly while the dev app is still open, and gets
-# cleaned up on the next run).
 $Staged = "$InstalledExe.new"
 $Parked = "$InstalledExe.old"
 Remove-Item $Parked -Force -ErrorAction SilentlyContinue
@@ -428,12 +256,9 @@ if (Test-Path $Parked) { Warn "$AppName is running; the old exe is parked at $Pa
 if (AddToUserPath $InstallDir) {
   Info "added $InstallDir to the user PATH"
 }
-# Make the command work in THIS shell too, not just newly spawned ones.
 if (($env:Path -split ';') -notcontains $InstallDir) { $env:Path = "$env:Path;$InstallDir" }
 
 New-Item -ItemType Directory -Force -Path $StartMenu | Out-Null
-# The shortcut icon is the one tauri-winres already embedded in the exe, so
-# there is nothing to copy alongside it.
 $ws = New-Object -ComObject WScript.Shell
 $lnk = $ws.CreateShortcut($Shortcut)
 $lnk.TargetPath = $InstalledExe

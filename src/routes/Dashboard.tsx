@@ -28,23 +28,14 @@ import {
 import { stageLabel, stageOf } from "@/lib/domain/stages";
 import { selectAgentTab } from "@/features/search/selectAgentTab";
 
-/** How many most-recent docs feed the graph. Caps the O(n²) layout cost; the
- *  corpus may be larger (the stat pills reflect the full index). */
 const GRAPH_DOC_LIMIT = 200;
 
-/** How many rows the Latest-activity panel shows. */
 const RECENT_LIMIT = 5;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Stable empty graph for the first-run hero, the KnowledgeGraph then
- *  paints only its nebula backdrop (no stars), identity-stable so its
- *  layout effect never re-runs. */
 const EMPTY_GRAPH = buildGraph([]);
 
-/** Bottom band the docked panels sit on, smoothstep easing, painted in the
- *  plain surface tone so the hero's foot reads dark (not nebula-blue) and
- *  blends into the app chrome on every theme. */
 const scrimStop = (pct: number, at: string) =>
   `color-mix(in srgb, var(--color-surface) ${pct}%, transparent) ${at}`;
 const PANEL_SCRIM =
@@ -59,8 +50,6 @@ const PANEL_SCRIM =
   ].join(", ") +
   ", var(--color-surface) 100%)";
 
-/** Coarse clock for the dashboard's elapsed/age labels, half-minute beats
- *  keep every "7m"-grade figure fresh without per-second re-renders. */
 function useSlowNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -76,14 +65,6 @@ function greetingFor(now: number, name: string | null): string {
   return name ? `Good ${day}, ${name}` : `Good ${day}`;
 }
 
-/**
- * The home surface, the Observatory (design 2a): the live knowledge graph
- * fills the pane as a cinematic hero, with the day's greeting and fleet
- * status up top, a centered search bar over corpus stat pills, live agents
- * pinned onto the graph field, and two glass panels docked at the bottom,
- * what's running right now, and what happened lately. "All quiet" is a
- * first-class state, not an empty one.
- */
 export function Dashboard() {
   const navigate = useNavigate();
   const bootstrap = useBootstrap();
@@ -94,15 +75,10 @@ export function Dashboard() {
   const archived = useArchivedWorkstreams();
   const fleet = useFleet(workstreams.data ?? []);
 
-  // Most-recent docs feed the hero graph. A generous cap keeps the O(n²)
-  // force pass quick; `total` still reflects the full index.
   const docsQuery = useDocs({ sort: "mtime", limit: GRAPH_DOC_LIMIT });
   const docs = useMemo(() => docsQuery.data?.items ?? [], [docsQuery.data]);
   const graph = useMemo(() => buildGraph(docs), [docs]);
 
-  // One owner for the Add-project wizard: null = closed; `url` set = seeded by
-  // a Discover pick, so every clone reviews the same location + thoughts steps.
-  // Closing drops the seed with it, a later plain "Add repo" starts blank.
   const [addProject, setAddProject] = useState<{ url: string | null } | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
 
@@ -113,7 +89,6 @@ export function Dashboard() {
   const projectName = (path: string): string =>
     projectNames.get(path) ?? path.split(/[\\/]/).pop() ?? path;
 
-  // Quiet actives + freshly archived, newest first, the "what was I doing" list.
   const recentRows = useMemo<RecentRow[]>(() => {
     const active = fleet.idle.map<RecentRow>((view) => ({
       kind: "active",
@@ -132,9 +107,6 @@ export function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fleet.idle, archived.data, projectNames]);
 
-  // The quiet state's "your last agent shipped X" note, the freshest archived
-  // workstream that opened a PR (merge status isn't tracked, so the copy only
-  // claims the ship).
   const lastShipped = useMemo(() => {
     const view = (archived.data ?? []).find((v) => v.item.prNumber !== null);
     return view
@@ -146,7 +118,6 @@ export function Dashboard() {
       : null;
   }, [archived.data]);
 
-  // Quiet-state stat: workstreams touched (or retired) in the last 7 days.
   const weekCount = useMemo(() => {
     const cutoff = now - WEEK_MS;
     const touched = (workstreams.data ?? []).filter(
@@ -169,12 +140,9 @@ export function Dashboard() {
       params: { projectPath: view.item.projectPath },
       search: { item: view.item.id },
     });
-    // Best-effort: focus the tab bound to the live session, when one exists.
     if (sessionId) selectAgentTab(view.item.id, sessionId);
   };
 
-  // Graph pins: every live agent first (stage-colored, pulsing), the freshest
-  // quiet workstreams filling the remaining slots.
   const livePins = fleet.live.slice(0, 3).map<GraphPin>((item) => {
     const running = item.activity === "working" || item.activity === "background";
     const pr = item.view.item.prNumber;
@@ -202,8 +170,6 @@ export function Dashboard() {
     }));
   const pins = [...livePins, ...quietPins];
 
-  // "Start an agent": open the most recently touched project's board with the
-  // new-workstream dialog popped (falls back to the first project).
   const startTarget =
     [...(workstreams.data ?? [])].sort(
       (a, b) => (b.item.updatedAt ?? 0) - (a.item.updatedAt ?? 0),
@@ -227,11 +193,6 @@ export function Dashboard() {
       ? config.user.charAt(0).toUpperCase() + config.user.slice(1)
       : null;
 
-  // First-run hero (design 4b): the lone first node + "Get set up" pill, shown
-  // until the thoughts repo is configured, NOT gated on having a project, so a
-  // configured user with no repos yet still gets the real knowledge graph (a
-  // cloned thoughts corpus lights it up on its own). Gated on bootstrap.data so
-  // the loading frame doesn't flash it.
   const thoughtsConfigured = config?.state === "ready" && config.configured;
   const firstRun = bootstrap.data !== undefined && !thoughtsConfigured;
   const hasProjects = projects.length > 0;
@@ -247,9 +208,6 @@ export function Dashboard() {
         .map((l) => stageLabel(stageOf(l.view)).toLowerCase()),
     ),
   ];
-  // First-run shares the full state's status line ("All quiet, no agents
-  // running" at rest, live agents shown when working), hasProjects is
-  // forced there so the quiet copy matches instead of the add-a-repo nag.
   const status = heroStatus(fleet.counts, {
     hasProjects: firstRun || hasProjects,
     loading: hasProjects && workstreams.isLoading,
@@ -265,22 +223,12 @@ export function Dashboard() {
 
   return (
     <div className="relative h-full min-h-[560px] overflow-hidden bg-surface">
-      {/* The hero: the interactive nebula graph fills the pane edge-to-edge.
-          Overlay containers are pointer-events-none, so pan/zoom/hover reach
-          the graph everywhere except over actual controls. The star field's
-          vignette lives inside the svg (an SVG mask on the star layer only,
-          masking this whole div would multiply two near-black gradients and
-          band into visible rings). */}
       {firstRun ? (
         <>
-          {/* The empty graph paints the same dithered nebula backdrop as the
-              populated hero, one implementation, no banding rings. */}
           <div className="absolute inset-0">
             <KnowledgeGraph graph={EMPTY_GRAPH} />
           </div>
           <FirstNodeField />
-          {/* Dead-center command bar, absolutely positioned so the header's
-              height can't skew it off the hero's true middle. */}
           <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 flex-col items-center gap-3.5 px-7 lg:px-11">
             <HeroSearch total={docsQuery.data?.total ?? 0} />
             <StarterStats agentsLive={fleet.counts.running} />
@@ -292,9 +240,6 @@ export function Dashboard() {
             <KnowledgeGraph graph={graph} />
           </div>
 
-          {/* Bottom scrim, the band the docked glass panels sit on, deepening
-              what the vignette already faded. Hidden until a repo is added,
-              since the panels it carries are too. */}
           {hasProjects && (
             <div
               className="pointer-events-none absolute inset-x-0 bottom-0 h-[300px]"
@@ -367,8 +312,6 @@ export function Dashboard() {
 
         <div className="min-h-6 flex-[1.5]" />
 
-        {/* Live now + Latest activity dock only once a repo exists, with no
-            projects there are no workstreams to surface. */}
         {!firstRun && hasProjects && (
           <div
             className={`pointer-events-auto grid grid-cols-1 gap-4 ${
@@ -406,7 +349,6 @@ export function Dashboard() {
       <DiscoverDialog
         open={discoverOpen}
         onClose={() => setDiscoverOpen(false)}
-        // The dialog closes itself after a pick (onPick → its close → onClose).
         onPick={(repo) => setAddProject({ url: repo.url })}
       />
     </div>

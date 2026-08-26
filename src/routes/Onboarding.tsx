@@ -1,16 +1,3 @@
-/**
- * /onboarding, first-run setup wizard.
- *
- * Four steps:
- *   1. Welcome + name, required to advance.
- *   2. Hyprlayer CLI, install / locate; gated until detected.
- *   3. AI harness, runs `hyprlayer ai configure` in an embedded PTY; skippable
- *      if already installed. Auto-advances on exit 0.
- *   4. Thoughts repo, clone / open / create; "Set up" calls initThoughtsRepo
- *      (repointing any existing thoughts config) then lands on the dashboard.
- *
- * Re-enterable from Settings at any time.
- */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -37,10 +24,8 @@ import type { ThoughtsSource } from "@/lib/bindings";
 import { useEscape } from "@/lib/keybindings/registry";
 import { dismissOnboarding } from "./onboardingState";
 
-/** Total wizard steps, bump when adding/removing a step. */
 const TOTAL_STEPS = 4;
 
-// ── Step 1: Welcome + name ────────────────────────────────────────────────────
 
 function Step1({
   user,
@@ -94,19 +79,11 @@ function Step1({
   );
 }
 
-// ── Step 2: AI harness ────────────────────────────────────────────────────────
 
-/**
- * A single phase value drives the whole step. Collapsing the booleans into one
- * state is deliberate: `onExit` fires from a Tauri `Channel.onmessage` callback,
- * which React's automatic batching doesn't reliably cover, so multiple
- * `setState`s there can land in separate renders, flashing a stale card between
- * them. One `setPhase` per transition makes every transition atomic.
- */
 type AiPhase =
-  | { kind: "idle" } // showing the configured / needs-setup card
-  | { kind: "running"; force: boolean } // configure terminal is live
-  | { kind: "checking" }; // process ended, re-checking status
+  | { kind: "idle" }
+  | { kind: "running"; force: boolean }
+  | { kind: "checking" };
 
 function Step2({ onNext }: { onNext: () => void }) {
   const aiStatus = useAiStatus();
@@ -116,9 +93,6 @@ function Step2({ onNext }: { onNext: () => void }) {
   const [phase, setPhase] = useState<AiPhase>({ kind: "idle" });
   const autoStartedRef = useRef(false);
 
-  // Auto-start configuration the first time we learn the user has no AI tool.
-  // useLayoutEffect (not useEffect) transitions before paint, so the idle card
-  // never flashes on screen before the terminal mounts.
   useLayoutEffect(() => {
     if (
       !aiStatus.isLoading &&
@@ -133,10 +107,6 @@ function Step2({ onNext }: { onNext: () => void }) {
 
   const start = (force: boolean) => setPhase({ kind: "running", force });
 
-  // The interactive process ended, re-check status, then return to idle (which
-  // renders the configured card or a retry prompt). A single `setPhase` per step
-  // means no stale card can render in between, even though this runs outside
-  // React's event-handler batching.
   const handleExit = (_code: number | null) => {
     setPhase({ kind: "checking" });
     void aiStatus.refetch().finally(() => setPhase({ kind: "idle" }));
@@ -152,7 +122,6 @@ function Step2({ onNext }: { onNext: () => void }) {
     );
   }
 
-  // The configure process is live, show the terminal; Next stays disabled.
   if (phase.kind === "running") {
     return (
       <Step
@@ -172,7 +141,6 @@ function Step2({ onNext }: { onNext: () => void }) {
               advances automatically when configuration finishes.
             </p>
           </Card>
-          {/* Fixed height so the layout doesn't reflow */}
           <div className="relative h-80 overflow-hidden rounded-lg border border-edge bg-surface">
             <SetupTerminal
               args={phase.force ? ["ai", "configure", "--force"] : ["ai", "configure"]}
@@ -185,7 +153,6 @@ function Step2({ onNext }: { onNext: () => void }) {
     );
   }
 
-  // Idle or checking: configured card, re-check spinner, or a (re)start prompt.
   return (
     <Step
       number={3}
@@ -226,7 +193,6 @@ function Step2({ onNext }: { onNext: () => void }) {
   );
 }
 
-// ── Step 3: Thoughts repo ─────────────────────────────────────────────────────
 
 function Step3({ user }: { user: string }) {
   const navigate = useNavigate();
@@ -234,9 +200,6 @@ function Step3({ user }: { user: string }) {
   const initThoughts = useInitThoughtsRepo();
   const probe = useProbeDefaultThoughts();
 
-  // Source is seeded from the probe once it resolves: if ~/thoughts is already a
-  // git repo, default to "open from disk" with the path prefilled; otherwise
-  // default to "create" at the same path. `null` until then (we show a spinner).
   const [source, setSource] = useState<RepoSource | null>(null);
   const seededRef = useRef(false);
   useEffect(() => {
@@ -248,17 +211,11 @@ function Step3({ user }: { user: string }) {
         probe.data.isGitRepo ? { mode: "disk", path } : { mode: "create", path },
       );
     } else if (probe.isError) {
-      // Probe failed, fall back to "create at ~/thoughts" rather than hang.
       seededRef.current = true;
       setSource({ mode: "create", path: "~/thoughts" });
     }
   }, [probe.data, probe.isError]);
 
-  // Re-entering with thoughts already configured (Settings → "Re-run setup",
-  // or a config half-written by an earlier attempt) is not a dead end: the
-  // backend repoints the config at whatever the user selects, so show the same
-  // form with a note and a "keep it" exit instead of blocking on a
-  // "already set up" card.
   const cfg = bootstrap.data?.config;
   const alreadyConfigured = cfg?.state === "ready" && cfg.configured;
 
@@ -279,8 +236,6 @@ function Step3({ user }: { user: string }) {
       apiSource = {
         mode: "clone",
         url: source.url.trim(),
-        // Empty → backend defaults to ~/thoughts; the clone lands AT this path
-        // (not under a repo-name subdir), so it's always ~/thoughts.
         location: source.location.trim() || null,
       };
     } else if (source.mode === "disk") {
@@ -367,18 +322,12 @@ function Step3({ user }: { user: string }) {
   );
 }
 
-// ── Wizard shell ──────────────────────────────────────────────────────────────
 
-/** The full onboarding wizard. Auto-launched from Root on first run;
- *  also reachable via Settings → "Re-run setup". */
 export function Onboarding() {
   const navigate = useNavigate();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [user, setUser] = useState("");
 
-  // Prefill the name from the shell username ($USER), the same default the CLI
-  // uses. Done once when the query resolves, and never clobbers a value the user
-  // has already typed (the `cur || …` keeps any edit).
   const defaultUser = useDefaultUsername();
   const prefilledRef = useRef(false);
   useEffect(() => {
@@ -388,8 +337,6 @@ export function Onboarding() {
     }
   }, [defaultUser.data]);
 
-  // Escape closes the wizard from any step (same as "Exit setup"). Rides the
-  // shared Escape stack, so a dialog open over it closes first.
   const exit = () => {
     dismissOnboarding();
     void navigate({ to: "/" });
@@ -399,7 +346,6 @@ export function Onboarding() {
   return (
     <div className="flex min-h-screen items-start justify-center bg-surface px-4 py-12">
       <div className="w-full max-w-xl">
-        {/* Back/close link, only show on steps 2+ */}
         {step > 1 && (
           <div className="mb-4 flex items-center justify-between">
             <button
@@ -418,7 +364,6 @@ export function Onboarding() {
             </button>
           </div>
         )}
-        {/* Keyed by step so each change remounts and replays the enter animation. */}
         <div key={step} className="animate-step-in">
           {step === 1 && (
             <Step1

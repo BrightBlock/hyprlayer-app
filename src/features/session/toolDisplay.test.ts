@@ -52,7 +52,6 @@ describe("toolSummary", () => {
 
   it("summarises task / web / todo tools", () => {
     expect(toolSummary("Task", '{"description":"find bugs","subagent_type":"x"}')).toBe("find bugs");
-    // "Agent" is the current wire name for the same tool "Task" used to be.
     expect(toolSummary("Agent", '{"description":"map the store"}')).toBe("map the store");
     expect(toolSummary("WebSearch", '{"query":"tauri channel"}')).toBe("tauri channel");
     expect(toolSummary("TodoWrite", '{"todos":[{},{},{}]}')).toBe("3 items");
@@ -68,7 +67,6 @@ describe("toolSummary", () => {
   });
 
   it("names the skill (not its args) for the Skill tool", () => {
-    // Claude Code emits the keys args-first; the summary must still be the skill.
     expect(toolSummary("Skill", '{"args":"22","skill":"describe_pr"}')).toBe("describe_pr  22");
     expect(toolSummary("Skill", '{"skill":"describe_pr"}')).toBe("describe_pr");
     expect(toolSummary("Skill", '{"skill":"create_plan","args":"add\\nauth"}')).toBe(
@@ -77,11 +75,6 @@ describe("toolSummary", () => {
   });
 
   it("reads a Workflow row's label out of the script's meta block", () => {
-    // Real tool_use records carry ONLY `script` — the Workflow tool's
-    // `description` parameter is documented as ignored in favour of
-    // `meta`, so no caller ever passes it. `str(obj.description)` alone
-    // would read empty on every real record; the label has to come out of
-    // the script's own head.
     const withDescription =
       "export const meta = {\n" +
       "  name: 'find-flaky-tests',\n" +
@@ -96,7 +89,6 @@ describe("toolSummary", () => {
       "Find flaky tests and propose fixes",
     );
 
-    // No `description` field in meta at all: fall back to `name`.
     const nameOnly =
       "export const meta = {\n" + "  name: 'audit-deps',\n" + "  phases: [],\n" + "}\n";
     expect(toolSummary("Workflow", JSON.stringify({ script: nameOnly }))).toBe("audit-deps");
@@ -241,10 +233,6 @@ describe("docFromTool", () => {
     expect(docFromTool("Bash", '{"command":"ls"}', {})).toBeNull();
   });
 
-  // The plan/research skills delegate the draft to a subagent and then persist
-  // the returned body through the shell, so `Write` never sees the doc. The
-  // shell can't say which mention was written, so the thoughts index does: only
-  // a doc the index saw written (keyed by filename) counts.
   describe("shell writes", () => {
     const PLAN = "/t/shared/plans/2026-08-16-skill-bar.md";
     const RESEARCH = "/t/shared/research/2026-08-16-auth.md";
@@ -271,8 +259,6 @@ describe("docFromTool", () => {
       });
     });
 
-    // The observed shape: the destination is a shell variable a heredoc script
-    // opens itself, so the path never sits next to a redirect.
     it("recognises a doc path assigned to a variable a script writes through", () => {
       expect(
         bash(
@@ -281,19 +267,12 @@ describe("docFromTool", () => {
       ).toEqual({ path: PLAN, kind: "plan" });
     });
 
-    // The whole point of the index proof: the archivist greps old plans
-    // constantly, and a read must not fill the Documents list with them.
     it("ignores a doc the command only reads, however it redirects", () => {
-      // Nothing this session wrote, so nothing it names can be a doc it created.
       const read = (command: string) => docFromTool("Bash", JSON.stringify({ command }), {});
       expect(read("grep -n '^status:' /t/shared/plans/old-plan.md")).toBeNull();
       expect(read("cat /t/shared/research/a.md /t/shared/research/b.md | head -40")).toBeNull();
-      // An incidental stderr redirect used to unlock the assigned-path guess and
-      // report the grepped plan as authored.
       expect(read('P=/t/shared/plans/old-plan.md; grep -c . "$P" 2>/dev/null')).toBeNull();
       expect(read("git show HEAD:thoughts/shared/plans/old-plan.md > /tmp/old.txt")).toBeNull();
-      // A failed or permission-denied write reaches the index too, so it leaves
-      // no entry and the attempt doesn't register.
       expect(read(`cat > /t/shared/plans/never-landed.md <<'MD'\nx\nMD`)).toBeNull();
     });
 
@@ -313,14 +292,9 @@ describe("docFromTool", () => {
     });
 
     it("ignores a path no doc was ever written to", () => {
-      // A heredoc body is not shell: the `=>` used to supply the redirect and
-      // conjure a doc out of prose.
       expect(
         bash(`cat > /tmp/notes.txt <<'MD'\nplan => /t/shared/plans/phantom.md\nMD`),
       ).toBeNull();
-      // The destination is `/tmp/dir/`, not a `.md` path, so `cp`'s source
-      // operand (the arm used to miscount operands and capture it) is never
-      // considered a write target, for a doc that doesn't exist anyway.
       expect(bash("cp /t/shared/plans/absent.md /tmp/dir/")).toBeNull();
     });
 
@@ -328,10 +302,6 @@ describe("docFromTool", () => {
       expect(docFromTool("Bash", JSON.stringify({ command: `cat > ${PLAN}` }), {})).toBeNull();
     });
 
-    // Was the accepted gap: any mention of an already-written doc used to
-    // resolve, so `cp <plan> /tmp/` re-reported it. Requiring write position
-    // closes it — the destination here is a directory, not a `.md` path, so
-    // `cp`'s source operand (never the thing `cp` writes) is not a candidate.
     it("ignores a doc a later command only names, in read or non-md-destination position", () => {
       const read = (command: string) => docFromTool("Bash", JSON.stringify({ command }), written);
       expect(read(`cat ${PLAN}`)).toBeNull();
@@ -342,9 +312,6 @@ describe("docFromTool", () => {
     });
 
     it("recognises write-position targets from the extended table", () => {
-      // The regression that sank the first attempt: an incidental fd redirect
-      // must not unlock the assigned-path guess, asserted against a POPULATED
-      // map so the AND is what rejects it, not an empty map.
       expect(bash('P=/t/shared/plans/old-plan.md; grep -c . "$P" 2>/dev/null')).toBeNull();
       expect(bash(`printf '%s' "$BODY" | tee -a ${HANDOFF}`)).toEqual({
         path: HANDOFF,
@@ -354,29 +321,21 @@ describe("docFromTool", () => {
     });
 
     it("reads a quoted command name", () => {
-      // Stripping only the leading quote left `cp'`, which matched no entry in
-      // the write tables, so a quoted copy went undetected.
       expect(bash(`'cp' /tmp/draft.md ${PLAN}`)).toEqual({ path: PLAN, kind: "plan" });
       expect(bash(`"tee" ${HANDOFF} < /tmp/body`)).toEqual({ path: HANDOFF, kind: "handoff" });
     });
 
     it("ignores the append forms of an fd redirect", () => {
-      // `2>>` blocked on the `2` and then matched the bare `>` that followed,
-      // so the doc named after it read as a write target.
       expect(bash(`grep -c . ${PLAN} 2>>/t/shared/plans/2026-08-16-skill-bar.md`)).toBeNull();
       expect(bash(`grep -c . ${PLAN} &>>${RESEARCH}`)).toBeNull();
-      // The plain append is still a write.
       expect(bash(`echo x >>${PLAN}`)).toEqual({ path: PLAN, kind: "plan" });
     });
 
     it("strips a heredoc body whatever spells its delimiter", () => {
-      // The parser matched only `\w+` delimiters, so these bodies stayed in the
-      // command and their prose parsed as shell (the `phantom.md` regression).
       for (const delim of ["'DOC-BODY'", "'EOF.MD'", '"END-OF-DOC"', "\\EOF"]) {
         const term = delim.replace(/['"\\]/g, "");
         expect(bash(`cat > /tmp/notes.txt <<${delim}\nplan => ${PLAN}\n${term}`)).toBeNull();
       }
-      // The header still carries its own write.
       expect(bash(`cat > ${PLAN} <<'DOC-BODY'\n# Plan\nDOC-BODY`)).toEqual({
         path: PLAN,
         kind: "plan",
@@ -384,18 +343,13 @@ describe("docFromTool", () => {
     });
 
     it("requires the assigned variable to reach the script", () => {
-      // Any `<<` in the command used to unlock the assigned-path guess, so a
-      // script that only read a plan reported it as authored.
       expect(bash(`P=${PLAN}\npython3 - <<'PY'\nprint(1)\nPY`)).toBeNull();
-      // Handed to the script, so this is the destination it writes.
       expect(bash(`P=${PLAN}\npython3 - "$P" <<'PY'\nimport sys\nopen(sys.argv[1],'w')\nPY`)).toEqual(
         { path: PLAN, kind: "plan" },
       );
     });
   });
 
-  // A worktree's `thoughts/shared` symlinks into the store, so `Write` and the
-  // index name one doc two ways and the sidebar listed it twice.
   describe("symlinked worktree paths", () => {
     const INDEXED = "/Users/jt/thoughts/repos/app/shared/plans/2026-08-19-vm.md";
     const NESTED = "/Users/jt/thoughts/repos/app/shared/handoffs/general/ctx.md";
@@ -408,7 +362,6 @@ describe("docFromTool", () => {
         path: INDEXED,
         kind: "plan",
       });
-      // Deeper than the scope segment: the tail only gets more specific.
       expect(write("/Users/jt/wt/app/branch/thoughts/shared/handoffs/general/ctx.md")).toEqual({
         path: NESTED,
         kind: "handoff",
@@ -416,8 +369,6 @@ describe("docFromTool", () => {
     });
 
     it("keeps the written path when the tail says it is a different doc", () => {
-      // Same filename under another scope, and outside any thoughts root: both
-      // are their own file, so neither may collapse onto the indexed one.
       const personal = "/Users/jt/wt/app/branch/thoughts/jt/plans/2026-08-19-vm.md";
       expect(write(personal)).toEqual({ path: personal, kind: "plan" });
       const repoDoc = "/Users/jt/wt/app/branch/docs/plans/2026-08-19-vm.md";
@@ -560,9 +511,6 @@ describe("sessionDocs", () => {
   ];
 
   it("projects every doc-creating tool call in traversal order, duplicates kept", () => {
-    // Duplicates matter: `useMostRecentDoc` reads the LAST write of a kind,
-    // while `useWorkstreamDocs` dedupes to the first. One projection serves both
-    // only if it keeps the repeat.
     expect(sessionDocs(items, {})).toEqual([
       { path: "/t/shared/plans/a.md", kind: "plan" },
       { path: "/t/shared/research/c.md", kind: "research" },
@@ -571,8 +519,6 @@ describe("sessionDocs", () => {
   });
 
   it("returns the same array for the same items, so repeat scans are free", () => {
-    // One `written` reference, as `useWrittenDocs` hands out: it is part of the
-    // validity key, so a fresh `{}` per call would (correctly) recompute.
     const written = {};
     expect(sessionDocs(items, written)).toBe(sessionDocs(items, written));
   });

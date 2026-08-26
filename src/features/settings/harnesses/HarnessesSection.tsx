@@ -6,14 +6,11 @@ import { CodexHarnessTab } from "./CodexHarnessTab";
 import { OpenCodeHarnessTab } from "./OpenCodeHarnessTab";
 import { OllamaHarnessTab } from "./OllamaHarnessTab";
 
-// Settings-tab ids, deliberately wider than the wire `Harness` union
-// (Ollama is configured here but runs through the OpenCode harness).
 type HarnessTabId = "claude" | "codex" | "opencode" | "ollama";
 
 type TabDef = {
   id: HarnessTabId;
   label: string;
-  /** Set only while a harness is genuinely new; drop it once it's established. */
   badge?: string;
 };
 
@@ -24,7 +21,6 @@ const TABS: TabDef[] = [
   { id: "ollama", label: "Ollama" },
 ];
 
-/** Settings → Harnesses: per-harness configuration behind a horizontal tab strip. */
 export function HarnessesSection({
   settings,
   binaries,

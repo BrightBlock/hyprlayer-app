@@ -8,8 +8,6 @@ import { SearchIcon } from "@/components/icons";
 
 const FEATURED = 7;
 
-/** Pick a provider from the models.dev catalog, then enter its API key. The key
- *  is written to OpenCode's auth.json via the backend. */
 export function ProviderPickerModal({
   open,
   onClose,
@@ -19,7 +17,6 @@ export function ProviderPickerModal({
   open: boolean;
   onClose: () => void;
   providers: CatalogProvider[];
-  /** Provider ids that already have a credential (shown as a badge). */
   configured: Set<string>;
 }) {
   const [query, setQuery] = useState("");

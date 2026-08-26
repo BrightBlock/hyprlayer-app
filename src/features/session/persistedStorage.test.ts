@@ -7,16 +7,11 @@ type Blob = { n: number };
 
 const storage = debouncedJSONStorage<Blob>()!;
 
-// Count real writes rather than reading the value back: the whole point of the
-// adapter is how MANY times it reaches localStorage, not what lands there.
 let writes: string[] = [];
 
 beforeEach(() => {
   vi.useFakeTimers();
   const backing = new Map<string, string>();
-  // A stand-in rather than a spy on jsdom's own Storage: the adapter reaches
-  // for the global on every call, so swapping the whole object is both simpler
-  // and closer to what it actually talks to.
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: {
@@ -42,7 +37,7 @@ const put = (n: number) => storage.setItem("k", { state: { n }, version: 1 });
 describe("debouncedJSONStorage", () => {
   it("collapses a burst of writes into one", () => {
     for (let n = 0; n < 50; n++) put(n);
-    expect(writes).toHaveLength(0); // nothing has reached storage yet
+    expect(writes).toHaveLength(0);
 
     vi.advanceTimersByTime(1000);
     expect(writes).toEqual(["k"]);
@@ -61,18 +56,17 @@ describe("debouncedJSONStorage", () => {
     vi.advanceTimersByTime(1000);
     expect(writes).toHaveLength(1);
 
-    put(1); // same bytes
+    put(1);
     vi.advanceTimersByTime(1000);
     expect(writes).toHaveLength(1);
 
-    put(2); // different
+    put(2);
     vi.advanceTimersByTime(1000);
     expect(writes).toHaveLength(2);
   });
 
   it("serves a queued value to a read that races the write", () => {
     put(7);
-    // Still pending — a rehydrate here must not see the older stored blob.
     expect(storage.getItem("k")).toMatchObject({ state: { n: 7 } });
     expect(writes).toHaveLength(0);
   });

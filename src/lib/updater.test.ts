@@ -2,9 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { isNewerVersion } from "./updater";
 
-// This is what drives the Linux update nudge: there is no signed manifest entry
-// for Linux, so the changelog's newest version vs. the running one is the only
-// signal. A false positive nags forever, so the malformed cases matter.
 describe("isNewerVersion", () => {
   it("compares each component numerically, not lexically", () => {
     expect(isNewerVersion("0.5.10", "0.5.9")).toBe(true);

@@ -22,18 +22,12 @@ type Props = {
   projectPath: string;
   open: boolean;
   onClose: () => void;
-  /** Called with the freshly created item so the caller can select its tab. */
   onCreated: (view: WorkstreamView) => void;
-  /** A folder project: no git, so the dialog is title-only. */
   folder?: boolean;
 };
 
-/** Where work on an existing branch lives: a dedicated worktree, or the
- * project's own checkout (no worktree). */
 type Place = "worktree" | "here";
 
-/** Prefix matches first, then any substring; non-matches dropped. Mirrors the
- * composer's command filter so branch search feels the same. */
 function filterBranches(all: string[], query: string): string[] {
   const q = query.trim().toLowerCase();
   if (!q) return all;
@@ -47,30 +41,11 @@ function filterBranches(all: string[], query: string): string[] {
   return [...prefix, ...substr];
 }
 
-/** The remote-only rows carry their full ref (`origin/feature`); the local branch
- * they'd create is the ref minus its remote prefix. */
 function localNameFor(remoteRef: string): string {
   const slash = remoteRef.indexOf("/");
   return slash === -1 ? remoteRef : remoteRef.slice(slash + 1);
 }
 
-/**
- * New-workstream dialog, built around one branch combobox. There is no mode
- * dropdown: the branch you pick determines the shape.
- *
- * The pinned "New branch" row creates a fresh branch and worktree from a base.
- * Picking an existing branch instead reveals a Worktree/Here choice, where
- * Worktree checks it out into its own worktree and Here switches the project's
- * checkout with no worktree.
- *
- * The list holds local branches plus remote-only ones. Picking a remote row
- * creates the local tracking branch first, since checking out a remote ref
- * would detach HEAD. Opening the dialog fires a `git fetch`, so a just-pushed
- * branch appears without a trip to the terminal.
- *
- * A folder project has none of this: the dialog collapses to a title and the
- * workstream runs in the project folder.
- */
 export function CreateWorkstreamDialog({
   projectPath,
   open,
@@ -80,34 +55,24 @@ export function CreateWorkstreamDialog({
 }: Props) {
   const [title, setTitle] = useState("");
   const [query, setQuery] = useState("");
-  // null = the pinned "New branch" row; otherwise the chosen existing branch.
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [base, setBase] = useState("");
-  // Whether the user has explicitly chosen a base, vs. it being auto-defaulted.
   const [userPickedBase, setUserPickedBase] = useState(false);
-  // The chosen type's prefix; null = no type, so the global prefix applies.
   const [typePrefix, setTypePrefix] = useState<string | null>(null);
-  // Whether the user chose the type explicitly, vs. it being suggested from the
-  // title. Same idiom as `userPickedBase` above.
   const [userPickedType, setUserPickedType] = useState(false);
   const [place, setPlace] = useState<Place>("worktree");
   const create = useCreateWorkstream(projectPath);
-  // A folder project has no branches to list, don't even ask.
   const bases = useWorkstreamBases(projectPath, open && !folder);
   const prefixes = useBranchPrefixes(projectPath, open && !folder);
   const refreshRemote = useFetchProjectRemote(projectPath);
 
   const defaultBase = bases.data?.defaultBase ?? "";
   const currentBranch = bases.data?.currentBranch ?? "";
-  // Memoized so identities are stable across renders, otherwise the `?? []`
-  // literals would re-fire the default-selection effect every render.
   const branches = useMemo(() => bases.data?.branches ?? [], [bases.data?.branches]);
   const localBranches = useMemo(
     () => bases.data?.localBranches ?? [],
     [bases.data?.localBranches],
   );
-  // Remote-only branches, already filtered backend-side to those with no local
-  // counterpart, listed after the locals so the branches you have come first.
   const remoteBranches = useMemo(
     () => bases.data?.remoteBranches ?? [],
     [bases.data?.remoteBranches],
@@ -119,24 +84,10 @@ export function CreateWorkstreamDialog({
   const remoteSet = useMemo(() => new Set(remoteBranches), [remoteBranches]);
   const filtered = useMemo(() => filterBranches(pickable, query), [pickable, query]);
 
-  // Memoized like `branches` above, so the `?? []` literal can't re-fire the
-  // suggestion effect every render. Deduped by prefix defensively:
-  // `validate_prefixes` rejects duplicates on every write path, but a
-  // hand-edited `settings.toml` is not a write path.
   const typeList = useMemo(() => {
     const seen = new Set<string>();
     return (prefixes.data?.prefixes ?? []).filter((p) => {
-      // Dedupe on the TRIMMED prefix, which is what the backend stores and what
-      // `create_workstream` trims to before building the branch. Comparing raw
-      // strings let `fix/` and `" fix/ "` both through as separate options that
-      // build the identical branch — and a hand-edited `settings.toml`, the
-      // only way past `normalize_branch_prefixes`, is exactly the case this
-      // defence exists for.
       const prefix = p.prefix.trim();
-      // Blank is dropped, not just deduped: `value: ""` is the None row's own
-      // sentinel below, and a second option carrying it would collide on
-      // `DropdownSelect`'s composite key (`src/components/ui.tsx:387`) and be
-      // unselectable.
       if (!prefix || seen.has(prefix)) return false;
       seen.add(prefix);
       return true;
@@ -144,9 +95,6 @@ export function CreateWorkstreamDialog({
   }, [prefixes.data?.prefixes]);
   const defaultPrefix = prefixes.data?.defaultPrefix ?? "";
 
-  // An in-place create refused to switch branches because the project checkout
-  // has uncommitted work. Recoverable in the dialog, so it doesn't render as a
-  // bare error (see CheckoutDirtyNotice).
   const checkoutDirty = isAppError(create.error) && create.error.code === "checkout_dirty";
   const dirtyChanges = checkoutDirty && isAppError(create.error)
     ? dirtyCount(create.error.message)
@@ -155,9 +103,6 @@ export function CreateWorkstreamDialog({
   const discard = useDiscardProjectChanges(projectPath);
   const restore = useRestoreWorkstream();
   const [confirmDiscard, setConfirmDiscard] = useState(false);
-  // Whose changes those are: the most recently archived in-place row still
-  // recording the branch the checkout is on. Branch adoption is what keeps that
-  // match honest, the row follows `git checkout` right up until it's archived.
   const leftBehind = useMemo(
     () =>
       checkoutDirty && currentBranch
@@ -173,22 +118,12 @@ export function CreateWorkstreamDialog({
 
   const isNew = selectedBranch === null;
   const remoteSelected = !isNew && !!selectedBranch && remoteSet.has(selectedBranch);
-  // The current branch is already checked out in the project's own tree, so it
-  // can't also be checked out into a dedicated worktree, git refuses a branch
-  // already checked out elsewhere. Only "My checkout" (in-place) is valid for it.
   const currentSelected = !isNew && !!currentBranch && selectedBranch === currentBranch;
 
-  // Force in-place when the current branch is picked, a new worktree for it
-  // would error. Keyed on the selection so switching to another branch frees the
-  // choice again.
   useEffect(() => {
     if (currentSelected && place === "worktree") setPlace("here");
   }, [currentSelected, place]);
 
-  // Re-scan branches on open, since the dialog stays mounted across opens and
-  // react-query's normal refetch-on-mount never fires again. The fetch runs
-  // alongside: the list paints immediately from the refs already on disk, and any
-  // branch pushed since the last fetch drops in when the network call lands.
   useEffect(() => {
     if (!open || folder) return;
     void bases.refetch();
@@ -196,17 +131,12 @@ export function CreateWorkstreamDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, folder]);
 
-  // Pre-select the new-branch base: the detected default, else the first
-  // branch. Follows a late-arriving default until the user picks one
-  // themselves. Keyed on `open` so reopening re-defaults.
   useEffect(() => {
     if (!open || userPickedBase) return;
     const initial = defaultBase || branches[0];
     if (initial && initial !== base) setBase(initial);
   }, [open, userPickedBase, defaultBase, branches, base]);
 
-  // Suggest a type from the title until the user picks one. Keyed on `open` via
-  // reset(), so reopening re-suggests.
   useEffect(() => {
     if (!open || userPickedType || !isNew) return;
     const next = suggestPrefix(title, typeList)?.prefix ?? null;
@@ -234,13 +164,8 @@ export function CreateWorkstreamDialog({
     onClose();
   };
 
-  /** Recovery is in flight, the whole dialog holds still until it settles. */
   const recovering = discard.isPending || restore.isPending;
 
-  // Resolve the combobox state into the backend's (mode, base, branch,
-  // branchPrefix) shape. A null prefix means the global one applies; only the
-  // new-branch path can ever carry one, since the other three adopt a branch
-  // that already has a name.
   const resolved = (): {
     mode: WorktreeMode;
     base: string | null;
@@ -262,9 +187,6 @@ export function CreateWorkstreamDialog({
       { title: trimmed, ...resolved() },
       {
         onSuccess: (view) => {
-          // Creation succeeded, close and jump straight to the new workstream.
-          // Seed-copy problems (e.g. a missing .env) surface at the project level
-          // (the sidebar warning), not here, so the dialog always dismisses.
           reset();
           onClose();
           onCreated(view);
@@ -273,8 +195,6 @@ export function CreateWorkstreamDialog({
     );
   };
 
-  // A detected default that isn't in the branch list (rare) still needs an
-  // option so the base <select> can show it as selected.
   const baseOptions =
     defaultBase && !branches.includes(defaultBase) ? [defaultBase, ...branches] : branches;
 
@@ -284,8 +204,6 @@ export function CreateWorkstreamDialog({
     : inplace
       ? "Switching branch…"
       : "Provisioning worktree…";
-  // A remote-only pick becomes a local branch tracking it, so say what will be
-  // created rather than naming a branch the user doesn't have yet.
   const localFor = remoteSelected && selectedBranch ? localNameFor(selectedBranch) : selectedBranch;
   const hint = folder
     ? "Runs in the project folder. No branch, no worktree. Add as many as you like."
@@ -330,7 +248,6 @@ export function CreateWorkstreamDialog({
               className="!rounded-none !border-0 !border-b !border-edge/60"
             />
             <ul className="max-h-48 overflow-y-auto py-1">
-              {/* Pinned: start a fresh branch. Always present, even while filtering. */}
               <BranchRow
                 icon={<PlusIcon size={14} />}
                 label="New branch"
@@ -377,18 +294,10 @@ export function CreateWorkstreamDialog({
               }}
               disabled={create.isPending || prefixes.isLoading}
               options={[
-                // "General", not "None": the row still produces a branch (under
-                // the global prefix), so naming it for the absence of a type
-                // read as though it meant no work. The prefix it yields is not
-                // spelled out here — the preview line below already shows the
-                // whole branch name, and no other option lists its prefix.
                 { value: "", label: "General" },
                 ...typeList.map((p) => ({ value: p.prefix, label: p.label })),
               ]}
             />
-            {/* Same "Preview:" shape as Settings → Git (`Settings.tsx:248-254`),
-                against the real title instead of a sample slug. The 4-hex suffix
-                is the backend's, so it renders dimmed as a placeholder. */}
             <p className="mt-1.5 text-xs text-ink-dim">
               Preview:{" "}
               <span className="font-mono text-ink">
@@ -439,9 +348,6 @@ export function CreateWorkstreamDialog({
 
         <p className="text-xs leading-relaxed text-ink-dim">{hint}</p>
         {!folder && bases.isError && <ErrorNote error={bases.error} />}
-        {/* Surfaced rather than swallowed: an unreadable `.hyprlayer/settings.toml`
-            fails this query, and without a note the picker just shows the
-            built-ins as though nothing were wrong. */}
         {!folder && isNew && prefixes.isError && <ErrorNote error={prefixes.error} />}
         {create.isError &&
           (checkoutDirty ? (
@@ -485,10 +391,6 @@ export function CreateWorkstreamDialog({
             type="submit"
             variant="primary"
             busy={create.isPending}
-            // Hold Create until the branch types have loaded. `typePrefix` is
-            // null until then, so an early submit silently builds the branch
-            // under the global prefix instead of the type the title suggests —
-            // the picker already disables itself for the same window.
             disabled={!title.trim() || recovering || (isNew && !folder && prefixes.isLoading)}
           >
             {create.isPending ? busyLabel : "Create"}
@@ -497,8 +399,6 @@ export function CreateWorkstreamDialog({
       </form>
     </Dialog>
 
-    {/* Sibling, not nested: the panel scrolls and owns a backdrop filter, and
-        `useEscape` stacks so this one takes Escape while it's up. */}
     <Dialog
       open={confirmDiscard}
       onClose={() => setConfirmDiscard(false)}
@@ -527,8 +427,6 @@ export function CreateWorkstreamDialog({
   );
 }
 
-/** Best-effort count from the backend's `checkout_dirty` message. Cosmetic,
- * the copy degrades to "the changes" if the wording ever drifts. */
 function dirtyCount(message: string): number | null {
   const m = /(\d+)\s+uncommitted/.exec(message);
   return m ? Number(m[1]) : null;
@@ -538,13 +436,6 @@ function changeCount(count: number | null): string {
   return count == null ? "the changes" : `${count} change${count === 1 ? "" : "s"}`;
 }
 
-/**
- * Why an in-place create stopped: the project checkout has uncommitted work that
- * a branch switch would carry across. Not an error note, nothing failed that a
- * retry would fix, so it reads as a blocked state with the way out attached. The
- * work is usually an archived in-place workstream's leftovers, and unarchiving is
- * the only route back to it; discarding lives in the dialog footer beside Create.
- */
 function CheckoutDirtyNotice({
   count,
   onBranch,
@@ -554,11 +445,8 @@ function CheckoutDirtyNotice({
   onUnarchive,
 }: {
   count: number | null;
-  /** Branch the checkout is sitting on. */
   onBranch: string;
-  /** Branch the create wanted to switch to. */
   target: string | null;
-  /** The archived workstream the changes belong to, when one is identifiable. */
   leftBehind: ArchivedWorkstreamView | undefined;
   busy: boolean;
   onUnarchive: (id: string) => void;
@@ -603,8 +491,6 @@ function CheckoutDirtyNotice({
   );
 }
 
-/** One row in the branch combobox: an icon, a label, and an optional dimmed
- * detail/badge on the right. The selected row is highlighted. */
 function BranchRow({
   icon,
   label,
@@ -639,8 +525,6 @@ function BranchRow({
   );
 }
 
-/** A compact two-or-more option segmented control, the lightweight stand-in
- * for a dropdown when the choices are few and worth showing at a glance. */
 function Segmented<T extends string>({
   value,
   onChange,

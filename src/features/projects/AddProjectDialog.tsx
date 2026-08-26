@@ -34,24 +34,15 @@ import { RepoSourcePicker, type RepoSource } from "./RepoSourcePicker";
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** Seed the clone URL when opening, how a repo picked in Discover enters
-   *  this wizard instead of being cloned directly. */
   initialUrl?: string | null;
-  /** The freshly added project, so the caller can navigate to it. */
   onAdded: (project: Project) => void;
 };
 
-/** Sentinel option values for the Thoughts-step selects. Real values never
- *  collide: the backend reserves `__`-prefixed profile names, and the folder
- *  options below filter `__`-prefixed directory names out. */
 const AUTO_FOLDER = "__auto";
 const NEW_FOLDER = "__custom";
 const DEFAULT_PROFILE = "__default";
 const NEW_PROFILE = "__new";
 
-/** Mirrors the CLI's `--directory` sanitization for the auto-folder preview:
- *  last path segment, `.git` stripped, unsafe chars → `_`
- *  (`brightblock.ai` → `brightblock_ai`). Advisory, the CLI recomputes. */
 function autoFolderName(source: RepoSource): string {
   const raw = source.mode === "clone" ? source.url : source.path;
   const seg = basename(
@@ -63,7 +54,6 @@ function autoFolderName(source: RepoSource): string {
   return seg.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
-/** `owner/repo` for a recognizable GitHub URL, else the last path segment. */
 function repoLabel(source: RepoSource): string {
   if (source.mode === "clone") {
     const url = source.url.trim();
@@ -74,26 +64,12 @@ function repoLabel(source: RepoSource): string {
   return basename(source.path.trim().replace(/[/\\]+$/, "")) || "repository";
 }
 
-/**
- * Add a project in two steps. Step 1, the repository: clone a hosted repo
- * into the repos root, or import a local repo from disk (registered in place,
- * never copied, so worktrees branch off the user's existing repo). Step 2,
- * thoughts: pick the profile and folder the repo's research/plans/notes map
- * into, with a live preview of the resulting path.
- *
- * A non-git folder can skip both: "Add as local folder" registers the
- * directory as-is and submits from step 1, no git, no thoughts, no CLI.
- */
 export function AddProjectDialog(props: Props) {
-  // Unmount when closed: every piece of wizard state resets for free, so
-  // there is no reset() ledger to keep in lockstep with new fields, and
-  // `initialUrl` is plain initial state rather than a synchronized effect.
   return props.open ? <AddProjectWizard {...props} /> : null;
 }
 
 function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const bootstrap = useBootstrap();
-  // A true first run has no config yet; the CLI needs a username to bootstrap one.
   const configMissing = bootstrap.data?.config.state === "missing";
 
   const [step, setStep] = useState<1 | 2>(1);
@@ -104,11 +80,8 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   });
   const [user, setUser] = useState("");
   const [initBranch, setInitBranch] = useState("main");
-  // Only consulted for a non-git folder. Off (the default) adds it as a plain
-  // folder, the non-mutating choice; git init is the opt-in.
   const [setUpGit, setSetUpGit] = useState(false);
 
-  // Step 2, where the repo maps into thoughts.
   const [profileName, setProfileName] = useState<string | null>(null);
   const [folder, setFolder] = useState(AUTO_FOLDER);
   const [customFolder, setCustomFolder] = useState("");
@@ -120,34 +93,26 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const importProject = useImportProject();
   const importFolder = useImportLocalFolder();
   const defaultUser = useDefaultUsername();
-  // Prefetch on mount so the Thoughts step renders instantly after Next.
   const profiles = useThoughtsProfiles();
   const createProfile = useCreateThoughtsProfile();
 
-  // Probe the browsed disk path (debounced) to tailor the offer before submit;
-  // advisory only, since `importProject` re-classifies on the backend anyway.
   const diskPath = source.mode === "disk" ? source.path.trim() : "";
   const debouncedPath = useDebounced(diskPath, 300);
   const pathInfo = useRepoPathInfo(debouncedPath, source.mode === "disk");
   const status = source.mode === "disk" ? pathInfo.data : undefined;
   const needsInit = status === "nonGit";
   const isBare = status === "bare";
-  // Only a confirmed non-git folder can be taken as-is; if the probe later says
-  // otherwise the choice falls away on its own, no reset bookkeeping.
   const asFolder = needsInit && !setUpGit;
 
   const pending = clone.isPending || importProject.isPending || importFolder.isPending;
   const error = clone.error ?? importProject.error ?? importFolder.error;
 
-  // First run: prefill "Your name" with the shell username ($USER), matching
-  // the CLI default, without clobbering an in-session edit.
   useEffect(() => {
     if (configMissing && defaultUser.data) {
       setUser((cur) => cur || defaultUser.data);
     }
   }, [configMissing, defaultUser.data]);
 
-  // Default the clone location to the configured repos root, else ~/hyprlayer/repos.
   useEffect(() => {
     const configured = bootstrap.data?.settings.reposRoot;
     if (configured) {
@@ -166,7 +131,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
           );
         }
       } catch {
-        // Leave blank → the backend falls back to its own default.
       }
     })();
     return () => {
@@ -174,13 +138,10 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
     };
   }, [bootstrap.data?.settings.reposRoot]);
 
-  // ── Step 2 derivations ────────────────────────────────────────────────────
   const profileList = profiles.data ?? [];
   const selectedProfile = profileList.find((p) => p.name === profileName) ?? profileList[0];
   const folders = selectedProfile?.folders ?? [];
   const repoName = autoFolderName(source);
-  // A stale pick (a folder from another repo/profile) self-heals to Auto,
-  // derived, so no reset bookkeeping when the URL or profile changes.
   const folderChoice =
     folder === AUTO_FOLDER || folder === NEW_FOLDER || folders.includes(folder)
       ? folder
@@ -212,9 +173,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
     setStep(1);
     setNewProfileOpen(false);
     createProfile.reset();
-    // `error` below is a first-wins coalesce of the three, so a clone failure
-    // left un-reset here outranks a later import failure and the user is shown
-    // a message about a source they already backed out of.
     clone.reset();
     importProject.reset();
     importFolder.reset();
@@ -230,10 +188,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
         : "";
   const step1Ok =
     Boolean(primaryInput) &&
-    // Whether a disk path submits as folder or repo depends on the probe, so
-    // wait for it, a pre-probe submit would silently git-init a plain folder.
     (source.mode !== "disk" || status !== undefined || pathInfo.isError) &&
-    // A folder project writes no config, so it needs no username.
     (!configMissing || asFolder || Boolean(user.trim())) &&
     (!needsInit || asFolder || Boolean(initBranch.trim())) &&
     !isBare;
@@ -258,7 +213,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
       );
       return;
     }
-    // Auto = let the CLI derive the folder; anything else is an explicit pick.
     const thoughtsDir = folderChoice === AUTO_FOLDER ? null : resolvedFolder || null;
     const profile = selectedProfile?.name ?? null;
     if (source.mode === "clone") {
@@ -274,8 +228,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
         { onSuccess: succeed },
       );
     } else if (source.mode === "disk") {
-      // `branch` only matters when we're creating the repo; the backend
-      // re-classifies anyway, so this stays correct even if `needsInit` is stale.
       importProject.mutate(
         {
           path: primaryInput,
@@ -325,7 +277,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
       });
       if (typeof picked === "string") setNpRepo(picked);
     } catch {
-      // Native picker unavailable or dismissed, the field stays hand-editable.
     }
   };
 
@@ -350,7 +301,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
         className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
-          // A folder has no thoughts step, step 1 IS the whole dialog.
           if (step === 1 && !asFolder) {
             if (step1Ok) setStep(2);
           } else {
@@ -383,8 +333,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
               }
             />
 
-            {/* Not a <Field>: it wraps children in a <label>, which would steal
-                the switch's accessible name. */}
             {needsInit && (
               <div className="flex items-center justify-between gap-4">
                 <p className="min-w-0 text-sm text-ink">Set up a git repository</p>
@@ -427,7 +375,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
 
         {step === 2 && (
           <div className="space-y-4">
-            {/* What's being added, and where its thoughts will land. */}
             <div className="rounded-md border border-edge bg-panel-2/40 px-3.5 py-3">
               <div className="flex items-center gap-2.5">
                 <RepoAvatar
@@ -485,7 +432,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                         value: p.name ?? DEFAULT_PROFILE,
                         label: p.name ?? "default",
                       })),
-                      // Creating a profile needs an existing config to write into.
                       ...(configMissing ? [] : [{ value: NEW_PROFILE, label: "New profile…" }]),
                     ]}
                   />

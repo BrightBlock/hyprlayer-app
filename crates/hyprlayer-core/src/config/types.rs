@@ -1,21 +1,10 @@
-//! Re-declared hyprlayer CLI config types (schema v4).
-//!
-//! The CLI is a binary-only crate, so these mirror
-//! `hyprlayer-cli/src/config.rs` field-for-field. The app treats the config
-//! as read-only (the CLI owns mutations); deserialization is tolerant,
-//! unknown fields are ignored and everything the app does not strictly need
-//! is defaulted. Fixture round-trip tests guard against upstream drift.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Maximum config schema version this app understands.
 pub const MAX_SUPPORTED_CONFIG_VERSION: u64 = 4;
 
-/// The standard git-backend tree: what bootstrap writes and new profiles get.
-/// One spelling, so the dialog's preview can never diverge from the write.
 pub const DEFAULT_THOUGHTS_REPO: &str = "~/thoughts";
 pub const DEFAULT_REPOS_DIR: &str = "repos";
 pub const DEFAULT_GLOBAL_DIR: &str = "global";
@@ -40,8 +29,6 @@ impl BackendKind {
         }
     }
 
-    /// Filesystem backends create `<repo>/thoughts/` symlinks and store
-    /// markdown on disk; flat-list backends delegate I/O to MCP tools.
     pub fn uses_filesystem(self) -> bool {
         matches!(self, BackendKind::Git | BackendKind::Obsidian)
     }
@@ -59,7 +46,6 @@ pub struct GitConfig {
 }
 
 impl GitConfig {
-    /// A git backend at `thoughts_repo` with the standard `repos`/`global` dirs.
     pub fn standard(thoughts_repo: impl Into<String>) -> Self {
         Self {
             thoughts_repo: thoughts_repo.into(),
@@ -83,7 +69,6 @@ pub struct ObsidianConfig {
 }
 
 impl ObsidianConfig {
-    /// Root directory holding the thoughts tree inside the vault.
     pub fn content_root(&self) -> Option<PathBuf> {
         if self.vault_path.is_empty() {
             return None;
@@ -143,7 +128,6 @@ impl BackendConfig {
         }
     }
 
-    /// Filesystem root of the thoughts tree, for backends that have one.
     pub fn thoughts_root(&self) -> Option<PathBuf> {
         match self {
             BackendConfig::Git(g) if !g.thoughts_repo.is_empty() => {
@@ -154,7 +138,6 @@ impl BackendConfig {
         }
     }
 
-    /// The `(repos_dir, global_dir)` pair for backends with a filesystem tree.
     pub fn tree_dirs(&self) -> Option<(&str, &str)> {
         match self {
             BackendConfig::Git(g) => Some((&g.repos_dir, &g.global_dir)),
@@ -210,10 +193,6 @@ pub struct ThoughtsConfig {
     pub profiles: HashMap<String, ProfileConfig>,
 }
 
-/// The CLI serializes an emptied map as `null` rather than `{}` (observed live
-/// from `thoughts profile delete`), and `#[serde(default)]` alone only covers
-/// an *absent* key. Treat explicit null the same, so the mirror stays readable
-/// in the window before the CLI's next load→save normalizes the file.
 fn null_as_default<'de, D, T>(de: D) -> std::result::Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -222,8 +201,6 @@ where
     Ok(Option::<T>::deserialize(de)?.unwrap_or_default())
 }
 
-/// Effective configuration resolved for a specific repository path.
-/// Port of `ThoughtsConfig::effective_config_for` in the CLI.
 #[derive(Debug, Clone)]
 pub struct EffectiveConfig {
     pub user: String,
@@ -249,8 +226,6 @@ impl ThoughtsConfig {
         }
     }
 
-    /// Repo mapping keys are the repo's absolute path as a display string,
-    /// the CLI uses `current_dir().display().to_string()`, no canonicalization.
     pub fn effective_config_for(&self, repo_path: &str) -> EffectiveConfig {
         let mapping = self.repo_mappings.get(repo_path);
 
@@ -289,9 +264,6 @@ pub struct AiConfig {
     pub agent_tool: Option<AgentTool>,
 }
 
-/// Top-level config. Only the fields the app reads are declared; the rest
-/// (telemetry, update bookkeeping) are intentionally ignored on read and
-/// never written back.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HyprlayerConfig {
@@ -303,7 +275,6 @@ pub struct HyprlayerConfig {
     pub ai: Option<AiConfig>,
 }
 
-/// Tilde-expansion identical to the CLI's `expand_path`.
 pub fn expand_path(path: &str) -> PathBuf {
     let expanded = shellexpand::tilde(path);
     PathBuf::from(expanded.as_ref())

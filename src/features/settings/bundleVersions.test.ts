@@ -11,7 +11,6 @@ import {
   versionOptions,
 } from "./bundleVersions";
 
-/** Real `hyprlayer ai status --json` from CLI 1.6.0 (9a2a33c). */
 const STATUS: AiStatus = {
   agentTool: "Claude Code",
   agentsInstalledSha: "9a2a33c6fc0648e8cd7bac278365c8a9dcca220b",
@@ -23,7 +22,6 @@ const STATUS: AiStatus = {
   pinnedVersion: "1.6.0",
 };
 
-/** Real `hyprlayer ai versions --json` from the same binary. */
 const VERSIONS: AiVersions = {
   assetsVersion: "1.6.0",
   binaryVersion: "1.6.0",
@@ -52,9 +50,6 @@ describe("bundlePinState", () => {
     expect(state).toMatchObject({ kind: "pinned", pinned: "1.5.0", drifted: true });
   });
 
-  // `pinnedVersion: null` is a real answer, not a missing one. Reading it as
-  // anything but "unpinned" would invert the row's headline claim and offer a
-  // "Clear pin" button for a pin that does not exist.
   it("reads a null pin as unpinned", () => {
     expect(bundlePinState({ ...STATUS, pinnedVersion: null })).toEqual({
       kind: "unpinned",
@@ -98,14 +93,6 @@ describe("versionOptions", () => {
     expect(next.label).not.toContain("pinned");
   });
 
-  /**
-   * The load-bearing rule. `reinstall --version` accepts any string and, for a
-   * version carrying no published bundle, installs master's tree under the
-   * requested label instead of failing — so an option sourced from anywhere
-   * but `versions` is a corrupted `~/.claude`, not a bad label. The payload
-   * below repeats the trap concretely: `binaryVersion` and `pinnedVersion`
-   * both name 1.5.9, which the CLI deliberately left out of `versions`.
-   */
   it("offers nothing that is absent from the versions array", () => {
     const stale: AiVersions = {
       assetsVersion: "1.5.9",
@@ -125,9 +112,6 @@ describe("versionOptions", () => {
     expect(versionOptions({ ...VERSIONS, versions: [] })).toEqual([]);
   });
 
-  // The CLI lists newest-first, so the cap keeps the head: the current
-  // release and the rollback candidates, not an archive of old bundles each
-  // able to park a machine behind a drifting pin.
   it("offers at most the newest three versions", () => {
     const crowded: AiVersions = {
       ...VERSIONS,
@@ -143,8 +127,6 @@ describe("versionOptions", () => {
     expect(values).not.toContain("1.5.9");
   });
 
-  // The list query is `enabled`-gated and can be offline-failed; both arrive
-  // as `undefined`, and neither may leave a stale option behind.
   it("offers nothing before the list has loaded", () => {
     expect(versionOptions(undefined)).toEqual([]);
   });
@@ -159,19 +141,11 @@ describe("selectedVersion", () => {
     expect(selectedVersion({ ...STATUS, pinnedVersion: null })).toBe("1.6.0");
   });
 
-  /**
-   * A pin whose release was deleted, or one set by hand outside the app. The
-   * row still has to name it — that is the state the user is in, and blanking
-   * it would hide the only thing that explains their bundle. Naming is not
-   * offering: `versionOptions` still refuses to make it selectable.
-   */
   it("names a pinned version that is absent from the list, without offering it", () => {
     expect(selectedVersion({ ...STATUS, pinnedVersion: "1.5.9" })).toBe("1.5.9");
     expect(versionOptions(VERSIONS).map((o) => o.value)).not.toContain("1.5.9");
   });
 
-  // Offline with a cold CLI cache: the list never arrives, but `ai status` is
-  // local and the row's headline must survive it.
   it("names the installed version with no list loaded at all", () => {
     expect(selectedVersion(STATUS)).toBe("1.6.0");
     expect(versionOptions(undefined)).toEqual([]);

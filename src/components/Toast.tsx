@@ -4,7 +4,7 @@ import { useToast, type ToastTone } from "@/lib/toast";
 import { XIcon } from "./icons";
 
 const DURATION_MS = 5000;
-const EXIT_MS = 380; // must match toast-out animation duration
+const EXIT_MS = 380;
 
 function ToastIcon({ tone }: { tone: ToastTone }) {
   const base = "flex h-6 w-6 shrink-0 items-center justify-center rounded-full";
@@ -58,11 +58,8 @@ export function Toast() {
   const [exiting, setExiting] = useState(false);
   const [acting, setActing] = useState(false);
 
-  // A toast with an action sticks around, the user has something to do, so we
-  // don't yank it out from under them on a countdown.
   const sticky = action !== null;
 
-  // Mount/unmount with exit animation
   useEffect(() => {
     if (visible) {
       if (unmountRef.current) clearTimeout(unmountRef.current);
@@ -78,7 +75,6 @@ export function Toast() {
     return () => { if (unmountRef.current) clearTimeout(unmountRef.current); };
   }, [visible]);
 
-  // Countdown + auto-dismiss, skipped for sticky (action) toasts.
   useEffect(() => {
     if (!visible || sticky) return;
 

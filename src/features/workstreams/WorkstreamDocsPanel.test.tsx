@@ -12,8 +12,6 @@ vi.mock("../../lib/bindings", () => ({
   },
 }));
 
-// No vitest globals -> RTL can't register its own auto-cleanup; without this,
-// a previous test's mounted copy steals the next test's queries and clicks.
 afterEach(cleanup);
 
 const ok = <T,>(data: T) => Promise.resolve({ status: "ok" as const, data });
@@ -89,7 +87,6 @@ describe("WorkstreamDocsPanel", () => {
     expect(await screen.findByText("Auth research")).toBeTruthy();
     expect(screen.getByText("Random note")).toBeTruthy();
     expect(screen.getByText("Agent 2")).toBeTruthy();
-    // Already-attached doc offers Detach; the other offers Attach.
     expect(screen.getByText("Detach")).toBeTruthy();
     expect(screen.getByText("Attach")).toBeTruthy();
     const query = vi.mocked(commands.queryDocs).mock.calls[0]![0];

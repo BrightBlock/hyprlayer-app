@@ -64,7 +64,6 @@ describe("relaunchArgs, assign-mode engines (Claude, Gemini)", () => {
 describe("relaunchArgs, exec-mint (Codex) + capture (Antigravity)", () => {
   it("Codex resumes its (minted) id via the `resume` subcommand, fresh or resume", () => {
     const codex = eng("codex");
-    // The id is minted before launch, so even a "fresh" launch resumes it.
     expect(relaunchArgs(codex, { sessionId: ID, resume: false, bypass: false })).toEqual([
       "resume",
       ID,
@@ -73,7 +72,6 @@ describe("relaunchArgs, exec-mint (Codex) + capture (Antigravity)", () => {
       "resume",
       ID,
     ]);
-    // Bypass goes after the resume subcommand (codex accepts it there).
     expect(relaunchArgs(codex, { sessionId: ID, resume: true, bypass: true })).toEqual([
       "resume",
       ID,
@@ -82,21 +80,17 @@ describe("relaunchArgs, exec-mint (Codex) + capture (Antigravity)", () => {
   });
 
   it("Codex without an id starts bare (fresh) or resumes most-recent", () => {
-    // Mint failed / not yet minted: a fresh launch is bare codex; the on-disk
-    // capture then backfills the id.
     expect(relaunchArgs(eng("codex"), { resume: false, bypass: false })).toEqual([]);
     expect(relaunchArgs(eng("codex"), { resume: true, bypass: false })).toEqual(["resume", "--last"]);
   });
 
   it("Antigravity captures its id: bare fresh, resume by --conversation <id>", () => {
     const agy = eng("antigravity");
-    // No caller-set id: fresh launch is bare; the id is captured from disk after.
     expect(relaunchArgs(agy, { sessionId: ID, resume: false, bypass: false })).toEqual([]);
     expect(relaunchArgs(agy, { sessionId: ID, resume: true, bypass: false })).toEqual([
       "--conversation",
       ID,
     ]);
-    // No id yet: fall back to most-recent.
     expect(relaunchArgs(agy, { resume: true, bypass: false })).toEqual(["--continue"]);
   });
 });
@@ -119,7 +113,6 @@ describe("session identity helpers", () => {
   it("mints a local id only for assign-mode engines", () => {
     expect(mintPtySessionId("claude-code")).toMatch(/[0-9a-f-]{36}/i);
     expect(mintPtySessionId("gemini")).toMatch(/[0-9a-f-]{36}/i);
-    // Exec-mint (codex) mints via a probe; capture (antigravity) + custom have no id.
     expect(mintPtySessionId("codex")).toBeUndefined();
     expect(mintPtySessionId("antigravity")).toBeUndefined();
     expect(mintPtySessionId("my-cli")).toBeUndefined();
@@ -130,7 +123,6 @@ describe("session identity helpers", () => {
     expect(engineMintsViaExec("antigravity")).toBe(false);
     expect(engineMintsViaExec("claude-code")).toBe(false);
 
-    // resume-by-id gates the on-disk capture fallback; only a custom engine can't.
     expect(engineResumesById("codex")).toBe(true);
     expect(engineResumesById("antigravity")).toBe(true);
     expect(engineResumesById("claude-code")).toBe(true);

@@ -26,26 +26,19 @@ import { BinaryCard } from "@/features/system/BinaryCard";
 const DOCS_URL = "https://ollama.com";
 const DEFAULT_ENDPOINT = "http://localhost:11434";
 
-/** Order-independent equality for two model-id lists. */
 function sameSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a);
   return b.every((id) => set.has(id));
 }
 
-/** Settings → Harnesses → Ollama. Local (or remote) models are run *through* the
- *  OpenCode harness, so this tab just (a) points at an Ollama server, (b) probes
- *  it for installed models, and (c) picks which to expose. "Usable" is decided by
- *  endpoint reachability, never by a local binary, a remote host has none. */
 export function OllamaHarnessTab({
   settings,
   status,
   opencodeInstalled,
 }: {
   settings: AppSettings;
-  /** Optional local `ollama` binary status, a convenience for localhost only. */
   status?: BinaryStatus;
-  /** OpenCode is the engine for local models; warn if it's missing. */
   opencodeInstalled: boolean;
 }) {
   const ollama: OllamaSettings = settings.providers?.ollama ?? {
@@ -59,9 +52,6 @@ export function OllamaHarnessTab({
   const setDefault = useSetOllamaDefaultModel();
   const save = useSetAppSettings();
 
-  // Optimistic selection: a toggle mutates the whole list and only lands after a
-  // bootstrap refetch, so rapid toggles would race on the stale snapshot and lose
-  // updates. Hold the in-flight list locally and drop it once bootstrap catches up.
   const settingsSelected = ollama.selectedModels ?? [];
   const [pendingSelected, setPendingSelected] = useState<string[] | null>(null);
   const selected = pendingSelected ?? settingsSelected;
@@ -75,9 +65,6 @@ export function OllamaHarnessTab({
   const reachable = probe.data?.reachable ?? false;
   const localBinary = status?.state.state === "ok";
 
-  // Keep the URL field in sync with the persisted endpoint (e.g. after Save
-  // normalizes it, or a change elsewhere); local typing is untouched because the
-  // stored value only changes on commit.
   const storedEndpoint = ollama.endpoint ?? "";
   const [url, setUrl] = useState(storedEndpoint);
   useEffect(() => {
@@ -95,11 +82,6 @@ export function OllamaHarnessTab({
 
   return (
     <>
-      {/* One note per mutation rather than a coalesced `a.error ?? b.error`:
-          a first-wins coalesce pins the note to whichever failed first, so a
-          later failure never surfaces and a shared dismiss silently discards
-          it. `setDefault` was uncovered entirely, so a failed default-model
-          write rendered nothing at all. */}
       {setEndpoint.isError && (
         <ErrorNote error={setEndpoint.error} onDismiss={() => setEndpoint.reset()} />
       )}
@@ -138,7 +120,6 @@ export function OllamaHarnessTab({
         </Card>
       )}
 
-      {/* Connection */}
       <Card>
         <CardTitle>Server</CardTitle>
         <Field label="Server URL">
@@ -190,7 +171,6 @@ export function OllamaHarnessTab({
         )}
       </Card>
 
-      {/* Models */}
       {reachable && (
         <Card>
           <CardTitle>
@@ -277,7 +257,6 @@ export function OllamaHarnessTab({
         </Card>
       )}
 
-      {/* Optional local install, only useful for localhost; never gates the feature. */}
       {status && (
         <Card>
           <CardTitle>Local install (optional)</CardTitle>

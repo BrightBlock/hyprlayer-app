@@ -1,8 +1,6 @@
 use hyprlayer_core::CoreError;
 use serde::Serialize;
 
-/// Error shape every IPC command returns. The frontend renders `message`,
-/// shows `remedy` as the call-to-action, and may branch on `code`.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AppError {

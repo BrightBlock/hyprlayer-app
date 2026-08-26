@@ -23,8 +23,6 @@ describe("modelProvider", () => {
   });
 
   it("treats every Claude model as the single `claude` provider", () => {
-    // All Anthropic models share one endpoint, so switching among them mid-session
-    // never crosses a provider, that's why Claude switching is seamless.
     expect(modelProvider("claude", null)).toBe("claude");
     expect(modelProvider("claude", "ignored")).toBe("claude");
   });
@@ -43,12 +41,10 @@ describe("lockedSessionProvider", () => {
   });
 
   it("locks to the started session's underlying provider", () => {
-    // Kimi via OpenRouter → locked to `openrouter`; Big Pickle (Zen, `opencode`)
-    // is a different provider and must be blocked.
     const locked = lockedSessionProvider(true, "opencode", "openrouter/moonshotai/kimi-k2.7-code");
     expect(locked).toBe("openrouter");
-    expect(modelProvider("opencode", "openrouter/auto-router")).toBe(locked); // same provider → allowed
-    expect(modelProvider("opencode", "opencode/big-pickle")).not.toBe(locked); // cross provider → blocked
+    expect(modelProvider("opencode", "openrouter/auto-router")).toBe(locked);
+    expect(modelProvider("opencode", "opencode/big-pickle")).not.toBe(locked);
   });
 
   it("locks a started Claude session to `claude` (so it can't jump to OpenCode)", () => {
@@ -83,7 +79,6 @@ describe("actionAgentDefaults", () => {
   });
 
   it("falls back through the OpenCode default then first-selected model", () => {
-    // No commitModel → opencode.defaultModel.
     expect(
       actionAgentDefaults(
         withProviders({
@@ -93,7 +88,6 @@ describe("actionAgentDefaults", () => {
       ),
     ).toEqual({ harness: "opencode", model: "openrouter/x", effort: null });
 
-    // No commit/default → the first exposed OpenCode model.
     expect(
       actionAgentDefaults(
         withProviders({
@@ -105,7 +99,6 @@ describe("actionAgentDefaults", () => {
   });
 
   it("runs an Ollama default on the OpenCode harness with its own commit model", () => {
-    // Ollama is its own default, but launches on the OpenCode harness.
     expect(
       actionAgentDefaults(
         withProviders({
@@ -118,7 +111,6 @@ describe("actionAgentDefaults", () => {
       ),
     ).toEqual({ harness: "opencode", model: "ollama/qwen2.5-coder:7b", effort: null });
 
-    // No commit model → the first selected, surfaced as an `ollama/<id>` id.
     expect(
       actionAgentDefaults(
         withProviders({
@@ -140,14 +132,12 @@ describe("effectiveHarnessKey", () => {
   });
 
   it("keeps Codex as its own harness", () => {
-    // Unlike Ollama (which rides OpenCode), Codex is a real harness of its own.
     expect(effectiveHarnessKey("codex")).toBe("codex");
   });
 });
 
 describe("actionLaunchArgs", () => {
   it("translates a Claude model key to its --model flag, keeping effort", () => {
-    // "sonnet" key → "sonnet" flag; "opus" → null (claude's own built-in default).
     expect(actionLaunchArgs({ harness: "claude", model: "sonnet", effort: "medium" })).toEqual({
       harness: "claude",
       model: "sonnet",
@@ -161,8 +151,6 @@ describe("actionLaunchArgs", () => {
   });
 
   it("clamps the effort to what the live catalog says the model accepts", () => {
-    // Commit/Ship on a Haiku commit model: the CLI takes no --effort for it, so
-    // the configured "medium" must be dropped, not sent.
     const catalog: ModelOption[] = [
       { key: "haiku", label: "Haiku 4.5", flag: "haiku", contextWindow: 200_000, efforts: [] },
       {
@@ -175,14 +163,11 @@ describe("actionLaunchArgs", () => {
     ];
     expect(actionLaunchArgs({ harness: "claude", model: "haiku", effort: "medium" }, catalog))
       .toEqual({ harness: "claude", model: "haiku", effort: null });
-    // An unsupported stored tier clamps to a tier the model reports.
     expect(actionLaunchArgs({ harness: "claude", model: "sonnet", effort: "max" }, catalog))
       .toEqual({ harness: "claude", model: "sonnet", effort: "high" });
   });
 
   it("substitutes the catalog default when the configured model is org-disabled", () => {
-    // Headless launches (Commit/Ship) have nowhere to show "disabled by org
-    // policy"; a substituted default beats a crashed agent tab.
     const catalog: ModelOption[] = [
       {
         key: "opus",
@@ -217,8 +202,6 @@ describe("actionLaunchArgs", () => {
   });
 
   it("passes a Codex model id through AND keeps its effort", () => {
-    // Codex ids need no translation (unlike Claude's keys), but, unlike
-    // OpenCode, Codex does take a reasoning effort, so it must not be dropped.
     expect(
       actionLaunchArgs({ harness: "codex", model: "gpt-5.4-codex", effort: "low" }),
     ).toEqual({ harness: "codex", model: "gpt-5.4-codex", effort: "low" });
@@ -227,8 +210,6 @@ describe("actionLaunchArgs", () => {
 
 describe("Codex defaults", () => {
   it("locks a started Codex session to the single `codex` provider", () => {
-    // All Codex models share one endpoint, so model switching mid-session is
-    // always safe, the lock only has to keep it from jumping to another harness.
     expect(modelProvider("codex", null)).toBe("codex");
     expect(lockedSessionProvider(true, "codex", null)).toBe("codex");
   });
@@ -268,8 +249,6 @@ describe("Codex defaults", () => {
       ),
     ).toEqual({ harness: "codex", model: "a", effort: "medium" });
 
-    // Nothing configured at all still names the harness, the backend then lets
-    // Codex pick its own default model.
     expect(
       actionAgentDefaults(
         withProviders({ defaultHarness: "codex" } as AppSettings["providers"]),
@@ -287,9 +266,6 @@ describe("Codex defaults", () => {
       },
     } as AppSettings["providers"]);
 
-    // No tab picks → the configured defaults. Codex maps our permission mode onto
-    // its approval/sandbox pair, so the composer's choice rides along (unlike
-    // OpenCode, which has no permission modes).
     expect(newChatLaunchArgs(settings, {})).toEqual({
       harness: "codex",
       model: "gpt-5.4-codex",
@@ -297,7 +273,6 @@ describe("Codex defaults", () => {
       permissionMode: null,
     });
 
-    // The tab's own picks win over the settings defaults.
     expect(
       newChatLaunchArgs(settings, {
         codexModel: "gpt-5.4",
@@ -308,8 +283,6 @@ describe("Codex defaults", () => {
   });
 
   it("falls back to Codex's middle effort tier, never a Claude-only level", () => {
-    // `max`/`ultracode` exist on Claude but not Codex, sending one would be
-    // rejected by the app-server, so an unrecognized value resolves to `medium`.
     const settings = withProviders({
       defaultHarness: "codex",
       codex: { selectedModels: ["m"], defaultEffort: "ultracode" },

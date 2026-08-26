@@ -15,31 +15,12 @@ import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
 import { ChevronDownIcon, RestartIcon, XIcon } from "./icons";
 
-/** Join class fragments, letting later ones override earlier ones in the same
- *  utility group. A plain join can't: Tailwind sorts utilities into the
- *  stylesheet itself, so `max-w-md` (the Dialog base) beat every caller's
- *  `max-w-2xl` regardless of write order, and five dialogs shipped 448px wide.
- *  See the width-class note in DropdownSelect, which hand-rolled a workaround
- *  for the same defect before this. */
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return twMerge(parts.filter(Boolean).join(" "));
 }
 
-/** The app's one keyboard-focus treatment. Mouse users never see it
- *  (`focus-visible`, not `focus`); keyboard users always do. Toggle carried
- *  this alone before the sweep — every other control relied on the UA
- *  default outline, which the dark surfaces render nearly invisibly. */
 const FOCUS_RING = "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
-/**
- * A keyboard-chord hint (⌘⇧P / Ctrl+Shift+P), formatted for the host OS.
- * macOS concatenates the modifier glyphs with no separators, so they're tracked
- * apart to stay legible at hint sizes, the same treatment as Settings →
- * Keyboard's larger pill, and like it deliberately NOT `font-mono` (monospace
- * renders ⌘/⇧ heavy and oversized). Size, color, and background come from
- * `className` (unsized it inherits the surrounding text) so each surface picks
- * a scale that matches its labels while sharing the one glyph treatment.
- */
 export function ChordHint({ chord, className }: { chord: string; className?: string }) {
   return (
     <kbd
@@ -142,18 +123,13 @@ export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputE
   );
 }
 
-/** Gap between the trigger and its menu, and the menu's minimum inset from any
- *  viewport edge. Shared by the open-position and clamp passes below. */
 const GAP = 4;
 const MARGIN = 8;
 
 export type DropdownOption = {
   value: string;
   label: string;
-  /** Rendered dimmed and unselectable, the `<option disabled>` equivalent. */
   disabled?: boolean;
-  /** Heading to file this option under; runs of equal values share one header
-   *  (the `<optgroup>` equivalent). Ungrouped options render bare. */
   group?: string;
 };
 
@@ -163,42 +139,12 @@ type DropdownSelectProps = {
   onChange: (value: string) => void;
   disabled?: boolean;
   className?: string;
-  /** Names the trigger when no surrounding text does. */
   "aria-label"?: string;
-  /** Trigger text when `value` matches no option, otherwise a stale/unknown
-   *  value would leak onto the button as raw text. */
   placeholder?: string;
-  /** Overrides the trigger's text, leaving the menu's own labels alone. For a
-   *  control that sits inline in a sentence, where the full option label is
-   *  worth reading in the menu but too long for the line it anchors to.
-   *  Suppresses `placeholder`'s dim styling — the override is real content,
-   *  not an empty-state hint. */
   triggerLabel?: string;
-  /** Observes the menu opening and closing without owning either. Lets a
-   *  caller defer loading its options until the user actually reaches for
-   *  the menu. */
   onOpenChange?: (open: boolean) => void;
 };
 
-/**
- * The app's ONLY select control. Native `<select>` is deliberately absent: the
- * OS draws its open menu, so on Linux/WebKitGTK it renders as a white GTK popup
- * over a dark theme, and macOS/Windows ignore the palette too. This draws the
- * menu in the DOM, themed like everything else on every platform.
- *
- * Positioning is `fixed` off the trigger's rect, so overflow containers
- * (dialogs, sidebars) can't clip it. It caps to the viewport, scrolls, and
- * flips upward when there's more room above.
- *
- * The menu and backdrop render in a portal on `document.body`, never inline.
- * Inline they'd be descendants of `Field`'s `<label>`, and WebKit forwards
- * label-descendant clicks to the labeled control, so every click would
- * re-toggle the trigger. The portal also escapes a dialog overlay's
- * `backdrop-blur`, which makes `position: fixed` behave relatively in WebKit.
- *
- * Keyboard: ↓/↑/Enter/Space opens, ↓/↑/Home/End walk the enabled options,
- * Enter/Space picks, Escape closes only the menu.
- */
 export function DropdownSelect({
   value,
   options,
@@ -231,9 +177,6 @@ export function DropdownSelect({
   };
   useEscape(open ? close : null);
 
-  // Focus the current choice when the menu opens, that both scrolls a long
-  // list to it and puts the arrow keys below on the right starting point.
-  // Once, not on every re-render, which would fight the user's own scrolling.
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -242,14 +185,10 @@ export function DropdownSelect({
     const target =
       list.querySelector<HTMLButtonElement>('[aria-selected="true"]:not([disabled])') ??
       list.querySelector<HTMLButtonElement>('[role="option"]:not([disabled])');
-    // preventScroll + an explicit nearest scroll: a bare focus() can jerk the
-    // whole page when the portal sits at the document root. Optional-call the
-    // scroll, jsdom doesn't implement it, so tests would throw here.
     target?.focus({ preventScroll: true });
     target?.scrollIntoView?.({ block: "nearest" });
   }, [open]);
 
-  // Measure on open (before paint, so the menu never flashes at 0,0).
   useLayoutEffect(() => {
     const el = triggerRef.current;
     if (!open || !el) return;
@@ -265,28 +204,16 @@ export function DropdownSelect({
     });
   }, [open]);
 
-  // The trigger's width is only a MINIMUM for the menu (see the style below), so
-  // a narrow trigger, "Haiku 4.5" in a settings row, still shows full option
-  // labels instead of "Opus 4.…". A menu that grew past the right edge would be
-  // clipped, though, so once it has laid out at its content width, pull it back
-  // inside the viewport. Second pass on purpose: the width isn't knowable until
-  // the options have rendered. Guarded on an actual change, so it settles in one
-  // extra frame rather than looping.
   useLayoutEffect(() => {
     const el = triggerRef.current;
     const list = listRef.current;
     if (!open || !el || !list) return;
-    // Anchor off the LIVE trigger rect, not `pos.left`: both layout effects run
-    // in the same commit, so on the opening pass `pos` is still its initial
-    // zero, clamping against that pinned every menu to the left viewport edge.
     const desiredLeft = el.getBoundingClientRect().left;
     const width = list.getBoundingClientRect().width;
     const clamped = Math.max(MARGIN, Math.min(desiredLeft, window.innerWidth - width - MARGIN));
     if (Math.abs(clamped - pos.left) > 0.5) setPos((p) => ({ ...p, left: clamped }));
   }, [open, pos.left, options]);
 
-  // Roving focus over the enabled options. Enter/Space need no handling, each
-  // option is a real <button>, so activation is the browser's job.
   const moveFocus = (delta: number | "first" | "last") => {
     const list = listRef.current;
     if (!list) return;
@@ -344,7 +271,6 @@ export function DropdownSelect({
       {open &&
         createPortal(
           <>
-            {/* Backdrop closes the menu on any outside click. */}
             <div className="fixed inset-0 z-50" onClick={close} aria-hidden="true" />
             <div
               ref={listRef}
@@ -370,20 +296,12 @@ export function DropdownSelect({
                 top: pos.top,
                 bottom: pos.bottom,
                 left: pos.left,
-                // Align with the trigger and never be narrower than it, but grow
-                // to fit the longest label rather than truncating it, a native
-                // select's popup sizes to its content too. Capped to the viewport
-                // so a long model id can't run off-screen.
                 minWidth: pos.width,
                 maxWidth: `calc(100vw - ${MARGIN * 2}px)`,
                 maxHeight: pos.maxHeight,
               }}
             >
               {options.map((o, i) => (
-                // U+001F (unit separator) joins group and value into one React
-                // key — it can't occur in either, the same guarantee a literal
-                // NUL gave, without tripping ripgrep's binary-file detection on
-                // every directory-wide search of this file.
                 <Fragment key={`${o.group ?? ""}${o.value}`}>
                   {o.group && o.group !== options[i - 1]?.group && (
                     <div
@@ -413,9 +331,6 @@ export function DropdownSelect({
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                    {/* Decorative: `aria-selected` already says this is the
-                        choice, and without hiding it the glyph lands in the
-                        option's accessible name ("main✓"). */}
                     {o.value === value && (
                       <span aria-hidden="true" className="shrink-0 text-2xs">
                         ✓
@@ -432,8 +347,6 @@ export function DropdownSelect({
   );
 }
 
-/** One labelled settings row (title + description left, control right), shared
- *  by Settings, the Harnesses tabs and the agent editor. */
 export function SettingRow({
   title,
   children,
@@ -454,10 +367,6 @@ export function SettingRow({
   );
 }
 
-/** Labeled form row. NOTE: children render inside a `<label>`, and WebKit
- *  forwards clicks on any label descendant to the first labelable child,
- *  overlays/menus opened from inside a Field must portal out (see
- *  DropdownSelect) or every click on them re-triggers the control. */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block text-sm">
@@ -471,11 +380,9 @@ type ToggleProps = {
   checked: boolean;
   onChange: (next: boolean) => void;
   disabled?: boolean;
-  /** Accessible label, since the switch renders no visible text itself. */
   "aria-label"?: string;
 };
 
-/** A binary on/off switch styled to match the settings rows. */
 export function Toggle({ checked, onChange, disabled, ...rest }: ToggleProps) {
   return (
     <button
@@ -502,17 +409,13 @@ export function Toggle({ checked, onChange, disabled, ...rest }: ToggleProps) {
   );
 }
 
-/** Dialog widths. Named so a caller can't hand `Dialog` a `max-w-*` that loses
- *  to its own base class — the defect that shipped five dialogs at 448px
- *  (`max-w-lg`/`max-w-2xl`/`max-w-3xl` callers, all silently clamped to the
- *  panel's own `max-w-md`, since `cx()` had no conflict resolution). */
 const DIALOG_SIZE = {
-  sm: "max-w-sm", // 384px — PromptArgsDialog
-  md: "max-w-md", // 448px — the default, most confirms
-  lg: "max-w-lg", // 512px — AgentBundleDialogs, the share dialogs
-  xl: "max-w-xl", // 576px — model/provider pickers
-  "2xl": "max-w-2xl", // 672px — the three CLI sign-in dialogs (h-80 terminal)
-  "3xl": "max-w-3xl", // 768px — ProjectSettingsDialog
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-lg",
+  xl: "max-w-xl",
+  "2xl": "max-w-2xl",
+  "3xl": "max-w-3xl",
 } as const;
 
 type DialogProps = {
@@ -521,41 +424,16 @@ type DialogProps = {
   title?: ReactNode;
   children: ReactNode;
   className?: string;
-  /** Names the dialog when the layout carries its own heading instead of `title`. */
   ariaLabel?: string;
-  /** Panel max-width. Never override this with a `max-w-*` className — see
-   *  `DIALOG_SIZE`'s comment for why that used to silently lose. */
   size?: keyof typeof DIALOG_SIZE;
-  /** Rendered in its own band below the body, outside the scroll region, so a
-   *  long dialog's action buttons never scroll away with the content. */
   footer?: ReactNode;
-  /** `top` pins the panel near the viewport top instead of centering it, for
-   *  dialogs whose body scrolls a long list (the export/import prompt pickers). */
   align?: "center" | "top";
-  /** `border-b` under the header and `border-t` above the footer, for a panel
-   *  whose body runs full-bleed (`padded={false}`) and needs a visible seam
-   *  against the inset header/footer content. */
   seams?: boolean;
-  /** Drop the body band's inset so its content can run edge-to-edge. The
-   *  header and footer bands keep their own padding regardless — dropping
-   *  theirs too would leave a full-bleed dialog with no title/footer inset
-   *  at all, and every caller that needs that layout already frames it in
-   *  `children` (see DiscoverDialog). */
   padded?: boolean;
-  /** Let the body band scroll. Off when the content owns its own scroll
-   *  regions (DiscoverDialog's two-pane layout). */
   scroll?: boolean;
-  /** Render a × beside the title. Opt-in, because most dialogs already end in a
-   *  Cancel button and a second close control next to it reads as clutter. Turn
-   *  it on for the ones that have no footer at all — otherwise Escape and a
-   *  backdrop click are the only ways out, and neither is visible. */
   closable?: boolean;
 };
 
-/** Dependency-free modal: fixed overlay + panel; Escape or a backdrop click
- *  closes. The panel is a three-band flex column — header and footer are
- *  `shrink-0`, only the body scrolls — so a `footer` never scrolls away with
- *  a long body. */
 export function Dialog({
   open,
   onClose,
@@ -649,25 +527,12 @@ type ConfirmDialogProps = {
   busy?: boolean;
   error?: unknown;
   onDismissError?: () => void;
-  /** Extra action between Cancel and Confirm, e.g. Archive's
-   *  "Skip script & archive". Keeps the dismissive→committing order. */
   extraActions?: ReactNode;
   cancelLabel?: string;
   size?: keyof typeof DIALOG_SIZE;
-  /** Focus the confirming button on open, so Enter commits. Opt-in: a confirm
-   *  raised by the user's own click (Delete, Archive) should not pre-arm a
-   *  destructive default, but one raised by the system in response to
-   *  something else — `ConfirmQuitDialog`, off the backend's quit event —
-   *  is answering a question the user already asked. */
   autoFocusConfirm?: boolean;
 };
 
-/** The app's one confirm-footer shape: dismissive action, then any extra
- *  action, then the committing one — never reconsider that order (every
- *  dialog footer in the app agrees on it). Covers the four hand-composed
- *  confirms that each reimplemented this footer before it existed.
- *  `RenameWorkstreamDialog` deliberately stays off this: it's a form with a
- *  `type="submit"` primary action, not a confirm. */
 export function ConfirmDialog({
   open,
   onClose,
@@ -714,13 +579,8 @@ export function ErrorNote({
   onDismiss,
 }: {
   error: unknown;
-  /** When provided, renders a × that clears the note. The caller owns the
-   *  dismissal (e.g. resetting the mutation) so a fresh attempt re-shows it. */
   onDismiss?: () => void;
 }) {
-  // No error → render nothing. Without this a null/undefined error (e.g. a
-  // mutation that hasn't run yet) paints a box reading "null", since
-  // `errorMessage(null)` stringifies to "null".
   if (error == null) return null;
   const remedy = errorRemedy(error);
   return (
@@ -744,11 +604,6 @@ export function ErrorNote({
   );
 }
 
-/** Raw CLI output, for an outcome the app cannot summarise honestly. Trims
- *  and renders nothing when there is nothing to show, so callers can pass
- *  stdout/stderr unconditionally. Wraps long lines (`whitespace-pre-wrap
- *  break-words`): CLI text embeds full asset filenames and URLs that would
- *  otherwise force a horizontal scrollbar inside a short note. */
 export function CliOutput({ text }: { text: string }) {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -759,7 +614,6 @@ export function CliOutput({ text }: { text: string }) {
   );
 }
 
-/** Standard route-level loading shell. */
 export function PageSpinner() {
   return (
     <div className="flex justify-center p-12">
@@ -768,7 +622,6 @@ export function PageSpinner() {
   );
 }
 
-/** Standard route-level error shell. */
 export function PageError({ error }: { error: unknown }) {
   return (
     <div className="p-8">
@@ -778,16 +631,9 @@ export function PageError({ error }: { error: unknown }) {
 }
 
 type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  /** Highlighted "this panel is open" state. */
   active?: boolean;
 };
 
-/** Square h-8 icon-only button, the standard chrome control size — for controls
- *  that sit in a toolbar or header. The other tier is the inline `h-6 w-6
- *  rounded` control for a control that sits *inside* another surface
- *  (`RefreshButton`'s icon branch, the Dialog and ErrorNote close buttons,
- *  `AgentList`'s row kebab): no exported component, just the class pair
- *  applied at each site. */
 export function IconButton({ active, className, ...rest }: IconButtonProps) {
   return (
     <button
@@ -806,17 +652,13 @@ export function IconButton({ active, className, ...rest }: IconButtonProps) {
 
 type RefreshButtonProps = {
   onClick: () => void;
-  /** Swaps the icon for a spinner and blocks re-entry while a refetch is in flight. */
   busy?: boolean;
-  /** Accessible name, say what gets refreshed. Wins over any visible `children`. */
   label: string;
   title?: string;
   className?: string;
-  /** Visible text beside the icon, e.g. a sync-status line. Icon-only when omitted. */
   children?: ReactNode;
 };
 
-/** Borderless refresh control: an icon-only square, or icon + status text. */
 export function RefreshButton({
   onClick,
   busy = false,
@@ -852,21 +694,13 @@ type ContextMenuProps = {
   children: ReactNode;
 };
 
-/** The currently-open menu's closer, so opening a new one (even via right-click,
- *  which doesn't fire a `click`) dismisses any other, only one menu at a time. */
 let closeActiveContextMenu: (() => void) | null = null;
 
-/** Fixed-position right-click menu; any window click or Escape closes it, and
- *  opening another menu closes this one. Clamps itself into the viewport so a
- *  menu opened near a screen edge (e.g. a far-right overflow button) doesn't
- *  spill off-screen. */
 export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
   useEscape(onClose);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState(position);
 
-  // Measure once mounted and pull the menu back inside the viewport (before
-  // paint, so it never flashes off-screen). Re-runs when the anchor moves.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -878,7 +712,6 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
   }, [position.x, position.y]);
 
   useEffect(() => {
-    // Mounting (or repositioning) closes whatever other menu was open.
     if (closeActiveContextMenu && closeActiveContextMenu !== onClose) closeActiveContextMenu();
     closeActiveContextMenu = onClose;
 
@@ -904,8 +737,6 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
 
 type ContextMenuItemProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   danger?: boolean;
-  /** A second, muted line under the label, typically why the item is disabled
-   *  (e.g. "Agent is still working, stop it first."). Rendered in warn tone. */
   hint?: ReactNode;
 };
 
@@ -932,42 +763,15 @@ export function ContextMenuItem({ danger, hint, className, children, ...rest }: 
 type PopoverProps = {
   open: boolean;
   onClose: () => void;
-  /** The trigger to anchor off. Measured on open, so overflow containers
-   *  can't clip the panel. */
   anchorRef: RefObject<HTMLElement | null>;
-  /** Preferred side; flips when there isn't room (DropdownSelect's rule). */
   side?: "bottom" | "top";
   align?: "start" | "end";
-  /** Floors the panel's width at the anchor's rendered width rather than its
-   *  own content width — for a menu meant to read as an extension of the
-   *  control it opens from (`ProjectSwitcher`, `RunSplit`'s Configure menu),
-   *  not a fixed action-menu width. */
   matchAnchorWidth?: boolean;
-  /** Gap between the anchor and the panel, in px. Defaults to the same `GAP`
-   *  the trigger-anchored menus already share. `RunSplit`'s Configure menu
-   *  sets this to 0 so the panel reads as a continuation of the button
-   *  group's own border, not a separate floating panel. */
   sideOffset?: number;
   className?: string;
   children: ReactNode;
 };
 
-/**
- * Anchored floating panel — a menu or content popover that opens off a
- * trigger, sibling to the point-anchored `ContextMenu` and the listbox
- * `DropdownSelect`. Carries four things already load-bearing in those two:
- * Escape via the shared registry (a popover inside a dialog closes itself
- * first, leaving the dialog open); a portal to `document.body` for the same
- * reason `DropdownSelect` needs one (WebKit forwards `<label>`-descendant
- * clicks to the labeled control, and a dialog's `backdrop-blur` makes
- * `position: fixed` behave relatively in WebKit); a measure-before-paint
- * layout effect so the panel never flashes at 0,0; and a clamp into the
- * viewport using the shared `MARGIN`.
- *
- * Ten hand-rolled floating panels predate this, nine of them with no Escape
- * handler at all and six on `z-30` — below a dialog's own overlay. This is
- * the fix for both: one primitive at `z-50`, on `useEscape`.
- */
 export function Popover({
   open,
   onClose,
@@ -988,20 +792,12 @@ export function Popover({
     minWidth?: number;
   }>({ left: 0 });
 
-  // Measure both the anchor and the panel's own natural size (before paint,
-  // so it never flashes at 0,0), then pick a side and clamp horizontally.
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     const panel = panelRef.current;
     if (!open || !anchor || !panel) return;
     const a = anchor.getBoundingClientRect();
     const natural = panel.getBoundingClientRect();
-    // `matchAnchorWidth` applies `minWidth: a.width` on the NEXT paint, so the
-    // measured rect is the panel's natural width, which for a narrow menu is
-    // smaller than what will actually render. Aligning `end` off that number
-    // put the panel its own shortfall too far right on first open (ScriptDock's
-    // Configure menu), and the viewport clamp underestimated the overhang by
-    // the same amount. Position against the width the panel is about to have.
     const width = matchAnchorWidth ? Math.max(natural.width, a.width) : natural.width;
     const height = natural.height;
 
@@ -1023,7 +819,6 @@ export function Popover({
   if (!open) return null;
   return createPortal(
     <>
-      {/* Backdrop closes the popover on any outside click. */}
       <div className="fixed inset-0 z-50" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
@@ -1037,29 +832,13 @@ export function Popover({
   );
 }
 
-/** Menu item. `ContextMenuItem` under a name that doesn't imply right-click,
- *  since the same item now serves dropdowns and popovers. Old name kept as an
- *  alias so the existing call sites don't churn. */
 export const MenuItem = ContextMenuItem;
 
-/** The one menu separator. Two idioms existed: `my-1 h-px bg-edge`
- *  (ProjectPage) and `my-1 border-t border-edge` (SessionChat, PromptLibrary).
- *  The h-px form wins: it can't inherit a stray border-color from a parent. */
 export function MenuSeparator() {
   return <div className="my-1 h-px bg-edge" />;
 }
 
-/** The app's two row heights, each tied to the corner radius it already had
- *  before this existed: every 28px row (ChangesPanel, CommitsPanel) already
- *  used `rounded-md`, every 36px row (the sidebar tree, both palettes,
- *  AgentList's agent row) already used `rounded-lg`. Derived from what the
- *  tree does, not invented — there is deliberately no third tier: the Agents
- *  list's one-off 52px row held 20px of single-line content and belonged in
- *  `standard` all along. A row with no radius of its own (the command
- *  palettes, which clip to their panel's own `rounded-lg`) cancels it with
- *  `rounded-none` in `className`, the same conflict `cx()` resolves anywhere
- *  else. */
-export type RowTier = "compact" | "standard"; // h-7 / h-9
+export type RowTier = "compact" | "standard";
 
 export type RowSelection = "none" | "tint" | "spine";
 
@@ -1068,22 +847,8 @@ const ROW_TIER: Record<RowTier, string> = {
   standard: "h-9 rounded-lg",
 };
 
-/** The list-row hover: a row tints toward the divider colour, distinct from
- *  `hover:bg-panel-2`'s "raise to the next surface" meaning on menu items and
- *  chrome buttons (`ContextMenuItem`, `IconButton`, `DropdownSelect`'s
- *  options). A caller with its own active/hover semantics — the command
- *  palettes' keyboard-highlighted row — overrides it in `className`, which
- *  wins the same way any other conflicting utility does. */
 const ROW_HOVER = "cursor-pointer hover:bg-edge/50";
 
-/**
- * The app's row vocabulary as a pure class-builder, for callers `Row` can't
- * cover: `Root.tsx`'s workstream row is a `<Link>`, `AgentList`'s checkbox
- * wrapper is a `<label>`, and several rows are plain `<button>`s. Layout
- * (`flex` vs the shared agent-list `grid`), horizontal padding, and indent
- * stay the caller's job — only height, radius, the hover/selection tint, and
- * the focus ring are shared.
- */
 export function rowClass({
   tier,
   selected = "none",
@@ -1092,10 +857,6 @@ export function rowClass({
 }: {
   tier: RowTier;
   selected?: RowSelection;
-  /** Adds the hover tint and pointer cursor. Off for a row whose own active
-   *  state already supplies the highlight (Root.tsx's selected workstream
-   *  row keeps its hover off while active, so hovering it can't flicker the
-   *  tint back to the neutral row colour). */
   interactive?: boolean;
   className?: string;
 }): string {
@@ -1109,11 +870,6 @@ export function rowClass({
   );
 }
 
-/** The 3px accent bar on a selected row. Existed verbatim at four sites in
- *  three files — Settings.tsx:1138, Root.tsx:1906, Root.tsx:2035,
- *  LibrarySidebar.tsx:146 — and was dropped by a fourth row (Root's pinned
- *  row) that is selectable in the same tree. Requires `relative` on the row,
- *  which `rowClass` always emits. */
 export function RowSpine() {
   return <span className="absolute inset-y-0 left-0 w-[3px] bg-accent" aria-hidden="true" />;
 }
@@ -1124,9 +880,6 @@ type RowProps = HTMLAttributes<HTMLDivElement> & {
   interactive?: boolean;
 };
 
-/** `rowClass` in component form, for the common `<div>` row. The polymorphic
- *  callers above apply `rowClass` directly instead — an `as`-prop generic
- *  here would fight TypeScript for no benefit. */
 export function Row({
   tier,
   selected = "none",

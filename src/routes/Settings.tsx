@@ -65,12 +65,6 @@ function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
   }
 }
 
-/** [surface, panel-2, accent] preview colors per theme. Kept explicit (rather
- *  than relying on the cascade) since the theme overrides in index.css are
- *  scoped to `html.<name>` and wouldn't resolve on a swatch element. "System"
- *  previews as the default Dark+. No "omarchy" entry here: its swatch is a
- *  live sample of the detected palette, passed through the `colors` prop
- *  below rather than a static triple in this table. */
 const SWATCHES: Record<string, [string, string, string]> = {
   system: ["#0c0c0c", "#1c1c1c", "#d97757"],
   dark: ["#0c0c0c", "#1c1c1c", "#d97757"],
@@ -81,9 +75,6 @@ const SWATCHES: Record<string, [string, string, string]> = {
   solarized: ["#002b36", "#0a4756", "#cb4b16"],
 };
 
-/** Three-swatch preview of a theme, so the picker reads at a glance. `colors`
- *  wins over the `SWATCHES` lookup when given — the Omarchy row samples its
- *  triple live from the resolved palette instead of a static table entry. */
 function ThemeSwatch({ id, colors }: { id: string; colors?: [string, string, string] }) {
   const [surface, panel, accent] = colors ?? SWATCHES[id] ?? SWATCHES.dark;
   return (
@@ -95,9 +86,6 @@ function ThemeSwatch({ id, colors }: { id: string; colors?: [string, string, str
   );
 }
 
-/** Pull [surface, panel-2, accent] out of a resolved Omarchy palette for the
- *  picker's live swatch — the same three slots SWATCHES hand-picks for every
- *  other theme. */
 function omarchySwatch(theme: OmarchyTheme): [string, string, string] {
   const token = (name: string) => theme.tokens.find((t) => t.name === name)?.value ?? "";
   return [token("--color-surface"), token("--color-panel-2"), token("--color-accent")];
@@ -108,9 +96,6 @@ function AppearanceSection() {
   const setMode = useThemeStore((s) => s.setMode);
   const omarchy = useThemeStore((s) => s.omarchy);
 
-  // Keep the Omarchy entry visible while it's the active selection even with
-  // no palette detected (Omarchy was uninstalled, or the machine never had
-  // it) — otherwise the grid would show nothing as active.
   const showOmarchy = omarchy !== null || mode === "omarchy";
   const themes = showOmarchy ? THEMES : THEMES.filter((t) => t.id !== "omarchy");
   const omarchyColors = omarchy ? omarchySwatch(omarchy) : undefined;
@@ -127,9 +112,6 @@ function AppearanceSection() {
         {themes.map((theme) => {
           const active = mode === theme.id;
           const isOmarchy = theme.id === "omarchy";
-          // An empty name is the theme.name `echo >` truncate race — degrade
-          // the label, nothing else. No palette at all (but still selected)
-          // reads as "not detected" so the user can see what they're on.
           const suffix = isOmarchy ? (omarchy ? omarchy.name || null : "not detected") : null;
           return (
             <button
@@ -156,7 +138,6 @@ function AppearanceSection() {
   );
 }
 
-/* --------------------------------- Git ----------------------------------- */
 
 const DEFAULT_GIT: Required<GitSettings> = {
   branchPrefix: null,
@@ -168,14 +149,11 @@ const DEFAULT_GIT: Required<GitSettings> = {
 };
 
 const DEFAULT_PREFIX = "hyprlayer/";
-/** Stand-in slug used to preview how a branch name will read. */
 const SAMPLE_SLUG = "add-login";
 
 type PrefixMode = "default" | "github" | "custom";
 
 function GitSection({ settings }: { settings: AppSettings }) {
-  // Fields are individually optional in the bindings (the struct has
-  // `#[serde(default)]`), so coalesce each against its built-in default.
   const raw = settings.git ?? {};
   const git: Required<GitSettings> = {
     branchPrefix: raw.branchPrefix ?? DEFAULT_GIT.branchPrefix ?? null,
@@ -189,8 +167,6 @@ function GitSection({ settings }: { settings: AppSettings }) {
   const save = useSetAppSettings();
   const username = useGithubUsername();
 
-  // Local mirror of the custom prefix text, so typing stays responsive and we
-  // only persist on commit (blur/enter). Seeded from the saved value.
   const initialCustom =
     git.branchPrefix && git.branchPrefix !== `${username.data ?? ""}/`
       ? git.branchPrefix
@@ -250,7 +226,6 @@ function GitSection({ settings }: { settings: AppSettings }) {
       )}
 
       <div className="mt-3 divide-y divide-edge/50">
-        {/* Branch name prefix */}
         <div className="py-3.5">
           <p className="text-sm text-ink">Branch name prefix</p>
           <div className="mt-3 space-y-2.5">
@@ -290,16 +265,11 @@ function GitSection({ settings }: { settings: AppSettings }) {
           </div>
         </div>
 
-        {/* Adjacent to the prefix above because the second one OVERRIDES the
-            first: picking a type in the dialog replaces the prefix, it does not
-            compose with it. */}
         <div className="py-3.5">
           <BranchPrefixEditor
             title={<p className="text-sm text-ink">Branch types</p>}
             description="Customize the branch types for what you're working on. Picking one replaces the prefix above for that workstream."
             value={git.prefixes ?? []}
-            // An emptied list collapses back to "unset", the same treatment
-            // `effective_branch_prefix` gives an empty string.
             onChange={(next) => patch({ prefixes: next.length ? next : null })}
             disabled={save.isPending}
             blockReseed={save.isPending || save.isError}
@@ -365,7 +335,6 @@ function GitSection({ settings }: { settings: AppSettings }) {
   );
 }
 
-/* ---------------------------- Notifications ------------------------------ */
 
 const DEFAULT_NOTIFICATIONS: Required<NotificationSettings> = {
   enabled: true,
@@ -379,9 +348,6 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
     sound: raw.sound ?? DEFAULT_NOTIFICATIONS.sound,
   };
   const save = useSetAppSettings();
-  // Inline result of the most recent "Send test" click, surfaces a clear
-  // message when the OS rejected the toast (e.g. permission not granted
-  // because the app bundle isn't properly registered with macOS).
   const [testStatus, setTestStatus] = useState<
     null | { ok: true } | { ok: false; reason: "permission_denied" | "error" }
   >(null);
@@ -389,8 +355,6 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
   function patch(next: Partial<NotificationSettings>) {
     save.mutate(
       { ...settings, notifications: { ...notif, ...next } },
-      // Invalidate the local in-memory snapshot so the next toast picks up the
-      // new value without an app restart.
       { onSuccess: () => invalidateNotificationSettingsCache() },
     );
   }
@@ -443,9 +407,6 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
             <Button onClick={runTest}>Send test</Button>
           }
         >
-          {/* A single node, not a run of `&&`s: an all-false children array is
-              still truthy, which would leave SettingRow rendering an empty
-              description line before you ever press Send test. */}
           {testStatus === null ? undefined : testStatus.ok ? (
             <span className="text-ok">Sent. Check the top-right.</span>
           ) : testStatus.reason === "permission_denied" ? (
@@ -461,24 +422,14 @@ function NotificationsSection({ settings }: { settings: AppSettings }) {
   );
 }
 
-/* ------------------------------- General --------------------------------- */
 
-/** Built-in default title models (mirror the backend's DEFAULT_TAB_TITLE_MODEL /
- *  DEFAULT_CODEX_TAB_TITLE_MODEL, keep in sync with `settings.rs`). */
 const DEFAULT_TAB_TITLE_MODEL = "claude:haiku";
 const DEFAULT_CODEX_TAB_TITLE_MODEL = "codex:gpt-5.4-mini";
 
-/** The title model used when the user hasn't picked one, Codex-by-default users
- *  get Codex's small model rather than Claude Haiku, which would need a `claude`
- *  binary they may not have. Mirrors `TabTitleSettings::effective_model`. */
 function defaultTitleModel(defaultHarness: string | null | undefined): string {
   return defaultHarness === "codex" ? DEFAULT_CODEX_TAB_TITLE_MODEL : DEFAULT_TAB_TITLE_MODEL;
 }
 
-/** Toggle auto-generated agent-tab titles and pick the model that writes them,
- *  any Claude model, or one of the user's configured OpenCode models so
- *  opencode-only users are covered. The choice is stored as a tagged id
- *  (`claude:<flag>` / `opencode:<provider/model>`) the backend routes on. */
 function DefaultHarnessCard({ settings }: { settings: AppSettings }) {
   const save = useSetAppSettings();
   const current = settings.providers?.defaultHarness ?? "claude";
@@ -523,8 +474,6 @@ function DefaultHarnessCard({ settings }: { settings: AppSettings }) {
   );
 }
 
-/** Confirm-on-quit. Off is also reachable from the quit dialog's "Don't ask
- *  again" checkbox, which is why this row exists: it's the only way back on. */
 function QuitCard({ settings }: { settings: AppSettings }) {
   const save = useSetAppSettings();
   const confirm = settings.quit?.confirm ?? true;
@@ -560,8 +509,6 @@ function QuitCard({ settings }: { settings: AppSettings }) {
 function TabTitlesCard({ settings }: { settings: AppSettings }) {
   const save = useSetAppSettings();
   const catalog = useOpencodeCatalog();
-  // Same live-first list the composer offers, so the title model can't name one
-  // the CLI won't run.
   const claudeCatalog = claudeModels(useClaudeProbe().data?.models);
   const tab: Required<TabTitleSettings> = {
     enabled: settings.tabTitles?.enabled ?? true,
@@ -572,15 +519,12 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
       ? tab.model
       : defaultTitleModel(settings.providers?.defaultHarness);
   const opencodeModels = settings.providers?.opencode?.selectedModels ?? [];
-  // Codex's own small model is always offered (it's the Codex default and needs
-  // no configuration); anything the user selected in the Codex tab joins it.
   const codexModels = [
     ...new Set([
       DEFAULT_CODEX_TAB_TITLE_MODEL.replace(/^codex:/, ""),
       ...(settings.providers?.codex?.selectedModels ?? []),
     ]),
   ];
-  // Friendly name for a "provider/model" id, from the cached models.dev catalog.
   const modelName = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of catalog.data?.providers ?? [])
@@ -656,10 +600,6 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
   );
 }
 
-/** The Hyprlayer card's AI Agents subsection: which agent tool the CLI has
- *  configured, and (once installed) the agent-bundle row. Lives here, not in
- *  its own card, because the CLI owns both — `ai configure`/`ai status` are
- *  hyprlayer CLI commands, and the bundle picker below drives `ai reinstall`. */
 function AiAgentsSubsection() {
   const aiStatus = useAiStatus();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -675,11 +615,6 @@ function AiAgentsSubsection() {
     <div className="mt-3 border-t border-edge/50 pt-3 text-sm">
       <div className="flex items-center justify-between">
         <span className="text-ink-dim">AI Agents</span>
-        {/* ADR-0006's inline icon-button tier, not the h-8 chrome tier: this
-            sits inside the Hyprlayer card, beside a text-sm label. 12, not the
-            nav rail's 16 — `GearIcon` paints its full viewBox, so it needs a
-            smaller nominal size than the 74%-fill glyphs around it to land on
-            the same ink as `PersonIcon size={13}` above. */}
         <button
           type="button"
           onClick={() => setDialogOpen(true)}
@@ -832,10 +767,7 @@ function BinariesCard({ data }: { data: NonNullable<ReturnType<typeof useBootstr
   );
 }
 
-/* ------------------------------- Advanced -------------------------------- */
 
-/** An engine toggle chip in "Available engines". Click toggles it on/off in the
- *  `+` menu; custom (non-builtin) engines get a remove "×". */
 function EngineChip({
   engine,
   onToggle,
@@ -920,7 +852,6 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
 
       {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
 
-      {/* Hero: Multiplexer mode */}
       <div className="overflow-hidden rounded-lg border border-accent/40 bg-accent/5">
         <div className="flex items-center gap-3 p-4">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent">
@@ -948,7 +879,6 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
 
         {cfg.enabled && (
           <div className="divide-y divide-edge/50 border-t border-accent/20 px-4">
-            {/* Available engines */}
             <div className="flex items-start justify-between gap-4 py-3.5">
               <div className="min-w-0">
                 <div className="text-sm text-ink">Available engines</div>
@@ -973,7 +903,6 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
               </div>
             </div>
 
-            {/* Default engine */}
             <SettingRow
               title="Default engine"
               control={
@@ -992,7 +921,6 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
               What a new agent tab launches with (⌘T).
             </SettingRow>
 
-            {/* Notify when blocked */}
             <SettingRow
               title="Notify when an agent is blocked"
               control={
@@ -1009,7 +937,6 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
         )}
       </div>
 
-      {/* Sibling advanced rows */}
       <Card>
         <div className="divide-y divide-edge/50">
           <SettingRow
@@ -1083,7 +1010,6 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
   );
 }
 
-/* ------------------------------ Page shell ------------------------------- */
 
 type SectionId =
   | "general"
@@ -1114,8 +1040,6 @@ const NAV: NavItem[] = [
 
 export function Settings() {
   const bootstrap = useBootstrap();
-  // A `?section=` deep-link (e.g. the composer's "Harnesses →" footer) sets the
-  // initial section; otherwise default to General.
   const { section: requestedSection } = useSearch({ from: "/settings" });
   const [active, setActive] = useState<SectionId>(() =>
     NAV.some((n) => n.id === requestedSection) ? (requestedSection as SectionId) : "general",
@@ -1129,27 +1053,11 @@ export function Settings() {
   const data = bootstrap.data!;
 
   return (
-    // Settings owns the shell's second column (Root hides the project tree on
-    // this route), so the section list is a real sidebar panel, same bg-panel,
-    // border seam and width as the Library / Prompts panels, so the column
-    // doesn't jump as you navigate between them. Fixed rather than drag-resizable:
-    // the labels are short and none of them wrap, so there's nothing to drag for.
-    // Only the content column scrolls.
     <div className="flex h-full min-h-0">
       <aside
         className="flex shrink-0 flex-col border-r border-edge bg-panel"
         style={{ width: SIDE_PANEL_WIDTH }}
       >
-        {/* No "Settings" band here: unlike the project / Library panels, this
-            one titles a route the window's own breadcrumb already names, so a
-            header would just print the word twice. The list starts at the top. */}
-        {/* p-3 matches the Library panel's gutter, at this width a tighter one
-            leaves the rows hugging the left edge. pt-2 is the one number that
-            isn't free: it lines the first row up with the rail's Home/dashboard
-            square, which centers 26px down (the rail's py-2.5 + half its h-8).
-            A row is 36px tall (py-2 + text-sm's 20px line box), so 8px of top
-            padding puts its center on the same line. Keep the two in step if
-            either the rail's inset or this row's padding changes. */}
         <nav className="flex-1 overflow-y-auto p-3 pt-2" aria-label="Settings sections">
           <ul className="space-y-1">
             {NAV.map((item) => {
@@ -1167,8 +1075,6 @@ export function Settings() {
                         : "text-ink-dim hover:bg-edge/50 hover:text-ink"
                     }`}
                   >
-                    {/* The accent spine every selected row in the shell's
-                        sidebars wears (project tree, pinned list). */}
                     {selected && (
                       <span
                         className="absolute inset-y-0 left-0 w-[3px] bg-accent"
@@ -1189,10 +1095,6 @@ export function Settings() {
         <div className="mx-auto max-w-3xl space-y-4 p-8">
           {section === "general" && (
             <>
-              {/* macOS checks for updates from the app menu (the only platform
-                  that gets one, see macos_menu in src-tauri/src/lib.rs), so
-                  Windows and Linux need the manual "Check now" card here or they
-                  have no way to ask at all. */}
               {!IS_MACOS && <UpdatesCard />}
               <HyprlayerConfigCard config={data} />
               <DefaultHarnessCard settings={data.settings} />

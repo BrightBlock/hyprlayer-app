@@ -27,18 +27,12 @@ type Row = {
   desc: string;
   chord: string | null;
   icon: React.ReactNode;
-  /** Why the row can't run right now (rendered as the row's title); null = runnable. */
   disabled: string | null;
   run: () => void;
 };
 
 const EMPTY_OVERRIDES: Overrides = {};
 
-/**
- * The prompt palette (⌘K): every prompt in the library, filtered as you type,
- * Enter runs the selection in the focused workstream. The layout mirrors
- * `SearchPalette` (⌘P) so the two read as one family of overlays.
- */
 export function PromptPalette({ activeWorkstream }: { activeWorkstream: WorkstreamView | null }) {
   const open = usePromptPaletteStore((s) => s.open);
   const navigate = useNavigate();
@@ -67,7 +61,6 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
     const noWs = activeWorkstream ? null : "Open a workstream to run prompts";
 
     const builtinRow = (id: BuiltinPromptId): Row | null => {
-      // Commit/Ship can never apply to a folder workstream, hide, don't gray.
       if (activeWorkstream && isFolderWorkstream(activeWorkstream)) return null;
       const def = BUILTIN_PROMPTS.find((b) => b.id === id)!;
       const body = effectiveBuiltinBody(settings, defaults, id);
@@ -225,10 +218,6 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
                 onClick={() => select(row)}
                 className={rowClass({
                   tier: "standard",
-                  // Rounded corners would show mid-list, clipped only by the
-                  // palette's own `rounded-lg`, so cancel the tier's default
-                  // radius. The keyboard-active state is the palette's own
-                  // highlight, not Row's `selected` tint.
                   className: `flex w-full gap-2 rounded-none px-4 text-left text-sm transition-colors ${
                     clampedActive === i ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/50"
                   } ${row.disabled ? "opacity-50" : ""}`,

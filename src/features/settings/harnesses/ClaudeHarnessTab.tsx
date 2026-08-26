@@ -51,8 +51,6 @@ export function ClaudeHarnessTab({
   const providers = settings.providers ?? {};
   const claude: ClaudeSettings = providers.claude ?? {};
   const save = useSetAppSettings();
-  // Same catalog the composer offers, so the defaults can't name a model the
-  // picker doesn't list.
   const catalog = claudeModels(useClaudeProbe().data?.models);
 
   function patchClaude(next: Partial<ClaudeSettings>) {
@@ -187,7 +185,6 @@ export function ClaudeHarnessTab({
   );
 }
 
-/** Collapsible Advanced section: executable-path override + link to the user's Claude settings file. */
 function ClaudeAdvancedCard({ status }: { status?: BinaryStatus }) {
   const [open, setOpen] = useState(false);
   return (
@@ -375,7 +372,6 @@ function ApiKeyAuthPanel({
   );
 }
 
-/** "Open in <editor>" control for a path under the user's home directory. */
 function OpenInEditor({ relPath }: { relPath: string }) {
   const editors = useEditorTargets();
   const targets = editors.data ?? [];
@@ -386,10 +382,6 @@ function OpenInEditor({ relPath }: { relPath: string }) {
     await (openWith ? openPath(path, openWith) : openPath(path)).catch(() => {});
   }
 
-  // The w-40 wrapper sets the trigger width (passing `className="w-40"` would
-  // work too, DropdownSelect drops its own `w-full` when the caller sets one).
-  // `value` stays "". This is an action menu, not a stored choice, so the
-  // trigger always reads "Open in…" and picking never sticks.
   return (
     <div className="w-40 shrink-0">
       <DropdownSelect
@@ -415,17 +407,6 @@ function DocLink({ href, children }: { href: string; children: React.ReactNode }
     </a>
   );
 }
-/**
- * "Models visible in composer" for Claude, the same card + row-list + "Add
- * models" dialog every other harness tab uses (see [`ModelMultiSelectDialog`]).
- *
- * Claude's setting is a TRI-state, unlike OpenCode/Codex's plain list:
- * `visibleModels: null` means "not customised → show every preset", which is the
- * default and why a fresh install shows all models without the user picking any.
- * Removing a model materializes the explicit list; "Reset to default" restores
- * `null`. Claude also accepts arbitrary `--model` ids, so the dialog carries an
- * add-custom-id field the other harnesses have no use for.
- */
 function VisibleModelsCard({
   claude,
   patchClaude,
@@ -435,13 +416,8 @@ function VisibleModelsCard({
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // The CLI's live catalog, plus the legacy pins it no longer lists; the static
-  // table stands in until the probe resolves (or if it can't run). Org-disabled
-  // rows resolve (a curated list can already name one) but aren't offered.
   const catalog = claudeModels(useClaudeProbe().data?.models);
   const catalogKeys = catalog.filter((m) => !m.disabled).map((m) => m.key);
-  // "Custom" means a user-typed id, a preset the catalog happens not to carry
-  // is still one of ours, so `knownModelKeys` (not the catalog) draws that line.
   const known = new Set(knownModelKeys(catalog));
 
   const visible = claude.visibleModels ?? null;
@@ -540,8 +516,6 @@ function VisibleModelsCard({
                 detail: m.flag ?? m.key,
               })),
           },
-          // Older ids the CLI's catalog doesn't list. `--model` still takes them,
-          // but nothing can confirm they run until the first API call.
           ...(catalog.some((m) => m.unlisted)
             ? [
                 {
@@ -567,11 +541,7 @@ function VisibleModelsCard({
               ]
             : []),
         ]}
-        // Claude's `--model` accepts any alias or dated id, so the picker doubles
-        // as the way to add one the built-in list doesn't carry.
         addCustom={{ placeholder: "Add a model ID (e.g. claude-opus-4-7-20260115)" }}
-        // A dozen-odd rows make all/none worth a click; the other harnesses have
-        // far longer catalogs where "select all" isn't a sensible action.
         bulkActions={(apply) => (
           <>
             <button

@@ -5,12 +5,6 @@ import { ZapIcon } from "@/components/icons";
 import { promptInputLabel } from "./prompts";
 import { answerPromptArgs, usePromptArgsStore, type PromptArgsRequest } from "./promptsStore";
 
-/**
- * Asks for a custom prompt's `{{input}}` arguments before it runs. One shared
- * dialog serves every surface, ⌘K palette, composer chip, keyboard shortcut,
- * because all three funnel through `runCustomPrompt`. Escape or a backdrop click
- * cancels the run; empty answers are allowed and substitute as empty.
- */
 export function PromptArgsDialog() {
   const request = usePromptArgsStore((s) => s.request);
   return (

@@ -1,14 +1,5 @@
-//! Pure helpers for the workstream lifecycle script runner (Setup/Run/Archive).
-//!
-//! The PTY spawn, live registry, and Tauri events live in the desktop shell
-//! (`src-tauri`); this module holds the headless, testable bits: the script
-//! kind, the fail-fast shell wrapper, free-port allocation, and dev-server port
-//! detection.
-
 use serde::{Deserialize, Serialize};
 
-/// Which lifecycle script. Persisted as the `[scripts]` keys and carried on the
-/// `ScriptRunChanged` event so the UI can route a run to the right tab/pill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
@@ -28,19 +19,12 @@ impl ScriptKind {
     }
 }
 
-/// Env vars injected into every script run, on top of the user's environment.
-/// `HL_PORT` is a free port allocated once per workstream for the Run server.
 pub const ENV_PORT: &str = "HL_PORT";
 pub const ENV_WORKTREE: &str = "HL_WORKTREE_PATH";
 pub const ENV_BRANCH: &str = "HL_BRANCH";
 pub const ENV_PROJECT: &str = "HL_PROJECT_PATH";
 pub const ENV_SLUG: &str = "HL_SLUG";
 
-/// Wrap a free-form command block so a non-zero line halts the sequence and the
-/// shell's final exit status is the failing command's. POSIX shells get
-/// `set -e`; PowerShell gets `$ErrorActionPreference='Stop'`. The returned block
-/// is meant to be handed to the login shell via
-/// `terminal::login_shell_args` (`sh -lc "<block>"` / `pwsh -Command "<block>"`).
 pub fn build_block(commands: &str) -> String {
     #[cfg(not(windows))]
     {
@@ -52,22 +36,11 @@ pub fn build_block(commands: &str) -> String {
     }
 }
 
-/// Allocate an ephemeral free TCP port on loopback. Best-effort: the port may be
-/// taken again before the user's server binds it (TOCTOU), which is exactly why
-/// the Run output is ALSO scanned for the actual port, see [`detect_port`].
 pub fn free_port() -> std::io::Result<u16> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     Ok(listener.local_addr()?.port())
 }
 
-/// Scan one line of dev-server output for a localhost URL and return its port.
-/// Recognizes `http(s)://localhost:PORT` and the same for `127.0.0.1`,
-/// `0.0.0.0`, `[::1]`, and `[::]` (the all-interfaces form Python's
-/// `http.server` and many Go/Node servers print), plus a bare `localhost:PORT`.
-/// Returns the first hit.
-///
-/// Tolerant of surrounding ANSI color codes because the host:port substring
-/// stays contiguous (Vite/Next color the whole URL as one unit).
 pub fn detect_port(line: &str) -> Option<u16> {
     const HOSTS: [&str; 5] = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "[::]"];
     for host in HOSTS {
@@ -107,7 +80,6 @@ mod tests {
 
     #[test]
     fn detect_port_finds_vite_local_url() {
-        // The exact shape from the mockup's Run output.
         assert_eq!(
             detect_port("  ➜  Local:   http://localhost:5174/"),
             Some(5174)
@@ -129,7 +101,6 @@ mod tests {
         assert_eq!(detect_port("ready on http://127.0.0.1:3000"), Some(3000));
         assert_eq!(detect_port("Listening on 0.0.0.0:8080"), Some(8080));
         assert_eq!(detect_port("serving http://[::1]:4321/"), Some(4321));
-        // Python http.server / all-interfaces IPv6 form.
         assert_eq!(
             detect_port("Serving HTTP on :: port 62209 (http://[::]:62209/) ..."),
             Some(62209)
@@ -138,7 +109,6 @@ mod tests {
 
     #[test]
     fn detect_port_tolerates_ansi_wrapping() {
-        // Color codes wrap the URL but the host:port stays contiguous.
         assert_eq!(
             detect_port("  \x1b[32m➜\x1b[39m  Local: \x1b[36mhttp://localhost:5174/\x1b[39m"),
             Some(5174)
@@ -151,8 +121,6 @@ mod tests {
         assert!(p > 0);
     }
 
-    /// The fail-fast preamble must actually halt a real shell on the first
-    /// non-zero command (the "non-zero exit halts the sequence" contract).
     #[cfg(unix)]
     #[test]
     fn build_block_halts_the_shell_on_nonzero() {

@@ -52,8 +52,6 @@ describe("substitutePromptVars", () => {
   });
 
   it("never re-substitutes token-shaped text inside a substituted value", () => {
-    // A diff hunk may legitimately contain another variable's token; single-pass
-    // substitution (matching the backend) must leave it verbatim.
     const tricky = { ...CTX, diff: '+ body.contains("{{last_commit}}")' };
     expect(substitutePromptVars("{{diff}}", tricky)).toBe(
       '+ body.contains("{{last_commit}}")',
@@ -115,8 +113,6 @@ describe("resolvePromptBody", () => {
   });
 
   it("never expands a variable token the user typed as an argument", () => {
-    // Single-pass: scanning resumes after the substituted value, so the typed
-    // "{{diff}}" is delivered as literal text rather than the worktree's diff.
     expect(
       resolvePromptBody("Compare {{input:a}} with {{diff}}", CTX, { "{{input:a}}": "{{diff}}" }),
     ).toBe("Compare {{diff}} with diff --git a b");
@@ -160,7 +156,6 @@ describe("effectiveBuiltinBody / isBuiltinModified", () => {
     const s = settingsWith({ builtinBodies: { commit: "/commit --strict" } });
     expect(effectiveBuiltinBody(s, DEFAULTS, "commit")).toBe("/commit --strict");
     expect(isBuiltinModified(s, DEFAULTS, "commit")).toBe(true);
-    // Ship is untouched by the commit override.
     expect(effectiveBuiltinBody(s, DEFAULTS, "ship")).toBe(DEFAULTS.ship);
     expect(isBuiltinModified(s, DEFAULTS, "ship")).toBe(false);
   });

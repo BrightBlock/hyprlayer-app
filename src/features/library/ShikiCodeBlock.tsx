@@ -1,13 +1,3 @@
-// Chat-pane fenced code block. Calls Shiki on each `code` change and renders
-// the resulting HAST as JSX (no dangerouslySetInnerHTML). Falls back to plain
-// monospace text while grammar loads or if the language is unknown.
-//
-// Streaming behavior: during a stream, `code` grows with each token. We
-// debounce the highlight call so Shiki only runs once the stream pauses (or
-// ends), the user sees plain monospace while tokens are arriving and the
-// block snaps to highlighted shortly after the stream settles. We also gate
-// the displayed tree on `highlighted.code === code` so a stale highlight from
-// an in-flight call never paints over the current text.
 
 import type { Root } from "hast";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
@@ -18,8 +8,6 @@ import { ClipboardIcon } from "@/components/icons";
 import { useCopyFeedback } from "@/lib/clipboard";
 import { highlightToHast, resolveLang } from "./shikiHighlight";
 
-// 150ms is long enough that streaming never triggers a highlight mid-token
-// but short enough that a static message snaps to color almost instantly.
 const HIGHLIGHT_DEBOUNCE_MS = 150;
 
 function renderHast(root: Root) {
@@ -49,9 +37,6 @@ function ShikiCodeBlockImpl({
     };
   }, [code, rawLang]);
 
-  // toJsxRuntime walks the whole hast tree allocating React elements per token,
-  // so we memoize by hast identity, unrelated transcript re-renders cost
-  // nothing once a block is highlighted.
   const tree = useMemo(
     () => (highlighted && highlighted.code === code ? renderHast(highlighted.hast) : null),
     [highlighted, code],

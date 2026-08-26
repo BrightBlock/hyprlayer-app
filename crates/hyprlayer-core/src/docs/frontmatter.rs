@@ -1,14 +1,8 @@
-//! Tolerant frontmatter parsing and line-surgical patching. Parsing never fails,
-//! anomalies (no/malformed YAML, scalar-vs-list confusion) degrade to warnings with
-//! filename/directory fallbacks. Public API is frozen: indexer + Tauri shell build on it.
-
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// The 10-field thought schema (hyprlayer-cli/src/backends/schema.rs), all
-/// optional because the parser must tolerate anything.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
@@ -24,11 +18,6 @@ pub struct Frontmatter {
     pub tags: Vec<String>,
     pub author: Option<String>,
     pub related: Vec<String>,
-    /// Unknown keys, preserved for display and round-tripping.
-    /// Unknown keys in display form: strings as-is, everything else compact
-    /// JSON, null as "". Read-only context for the UI, the line-surgical
-    /// patcher preserves the underlying bytes regardless. (Stringified
-    /// because specta forbids serde_json::Value's i64 arm in IPC types.)
     pub extra: BTreeMap<String, String>,
 }
 
@@ -36,11 +25,9 @@ pub struct Frontmatter {
 pub struct ParsedDoc {
     pub fm: Frontmatter,
     pub warnings: Vec<String>,
-    /// Byte offset where the body starts (0 when there is no frontmatter).
     pub body_offset: usize,
 }
 
-/// Parse a document's frontmatter without ever failing.
 pub fn parse(content: &str) -> ParsedDoc {
     let Some((block, body_offset)) = extract_block(content) else {
         return ParsedDoc {
@@ -61,9 +48,6 @@ pub fn parse(content: &str) -> ParsedDoc {
             }
         }
         Err(e) => {
-            // serde_yaml rejects whole blocks for recoverable anomalies
-            // (duplicate keys, one bad line). Fall back to a loose line scan
-            // so the doc still indexes with its scalar fields intact.
             let mut warnings = vec![format!("frontmatter YAML error: {e}")];
             let fm = loose_recover(block, &mut warnings);
             ParsedDoc {
@@ -75,14 +59,8 @@ pub fn parse(content: &str) -> ParsedDoc {
     }
 }
 
-/// Loose line-based recovery for blocks serde_yaml refuses to parse.
-///
-/// Recognizes top-level `key: scalar` pairs and simple `key:` + indented
-/// `- item` block lists. Duplicate keys are last-wins; every anomaly
-/// (duplicate, unrecoverable line) emits a warning.
 fn loose_recover(block: &str, warnings: &mut Vec<String>) -> Frontmatter {
     let mut entries: Vec<(String, serde_yaml::Value)> = Vec::new();
-    // Index into `entries` of the key currently accepting list items.
     let mut current: Option<usize> = None;
 
     for raw in block.lines() {
@@ -148,8 +126,6 @@ fn loose_recover(block: &str, warnings: &mut Vec<String>) -> Frontmatter {
     from_yaml_value(&serde_yaml::Value::Mapping(map), warnings)
 }
 
-/// Parse a single scalar (or flow list) with serde_yaml so quoting/comments
-/// behave correctly; anything weirder degrades to the raw string.
 fn loose_scalar(s: &str) -> serde_yaml::Value {
     match serde_yaml::from_str::<serde_yaml::Value>(s) {
         Ok(v)
@@ -164,8 +140,6 @@ fn loose_scalar(s: &str) -> serde_yaml::Value {
     }
 }
 
-/// Byte index of the `:` separating a top-level key from its value, the
-/// first colon followed by whitespace or end-of-line (YAML mapping syntax).
 fn find_key_colon(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     (0..bytes.len()).find(|&i| {
@@ -181,8 +155,6 @@ fn unquote_key(key: &str) -> String {
     stripped.unwrap_or(key).to_string()
 }
 
-/// Locate the frontmatter block: `---` on the first line, closed by a line
-/// that is exactly `---` or `...`. Returns (block_str, body_offset).
 pub fn extract_block(content: &str) -> Option<(&str, usize)> {
     let after_open = content
         .strip_prefix("---\r\n")
@@ -202,12 +174,6 @@ pub fn extract_block(content: &str) -> Option<(&str, usize)> {
     None
 }
 
-/// Byte-level, YAML-parse-free sibling of [`extract_block`]'s offset return,
-/// used at query time to strip frontmatter from a raw disk read without
-/// paying for a YAML parse. Semantics mirror `extract_block` exactly: `0`
-/// when there is no opening `---` line, and `0` when no closing `---`/`...`
-/// line is found (matching `extract_block`'s degradation to "whole file is
-/// body" for unterminated frontmatter).
 pub fn body_offset_bytes(content: &[u8]) -> usize {
     let after_open = if let Some(rest) = content.strip_prefix(b"---\r\n") {
         rest
@@ -229,7 +195,6 @@ pub fn body_offset_bytes(content: &[u8]) -> usize {
     0
 }
 
-/// Byte sibling of `str::trim_end_matches(['\r', '\n'])`.
 fn trim_end_cr_lf(mut line: &[u8]) -> &[u8] {
     while let Some((&last, rest)) = line.split_last() {
         if last == b'\r' || last == b'\n' {
@@ -250,7 +215,6 @@ fn yaml_scalar_to_string(v: &serde_yaml::Value) -> Option<String> {
     }
 }
 
-/// Accept both `tags: a` and `tags: [a, b]`.
 fn yaml_string_or_seq(v: &serde_yaml::Value, key: &str, warnings: &mut Vec<String>) -> Vec<String> {
     match v {
         serde_yaml::Value::Sequence(seq) => seq
@@ -306,7 +270,6 @@ fn from_yaml_value(value: &serde_yaml::Value, warnings: &mut Vec<String>) -> Fro
     fm
 }
 
-/// Display form for unknown-key values (see [`Frontmatter::extra`]).
 fn yaml_value_display(v: &serde_yaml::Value) -> String {
     match v {
         serde_yaml::Value::String(s) => s.clone(),
@@ -318,9 +281,6 @@ fn yaml_value_display(v: &serde_yaml::Value) -> String {
     }
 }
 
-/// Fill title/date/type gaps from the file's name and parent directory,
-/// matching the CLI's layout conventions
-/// (`<plans|research|handoffs|prs|notes>/YYYY-MM-DD[-TICKET]-slug.md`).
 pub fn apply_path_fallbacks(fm: &mut Frontmatter, abs_path: &Path) {
     let stem = abs_path
         .file_stem()
@@ -363,7 +323,6 @@ pub fn apply_path_fallbacks(fm: &mut Frontmatter, abs_path: &Path) {
     }
 }
 
-/// `YYYY-MM-DD` prefix of a file stem, if present.
 fn leading_date(stem: &str) -> Option<&str> {
     let bytes = stem.as_bytes();
     if bytes.len() < 10 {
@@ -380,16 +339,6 @@ fn leading_date(stem: &str) -> Option<&str> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Line-surgical frontmatter patching
-//
-// Agents and humans hand-edit thought files. A patch must therefore touch
-// ONLY the lines of the keys it sets/removes: every other byte of the file,
-// comments, quoting style, key order, unknown keys, EOL convention, the
-// entire body, survives verbatim.
-// ---------------------------------------------------------------------------
-
-/// Schema key order (hyprlayer-cli/src/backends/schema.rs THOUGHT_SCHEMA).
 const SCHEMA_KEYS: [&str; 10] = [
     "title", "type", "date", "status", "ticket", "project", "scope", "tags", "author", "related",
 ];
@@ -398,7 +347,6 @@ fn schema_pos(key: &str) -> Option<usize> {
     SCHEMA_KEYS.iter().position(|k| *k == key)
 }
 
-/// A value to write into frontmatter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -408,9 +356,6 @@ pub enum FmValue {
     Null,
 }
 
-/// A set of frontmatter edits applied in one surgical pass.
-/// `remove` is applied first, then `set` (in order; later sets of the same
-/// key win).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
@@ -433,16 +378,6 @@ pub enum FmError {
     Validation(String),
 }
 
-/// Apply `patch` to `original`, returning the new file contents.
-///
-/// Guarantees:
-/// - body bytes after the closing `---` are never modified;
-/// - untouched frontmatter spans keep their exact bytes;
-/// - if there is no frontmatter block and the patch sets keys, a new block is
-///   synthesized at byte 0 (keys in schema order) with the body preserved;
-/// - the original EOL convention and trailing-newline presence are preserved;
-/// - the patched result is re-parsed and every set key must read back, or an
-///   error is returned (garbage is never produced).
 pub fn patch_frontmatter(original: &str, patch: &FmPatch) -> Result<String, FmError> {
     for (key, _) in &patch.set {
         validate_key(key)?;
@@ -479,8 +414,6 @@ fn validate_key(key: &str) -> Result<(), FmError> {
     }
 }
 
-/// A top-level key span inside the block: optional lead (comments/blank lines
-/// attached to this span) + the `key:` line and its continuation lines.
 struct Span {
     key: String,
     lead_start: usize,
@@ -488,8 +421,6 @@ struct Span {
     end: usize,
 }
 
-/// Tokenize the block into spans. Returns (spans, tail_start) where
-/// `block[tail_start..]` is trailing comments/blank lines owned by no span.
 fn tokenize_block(block: &str) -> (Vec<Span>, usize) {
     let mut spans: Vec<Span> = Vec::new();
     let mut pending_start: Option<usize> = None;
@@ -524,8 +455,6 @@ fn tokenize_block(block: &str) -> (Vec<Span>, usize) {
             }
         }
 
-        // Continuation (or stray) line: absorb it, and any blank/comment
-        // lines between it and the current span, into the current span.
         if let Some(last) = spans.last_mut() {
             pending_start = None;
             last.end = offset;
@@ -538,7 +467,6 @@ fn tokenize_block(block: &str) -> (Vec<Span>, usize) {
     (spans, tail_start)
 }
 
-/// Working item while rebuilding the block.
 struct WorkItem<'a> {
     key: String,
     lead: &'a str,
@@ -557,7 +485,6 @@ fn patch_block(
     patch: &FmPatch,
     eol: &str,
 ) -> Result<String, FmError> {
-    // extract_block guarantees the opening delimiter is one of these.
     let open_len = if original.starts_with("---\r\n") {
         5
     } else {
@@ -579,11 +506,8 @@ fn patch_block(
         })
         .collect();
 
-    // Removes first: delete every span with the key, including its lead.
     items.retain(|item| !patch.remove.contains(&item.key));
 
-    // Sets: replace the LAST span with the key (last-wins on read), or insert
-    // a new span ordered by schema position.
     for (key, value) in &patch.set {
         let rendered = render_span(key, value, eol)?;
         if let Some(item) = items.iter_mut().rev().find(|item| item.key == *key) {
@@ -616,31 +540,25 @@ fn patch_block(
     Ok(out)
 }
 
-/// Where to insert a new key: schema keys slot in relative to whichever
-/// schema keys already exist; unknown keys go last (before the closing ---).
 fn insertion_index(items: &[WorkItem<'_>], key: &str) -> usize {
     let Some(pos) = schema_pos(key) else {
         return items.len();
     };
-    // Before the first schema key that should come after it...
     if let Some(idx) = items
         .iter()
         .position(|item| schema_pos(&item.key).is_some_and(|q| q > pos))
     {
         return idx;
     }
-    // ...else after the last schema key that comes before it...
     if let Some(idx) = items
         .iter()
         .rposition(|item| schema_pos(&item.key).is_some_and(|q| q <= pos))
     {
         return idx + 1;
     }
-    // ...else (no schema keys at all) first, ahead of unknown keys.
     0
 }
 
-/// Render one `key: value` span, terminated with `eol`.
 fn render_span(key: &str, value: &FmValue, eol: &str) -> Result<String, FmError> {
     Ok(match value {
         FmValue::Null => format!("{key}:{eol}"),
@@ -656,15 +574,12 @@ fn render_span(key: &str, value: &FmValue, eol: &str) -> Result<String, FmError>
     })
 }
 
-/// Render a scalar through serde_yaml so edge cases (`:`, `#`, quotes,
-/// leading/trailing spaces, `yes`/`no`, numbers) get correct quoting.
 fn render_scalar(key: &str, s: &str, eol: &str) -> Result<String, FmError> {
     let rendered = serde_yaml::to_string(s).map_err(|source| FmError::Render {
         key: key.to_string(),
         source,
     })?;
     let rendered = rendered.trim_end_matches('\n');
-    // Multi-line scalars render as block scalars; keep the file's EOLs.
     Ok(if eol == "\n" {
         rendered.to_string()
     } else {
@@ -672,14 +587,11 @@ fn render_scalar(key: &str, s: &str, eol: &str) -> Result<String, FmError> {
     })
 }
 
-/// Build a brand-new block (no existing frontmatter), keys in schema order,
-/// body preserved verbatim.
 fn synthesize_block(
     original: &str,
     set: &[(String, FmValue)],
     eol: &str,
 ) -> Result<String, FmError> {
-    // Last-wins de-dup, preserving first-seen position for unknown keys.
     let mut entries: Vec<(&str, &FmValue)> = Vec::new();
     for (key, value) in set {
         if let Some(entry) = entries.iter_mut().find(|(k, _)| *k == key) {
@@ -688,7 +600,6 @@ fn synthesize_block(
             entries.push((key, value));
         }
     }
-    // Stable sort: schema keys in schema order, unknown keys after.
     entries.sort_by_key(|(k, _)| schema_pos(k).unwrap_or(usize::MAX));
 
     let mut out = format!("---{eol}");
@@ -701,7 +612,6 @@ fn synthesize_block(
     Ok(out)
 }
 
-/// Re-parse the patched result and confirm every set key reads back exactly.
 fn validate_patch(result: &str, patch: &FmPatch) -> Result<(), FmError> {
     if patch.set.is_empty() {
         return Ok(());
@@ -738,7 +648,7 @@ fn scalar_matches(actual: &Option<String>, expected: &FmValue) -> bool {
     match expected {
         FmValue::Str(s) => actual.as_deref() == Some(s.as_str()),
         FmValue::Null => actual.is_none(),
-        FmValue::List(_) => false, // scalar schema fields cannot hold lists
+        FmValue::List(_) => false,
     }
 }
 
@@ -753,7 +663,6 @@ fn list_matches(actual: &[String], expected: &FmValue) -> bool {
 fn extra_matches(actual: Option<&String>, expected: &FmValue) -> bool {
     match expected {
         FmValue::Str(s) => actual.is_some_and(|v| v == s),
-        // Lists display as compact JSON arrays (yaml_value_display).
         FmValue::List(items) => {
             let expected_json = serde_json::to_string(items).unwrap_or_default();
             actual.is_some_and(|v| *v == expected_json)
@@ -797,21 +706,13 @@ mod stub_tests {
     #[test]
     fn body_offset_bytes_matches_extract_block_across_shapes() {
         let cases = [
-            // Well-formed frontmatter.
             "---\ntitle: x\nstatus: active\n---\n\nBody here.\n",
-            // CRLF line endings throughout.
             "---\r\ntitle: x\r\n---\r\nBody.\r\n",
-            // `...` terminator instead of `---`.
             "---\ntitle: x\n...\nBody.\n",
-            // No frontmatter at all.
             "just a body\nwith no header\n",
-            // Malformed YAML inside an otherwise well-terminated block.
             "---\n: : : not yaml [\n---\nbody\n",
-            // Unterminated frontmatter: whole file degrades to body.
             "---\ntitle: x\nno closing delimiter here\n",
-            // Empty file.
             "",
-            // Opening delimiter with nothing after it.
             "---\n",
         ];
         for doc in cases {
@@ -989,8 +890,6 @@ mod patch_tests {
             remove: vec!["whatever".into()],
         };
         let out = patch_frontmatter(body, &patch).unwrap();
-        // Schema order, unknown keys last, body byte-identical (no trailing
-        // newline added).
         assert_eq!(
             out,
             "---\ntitle: New\ndate: 2026-06-12\nzCustom: v\n---\n# Heading\n\nNo frontmatter here."
@@ -1103,7 +1002,6 @@ mod patch_tests {
         assert_eq!(out, "---\ntitle: first\ntitle: patched\n---\nbody");
         assert_eq!(parse(&out).fm.title.as_deref(), Some("patched"));
 
-        // remove deletes ALL spans for the key
         let out = patch_frontmatter(
             doc,
             &FmPatch {
@@ -1184,10 +1082,7 @@ mod patch_tests {
     #[test]
     fn comment_between_list_items_belongs_to_that_span() {
         let doc = "---\ntags:\n  - a\n# middle comment\n  - b\nstatus: draft\n---\n";
-        // No-op stays identical.
         assert_eq!(patch_frontmatter(doc, &FmPatch::default()).unwrap(), doc);
-        // Replacing tags replaces the interleaved comment too (it is part of
-        // the span), while status is untouched.
         let patch = FmPatch {
             set: vec![("tags".into(), FmValue::List(vec!["z".into()]))],
             remove: vec![],

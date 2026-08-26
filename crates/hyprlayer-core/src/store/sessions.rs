@@ -1,6 +1,3 @@
-//! Persistence for agent sessions, their event logs (for attach/replay), and
-//! the orphan-PID ledger used to reap processes a crash left behind.
-
 use rusqlite::{params, Row};
 use serde::{Deserialize, Serialize};
 
@@ -17,31 +14,23 @@ pub struct Session {
     pub id: String,
     pub workstream_id: String,
     pub stage: Stage,
-    /// Which harness backs the session.
     pub harness: Harness,
-    /// The harness's own session id (set on init; drives resume). claude's
-    /// session id for Claude Code, the opencode session id for OpenCode, the
-    /// thread id for Codex.
     pub claude_session_id: Option<String>,
     pub cwd: String,
     pub state: SessionState,
     pub model: Option<String>,
-    /// Cumulative cost reported by the latest `result` event.
     pub cost_usd: Option<f64>,
     pub started_at: f64,
     pub ended_at: Option<f64>,
     pub exit_summary: Option<String>,
 }
 
-/// One persisted event, for replay into a freshly-attached UI Channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct StoredEvent {
-    /// Monotonic per-session sequence (f64 for IPC; small integers in practice).
     pub seq: f64,
     pub kind: String,
-    /// The full `SessionEvent` JSON.
     pub payload: String,
     pub created_at: f64,
 }
@@ -140,7 +129,6 @@ impl Db {
         })
     }
 
-    /// Record claude's session id + model from the init event.
     pub fn mark_session_init(
         &self,
         id: &str,
@@ -177,7 +165,6 @@ impl Db {
         })
     }
 
-    /// Terminal update: state + ended_at + a short exit summary.
     pub fn finish_session(
         &self,
         id: &str,
@@ -201,8 +188,6 @@ impl Db {
         payload: &str,
     ) -> Result<()> {
         self.with(|conn| {
-            // Cached statement: the forwarder appends one row per block during a
-            // live turn, so reuse the prepared INSERT instead of re-compiling it.
             let mut stmt = conn.prepare_cached(
                 "INSERT INTO session_events (session_id, seq, kind, payload, created_at)
                  VALUES (?1,?2,?3,?4,?5)",
@@ -212,11 +197,6 @@ impl Db {
         })
     }
 
-    /// The next free sequence number for this session's log: `MAX(seq)+1`, or 0
-    /// when empty. Unlike the event *count*. This is correct even when the seqs
-    /// are non-contiguous, a live rewind can truncate the tail and then continue
-    /// the log past a gap, so a resumed forwarder must start above the real max,
-    /// never at `len()` (which would collide with surviving rows).
     pub fn next_session_seq(&self, session_id: &str) -> Result<i64> {
         self.with(|conn| {
             let max: Option<i64> = conn.query_row(
@@ -246,10 +226,6 @@ impl Db {
         })
     }
 
-    /// The seq of the `n`-th (1-based) `userMessage` event in this session,
-    /// or `None` if there are fewer than `n` user turns. Shared by rewind/fork:
-    /// the UI knows which user bubble was clicked (ordinal among user items),
-    /// and that maps to the seq of the corresponding persisted event.
     pub fn nth_user_message_seq(&self, session_id: &str, n: usize) -> Result<Option<i64>> {
         if n == 0 {
             return Ok(None);
@@ -270,9 +246,6 @@ impl Db {
         })
     }
 
-    /// How many user turns this session has logged. A resumed harness driver
-    /// seeds its own turn counter with this: rewind ordinals are session-global,
-    /// but a fresh driver has only seen the turns it streamed itself.
     pub fn count_user_messages(&self, session_id: &str) -> Result<usize> {
         self.with(|conn| {
             let n: i64 = conn.query_row(
@@ -285,12 +258,6 @@ impl Db {
         })
     }
 
-    /// Delete every event at `seq >= cutoff` for this session, the rewind
-    /// truncation, and return the removed rows (seq/created_at preserved) so the
-    /// caller can [`restore_session_events`] them if a follow-up step (the
-    /// re-spawn) fails. Read + delete run in one transaction so they can't
-    /// interleave. The caller is expected to have stopped the live driver first;
-    /// appending events for a killed session after this leaves a consistent log.
     pub fn cut_session_events_from(
         &self,
         session_id: &str,
@@ -322,9 +289,6 @@ impl Db {
         })
     }
 
-    /// Re-insert events removed by [`cut_session_events_from`], verbatim (seq and
-    /// created_at preserved), the rollback for a rewind whose re-spawn failed,
-    /// so a launch error never costs the conversation tail.
     pub fn restore_session_events(&self, session_id: &str, events: &[StoredEvent]) -> Result<()> {
         self.with(|conn| {
             let tx = conn.unchecked_transaction()?;
@@ -348,8 +312,6 @@ impl Db {
         })
     }
 
-    /* ----------------------------- Orphan PIDs ---------------------------- */
-
     pub fn record_orphan(&self, pid: i64, session_id: &str) -> Result<()> {
         self.with(|conn| {
             conn.execute(
@@ -371,7 +333,6 @@ impl Db {
         })
     }
 
-    /// All recorded orphan (pid, session_id) pairs, read at startup to reap.
     pub fn list_orphans(&self) -> Result<Vec<(i64, String)>> {
         self.with(|conn| {
             let mut stmt = conn.prepare("SELECT pid, session_id FROM orphan_pids")?;
@@ -396,7 +357,6 @@ mod tests {
     #[test]
     fn session_lifecycle_persists_and_replays() {
         let db = Db::open_in_memory().unwrap();
-        // A session needs a parent workstream row (FK).
         db.insert_workstream(crate::store::NewWorkstream {
             project_path: "/p".into(),
             title: "t".into(),
@@ -449,8 +409,6 @@ mod tests {
         assert_eq!(db.list_sessions(&ws.id).unwrap().len(), 1);
     }
 
-    /// Build a small session whose log alternates user/assistant turns. Used
-    /// by the rewind and fork helper tests below, keeps them parallel.
     fn seed_dialog(db: &Db, session_id: &str) {
         db.insert_workstream(crate::store::NewWorkstream {
             project_path: "/p".into(),
@@ -506,7 +464,6 @@ mod tests {
                 .map(|e| (e.seq as i64, e.kind))
                 .collect()
         };
-        // Rewind to user turn #2 → cutoff seq 3, remove seqs 3..=6.
         let removed = db.cut_session_events_from("s1", 3).unwrap();
         assert_eq!(removed.len(), 4);
         assert_eq!(removed[0].seq as i64, 3);
@@ -518,7 +475,6 @@ mod tests {
                 (2, "assistantText".into()),
             ],
         );
-        // Rollback (a failed re-spawn) puts the cut tail back exactly as it was.
         db.restore_session_events("s1", &removed).unwrap();
         assert_eq!(
             kinds(&db),

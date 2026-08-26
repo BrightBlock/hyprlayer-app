@@ -1,42 +1,19 @@
-//! The app-facing session event stream, what the UI renders and the store
-//! persists. The Tauri shell forwards these over a per-session Channel and
-//! writes them to `session_events` for replay.
-
 use serde::{Deserialize, Serialize};
 
-/// How a claude process ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum ExitOutcome {
-    /// Emitted a terminal `result` then exited 0.
     Completed,
-    /// Stopped after an app-initiated interrupt.
     Interrupted,
-    /// Exited without a terminal `result` (or non-zero), treated as a crash.
     Crashed,
-    /// We killed the process tree (hard stop / cleanup).
     Killed,
-    /// The app took the process down as part of its own lifecycle, quitting, or
-    /// relaunching this session under new settings, not something that happened
-    /// to the session. Terminal for the live process only: nothing is persisted,
-    /// so the session replays clean and resumable (see the forwarder's `Exited`
-    /// arm).
     Detached,
-    /// Failed to spawn / disappeared immediately.
     SpawnFailed,
 }
 
-/// `DBG_TERMINATE_PROCESS`, only ever delivered by an external `TerminateProcess`
-/// explicitly passing it: the debug subsystem, or Windows tearing the session down.
-/// No routine kill picks it (measured on Win11: job-object close gives 0, taskkill
-/// 1, `Process::kill` -1) and no program exits with it itself, so it always means
-/// something outside ended the child. Unreachable on Unix, where `code()` is 8-bit.
 const EXTERNALLY_TERMINATED: i32 = 0x4001_0004;
 
-/// SIGHUP/SIGINT/SIGTERM/SIGKILL, something *asked* the process to stop, i.e.
-/// a kill from outside the app. A fault the process hit itself (SIGSEGV,
-/// SIGABRT, SIGBUS…) is still a crash.
 #[cfg(unix)]
 fn is_stop_signal(signal: i32) -> bool {
     matches!(
@@ -47,24 +24,14 @@ fn is_stop_signal(signal: i32) -> bool {
 
 #[cfg(not(unix))]
 fn is_stop_signal(_signal: i32) -> bool {
-    false // no signals on Windows, `code` carries the whole story
+    false
 }
 
-/// The `128 + N` exit codes for those same signals. A harness that installs its
-/// own SIGTERM handler reports the kill THIS way, not as a signal death:
-/// measured on macOS, `kill -TERM` on the claude binary yields code 143 with no
-/// signal, because claude catches it and exits by convention. Without this a
-/// kill from outside still read as "Session crashed (exit 143)".
 fn is_stop_exit_code(code: i32) -> bool {
-    matches!(code, 129 | 130 | 137 | 143) // HUP, INT, KILL, TERM
+    matches!(code, 129 | 130 | 137 | 143)
 }
 
 impl ExitOutcome {
-    /// Classify a process that exited without its driver's clean-finish signal.
-    /// Our own kills never reach here, the driver's `KillFlag` short-circuits
-    /// first, so a stop signal or [`EXTERNALLY_TERMINATED`] means something
-    /// outside the app ended the child. That's an ending, not a crash: it's the
-    /// "Session crashed (exit 1073807364)" a Windows restart could greet you with.
     pub fn from_unclean_exit(code: Option<i32>, signal: Option<i32>) -> Self {
         if let Some(signal) = signal {
             return if is_stop_signal(signal) {
@@ -80,8 +47,6 @@ impl ExitOutcome {
         }
     }
 
-    /// Same, from a real [`ExitStatus`](std::process::ExitStatus), the drivers'
-    /// entry point, which keeps the signal read (Unix-only) out of their bodies.
     pub fn from_status(status: &std::process::ExitStatus) -> Self {
         #[cfg(unix)]
         let signal = std::os::unix::process::ExitStatusExt::signal(status);
@@ -90,10 +55,6 @@ impl ExitOutcome {
         Self::from_unclean_exit(status.code(), signal)
     }
 
-    /// The [`SessionState`] a terminal outcome persists as. Lives next to the
-    /// enum so storage can't drift from the variants. `Detached` never reaches
-    /// storage (the forwarder skips the row write); `Idle` is what the session
-    /// replays as either way.
     pub fn state(self) -> SessionState {
         match self {
             ExitOutcome::Completed => SessionState::Completed,
@@ -105,20 +66,11 @@ impl ExitOutcome {
         }
     }
 
-    /// Whether this outcome is worth a line in the transcript and a terminal row.
-    /// A `Detached` exit is the app's own bookkeeping, the user never asked for
-    /// it, so it leaves no trace.
     pub fn is_reportable(self) -> bool {
         !matches!(self, ExitOutcome::Detached)
     }
 }
 
-/// A session's full lifecycle state, persisted in `sessions.state` and carried
-/// by the `session-lifecycle` event. The five terminal variants mirror
-/// [`ExitOutcome`]; `Idle` is a live-but-between-turns session. sqlite stores
-/// `as_str` TEXT; rows read back through the tolerant [`SessionState::parse`]
-/// (unknown ⇒ `Crashed`: terminal and conservative, so the UI never treats a
-/// state it doesn't understand as a live session to re-attach).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
@@ -151,7 +103,6 @@ impl SessionState {
         }
     }
 
-    /// Tolerant row-read: unknown ⇒ `Crashed` (see the enum docs).
     pub fn parse(s: &str) -> Self {
         match s {
             "idle" => SessionState::Idle,
@@ -174,10 +125,6 @@ impl From<ExitOutcome> for SessionState {
     }
 }
 
-/// One event in a session's lifetime. Ordered; the sequence per session is
-/// monotonic. Serialized tagged so the frontend can switch on `kind`. Tool
-/// inputs are carried as compact JSON strings (not `serde_json::Value`) so the
-/// type exports cleanly through specta; the UI parses them for display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
@@ -186,148 +133,81 @@ impl From<ExitOutcome> for SessionState {
     rename_all_fields = "camelCase"
 )]
 pub enum SessionEvent {
-    /// Session is up; claude assigned its own id (used for `--resume`).
     Init {
         claude_session_id: String,
         model: Option<String>,
     },
-    /// A user turn the app sent to claude. claude never echoes the human prompt
-    /// on stdout (it's input), so the driver emits this itself purely so the turn
-    /// is persisted and replays after a restart. It is NOT forwarded to the live
-    /// UI (which already shows the message optimistically), persist-only, so the
-    /// live transcript isn't double-stamped. `stage` is the stage label for the
-    /// session's opening prompt, else null (a follow-up).
     UserMessage {
         text: String,
         stage: Option<String>,
-        /// Name of the custom prompt this turn ran, else null for a typed turn.
-        /// `text` stays the exact body the agent received (vars substituted), so
-        /// the UI can collapse it into a card titled with this name and expand it
-        /// back to what was actually sent. Defaulted: rows persisted before this
-        /// field existed still deserialize.
         #[serde(default)]
         prompt_name: Option<String>,
     },
-    /// Streaming text delta (live typing). Coalesced into `AssistantText` on
-    /// turn completion, the UI shows partials, then replaces with the final.
     PartialText {
         text: String,
         parent_id: Option<String>,
     },
-    /// A completed assistant text block.
     AssistantText {
         text: String,
         parent_id: Option<String>,
-        /// True when claude injected this block as a synthetic user turn rather
-        /// than the agent writing it: a launched skill's SKILL.md body, a
-        /// re-invocation notice. The UI folds an injected block into the `Skill`
-        /// row that pulled it in instead of dumping it inline. Defaulted: rows
-        /// persisted before this field existed still deserialize (and replay as
-        /// non-injected, which is what the prefix heuristic already handled).
         #[serde(default)]
         injected: bool,
     },
-    /// A completed thinking block (shown collapsed).
     Thinking {
         text: String,
         parent_id: Option<String>,
     },
-    /// The agent invoked a tool. `input` is compact JSON. `parent_id` is the
-    /// `Task` tool-use id when this runs inside a subagent (else null).
     ToolUse {
         id: String,
         name: String,
         input: String,
         parent_id: Option<String>,
     },
-    /// Result of a tool the agent ran.
     ToolResult {
         tool_use_id: String,
         content: String,
         is_error: bool,
         parent_id: Option<String>,
     },
-    /// Permission prompt, the UI renders an Allow/Deny card; reply via the
-    /// driver's `respond_permission` with this `request_id`. `input` is compact
-    /// JSON of the tool's arguments.
     PermissionAsk {
         request_id: String,
         tool_name: String,
         input: String,
     },
-    /// The agent invoked `AskUserQuestion`, rather than a yes/no permission
-    /// gate, the UI renders the questions interactively above the composer and
-    /// the user picks answers; reply via the driver's `answer_question` with this
-    /// `request_id`. `questions` is compact JSON of the `questions` array (each:
-    /// `question`/`header`/`multiSelect`/`options[]{label,description}`).
     QuestionAsk {
         request_id: String,
         questions: String,
     },
-    /// A live context-window reading (input tokens in context), emitted per
-    /// assistant message so the meter updates DURING a multi-tool turn, not
-    /// only at `TurnDone`. Persisted (it's tiny) so the meter survives a restart
-    /// even when a turn was interrupted before its `TurnDone` ever landed.
-    Usage { context_tokens: u32 },
-    /// The model's context window in tokens, the meter's DENOMINATOR (`Usage` is
-    /// the numerator). Emitted once at session start when the backend knows the
-    /// value authoritatively: an Ollama model is launched with a fixed `num_ctx`
-    /// the UI can't infer from the `provider/model` id. Absent for models we
-    /// don't pin (Claude, hosted OpenCode providers), the UI then falls back to
-    /// its own per-model table. Persisted so it survives a restart/replay.
-    ContextWindow { tokens: u32 },
-    /// A turn finished; carries cumulative cost so far and the context-window
-    /// fill (input tokens in context for the turn) for the UI's context meter.
+    Usage {
+        context_tokens: u32,
+    },
+    ContextWindow {
+        tokens: u32,
+    },
     TurnDone {
         cost_usd: Option<f64>,
         num_turns: Option<u32>,
         context_tokens: Option<u32>,
     },
-    /// claude auto- or manually compacted the conversation. The transcript
-    /// renders a divider so a silent compaction stretch is legible instead of
-    /// looking like a stuck turn. `trigger` is "auto" or "manual"; `pre_tokens`
-    /// is the context fill just before the compact, when reported.
     CompactBoundary {
         trigger: String,
         pre_tokens: Option<u32>,
     },
-    /// A command queued into a running session, a scheduled-wakeup prompt, a slash
-    /// command queued behind a busy turn, started or finished. The transcript renders
-    /// a seam on `started`, because claude never echoes the injected prompt to us: the
-    /// turn simply begins, and without this marker it reads as the agent spontaneously
-    /// resuming. `completed`/`cancelled` close the bracket and render nothing (the
-    /// turn's own content already shows how it ended). Both carry the same
-    /// `command_uuid`.
-    CommandLifecycle { command_uuid: String, state: String },
-    /// A background shell task (spawned by `Bash{run_in_background:true}`) reached
-    /// a terminal state. claude emits the underlying `task_notification`
-    /// asynchronously the moment the shell finishes, even if the agent never
-    /// polled it, so this is how the UI learns a fire-and-forget background task
-    /// is done and drops it from the live "background tasks" indicator (the
-    /// poll/stop paths miss the common case where the agent just moves on).
-    /// `status` is "completed" or "failed"; `tool_use_id` is the spawning `Bash`
-    /// call (the UI's direct transcript key), `task_id` the background shell id.
+    CommandLifecycle {
+        command_uuid: String,
+        state: String,
+    },
     BackgroundTaskUpdate {
         task_id: String,
         tool_use_id: Option<String>,
         status: String,
     },
-    /// A new `claude` process took over an existing session via `--resume`
-    /// (permission/model change, app-restart resume, log-only rewind fallback).
-    /// The forwarder emits it once at the start of a relaunch, distinct from
-    /// claude's per-turn `init`, so the UI drops background tasks the now-dead
-    /// prior process owned (their completion notification can never arrive).
     Relaunched {},
-    /// A LIVE rewind truncated this session's conversation IN PLACE: the same
-    /// `claude` process had its model memory peeled by `rewind_conversation` (see
-    /// [`ClaudeDriver::rewind_to_ordinal`]). Emitted once, like [`Relaunched`], so
-    /// the UI settles the transcript at the new boundary, but the process is
-    /// UNCHANGED, so (unlike a relaunch) its still-running background tasks can
-    /// still complete-notify and must NOT be dropped.
     Rewound {},
-    /// An unparseable / unknown stdout line, surfaced, never fatal.
-    ProtocolError { detail: String, raw: String },
-    /// The process ended. Terminal: no further events for this session.
+    ProtocolError {
+        detail: String,
+        raw: String,
+    },
     Exited {
         outcome: ExitOutcome,
         code: Option<i32>,
@@ -336,8 +216,6 @@ pub enum SessionEvent {
 }
 
 impl SessionEvent {
-    /// The stored `kind` tag, identical to this event's serde tag. Lives next to
-    /// the enum so the persisted log can't drift from the wire name.
     pub fn kind(&self) -> &'static str {
         match self {
             SessionEvent::Init { .. } => "init",
@@ -367,7 +245,6 @@ impl SessionEvent {
 mod tests {
     use super::*;
 
-    /// Pins the wire shape the UI keys on (`kind: "relaunched"`, no payload).
     #[test]
     fn relaunched_serializes_with_kind_tag() {
         assert_eq!(
@@ -377,9 +254,6 @@ mod tests {
         assert_eq!(SessionEvent::Relaunched {}.kind(), "relaunched");
     }
 
-    /// The live-rewind boundary is a distinct kind from `relaunched`, the UI
-    /// settles the transcript at it but must keep the (same-process) background
-    /// tasks, so the tag can't collide.
     #[test]
     fn rewound_serializes_with_kind_tag() {
         assert_eq!(
@@ -389,8 +263,6 @@ mod tests {
         assert_eq!(SessionEvent::Rewound {}.kind(), "rewound");
     }
 
-    /// A child the app took down with it on quit reads as ended, not crashed,
-    /// the "Session crashed (exit 1073807364)" every Windows restart used to show.
     #[test]
     fn windows_external_termination_is_a_kill_not_a_crash() {
         assert_eq!(
@@ -407,9 +279,6 @@ mod tests {
         );
     }
 
-    /// `kill(1)` from a terminal, Activity Monitor, an OOM killer: the session
-    /// ended, and saying so beats the "Session crashed" it used to read as. A
-    /// fault the process hit itself is still a crash.
     #[test]
     fn unix_stop_signals_are_kills_but_faults_are_crashes() {
         for signal in [1, 2, 15, 9] {
@@ -428,10 +297,6 @@ mod tests {
         }
     }
 
-    /// The encoding that actually shows up in practice: a harness that catches
-    /// SIGTERM exits `128 + N` with NO signal on its status. Measured on macOS,
-    /// `kill -TERM` on the claude binary lands here as 143, and without this the
-    /// external kill read as "Session crashed (exit 143)".
     #[test]
     fn stop_exit_codes_are_kills_not_crashes() {
         for code in [129, 130, 137, 143] {
@@ -441,7 +306,6 @@ mod tests {
                 "exit {code}"
             );
         }
-        // Ordinary failures keep reporting as crashes.
         for code in [1, 2, 127, 128] {
             assert_eq!(
                 ExitOutcome::from_unclean_exit(Some(code), None),
@@ -451,8 +315,6 @@ mod tests {
         }
     }
 
-    /// The app's own teardown leaves no trace: nothing to persist, and the
-    /// session replays idle so it stays resumable.
     #[test]
     fn detached_is_unreportable_and_replays_idle() {
         assert!(!ExitOutcome::Detached.is_reportable());

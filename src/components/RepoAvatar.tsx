@@ -6,12 +6,6 @@ function initial(name: string): string {
   return name.trim().slice(0, 1).toUpperCase() || "?";
 }
 
-/**
- * A repo's owner avatar, the GitHub org/user icon, served from
- * `github.com/<owner>.png` (no API call, no auth). Falls back to a letter tile
- * when the source isn't a GitHub repo (a local import) or the image can't load
- * (offline, etc.).
- */
 export function RepoAvatar({
   source,
   name,
@@ -30,7 +24,6 @@ export function RepoAvatar({
   if (owner && !failed) {
     return (
       <img
-        // 2× for crisp rendering on retina displays.
         src={`https://github.com/${owner}.png?size=${size * 2}`}
         alt=""
         loading="lazy"

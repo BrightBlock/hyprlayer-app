@@ -6,28 +6,19 @@ import { docTitle } from "@/features/library/text";
 import type { DocMeta, ThoughtQuery } from "@/lib/bindings";
 import { useDocs, MIN_DOC_TEXT_QUERY } from "@/lib/queries";
 
-/** Attachment role derived from the doc's type. */
 export function roleForDoc(doc: DocMeta): string {
   return doc.fm.type === "research" || doc.fm.type === "plan" ? doc.fm.type : "other";
 }
 
 type Props = {
-  /** The project's thoughts key (the doc-index project id); docs are scoped to it. */
   thoughtsProject: string | null;
-  /** Title of the agent tab attachments will target (the last-active one). */
   targetTitle: string | null;
-  /** Doc ids already attached to that tab. */
   attachedPaths: string[];
   onAttach: (id: string, role: string) => void;
   onDetach: (id: string) => void;
   onOpenDoc: (id: string) => void;
 };
 
-/**
- * The Docs view: the project's thoughts docs, inline, browse, open, and
- * attach/detach them as context for the active agent tab without leaving
- * the workstream.
- */
 export function WorkstreamDocsPanel({
   thoughtsProject,
   targetTitle,
@@ -41,8 +32,6 @@ export function WorkstreamDocsPanel({
 
   const query: ThoughtQuery = useMemo(() => {
     const trimmed = text.trim();
-    // Below MIN_DOC_TEXT_QUERY a text query is a full-corpus disk scan, so a
-    // short query leaves the panel unnarrowed rather than firing one.
     const hasText = trimmed.length >= MIN_DOC_TEXT_QUERY;
     return {
       text: hasText ? trimmed : null,

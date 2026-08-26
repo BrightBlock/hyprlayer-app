@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { fuzzyScore, groupResults, flattenGroups, type SearchResult } from "./search";
 
-// ── fuzzyScore ──────────────────────────────────────────────────────────────
 
 describe("fuzzyScore", () => {
   it("returns null when query is not a subsequence", () => {
@@ -43,7 +42,6 @@ describe("fuzzyScore", () => {
   it("word-boundary bonus: 'sp' matches better at word start", () => {
     const wordBoundary = fuzzyScore("spotlight search", "ss")!;
     const noWB = fuzzyScore("express", "ss")!;
-    // 'ss' at the start of two words vs 'ss' mid-word, boundary should win
     expect(wordBoundary).toBeGreaterThan(noWB);
   });
 
@@ -58,7 +56,6 @@ describe("fuzzyScore", () => {
   });
 });
 
-// ── groupResults ────────────────────────────────────────────────────────────
 
 function makeResult(kind: SearchResult["kind"], score: number, n: number): SearchResult {
   return {
@@ -126,7 +123,6 @@ describe("groupResults", () => {
   });
 });
 
-// ── flattenGroups ───────────────────────────────────────────────────────────
 
 describe("flattenGroups", () => {
   it("flattens groups in display order (Workstreams → Agents → Files → Documents)", () => {

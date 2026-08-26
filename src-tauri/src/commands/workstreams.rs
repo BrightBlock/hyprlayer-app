@@ -32,18 +32,9 @@ use crate::state::AppState;
 pub struct WorkstreamView {
     pub item: Workstream,
     pub git: WorktreeStatus,
-    /// Set only by `create_workstream`: report of copied untracked files; `null` elsewhere.
     pub seed: Option<hyprlayer_core::worktree::seed::SeedReport>,
 }
 
-/// Branch choices for the "new workstream" dialog. `branches` (local + remote)
-/// feeds the isolated base picker; `local_branches` and `remote_branches` feed the
-/// existing/in-place picker; `current_branch` is the in-place default.
-///
-/// `remote_branches` holds only the remote-tracking refs with *no* local branch of
-/// the same name (`origin/feature` when there's no local `feature`), a branch that
-/// exists locally is already offered as a local row. Adopting one materializes a
-/// local tracking branch first, since a remote ref would detach HEAD.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkstreamBases {
@@ -54,27 +45,12 @@ pub struct WorkstreamBases {
     pub current_branch: Option<String>,
 }
 
-/// The branch-type picker's view of one project's branch types.
-///
-/// The chain is resolved HERE, not in the frontend: `src/routes/Settings.tsx`
-/// already hand-mirrors Rust defaults at `:129-137`, `:319-322` and `:415-418`
-/// (the last carrying an explicit "keep in sync with settings.rs" comment), and
-/// a fifth mirror is how those drift.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedBranchPrefixes {
-    /// The picker's list, after built-in → global → per-repo resolution. Every
-    /// entry's `keywords` is filled from its label when it stored none, so the
-    /// frontend matcher never re-derives the fallback.
     pub prefixes: Vec<BranchPrefix>,
-    /// The prefix that applies when no type is picked
-    /// (`GitSettings::effective_branch_prefix`), so the "None" row can preview
-    /// its branch name without a fourth TS mirror of `DEFAULT_BRANCH_PREFIX`.
     pub default_prefix: String,
-    /// This repo's raw `[branches].prefixes`, empty when it inherits. The
-    /// per-repo editor edits THIS; `prefixes` above is the read-only resolution.
     pub repo: Vec<BranchPrefix>,
-    /// Which level `prefixes` came from.
     pub source: PrefixSource,
 }
 
@@ -93,9 +69,6 @@ async fn load_item(state: &AppState, id: &str) -> CmdResult<Workstream> {
         .ok_or_else(|| item_not_found(id))
 }
 
-/// Directory to run `gh` PR commands in: the worktree when on disk, else the main
-/// repo. Both share the remote (identical PR resolution); the fallback keeps PR ops
-/// working after the worktree is removed (e.g. just archived).
 fn pr_dir(item: &Workstream) -> &Path {
     let worktree = Path::new(&item.worktree_path);
     if worktree.is_dir() {
@@ -105,7 +78,6 @@ fn pr_dir(item: &Workstream) -> &Path {
     }
 }
 
-/// Live git + thoughts-link status for one item (blocking work).
 fn item_view(item: Workstream, link: Option<LinkStatus>) -> WorkstreamView {
     let dir = Path::new(&item.worktree_path);
     let git = if item.is_folder() {
@@ -120,10 +92,6 @@ fn item_view(item: Workstream, link: Option<LinkStatus>) -> WorkstreamView {
     }
 }
 
-/// Each workstream's git+link status, computed concurrently on the blocking pool
-/// (one task per item, input order preserved). Status is filesystem-bound, so a
-/// serial sweep made sidebar latency scale with workstream count; fanning out caps
-/// it at the slowest single repo. `link_for` runs per-task, so its config is Arc'd.
 async fn status_batch<F>(items: Vec<Workstream>, link_for: F) -> CmdResult<Vec<WorkstreamView>>
 where
     F: Fn(&Workstream) -> Option<LinkStatus> + Send + Sync + 'static,
@@ -150,19 +118,6 @@ where
     Ok(views)
 }
 
-/// Adopt live HEAD into the rows whose branch the app doesn't own, so a
-/// `git checkout` inside the checkout (an agent branching mid-turn, say) moves
-/// the workstream with it. `isolated` rows are excluded, their branch is
-/// app-created and archive may delete it.
-///
-/// The views are patched in place, so the caller's response already carries the
-/// new branch and the frontend needs no follow-up list refetch, which is what
-/// keeps this off the watcher's self-refresh treadmill (#221).
-///
-/// Opportunistic: a failed write (a busy database, say) is logged and the
-/// unpatched views returned, because this rides on a read path, failing the
-/// whole list would blank the board and the sidebar over a bookkeeping update
-/// the next sweep retries anyway.
 async fn adopt_head_branches(
     app: &AppHandle,
     db: Arc<hyprlayer_core::store::Db>,
@@ -211,8 +166,6 @@ async fn adopt_head_branches(
         }
         .emit(app);
         views[i].item.branch = next;
-        // The write dropped the attached PR (it was the old branch's); keep the
-        // response from claiming otherwise.
         views[i].item.pr_number = None;
     }
     views
@@ -231,7 +184,6 @@ pub async fn list_workstreams(
     })
     .await?;
 
-    // All items in one project share a thoughts config; resolve it once.
     let effective = if let Some(first) = items.first() {
         Some(effective_for(&state, &first.project_path).await?)
     } else {
@@ -246,7 +198,6 @@ pub async fn list_workstreams(
     Ok(adopt_head_branches(&app, state.db.clone(), views).await)
 }
 
-/// Active workstreams across every project, feeds the sidebar tree.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_all_workstreams(
@@ -258,15 +209,6 @@ pub async fn list_all_workstreams(
     Ok(adopt_head_branches(&app, state.db.clone(), views).await)
 }
 
-/// Point the live worktree watcher at this workstream, so external edits emit
-/// `WorktreeChanged` and refresh the Changes panel + git status without a focus
-/// event. Single-slot: switching replaces the previous watcher; same id is a no-op.
-///
-/// `None` clears the slot, the route calls it when no workstream is on screen.
-/// That matters beyond the file watcher: `pr_watch` reads this slot to decide
-/// which workstream deserves live PR polling, so a slot left pointing at the
-/// last-viewed workstream keeps spending GitHub API quota on a branch nobody is
-/// looking at.
 #[tauri::command]
 #[specta::specta]
 pub async fn watch_worktree(
@@ -282,8 +224,6 @@ pub async fn watch_worktree(
     if guard.as_ref().is_some_and(|(id, _)| id == &workstream_id) {
         return Ok(());
     }
-    // Drop the previous watcher before resolving the new one (so a missing
-    // worktree, e.g. just-archived, simply leaves nothing watched).
     *guard = None;
 
     let ws = load_item(&state, &workstream_id).await?;
@@ -295,8 +235,6 @@ pub async fn watch_worktree(
     let app = app.clone();
     let wsid = workstream_id.clone();
     let handle = blocking("watch_worktree", move || {
-        // The watcher needs the git dir to notice commits/staging in a linked
-        // worktree; fall back to `<worktree>/.git` if unresolved.
         let git_dir = hyprlayer_core::gitops::git_dir(&path).unwrap_or_else(|| path.join(".git"));
         hyprlayer_core::index::watcher::watch_worktree(
             &path,
@@ -316,9 +254,6 @@ pub async fn watch_worktree(
     Ok(())
 }
 
-/// Branches the user can base a new workstream on, plus the auto-detected default.
-/// Best-effort: the default falls back to empty (dialog pre-selects nothing, backend
-/// re-detects on create) so a repo with no resolvable main/master still lists branches.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workstream_bases(
@@ -338,8 +273,6 @@ pub async fn list_workstream_bases(
         blocking("list_branches", move || {
             let branches = hyprlayer_core::gitops::list_branches(&repo)?;
             let local_branches = hyprlayer_core::gitops::list_local_branches(&repo)?;
-            // Remote-only: a remote ref whose local counterpart already exists is
-            // the same branch, and the local row is the one that can be checked out.
             let remote_branches = hyprlayer_core::gitops::list_remote_branches(&repo)?
                 .into_iter()
                 .filter(|r| match hyprlayer_core::gitops::local_name_for_remote(r) {
@@ -361,10 +294,6 @@ pub async fn list_workstream_bases(
     })
 }
 
-/// `git fetch --prune origin` in the project's own checkout, so the branch picker
-/// sees branches pushed since the app last fetched. The new-workstream dialog fires
-/// this on open and refetches the branch list when it lands, the list renders
-/// immediately from the refs already on disk, then fills in.
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_project_remote(
@@ -382,13 +311,6 @@ pub async fn fetch_project_remote(
     Ok(())
 }
 
-/// Restore the project checkout's modified tracked files to HEAD, leaving
-/// untracked files alone, and report how many were reverted. Destructive, the
-/// new-workstream dialog confirms first.
-///
-/// Keyed by project path rather than workstream id: this exists for the
-/// `checkout_dirty` create failure, where the leftover changes usually belong to
-/// a workstream that was already archived, so there is no live row to hang it off.
 #[tauri::command]
 #[specta::specta]
 pub async fn discard_project_changes(
@@ -412,19 +334,11 @@ pub async fn discard_project_changes(
     .map_err(AppError::from)
 }
 
-/// The local branch an existing/in-place workstream will check out, and whether the
-/// app had to create it (a remote-only pick), the rollback path deletes only
-/// branches we created.
 struct AdoptedBranch {
     branch: String,
     created: bool,
 }
 
-/// Resolve a branch the user picked in the new-workstream dialog into a local branch
-/// name. A local branch passes straight through; a remote-tracking ref
-/// (`origin/feature`) gets a local branch created to track it, the same two steps
-/// `git checkout feature` does by hand for a remote-only branch. Anything else is an
-/// `invalid_branch` error.
 async fn adopt_branch(
     state: &AppState,
     project_path: &str,
@@ -451,9 +365,6 @@ async fn adopt_branch(
         let local = hyprlayer_core::gitops::local_name_for_remote(&branch)
             .unwrap_or(branch.as_str())
             .to_string();
-        // Raced with a local branch of the same name appearing (the picker hides a
-        // remote whose local exists): adopt that local rather than failing on a
-        // name collision.
         if locals.contains(&local) {
             return Ok(AdoptedBranch {
                 branch: local,
@@ -465,9 +376,6 @@ async fn adopt_branch(
             .require(BinaryKind::Git)
             .await
             .map_err(AppError::from)?;
-        // Freshen the remote ref so the new branch starts at the remote's current
-        // tip rather than whatever was last fetched. Offline is fine, the ref on
-        // disk still works, it's just older.
         let _ = worktree::fetch_remote(&git, &repo).await;
         worktree::create_tracking_branch(&git, &repo, &local, &branch)
             .await
@@ -485,11 +393,6 @@ async fn adopt_branch(
     })
 }
 
-/// A workstream in a `folder` project: no worktree, no branch, no thoughts
-/// provisioning, no Setup script, just a row pointing at the project folder,
-/// which agent sessions run in directly. Unlike `inplace` there's no
-/// one-per-project limit: with no branch to fight over, parallel workstreams in
-/// the same folder are just parallel conversations.
 async fn create_folder_workstream(
     state: &AppState,
     project_path: String,
@@ -509,8 +412,6 @@ async fn create_folder_workstream(
     let new_item = NewWorkstream {
         slug: worktree::unique_slug(&title),
         title,
-        // No git: an empty branch/base is the honest value, and every git
-        // surface is skipped for `Folder` rather than reading these.
         branch: String::new(),
         base_branch: String::new(),
         worktree_path: project_path.clone(),
@@ -523,7 +424,6 @@ async fn create_folder_workstream(
 
 #[tauri::command]
 #[specta::specta]
-// Arity mirrors the IPC contract this command exposes.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_workstream(
     app: AppHandle,
@@ -531,11 +431,8 @@ pub async fn create_workstream(
     project_path: String,
     title: String,
     base: Option<String>,
-    // `branch`: the local branch to adopt for existing/inplace; unused for isolated.
     mode: WorktreeMode,
     branch: Option<String>,
-    // `branch_prefix`: the type picked in the dialog. Only consulted for
-    // isolated, like `base`.
     branch_prefix: Option<String>,
 ) -> CmdResult<WorkstreamView> {
     let title = title.trim().to_string();
@@ -547,9 +444,6 @@ pub async fn create_workstream(
         });
     }
 
-    // A folder project has no git and no thoughts mapping, the requested mode,
-    // base, and branch are all meaningless. Read the registry, not the caller,
-    // so a stale UI can't ask for a worktree in a plain directory.
     if !super::projects::project_source(&state, &project_path)
         .await
         .is_git()
@@ -557,13 +451,6 @@ pub async fn create_workstream(
         return create_folder_workstream(&state, project_path, title).await;
     }
 
-    // Existing/in-place adopt a branch the user already has, and both check it out
-    // somewhere (a worktree, or the main checkout), a remote-tracking ref or tag
-    // would detach HEAD, so resolve the pick to a *local* branch first, creating one
-    // that tracks the remote when the user picked a remote-only branch. Rejects
-    // anything that is neither: the UI only offers real branches, but a direct Tauri
-    // invoke could pass anything. (`WorktreeManager` documents the local-branch
-    // invariant; this is where it's enforced.)
     let picked = branch
         .map(|b| b.trim().to_string())
         .filter(|b| !b.is_empty());
@@ -575,8 +462,6 @@ pub async fn create_workstream(
         None => (None, false),
     };
 
-    // Resolve the requested backing mode so an unknown mode or a missing branch
-    // fails before any worktree work.
     let needs_branch = |m: &str| {
         branch_choice.clone().ok_or_else(|| AppError {
             code: "invalid_branch".into(),
@@ -592,8 +477,6 @@ pub async fn create_workstream(
         WorktreeMode::Inplace => CreateMode::InPlace {
             branch: needs_branch("in-place")?,
         },
-        // Only a folder project can back a folder workstream, and that path
-        // returned above, here the mode contradicts the project.
         WorktreeMode::Folder => {
             return Err(AppError {
                 code: "invalid_mode".into(),
@@ -605,9 +488,6 @@ pub async fn create_workstream(
     };
     let inplace = mode == WorktreeMode::Inplace;
 
-    // At most one in-place workstream per project: every in-place row shares the
-    // single project checkout, so a second one would claim a different branch on
-    // the same HEAD and the two would fight over it (silent wrong-branch work).
     if inplace {
         let pp = project_path.clone();
         let active = db_task(state.db.clone(), move |db| db.list_workstreams(&pp, false)).await?;
@@ -633,10 +513,6 @@ pub async fn create_workstream(
         .require(BinaryKind::Git)
         .await
         .map_err(AppError::from)?;
-    // A type picked in the dialog REPLACES the global prefix rather than
-    // composing with it: `fix/add-login-a1b2`, not `jt/fix/add-login-a1b2`.
-    // A blank pick is the same as no pick, matching how `base_override` below
-    // treats an empty selection.
     let picked = branch_prefix
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
@@ -644,22 +520,9 @@ pub async fn create_workstream(
         Some(p) => p,
         None => state.settings.get().await.git.effective_branch_prefix(),
     };
-    // Validate whichever level won, not just an explicit pick. Nothing checked
-    // `git.branchPrefix` before the branch-type picker landed, so a stored
-    // `" my feature/"` is a real shape (`system.rs`'s own scoped-validation
-    // test uses it), and `set_app_settings` deliberately re-validates it only
-    // when it CHANGES — so an already-bad global prefix is never re-examined
-    // there. Without this it reaches `git worktree add -b` and surfaces as a
-    // raw git fatal naming neither the setting nor its remedy.
-    //
-    // Scoped to the isolated path because that is the only arm of
-    // `WorktreeManager::create` that reads `branch_prefix` (`manager.rs:169`);
-    // the others adopt a branch that already has a name, and a bad stored
-    // prefix must not block them.
     if matches!(create_mode, CreateMode::Isolated) {
         hyprlayer_core::branch_prefix::validate_prefix(&branch_prefix).map_err(AppError::from)?;
     }
-    // An empty/blank selection means "auto-detect", same as omitting it.
     let base_override = base.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
     let created = state
         .worktrees
@@ -679,20 +542,10 @@ pub async fn create_workstream(
 
     let worktree_path = PathBuf::from(&created.path);
 
-    // In-place workstreams target the project's own checkout, which is already
-    // provisioned, re-running `thoughts init` (and rolling it back on failure)
-    // would touch the user's repo. Just read the existing link status; never
-    // provision or seed.
     let (link, seed) = if inplace {
         let link = thoughts_links::check_thoughts(&worktree_path, &effective);
         (link, None)
     } else {
-        // Provision hyprlayer context inside the new worktree, CLI-first:
-        // `thoughts init --yes --directory <mapped>` creates the symlinks and
-        // maps the worktree to the SAME repo name, with the CLI owning its
-        // config write. Manual provisioning (which has the Windows junction
-        // fallback) is the fallback. Failures roll the worktree back so we
-        // never leave half-provisioned state behind.
         let cli_init = HyprCli::new(&state.binaries)
             .thoughts_init(&worktree_path, &mapped, effective.profile_name.as_deref())
             .await;
@@ -715,9 +568,6 @@ pub async fn create_workstream(
         let link = match provision {
             Ok(link) => link,
             Err(e) => {
-                // Roll the worktree back. Delete the branch only when WE created
-                // it, isolated, or the local tracking branch we just made for a
-                // remote-only pick. An adopted existing branch is the user's.
                 let _ = state
                     .worktrees
                     .remove(
@@ -735,9 +585,6 @@ pub async fn create_workstream(
         };
         state.config.invalidate().await;
 
-        // Best-effort: copy configured untracked files (e.g. .env) into the new
-        // worktree. NEVER fatal, a missing file must not undo a provisioned
-        // worktree.
         let seed = {
             let repo = PathBuf::from(&project_path);
             let wt = worktree_path.clone();
@@ -777,19 +624,7 @@ pub async fn create_workstream(
     };
     let item = db_task(state.db.clone(), move |db| db.insert_workstream(new_item)).await?;
 
-    // Run the project's Setup script once, in the new worktree, before the
-    // workstream reports ready (this blocks the command's return). A failure is
-    // recorded + surfaced via the ScriptRunChanged event but does NOT roll back
-    // the worktree, the user can fix the script and re-run Setup from the dock.
-    // In-place workstreams reuse the existing checkout, so there's nothing to set
-    // up.
-    //
-    // SECURITY, auto-run of UNTRUSTED code (TODO: trust gate). `.hyprlayer/
-    // settings.toml` is repo-controlled, so this executes the repo's Setup block
-    // as `sh -lc` on worktree creation with no confirmation: opening a hostile
-    // repo is RCE. Run (`script_run`) and Archive run the same repo-defined shell.
-    // Fix: gate on explicit per-repo trust, content-hash the scripts, store
-    // grants in app config (not the repo), and re-prompt when the hash changes.
+    // TODO: Gate setup scripts on repository trust.
     if !inplace {
         super::scripts::run_lifecycle_script(&app, &state, &item, ScriptKind::Setup).await;
     }
@@ -799,7 +634,6 @@ pub async fn create_workstream(
     Ok(view)
 }
 
-/// This project's branch types, resolved built-in → global → per-repo.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_branch_prefixes(
@@ -828,16 +662,6 @@ pub async fn get_branch_prefixes(
     })
 }
 
-/// Overwrite this repo's `[branches].prefixes`. Deliberately asymmetric with
-/// [`get_branch_prefixes`], which returns the RESOLVED chain: the global list is
-/// written through the existing `set_app_settings` whole-object replace, and
-/// there is no writable "resolved" level to write back to.
-///
-/// Returns the stored (trimmed) list, mirroring `set_worktree_files`
-/// (`src-tauri/src/commands/projects.rs:1100-1116`). That return value is what
-/// makes normalization safe: the editor's re-seed guard compares what it sent
-/// against what it reads back, so a silent server-side trim would look like an
-/// external edit and wipe an in-progress row.
 #[tauri::command]
 #[specta::specta]
 pub async fn set_branch_prefixes(
@@ -872,10 +696,6 @@ pub async fn rename_workstream(
     .await
 }
 
-/// Change a workstream's target (base) branch. Re-targets the live PR via
-/// `gh pr edit --base` when one is open, then persists the new base, so the
-/// next status recompute measures ahead/behind against it and a future Ship
-/// opens its PR there. Lets git-flow teams merge into `develop`, not `main`.
 #[tauri::command]
 #[specta::specta]
 pub async fn set_workstream_base_branch(
@@ -888,11 +708,6 @@ pub async fn set_workstream_base_branch(
     if base.is_empty() {
         return Err(AppError::internal("base branch cannot be empty"));
     }
-    // Re-target an already-open PR so GitHub merges into the new base. The PR
-    // lookup is best effort, a local-only branch has none (Ok(None)) and a
-    // transient gh/network blip shouldn't block the local base change, but a
-    // real failure to edit an existing PR (e.g. the base isn't pushed yet)
-    // propagates to the dialog so the user can fix it.
     if let Ok(gh) = state.binaries.require(BinaryKind::Gh).await {
         let dir = pr_dir(&item);
         if let Ok(Some(status)) = pr::pr_status(&gh, dir, &item.pr_ref()).await {
@@ -909,10 +724,6 @@ pub async fn set_workstream_base_branch(
     .await
 }
 
-/// Pull the target (base) branch's new commits into the workstream's worktree
-/// (fetch + merge). Deterministic, no agent. On conflicts the merge is left in
-/// progress so the user resolves the conflicted files (they surface in the
-/// Changes panel) and commits; a dirty-tree precondition surfaces git's message.
 #[tauri::command]
 #[specta::specta]
 pub async fn update_workstream_from_base(
@@ -930,9 +741,6 @@ pub async fn update_workstream_from_base(
         .map_err(AppError::from)
 }
 
-/// Fetch the workstream's remote (`git fetch --prune origin`) so ahead/behind and
-/// the PR view reflect remote branch changes. The frontend refetches the
-/// workstream status + PR afterward.
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_workstream_remote(state: State<'_, AppState>, id: String) -> CmdResult<()> {
@@ -954,8 +762,6 @@ pub async fn set_workstream_stage(
     id: String,
     stage: Stage,
 ) -> CmdResult<()> {
-    // `Stage` deserializes tolerantly (unknown ⇒ General), so no invalid-stage
-    // error path remains: the bindings union makes a bad value a TS type error.
     load_item(&state, &id).await?;
     db_task(state.db.clone(), move |db| {
         db.update_workstream_stage(&id, stage)
@@ -1003,34 +809,16 @@ pub async fn list_workstream_docs(
     db_task(state.db.clone(), move |db| db.workstream_docs(&id)).await
 }
 
-/// Archive a workstream non-destructively: move the worktree to
-/// `<project>/archived-contexts/<slug>/` and flip the
-/// DB row to `archived`. Branch and every uncommitted file are preserved
-/// for [`restore_workstream`]. Husks (worktree dir without `.git`) can't be
-/// moved; they're pruned + cleaned, the row still flips to archived, and
-/// restore for that row will fail with `archive_missing`.
-///
-/// In-place workstreams have no dedicated worktree (their path IS the project
-/// checkout), so archive is purely a status flip: the directory, branch, and
-/// thoughts links are left exactly as they are.
 #[tauri::command]
 #[specta::specta]
 pub async fn archive_workstream(
     app: AppHandle,
     state: State<'_, AppState>,
     id: String,
-    // When the Archive script fails, the user can retry (`false`) or skip it
-    // (`true`) to archive anyway. `false` on a normal archive.
     skip_scripts: bool,
 ) -> CmdResult<()> {
     let item = load_item(&state, &id).await?;
 
-    // Tear down any live agent sessions for this workstream BEFORE moving the
-    // worktree. Otherwise the claude process keeps running against a stale
-    // cwd and its driver + forwarder task leak (they only exit on the
-    // process's own `Exited` event, which archive never triggers). Kill each
-    // and wait, bounded, for the forwarder to drop it from the live
-    // registry.
     let sessions = {
         let id = id.clone();
         db_task(state.db.clone(), move |db| db.list_sessions(&id))
@@ -1041,22 +829,13 @@ pub async fn archive_workstream(
         kill_and_await_exit(&state, &session.id).await;
     }
 
-    // Same for any live terminals in this workstream: kill their shells so we
-    // don't leak orphaned PTY processes against the about-to-move worktree.
     state.terminals.remove_for_workstream(&id).await;
-    // Stop any live Run process and drop this workstream's script state.
     state.scripts.clear_workstream(&id).await;
 
-    // In-place / folder: nothing to move or unlink, just flip the row. (The
-    // shared project directory, its branch, and its thoughts links stay put.)
-    // Archive scripts only run for dedicated worktrees, so skip them here too.
     if item.shares_project_dir() {
         return db_task(state.db.clone(), move |db| db.archive_workstream(&id)).await;
     }
 
-    // Run the project's Archive script on the still-intact worktree before any
-    // teardown. A non-zero exit aborts the archive (nothing destructive has run
-    // yet) so the user can fix it and retry, or archive again with skip_scripts.
     if !skip_scripts
         && matches!(
             super::scripts::run_lifecycle_script(&app, &state, &item, ScriptKind::Archive).await,
@@ -1081,14 +860,6 @@ pub async fn archive_workstream(
     let archive_path = archive_dir_for(project_path, &item.slug);
     let live = worktree::is_live_worktree(worktree_path);
 
-    // Delete the remote branch when archiving a *merged* workstream, so a shipped
-    // branch doesn't linger on GitHub (we no longer lean on GitHub's "auto-delete
-    // head branches" setting). Gated on the user's opt-in + an app-created branch,
-    // and on the PR actually being merged, an unmerged branch's remote copy may
-    // be its only backup, so we never delete that. The local branch stays put
-    // (restore needs it; permanent delete drops it). Best-effort: a `gh`/network
-    // hiccup or an already-deleted branch must not block the archive. Done before
-    // the worktree moves so the PR lookup runs from the live checkout.
     if state.settings.get().await.git.delete_branch_on_archive && item.app_owns_branch() {
         if let Ok(gh) = state.binaries.require(BinaryKind::Gh).await {
             if let Ok(Some(status)) = pr::pr_status(&gh, pr_dir(&item), &item.pr_ref()).await {
@@ -1106,9 +877,6 @@ pub async fn archive_workstream(
         }
     }
 
-    // Uninit so the worktree's absolute-path symlinks + repoMappings don't
-    // accumulate stale entries pointing at the archive location. Restore
-    // re-provisions from scratch. Direct mapping removal is the fallback.
     let mut unmapped = false;
     if live {
         match HyprCli::new(&state.binaries)
@@ -1121,7 +889,6 @@ pub async fn archive_workstream(
     }
 
     if live && state.settings.get().await.git.prune_ignored_on_archive {
-        // worktree.copy patterns are preserved; read mirrors create_workstream.
         let keep = hyprlayer_core::repo_settings::read(project_path)
             .map(|s| s.worktree.copy)
             .unwrap_or_default();
@@ -1140,7 +907,6 @@ pub async fn archive_workstream(
         .await
         .map_err(AppError::from)?;
     if moved {
-        // Per-clone exclude, written once per project, idempotent.
         if let Err(e) = worktree::ensure_archive_excluded(project_path) {
             log::warn!("could not write .git/info/exclude for archive: {e}");
         }
@@ -1157,19 +923,14 @@ pub async fn archive_workstream(
     db_task(state.db.clone(), move |db| db.archive_workstream(&id)).await
 }
 
-/// View shape for the archive history view. `archive_exists` flags rows
-/// whose backup directory was deleted out-of-band (restore would fail; UI
-/// surfaces "delete permanently" as the only action).
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchivedWorkstreamView {
     pub item: Workstream,
-    /// `<project>/archived-contexts/<slug>`, the on-disk backup path.
     pub archive_path: String,
     pub archive_exists: bool,
 }
 
-/// All archived workstreams across every project, newest-first.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_archived_workstreams(
@@ -1181,9 +942,6 @@ pub async fn list_archived_workstreams(
             .into_iter()
             .map(|item| {
                 let archive_path = archive_dir_for(Path::new(&item.project_path), &item.slug);
-                // In-place/folder rows were never moved to an archive dir,
-                // archive is a pure status flip, and restore is too, so they're
-                // always restorable regardless of whether the (unused) path exists.
                 let archive_exists = item.shares_project_dir() || archive_path.exists();
                 ArchivedWorkstreamView {
                     archive_path: archive_path.display().to_string(),
@@ -1196,11 +954,6 @@ pub async fn list_archived_workstreams(
     .await
 }
 
-/// Move an archived workstream back to its original path and flip the row
-/// to `active`. Fails with `restore_target_occupied` when something has
-/// taken the original `worktree_path` since archive (e.g. a new workstream
-/// reused the slug), and `archive_missing` if the backup directory was
-/// deleted out-of-band.
 #[tauri::command]
 #[specta::specta]
 pub async fn restore_workstream(
@@ -1216,9 +969,6 @@ pub async fn restore_workstream(
         });
     }
 
-    // In-place / folder: archive never moved anything, so restore is just the
-    // status flip plus a fresh link read against the project directory (a
-    // folder project has no links to read).
     if item.shares_project_dir() {
         let link = if item.is_folder() {
             None
@@ -1274,10 +1024,6 @@ pub async fn restore_workstream(
         .await
         .map_err(AppError::from)?;
 
-    // Re-provision thoughts: links + repoMappings. Best-effort, restore is
-    // still useful with broken links (the user sees the broken-link badge
-    // and can hit Reprovision), but the common path should produce a fully
-    // working worktree.
     let effective = effective_for(&state, &item.project_path).await?;
     let link = match thoughts_links::provision_thoughts(worktree_path, &effective) {
         Ok(link) => Some(link),
@@ -1308,10 +1054,6 @@ pub async fn restore_workstream(
     Ok(item_view(item, link))
 }
 
-/// Permanent delete: remove the archive directory, prune git's worktree
-/// registry, optionally drop the branch (per `git.delete_branch_on_archive`,
-/// which now governs the *permanent delete* side of the archive lifecycle),
-/// and DELETE the workstream row.
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) -> CmdResult<()> {
@@ -1323,8 +1065,6 @@ pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) 
             remedy: Some("Archive it first.".into()),
         });
     }
-    // A folder row owns nothing on disk, no archive dir, no branch, no git.
-    // Purging it is a registry prune.
     if item.is_folder() {
         return db_task(state.db.clone(), move |db| db.delete_workstream(&id)).await;
     }
@@ -1335,8 +1075,6 @@ pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) 
         .map_err(AppError::from)?;
     let project_path = Path::new(&item.project_path);
     let archive_path = archive_dir_for(project_path, &item.slug);
-    // Only ever delete a branch the app created (isolated). For an in-place row
-    // the archive dir doesn't exist either, so purge is just a registry prune.
     let delete_branch =
         state.settings.get().await.git.delete_branch_on_archive && item.app_owns_branch();
 
@@ -1355,8 +1093,6 @@ pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) 
     db_task(state.db.clone(), move |db| db.delete_workstream(&id)).await
 }
 
-/// Report returned by [`cleanup_archived_workstreams`]: rows successfully
-/// deleted vs. rows that failed (logged individually as warnings).
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveCleanupReport {
@@ -1364,10 +1100,6 @@ pub struct ArchiveCleanupReport {
     pub failed: u32,
 }
 
-/// Bulk permanent-delete of archived workstreams. `before_ms = None` purges
-/// ALL archived rows; `Some(cutoff)` purges those with `archived_at < cutoff`.
-/// Per-row reuse of purge_archive + delete_workstream; best-effort (failures
-/// counted, not fatal), mirroring delete_archived_workstream.
 #[tauri::command]
 #[specta::specta]
 pub async fn cleanup_archived_workstreams(
@@ -1375,14 +1107,11 @@ pub async fn cleanup_archived_workstreams(
     before_ms: Option<f64>,
 ) -> CmdResult<ArchiveCleanupReport> {
     let items = db_task(state.db.clone(), |db| db.list_archived_workstreams()).await?;
-    // Filter: None → all; Some(cut) → only rows archived before the cutoff.
     let items: Vec<_> = items
         .into_iter()
         .filter(|w| before_ms.is_none_or(|cut| w.archived_at.is_some_and(|a| a < cut)))
         .collect();
 
-    // Folder rows purge without git (mirroring delete_archived_workstream), so
-    // only require the binary when a git-backed row is actually in the batch.
     let git = if items.iter().any(|w| !w.is_folder()) {
         Some(
             state
@@ -1402,12 +1131,10 @@ pub async fn cleanup_archived_workstreams(
     for w in items {
         let id = w.id.clone();
 
-        // A folder row owns nothing on disk, no archive dir, no branch.
         if !w.is_folder() {
             let git = git.as_ref().expect("required above for non-folder rows");
             let project_path = PathBuf::from(&w.project_path);
             let archive_path = archive_dir_for(&project_path, &w.slug);
-            // Never delete a branch the app didn't create (existing/inplace).
             let delete_branch = delete_branch_setting && w.app_owns_branch();
 
             if let Err(e) = state
@@ -1433,8 +1160,6 @@ pub async fn cleanup_archived_workstreams(
     Ok(ArchiveCleanupReport { deleted, failed })
 }
 
-/// Re-create broken thoughts links (status shows `broken` after e.g. a moved
-/// thoughts repo).
 #[tauri::command]
 #[specta::specta]
 pub async fn reprovision_workstream(
@@ -1442,8 +1167,6 @@ pub async fn reprovision_workstream(
     id: String,
 ) -> CmdResult<WorkstreamView> {
     let item = load_item(&state, &id).await?;
-    // Provisioning would write thoughts symlinks into a folder the app
-    // promised to leave untouched.
     if item.is_folder() {
         return Err(AppError {
             code: "folder_no_thoughts".into(),
@@ -1457,13 +1180,8 @@ pub async fn reprovision_workstream(
     Ok(item_view(item, Some(link)))
 }
 
-/// What a worktree-git failure almost always means: the command resolved a
-/// workstream and then could not read the directory it points at.
 const WORKTREE_GONE: &str = "The worktree may have been deleted; archive this workstream.";
 
-/// Run a blocking git operation against a workstream's worktree AND its base
-/// branch: load the item, hand both to `f` on the blocking pool, and map any
-/// core error to an `AppError` tagged with `op` and carrying `remedy`.
 async fn with_worktree_base_remedy<T, F>(
     state: &State<'_, AppState>,
     id: &str,
@@ -1487,7 +1205,6 @@ where
     })
 }
 
-/// [`with_worktree_base_remedy`] with the default worktree-gone remedy.
 async fn with_worktree_base<T, F>(
     state: &State<'_, AppState>,
     id: &str,
@@ -1501,8 +1218,6 @@ where
     with_worktree_base_remedy(state, id, op, WORKTREE_GONE, f).await
 }
 
-/// [`with_worktree_base`] for the commands that only need the worktree path.
-/// Every command that needs only the path is a one-line call to this.
 async fn with_worktree<T, F>(
     state: &State<'_, AppState>,
     id: &str,
@@ -1513,21 +1228,9 @@ where
     T: Send + 'static,
     F: FnOnce(&Path) -> Result<T, CoreError> + Send + 'static,
 {
-    // Both closure params are annotated: rustc infers a higher-ranked signature
-    // here over two elided lifetimes, and an untyped `_` turns a mistake into an
-    // opaque "lifetime may not live long enough" rather than a type error.
     with_worktree_base(state, id, op, move |p: &Path, _: &str| f(p)).await
 }
 
-/// [`with_worktree`] with a caller-supplied remedy.
-///
-/// [`WORKTREE_GONE`] assumes the only way one of these commands fails is a
-/// worktree that is no longer on disk. The sha-taking reads break that: they
-/// also fail on a commit-ish git cannot resolve, which is what an old
-/// commit-diff tab becomes after a rebase or a squash-merge rewrites the
-/// branch. Telling someone to archive a healthy workstream because a stale tab
-/// was reopened is the same actively-wrong advice `list_commits` routes around
-/// by returning an empty list for an unborn HEAD.
 async fn with_worktree_remedy<T, F>(
     state: &State<'_, AppState>,
     id: &str,
@@ -1542,13 +1245,10 @@ where
     with_worktree_base_remedy(state, id, op, remedy, move |p: &Path, _: &str| f(p)).await
 }
 
-/// Remedy for the two sha-addressed reads. See [`with_worktree_remedy`].
 const COMMIT_GONE: &str =
     "This commit may no longer be on the branch after a rebase or squash-merge; \
      reopen the file from the Commits tab.";
 
-/// Split staged/unstaged status for the source-control panel (thoughts/ and
-/// .hyprlayer/ excluded).
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_git_status(
@@ -1561,24 +1261,16 @@ pub async fn worktree_git_status(
     .await
 }
 
-/// The live values behind prompt `{{variables}}` for a workstream. The frontend
-/// fetches this at run time to substitute a custom prompt's body before sending
-/// it (built-in Commit/Ship bodies are substituted backend-side at launch).
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptContext {
     pub branch: String,
-    /// The PR target branch, `origin/`-stripped.
     pub base_branch: String,
-    /// Working-tree change summary, e.g. `"4 files (+182 −40)"`.
     pub changed_files: String,
-    /// Working-tree diff vs HEAD, truncated backend-side.
     pub diff: String,
-    /// Most recent commit subject.
     pub last_commit: String,
 }
 
-/// Resolve the prompt `{{variable}}` values for a workstream's worktree.
 #[tauri::command]
 #[specta::specta]
 pub async fn workstream_prompt_context(
@@ -1605,7 +1297,6 @@ pub async fn workstream_prompt_context(
     })
 }
 
-/// Stage the given worktree-relative paths (HEAD→index).
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_stage(
@@ -1619,7 +1310,6 @@ pub async fn worktree_stage(
     .await
 }
 
-/// Unstage the given paths (reset index entries back to HEAD).
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_unstage(
@@ -1633,8 +1323,6 @@ pub async fn worktree_unstage(
     .await
 }
 
-/// Discard working-tree changes for the given paths (restore tracked to HEAD,
-/// delete untracked). Destructive, the UI confirms first.
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_discard(
@@ -1648,8 +1336,6 @@ pub async fn worktree_discard(
     .await
 }
 
-/// The two file texts the diff viewer compares (HEAD/index/working-tree depending
-/// on `staged`).
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_file_sides(
@@ -1664,9 +1350,6 @@ pub async fn worktree_file_sides(
     .await
 }
 
-/// The commits this workstream added on top of its base branch, newest first
-/// (capped backend-side). Empty — not an error — when the branch has diverged
-/// from nothing yet or HEAD is unborn.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workstream_commits(
@@ -1679,8 +1362,6 @@ pub async fn list_workstream_commits(
     .await
 }
 
-/// Files one commit changed, diffed against its first parent, with renames
-/// detected so the labels match the Changes panel.
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_commit_files(
@@ -1698,7 +1379,6 @@ pub async fn worktree_commit_files(
     .await
 }
 
-/// The two file texts the diff viewer compares for a commit (first parent vs. commit).
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_commit_file_sides(
@@ -1717,7 +1397,6 @@ pub async fn worktree_commit_file_sides(
     .await
 }
 
-/// Immediate children of a directory in the worktree (lazy "All Files" tree).
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_list_dir(
@@ -1731,7 +1410,6 @@ pub async fn worktree_list_dir(
     .await
 }
 
-/// A worktree file's text + mtime (the save concurrency token).
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeFile {
@@ -1739,7 +1417,6 @@ pub struct WorktreeFile {
     pub mtime_ms: f64,
 }
 
-/// A save was refused because the file changed on disk since it was opened.
 fn file_conflict() -> AppError {
     AppError {
         code: "file_conflict".into(),
@@ -1750,7 +1427,6 @@ fn file_conflict() -> AppError {
     }
 }
 
-/// Read a worktree file as text + mtime for the editor.
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_read_file(
@@ -1766,8 +1442,6 @@ pub async fn worktree_read_file(
     .await
 }
 
-/// Save a worktree file, refusing (with `file_conflict`) if its mtime drifted since
-/// the editor read it. `base_mtime_ms` of `0` skips the guard. Returns the new mtime.
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_write_file(
@@ -1780,7 +1454,6 @@ pub async fn worktree_write_file(
     let item = load_item(&state, &id).await?;
     let worktree = PathBuf::from(&item.worktree_path);
     blocking("worktree_write_file", move || -> CmdResult<f64> {
-        // Refuse if the file changed on disk since the editor read it (mirrors save_doc).
         if base_mtime_ms > 0.0 {
             if let Ok(current) = hyprlayer_core::gitops::file_mtime_ms(&worktree, &path) {
                 if (current - base_mtime_ms).abs() > 0.5 {
@@ -1794,8 +1467,6 @@ pub async fn worktree_write_file(
     .await?
 }
 
-/// Slash commands available in this worktree (project + user `.claude`), for the
-/// composer's `/skill` autocomplete and highlight.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_slash_commands(
@@ -1808,8 +1479,6 @@ pub async fn list_slash_commands(
     .await
 }
 
-/// Worktree-relative file paths matching `query`, for the composer's `@file`
-/// autocomplete. Returns at most `limit` results.
 #[tauri::command]
 #[specta::specta]
 pub async fn worktree_search_files(
@@ -1824,17 +1493,6 @@ pub async fn worktree_search_files(
     .await
 }
 
-/// The pull request for a workstream, the manually attached PR (by number) when
-/// one is set, otherwise the branch's own PR. Derived live from `gh`.
-///
-/// `None` means GitHub answered and this branch has no PR; a gh that's simply
-/// absent/unauthenticated says the same thing (no GitHub in play at all), so it
-/// degrades to `None` too, matching `list_recent_repos`.
-///
-/// A gh that IS there and failed (spent API quota, network, a wedged repo) is an
-/// error, deliberately: collapsing that into `None` told the UI "no PR exists",
-/// which un-hides Ship on a branch that already has one. Erroring instead leaves
-/// React Query holding the last known status.
 #[tauri::command]
 #[specta::specta]
 pub async fn workstream_pr_status(
@@ -1854,10 +1512,6 @@ pub async fn workstream_pr_status(
         })
 }
 
-/// Open PRs in the workstream's repo for the "Attach PR" picker, filtered by
-/// `query` (free-text GitHub search when non-empty). Degrades to an empty list
-/// (never an error) when gh is missing/unauthenticated or the repo has none, so
-/// the picker shows its "No open PRs found" state rather than failing.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workstream_open_prs(
@@ -1869,8 +1523,6 @@ pub async fn list_workstream_open_prs(
     let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
         return Ok(Vec::new());
     };
-    // List from the worktree when it's on disk, else the main repo, both
-    // resolve to the same remote, and a just-archived worktree shouldn't error.
     let dir = pr_dir(&item);
     match pr::list_open_prs(&gh, dir, &query, 50).await {
         Ok(prs) => Ok(prs),
@@ -1881,9 +1533,6 @@ pub async fn list_workstream_open_prs(
     }
 }
 
-/// A live preview of the PR a user typed into the attach picker (by number), or
-/// `None` when no such PR exists. Degrades to `None` (never an error) on any gh
-/// failure, so the picker shows its "not found" hint rather than failing.
 #[tauri::command]
 #[specta::specta]
 pub async fn preview_workstream_pr(
@@ -1904,10 +1553,6 @@ pub async fn preview_workstream_pr(
     }
 }
 
-/// Attach PR `pr_number` to a workstream, overriding branch-based detection.
-/// Validates the number resolves to a real PR in the repo before persisting, so
-/// a typo'd number surfaces an error in the dialog instead of silently hiding
-/// the PR bar. Returns the freshly fetched status (what the bar then renders).
 #[tauri::command]
 #[specta::specta]
 pub async fn attach_workstream_pr(
@@ -1916,8 +1561,6 @@ pub async fn attach_workstream_pr(
     pr_number: u32,
 ) -> CmdResult<Option<PrStatus>> {
     let item = load_item(&state, &id).await?;
-    // No repo here, gh would walk UP to any enclosing checkout and happily
-    // attach some other repo's PR to this row.
     if item.is_folder() {
         return Err(AppError {
             code: "folder_no_git".into(),
@@ -1933,9 +1576,6 @@ pub async fn attach_workstream_pr(
     let status = match pr::pr_status(&gh, pr_dir(&item), &pr_number.to_string()).await {
         Ok(Some(status)) => status,
         Ok(None) => return Err(attach_pr_error(pr_number, None)),
-        // A bad number doesn't hit the "no pull requests found" path, gh fails
-        // with GitHub's own message ("Could not resolve to a PullRequest…").
-        // Surface that text rather than the framed `gh` exec error.
         Err(e) => return Err(attach_pr_error(pr_number, Some(e))),
     };
     db_task(state.db.clone(), move |db| {
@@ -1945,9 +1585,6 @@ pub async fn attach_workstream_pr(
     Ok(Some(status))
 }
 
-/// Build a dialog-facing error for a failed PR attach. Surfaces GitHub's own
-/// message (from gh's stderr) without the underlying `gh …` invocation framing;
-/// falls back to a plain "not found" when there's no usable detail.
 fn attach_pr_error(pr_number: u32, err: Option<CoreError>) -> AppError {
     let detail = match err {
         Some(CoreError::Exec { stderr_tail, .. }) => clean_gh_stderr(&stderr_tail),
@@ -1965,9 +1602,6 @@ fn attach_pr_error(pr_number: u32, err: Option<CoreError>) -> AppError {
     }
 }
 
-/// Strip gh/GraphQL decoration from a stderr line so the user sees just the
-/// message: drops a leading `GraphQL: ` tag and a trailing space-free
-/// `(path.hint)` GraphQL field path (e.g. `(repository.pullRequest)`).
 fn clean_gh_stderr(stderr: &str) -> String {
     let mut s = stderr.trim();
     s = s.strip_prefix("GraphQL: ").unwrap_or(s);
@@ -1979,7 +1613,6 @@ fn clean_gh_stderr(stderr: &str) -> String {
     s.to_string()
 }
 
-/// Detach any manually attached PR, reverting to branch-based detection.
 #[tauri::command]
 #[specta::specta]
 pub async fn detach_workstream_pr(state: State<'_, AppState>, id: String) -> CmdResult<()> {
@@ -1987,7 +1620,6 @@ pub async fn detach_workstream_pr(state: State<'_, AppState>, id: String) -> Cmd
     db_task(state.db.clone(), move |db| db.set_workstream_pr(&id, None)).await
 }
 
-/// Merge a workstream's PR with the chosen method (squash/merge/rebase).
 #[tauri::command]
 #[specta::specta]
 pub async fn merge_workstream_pr(
@@ -2019,16 +1651,13 @@ mod tests {
 
     #[test]
     fn clean_gh_stderr_strips_graphql_decoration() {
-        // The real "unknown PR number" message: GraphQL tag + trailing field path.
         assert_eq!(
             clean_gh_stderr(
                 "GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)"
             ),
             "Could not resolve to a PullRequest with the number of 999."
         );
-        // A plain message is passed through untouched (trimmed only).
         assert_eq!(clean_gh_stderr("  not found  "), "not found");
-        // A trailing parenthetical that isn't a field path (has spaces) is kept.
         assert_eq!(
             clean_gh_stderr("failed (try again later)"),
             "failed (try again later)"
@@ -2042,14 +1671,12 @@ mod tests {
             exit: Some(1),
             stderr_tail: "GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)".into(),
         };
-        // The exec error's stderr becomes the message, no `gh` framing leaks.
         let app = attach_pr_error(999, Some(err));
         assert_eq!(
             app.message,
             "Could not resolve to a PullRequest with the number of 999."
         );
         assert!(!app.message.contains("gh"));
-        // No usable detail → a plain not-found fallback.
         assert_eq!(
             attach_pr_error(7, None).message,
             "No pull request #7 found in this repository"

@@ -1,8 +1,3 @@
-/**
- * The agent editor: Setup / Prompt / Capabilities / Permissions / Collaborators
- * over one working copy of a `.claude/agents/*.md` file and its app-side
- * launch settings, saved by the container.
- */
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
@@ -70,21 +65,12 @@ import {
 } from "./agents";
 import { Callout, CardGroup, EditorCard, FolderCombo, RadioRow, Segmented } from "./parts";
 
-/** The editor reads as a settings page: one centered column, unlike the full-width list. */
 const COLUMN = "mx-auto w-full max-w-5xl";
 
-/** Header glyphs take no fill, so the row reads as one strip of icons rather
- *  than a cluster of competing buttons, colour alone carries hover and rank.
- *  Split so the accent variant never fights the dim one over `text-*`, which
- *  Tailwind resolves by stylesheet order rather than class order. */
 const HEADER_ICON_BASE = "grid h-7 w-7 shrink-0 place-items-center rounded-md";
 const HEADER_ICON = `${HEADER_ICON_BASE} text-ink-dim hover:text-ink disabled:opacity-50`;
-/** The commit action: accent-coloured rather than accent-filled, and visibly
- *  inert when there is nothing to save. */
 const HEADER_ICON_PRIMARY = `${HEADER_ICON_BASE} text-accent hover:text-accent/80 disabled:text-ink-dim/50`;
 
-/** Description field bounds, in whole 20px lines (`text-sm`) plus 16px of
- *  `py-2`, a fractional height is what clipped the last line before. */
 const DESC_MIN_H = 3 * 20 + 16;
 const DESC_MAX_H = 10 * 20 + 16;
 
@@ -99,29 +85,22 @@ type Props = {
   tab: EditorTab;
   onTab: (tab: EditorTab) => void;
   onBack: () => void;
-  /** The breadcrumb's ancestor targets. The folder segment is omitted when
-   *  empty — a loose agent has no folder ancestor to show. */
   breadcrumb: {
     folder: string;
     onAgents: () => void;
     onFolder: () => void;
   };
   onSave: () => void;
-  /** Sets the overlay's publish status. Patches the draft like any other edit
-   *  — the header's ✓ is what writes it — so the unsaved dot appears and one
-   *  Save covers the toggle plus whatever else is pending. */
   onStatus: (status: "draft" | "published") => void;
   onReset: () => void;
   onExport: () => void;
   onCopyPath: () => void;
   saving: boolean;
-  /** Null when this agent has no project scope to move to. */
   projectName: string | null;
   folders: string[];
   contextFiles: AgentContextFile[];
   mcpServers: AgentMcpServer[];
   skills: AgentSkill[];
-  /** Everything this agent could delegate to, its own library, minus itself. */
   peers: AgentFile[];
 };
 
@@ -182,15 +161,10 @@ export function AgentEditor(props: Props) {
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"
           />
         )}
-        {/* Always rendered: every agent has one item in here — Reset for a
-            system agent, the publish toggle for one of yours. */}
         <button
           type="button"
           aria-label="More actions"
           onClick={(e) => {
-            // The menu closes on any window click, so the opener has to keep
-            // its own click from reaching that listener. Anchor off the
-            // button, not the pointer, so it lands the same place every time.
             e.stopPropagation();
             const at = e.currentTarget.getBoundingClientRect();
             setMenuAt({ x: at.right - 150, y: at.bottom + 6 });
@@ -213,8 +187,6 @@ export function AgentEditor(props: Props) {
           onClick={onSave}
           disabled={!dirty || !draft.name.trim() || saving}
           aria-label="Save"
-          // The label used to say why it was inert just by being greyed next to
-          // the word "Save"; as a glyph it has to spell that out.
           title={
             saving
               ? "Saving…"
@@ -242,8 +214,6 @@ export function AgentEditor(props: Props) {
               Reset to default
             </ContextMenuItem>
           )}
-          {/* Not for a system agent: `statusOf` reads those as always Active,
-              so a draft flag on one would badge nothing. */}
           {!system && (
             <ContextMenuItem
               onClick={() => {
@@ -259,7 +229,6 @@ export function AgentEditor(props: Props) {
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-8 pt-2">
-        {/* min-h-full so a tab can hand its tall control the leftover height. */}
         <div className={`${COLUMN} flex min-h-full flex-col gap-3.5 px-7`}>
           {tab === "setup" && <SetupTab {...props} />}
           {tab === "prompt" && <PromptTab {...props} />}
@@ -274,21 +243,6 @@ export function AgentEditor(props: Props) {
   );
 }
 
-/**
- * Agents › folder › agent › section, above the `h1`. The drilled-in sidebar
- * shows the root rows and the agent's configuration sections but never the
- * folder the agent sits in, so without this trail the folder is unreachable
- * except by going all the way back out.
- *
- * Follows the app's one other breadcrumb (`Root.tsx:1380-1396`), including
- * its polarity: ancestors are the *stronger* treatment (`font-medium
- * text-ink`) and the current crumb is the dim, inert one — the opposite of
- * the usual convention, matched anyway so the two breadcrumbs in the app
- * agree. Rendered at `text-xs`, not the header's `text-sm`: the `h1` below is
- * the generic "Edit Agent", and the `font-mono text-xs` subtitle under it
- * already carries the agent's own name — a trail sized to compete with the
- * heading would outrank the thing it introduces.
- */
 function Breadcrumb({
   folder,
   agentName,
@@ -357,16 +311,11 @@ function SetupTab({
   projectName,
   folders,
 }: Props) {
-  // Descriptions run to whole paragraphs (that's why the list elides them), so
-  // the field grows to its content instead of clipping at a fixed height that
-  // wasn't even a whole number of lines. Past the cap it scrolls.
   const descRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const el = descRef.current;
     if (!el) return;
     el.style.height = "auto";
-    // `height` sets the border box here but scrollHeight measures the padding
-    // box, so the borders have to be added back or the last line stays clipped.
     const borders = el.offsetHeight - el.clientHeight;
     const fit = el.scrollHeight + borders;
     el.style.height = `${Math.min(Math.max(fit, DESC_MIN_H), DESC_MAX_H)}px`;
@@ -525,18 +474,12 @@ function SetupTab({
             <div className="w-55">
               <FolderCombo
                 id="agent-folder"
-                // An owned agent filed before `category` existed still sits in
-                // its overlay folder, so the field has to show that rather
-                // than an empty box the list plainly contradicts.
                 value={isSystem(draft) ? overlay.folder : (draft.category ?? overlay.folder)}
                 onChange={(folder) => {
                   if (isSystem(draft)) {
                     patchOverlay({ folder });
                     return;
                   }
-                  // `category` outranks `overlay.folder`; retire the legacy
-                  // one in the same edit so clearing the field later doesn't
-                  // snap the agent back into it.
                   patch({ category: folder.trim() || null });
                   if (overlay.folder) patchOverlay({ folder: "" });
                 }}
@@ -639,8 +582,6 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
   const extras = extraTools(draft.tools);
   const extraSkillNames = extraSkills(draft.skills, skills);
   return (
-    // Wider gap between groups than between the cards inside one, so the
-    // eyebrows read as section breaks rather than more card titles.
     <div className="flex flex-col gap-6">
       <CardGroup label="Tools">
         <EditorCard
@@ -1023,7 +964,6 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
   );
 }
 
-/** One line each, keyed by the shared permission-mode vocabulary. */
 const PERMISSION_DESCRIPTIONS: Record<string, string> = {
   auto: "Leave the posture to the stage's own policy.",
   default: "Every tool call outside the allow rules waits for approval.",
@@ -1138,7 +1078,6 @@ function Labeled({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** A divided settings row inside a `bare` card. */
 function Row({
   title,
   hint,

@@ -9,8 +9,6 @@ const STRING_KEYS = ["title", "type", "date", "status", "ticket", "project", "sc
 type StringKey = (typeof STRING_KEYS)[number];
 type FormValues = Record<StringKey, string> & { tags: string };
 
-/** Keep a non-canonical current value selectable instead of silently dropping it,
- *  plus a leading em-dash option for clearing the field. */
 function optionsFor(canonical: readonly string[], current: string) {
   const values = current && !canonical.includes(current) ? [current, ...canonical] : [...canonical];
   return [{ value: "", label: "—" }, ...values.map((v) => ({ value: v, label: v }))];
@@ -18,17 +16,11 @@ function optionsFor(canonical: readonly string[], current: string) {
 
 type Props = {
   meta: DocMeta;
-  /** True while the editor buffer is dirty, patching would clobber it. */
   disabled: boolean;
   busy: boolean;
   onApply: (patch: FmPatchDto) => void;
 };
 
-/**
- * Edits the 10-field schema and submits only the changed fields as an
- * FmPatchDto (cleared fields become removals). Remount (via `key`) when the
- * underlying document changes so the form reseeds.
- */
 export function FrontmatterForm({ meta, disabled, busy, onApply }: Props) {
   const fm = meta.fm;
   const [values, setValues] = useState<FormValues>(() => ({

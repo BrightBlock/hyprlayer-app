@@ -2,7 +2,6 @@ import type { WorkstreamActivity } from "@/features/session/sessionStore";
 
 export type SearchResultKind = "workstream" | "agent" | "doc" | "file";
 
-/** Where a result sends you; dispatched centrally by the palette. */
 export type NavTarget =
   | { type: "workstream"; projectPath: string; workstreamId: string }
   | { type: "agent"; projectPath: string; workstreamId: string; sessionId: string }
@@ -11,16 +10,12 @@ export type NavTarget =
 
 export type SearchResult = {
   kind: SearchResultKind;
-  /** Stable React key + dedupe id. */
   key: string;
   title: string;
   subtitle?: string;
-  /** Higher = better, within its source. */
   score: number;
   nav: NavTarget;
-  /** Agents only: drives the activity badge. */
   activity?: WorkstreamActivity;
-  /** Trailing tag (doc type, file ext, stage…). */
   tag?: string;
 };
 
@@ -33,9 +28,6 @@ const GROUP_ORDER: { kind: SearchResultKind; label: string }[] = [
   { kind: "doc", label: "Documents" },
 ];
 
-/** Case-insensitive subsequence score, or null when `q` isn't a subsequence of
- *  `text`. Rewards contiguous runs, word-boundary starts, and a full prefix;
- *  shorter targets win ties. Empty `q` returns 0 (keep caller's order). */
 export function fuzzyScore(text: string, q: string): number | null {
   if (!q) return 0;
   const t = text.toLowerCase();
@@ -53,19 +45,18 @@ export function fuzzyScore(text: string, q: string): number | null {
         break;
       }
     }
-    if (found === -1) return null; // not a subsequence
+    if (found === -1) return null;
     matched++;
     run = found === ti ? run + 1 : 0;
-    score += 1 + run * 2; // contiguity bonus
-    if (found === 0 || /\W|_/.test(t[found - 1])) score += 3; // word-boundary bonus
+    score += 1 + run * 2;
+    if (found === 0 || /\W|_/.test(t[found - 1])) score += 3;
     ti = found + 1;
   }
-  if (t.startsWith(needle)) score += 5; // prefix bonus
-  score -= t.length * 0.01; // prefer shorter targets on ties
+  if (t.startsWith(needle)) score += 5;
+  score -= t.length * 0.01;
   return matched === needle.length ? score : null;
 }
 
-/** Order + label non-empty groups (each sorted by score desc, capped). */
 export function groupResults(results: SearchResult[], perGroup = 8): SearchGroup[] {
   return GROUP_ORDER.map(({ kind, label }) => ({
     kind,
@@ -77,7 +68,6 @@ export function groupResults(results: SearchResult[], perGroup = 8): SearchGroup
   })).filter((g) => g.results.length > 0);
 }
 
-/** Flatten groups (in display order) for the single keyboard cursor. */
 export function flattenGroups(groups: SearchGroup[]): SearchResult[] {
   return groups.flatMap((g) => g.results);
 }

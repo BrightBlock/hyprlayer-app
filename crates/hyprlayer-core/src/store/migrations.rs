@@ -1,10 +1,6 @@
 use rusqlite::Connection;
 
-/// Ordered, append-only migrations applied via PRAGMA user_version.
-/// Never edit a shipped step, add a new one.
 const MIGRATIONS: &[&str] = &[
-    // v1: work items + (forward-declared for phase 3) sessions and the
-    // orphan-process ledger.
     "
     CREATE TABLE work_items (
         id            TEXT PRIMARY KEY,
@@ -61,19 +57,12 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (pid, session_id)
     );
     ",
-    // v2: "work items" became "workstreams", rename tables/columns in
-    // place; existing rows survive. (v1's SQL text above must never change:
-    // fresh installs run v1 then v2 and converge on the same schema.)
     "
     ALTER TABLE work_items RENAME TO workstreams;
     ALTER TABLE work_item_docs RENAME TO workstream_docs;
     ALTER TABLE workstream_docs RENAME COLUMN work_item_id TO workstream_id;
     ALTER TABLE sessions RENAME COLUMN work_item_id TO workstream_id;
     ",
-    // v3: the project registry. A project is an explicit, app-owned clone the
-    // user added (cloned from a URL or imported from disk), the source of
-    // truth for the project list, replacing the old derive-from-repoMappings
-    // approach (which surfaced every worktree's `thoughts init` as a project).
     "
     CREATE TABLE projects (
         path        TEXT PRIMARY KEY,
@@ -83,27 +72,12 @@ const MIGRATIONS: &[&str] = &[
         created_at  REAL NOT NULL
     );
     ",
-    // v4: workstreams can now be created three ways. `worktree_mode` records
-    // which, so the archive/delete lifecycle knows whether the branch + dir are
-    // app-owned (safe to drop) or the user's. Existing rows are the original
-    // behavior: a new branch in a dedicated worktree → 'isolated'.
-    //   isolated: new branch <prefix><slug> in a new worktree (the default)
-    //   existing: a user-chosen local branch checked out into a new worktree
-    //   inplace:  no worktree; the project's own checkout on a chosen branch
     "
     ALTER TABLE workstreams ADD COLUMN worktree_mode TEXT NOT NULL DEFAULT 'isolated';
     ",
-    // v5: which harness backs a session. Existing rows predate OpenCode, so they
-    // are Claude Code. `claude_session_id` keeps its name but is now the generic
-    // harness session id (claude's for Claude, the opencode session id for OpenCode).
     "
     ALTER TABLE sessions ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude';
     ",
-    // v6: user-defined project ordering for the sidebar. `position` is the
-    // drag-to-reorder rank; `list_projects` sorts by (position, name). Existing
-    // rows default to 0 and so keep tiebreaking by name, upgrades preserve
-    // today's alphabetical order until the first manual reorder. New projects
-    // append at the bottom (position = MAX+1; see `insert_project`).
     "
     ALTER TABLE projects ADD COLUMN position REAL NOT NULL DEFAULT 0;
     ",

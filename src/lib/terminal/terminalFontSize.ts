@@ -15,11 +15,6 @@ type TerminalFontSizeState = {
   reset: () => void;
 };
 
-/**
- * Terminal font size, shared across all terminals and persisted so the zoom
- * level survives reloads. Driven by the `terminal.zoom*` keyboard commands;
- * every mounted TerminalTab subscribes and re-fits when it changes.
- */
 export const useTerminalFontSize = create<TerminalFontSizeState>()(
   persist(
     (set) => ({
