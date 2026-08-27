@@ -875,6 +875,8 @@ const RESTICK_PX = 24;
 
 const RELOCK_MS = 200;
 
+const RESIZE_PIN_MS = 220;
+
 const SEND_GLIDE_FACTOR = 0.12;
 const SEND_GLIDE_MS = 600;
 
@@ -909,6 +911,8 @@ export const TranscriptView = memo(
     const lastTop = useRef(0);
     const relockUntil = useRef(0);
     const easeFrame = useRef(0);
+    const resizeFrame = useRef(0);
+    const resizePinUntil = useRef(0);
 
     const pin = useCallback((factor = 0.3) => {
       const el = scrollRef.current;
@@ -988,10 +992,27 @@ export const TranscriptView = memo(
       const el = scrollRef.current;
       const content = contentRef.current;
       if (!el || !content || typeof ResizeObserver === "undefined") return;
-      const ro = new ResizeObserver(() => pin());
+      const tick = () => {
+        pin();
+        if (performance.now() < resizePinUntil.current) {
+          resizeFrame.current = requestAnimationFrame(tick);
+        } else {
+          resizeFrame.current = 0;
+        }
+      };
+      const ro = new ResizeObserver(() => {
+        resizePinUntil.current = performance.now() + RESIZE_PIN_MS;
+        if (!resizeFrame.current) resizeFrame.current = requestAnimationFrame(tick);
+      });
       ro.observe(el);
       ro.observe(content);
-      return () => ro.disconnect();
+      return () => {
+        ro.disconnect();
+        if (resizeFrame.current) {
+          cancelAnimationFrame(resizeFrame.current);
+          resizeFrame.current = 0;
+        }
+      };
     }, [pin]);
 
     useEffect(

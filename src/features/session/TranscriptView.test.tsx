@@ -111,9 +111,13 @@ describe("insideNestedScroller", () => {
 
 describe("re-pinning on resize", () => {
   let resizes: ResizeObserverCallback[] = [];
+  let frames: FrameRequestCallback[] = [];
+  let now = 0;
 
   beforeEach(() => {
     resizes = [];
+    frames = [];
+    now = 0;
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -124,11 +128,15 @@ describe("re-pinning on resize", () => {
         disconnect() {}
       },
     );
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    vi.spyOn(performance, "now").mockImplementation(() => now);
   });
 
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   function renderStuck() {
@@ -151,7 +159,13 @@ describe("re-pinning on resize", () => {
     return { el, shrinkViewportTo: (h: number) => (clientHeight = h) };
   }
 
-  const resize = () => resizes.forEach((cb) => cb([], {} as ResizeObserver));
+  const resize = () => {
+    resizes.forEach((cb) => cb([], {} as ResizeObserver));
+    now += 10_000;
+    const pending = frames;
+    frames = [];
+    pending.forEach((cb) => cb(now));
+  };
 
   it("re-pins to the new bottom when the viewport shrinks", () => {
     const { el, shrinkViewportTo } = renderStuck();
