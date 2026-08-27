@@ -295,8 +295,10 @@ elif [[ "$INCLUDE_WINDOWS" == "1" ]]; then
       mkdir -p "$WIN_OUT"
       gh run download "$RUN_ID" --repo "$WIN_ACTIONS_REPO" -n windows-installer -D "$WIN_OUT" \
         || die "failed to download windows-installer artifact from run $RUN_ID"
-      SETUP_NAME="$(basename "$(ls "$WIN_OUT"/*-setup.exe | head -n1)")"
-      [[ -n "$SETUP_NAME" ]] || die "no *-setup.exe found in downloaded artifact"
+      # $WIN_OUT keeps every past release's installer, so glob order would pick the oldest.
+      SETUP_NAME="$WIN_SETUP_NAME"
+      [[ -f "$WIN_OUT/$SETUP_NAME" ]] \
+        || die "run $RUN_ID's artifact has no $SETUP_NAME — it built a different version than $TAG"
       ;;
   esac
   say "Signing $SETUP_NAME on the Mac (key stays local)…"
