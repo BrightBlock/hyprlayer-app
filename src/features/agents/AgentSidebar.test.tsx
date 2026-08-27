@@ -13,6 +13,7 @@ const AGENT: AgentFile = {
   path: "/a/scout.md",
   source: "user",
   plugin: null,
+  managed: false,
   name: "scout",
   description: "",
   tools: [],

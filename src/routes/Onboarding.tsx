@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import {
@@ -16,6 +16,7 @@ import {
   useInitThoughtsRepo,
   useProbeDefaultThoughts,
 } from "@/lib/queries";
+import { CliUpdateNote } from "@/features/settings/AgentBundleSection";
 import { CliInstallStep } from "@/features/onboarding/CliInstallStep";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
 import { Step } from "@/features/onboarding/StepShell";
@@ -56,7 +57,7 @@ function Step1({
           This takes about two minutes. You'll end up with:
         </p>
         <ul className="space-y-1 text-sm text-ink-dim">
-          <li>✦ An AI coding assistant configured and ready to use</li>
+          <li>✦ Claude Code and Codex agent workflows linked and ready to use</li>
           <li>✦ A thoughts repository for your project notes and docs</li>
           <li>✦ A dashboard where you can add projects and start coding</li>
         </ul>
@@ -82,30 +83,19 @@ function Step1({
 
 type AiPhase =
   | { kind: "idle" }
-  | { kind: "running"; force: boolean }
+  | { kind: "running" }
   | { kind: "checking" };
 
 function Step2({ onNext }: { onNext: () => void }) {
   const aiStatus = useAiStatus();
   const isInstalled = aiStatus.data?.installed ?? false;
-  const agentTool = aiStatus.data?.agentTool ?? "AI tool";
+  const platforms = aiStatus.data?.platforms ?? [];
+  const agentPaths = platforms
+    .map((platform) => platform.location)
+    .filter((location): location is string => !!location);
 
   const [phase, setPhase] = useState<AiPhase>({ kind: "idle" });
-  const autoStartedRef = useRef(false);
-
-  useLayoutEffect(() => {
-    if (
-      !aiStatus.isLoading &&
-      !isInstalled &&
-      phase.kind === "idle" &&
-      !autoStartedRef.current
-    ) {
-      autoStartedRef.current = true;
-      setPhase({ kind: "running", force: false });
-    }
-  }, [aiStatus.isLoading, isInstalled, phase.kind]);
-
-  const start = (force: boolean) => setPhase({ kind: "running", force });
+  const startRepair = () => setPhase({ kind: "running" });
 
   const handleExit = (_code: number | null) => {
     setPhase({ kind: "checking" });
@@ -114,9 +104,9 @@ function Step2({ onNext }: { onNext: () => void }) {
 
   if (aiStatus.isLoading) {
     return (
-      <Step number={3} total={TOTAL_STEPS} title="AI harness">
-        <Card className="flex items-center justify-center py-12">
-          <Spinner />
+      <Step number={3} total={TOTAL_STEPS} title="AI agents">
+        <Card className="flex items-center justify-center gap-2 py-12 text-sm text-ink-dim">
+          <Spinner /> Setting up Claude Code and Codex agents…
         </Card>
       </Step>
     );
@@ -127,7 +117,7 @@ function Step2({ onNext }: { onNext: () => void }) {
       <Step
         number={3}
         total={TOTAL_STEPS}
-        title="AI harness"
+        title="AI agents"
         footer={
           <Button variant="primary" disabled>
             Next
@@ -137,13 +127,13 @@ function Step2({ onNext }: { onNext: () => void }) {
         <div className="space-y-3">
           <Card>
             <p className="text-sm text-ink-dim">
-              Complete the prompts below. Arrow keys + Enter to select. This step
-              advances automatically when configuration finishes.
+              Repairing the shared Claude Code and Codex agent installation. This step checks the
+              result when the command finishes.
             </p>
           </Card>
           <div className="relative h-80 overflow-hidden rounded-lg border border-edge bg-surface">
             <SetupTerminal
-              args={phase.force ? ["ai", "configure", "--force"] : ["ai", "configure"]}
+              args={["ai", "reinstall"]}
               onExit={handleExit}
               className="h-full"
             />
@@ -157,7 +147,7 @@ function Step2({ onNext }: { onNext: () => void }) {
     <Step
       number={3}
       total={TOTAL_STEPS}
-      title="AI harness"
+      title="AI agents"
       footer={
         <Button variant="primary" onClick={onNext} disabled={!isInstalled}>
           Next
@@ -172,21 +162,40 @@ function Step2({ onNext }: { onNext: () => void }) {
         <Card className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="text-lg">✓</span>
-            <p className="text-sm font-medium text-ink">{agentTool} is configured</p>
+            <p className="text-sm font-medium text-ink">
+              Claude Code and Codex agents are ready
+            </p>
           </div>
-          <Button type="button" onClick={() => start(true)} className="text-sm">
-            Reconfigure
+          {agentPaths.length > 0 ? (
+            <p className="text-xs text-ink-dim">
+              {agentPaths.map((location, i) => (
+                <span key={location}>
+                  {i > 0 && " · "}
+                  <span className="font-mono">{location}</span>
+                </span>
+              ))}
+            </p>
+          ) : (
+            <p className="text-xs text-ink-dim">
+              {aiStatus.data?.agentTool ?? "Agent files"} reported ready. Update the Hyprlayer CLI
+              to see separate Claude Code and Codex link status.
+            </p>
+          )}
+          <Button type="button" onClick={startRepair} className="text-sm">
+            Repair installation
           </Button>
         </Card>
       ) : (
         <Card className="space-y-3">
           <p className="text-sm text-ink-dim">
-            Set up your AI coding assistant to continue. It installs the agent and
-            its files globally.
+            Automatic setup did not finish. Repair the shared installation to link Hyprlayer's
+            agents into both Claude Code and Codex.
           </p>
-          <Button type="button" variant="primary" onClick={() => start(false)}>
-            Start configuration
+          {aiStatus.error != null && <ErrorNote error={aiStatus.error} />}
+          <Button type="button" variant="primary" onClick={startRepair}>
+            Repair setup
           </Button>
+          {platforms.length === 0 && <CliUpdateNote />}
         </Card>
       )}
     </Step>

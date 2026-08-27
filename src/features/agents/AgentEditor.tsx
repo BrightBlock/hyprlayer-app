@@ -120,6 +120,7 @@ export function AgentEditor(props: Props) {
   } = props;
   const isNew = isUnsaved(draft);
   const system = isSystem(draft);
+  const managed = draft.managed;
   const isDraftStatus = overlay.status === "draft";
   const tabs = editorTabs(useSignedIn());
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
@@ -138,9 +139,16 @@ export function AgentEditor(props: Props) {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="truncate text-lg font-semibold tracking-tight text-ink">
-              {isNew ? "New Agent" : system ? "Edit System Agent" : "Edit Agent"}
+              {isNew
+                ? "New Agent"
+                : managed
+                  ? "View Managed Agent"
+                  : system
+                    ? "Edit System Agent"
+                    : "Edit Agent"}
             </h1>
             {system && <Badge tone="dim">System</Badge>}
+            {managed && <Badge tone="dim">Read-only</Badge>}
             {isDraftStatus && (
               <span title="Draft agents can't be spawned by sessions started while they're a draft. Publish to make this one available.">
                 <Badge tone="warn">Draft</Badge>
@@ -161,18 +169,20 @@ export function AgentEditor(props: Props) {
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"
           />
         )}
-        <button
-          type="button"
-          aria-label="More actions"
-          onClick={(e) => {
-            e.stopPropagation();
-            const at = e.currentTarget.getBoundingClientRect();
-            setMenuAt({ x: at.right - 150, y: at.bottom + 6 });
-          }}
-          className={`${HEADER_ICON} tracking-widest`}
-        >
-          ⋮
-        </button>
+        {!managed && (
+          <button
+            type="button"
+            aria-label="More actions"
+            onClick={(e) => {
+              e.stopPropagation();
+              const at = e.currentTarget.getBoundingClientRect();
+              setMenuAt({ x: at.right - 150, y: at.bottom + 6 });
+            }}
+            className={`${HEADER_ICON} tracking-widest`}
+          >
+            ⋮
+          </button>
+        )}
         <button
           type="button"
           onClick={onBack}
@@ -182,24 +192,26 @@ export function AgentEditor(props: Props) {
         >
           <XIcon size={15} />
         </button>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={!dirty || !draft.name.trim() || saving}
-          aria-label="Save"
-          title={
-            saving
-              ? "Saving…"
-              : !draft.name.trim()
-                ? "Name the agent to save"
-                : !dirty
-                  ? "No changes to save"
-                  : "Save"
-          }
-          className={HEADER_ICON_PRIMARY}
-        >
-          {saving ? <Spinner size={15} /> : <CheckIcon size={16} strokeWidth={2.2} />}
-        </button>
+        {!managed && (
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={!dirty || !draft.name.trim() || saving}
+            aria-label="Save"
+            title={
+              saving
+                ? "Saving…"
+                : !draft.name.trim()
+                  ? "Name the agent to save"
+                  : !dirty
+                    ? "No changes to save"
+                    : "Save"
+            }
+            className={HEADER_ICON_PRIMARY}
+          >
+            {saving ? <Spinner size={15} /> : <CheckIcon size={16} strokeWidth={2.2} />}
+          </button>
+        )}
       </div>
 
       {menuAt && (
@@ -228,17 +240,19 @@ export function AgentEditor(props: Props) {
         </ContextMenu>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto pb-8 pt-2">
-        <div className={`${COLUMN} flex min-h-full flex-col gap-3.5 px-7`}>
-          {tab === "setup" && <SetupTab {...props} />}
-          {tab === "prompt" && <PromptTab {...props} />}
-          {tab === "capabilities" && <CapabilitiesTab {...props} />}
-          {tab === "permissions" && <PermissionsTab {...props} />}
-          {tab === "collaborators" && tabs.some((t) => t.key === tab) && (
-            <CollaboratorsTab {...props} />
-          )}
+      <fieldset disabled={managed} className="contents">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-8 pt-2">
+          <div className={`${COLUMN} flex min-h-full flex-col gap-3.5 px-7`}>
+            {tab === "setup" && <SetupTab {...props} />}
+            {tab === "prompt" && <PromptTab {...props} />}
+            {tab === "capabilities" && <CapabilitiesTab {...props} />}
+            {tab === "permissions" && <PermissionsTab {...props} />}
+            {tab === "collaborators" && tabs.some((t) => t.key === tab) && (
+              <CollaboratorsTab {...props} />
+            )}
+          </div>
         </div>
-      </div>
+      </fieldset>
     </div>
   );
 }
@@ -323,14 +337,20 @@ function SetupTab({
 
   return (
     <>
-      {isSystem(draft) && (
+      {draft.managed ? (
+        <Callout tone="warn" icon={<ShieldIcon size={14} />}>
+          Hyprlayer manages this linked agent as part of the Claude and Codex bundle. It is
+          read-only here so edits cannot change the shared bundle store. Duplicate it from the
+          agent menu to create a personal copy.
+        </Callout>
+      ) : isSystem(draft) ? (
         <Callout tone="warn" icon={<ShieldIcon size={14} />}>
           This agent ships with the <span className="font-mono">{draft.plugin}</span> plugin. Edits
           are saved as a copy in your own library and take precedence over the shipped file.{" "}
           <strong className="font-semibold text-ink">Reset to default</strong> removes the copy at
           any time.
         </Callout>
-      )}
+      ) : null}
 
       <EditorCard className="flex flex-col gap-4">
         <Labeled label="Name">

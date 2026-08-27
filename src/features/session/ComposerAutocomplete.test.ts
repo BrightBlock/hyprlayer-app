@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { detectTrigger, highlightSegments } from "./ComposerAutocomplete";
+import type { SlashCommand } from "@/lib/bindings";
+
+import {
+  detectTrigger,
+  highlightSegments,
+  isClaudeFamilyModel,
+  resolvesInHarness,
+  skillSigilFor,
+} from "./ComposerAutocomplete";
 
 describe("detectTrigger", () => {
   it("detects a command at the start of the message", () => {
@@ -62,5 +70,76 @@ describe("highlightSegments", () => {
   it("highlights a skill referenced mid-prompt", () => {
     const segs = highlightSegments("first do /code-review please", known);
     expect(segs.filter((s) => s.skill).map((s) => s.text)).toEqual(["/code-review"]);
+  });
+
+  it("paints the harness's own sigil", () => {
+    const segs = highlightSegments("run $research_codebase now", known, "$");
+    expect(segs.filter((s) => s.skill).map((s) => s.text)).toEqual(["$research_codebase"]);
+  });
+
+  it("leaves the other harness's sigil alone", () => {
+    expect(highlightSegments("run /research_codebase", known, "$").some((s) => s.skill)).toBe(
+      false,
+    );
+    expect(highlightSegments("run $research_codebase", known, "/").some((s) => s.skill)).toBe(
+      false,
+    );
+  });
+});
+
+describe("skillSigilFor", () => {
+  it("uses Codex's own explicit-invocation sigil on codex", () => {
+    expect(skillSigilFor("codex")).toBe("$");
+  });
+
+  it("keeps Claude's slash on Claude and Claude-family OpenCode models", () => {
+    expect(skillSigilFor("claude")).toBe("/");
+    expect(skillSigilFor("opencode", "anthropic/claude-sonnet-4-6")).toBe("/");
+    expect(skillSigilFor("opencode", "openrouter/anthropic/claude-opus-4.1")).toBe("/");
+  });
+
+  it("uses Codex behavior for every other OpenCode model", () => {
+    expect(skillSigilFor("opencode", "openai/gpt-5.4")).toBe("$");
+    expect(skillSigilFor("opencode", "google/gemini-3-pro")).toBe("$");
+    expect(skillSigilFor("opencode", "ollama/qwen3-coder")).toBe("$");
+    expect(skillSigilFor("opencode", null)).toBe("$");
+  });
+});
+
+describe("isClaudeFamilyModel", () => {
+  it("recognizes Claude through first-party and brokered model ids", () => {
+    expect(isClaudeFamilyModel("anthropic/claude-sonnet-4-6")).toBe(true);
+    expect(isClaudeFamilyModel("openrouter/anthropic/claude-opus-4.1")).toBe(true);
+    expect(isClaudeFamilyModel("amazon-bedrock/us.anthropic.claude-4")).toBe(true);
+  });
+
+  it("does not classify missing or non-Claude models as Claude", () => {
+    expect(isClaudeFamilyModel("openai/gpt-5.4")).toBe(false);
+    expect(isClaudeFamilyModel("google/gemini-3-pro")).toBe(false);
+    expect(isClaudeFamilyModel(null)).toBe(false);
+  });
+});
+
+describe("resolvesInHarness", () => {
+  const entry = (name: string, kind: SlashCommand["kind"]): SlashCommand => ({
+    name,
+    description: "",
+    source: "user",
+    kind,
+  });
+
+  it("offers a skill to codex, which is handed the .claude/skills roots", () => {
+    expect(resolvesInHarness(entry("create_plan", "skill"), "codex")).toBe(true);
+  });
+
+  it("hides a prompt command from codex, which has nothing to expand it", () => {
+    expect(resolvesInHarness(entry("git:sync", "command"), "codex")).toBe(false);
+  });
+
+  it("leaves every other harness's offering untouched", () => {
+    for (const harness of ["claude", "opencode"]) {
+      expect(resolvesInHarness(entry("git:sync", "command"), harness)).toBe(true);
+      expect(resolvesInHarness(entry("create_plan", "skill"), harness)).toBe(true);
+    }
   });
 });

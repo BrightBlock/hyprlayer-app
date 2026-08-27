@@ -33,6 +33,7 @@ import {
   initialsOf,
   inheritsAllTools,
   isAllProjects,
+  isManaged,
   isSystem,
   isUnsaved,
   mcpEnabled,
@@ -65,6 +66,7 @@ const agent = (over: Partial<AgentFile>): AgentFile => ({
   path: `/home/u/.claude/agents/${over.name ?? "a"}.md`,
   source: "user",
   plugin: null,
+  managed: false,
   name: "a",
   description: "",
   tools: [],
@@ -290,6 +292,7 @@ describe("visibleAgents", () => {
     agent({ name: "codebase-locator", description: "Finds where code lives" }),
     agent({ name: "repo-linter", source: "project", path: "/repo/.claude/agents/repo-linter.md" }),
     agent({ name: "code-reviewer", source: "plugin", plugin: "pr-review-toolkit" }),
+    agent({ name: "cartographer", managed: true }),
   ];
 
   it("splits your agents from the plugins' system agents", () => {
@@ -298,7 +301,7 @@ describe("visibleAgents", () => {
     ).toEqual(["codebase-locator", "repo-linter"]);
     expect(
       visibleAgents(all, { tab: "system", scope: "global", search: "" }).map((a) => a.name),
-    ).toEqual(["code-reviewer"]);
+    ).toEqual(["code-reviewer", "cartographer"]);
   });
 
   it("narrows to the project's own agents", () => {
@@ -570,6 +573,16 @@ describe("status and scope", () => {
     expect(isSystem(plugin)).toBe(true);
   });
 
+  it("classifies a linked Hyprlayer agent as managed system content", () => {
+    const managed = agent({ managed: true });
+    expect(isManaged(managed)).toBe(true);
+    expect(isSystem(managed)).toBe(true);
+    expect(statusOf(managed, { ...DEFAULT_OVERLAY, status: "draft" })).toEqual({
+      label: "Active",
+      tone: "ok",
+    });
+  });
+
   it("reads scope off the directory that holds the file", () => {
     expect(isAllProjects(agent({}))).toBe(true);
     expect(isAllProjects(agent({ source: "project" }))).toBe(false);
@@ -647,6 +660,13 @@ describe("duplicateAgent", () => {
     const copy = duplicateAgent(agent({ source: "plugin", plugin: "pr-review-toolkit" }));
     expect(copy.source).toBe("user");
     expect(copy.plugin).toBeNull();
+  });
+
+  it("turns a managed agent duplicate into a regular personal agent", () => {
+    const copy = duplicateAgent(agent({ name: "cartographer", managed: true }));
+    expect(copy.managed).toBe(false);
+    expect(copy.source).toBe("user");
+    expect(copy.path).toBe("");
   });
 });
 

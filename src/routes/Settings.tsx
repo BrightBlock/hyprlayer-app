@@ -39,6 +39,7 @@ import {
   Field,
   PageError,
   PageSpinner,
+  Spinner,
   TextInput,
   Toggle,
   SettingRow,
@@ -53,7 +54,7 @@ import { AgentBundleSection } from "@/features/settings/AgentBundleSection";
 import { THEMES, useThemeStore } from "@/lib/theme";
 import { IS_MACOS } from "@/lib/platform";
 import { SIDE_PANEL_WIDTH } from "@/lib/uiStore";
-import { AgentIcon, AnytypeIcon, BellIcon, CheckIcon, ClipboardIcon, GearIcon, GitBranchIcon, harnessIcon, KeyboardIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PaletteIcon, PersonIcon, PlusIcon, PuzzleIcon, SlidersIcon, TerminalIcon, XIcon } from "@/components/icons";
+import { AgentIcon, AnytypeIcon, BellIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, KeyboardIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PaletteIcon, PersonIcon, PlusIcon, PuzzleIcon, SlidersIcon, TerminalIcon, XIcon } from "@/components/icons";
 
 function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
   switch (kind) {
@@ -603,6 +604,10 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
 function AiAgentsSubsection() {
   const aiStatus = useAiStatus();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const platforms = aiStatus.data?.platforms ?? [];
+  const agentPaths = platforms
+    .map((platform) => platform.location)
+    .filter((location): location is string => !!location);
 
   const handleExit = (code: number | null) => {
     if (code === 0) {
@@ -615,38 +620,52 @@ function AiAgentsSubsection() {
     <div className="mt-3 border-t border-edge/50 pt-3 text-sm">
       <div className="flex items-center justify-between">
         <span className="text-ink-dim">AI Agents</span>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          title={aiStatus.data?.installed ? "Reconfigure" : "Configure"}
-          aria-label={aiStatus.data?.installed ? "Reconfigure" : "Configure"}
-          className="-mr-1 ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-        >
-          <GearIcon size={12} />
-        </button>
+        {!aiStatus.isLoading && (
+          <Button type="button" onClick={() => setDialogOpen(true)}>
+            Repair / reinstall
+          </Button>
+        )}
       </div>
       <div className="mt-2 text-sm">
         {aiStatus.isLoading && (
-          <p className="text-ink-dim">Checking status…</p>
+          <p className="flex items-center gap-2 text-ink-dim">
+            <Spinner size={12} /> Ensuring Claude Code and Codex agent links…
+          </p>
         )}
         {!aiStatus.isLoading && aiStatus.data?.installed && (
           <p>
-            <Badge tone="ok">Installed</Badge>
+            <Badge tone="ok">Ready</Badge>
             <span className="ml-2 text-ink-dim">
-              {aiStatus.data.agentTool ?? "AI tool"}{" "}
-              {aiStatus.data.location ? (
-                <span className="font-mono text-xs">{aiStatus.data.location}</span>
-              ) : null}
+              {agentPaths.length > 0 ? (
+                agentPaths.map((location, i) => (
+                  <span key={location}>
+                    {i > 0 && " · "}
+                    <span className="font-mono text-xs">{location}</span>
+                  </span>
+                ))
+              ) : (
+                <>
+                  {aiStatus.data.agentTool ?? "AI agents"}{" "}
+                  {aiStatus.data.location ? (
+                    <span className="font-mono text-xs">{aiStatus.data.location}</span>
+                  ) : null}
+                </>
+              )}
             </span>
           </p>
         )}
         {!aiStatus.isLoading && !aiStatus.data?.installed && (
           <p>
-            <Badge tone="warn">Not configured</Badge>
+            <Badge tone="warn">Needs repair</Badge>
             <span className="ml-2 text-ink-dim">
-              Click Configure to install your AI coding assistant.
+              Claude Code and Codex agent links were not fully installed.
             </span>
           </p>
+        )}
+        {!aiStatus.isLoading && aiStatus.error != null && (
+          <div className="mt-2">
+            <ErrorNote error={aiStatus.error} />
+          </div>
         )}
       </div>
 
@@ -657,12 +676,15 @@ function AiAgentsSubsection() {
       <Dialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        title="Configure AI tool"
+        title="Repair Claude Code + Codex agents"
         size="2xl"
       >
-        <div className="relative h-80 rounded-lg border border-edge bg-surface overflow-hidden">
+        <p className="mb-3 text-sm text-ink-dim">
+          Reinstall the shared bundle and recreate Hyprlayer-managed links for both platforms.
+        </p>
+        <div className="relative h-80 overflow-hidden rounded-lg border border-edge bg-surface">
           <SetupTerminal
-            args={["ai", "configure", "--force"]}
+            args={["ai", "reinstall"]}
             onExit={handleExit}
             className="h-full"
           />
@@ -1103,8 +1125,8 @@ export function Settings() {
               <Card>
                 <CardTitle>Setup wizard</CardTitle>
                 <p className="mb-3 text-xs text-ink-dim">
-                  Re-run the guided setup to reconfigure your AI tool or change your thoughts
-                  repository.
+                  Re-run the guided setup to repair the Claude and Codex agent links or change
+                  your thoughts repository.
                 </p>
                 <Link to="/onboarding">
                   <Button>Re-run setup</Button>

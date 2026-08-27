@@ -9,6 +9,29 @@ use tokio::sync::RwLock;
 
 use crate::error::{AppError, CmdResult};
 
+const UNSUPPORTED_OPENCODE_PROVIDER_IDS: &[&str] = &["github-copilot"];
+
+pub(crate) fn opencode_provider_is_supported(provider: &str) -> bool {
+    let provider = provider.trim().trim_end_matches('/');
+    !UNSUPPORTED_OPENCODE_PROVIDER_IDS
+        .iter()
+        .any(|unsupported| provider.eq_ignore_ascii_case(unsupported))
+}
+
+pub(crate) fn opencode_model_is_supported(model: &str) -> bool {
+    let model = model
+        .strip_prefix("opencode:")
+        .or_else(|| {
+            model
+                .get(.."opencode:".len())
+                .filter(|prefix| prefix.eq_ignore_ascii_case("opencode:"))
+                .map(|_| &model["opencode:".len()..])
+        })
+        .unwrap_or(model);
+    let provider = model.split('/').next().unwrap_or(model);
+    opencode_provider_is_supported(provider)
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct KeybindingSettings {
@@ -72,6 +95,39 @@ pub struct AppSettings {
     pub multiplexer: MultiplexerSettings,
     pub dev_tools: bool,
     pub full_disk_access_notice_dismissed: bool,
+}
+
+impl AppSettings {
+    fn normalize(&mut self) -> bool {
+        let opencode = &mut self.providers.opencode;
+        let selected_len = opencode.selected_models.len();
+        opencode
+            .selected_models
+            .retain(|model| opencode_model_is_supported(model));
+        let mut changed = selected_len != opencode.selected_models.len();
+
+        for model in [&mut opencode.default_model, &mut opencode.commit_model] {
+            if model
+                .as_deref()
+                .is_some_and(|model| !opencode_model_is_supported(model))
+            {
+                *model = None;
+                changed = true;
+            }
+        }
+
+        if self.tab_titles.model.as_deref().is_some_and(|model| {
+            model
+                .get(.."opencode:".len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("opencode:"))
+                && !opencode_model_is_supported(model)
+        }) {
+            self.tab_titles.model = None;
+            changed = true;
+        }
+
+        changed
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -332,13 +388,33 @@ pub struct SettingsStore {
     cache: RwLock<AppSettings>,
 }
 
+#[cfg(not(test))]
+fn scrub_unsupported_opencode_defaults() {
+    for provider in UNSUPPORTED_OPENCODE_PROVIDER_IDS {
+        match hyprlayer_core::opencode::config::clear_default_model_for_provider(provider) {
+            Ok(true) => log::info!("removed the retired OpenCode default model for {provider}"),
+            Ok(false) => {}
+            Err(error) => {
+                log::warn!("could not remove unsupported OpenCode default model: {error}")
+            }
+        }
+    }
+}
+
 impl SettingsStore {
     pub fn load(dir: PathBuf) -> Self {
         let path = dir.join("settings.json");
-        let settings = std::fs::read_to_string(&path)
+        let mut settings: AppSettings = std::fs::read_to_string(&path)
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
+        if settings.normalize() {
+            if let Err(error) = persist_sync(&path, &settings) {
+                log::warn!("could not persist normalized settings: {error}");
+            }
+        }
+        #[cfg(not(test))]
+        std::thread::spawn(scrub_unsupported_opencode_defaults);
         Self {
             path,
             cache: RwLock::new(settings),
@@ -356,6 +432,7 @@ impl SettingsStore {
         let mut guard = self.cache.write().await;
         let mut next = guard.clone();
         mutate(&mut next);
+        next.normalize();
         persist(&self.path, &next).await?;
         *guard = next.clone();
         Ok(next)
@@ -364,6 +441,17 @@ impl SettingsStore {
     pub async fn set(&self, settings: AppSettings) -> CmdResult<()> {
         self.update(|s| *s = settings).await.map(|_| ())
     }
+}
+
+fn persist_sync(path: &std::path::Path, settings: &AppSettings) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("create settings dir: {error}"))?;
+    }
+    let json = serde_json::to_string_pretty(settings)
+        .map_err(|error| format!("serialize settings: {error}"))?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json).map_err(|error| format!("write settings: {error}"))?;
+    std::fs::rename(&tmp, path).map_err(|error| format!("persist settings: {error}"))
 }
 
 async fn persist(path: &std::path::Path, settings: &AppSettings) -> CmdResult<()> {
@@ -531,6 +619,82 @@ mod tests {
             Some("anthropic/claude-sonnet-4-5")
         );
         assert_eq!(s.providers.opencode.selected_models.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn settings_store_migrates_legacy_copilot_models_on_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let raw = r#"{
+            "providers": {
+                "claude": { "defaultModel": "github-copilot/not-an-opencode-model" },
+                "opencode": {
+                    "defaultModel": "GITHUB-COPILOT/gpt-5",
+                    "commitModel": "github-copilot/claude-sonnet",
+                    "selectedModels": [
+                        "anthropic/claude-sonnet-4-5",
+                        "GitHub-Copilot/gpt-5",
+                        "openai/github-copilot"
+                    ]
+                }
+            },
+            "tabTitles": {
+                "enabled": true,
+                "model": "OpenCode:github-COPILOT/gpt-5"
+            }
+        }"#;
+        std::fs::write(&path, raw).unwrap();
+
+        let store = SettingsStore::load(dir.path().to_path_buf());
+        let settings = store.get().await;
+        assert_eq!(
+            settings.providers.opencode.selected_models,
+            ["anthropic/claude-sonnet-4-5", "openai/github-copilot"]
+        );
+        assert_eq!(settings.providers.opencode.default_model, None);
+        assert_eq!(settings.providers.opencode.commit_model, None);
+        assert_eq!(settings.tab_titles.model, None);
+        assert_eq!(
+            settings.providers.claude.default_model.as_deref(),
+            Some("github-copilot/not-an-opencode-model")
+        );
+
+        let persisted: AppSettings =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(
+            persisted.providers.opencode.selected_models,
+            settings.providers.opencode.selected_models
+        );
+        assert_eq!(persisted.providers.opencode.default_model, None);
+        assert_eq!(persisted.providers.opencode.commit_model, None);
+        assert_eq!(persisted.tab_titles.model, None);
+    }
+
+    #[tokio::test]
+    async fn settings_store_normalizes_copilot_models_before_every_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let store = SettingsStore::load(dir.path().to_path_buf());
+
+        let updated = store
+            .update(|settings| {
+                let opencode = &mut settings.providers.opencode;
+                opencode.selected_models =
+                    vec!["github-copilot/gpt-5".into(), "openai/gpt-5".into()];
+                opencode.default_model = Some("GitHub-Copilot/gpt-5".into());
+                opencode.commit_model = Some("GITHUB-COPILOT/gpt-5".into());
+                settings.tab_titles.model = Some("opencode:github-copilot/gpt-5".into());
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(updated.providers.opencode.selected_models, ["openai/gpt-5"]);
+        assert_eq!(updated.providers.opencode.default_model, None);
+        assert_eq!(updated.providers.opencode.commit_model, None);
+        assert_eq!(updated.tab_titles.model, None);
+
+        let persisted = std::fs::read_to_string(path).unwrap();
+        assert!(!persisted.to_ascii_lowercase().contains("github-copilot"));
     }
 
     #[test]

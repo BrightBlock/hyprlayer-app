@@ -25,6 +25,24 @@ export const DEFAULT_HARNESS_OPTIONS: { key: string; label: string }[] = [
   { key: "ollama", label: "Ollama" },
 ];
 
+const UNSUPPORTED_OPENCODE_PROVIDER_IDS = new Set(["github-copilot"]);
+
+export function isSupportedOpencodeProvider(provider: string | null | undefined): boolean {
+  return !!provider && !UNSUPPORTED_OPENCODE_PROVIDER_IDS.has(provider.trim().toLowerCase());
+}
+
+export function isSupportedOpencodeModel(model: string | null | undefined): model is string {
+  if (!model) return false;
+  const unprefixed = model.replace(/^opencode:/i, "");
+  return isSupportedOpencodeProvider(unprefixed.split("/", 1)[0]);
+}
+
+export function firstSupportedOpencodeModel(
+  ...models: Array<string | null | undefined>
+): string | null {
+  return models.find(isSupportedOpencodeModel) ?? null;
+}
+
 export function harnessOption(key: string | undefined | null): HarnessOption {
   return HARNESSES.find((h) => h.key === key) ?? HARNESSES[0];
 }
@@ -55,7 +73,11 @@ export function actionAgentDefaults(
   }
   if (dh === "opencode") {
     const oc = providers?.opencode;
-    const model = oc?.commitModel ?? oc?.defaultModel ?? oc?.selectedModels?.[0] ?? null;
+    const model = firstSupportedOpencodeModel(
+      oc?.commitModel,
+      oc?.defaultModel,
+      ...(oc?.selectedModels ?? []),
+    );
     return { harness: "opencode", model, effort: null };
   }
   if (dh === "codex") {
@@ -92,7 +114,11 @@ export function actionLaunchArgs(
       effort: effectiveEffort(d.effort ?? undefined, model)?.key ?? null,
     };
   }
-  return { harness: d.harness, model: d.model, effort: d.harness === "codex" ? d.effort : null };
+  return {
+    harness: d.harness,
+    model: d.harness === "opencode" ? firstSupportedOpencodeModel(d.model) : d.model,
+    effort: d.harness === "codex" ? d.effort : null,
+  };
 }
 
 export type ShellLaunchPicks = {
@@ -125,13 +151,14 @@ export function newChatLaunchArgs(
     const oc = providers?.opencode;
     const ollama = providers?.ollama;
     const first = ollama?.selectedModels?.[0];
-    const model =
-      shell?.opencodeModel ??
-      oc?.defaultModel ??
-      ollama?.defaultModel ??
-      oc?.selectedModels?.[0] ??
-      (first ? `ollama/${first}` : null);
-    return { harness: "opencode", model: model ?? null, effort: null, permissionMode };
+    const model = firstSupportedOpencodeModel(
+      shell?.opencodeModel,
+      oc?.defaultModel,
+      ollama?.defaultModel,
+      ...(oc?.selectedModels ?? []),
+      first ? `ollama/${first}` : null,
+    );
+    return { harness: "opencode", model, effort: null, permissionMode };
   }
   if (harnessKey === "codex") {
     const codex = providers?.codex;

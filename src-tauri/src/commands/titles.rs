@@ -166,6 +166,7 @@ async fn generate_with_codex(state: &AppState, model: &str, prompt: &str) -> Cmd
         prior_user_turns: 0,
         permission_mode: PermissionMode::Plan,
         add_dirs: Vec::new(),
+        skill_roots: Vec::new(),
         resume: None,
         model: (!model.is_empty()).then(|| model.to_string()),
         effort: None,

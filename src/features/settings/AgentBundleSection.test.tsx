@@ -54,24 +54,24 @@ const BEHIND = {
 };
 
 const REPORT = {
-  agents: [
-    { name: "cartographer", change: "added" as const, path: "/home/u/.claude/agents/carto.md" },
-  ],
-  settingsChanged: false,
-  skillsChanged: 0,
-  backupPath: "/home/u/.claude/hyprlayer-backup",
+  source: "releaseAsset" as const,
+  stdout: "Downloaded the Claude + Codex bundle pair\n",
 };
 
 const ok = <T,>(data: T) => Promise.resolve({ status: "ok" as const, data });
 
 const STATUS: AiStatus = {
-  agentTool: "Claude Code",
+  agentTool: "Claude + Codex",
   agentsInstalledSha: "9a2a33c",
   assetsVersion: "1.6.0",
   binaryVersion: "1.6.0",
   installed: true,
   lastAgentCheck: null,
-  location: "~/.claude/",
+  location: "~/.config/hyprlayer/agents/1.6.0",
+  platforms: [
+    { id: "claude", name: "Claude Code", installed: true, location: "~/.claude" },
+    { id: "codex", name: "Codex", installed: true, location: "~/.codex" },
+  ],
   pinnedVersion: "1.6.0",
 };
 
@@ -95,6 +95,7 @@ const LEGACY_STATUS: AiStatus = {
   assetsVersion: null,
   binaryVersion: null,
   pinnedVersion: null,
+  platforms: [],
 };
 
 const install = (over: Partial<AgentBundleInstall>): AgentBundleInstall => ({
@@ -103,7 +104,6 @@ const install = (over: Partial<AgentBundleInstall>): AgentBundleInstall => ({
   source: "releaseAsset",
   stdout: "  Downloaded 54 files from the v1.6.0 release asset\n",
   stderr: "",
-  backupPath: "/home/u/.claude/hyprlayer-backup",
   ...over,
 });
 
@@ -150,8 +150,8 @@ describe("AgentBundleSection", () => {
     await waitFor(() => expect(b.agentBundleVersions).toHaveBeenCalled());
   });
 
-  it("shows a read-only SHA instead of a picker when the tool is not manageable", async () => {
-    renderSection({ ...STATUS, agentTool: "OpenCode" }, { ...FRESHNESS, manageable: false });
+  it("shows a read-only SHA instead of a picker for a legacy single-platform status", async () => {
+    renderSection(LEGACY_STATUS, { ...FRESHNESS, manageable: false });
     expect(await screen.findByText(/9a2a33c/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /agent bundle version/i })).toBeNull();
     expect(screen.queryByText(/Update the hyprlayer CLI/)).toBeNull();
@@ -253,8 +253,8 @@ describe("AgentBundleSection", () => {
     await choose(/1\.6\.0-rc\.2/);
     fireEvent.click(await screen.findByRole("button", { name: /install 1\.6\.0-rc\.2/i }));
     expect(await screen.findByText(/no longer matches the version shown/i)).toBeTruthy();
-    expect(screen.getByText(/hyprlayer-backup/)).toBeTruthy();
-    expect(screen.queryByText(/Bundle reinstalled from the published release/)).toBeNull();
+    expect(screen.queryByText(/backup/i)).toBeNull();
+    expect(screen.queryByText(/Claude and Codex linked to the published bundle/)).toBeNull();
   });
 
   it("reports an unpin that fell back as informational, not corruption", async () => {
@@ -295,8 +295,8 @@ describe("AgentBundleSection", () => {
     fireEvent.click(await screen.findByRole("button", { name: /install 1\.6\.0-rc\.2/i }));
     expect(await screen.findByText(/exit 1/)).toBeTruthy();
     expect(screen.getByText(/could not verify the bundle digest/)).toBeTruthy();
-    expect(screen.queryByText(/left as it was/i)).toBeNull();
-    expect(screen.getByText(/hyprlayer-backup/)).toBeTruthy();
+    expect(screen.getByText(/personal path collision was left untouched/i)).toBeTruthy();
+    expect(screen.queryByText(/backup/i)).toBeNull();
     expect(screen.getByRole("button", { name: /install 1\.6\.0-rc\.2/i })).toBeTruthy();
   });
 
@@ -349,13 +349,15 @@ describe("AgentBundleSection", () => {
     expect(await screen.findByText(/Updated to 1\.6\.0/)).toBeTruthy();
   });
 
-  it("names the backup when the catch-up replaced settings.json", async () => {
+  it("reports a fallback when catch-up cannot use the published bundle pair", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
-    b.updateAgentBundle.mockReturnValue(ok({ ...REPORT, settingsChanged: true }));
+    b.updateAgentBundle.mockReturnValue(
+      ok({ ...REPORT, source: "fallback", stdout: "trying the next source" }),
+    );
     renderSection({ ...STATUS, assetsVersion: "1.5.9", pinnedVersion: null }, BEHIND);
     fireEvent.click(await screen.findByRole("button", { name: /update to 1\.6\.0/i }));
-    expect(await screen.findByText(/settings\.json/)).toBeTruthy();
-    expect(screen.getByText(/hyprlayer-backup/)).toBeTruthy();
+    expect(await screen.findByText(/fallback bundle instead of 1\.6\.0/)).toBeTruthy();
+    expect(screen.queryByText(/backup/i)).toBeNull();
   });
 
   it("offers no catch-up when the bundle already matches the version the CLI wants", async () => {
@@ -378,6 +380,7 @@ describe("AgentBundleSection", () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: null, latest: null, hint: null }));
     renderSection(LEGACY_STATUS, {
       ...FRESHNESS,
+      manageable: false,
       installedVersion: null,
       desiredVersion: null,
       latestSha: "def",
@@ -391,7 +394,12 @@ describe("AgentBundleSection", () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(
       ok({ current: "1.5.9", latest: "1.6.2", hint: "brew upgrade hyprlayer" }),
     );
-    renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });
+    renderSection(LEGACY_STATUS, {
+      ...FRESHNESS,
+      manageable: false,
+      installedVersion: null,
+      desiredVersion: null,
+    });
     expect(await screen.findByText(/1\.6\.2 available/)).toBeTruthy();
     expect(screen.getByText(/hyprlayer 1\.5\.9/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /^update$/i })).toBeTruthy();
@@ -402,7 +410,12 @@ describe("AgentBundleSection", () => {
       ok({ current: "1.5.9", latest: "1.6.2", hint: "brew upgrade hyprlayer" }),
     );
     b.updateHyprlayerCli.mockReturnValue(ok({ ok: true, exitCode: 0, stdout: "", stderr: "" }));
-    renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });
+    renderSection(LEGACY_STATUS, {
+      ...FRESHNESS,
+      manageable: false,
+      installedVersion: null,
+      desiredVersion: null,
+    });
     fireEvent.click(await screen.findByRole("button", { name: /^update$/i }));
     await waitFor(() => expect(b.updateHyprlayerCli).toHaveBeenCalled());
     expect(await screen.findByText(/hyprlayer updated/i)).toBeTruthy();
@@ -415,7 +428,12 @@ describe("AgentBundleSection", () => {
     b.updateHyprlayerCli.mockReturnValue(
       ok({ ok: false, exitCode: 1, stdout: "", stderr: "Error: sudo: no tty present" }),
     );
-    renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });
+    renderSection(LEGACY_STATUS, {
+      ...FRESHNESS,
+      manageable: false,
+      installedVersion: null,
+      desiredVersion: null,
+    });
     fireEvent.click(await screen.findByRole("button", { name: /^update$/i }));
     expect(await screen.findByText(/brew upgrade hyprlayer/)).toBeTruthy();
     expect(screen.getByText(/no tty present/)).toBeTruthy();
@@ -423,7 +441,12 @@ describe("AgentBundleSection", () => {
 
   it("offers no button when the check cannot name a version", async () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
-    renderSection(LEGACY_STATUS, { ...FRESHNESS, installedVersion: null, desiredVersion: null });
+    renderSection(LEGACY_STATUS, {
+      ...FRESHNESS,
+      manageable: false,
+      installedVersion: null,
+      desiredVersion: null,
+    });
     expect(await screen.findByText(/hyprlayer 1\.5\.9/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^update$/i })).toBeNull();
   });

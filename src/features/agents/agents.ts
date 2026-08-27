@@ -196,6 +196,7 @@ export function newAgent(source: string): AgentFile {
     path: "",
     source,
     plugin: null,
+    managed: false,
     name: "",
     description: "",
     tools: [],
@@ -216,7 +217,11 @@ export function isUnsaved(agent: AgentFile): boolean {
 }
 
 export function isSystem(agent: AgentFile): boolean {
-  return agent.source === "plugin";
+  return agent.source === "plugin" || agent.managed === true;
+}
+
+export function isManaged(agent: AgentFile): boolean {
+  return agent.managed === true;
 }
 
 export function isAllProjects(agent: AgentFile): boolean {
@@ -386,6 +391,7 @@ export function duplicateAgent(agent: AgentFile): AgentFile {
     ...structuredClone(agent),
     path: "",
     plugin: null,
+    managed: false,
     source: isSystem(agent) ? "user" : agent.source,
     name: `${agent.name} copy`,
   };
@@ -448,7 +454,7 @@ export function bundleChipState(
     return { kind: "unknown", detail: "Could not check — the hyprlayer CLI did not answer." };
   }
   if (!status.manageable) {
-    return { kind: "unknown", detail: "No Claude Code agent bundle is configured." };
+    return { kind: "unknown", detail: "The Claude and Codex bundle pair is not ready." };
   }
   const lastCheckedMs = status.lastChecked != null ? status.lastChecked * 1000 : null;
   const from =

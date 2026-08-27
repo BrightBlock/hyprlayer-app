@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::State;
 
-use hyprlayer_core::agent_bundle::{self, AgentChange, BundleSource};
+use hyprlayer_core::agent_bundle::{self, BundleSource};
 use hyprlayer_core::agents::{self, AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay};
 use hyprlayer_core::hyprcli::{AiVersions, BundleSelection, HyprCli};
 use hyprlayer_core::skills::AgentSkill;
@@ -99,14 +99,6 @@ pub async fn export_agent_file(agent: AgentFile, overlay: AgentOverlay) -> CmdRe
     .await?
 }
 
-const MANAGEABLE_AGENT_TOOL: &str = "Claude Code";
-
-fn claude_root() -> CmdResult<PathBuf> {
-    dirs::home_dir()
-        .map(|home| home.join(".claude"))
-        .ok_or_else(|| AppError::internal("could not determine the home directory"))
-}
-
 const BUNDLE_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_REFS_BYTES: usize = 1024 * 1024;
 
@@ -159,8 +151,7 @@ pub async fn agent_bundle_status(state: State<'_, AppState>) -> CmdResult<AgentB
         .ai_status(&cwd)
         .await
         .map_err(AppError::from)?;
-    let manageable =
-        status.installed && status.agent_tool.as_deref() == Some(MANAGEABLE_AGENT_TOOL);
+    let manageable = agent_bundle::is_manageable_pair(&status);
     let desired = agent_bundle::desired_version(
         status.pinned_version.as_deref(),
         status.binary_version.as_deref(),
@@ -209,99 +200,42 @@ pub async fn agent_bundle_status(state: State<'_, AppState>) -> CmdResult<AgentB
 
 #[derive(Debug, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentBundleChange {
-    pub name: String,
-    pub change: AgentChange,
-    pub path: String,
-}
-
-#[derive(Debug, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
 pub struct AgentBundleReport {
-    pub agents: Vec<AgentBundleChange>,
-    pub settings_changed: bool,
-    pub skills_changed: u32,
-    pub backup_path: String,
+    pub source: BundleSource,
+    pub stdout: String,
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn update_agent_bundle(state: State<'_, AppState>) -> CmdResult<AgentBundleReport> {
-    let root = claude_root()?;
-
-    let backup_root = root.clone();
-    let staged = blocking("stage_agent_bundle_backup", move || {
-        agent_bundle::stage_backup(&backup_root).map_err(AppError::from)
-    })
-    .await??;
-
     let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let reinstall = HyprCli::new(&state.binaries).ai_reinstall(&cwd).await;
-    if let Err(e) = reinstall {
-        let discard_root = root.clone();
-        let _ = blocking("discard_agent_bundle_backup", move || {
-            agent_bundle::discard_staged_backup(&discard_root);
-            CmdResult::Ok(())
-        })
-        .await;
-        return Err(AppError {
+    let stdout = HyprCli::new(&state.binaries)
+        .ai_reinstall(&cwd)
+        .await
+        .map_err(|e| AppError {
             code: "agent_bundle_update_failed".into(),
             message: e.to_string(),
             remedy: Some(
                 "Check your network connection and try again. The CLI's own error is under \"Technical details\"."
                     .into(),
             ),
-        });
-    }
+        })?;
 
-    let diff_root = root.clone();
-    let (diff, backup_path) = blocking("diff_agent_bundle", move || {
-        let diff =
-            agent_bundle::diff_against_backup(&diff_root, &staged).map_err(AppError::from)?;
-        let backup = agent_bundle::promote_backup(&diff_root).map_err(AppError::from)?;
-        CmdResult::Ok((diff, backup))
-    })
-    .await??;
-
-    let agents_dir = root.join("agents");
     Ok(AgentBundleReport {
-        agents: diff
-            .agents
-            .into_iter()
-            .map(|(name, change)| AgentBundleChange {
-                path: agents_dir
-                    .join(format!("{name}.md"))
-                    .to_string_lossy()
-                    .into_owned(),
-                name,
-                change,
-            })
-            .collect(),
-        settings_changed: diff.settings_changed,
-        skills_changed: diff.skills_changed as u32,
-        backup_path: backup_path.to_string_lossy().into_owned(),
+        source: agent_bundle::reinstall_source(&stdout),
+        stdout,
     })
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn restore_agent_from_backup(stem: String) -> CmdResult<()> {
-    let root = claude_root()?;
-    blocking("restore_agent_from_backup", move || {
-        agent_bundle::restore_agent_from_backup(&root, &stem).map_err(AppError::from)
-    })
-    .await?
 }
 
 const VERSION_LIST_LIMIT: u32 = 10;
 
 async fn require_manageable(cli: &HyprCli<'_>, cwd: &Path) -> CmdResult<()> {
     let status = cli.ai_status(cwd).await.map_err(AppError::from)?;
-    if !status.installed || status.agent_tool.as_deref() != Some(MANAGEABLE_AGENT_TOOL) {
+    if !agent_bundle::is_manageable_pair(&status) {
         return Err(AppError {
             code: "agent_bundle_not_manageable".into(),
-            message: format!("Bundle versions can only be managed for {MANAGEABLE_AGENT_TOOL}."),
-            remedy: Some("Run the AI tool setup and choose Claude Code.".into()),
+            message: "Bundle versions require both Claude Code and Codex to be provisioned.".into(),
+            remedy: Some("Update the Hyprlayer CLI, then run `hyprlayer ai reinstall`.".into()),
         });
     }
     Ok(())
@@ -326,7 +260,6 @@ pub struct AgentBundleInstall {
     pub source: BundleSource,
     pub stdout: String,
     pub stderr: String,
-    pub backup_path: Option<String>,
 }
 
 #[tauri::command]
@@ -356,32 +289,14 @@ pub async fn install_agent_bundle_version(
         }
     }
 
-    let root = claude_root()?;
-    let staging_root = root.clone();
-    let staged = blocking("stage_agent_bundle_backup", move || {
-        agent_bundle::stage_backup(&staging_root).map_err(AppError::from)
-    })
-    .await??;
-
     let selection = match version.as_deref() {
         Some(v) => BundleSelection::Version(v),
         None => BundleSelection::Unpin,
     };
-    let output = match cli.ai_reinstall_selected(&cwd, selection).await {
-        Ok(output) => output,
-        Err(e) => {
-            let kept = format!(
-                "A pre-install copy of the bundle was kept at {}.",
-                staged.display()
-            );
-            let mut err = AppError::from(e);
-            err.remedy = Some(match err.remedy {
-                Some(remedy) => format!("{remedy} {kept}"),
-                None => kept,
-            });
-            return Err(err);
-        }
-    };
+    let output = cli
+        .ai_reinstall_selected(&cwd, selection)
+        .await
+        .map_err(AppError::from)?;
 
     if output.exit_code != Some(0) {
         return Ok(AgentBundleInstall {
@@ -390,14 +305,8 @@ pub async fn install_agent_bundle_version(
             source: agent_bundle::reinstall_source(&output.stdout),
             stdout: output.stdout,
             stderr: output.stderr,
-            backup_path: Some(staged.to_string_lossy().into_owned()),
         });
     }
-
-    let backup_path = blocking("promote_agent_bundle_backup", move || {
-        agent_bundle::promote_backup(&root).map_err(AppError::from)
-    })
-    .await??;
 
     Ok(AgentBundleInstall {
         ok: true,
@@ -405,6 +314,5 @@ pub async fn install_agent_bundle_version(
         source: agent_bundle::reinstall_source(&output.stdout),
         stdout: output.stdout,
         stderr: output.stderr,
-        backup_path: Some(backup_path.to_string_lossy().into_owned()),
     })
 }

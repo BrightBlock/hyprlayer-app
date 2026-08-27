@@ -86,6 +86,7 @@ import {
 import { useModelWindowMap } from "./modelWindowsStore";
 import {
   effectiveHarnessKey,
+  firstSupportedOpencodeModel,
   harnessOption,
   lockedSessionProvider,
   modelProvider,
@@ -1087,15 +1088,26 @@ export function SessionChat({
   );
   const usingOpencode = harness.key === "opencode";
   const usingCodex = harness.key === "codex";
-  const ocModels = opencodeDefaults?.selectedModels ?? [];
+  const ocSelected = opencodeDefaults?.selectedModels ?? [];
   const ollamaModels = (ollamaDefaults?.selectedModels ?? []).map((id) => `ollama/${id}`);
-  const ocModel =
-    shell.opencodeModel ??
-    opencodeDefaults?.defaultModel ??
-    ollamaDefaults?.defaultModel ??
-    ocModels[0] ??
-    ollamaModels[0] ??
-    null;
+  const ocCatalog = useOpencodeCatalog(ocSelected.length > 0);
+  const ocKnown = useMemo(() => {
+    const providers = ocCatalog.data?.providers;
+    if (!providers?.some((p) => p.available != null)) return null;
+    const ids = new Set<string>();
+    for (const p of providers) for (const m of p.models) ids.add(`${p.id}/${m.id}`);
+    return ids;
+  }, [ocCatalog.data]);
+  const ocUsable = (id: string | null | undefined) =>
+    id != null && ocKnown != null && !ocKnown.has(id) ? null : id;
+  const ocModels = ocKnown ? ocSelected.filter((id) => ocKnown.has(id)) : ocSelected;
+  const ocModel = firstSupportedOpencodeModel(
+    ocUsable(shell.opencodeModel),
+    ocUsable(opencodeDefaults?.defaultModel),
+    ollamaDefaults?.defaultModel,
+    ...ocModels,
+    ...ollamaModels,
+  );
   const codexCatalog = useCodexProbe(codexInstalled);
   const codexModels = resolveCodexModelIds(
     codexDefaults?.selectedModels,
@@ -1113,7 +1125,6 @@ export function SessionChat({
   );
   const startModelFlag = usingOpencode ? ocModel : usingCodex ? codexModel : model.flag;
   const startEffort = usingCodex ? codexEffort.key : usingOpencode ? null : (effort?.key ?? null);
-  const ocCatalog = useOpencodeCatalog(ocModels.length > 0);
   const ocNames = useMemo(
     () => opencodeModelNames(ocCatalog.data?.providers ?? []),
     [ocCatalog.data],
@@ -1468,6 +1479,8 @@ export function SessionChat({
     onChange: onDraftChange,
     textareaRef,
     enabled: !pendingQuestion,
+    harness: harness.key,
+    model: usingOpencode ? ocModel : null,
     onPickFile: (rel) => {
       const root = view.item.worktreePath.replace(/\/+$/, "");
       onAddAttachments([{ path: `${root}/${rel}`, name: basename(rel), kind: "file" }]);
@@ -1805,6 +1818,7 @@ export function SessionChat({
                   <HighlightBackdrop
                     value={draft}
                     commandNames={autocomplete.commandNames}
+                    sigil={autocomplete.skillSigil}
                     scrollTop={composerScroll}
                     argHint={pendingArg && promptInputLabel(pendingArg)}
                   />

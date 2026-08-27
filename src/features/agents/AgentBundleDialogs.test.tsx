@@ -2,46 +2,22 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentBundleChange } from "@/lib/bindings";
-
 import { AgentUpdateFailed, AgentUpdateReport } from "./AgentBundleDialogs";
 import type { BundleFailure, BundleReport } from "./agents";
 
-const b = vi.hoisted(() => ({
-  restoreAgentFromBackup: vi.fn(() => Promise.resolve({ status: "ok", data: null })),
-  navigate: vi.fn(),
-  invalidateQueries: vi.fn(() => Promise.resolve()),
-}));
-vi.mock("@/lib/bindings", () => ({
-  commands: { restoreAgentFromBackup: b.restoreAgentFromBackup },
-}));
-
+const b = vi.hoisted(() => ({ navigate: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => b.navigate }));
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: b.invalidateQueries }),
-}));
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
-const change = (over: Partial<AgentBundleChange>): AgentBundleChange => ({
-  name: "cartographer",
-  change: "added",
-  path: "/home/u/.claude/agents/cartographer.md",
-  ...over,
-});
-
-const BACKUP = "/home/u/.claude/hyprlayer-backup";
-
-const report = (over: Partial<BundleReport>): BundleReport => ({
-  from: "abc",
-  to: "def",
-  agents: [],
-  settingsChanged: false,
-  skillsChanged: 0,
-  backupPath: BACKUP,
+const report = (over: Partial<BundleReport> = {}): BundleReport => ({
+  from: "1.5.9",
+  to: "1.6.0",
+  source: "releaseAsset",
+  stdout: "Downloaded the Claude + Codex bundle pair\n",
   ...over,
 });
 
@@ -51,110 +27,39 @@ describe("AgentUpdateReport", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("renders one row per change with the right badge tone", () => {
-    render(
-      <AgentUpdateReport
-        report={report({
-          from: "1.5.9",
-          to: "1.6.0",
-          agents: [
-            change({ name: "cartographer", change: "added" }),
-            change({
-              name: "foreman",
-              change: "updated",
-              path: "/home/u/.claude/agents/foreman.md",
-            }),
-          ],
-        })}
-        open={true}
-        onClose={() => {}}
-      />,
-    );
+  it("reports the atomic pair and its version transition", () => {
+    render(<AgentUpdateReport report={report()} open={true} onClose={() => {}} />);
 
-    expect(screen.getByText("cartographer")).toBeTruthy();
-    expect(screen.getByText("New")).toBeTruthy();
-    expect(screen.getByText("foreman")).toBeTruthy();
-    expect(screen.getByText("Updated")).toBeTruthy();
     expect(screen.getByText("1.5.9 → 1.6.0")).toBeTruthy();
+    expect(screen.getByText(/Claude Code and Codex now point to 1\.6\.0/)).toBeTruthy();
+    expect(screen.queryByText(/backup/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
   });
 
-  it("offers Restore mine on every overwritten row, not on newly added ones", () => {
+  it("warns when the CLI selected the repository fallback", () => {
     render(
       <AgentUpdateReport
-        report={report({
-          agents: [
-            change({ name: "cartographer", change: "added" }),
-            change({
-              name: "foreman",
-              change: "updated",
-              path: "/home/u/.claude/agents/foreman.md",
-            }),
-          ],
-        })}
+        report={report({ source: "fallback", stdout: "trying the next source" })}
         open={true}
         onClose={() => {}}
       />,
     );
 
-    expect(screen.getAllByRole("button", { name: "Restore mine" })).toHaveLength(1);
-    expect(screen.getByText(BACKUP)).toBeTruthy();
+    expect(screen.getByText(/repository fallback bundle/)).toBeTruthy();
+    expect(screen.getByText(/trying the next source/)).toBeTruthy();
   });
 
-  it("omits the backup note when everything was newly added, nothing was overwritten", () => {
+  it("does not invent an identity when the target is unknown", () => {
     render(
       <AgentUpdateReport
-        report={report({ agents: [change({ name: "cartographer", change: "added" })] })}
-        open={true}
-        onClose={() => {}}
-      />,
-    );
-    expect(screen.queryByText(BACKUP)).toBeNull();
-  });
-
-  it("names a replaced settings.json and replaced skills, and still offers the backup", () => {
-    render(
-      <AgentUpdateReport
-        report={report({ settingsChanged: true, skillsChanged: 3 })}
-        open={true}
-        onClose={() => {}}
-      />,
-    );
-    expect(screen.getByText(/settings\.json and 3 skill files/)).toBeTruthy();
-    expect(screen.getByText(BACKUP)).toBeTruthy();
-    expect(screen.queryByText(/already matched the bundle/)).toBeNull();
-  });
-
-  it("omits the identity line entirely when what landed is unknown", () => {
-    render(
-      <AgentUpdateReport
-        report={report({ from: null, to: null, settingsChanged: true })}
-        open={true}
-        onClose={() => {}}
-      />,
-    );
-    expect(screen.queryByText(/unknown/)).toBeNull();
-    expect(screen.getByText(/settings\.json/)).toBeTruthy();
-  });
-
-  it("reports an update that changed nothing rather than an empty list", () => {
-    render(<AgentUpdateReport report={report({ to: "abc" })} open={true} onClose={() => {}} />);
-    expect(screen.getByText(/already matched the bundle/)).toBeTruthy();
-  });
-
-  it("restoring calls the backend with the row's name and refreshes the library", async () => {
-    render(
-      <AgentUpdateReport
-        report={report({ agents: [change({ name: "cartographer", change: "updated" })] })}
+        report={report({ from: null, to: null, source: "unknown" })}
         open={true}
         onClose={() => {}}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore mine" }));
-    expect(b.restoreAgentFromBackup).toHaveBeenCalledWith("cartographer");
-    await vi.waitFor(() =>
-      expect(b.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["agent-files"] }),
-    );
+    expect(screen.queryByText(/→/)).toBeNull();
+    expect(screen.getByText(/did not identify the bundle source/)).toBeTruthy();
   });
 });
 
@@ -191,7 +96,7 @@ describe("AgentUpdateFailed", () => {
     expect(onRetry).toHaveBeenCalled();
   });
 
-  it("Open AI settings closes the dialog and routes to the AI Agents card", () => {
+  it("Open AI settings closes the dialog and routes to settings", () => {
     const onClose = vi.fn();
     render(
       <AgentUpdateFailed failure={failure} open={true} onClose={onClose} onRetry={() => {}} />,

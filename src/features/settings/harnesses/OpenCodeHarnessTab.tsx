@@ -22,6 +22,7 @@ import {
   Spinner,
   SettingRow,
 } from "@/components/ui";
+import { isSupportedOpencodeProvider } from "@/lib/domain/harnessing";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
 import { BinaryCard } from "@/features/system/BinaryCard";
 import { ProviderPickerModal } from "./ProviderPickerModal";
@@ -41,6 +42,7 @@ export function OpenCodeHarnessTab({
   const save = useSetAppSettings();
   const setDefault = useSetOpencodeDefaultModel();
   const removeProvider = useRemoveOpencodeProvider();
+  const refreshCatalog = useRefreshOpencodeCatalog();
 
   const [providerOpen, setProviderOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -50,13 +52,25 @@ export function OpenCodeHarnessTab({
   const selectedModels = opencode.selectedModels ?? [];
   const installed = status?.state.state === "ok";
 
+  const providerById = useMemo(() => {
+    const map = new Map<string, (typeof providers)[number]>();
+    for (const provider of providers) map.set(provider.id.toLowerCase(), provider);
+    return map;
+  }, [providers]);
   const configured = useMemo(
-    () => new Set((auth.data ?? []).map((e) => e.provider)),
-    [auth.data],
+    () =>
+      new Set(
+        (auth.data ?? []).flatMap((entry) => {
+          if (!isSupportedOpencodeProvider(entry.provider)) return [];
+          const provider = providerById.get(entry.provider.toLowerCase());
+          return [provider ? provider.id : entry.provider.toLowerCase()];
+        }),
+      ),
+    [auth.data, providerById],
   );
   const providerName = useMemo(() => {
     const map = new Map<string, string>();
-    for (const p of providers) map.set(p.id, p.name);
+    for (const p of providers) map.set(p.id.toLowerCase(), p.name);
     return map;
   }, [providers]);
   const modelName = useMemo(() => {
@@ -126,30 +140,35 @@ export function OpenCodeHarnessTab({
         <div className="mt-3 space-y-1.5">
           {configured.size === 0 && (
             <p className="text-xs text-ink-dim">
-              No providers configured yet. Add one to use its models with OpenCode.
+              No supported providers configured yet. Add one to use its models with OpenCode.
             </p>
           )}
-          {(auth.data ?? []).map((e) => (
-            <div
-              key={e.provider}
-              className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2"
-            >
-              <span className="min-w-0 truncate text-sm text-ink">
-                {providerName.get(e.provider) ?? e.provider}
-              </span>
-              <div className="flex shrink-0 items-center gap-3">
-                <Badge tone="dim">key set</Badge>
-                <button
-                  type="button"
-                  aria-label={`Remove ${e.provider}`}
-                  onClick={() => removeProvider.mutate(e.provider)}
-                  className="text-ink-dim hover:text-bad"
-                >
-                  <XIcon />
-                </button>
+          {(auth.data ?? []).map((e) => {
+            const supported = isSupportedOpencodeProvider(e.provider);
+            return (
+              <div
+                key={e.provider}
+                className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2"
+              >
+                <span className="min-w-0 truncate text-sm text-ink">
+                  {providerName.get(e.provider.toLowerCase()) ?? e.provider}
+                </span>
+                <div className="flex shrink-0 items-center gap-3">
+                  <Badge tone={supported ? "dim" : "warn"}>
+                    {supported ? "key set" : "unsupported"}
+                  </Badge>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${e.provider}`}
+                    onClick={() => removeProvider.mutate(e.provider)}
+                    className="text-ink-dim hover:text-bad"
+                  >
+                    <XIcon />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
 
@@ -158,7 +177,13 @@ export function OpenCodeHarnessTab({
           <CardTitle className="mb-0">
             Models <span className="ml-1 font-normal text-ink-dim">{selectedModels.length} selected</span>
           </CardTitle>
-          <Button onClick={() => setModelOpen(true)} disabled={catalog.isLoading}>
+          <Button
+            onClick={() => {
+              refreshCatalog.mutate();
+              setModelOpen(true);
+            }}
+            disabled={catalog.isLoading}
+          >
             <PlusIcon size={14} /> Add models
           </Button>
         </div>

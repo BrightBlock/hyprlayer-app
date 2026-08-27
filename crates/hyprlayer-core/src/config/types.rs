@@ -249,21 +249,6 @@ impl ThoughtsConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentTool {
-    Claude,
-    Copilot,
-    OpenCode,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiConfig {
-    #[serde(default)]
-    pub agent_tool: Option<AgentTool>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HyprlayerConfig {
@@ -271,8 +256,6 @@ pub struct HyprlayerConfig {
     pub version: Option<u64>,
     #[serde(default)]
     pub thoughts: Option<ThoughtsConfig>,
-    #[serde(default)]
-    pub ai: Option<AiConfig>,
 }
 
 pub fn expand_path(path: &str) -> PathBuf {

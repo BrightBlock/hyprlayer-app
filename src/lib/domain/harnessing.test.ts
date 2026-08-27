@@ -201,6 +201,29 @@ describe("actionLaunchArgs", () => {
     });
   });
 
+  it("never launches a legacy Copilot model and falls through to a supported model", () => {
+    const settings = withProviders({
+      defaultHarness: "opencode",
+      opencode: {
+        defaultModel: "github-copilot/default",
+        commitModel: "GITHUB-COPILOT/commit",
+        selectedModels: ["GitHub-Copilot/selected", "openai/gpt-5"],
+      },
+    });
+
+    expect(
+      newChatLaunchArgs(settings, { opencodeModel: "gItHuB-CoPiLoT/shell" }),
+    ).toMatchObject({ harness: "opencode", model: "openai/gpt-5", effort: null });
+    expect(actionAgentDefaults(settings)).toEqual({
+      harness: "opencode",
+      model: "openai/gpt-5",
+      effort: null,
+    });
+    expect(
+      actionLaunchArgs({ harness: "opencode", model: "github-copilot/direct", effort: null }),
+    ).toEqual({ harness: "opencode", model: null, effort: null });
+  });
+
   it("passes a Codex model id through AND keeps its effort", () => {
     expect(
       actionLaunchArgs({ harness: "codex", model: "gpt-5.4-codex", effort: "low" }),
@@ -290,4 +313,3 @@ describe("Codex defaults", () => {
     expect(newChatLaunchArgs(settings, {}).effort).toBe("medium");
   });
 });
-

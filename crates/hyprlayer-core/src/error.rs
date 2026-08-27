@@ -123,10 +123,6 @@ impl CoreError {
             CoreError::Exec { program, stderr_tail, .. } => {
                 if program.contains("gh") && stderr_tail.contains("auth") {
                     Some("Run `gh auth login` in a terminal.".into())
-                } else if program.contains("hyprlayer")
-                    && stderr_tail.contains("No AI tool configured")
-                {
-                    Some("Open Settings › AI tool and click Configure.".into())
                 } else {
                     None
                 }
@@ -226,15 +222,5 @@ mod tests {
     #[test]
     fn exec_code_is_unchanged() {
         assert_eq!(exec(Some(1), "boom").code(), "exec_failed");
-    }
-
-    #[test]
-    fn exec_remedy_points_at_the_ai_tool_card() {
-        let err = CoreError::Exec {
-            program: "hyprlayer".into(),
-            exit: Some(1),
-            stderr_tail: "Error: No AI tool configured. Run 'hyprlayer ai configure' first.".into(),
-        };
-        assert!(err.remedy().is_some_and(|r| r.contains("Settings")));
     }
 }

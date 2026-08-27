@@ -32,6 +32,7 @@ import {
   duplicateAgent,
   folderList,
   folderResolver,
+  isManaged,
   isSystem,
   isUnsaved,
   newAgent,
@@ -530,7 +531,7 @@ export function AgentLibrary({
             onSave={() => save.mutate({ agent: working, overlay: workingOverlay, isDefault })}
             onStatus={(status) => patchOverlay({ status })}
             onReset={() => {
-              if (working.modified) remove.mutate([working]);
+              if (!isManaged(working) && working.modified) remove.mutate([working]);
               else flash("This agent is already the shipped version");
             }}
             onExport={() => exportAgents.mutate([working])}
@@ -578,16 +579,18 @@ export function AgentLibrary({
           >
             Set as default
           </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => {
-              setActionTarget(menu.agent);
-              setMoveTarget("");
-              setMenu(null);
-              setDialog("move");
-            }}
-          >
-            Move to folder…
-          </ContextMenuItem>
+          {!isManaged(menu.agent) && (
+            <ContextMenuItem
+              onClick={() => {
+                setActionTarget(menu.agent);
+                setMoveTarget("");
+                setMenu(null);
+                setDialog("move");
+              }}
+            >
+              Move to folder…
+            </ContextMenuItem>
+          )}
           <ContextMenuItem
             onClick={() => {
               setMenu(null);
@@ -596,16 +599,18 @@ export function AgentLibrary({
           >
             Export .agent.json
           </ContextMenuItem>
-          <ContextMenuItem
-            danger
-            onClick={() => {
-              setActionTarget(menu.agent);
-              setMenu(null);
-              setDialog("delete");
-            }}
-          >
-            {menu.agent.modified ? "Restore shipped version" : "Delete agent"}
-          </ContextMenuItem>
+          {!isManaged(menu.agent) && (
+            <ContextMenuItem
+              danger
+              onClick={() => {
+                setActionTarget(menu.agent);
+                setMenu(null);
+                setDialog("delete");
+              }}
+            >
+              {menu.agent.modified ? "Restore shipped version" : "Delete agent"}
+            </ContextMenuItem>
+          )}
         </ContextMenu>
       )}
 

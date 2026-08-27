@@ -111,6 +111,32 @@ pub fn set_default_model(model: Option<&str>) -> Result<()> {
     write_json_atomic(&path, &Value::Object(obj), 0o644)
 }
 
+pub fn clear_default_model_for_provider(provider: &str) -> Result<bool> {
+    let Some(path) = config_json_path() else {
+        return Ok(false);
+    };
+    let mut obj = match std::fs::read_to_string(&path) {
+        Ok(s) => match serde_json::from_str::<Value>(&s) {
+            Ok(Value::Object(m)) => m,
+            // Rewriting JSONC would discard the user's comments.
+            Ok(_) | Err(_) => return Ok(false),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    let matches_provider = obj
+        .get("model")
+        .and_then(Value::as_str)
+        .and_then(|model| model.split('/').next())
+        .is_some_and(|configured| configured.eq_ignore_ascii_case(provider));
+    if !matches_provider {
+        return Ok(false);
+    }
+    obj.remove("model");
+    write_json_atomic(&path, &Value::Object(obj), 0o644)?;
+    Ok(true)
+}
+
 pub fn set_ollama_provider(base_url: &str, models: &[String]) -> Result<()> {
     let Some(path) = config_json_path() else {
         return Ok(());
@@ -339,6 +365,13 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(v.get("model").is_none());
         assert_eq!(v["theme"], "dark");
+
+        set_default_model(Some("GitHub-Copilot/gpt-5")).unwrap();
+        assert!(clear_default_model_for_provider("github-copilot").unwrap());
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(v.get("model").is_none());
+        assert_eq!(v["theme"], "dark");
+        assert!(!clear_default_model_for_provider("github-copilot").unwrap());
 
         let mut obj = v.as_object().unwrap().clone();
         obj.insert(

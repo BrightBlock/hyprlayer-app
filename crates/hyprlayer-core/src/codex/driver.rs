@@ -27,6 +27,7 @@ pub struct SpawnConfig {
     pub cwd: PathBuf,
     pub permission_mode: PermissionMode,
     pub add_dirs: Vec<PathBuf>,
+    pub skill_roots: Vec<PathBuf>,
     pub resume: Option<String>,
     pub prior_user_turns: usize,
     pub model: Option<String>,
@@ -58,7 +59,11 @@ impl CodexDriver {
 
         let mut cmd = Command::new(&config.codex_bin);
         crate::process::appimage::scrub_tokio(&mut cmd);
-        cmd.args(["app-server", "--stdio"])
+        // Personal custom agents are still guarded independently of the
+        // stable multi-agent runtime in Codex 0.149.x. Set the documented
+        // agent registry gate before the subcommand so installed persona
+        // TOMLs are available in every Hyprlayer Codex session.
+        cmd.args(["-c", "agents.enabled=true", "app-server", "--stdio"])
             .current_dir(&config.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -163,6 +168,17 @@ impl CodexDriver {
         .await?;
         self.notify("initialized", json!({}))?;
 
+        if !config.skill_roots.is_empty() {
+            let roots: Vec<String> = config
+                .skill_roots
+                .iter()
+                .map(|r| r.to_string_lossy().into_owned())
+                .collect();
+            let _ = self
+                .request("skills/extraRoots/set", json!({ "extraRoots": roots }))
+                .await;
+        }
+
         let (approval_policy, sandbox) = approval_posture(config.permission_mode);
         let mut params = json!({
             "cwd": config.cwd.to_string_lossy(),
@@ -199,7 +215,15 @@ impl CodexDriver {
             }
         };
 
-        let result = self.request(method, params).await?;
+        let rpc_id = self.next_rpc_id();
+        self.state
+            .lock()
+            .map_err(|_| CoreError::OutputParse {
+                program: "codex".into(),
+                detail: "protocol state was poisoned during thread handshake".into(),
+            })?
+            .expect_root_thread_from(rpc_id);
+        let result = self.request_with_id(rpc_id, method, params).await?;
         let thread_id = result
             .get("thread")
             .and_then(|t| t.get("id"))
@@ -348,6 +372,20 @@ impl CodexDriver {
         Ok(())
     }
 
+    pub async fn skills(&self) -> Result<Vec<String>> {
+        let result = self.request("skills/list", json!({})).await?;
+        Ok(result
+            .get("data")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("skills").and_then(Value::as_array))
+            .flatten()
+            .filter_map(|skill| skill.get("name").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect())
+    }
+
     pub fn kill(&self) {
         self.kill_flag.mark_killed();
         self.killer.kill();
@@ -374,7 +412,12 @@ impl CodexDriver {
     }
 
     async fn request(&self, method: &str, params: Value) -> Result<Value> {
-        let rx = self.request_channel(method, params)?;
+        let id = self.next_rpc_id();
+        self.request_with_id(id, method, params).await
+    }
+
+    async fn request_with_id(&self, id: u64, method: &str, params: Value) -> Result<Value> {
+        let rx = self.open_request(id, method, params)?;
         let replied = tokio::time::timeout(STARTUP_TIMEOUT, rx).await;
         let failed = |detail: String| CoreError::OutputParse {
             program: "codex".into(),
@@ -395,12 +438,24 @@ impl CodexDriver {
         }
     }
 
+    fn next_rpc_id(&self) -> u64 {
+        self.rpc_seq.fetch_add(1, Ordering::SeqCst)
+    }
+
     fn request_channel(
         &self,
         method: &str,
         params: Value,
     ) -> Result<oneshot::Receiver<std::result::Result<Value, String>>> {
-        let id = self.rpc_seq.fetch_add(1, Ordering::SeqCst);
+        self.open_request(self.next_rpc_id(), method, params)
+    }
+
+    fn open_request(
+        &self,
+        id: u64,
+        method: &str,
+        params: Value,
+    ) -> Result<oneshot::Receiver<std::result::Result<Value, String>>> {
         let (tx, rx) = oneshot::channel();
         if let Ok(mut map) = self.pending.lock() {
             map.insert(id, tx);
@@ -489,38 +544,7 @@ async fn read_and_wait(
                 let Some(incoming) = decode_line(&line) else {
                     continue;
                 };
-                match incoming {
-                    Incoming::Response { id, result } => {
-                        let waiter = pending.lock().ok().and_then(|mut m| m.remove(&id));
-                        if let Some(tx) = waiter {
-                            let _ = tx.send(result);
-                        }
-                    }
-                    Incoming::Notification { method, params } => {
-                        if method == "thread/closed" {
-                            clean_exit = true;
-                        }
-                        let out = match state.lock() {
-                            Ok(mut s) => s.notification(&method, &params),
-                            Err(_) => Vec::new(),
-                        };
-                        for event in out {
-                            let _ = events.send(event);
-                        }
-                    }
-                    Incoming::ServerRequest { id, method, params } => {
-                        let out = match state.lock() {
-                            Ok(mut s) => s.server_request(&id, &method, &params),
-                            Err(_) => Vec::new(),
-                        };
-                        if out.is_empty() {
-                            auto_decline(&stdin_tx, &id, &method);
-                        }
-                        for event in out {
-                            let _ = events.send(event);
-                        }
-                    }
-                }
+                clean_exit |= route_incoming(incoming, &events, &pending, &state, &stdin_tx);
             }
             Ok(None) => break,
             Err(_) => break,
@@ -550,9 +574,59 @@ async fn read_and_wait(
     });
 }
 
+fn route_incoming(
+    incoming: Incoming,
+    events: &broadcast::Sender<SessionEvent>,
+    pending: &PendingReplies,
+    state: &Arc<StdMutex<Translator>>,
+    stdin_tx: &mpsc::WeakUnboundedSender<String>,
+) -> bool {
+    match incoming {
+        Incoming::Response { id, result } => {
+            if let Ok(mut s) = state.lock() {
+                s.observe_response(id, &result);
+            }
+            let waiter = pending.lock().ok().and_then(|mut m| m.remove(&id));
+            if let Some(tx) = waiter {
+                let _ = tx.send(result);
+            }
+            false
+        }
+        Incoming::Notification { method, params } => {
+            let (closes_root, out) = match state.lock() {
+                Ok(mut s) => (
+                    method == "thread/closed" && !s.is_child_thread(&params),
+                    s.notification(&method, &params),
+                ),
+                Err(_) => (method == "thread/closed", Vec::new()),
+            };
+            for event in out {
+                let _ = events.send(event);
+            }
+            closes_root
+        }
+        Incoming::ServerRequest { id, method, params } => {
+            // Child-thread requests must remain routable: their agent cannot
+            // continue until an approval or user-input response is delivered.
+            let out = match state.lock() {
+                Ok(mut s) => s.server_request(&id, &method, &params),
+                Err(_) => Vec::new(),
+            };
+            if out.is_empty() {
+                auto_decline(stdin_tx, &id, &method);
+            }
+            for event in out {
+                let _ = events.send(event);
+            }
+            false
+        }
+    }
+}
+
 fn auto_decline(stdin_tx: &mpsc::WeakUnboundedSender<String>, id: &Value, method: &str) {
     let result = match method {
         "mcpServer/elicitation/request" => json!({ "action": "decline" }),
+        "item/tool/requestUserInput" => json!({ "answers": {} }),
         "execCommandApproval" | "applyPatchApproval" => json!({
             "decision": { "denied": { "rejection": "unsupported by this client" } }
         }),
@@ -638,5 +712,164 @@ mod tests {
             v["result"]["decision"]["denied"]["rejection"],
             json!("unsupported by this client")
         );
+    }
+
+    #[tokio::test]
+    async fn routing_filters_child_notifications_only() {
+        let (events, mut event_rx) = broadcast::channel(8);
+        let pending: PendingReplies = Arc::new(StdMutex::new(HashMap::new()));
+        let state = Arc::new(StdMutex::new(Translator::default()));
+        state.lock().unwrap().expect_root_thread_from(42);
+        let (stdin_tx, _stdin_rx) = mpsc::unbounded_channel();
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+        pending.lock().unwrap().insert(42, reply_tx);
+        assert!(!route_incoming(
+            Incoming::Response {
+                id: 42,
+                result: Ok(json!({ "thread": { "id": "root-thread" } })),
+            },
+            &events,
+            &pending,
+            &state,
+            &stdin_tx.downgrade(),
+        ));
+        assert_eq!(
+            reply_rx.await.unwrap().unwrap()["thread"]["id"],
+            json!("root-thread"),
+            "handshake responses must bypass notification filtering"
+        );
+
+        assert!(!route_incoming(
+            Incoming::Notification {
+                method: "turn/completed".into(),
+                params: json!({ "threadId": "child-thread", "turn": {
+                    "id": "child-turn", "status": "completed"
+                } }),
+            },
+            &events,
+            &pending,
+            &state,
+            &stdin_tx.downgrade(),
+        ));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+
+        assert!(!route_incoming(
+            Incoming::ServerRequest {
+                id: json!(51),
+                method: "item/commandExecution/requestApproval".into(),
+                params: json!({ "threadId": "child-thread", "turnId": "child-turn",
+                    "itemId": "child-command", "command": "touch child-output", "cwd": "/w"
+                }),
+            },
+            &events,
+            &pending,
+            &state,
+            &stdin_tx.downgrade(),
+        ));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(SessionEvent::PermissionAsk { request_id, .. }) if request_id == "child-thread:child-command"
+        ));
+
+        assert!(route_incoming(
+            Incoming::Notification {
+                method: "thread/closed".into(),
+                params: json!({ "threadId": "root-thread" }),
+            },
+            &events,
+            &pending,
+            &state,
+            &stdin_tx.downgrade(),
+        ));
+        assert!(!route_incoming(
+            Incoming::Notification {
+                method: "thread/closed".into(),
+                params: json!({ "threadId": "child-thread" }),
+            },
+            &events,
+            &pending,
+            &state,
+            &stdin_tx.downgrade(),
+        ));
+    }
+
+    #[tokio::test]
+    async fn routing_empty_answers_child_questions_and_surfaces_the_root_question() {
+        let (events, mut event_rx) = broadcast::channel(8);
+        let pending: PendingReplies = Arc::new(StdMutex::new(HashMap::new()));
+        let state = Arc::new(StdMutex::new(Translator::default()));
+        state
+            .lock()
+            .unwrap()
+            .set_root_thread_id("root-thread".into());
+        let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel();
+        let question = |thread_id: &str, item_id: &str| {
+            json!({
+                "threadId": thread_id,
+                "turnId": format!("{thread_id}-turn"),
+                "itemId": item_id,
+                "questions": [{
+                    "id": format!("{item_id}-choice"),
+                    "header": "Choice",
+                    "question": "Continue?",
+                    "options": []
+                }]
+            })
+        };
+
+        for (rpc_id, thread_id, item_id) in [
+            (61, "child-one", "child-question-one"),
+            (62, "child-two", "child-question-two"),
+        ] {
+            assert!(!route_incoming(
+                Incoming::ServerRequest {
+                    id: json!(rpc_id),
+                    method: "item/tool/requestUserInput".into(),
+                    params: question(thread_id, item_id),
+                },
+                &events,
+                &pending,
+                &state,
+                &stdin_tx.downgrade(),
+            ));
+            let line = stdin_rx.try_recv().expect("child question was answered");
+            let reply: Value = serde_json::from_str(line.trim()).unwrap();
+            assert_eq!(reply["id"], json!(rpc_id));
+            assert_eq!(reply["result"], json!({ "answers": {} }));
+        }
+        assert!(matches!(
+            event_rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        assert!(state.lock().unwrap().pending_questions.is_empty());
+
+        assert!(!route_incoming(
+            Incoming::ServerRequest {
+                id: json!(63),
+                method: "item/tool/requestUserInput".into(),
+                params: question("root-thread", "root-question"),
+            },
+            &events,
+            &pending,
+            &state,
+            &stdin_tx.downgrade(),
+        ));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(SessionEvent::QuestionAsk { request_id, .. }) if request_id == "root-thread:root-question"
+        ));
+        assert!(matches!(
+            stdin_rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(state
+            .lock()
+            .unwrap()
+            .pending_questions
+            .contains_key("root-thread:root-question"));
     }
 }

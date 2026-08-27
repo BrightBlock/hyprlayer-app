@@ -35,16 +35,9 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
       <div className="selectable mt-2 rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
         <p className="text-bad">
           The reinstall failed
-          {result.exitCode != null && <> (exit {result.exitCode})</>}. The CLI may have stopped
-          partway through, so the bundle on disk is not guaranteed untouched.
+          {result.exitCode != null && <> (exit {result.exitCode})</>}. The CLI did not confirm a
+          complete Claude and Codex link set; any personal path collision was left untouched.
         </p>
-        {result.backupPath && (
-          <p className="mt-1 text-ink-dim">
-            Your pre-install files were kept at{" "}
-            <span className="font-mono text-xs">{result.backupPath}</span> — until the next
-            install attempt, which replaces that copy.
-          </p>
-        )}
         <CliOutput text={result.stderr || result.stdout} />
       </div>
     );
@@ -55,8 +48,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
         <div className="selectable mt-2 rounded-md border border-edge bg-panel-2 p-3 text-sm">
           <p className="text-ink-dim">
             The pin was cleared. No release publishes a bundle for this CLI&rsquo;s own version,
-            so it installed the repository&rsquo;s current files instead — the same bundle an
-            unpinned pre-1.6.0 install uses.
+            so it linked Claude and Codex to the repository&rsquo;s current bundle instead.
           </p>
           <CliOutput text={result.stdout} />
         </div>
@@ -65,17 +57,9 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
     return (
       <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-sm">
         <p className="text-warn">
-          That version has no published bundle, so the CLI installed an unversioned copy from the
-          repository instead. What is on disk no longer matches the version shown.
+          That version has no published bundle pair, so the CLI linked Claude and Codex to the
+          repository fallback instead. What is active no longer matches the version shown.
         </p>
-        {result.backupPath && (
-          <p className="mt-1 text-ink-dim">
-            Your previous bundle was backed up to{" "}
-            <span className="font-mono text-xs">{result.backupPath}</span>. Reinstalling another
-            version will not undo this — the installer reads these files as your own edits and
-            keeps them.
-          </p>
-        )}
         <CliOutput text={result.stdout} />
       </div>
     );
@@ -88,12 +72,6 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
             The reinstall finished, but its output did not confirm the published release asset
             was used, so treat the installed files as unverified.
           </p>
-          {result.backupPath && (
-            <p className="mt-1 text-ink-dim">
-              Your previous bundle was backed up to{" "}
-              <span className="font-mono text-xs">{result.backupPath}</span>.
-            </p>
-          )}
           <CliOutput text={result.stdout} />
         </div>
       );
@@ -111,7 +89,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
     <p className="mt-2 text-sm text-ok">
       {unpinned
         ? "Pin cleared — the bundle now tracks the CLI again."
-        : "Bundle reinstalled from the published release."}
+        : "Claude and Codex linked to the published bundle."}
     </p>
   );
 }
@@ -139,47 +117,27 @@ function RowInstallButton({
   );
 }
 
-function listOf(parts: string[]): string {
-  if (parts.length <= 1) return parts[0] ?? "";
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
-}
-
 function UpdateOutcome({ report, target }: { report: AgentBundleReport; target: string }) {
-  const changed = listOf(
-    [
-      report.agents.length > 0
-        ? `${report.agents.length} agent file${report.agents.length === 1 ? "" : "s"}`
-        : null,
-      report.settingsChanged ? "settings.json" : null,
-      report.skillsChanged > 0
-        ? `${report.skillsChanged} skill file${report.skillsChanged === 1 ? "" : "s"}`
-        : null,
-    ].filter((part): part is string => part !== null),
-  );
-  if (changed === "") {
+  if (report.source === "releaseAsset") {
     return (
-      <p className="mt-2 text-sm text-ok">Now on {target} — the files on disk already matched it.</p>
+      <p className="mt-2 text-sm text-ok">
+        Updated to {target} — Claude and Codex now point to the published bundle.
+      </p>
     );
   }
   return (
-    <div
-      className={`selectable mt-2 rounded-md border p-3 text-sm ${
-        report.settingsChanged ? "border-warn/30 bg-warn/10" : "border-edge bg-panel-2"
-      }`}
-    >
-      <p className={report.settingsChanged ? "text-warn" : "text-ok"}>
-        Updated to {target} — replaced {changed}.
+    <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-sm">
+      <p className="text-warn">
+        {report.source === "fallback"
+          ? `Claude and Codex were linked to a fallback bundle instead of ${target}.`
+          : `Claude and Codex were relinked, but the CLI did not confirm ${target} as the source.`}
       </p>
-      <p className="mt-1 text-ink-dim">
-        Your previous copies are at{" "}
-        <span className="font-mono text-xs">{report.backupPath}</span> — until the next install,
-        which replaces that copy.
-      </p>
+      <CliOutput text={report.stdout} />
     </div>
   );
 }
 
-function CliUpdateNote() {
+export function CliUpdateNote() {
   const check = useCliUpdateCheck();
   const update = useMutation({
     mutationFn: () => unwrap(commands.updateHyprlayerCli()),
@@ -240,6 +198,8 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
   const bundle = useAgentBundle({ enabled: status?.installed === true });
   const manageable = bundle.data?.manageable === true;
   const versioned = manageable && pin.kind !== "unavailable";
+  const legacyCli =
+    bundle.data != null && !bundle.data.manageable && (status?.platforms?.length ?? 0) === 0;
   const [listWanted, setListWanted] = useState(false);
   const versions = useAgentBundleVersions({ enabled: versioned && listWanted });
   const [choice, setChoice] = useState<string | null>(null);
@@ -348,7 +308,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
         </Link>
       </div>
 
-      {manageable && pin.kind === "unavailable" && <CliUpdateNote />}
+      {(legacyCli || (manageable && pin.kind === "unavailable")) && <CliUpdateNote />}
 
       {versioned && !pending && pin.kind === "pinned" && (
         <div className="mt-2">
@@ -367,7 +327,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
       {busy && (
         <p className="mt-2 flex items-center gap-2 text-ink-dim">
           <Spinner size={14} />
-          Reinstalling the bundle — this rewrites ~/.claude and takes a few seconds.
+          Installing the bundle pair and switching the Claude and Codex links…
         </p>
       )}
 

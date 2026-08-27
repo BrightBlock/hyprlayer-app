@@ -2,6 +2,14 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum SlashKind {
+    Skill,
+    Command,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -9,6 +17,7 @@ pub struct SlashCommand {
     pub name: String,
     pub description: String,
     pub source: String,
+    pub kind: SlashKind,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,6 +104,18 @@ pub fn list_skills(worktree: Option<&Path>) -> Vec<AgentSkill> {
 
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
+}
+
+pub fn skill_roots(worktree: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(wt) = worktree {
+        roots.push(wt.join(".claude/skills"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home.join(".claude/skills"));
+    }
+    roots.retain(|r| r.is_dir());
+    roots
 }
 
 struct PluginInstall {
@@ -207,6 +228,7 @@ fn builtin_commands() -> Vec<SlashCommand> {
             name: name.to_string(),
             description: description.to_string(),
             source: "builtin".to_string(),
+            kind: SlashKind::Command,
         })
         .collect()
 }
@@ -225,7 +247,7 @@ fn scan_skills(dir: &Path) -> Vec<SkillEntry> {
         return out;
     };
     for entry in entries.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        if !entry.path().is_dir() {
             continue;
         }
         let skill_file = entry.path().join("SKILL.md");
@@ -260,6 +282,7 @@ fn collect_skills(dir: &Path, source: &str, out: &mut Vec<SlashCommand>) {
             name,
             description: entry.description.unwrap_or_default(),
             source: source.to_string(),
+            kind: SlashKind::Skill,
         });
     }
 }
@@ -290,6 +313,7 @@ fn collect_commands(dir: &Path, prefix: &str, source: &str, out: &mut Vec<SlashC
                 name,
                 description: description.unwrap_or_default(),
                 source: source.to_string(),
+                kind: SlashKind::Command,
             });
         }
     }
@@ -384,6 +408,31 @@ mod tests {
         assert!(cmds
             .iter()
             .any(|c| c.name == "demo" && c.source == "project"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_skills_follows_symlinked_skill_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = dir.path().join("stored-skill");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "---\ndescription: A symlinked skill.\n---\n\nLinked body.\n",
+        )
+        .unwrap();
+
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        std::os::unix::fs::symlink(&skill, skills_dir.join("linked")).unwrap();
+
+        let entries = scan_skills(&skills_dir);
+        let linked = entries
+            .iter()
+            .find(|entry| entry.dir == "linked")
+            .expect("symlinked skill directory should be scanned");
+        assert_eq!(linked.description.as_deref(), Some("A symlinked skill."));
+        assert_eq!(linked.chars, "\nLinked body.\n".chars().count() as u32);
     }
 
     #[test]
@@ -558,5 +607,45 @@ mod tests {
 
         let cmds = list_slash_commands(wt);
         assert!(cmds.iter().any(|c| c.name == "sync"));
+    }
+
+    #[test]
+    fn slash_commands_are_tagged_skill_or_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path();
+        std::fs::create_dir_all(wt.join(".claude/commands")).unwrap();
+        std::fs::write(
+            wt.join(".claude/commands/sync.md"),
+            "---\ndescription: Sync things.\n---\n\nSync.\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(wt.join(".claude/skills/plan")).unwrap();
+        std::fs::write(
+            wt.join(".claude/skills/plan/SKILL.md"),
+            "---\nname: plan\ndescription: Plan things.\n---\n\nPlan.\n",
+        )
+        .unwrap();
+
+        let cmds = list_slash_commands(wt);
+        let kind = |name: &str| cmds.iter().find(|c| c.name == name).map(|c| c.kind);
+        assert_eq!(kind("plan"), Some(SlashKind::Skill));
+        assert_eq!(kind("sync"), Some(SlashKind::Command));
+        assert_eq!(kind("security-review"), Some(SlashKind::Command));
+    }
+
+    #[test]
+    fn skill_roots_are_the_skills_dirs_that_exist_project_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt = dir.path();
+        assert!(
+            !skill_roots(Some(wt)).iter().any(|r| r.starts_with(wt)),
+            "a worktree with no .claude/skills contributes no root"
+        );
+
+        std::fs::create_dir_all(wt.join(".claude/skills")).unwrap();
+        let roots = skill_roots(Some(wt));
+        assert_eq!(roots.first(), Some(&wt.join(".claude/skills")));
+        assert!(roots.iter().all(|r| r.ends_with("skills")));
+        assert!(roots.iter().all(|r| r.is_dir()));
     }
 }

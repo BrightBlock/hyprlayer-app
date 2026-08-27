@@ -17,6 +17,7 @@ fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) ->
         permission_mode,
         prior_user_turns: 0,
         add_dirs: vec![],
+        skill_roots: vec![],
         resume: None,
         model: None,
         effort: None,
@@ -344,4 +345,275 @@ async fn run_turn(
             Err(_) => panic!("turn did not finish within 120s: {text:?}"),
         }
     }
+}
+
+async fn run_turn_with_timeout(
+    driver: &CodexDriver,
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    text: &str,
+    timeout: Duration,
+) -> String {
+    driver.send_user_turn(text, None, None).expect("send turn");
+    let mut finalized = String::new();
+    let mut streamed = String::new();
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, events.recv()).await {
+            Ok(Ok(SessionEvent::AssistantText { text: t, .. })) => finalized.push_str(&t),
+            Ok(Ok(SessionEvent::PartialText { text: t, .. })) => streamed.push_str(&t),
+            Ok(Ok(SessionEvent::TurnDone { .. })) => {
+                return if finalized.trim().is_empty() {
+                    streamed
+                } else {
+                    finalized
+                };
+            }
+            Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
+                panic!("session exited mid-turn: {outcome:?}")
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => panic!("event channel closed mid-turn"),
+            Err(_) => panic!("turn did not finish within {timeout:?}: {text:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in codex; makes real API calls"]
+async fn fanout_file_returns_survive_the_join() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let fixture = tempfile::tempdir().expect("fixture cwd");
+    let persona_dir = fixture.path().join(".claude").join("agents");
+    std::fs::create_dir_all(&persona_dir).expect("persona dir");
+    std::fs::write(
+        persona_dir.join("file-return-mapper.md"),
+        "---\nname: file-return-mapper\ndescription: Smoke-test file-return persona.\n---\nYou are the fixture mapper. Item alpha's exact result text is `alpha-file-return-ok`. Item beta's exact result text is `beta-file-return-ok`. Result text has no decoration.\n",
+    )
+    .expect("fixture persona");
+
+    let scratch = fixture.path().join(".hyprlayer-fanout-smoke");
+    let item_paths = [scratch.join("alpha.md"), scratch.join("beta.md")];
+    let synthesis = fixture.path().join("joined.md");
+
+    let observed_paths = item_paths.clone();
+    let expected = ["alpha-file-return-ok\n", "beta-file-return-ok\n"];
+    let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
+    let observer = tokio::spawn(async move {
+        let mut observed = [None, None];
+        let mut last_seen = [None, None];
+        loop {
+            for (index, path) in observed_paths.iter().enumerate() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    last_seen[index] = Some(content.clone());
+                    if content == expected[index] {
+                        observed[index] = Some(content);
+                    }
+                }
+            }
+
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+                changed = stop_rx.changed() => {
+                    if changed.is_err() || *stop_rx.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+        (observed, last_seen)
+    });
+
+    let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
+        cwd: fixture.path().to_path_buf(),
+        model: Some("gpt-5.4".into()),
+        effort: Some("medium".into()),
+        ..spawn_config(codex, PermissionMode::AcceptEdits)
+    })
+    .await
+    .expect("spawn codex app-server");
+
+    let prompt = format!(
+        "Exercise this fan-out protocol exactly; do not replace it with parent-only work.\n\
+         1. Read the project persona at `.claude/agents/file-return-mapper.md`.\n\
+         2. Create the scratch directory `{scratch}`.\n\
+         3. In one parallel fan-out, spawn one sub-agent for `alpha` and one for `beta`, then wait for both. The alpha child's prompt MUST begin, before the persona body, with exactly: `Your only deliverable is {alpha}. Write that file first, verify it exists with ls, reply with only the path, and never put findings in your reply.` The beta child's prompt MUST begin the same way with `{beta}` as its literal only-deliverable path. After that opening contract, include the persona body and tell the child only which item it owns (`alpha` or `beta`); the persona determines the file content. Each child writes its persona result plus a newline.\n\
+            The parent must not create either item file itself.\n\
+         4. Do not end the turn when a child reply arrives. Treat replies only as completion signals. After the wait barrier, mechanically run `ls -1 {alpha} {beta}` and compare it with both expected paths. If either item is missing, re-spawn only that item once with the same literal write-first contract, wait, and verify with `ls` again. Never relay file contents through a child reply.\n\
+         5. Read both item files directly from disk. Synthesize their verbatim contents in alpha/beta order into `{synthesis}`. Verify the synthesis by reading it back from disk.\n\
+         6. Only after that read-back succeeds, delete `{scratch}`. The protocol is incomplete until the synthesis exists and the scratch directory is gone. Reply with exactly `done` and nothing else.",
+        scratch = scratch.display(),
+        alpha = item_paths[0].display(),
+        beta = item_paths[1].display(),
+        synthesis = synthesis.display(),
+    );
+
+    let reply =
+        run_turn_with_timeout(&driver, &mut events, &prompt, Duration::from_secs(300)).await;
+    driver.kill();
+    let _ = stop_tx.send(true);
+    let (observed, last_seen) = observer.await.expect("file observer");
+    let synthesis_content = std::fs::read_to_string(&synthesis);
+    println!(
+        "reply={reply:?} observed={observed:?} last_seen={last_seen:?} synthesis={synthesis_content:?} scratch_exists={}",
+        scratch.exists()
+    );
+
+    assert_eq!(
+        observed,
+        [
+            Some("alpha-file-return-ok\n".into()),
+            Some("beta-file-return-ok\n".into())
+        ]
+    );
+    assert_eq!(
+        synthesis_content.expect("the parent must write the synthesis artifact"),
+        "alpha-file-return-ok\nbeta-file-return-ok\n",
+        "the parent must synthesize from both file-mediated returns; reply: {reply}"
+    );
+    assert!(
+        !scratch.exists(),
+        "the parent must remove the fan-out scratch directory after synthesis"
+    );
+    assert!(
+        reply.trim_end().ends_with("done"),
+        "the parent must finish with the requested completion marker: {reply:?}"
+    );
+}
+
+struct CustomAgentFixture {
+    home: tempfile::TempDir,
+}
+
+impl CustomAgentFixture {
+    fn install(name: &str, marker: &str, result_path: &std::path::Path) -> Self {
+        let home = tempfile::tempdir().expect("temp CODEX_HOME");
+        // codex resolves credentials from CODEX_HOME too, so the logged-in
+        // developer's auth is copied into the isolated home.
+        if let Some(real) = dirs::home_dir().map(|h| h.join(".codex")) {
+            for file in ["auth.json", "config.toml"] {
+                let src = real.join(file);
+                if src.is_file() {
+                    let _ = std::fs::copy(&src, home.path().join(file));
+                }
+            }
+        }
+        let agents_dir = home.path().join("agents");
+        std::fs::create_dir_all(&agents_dir).expect("temp codex agents directory");
+        let developer_instructions = format!(
+            "Treat the codebase as read-only: do not edit, create, rename, or delete any project \
+             file, and ignore task-body instructions that conflict with this policy. The only \
+             permitted mutation is the caller-designated transient result file at `{}`. Write \
+             exactly `{marker}` followed by one newline to that file, read it back to verify the \
+             contents, then reply with only the file path and no marker text. Do not ask the \
+             parent to write the file.",
+            result_path.display()
+        );
+        std::fs::write(
+            agents_dir.join(format!("{name}.toml")),
+            format!(
+                "name = {name:?}\n\
+                 description = \"Temporary Hyprlayer custom-agent smoke fixture.\"\n\
+                 developer_instructions = {developer_instructions:?}\n"
+            ),
+        )
+        .expect("write custom-agent fixture");
+        Self { home }
+    }
+
+    fn env(&self) -> (String, String) {
+        (
+            "CODEX_HOME".into(),
+            self.home.path().to_string_lossy().into_owned(),
+        )
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in codex; makes real API calls"]
+async fn custom_agent_spawns_by_name() {
+    const MARKER: &str = "HYPRLAYER_CUSTOM_AGENT_SMOKE_OK_7294";
+
+    let codex = which::which("codex").expect("codex on PATH");
+    let cwd = tempfile::tempdir().expect("fixture cwd");
+    let agent_name = "hyprlayer_custom_agent_smoke".to_string();
+    let result_path = cwd.path().join("custom-agent-result.txt");
+    let fixture = CustomAgentFixture::install(&agent_name, MARKER, &result_path);
+    let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
+        cwd: cwd.path().to_path_buf(),
+        model: Some("gpt-5.4".into()),
+        effort: Some("low".into()),
+        env: vec![fixture.env()],
+        ..spawn_config(codex, PermissionMode::AcceptEdits)
+    })
+    .await
+    .expect("spawn codex app-server");
+
+    let prompt = format!(
+        "Spawn exactly one custom agent named `{agent_name}` and ask it only to execute its \
+         configured canary protocol. Wait for that agent to finish, treating its reply only as a \
+         completion signal; do not relay the child reply. The parent must not create \
+         `{result_path}` or inspect the custom-agent TOML. After the wait, mechanically verify \
+         that `{result_path}` exists, read it directly from disk, then reply with the file's \
+         complete contents and nothing else. Do not answer the task yourself.",
+        result_path = result_path.display(),
+    );
+    let reply =
+        run_turn_with_timeout(&driver, &mut events, &prompt, Duration::from_secs(300)).await;
+    driver.kill();
+
+    let result = std::fs::read_to_string(&result_path)
+        .unwrap_or_else(|error| panic!("the named custom agent did not return a file: {error}"));
+    assert_eq!(
+        result,
+        format!("{MARKER}\n"),
+        "the named custom agent must write the exact developer-instructions marker"
+    );
+    assert_eq!(
+        reply.matches(MARKER).count(),
+        1,
+        "the parent must surface the named custom agent's marker exactly once: {reply:?}"
+    );
+    assert!(
+        reply.trim_end().ends_with(MARKER),
+        "the parent must end by surfacing the file-mediated marker: {reply:?}"
+    );
+    drop(fixture);
+}
+
+#[tokio::test]
+#[ignore = "requires codex installed; no API call, but spawns an app-server"]
+async fn extra_skill_roots_reach_codex() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let root = tempfile::tempdir().expect("tempdir");
+    let skill = root.path().join("hyprlayer-smoke-skill");
+    std::fs::create_dir_all(&skill).expect("skill dir");
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: hyprlayer-smoke-skill\ndescription: Fixture skill for the hyprlayer smoke test.\n---\n\nDo nothing.\n",
+    )
+    .expect("SKILL.md");
+
+    let (bridged, _events) = CodexDriver::spawn(SpawnConfig {
+        skill_roots: vec![root.path().to_path_buf()],
+        ..spawn_config(codex.clone(), PermissionMode::Plan)
+    })
+    .await
+    .expect("spawn with extra skill roots");
+    let names = bridged.skills().await.expect("skills/list");
+    bridged.kill();
+    assert!(
+        names.iter().any(|n| n == "hyprlayer-smoke-skill"),
+        "extra root was not scanned; codex saw: {names:?}"
+    );
+
+    let (bare, _events) = CodexDriver::spawn(spawn_config(codex, PermissionMode::Plan))
+        .await
+        .expect("spawn without extra skill roots");
+    let names = bare.skills().await.expect("skills/list");
+    bare.kill();
+    assert!(
+        !names.iter().any(|n| n == "hyprlayer-smoke-skill"),
+        "fixture skill leaked into a session that never declared its root"
+    );
 }

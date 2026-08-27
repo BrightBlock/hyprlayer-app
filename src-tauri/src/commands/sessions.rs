@@ -23,6 +23,7 @@ use super::{db_task, effective_for};
 use crate::error::{AppError, CmdResult};
 use crate::events::SessionLifecycle;
 use crate::session_registry::{ForwarderHandle, SessionRegistry, WorkflowChannel};
+use crate::settings::opencode_model_is_supported;
 use crate::state::AppState;
 
 fn session_not_found(id: &str) -> AppError {
@@ -30,6 +31,24 @@ fn session_not_found(id: &str) -> AppError {
         code: "session_not_found".into(),
         message: format!("No live session with id {id}"),
         remedy: Some("The session may have ended; start a new one.".into()),
+    }
+}
+
+fn unsupported_opencode_model() -> AppError {
+    AppError {
+        code: "opencode_provider_unsupported".into(),
+        message: "GitHub Copilot models are no longer supported".into(),
+        remedy: Some("Choose a model from a supported OpenCode provider.".into()),
+    }
+}
+
+fn unavailable_opencode_model(model: &str) -> AppError {
+    AppError {
+        code: "opencode_model_unavailable".into(),
+        message: format!("OpenCode does not currently offer `{model}`"),
+        remedy: Some(
+            "Refresh the model list in Settings → OpenCode and pick a current model.".into(),
+        ),
     }
 }
 
@@ -110,6 +129,12 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
         .harness
     {
         Harness::Opencode => {
+            if model
+                .as_deref()
+                .is_some_and(|model| !opencode_model_is_supported(model))
+            {
+                return Err(unsupported_opencode_model());
+            }
             let bin = state
                 .binaries
                 .require(BinaryKind::OpenCode)
@@ -126,6 +151,11 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
                 .ensure(bin, path, data_dir)
                 .await
                 .map_err(AppError::internal)?;
+            if let Some(model) = model.as_deref() {
+                if server.knows_model(model).await == Some(false) {
+                    return Err(unavailable_opencode_model(model));
+                }
+            }
             let (driver, rx) = crate::opencode::OpenCodeDriver::spawn(server, &session.cwd, model)
                 .await
                 .map_err(AppError::internal)?;
@@ -169,6 +199,9 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
                 cwd: PathBuf::from(&session.cwd),
                 permission_mode,
                 add_dirs,
+                skill_roots: hyprlayer_core::skills::skill_roots(Some(std::path::Path::new(
+                    &session.cwd,
+                ))),
                 resume: resume_thread,
                 prior_user_turns,
                 model,
@@ -823,6 +856,18 @@ pub async fn set_session_model(
     session_id: String,
     model: Option<String>,
 ) -> CmdResult<()> {
+    if let Some(model_id) = model.as_deref() {
+        if load_session(&state, &session_id).await?.harness == Harness::Opencode {
+            if !opencode_model_is_supported(model_id) {
+                return Err(unsupported_opencode_model());
+            }
+            if let Some(server) = state.opencode.current().await {
+                if server.knows_model(model_id).await == Some(false) {
+                    return Err(unavailable_opencode_model(model_id));
+                }
+            }
+        }
+    }
     if let Some(driver) = state.sessions.get(&session_id).await {
         driver.set_model(model);
     }

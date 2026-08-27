@@ -471,7 +471,6 @@ mod tests {
         let raw = r#"{"version": 4, "telemetry": {"mode": "anonymous"}, "futureField": [1,2,3]}"#;
         let cfg = parse_config(raw, Path::new("test.json")).unwrap();
         assert!(cfg.thoughts.is_none());
-        assert!(cfg.ai.is_none());
     }
 
     #[test]

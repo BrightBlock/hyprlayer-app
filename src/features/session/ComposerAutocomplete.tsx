@@ -29,6 +29,7 @@ export type Suggestion = {
   label: string;
   detail: string;
   badge?: string;
+  sigil: string;
 };
 
 const FILE_LIMIT = 20;
@@ -61,6 +62,22 @@ function filterCommands(all: SlashCommand[], query: string): SlashCommand[] {
   return [...prefix, ...substr];
 }
 
+export function isClaudeFamilyModel(model: string | null | undefined): boolean {
+  if (!model) return false;
+  const id = model.toLowerCase();
+  return id.startsWith("anthropic/") || id.includes("claude");
+}
+
+export function skillSigilFor(harness: string, model?: string | null): string {
+  if (harness === "claude") return "/";
+  if (harness === "opencode" && isClaudeFamilyModel(model)) return "/";
+  return "$";
+}
+
+export function resolvesInHarness(command: SlashCommand, harness: string): boolean {
+  return harness !== "codex" || command.kind === "skill";
+}
+
 function dirname(path: string): string {
   const i = path.lastIndexOf("/");
   return i >= 0 ? path.slice(0, i) : "";
@@ -74,6 +91,7 @@ export type ComposerAutocomplete = {
   setActiveIndex: (i: number) => void;
   loading: boolean;
   commandNames: Set<string>;
+  skillSigil: string;
   matchPrompt: (draft: string) => ComposerPromptMatch | null;
   offeredPrompts: ReadonlyMap<string, CustomPrompt>;
   apply: (index: number) => void;
@@ -88,9 +106,21 @@ export function useComposerAutocomplete(opts: {
   onChange: (next: string) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   enabled: boolean;
+  harness: string;
+  model?: string | null;
   onPickFile?: (path: string) => void;
 }): ComposerAutocomplete {
-  const { workstreamId, projectPath, value, onChange, textareaRef, enabled, onPickFile } = opts;
+  const {
+    workstreamId,
+    projectPath,
+    value,
+    onChange,
+    textareaRef,
+    enabled,
+    harness,
+    model,
+    onPickFile,
+  } = opts;
 
   const [slashCommands, setSlashCommands] = useState<SlashCommand[] | null>(null);
   const [caret, setCaret] = useState(0);
@@ -119,16 +149,19 @@ export function useComposerAutocomplete(opts: {
     [prompts, slashCommands, projectPath],
   );
 
+  const skillSigil = skillSigilFor(harness, model);
+
   const allCommands = useMemo<SlashCommand[]>(
     () => [
       ...[...offered].map(([slug, p]) => ({
         name: slug,
         description: promptFirstLine(effectiveCustomBody(p, projectPath)),
         source: "prompt" as const,
+        kind: "skill" as const,
       })),
-      ...(slashCommands ?? []),
+      ...(slashCommands ?? []).filter((c) => resolvesInHarness(c, harness)),
     ],
-    [offered, slashCommands, projectPath],
+    [offered, slashCommands, projectPath, harness],
   );
 
   const matchPrompt = useCallback((draft: string) => matchComposerPrompt(draft, offered), [offered]);
@@ -176,6 +209,7 @@ export function useComposerAutocomplete(opts: {
         label: c.name,
         detail: c.description,
         badge: c.source === "prompt" ? "prompt" : undefined,
+        sigil: c.kind === "skill" ? skillSigil : "/",
       }));
     }
     if (trigger?.type === "file") {
@@ -183,10 +217,11 @@ export function useComposerAutocomplete(opts: {
         value: path,
         label: basename(path),
         detail: dirname(path),
+        sigil: "@",
       }));
     }
     return [];
-  }, [trigger, allCommands, files]);
+  }, [trigger, allCommands, files, skillSigil]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -227,8 +262,7 @@ export function useComposerAutocomplete(opts: {
         return;
       }
 
-      const insert =
-        trigger.type === "command" ? `/${item.value} ` : `@${item.value} `;
+      const insert = `${item.sigil}${item.value} `;
       const next = value.slice(0, trigger.start) + insert + value.slice(caret);
       onChange(next);
       const newCaret = trigger.start + insert.length;
@@ -289,6 +323,7 @@ export function useComposerAutocomplete(opts: {
     setActiveIndex,
     loading,
     commandNames,
+    skillSigil,
     matchPrompt,
     offeredPrompts: offered,
     apply,
@@ -342,7 +377,7 @@ export function AutocompleteDropdown({
                 }`}
               >
                 <span className="shrink-0 font-medium text-ink">
-                  {state.mode === "command" ? `/${s.label}` : s.label}
+                  {state.mode === "command" ? `${s.sigil}${s.label}` : s.label}
                 </span>
                 {s.detail && (
                   <span className="truncate text-xs text-ink-dim">{s.detail}</span>
@@ -364,9 +399,10 @@ export function AutocompleteDropdown({
 export function highlightSegments(
   text: string,
   commandNames: Set<string>,
+  sigil = "/",
 ): { text: string; skill: boolean }[] {
   const segments: { text: string; skill: boolean }[] = [];
-  const re = /(^|\s)(\/[\w:-]+)/g;
+  const re = new RegExp(`(^|\\s)(\\${sigil}[\\w:-]+)`, "g");
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
@@ -384,11 +420,13 @@ export function highlightSegments(
 export function HighlightBackdrop({
   value,
   commandNames,
+  sigil,
   scrollTop,
   argHint,
 }: {
   value: string;
   commandNames: Set<string>;
+  sigil: string;
   scrollTop: number;
   argHint?: string | null;
 }) {
@@ -398,8 +436,8 @@ export function HighlightBackdrop({
   }, [scrollTop, value]);
 
   const segments = useMemo(
-    () => highlightSegments(value, commandNames),
-    [value, commandNames],
+    () => highlightSegments(value, commandNames, sigil),
+    [value, commandNames, sigil],
   );
 
   return (

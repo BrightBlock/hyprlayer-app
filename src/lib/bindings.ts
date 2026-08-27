@@ -191,7 +191,6 @@ export const commands = {
 	exportAgentFile: (agent: AgentFile, overlay: AgentOverlay) => typedError<string, AppError>(__TAURI_INVOKE("export_agent_file", { agent, overlay })),
 	agentBundleStatus: () => typedError<AgentBundleStatus, AppError>(__TAURI_INVOKE("agent_bundle_status")),
 	updateAgentBundle: () => typedError<AgentBundleReport, AppError>(__TAURI_INVOKE("update_agent_bundle")),
-	restoreAgentFromBackup: (stem: string) => typedError<null, AppError>(__TAURI_INVOKE("restore_agent_from_backup", { stem })),
 	agentBundleVersions: () => typedError<AiVersions, AppError>(__TAURI_INVOKE("agent_bundle_versions")),
 	installAgentBundleVersion: (version: string | null) => typedError<AgentBundleInstall, AppError>(__TAURI_INVOKE("install_agent_bundle_version", { version })),
 };
@@ -217,26 +216,17 @@ export type ActiveSessionView = {
 	projectPath: string,
 };
 
-export type AgentBundleChange = {
-	name: string,
-	change: AgentChange,
-	path: string,
-};
-
 export type AgentBundleInstall = {
 	ok: boolean,
 	exitCode: number | null,
 	source: BundleSource,
 	stdout: string,
 	stderr: string,
-	backupPath: string | null,
 };
 
 export type AgentBundleReport = {
-	agents: AgentBundleChange[],
-	settingsChanged: boolean,
-	skillsChanged: number,
-	backupPath: string,
+	source: BundleSource,
+	stdout: string,
 };
 
 export type AgentBundleStatus = {
@@ -248,8 +238,6 @@ export type AgentBundleStatus = {
 	lastChecked: number | null,
 	updateAvailable: boolean,
 };
-
-export type AgentChange = "added" | "updated";
 
 export type AgentCollaborator = {
 	name: string,
@@ -266,6 +254,7 @@ export type AgentFile = {
 	path: string,
 	source: string,
 	plugin: string | null,
+	managed: boolean,
 	name: string,
 	description: string,
 	tools: string[],
@@ -324,10 +313,18 @@ export type AgentSkill = {
 	userOnly: boolean,
 };
 
+export type AiPlatformStatus = {
+	id?: string,
+	name?: string,
+	installed?: boolean,
+	location?: string | null,
+};
+
 export type AiStatus = {
 	agentTool?: string | null,
 	installed?: boolean,
 	location?: string | null,
+	platforms?: AiPlatformStatus[],
 	agentsInstalledSha?: string | null,
 	lastAgentCheck?: number | null,
 	assetsVersion?: string | null,
@@ -429,6 +426,7 @@ export type CatalogProvider = {
 	env: string[],
 	doc: string | null,
 	models: CatalogModel[],
+	available?: boolean | null,
 };
 
 export type CheckStatus = "pass" | "warn" | "fail";
@@ -950,7 +948,10 @@ export type SlashCommand = {
 	name: string,
 	description: string,
 	source: string,
+	kind: SlashKind,
 };
+
+export type SlashKind = "skill" | "command";
 
 export type SortKey = "relevance" | "date" | "mtime" | "title";
 

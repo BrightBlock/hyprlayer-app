@@ -60,11 +60,22 @@ pub struct AiStatus {
     pub agent_tool: Option<String>,
     pub installed: bool,
     pub location: Option<String>,
+    pub platforms: Vec<AiPlatformStatus>,
     pub agents_installed_sha: Option<String>,
     pub last_agent_check: Option<f64>,
     pub assets_version: Option<String>,
     pub binary_version: Option<String>,
     pub pinned_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiPlatformStatus {
+    pub id: String,
+    pub name: String,
+    pub installed: bool,
+    pub location: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,7 +242,7 @@ impl<'a> HyprCli<'a> {
 
     pub async fn ai_status(&self, cwd: &Path) -> Result<AiStatus> {
         let stdout = self
-            .exec(cwd, &["ai", "status", "--json"], Duration::from_secs(30))
+            .exec(cwd, &["ai", "status", "--json"], Duration::from_secs(300))
             .await?;
         serde_json::from_str(&stdout).map_err(|e| CoreError::OutputParse {
             program: "hyprlayer ai status".into(),
@@ -343,6 +354,26 @@ mod tests {
       "pinnedVersion": "1.6.0"
     }"#;
 
+    const PAIRED_STATUS: &str = r#"{
+      "agentTool": "Claude + Codex",
+      "installed": true,
+      "location": "~/.config/hyprlayer/agents/1.7.0",
+      "platforms": [
+        {
+          "id": "claude",
+          "name": "Claude Code",
+          "installed": true,
+          "location": "~/.claude"
+        },
+        {
+          "id": "codex",
+          "name": "Codex",
+          "installed": true,
+          "location": "~/.codex"
+        }
+      ]
+    }"#;
+
     const VERSIONS_1_6_0: &str = r#"{
       "assetsVersion": "1.6.0",
       "binaryVersion": "1.6.0",
@@ -360,9 +391,42 @@ mod tests {
         let s: AiStatus = serde_json::from_str(STATUS_1_6_0).unwrap();
         assert!(s.installed);
         assert_eq!(s.agent_tool.as_deref(), Some("Claude Code"));
+        assert!(s.platforms.is_empty());
         assert_eq!(s.assets_version.as_deref(), Some("1.6.0"));
         assert_eq!(s.binary_version.as_deref(), Some("1.6.0"));
         assert_eq!(s.pinned_version.as_deref(), Some("1.6.0"));
+    }
+
+    #[test]
+    fn parses_the_paired_platform_status_payload() {
+        let s: AiStatus = serde_json::from_str(PAIRED_STATUS).unwrap();
+        assert!(s.installed);
+        assert_eq!(s.agent_tool.as_deref(), Some("Claude + Codex"));
+        assert_eq!(s.platforms.len(), 2);
+        assert_eq!(s.platforms[0].id, "claude");
+        assert_eq!(s.platforms[0].name, "Claude Code");
+        assert!(s.platforms[0].installed);
+        assert_eq!(s.platforms[0].location.as_deref(), Some("~/.claude"));
+        assert_eq!(s.platforms[1].id, "codex");
+        assert_eq!(s.platforms[1].name, "Codex");
+        assert!(s.platforms[1].installed);
+        assert_eq!(s.platforms[1].location.as_deref(), Some("~/.codex"));
+    }
+
+    #[test]
+    fn a_partial_platform_entry_does_not_fail_the_whole_status() {
+        let s: AiStatus = serde_json::from_str(
+            r#"{"agentTool":"Claude + Codex","installed":true,"platforms":[
+                {"id":"claude","name":"Claude Code","installed":true,"location":"~/.claude"},
+                {"id":"codex","installed":false,"location":null}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(s.platforms.len(), 2);
+        assert_eq!(s.platforms[1].id, "codex");
+        assert_eq!(s.platforms[1].name, "");
+        assert!(!s.platforms[1].installed);
+        assert_eq!(s.platforms[1].location, None);
     }
 
     #[test]

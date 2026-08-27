@@ -185,7 +185,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::agents::export_agent_file,
             commands::agents::agent_bundle_status,
             commands::agents::update_agent_bundle,
-            commands::agents::restore_agent_from_backup,
             commands::agents::agent_bundle_versions,
             commands::agents::install_agent_bundle_version,
         ])

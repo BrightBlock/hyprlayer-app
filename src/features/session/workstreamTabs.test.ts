@@ -5,6 +5,7 @@ import {
   clearArchiveOnRefocus,
   consumeComposerFocus,
   cycleActiveTab,
+  migratePersistedWorkstreamTabs,
   nextShellId,
   removeShellState,
   requestComposerFocus,
@@ -101,6 +102,63 @@ const archived = (id: number, archivedAt = 1000): ArchivedShell => ({
   shell: shell(id),
   archivedAt,
   status: "idle",
+});
+
+describe("persisted workstream migration", () => {
+  it("clears legacy Copilot picks from active and archived shells case-insensitively", () => {
+    const current = { ...shell(1), opencodeModel: "GitHub-Copilot/gpt-5" };
+    const supported = { ...shell(2), opencodeModel: "openai/gpt-5" };
+    const oldArchived = {
+      ...archived(3),
+      shell: { ...shell(3), opencodeModel: "GITHUB-COPILOT/claude-sonnet" },
+    };
+
+    const migrated = migratePersistedWorkstreamTabs({
+      byWs: {
+        ws: {
+          shells: [current, supported],
+          activeId: 1,
+          archived: [oldArchived],
+        },
+      },
+    });
+
+    expect(migrated.byWs.ws.shells[0].opencodeModel).toBeUndefined();
+    expect(migrated.byWs.ws.shells[1].opencodeModel).toBe("openai/gpt-5");
+    expect(migrated.byWs.ws.archived?.[0].shell.opencodeModel).toBeUndefined();
+  });
+
+  it("drops malformed entries instead of throwing away the whole store", () => {
+    const migrated = migratePersistedWorkstreamTabs({
+      byWs: {
+        ws: {
+          shells: [shell(1), null],
+          activeId: 1,
+          archived: [archived(2), { archivedAt: 5, status: "idle" }, null],
+        },
+        broken: null,
+      },
+    });
+
+    expect(migrated.byWs.ws.shells.map((s) => s.id)).toEqual([1]);
+    expect(migrated.byWs.ws.archived?.map((e) => e.shell.id)).toEqual([2]);
+  });
+
+  it("backfills missing per-shell defaults on both live and archived shells", () => {
+    const bare = { id: 7, title: "t", activityAt: 0 } as unknown as ReturnType<typeof shell>;
+    const migrated = migratePersistedWorkstreamTabs({
+      byWs: {
+        ws: { shells: [bare], activeId: 7, archived: [{ ...archived(8), shell: bare }] },
+      },
+    });
+
+    for (const s of [migrated.byWs.ws.shells[0], migrated.byWs.ws.archived![0].shell]) {
+      expect(s.docs).toEqual([]);
+      expect(s.attachments).toEqual([]);
+      expect(s.dismissedSuggestions).toEqual([]);
+      expect(s.titleLocked).toBe(true);
+    }
+  });
 });
 
 describe("nextShellId", () => {

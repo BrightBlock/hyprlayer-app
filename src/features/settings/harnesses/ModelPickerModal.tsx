@@ -24,7 +24,12 @@ export function ModelPickerModal({
       providers
         .map((p) => {
           const configured = !onlyConfigured || onlyConfigured.has(p.id);
-          const models = configured ? p.models : p.models.filter((m) => isFreeOpencodeModel(m.id));
+          const models =
+            p.available === false
+              ? []
+              : configured
+                ? p.models
+                : p.models.filter((m) => isFreeOpencodeModel(m.id));
           return {
             configured,
             group: {

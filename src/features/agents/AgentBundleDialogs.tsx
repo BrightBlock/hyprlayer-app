@@ -1,18 +1,8 @@
-import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
 
-import { Badge, type BadgeTone, Button, CliOutput, Dialog } from "@/components/ui";
-import { commands, type AgentBundleChange } from "@/lib/bindings";
-import { errorMessage, unwrap } from "@/lib/ipc";
-import { useToast } from "@/lib/toast";
+import { Button, CliOutput, Dialog } from "@/components/ui";
 
 import type { BundleFailure, BundleReport } from "./agents";
-
-const CHANGE_BADGE: Record<AgentBundleChange["change"], { tone: BadgeTone; label: string }> = {
-  added: { tone: "ok", label: "New" },
-  updated: { tone: "dim", label: "Updated" },
-};
 
 export function AgentUpdateReport({
   report,
@@ -23,30 +13,15 @@ export function AgentUpdateReport({
   open: boolean;
   onClose: () => void;
 }) {
-  const queryClient = useQueryClient();
-  const [restoring, setRestoring] = useState<string | null>(null);
   if (!report) return null;
-  const anyOverwritten = report.agents.some((c) => c.change !== "added");
-
-  const restore = async (name: string) => {
-    setRestoring(name);
-    try {
-      await unwrap(commands.restoreAgentFromBackup(name));
-      await queryClient.invalidateQueries({ queryKey: ["agent-files"] });
-      useToast.getState().show("Agents", `“${name}” restored from backup`);
-    } catch (e) {
-      useToast.getState().show("Restore failed", errorMessage(e), { tone: "bad" });
-    } finally {
-      setRestoring(null);
-    }
-  };
-
-  const alsoChanged = [
-    report.settingsChanged ? "settings.json" : null,
-    report.skillsChanged > 0
-      ? `${report.skillsChanged} skill file${report.skillsChanged === 1 ? "" : "s"}`
-      : null,
-  ].filter(Boolean);
+  const destination = report.to ?? "the requested bundle";
+  const sourceMessage =
+    report.source === "releaseAsset"
+      ? `Claude Code and Codex now point to ${destination}.`
+      : report.source === "fallback"
+        ? "Claude Code and Codex were linked to the repository fallback bundle."
+        : "Claude Code and Codex were relinked, but the CLI did not identify the bundle source.";
+  const caution = report.source !== "releaseAsset";
 
   return (
     <Dialog open={open} onClose={onClose} title="Agents updated" size="lg">
@@ -58,51 +33,17 @@ export function AgentUpdateReport({
           </p>
         )}
 
-        {report.agents.length === 0 && alsoChanged.length === 0 ? (
-          <p className="text-sm text-ink-dim">
-            Nothing changed — the library already matched the bundle.
-          </p>
-        ) : (
-          <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto">
-            {report.agents.map((change) => {
-              const badge = CHANGE_BADGE[change.change];
-              return (
-                <li
-                  key={change.path}
-                  className="flex items-center gap-2 rounded-md border border-edge/60 px-2.5 py-1.5 text-sm"
-                >
-                  <span className="min-w-0 flex-1 truncate text-ink" title={change.path}>
-                    {change.name}
-                  </span>
-                  <Badge tone={badge.tone}>{badge.label}</Badge>
-                  {change.change !== "added" && (
-                    <Button
-                      className="shrink-0"
-                      busy={restoring === change.name}
-                      onClick={() => void restore(change.name)}
-                    >
-                      Restore mine
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <p
+          className={`rounded-md border px-2.5 py-2 text-sm ${
+            caution
+              ? "border-warn/30 bg-warn/10 text-warn"
+              : "border-ok/30 bg-ok/10 text-ok"
+          }`}
+        >
+          {sourceMessage}
+        </p>
 
-        {alsoChanged.length > 0 && (
-          <p className="text-sm text-ink-dim">
-            The update also replaced {alsoChanged.join(" and ")}.
-          </p>
-        )}
-
-        {(anyOverwritten || alsoChanged.length > 0) && (
-          <p className="rounded-md border border-warn/30 bg-warn/10 px-2.5 py-2 text-xs text-warn">
-            The previous contents of everything above are saved at{" "}
-            <code className="font-mono break-all">{report.backupPath}</code>. If any of it replaced
-            an edit of your own, restore it now — the next update overwrites that copy.
-          </p>
-        )}
+        {caution && <CliOutput text={report.stdout} />}
 
         <div className="flex justify-end">
           <Button onClick={onClose}>Done</Button>
@@ -136,7 +77,8 @@ export function AgentUpdateFailed({
               , still on <span className="font-mono">{failure.stillOn}</span>
             </>
           ) : null}
-          . This is usually a network problem, or an AI tool that still needs configuring.
+          . This is usually a network problem or an older CLI that cannot provision the bundle
+          pair.
         </p>
 
         <details className="group">

@@ -4,7 +4,10 @@ import { persist } from "zustand/middleware";
 
 import type { Attachment } from "./attachments";
 import { debouncedJSONStorage } from "./persistedStorage";
-import type { ActionAgentDefaults } from "@/lib/domain/harnessing";
+import {
+  isSupportedOpencodeModel,
+  type ActionAgentDefaults,
+} from "@/lib/domain/harnessing";
 import type { StageKey } from "@/lib/domain/stages";
 
 export type AttachedDoc = {
@@ -173,26 +176,39 @@ export function clearArchiveOnRefocus(prev: WsTabState, next: WsTabState): WsTab
 
 type TabsStore = { byWs: Record<string, WsTabState> };
 
+function normalizePersistedShell(shell: ShellTab): ShellTab {
+  return {
+    ...shell,
+    docs: shell.docs ?? [],
+    attachments: shell.attachments ?? [],
+    dismissedSuggestions: shell.dismissedSuggestions ?? [],
+    titleLocked: shell.titleLocked ?? true,
+    opencodeModel:
+      shell.opencodeModel && isSupportedOpencodeModel(shell.opencodeModel)
+        ? shell.opencodeModel
+        : undefined,
+  };
+}
+
+export function migratePersistedWorkstreamTabs(persisted: unknown): TabsStore {
+  const state = persisted as TabsStore | undefined;
+  if (!state?.byWs) return { byWs: {} };
+  for (const ws of Object.values(state.byWs)) {
+    if (!ws) continue;
+    ws.shells = (ws.shells ?? []).filter((shell) => !!shell).map(normalizePersistedShell);
+    ws.archived = (ws.archived ?? [])
+      .filter((entry) => !!entry?.shell)
+      .map((entry) => ({ ...entry, shell: normalizePersistedShell(entry.shell) }));
+  }
+  return state;
+}
+
 export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
     name: "hyprlayer:workstream-tabs",
     storage: debouncedJSONStorage(),
-    version: 5,
-    migrate: (persisted) => {
-      const state = persisted as TabsStore | undefined;
-      if (!state?.byWs) return { byWs: {} };
-      for (const ws of Object.values(state.byWs)) {
-        ws.shells = (ws.shells ?? []).map((s) => ({
-          ...s,
-          docs: s.docs ?? [],
-          attachments: s.attachments ?? [],
-          dismissedSuggestions: s.dismissedSuggestions ?? [],
-          titleLocked: s.titleLocked ?? true,
-        }));
-        ws.archived = ws.archived ?? [];
-      }
-      return state;
-    },
+    version: 6,
+    migrate: migratePersistedWorkstreamTabs,
   }),
 );
 

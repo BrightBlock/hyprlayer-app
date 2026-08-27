@@ -81,7 +81,6 @@ mod tests {
         HyprlayerConfig {
             version: Some(4),
             thoughts: Some(thoughts),
-            ai: None,
         }
     }
 

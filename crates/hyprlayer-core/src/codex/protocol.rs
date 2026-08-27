@@ -87,9 +87,14 @@ pub enum ApprovalKind {
 
 #[derive(Default)]
 pub struct Translator {
+    root_thread_id: Option<String>,
+    root_rpc: Option<u64>,
     pub active_turn: Option<String>,
     pub requested_turn: Option<String>,
     started_tools: HashSet<String>,
+    // Child transcript events stay hidden, but file-change approvals omit the
+    // proposed patch and need the preceding item/started payload for context.
+    child_file_change_inputs: HashMap<(String, String), Map<String, Value>>,
     context_window_sent: bool,
     pub pending_approvals: HashMap<String, (Value, ApprovalKind)>,
     pub pending_questions: HashMap<String, PendingQuestion>,
@@ -104,7 +109,112 @@ impl Translator {
         }
     }
 
+    pub fn set_root_thread_id(&mut self, thread_id: String) {
+        self.root_thread_id = Some(thread_id);
+    }
+
+    // codex replays thread history right behind a resume response, so the read
+    // loop arms the root filter itself before decoding the next line — the
+    // request task's await lands too late.
+    pub fn expect_root_thread_from(&mut self, rpc_id: u64) {
+        self.root_rpc = Some(rpc_id);
+    }
+
+    pub fn observe_response(&mut self, rpc_id: u64, result: &Result<Value, String>) {
+        if self.root_rpc != Some(rpc_id) {
+            return;
+        }
+        self.root_rpc = None;
+        if let Ok(value) = result {
+            if let Some(thread_id) = value
+                .get("thread")
+                .and_then(|t| t.get("id"))
+                .and_then(Value::as_str)
+            {
+                self.set_root_thread_id(thread_id.to_string());
+            }
+        }
+    }
+
+    pub fn accepts_notification(&self, p: &Value) -> bool {
+        let Some(root_thread_id) = self.root_thread_id.as_deref() else {
+            return true;
+        };
+        match p.get("threadId") {
+            None => true,
+            Some(Value::String(thread_id)) => thread_id == root_thread_id,
+            Some(_) => false,
+        }
+    }
+
+    pub(crate) fn is_child_thread(&self, p: &Value) -> bool {
+        let Some(root_thread_id) = self.root_thread_id.as_deref() else {
+            return false;
+        };
+        p.get("threadId")
+            .and_then(Value::as_str)
+            .is_some_and(|thread_id| thread_id != root_thread_id)
+    }
+
+    fn observe_child_notification(&mut self, method: &str, p: &Value) {
+        let Some(thread_id) = p.get("threadId").and_then(Value::as_str) else {
+            return;
+        };
+        match method {
+            "item/started" => {
+                let item = p.get("item").unwrap_or(&Value::Null);
+                if item.get("type").and_then(Value::as_str) != Some("fileChange") {
+                    return;
+                }
+                let Some((item_id, _, Value::Object(input))) = tool_call(item) else {
+                    return;
+                };
+                self.child_file_change_inputs
+                    .insert((thread_id.to_string(), item_id), input);
+            }
+            "item/completed" => {
+                let item_id = p.get("itemId").and_then(Value::as_str).or_else(|| {
+                    p.get("item")
+                        .and_then(|item| item.get("id"))
+                        .and_then(Value::as_str)
+                });
+                if let Some(item_id) = item_id {
+                    self.child_file_change_inputs
+                        .remove(&(thread_id.to_string(), item_id.to_string()));
+                }
+            }
+            "turn/completed" | "thread/closed" => {
+                self.child_file_change_inputs
+                    .retain(|(cached_thread_id, _), _| cached_thread_id != thread_id);
+            }
+            _ => {}
+        }
+    }
+
+    fn take_child_file_change_input(&mut self, p: &Value) -> Option<Map<String, Value>> {
+        if !self.is_child_thread(p) {
+            return None;
+        }
+        let thread_id = p.get("threadId").and_then(Value::as_str)?;
+        let item_id = p.get("itemId").and_then(Value::as_str)?;
+        self.child_file_change_inputs
+            .remove(&(thread_id.to_string(), item_id.to_string()))
+    }
+
     pub fn notification(&mut self, method: &str, p: &Value) -> Vec<SessionEvent> {
+        if !self.accepts_notification(p) {
+            self.observe_child_notification(method, p);
+            if method == "error" {
+                if let Some(msg) = error_text(p) {
+                    return vec![SessionEvent::AssistantText {
+                        text: format!("⚠ Codex sub-agent error: {msg}"),
+                        parent_id: None,
+                        injected: false,
+                    }];
+                }
+            }
+            return Vec::new();
+        }
         match method {
             "turn/started" => {
                 self.active_turn = p
@@ -115,6 +225,7 @@ impl Translator {
                 Vec::new()
             }
             "turn/completed" => {
+                self.child_file_change_inputs.clear();
                 self.active_turn = None;
                 self.requested_turn = None;
                 let status = p
@@ -161,16 +272,8 @@ impl Translator {
             "item/completed" => self.item_completed(p.get("item").unwrap_or(&Value::Null)),
             "turn/plan/updated" => plan_events(p),
             "thread/tokenUsage/updated" => self.token_usage(p),
-            "error" => {
-                if p.get("willRetry").and_then(Value::as_bool) == Some(true) {
-                    return Vec::new();
-                }
-                let msg = p
-                    .get("error")
-                    .and_then(|e| e.get("message"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("Codex reported an error");
-                vec![
+            "error" => match error_text(p) {
+                Some(msg) => vec![
                     SessionEvent::AssistantText {
                         text: format!("⚠ Codex error: {msg}"),
                         parent_id: None,
@@ -181,16 +284,22 @@ impl Translator {
                         num_turns: None,
                         context_tokens: None,
                     },
-                ]
-            }
+                ],
+                None => Vec::new(),
+            },
             _ => Vec::new(),
         }
     }
 
     pub fn server_request(&mut self, id: &Value, method: &str, p: &Value) -> Vec<SessionEvent> {
+        // Parallel child questions cannot share the root UI's single question
+        // slot. Returning no event makes the driver answer this request empty.
+        if method == "item/tool/requestUserInput" && self.is_child_thread(p) {
+            return Vec::new();
+        }
         match method {
             "item/commandExecution/requestApproval" => {
-                let request_id = approval_request_id(p);
+                let request_id = approval_request_id(p, id);
                 self.pending_approvals.insert(
                     request_id.clone(),
                     (id.clone(), ApprovalKind::CommandExecution),
@@ -212,10 +321,10 @@ impl Translator {
                 }]
             }
             "item/fileChange/requestApproval" => {
-                let request_id = approval_request_id(p);
+                let request_id = approval_request_id(p, id);
                 self.pending_approvals
                     .insert(request_id.clone(), (id.clone(), ApprovalKind::FileChange));
-                let mut input = Map::new();
+                let mut input = self.take_child_file_change_input(p).unwrap_or_default();
                 if let Some(r) = p.get("reason").filter(|r| !r.is_null()) {
                     input.insert("reason".into(), r.clone());
                 }
@@ -229,7 +338,7 @@ impl Translator {
                 }]
             }
             "item/permissions/requestApproval" => {
-                let request_id = approval_request_id(p);
+                let request_id = approval_request_id(p, id);
                 let requested = p.get("permissions").cloned().unwrap_or(json!({}));
                 self.pending_approvals.insert(
                     request_id.clone(),
@@ -280,7 +389,7 @@ impl Translator {
                 }]
             }
             "item/tool/requestUserInput" => {
-                let request_id = approval_request_id(p);
+                let request_id = approval_request_id(p, id);
                 let questions = p
                     .get("questions")
                     .and_then(Value::as_array)
@@ -433,12 +542,32 @@ impl Translator {
     }
 }
 
-fn approval_request_id(p: &Value) -> String {
-    p.get("approvalId")
-        .and_then(Value::as_str)
-        .or_else(|| p.get("itemId").and_then(Value::as_str))
-        .unwrap_or_default()
-        .to_string()
+fn approval_request_id(p: &Value, rpc_id: &Value) -> String {
+    if let Some(approval) = p.get("approvalId").and_then(Value::as_str) {
+        return approval.to_string();
+    }
+    let item = p.get("itemId").and_then(Value::as_str);
+    let thread = p.get("threadId").and_then(Value::as_str);
+    match (thread, item) {
+        // Item ids are per-thread counters; scope them so parallel sub-agent
+        // approvals cannot collide in pending_approvals.
+        (Some(thread), Some(item)) => format!("{thread}:{item}"),
+        (None, Some(item)) => item.to_string(),
+        _ => rpc_id.to_string(),
+    }
+}
+
+fn error_text(p: &Value) -> Option<String> {
+    if p.get("willRetry").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    Some(
+        p.get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("Codex reported an error")
+            .to_string(),
+    )
 }
 
 pub fn approval_reply(kind: &ApprovalKind, allow: bool, message: Option<&str>) -> Value {
@@ -769,6 +898,283 @@ mod tests {
         ));
         assert_eq!(decode_line("listening on stdio"), None);
         assert_eq!(decode_line("   "), None);
+    }
+
+    #[test]
+    fn notification_thread_filter_uses_the_schema_thread_id() {
+        let mut t = Translator::default();
+        let child = json!({ "threadId": "child-thread" });
+
+        assert!(
+            t.accepts_notification(&child),
+            "notifications may arrive while thread/start is still handshaking"
+        );
+
+        t.set_root_thread_id("root-thread".into());
+        assert!(t.accepts_notification(&json!({ "threadId": "root-thread" })));
+        assert!(!t.accepts_notification(&child));
+        assert!(
+            t.accepts_notification(&json!({ "status": "ready" })),
+            "connection-scoped notifications have no threadId"
+        );
+        assert!(!t.accepts_notification(&json!({ "threadId": null })));
+    }
+
+    #[test]
+    fn child_thread_notifications_do_not_enter_the_root_transcript() {
+        let mut t = Translator {
+            active_turn: Some("root-turn".into()),
+            requested_turn: Some("root-turn".into()),
+            ..Default::default()
+        };
+        t.set_root_thread_id("root-thread".into());
+
+        let child_notifications = [
+            (
+                "item/agentMessage/delta",
+                json!({ "threadId": "child-thread", "turnId": "child-turn", "itemId": "i1", "delta": "child partial" }),
+            ),
+            (
+                "item/completed",
+                json!({ "threadId": "child-thread", "turnId": "child-turn", "item": {
+                    "type": "agentMessage", "id": "i1", "text": "child final"
+                } }),
+            ),
+            (
+                "thread/tokenUsage/updated",
+                json!({ "threadId": "child-thread", "turnId": "child-turn", "tokenUsage": {
+                    "last": { "inputTokens": 12 }, "modelContextWindow": 1000
+                } }),
+            ),
+            (
+                "turn/completed",
+                json!({ "threadId": "child-thread", "turn": {
+                    "id": "child-turn", "status": "completed"
+                } }),
+            ),
+        ];
+
+        for (method, params) in child_notifications {
+            assert!(
+                t.notification(method, &params).is_empty(),
+                "{method} leaked from the child thread"
+            );
+        }
+        assert_eq!(t.active_turn.as_deref(), Some("root-turn"));
+        assert_eq!(t.requested_turn.as_deref(), Some("root-turn"));
+
+        assert!(t
+            .notification(
+                "error",
+                &json!({ "threadId": "child-thread", "willRetry": true,
+                    "error": { "message": "retrying" }
+                }),
+            )
+            .is_empty());
+        let child_error = t.notification(
+            "error",
+            &json!({ "threadId": "child-thread", "turnId": "child-turn", "willRetry": false,
+                "error": { "message": "child failed" }
+            }),
+        );
+        assert_eq!(ev_names(&child_error), ["assistantText"]);
+        match &child_error[0] {
+            SessionEvent::AssistantText { text, .. } => {
+                assert!(text.contains("child failed"), "kept the message: {text}");
+            }
+            other => panic!("expected AssistantText, got {other:?}"),
+        }
+
+        let root_text = t.notification(
+            "item/completed",
+            &json!({ "threadId": "root-thread", "turnId": "root-turn", "item": {
+                "type": "agentMessage", "id": "i2", "text": "root final"
+            } }),
+        );
+        assert_eq!(ev_names(&root_text), ["assistantText"]);
+        let root_done = t.notification(
+            "turn/completed",
+            &json!({ "threadId": "root-thread", "turn": {
+                "id": "root-turn", "status": "completed"
+            } }),
+        );
+        assert_eq!(ev_names(&root_done), ["turnDone"]);
+    }
+
+    #[test]
+    fn child_thread_server_requests_remain_routable() {
+        let mut t = Translator::default();
+        t.set_root_thread_id("root-thread".into());
+
+        let out = t.server_request(
+            &json!(21),
+            "item/commandExecution/requestApproval",
+            &json!({ "threadId": "child-thread", "turnId": "child-turn", "itemId": "child-command",
+                "command": "touch child-output", "cwd": "/w"
+            }),
+        );
+
+        assert_eq!(ev_names(&out), ["permissionAsk"]);
+        assert!(t
+            .pending_approvals
+            .contains_key("child-thread:child-command"));
+    }
+
+    #[test]
+    fn parallel_child_approvals_with_the_same_item_id_do_not_collide() {
+        let mut t = Translator::default();
+        t.set_root_thread_id("root-thread".into());
+
+        for (rpc, thread) in [(51, "child-one"), (52, "child-two")] {
+            let out = t.server_request(
+                &json!(rpc),
+                "item/commandExecution/requestApproval",
+                &json!({ "threadId": thread, "turnId": "child-turn", "itemId": "item_1",
+                    "command": "touch out", "cwd": "/w"
+                }),
+            );
+            assert_eq!(ev_names(&out), ["permissionAsk"]);
+        }
+
+        assert_eq!(t.pending_approvals.len(), 2);
+        assert!(t.pending_approvals.contains_key("child-one:item_1"));
+        assert!(t.pending_approvals.contains_key("child-two:item_1"));
+    }
+
+    #[test]
+    fn the_read_loop_arms_the_root_filter_from_the_handshake_response() {
+        let mut t = Translator::default();
+        t.expect_root_thread_from(7);
+
+        t.observe_response(6, &Ok(json!({ "thread": { "id": "not-the-handshake" } })));
+        assert!(t.accepts_notification(&json!({ "threadId": "child-thread" })));
+
+        t.observe_response(7, &Ok(json!({ "thread": { "id": "root-thread" } })));
+        assert!(!t.accepts_notification(&json!({ "threadId": "child-thread" })));
+        assert!(t.accepts_notification(&json!({ "threadId": "root-thread" })));
+    }
+
+    #[test]
+    fn child_file_change_approval_uses_the_cached_item_then_cleans_it() {
+        let mut t = Translator::default();
+        t.set_root_thread_id("root-thread".into());
+
+        let started = json!({
+            "threadId": "child-thread",
+            "turnId": "child-turn",
+            "item": {
+                "type": "fileChange",
+                "id": "child-edit",
+                "status": "inProgress",
+                "changes": [{
+                    "path": "/w/src/lib.rs",
+                    "kind": { "type": "update" },
+                    "diff": "@@ -1 +1 @@\n-old line\n+new line\n"
+                }]
+            }
+        });
+        assert!(t.notification("item/started", &started).is_empty());
+        assert_eq!(t.child_file_change_inputs.len(), 1);
+
+        let out = t.server_request(
+            &json!(22),
+            "item/fileChange/requestApproval",
+            &json!({
+                "threadId": "child-thread",
+                "turnId": "child-turn",
+                "itemId": "child-edit",
+                "reason": "Apply the requested correction"
+            }),
+        );
+        match &out[0] {
+            SessionEvent::PermissionAsk {
+                request_id,
+                tool_name,
+                input,
+            } => {
+                assert_eq!(request_id, "child-thread:child-edit");
+                assert_eq!(tool_name, "Edit");
+                let input = parse(input);
+                assert_eq!(input["file_path"], json!("/w/src/lib.rs"));
+                assert_eq!(input["old_string"], json!("old line\n"));
+                assert_eq!(input["new_string"], json!("new line\n"));
+                assert_eq!(input["reason"], json!("Apply the requested correction"));
+            }
+            other => panic!("expected PermissionAsk, got {other:?}"),
+        }
+        assert!(t.child_file_change_inputs.is_empty());
+
+        assert!(t.notification("item/started", &started).is_empty());
+        assert_eq!(t.child_file_change_inputs.len(), 1);
+        assert!(t
+            .notification(
+                "item/completed",
+                &json!({
+                    "threadId": "child-thread",
+                    "turnId": "child-turn",
+                    "item": { "type": "fileChange", "id": "child-edit", "changes": [], "status": "declined" }
+                }),
+            )
+            .is_empty());
+        assert!(t.child_file_change_inputs.is_empty());
+
+        assert!(t.notification("item/started", &started).is_empty());
+        assert!(t
+            .notification(
+                "turn/completed",
+                &json!({
+                    "threadId": "child-thread",
+                    "turn": { "id": "child-turn", "status": "interrupted" }
+                }),
+            )
+            .is_empty());
+        assert!(t.child_file_change_inputs.is_empty());
+    }
+
+    #[test]
+    fn child_questions_are_not_queued_but_root_questions_are_unchanged() {
+        let mut t = Translator::default();
+        t.set_root_thread_id("root-thread".into());
+        let question = |thread_id: &str, item_id: &str| {
+            json!({
+                "threadId": thread_id,
+                "turnId": format!("{thread_id}-turn"),
+                "itemId": item_id,
+                "questions": [{
+                    "id": format!("{item_id}-choice"),
+                    "header": "Choice",
+                    "question": "Continue?",
+                    "options": []
+                }]
+            })
+        };
+
+        assert!(t
+            .server_request(
+                &json!(31),
+                "item/tool/requestUserInput",
+                &question("child-one", "child-question-one"),
+            )
+            .is_empty());
+        assert!(t
+            .server_request(
+                &json!(32),
+                "item/tool/requestUserInput",
+                &question("child-two", "child-question-two"),
+            )
+            .is_empty());
+        assert!(t.pending_questions.is_empty());
+
+        let out = t.server_request(
+            &json!(33),
+            "item/tool/requestUserInput",
+            &question("root-thread", "root-question"),
+        );
+        assert_eq!(ev_names(&out), ["questionAsk"]);
+        assert!(t
+            .pending_questions
+            .contains_key("root-thread:root-question"));
+        assert_eq!(t.pending_questions.len(), 1);
     }
 
     #[test]

@@ -23,6 +23,7 @@ pub struct AgentFile {
     pub path: String,
     pub source: String,
     pub plugin: Option<String>,
+    pub managed: bool,
     pub name: String,
     pub description: String,
     pub tools: Vec<String>,
@@ -150,6 +151,7 @@ pub fn parse_agent(path: &Path, source: &str, text: &str) -> AgentFile {
         path: path.to_string_lossy().into_owned(),
         source: source.to_string(),
         plugin: None,
+        managed: false,
         name: pick(KEY_NAME).unwrap_or(stem),
         description: pick(KEY_DESCRIPTION).unwrap_or_default(),
         tools: pick(KEY_TOOLS)
@@ -218,6 +220,17 @@ fn mtime_ms(path: &Path) -> Option<f64> {
 }
 
 fn collect(dir: &Path, source: &str, plugin: Option<&str>, out: &mut Vec<AgentFile>) {
+    let store_root = hyprlayer_agent_store_root();
+    collect_with_store_root(dir, source, plugin, store_root.as_deref(), out);
+}
+
+fn collect_with_store_root(
+    dir: &Path,
+    source: &str,
+    plugin: Option<&str>,
+    store_root: Option<&Path>,
+    out: &mut Vec<AgentFile>,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -236,6 +249,7 @@ fn collect(dir: &Path, source: &str, plugin: Option<&str>, out: &mut Vec<AgentFi
         if let Ok(text) = std::fs::read_to_string(&path) {
             let mut agent = parse_agent(&path, source, &text);
             agent.plugin = plugin.map(|p| p.to_string());
+            agent.managed = store_root.is_some_and(|root| link_targets_store(&path, root));
             out.push(agent);
         }
     }
@@ -377,7 +391,13 @@ fn separator_of(original: &str) -> String {
 }
 
 pub fn save_agent(agent: &AgentFile) -> Result<AgentFile> {
+    let store_root = hyprlayer_agent_store_root();
+    save_agent_with_store_root(agent, store_root.as_deref())
+}
+
+fn save_agent_with_store_root(agent: &AgentFile, store_root: Option<&Path>) -> Result<AgentFile> {
     let path = PathBuf::from(&agent.path);
+    reject_managed_link(&path, store_root)?;
     let original = std::fs::read_to_string(&path).unwrap_or_default();
     let contents = render_agent(&original, agent)?;
     if let Some(parent) = path.parent() {
@@ -392,8 +412,89 @@ pub fn save_agent(agent: &AgentFile) -> Result<AgentFile> {
 }
 
 pub fn delete_agent(path: &Path) -> Result<()> {
+    let store_root = hyprlayer_agent_store_root();
+    delete_agent_with_store_root(path, store_root.as_deref())
+}
+
+fn delete_agent_with_store_root(path: &Path, store_root: Option<&Path>) -> Result<()> {
+    reject_managed_link(path, store_root)?;
     std::fs::remove_file(path)?;
     Ok(())
+}
+
+fn reject_managed_link(path: &Path, store_root: Option<&Path>) -> Result<()> {
+    if store_root.is_some_and(|root| link_targets_store(path, root)) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "{} is managed by Hyprlayer and cannot be edited or deleted; duplicate it to create a personal agent",
+                path.display()
+            ),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn hyprlayer_agent_store_root() -> Option<PathBuf> {
+    dirs::config_dir().map(|root| root.join("hyprlayer").join("agents"))
+}
+
+fn link_targets_store(path: &Path, store_root: &Path) -> bool {
+    if let Ok(target) = std::fs::read_link(path) {
+        let resolved = if target.is_absolute() {
+            target
+        } else {
+            path.parent().unwrap_or_else(|| Path::new("")).join(target)
+        };
+        if path_is_within(&resolved, store_root) {
+            return true;
+        }
+    }
+    // The agents directory itself may be the symlink into the store (an atomic
+    // pair switch), leaving each file a plain entry read_link cannot classify;
+    // canonicalizing the file catches that layout. The read_link check above
+    // still covers dangling per-file links, which canonicalize refuses.
+    std::fs::canonicalize(path)
+        .map(|canonical| path_is_within(&canonical, store_root))
+        .unwrap_or(false)
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    let Some(path) = absolute_lexical(path) else {
+        return false;
+    };
+    let Some(root) = absolute_lexical(root) else {
+        return false;
+    };
+    if path.starts_with(&root) {
+        return true;
+    }
+    match (std::fs::canonicalize(path), std::fs::canonicalize(root)) {
+        (Ok(path), Ok(root)) => path.starts_with(root),
+        _ => false,
+    }
+}
+
+fn absolute_lexical(path: &Path) -> Option<PathBuf> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if normalized.file_name().is_some() {
+                    normalized.pop();
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    Some(normalized)
 }
 
 pub fn file_stem_for(name: &str) -> String {
@@ -675,6 +776,7 @@ mod tests {
             path: "/x/new.md".into(),
             source: "user".into(),
             plugin: None,
+            managed: false,
             name: "New Agent".into(),
             description: "does things".into(),
             tools: vec![],
@@ -699,6 +801,7 @@ mod tests {
             path: "/x/new.md".into(),
             source: "user".into(),
             plugin: None,
+            managed: false,
             name: "New Agent".into(),
             description: "does things".into(),
             tools: vec!["Read".into()],
@@ -824,6 +927,158 @@ mod tests {
         assert_eq!(file_stem_for("Plan Reviewer"), "plan-reviewer");
         assert_eq!(file_stem_for("  A//B  "), "a-b");
         assert_eq!(file_stem_for("***"), "agent");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn linked_bundle_agents_are_managed_and_cannot_mutate_the_store() {
+        let temp = tempfile::tempdir().unwrap();
+        let store_agent = temp.path().join("store/cartographer.md");
+        let live_dir = temp.path().join(".claude/agents");
+        std::fs::create_dir_all(store_agent.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&live_dir).unwrap();
+        std::fs::write(&store_agent, SAMPLE).unwrap();
+        let live_agent = live_dir.join("cartographer.md");
+        std::os::unix::fs::symlink(&store_agent, &live_agent).unwrap();
+
+        let mut listed = Vec::new();
+        collect_with_store_root(
+            &live_dir,
+            "user",
+            None,
+            Some(&temp.path().join("store")),
+            &mut listed,
+        );
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].managed);
+        assert_eq!(listed[0].source, "user");
+
+        let mut edited = listed.remove(0);
+        edited.prompt = "do something else\n".into();
+        let save_error = save_agent_with_store_root(&edited, Some(&temp.path().join("store")))
+            .unwrap_err()
+            .to_string();
+        assert!(save_error.contains("managed by Hyprlayer"));
+        assert_eq!(std::fs::read_to_string(&store_agent).unwrap(), SAMPLE);
+
+        let delete_error =
+            delete_agent_with_store_root(&live_agent, Some(&temp.path().join("store")))
+                .unwrap_err()
+                .to_string();
+        assert!(delete_error.contains("managed by Hyprlayer"));
+        assert!(live_agent
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_to_string(&store_agent).unwrap(), SAMPLE);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_directory_symlink_into_the_store_still_marks_agents_managed() {
+        let temp = tempfile::tempdir().unwrap();
+        let store_root = temp.path().join("store");
+        let store_agents = store_root.join("1.7.0/agents");
+        std::fs::create_dir_all(&store_agents).unwrap();
+        std::fs::write(store_agents.join("cartographer.md"), SAMPLE).unwrap();
+        let claude_dir = temp.path().join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        let live_dir = claude_dir.join("agents");
+        std::os::unix::fs::symlink(&store_agents, &live_dir).unwrap();
+
+        let mut listed = Vec::new();
+        collect_with_store_root(&live_dir, "user", None, Some(&store_root), &mut listed);
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].managed);
+
+        let mut edited = listed.remove(0);
+        edited.prompt = "overwrite the store".into();
+        let save_error = save_agent_with_store_root(&edited, Some(&store_root))
+            .unwrap_err()
+            .to_string();
+        assert!(save_error.contains("managed by Hyprlayer"));
+        assert_eq!(
+            std::fs::read_to_string(store_agents.join("cartographer.md")).unwrap(),
+            SAMPLE
+        );
+
+        let delete_error =
+            delete_agent_with_store_root(&live_dir.join("cartographer.md"), Some(&store_root))
+                .unwrap_err()
+                .to_string();
+        assert!(delete_error.contains("managed by Hyprlayer"));
+        assert!(store_agents.join("cartographer.md").is_file());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn personal_agent_symlinks_outside_the_store_stay_user_owned() {
+        let temp = tempfile::tempdir().unwrap();
+        let store_root = temp.path().join("store");
+        let personal_target = temp.path().join("personal/cartographer.md");
+        let live_dir = temp.path().join(".claude/agents");
+        std::fs::create_dir_all(personal_target.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&live_dir).unwrap();
+        std::fs::write(&personal_target, SAMPLE).unwrap();
+        let live_agent = live_dir.join("cartographer.md");
+        std::os::unix::fs::symlink(&personal_target, &live_agent).unwrap();
+
+        let mut listed = Vec::new();
+        collect_with_store_root(&live_dir, "user", None, Some(&store_root), &mut listed);
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].managed);
+
+        let mut edited = listed.remove(0);
+        edited.prompt = "personal symlink edit".into();
+        save_agent_with_store_root(&edited, Some(&store_root)).unwrap();
+        assert!(std::fs::read_to_string(&personal_target)
+            .unwrap()
+            .contains("personal symlink edit"));
+
+        delete_agent_with_store_root(&live_agent, Some(&store_root)).unwrap();
+        assert!(!live_agent.symlink_metadata().is_ok());
+        assert!(personal_target.is_file());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn broken_store_links_are_managed_but_store_prefix_siblings_are_not() {
+        let temp = tempfile::tempdir().unwrap();
+        let store_root = temp.path().join("agents");
+        let live_dir = temp.path().join(".claude/agents");
+        std::fs::create_dir_all(&live_dir).unwrap();
+
+        let broken_managed = live_dir.join("managed.md");
+        std::os::unix::fs::symlink(store_root.join("missing/managed.md"), &broken_managed).unwrap();
+        assert!(link_targets_store(&broken_managed, &store_root));
+        assert!(delete_agent_with_store_root(&broken_managed, Some(&store_root)).is_err());
+        assert!(broken_managed.symlink_metadata().is_ok());
+
+        let sibling = live_dir.join("personal.md");
+        std::os::unix::fs::symlink(temp.path().join("agents-personal/missing.md"), &sibling)
+            .unwrap();
+        assert!(!link_targets_store(&sibling, &store_root));
+        delete_agent_with_store_root(&sibling, Some(&store_root)).unwrap();
+        assert!(!sibling.symlink_metadata().is_ok());
+    }
+
+    #[test]
+    fn regular_personal_agents_remain_mutable() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("personal.md");
+        std::fs::write(&path, SAMPLE).unwrap();
+        let mut agent = parse_agent(&path, "user", SAMPLE);
+        agent.prompt = "personal edit".into();
+
+        let saved = save_agent(&agent).unwrap();
+        assert!(!saved.managed);
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("personal edit"));
+
+        delete_agent(&path).unwrap();
+        assert!(!path.exists());
     }
 
     #[test]
