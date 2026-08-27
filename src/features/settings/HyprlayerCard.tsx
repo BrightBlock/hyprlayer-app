@@ -46,7 +46,7 @@ import { useCopyFeedback } from "@/lib/clipboard";
 import { IS_MACOS } from "@/lib/platform";
 
 import { AgentBundleSection, CliUpdateOutcome, useCliSelfUpdate } from "./AgentBundleSection";
-import { needsCliUpgrade } from "./bundleVersions";
+import { bundleLayout, cliFailureText } from "./bundleVersions";
 import { CardRow, CARD_ROW_SPAN } from "./cardRow";
 
 function BackendIcon({ kind, size = 14 }: { kind: string; size?: number }) {
@@ -81,6 +81,7 @@ function CliRow({
   const update = useCliSelfUpdate();
   const reset = update.reset;
   const version = check.data?.current ?? status?.binaryVersion ?? binary?.version ?? null;
+  // the migration note names the newer version itself; don't badge it twice
   const latest = upgradeOffered ? null : (check.data?.latest ?? null);
   const updated = update.data?.ok === true;
   const failed = update.error != null || update.data?.ok === false;
@@ -104,25 +105,23 @@ function CliRow({
       </div>
 
       <div className="flex items-center gap-1.5">
-        {!upgradeOffered && (
-          <IconButton
-            title="Update the hyprlayer CLI"
-            aria-label="Update the hyprlayer CLI"
-            disabled={update.isPending}
-            className={failed ? "text-bad" : updated ? "text-ok" : undefined}
-            onClick={() => update.mutate()}
-          >
-            {update.isPending ? (
-              <Spinner size={13} />
-            ) : failed ? (
-              <WarningTriangleIcon size={14} />
-            ) : updated ? (
-              <CheckIcon size={14} />
-            ) : (
-              <DownloadIcon size={13} />
-            )}
-          </IconButton>
-        )}
+        <IconButton
+          title="Update the hyprlayer CLI"
+          aria-label="Update the hyprlayer CLI"
+          disabled={update.isPending}
+          className={failed ? "text-bad" : updated ? "text-ok" : undefined}
+          onClick={() => update.mutate()}
+        >
+          {update.isPending ? (
+            <Spinner size={13} />
+          ) : failed ? (
+            <WarningTriangleIcon size={14} />
+          ) : updated ? (
+            <CheckIcon size={14} />
+          ) : (
+            <DownloadIcon size={13} />
+          )}
+        </IconButton>
       </div>
 
       {!update.isPending && failed && (
@@ -238,12 +237,15 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
   const repaired = repair.data?.ok === true;
   const failure = repair.data != null && !repair.data.ok ? repair.data : null;
   const failed = repair.error != null || failure != null;
+  const resolved = repair.data?.resolved ?? null;
+  const moved = (resolved?.replaced.length ?? 0) + (resolved?.backedUp.length ?? 0) > 0;
 
   useEffect(() => {
-    if (!repaired) return;
+    // a repair that touched the user's files keeps its receipt until the next run
+    if (!repaired || moved) return;
     const timer = window.setTimeout(reset, 2000);
     return () => window.clearTimeout(timer);
-  }, [repaired, reset]);
+  }, [repaired, moved, reset]);
 
   return (
     <CardRow label="Agent targets">
@@ -294,6 +296,28 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
         )}
       </div>
 
+      {repaired && moved && resolved && (
+        <div className={CARD_ROW_SPAN}>
+          <div className="mt-1 rounded-md border border-edge bg-panel-2 p-3 text-sm">
+            <p className="text-ok">Relinked Claude and Codex.</p>
+            {resolved.replaced.length > 0 && (
+              <p className="mt-1.5 text-xs text-ink-dim">
+                Removed {resolved.replaced.length} stale{" "}
+                {resolved.replaced.length === 1 ? "copy" : "copies"} that already matched the
+                bundle.
+              </p>
+            )}
+            {resolved.backedUp.length > 0 && (
+              <p className="mt-1.5 text-xs text-ink-dim">
+                Kept {resolved.backedUp.length} edited{" "}
+                {resolved.backedUp.length === 1 ? "copy" : "copies"} — moved aside as{" "}
+                <span className="font-mono">.bak-</span>, not deleted.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {(status.error != null || failed) && (
         <div className={CARD_ROW_SPAN}>
           {status.error != null && <ErrorNote error={status.error} />}
@@ -316,7 +340,7 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
                 The repair failed{failure.exitCode != null && <> (exit {failure.exitCode})</>}. The
                 Claude and Codex links were left as they were.
               </p>
-              <CliOutput text={failure.stderr || failure.stdout} />
+              <CliOutput text={cliFailureText(failure)} />
             </div>
           )}
         </div>
@@ -329,7 +353,7 @@ export function HyprlayerCard({ data }: { data: Bootstrap }) {
   const aiStatus = useAiStatus();
   const bundle = useAgentBundle({ enabled: aiStatus.data?.installed === true });
   const config = data.config;
-  const upgradeOffered = needsCliUpgrade(aiStatus.data, bundle.data);
+  const upgradeOffered = bundleLayout(aiStatus.data, bundle.data) === "legacy";
 
   return (
     <Card className="p-0">

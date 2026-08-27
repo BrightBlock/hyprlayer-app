@@ -440,7 +440,7 @@ describe("AgentBundleSection", () => {
     expect(screen.getByText(/no tty present/)).toBeTruthy();
   });
 
-  it("does not nag a CLI that already clears the skills floor", async () => {
+  it("says nothing at all about a CLI that already clears the skills floor", async () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.6.1", latest: null, hint: null }));
     renderSection(LEGACY_STATUS, {
       ...FRESHNESS,
@@ -448,19 +448,33 @@ describe("AgentBundleSection", () => {
       installedVersion: null,
       desiredVersion: null,
     });
-    expect(await screen.findByText(/hyprlayer 1\.6\.1/)).toBeTruthy();
+    await screen.findByText(/Migration required/);
+    await waitFor(() => expect(b.hyprlayerCliUpdateCheck).toHaveBeenCalled());
     expect(screen.queryByText(/update to 1\.6\.0/i)).toBeNull();
+    expect(screen.queryByText(/hyprlayer 1\.6\.1/)).toBeNull();
   });
 
   it("falls back to the reported binary version when the check cannot run", async () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: null, latest: null, hint: null }));
     renderSection(
-      { ...LEGACY_STATUS, binaryVersion: "1.6.1" },
+      { ...LEGACY_STATUS, binaryVersion: "1.5.9" },
       { ...FRESHNESS, manageable: false, installedVersion: null, desiredVersion: null },
     );
-    expect(await screen.findByText(/hyprlayer 1\.6\.1/)).toBeTruthy();
-    expect(screen.queryByText(/update to 1\.6\.0/i)).toBeNull();
+    expect(await screen.findByText(/hyprlayer 1\.5\.9/)).toBeTruthy();
     expect(screen.queryByText(/pre-1\.6\.0/)).toBeNull();
+  });
+
+  it("keeps the CLI note on the card's own text scale", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
+    renderSection(LEGACY_STATUS, {
+      ...FRESHNESS,
+      manageable: false,
+      installedVersion: null,
+      desiredVersion: null,
+    });
+    // no size class here inherits the 16px root, twice the card's other rows
+    const note = (await screen.findByText(/hyprlayer 1\.5\.9/)).closest("div")?.parentElement;
+    expect(note?.className).toContain("text-sm");
   });
 
   it("still asks a pre-floor CLI to update", async () => {

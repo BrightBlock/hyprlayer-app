@@ -260,16 +260,40 @@ pub struct AgentBundleInstall {
     pub source: BundleSource,
     pub stdout: String,
     pub stderr: String,
+    #[serde(default)]
+    pub resolved: Option<agent_bundle::CollisionReport>,
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn repair_agent_bundle(state: State<'_, AppState>) -> CmdResult<AgentBundleInstall> {
     let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let output = HyprCli::new(&state.binaries)
+    let cli = HyprCli::new(&state.binaries);
+    let mut output = cli
         .ai_reinstall_selected(&cwd, BundleSelection::Force)
         .await
         .map_err(AppError::from)?;
+
+    // the CLI refuses to overwrite an occupied path, so clear what blocks it and retry once
+    let mut resolved: Option<agent_bundle::CollisionReport> = None;
+    if output.exit_code != Some(0) {
+        if let Ok(status) = cli.ai_status(&cwd).await {
+            let stamp = agent_bundle::backup_stamp(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            );
+            let report = agent_bundle::clear_link_collisions(&status, &stamp);
+            if !report.is_empty() {
+                output = cli
+                    .ai_reinstall_selected(&cwd, BundleSelection::Force)
+                    .await
+                    .map_err(AppError::from)?;
+                resolved = Some(report);
+            }
+        }
+    }
 
     Ok(AgentBundleInstall {
         ok: output.exit_code == Some(0),
@@ -277,6 +301,7 @@ pub async fn repair_agent_bundle(state: State<'_, AppState>) -> CmdResult<AgentB
         source: agent_bundle::reinstall_source(&output.stdout),
         stdout: output.stdout,
         stderr: output.stderr,
+        resolved,
     })
 }
 
@@ -323,6 +348,7 @@ pub async fn install_agent_bundle_version(
             source: agent_bundle::reinstall_source(&output.stdout),
             stdout: output.stdout,
             stderr: output.stderr,
+            resolved: None,
         });
     }
 
@@ -332,5 +358,6 @@ pub async fn install_agent_bundle_version(
         source: agent_bundle::reinstall_source(&output.stdout),
         stdout: output.stdout,
         stderr: output.stderr,
+        resolved: None,
     })
 }

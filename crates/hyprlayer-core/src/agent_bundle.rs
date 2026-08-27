@@ -1,4 +1,7 @@
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::hyprcli::AiStatus;
 
@@ -66,10 +69,210 @@ pub fn is_manageable_pair(status: &AiStatus) -> bool {
         })
 }
 
+fn expand_tilde(path: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(shellexpand::tilde(path).into_owned())
+}
+
+/// `YYYYMMDD-HHMMSS` in UTC, for naming a backup the user can read at a glance.
+pub fn backup_stamp(epoch_secs: u64) -> String {
+    let (days, rem) = (epoch_secs / 86_400, epoch_secs % 86_400);
+    // Howard Hinnant's civil_from_days, shifted to an era starting 0000-03-01
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = era * 400 + yoe + i64::from(month <= 2);
+    format!(
+        "{year:04}{month:02}{day:02}-{:02}{:02}{:02}",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
+/// Clear every target path blocking a link, across each platform the status reports.
+pub fn clear_link_collisions(status: &AiStatus, stamp: &str) -> CollisionReport {
+    let (Some(root), Some(version)) = (
+        status.location.as_deref(),
+        desired_version(
+            status.pinned_version.as_deref(),
+            status.binary_version.as_deref(),
+        ),
+    ) else {
+        return CollisionReport::default();
+    };
+    let mut report = CollisionReport::default();
+    for platform in &status.platforms {
+        let Some(target) = platform.location.as_deref() else {
+            continue;
+        };
+        let target = expand_tilde(target);
+        // codex is linked its skills out of the claude bundle, and its own manifest never
+        // mentions them, so every bundle has to be checked against every target
+        for source in &status.platforms {
+            let bundle = expand_tilde(root).join(version).join(&source.id);
+            let one = resolve_collisions(&bundle, &target, stamp);
+            report.replaced.extend(one.replaced);
+            report.backed_up.extend(one.backed_up);
+        }
+    }
+    report.replaced.sort();
+    report.replaced.dedup();
+    report.backed_up.sort();
+    report.backed_up.dedup();
+    report
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hyprcli::AiPlatformStatus;
+
+    fn sha_of(body: &str) -> String {
+        format!("{:x}", Sha256::digest(body.as_bytes()))
+    }
+
+    /// bundle: skills/keep/SKILL.md + skills/mine/SKILL.md + agents/one.md, settings.json copied
+    fn fixture(root: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        let bundle = root.join("bundle");
+        let target = root.join("target");
+        for (rel, body) in [
+            ("skills/keep/SKILL.md", "keep"),
+            ("skills/mine/SKILL.md", "mine"),
+            ("agents/one.md", "one"),
+            ("settings.json", "settings"),
+        ] {
+            let p = bundle.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, body).unwrap();
+        }
+        let files: Vec<String> = [
+            ("skills/keep/SKILL.md", "keep"),
+            ("skills/mine/SKILL.md", "mine"),
+            ("agents/one.md", "one"),
+            ("settings.json", "settings"),
+        ]
+        .iter()
+        .map(|(rel, body)| format!(r#"{{"path":"{rel}","sha256":"{}"}}"#, sha_of(body)))
+        .collect();
+        std::fs::write(
+            bundle.join("manifest.json"),
+            format!(r#"{{"files":[{}]}}"#, files.join(",")),
+        )
+        .unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(
+            target.join(TARGET_MANIFEST),
+            format!(
+                r#"{{"files":[{{"path":"settings.json","sha256":"{}"}}]}}"#,
+                sha_of("settings")
+            ),
+        )
+        .unwrap();
+        (bundle, target)
+    }
+
+    fn plant(target: &Path, rel: &str, body: &str) {
+        let p = target.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
+
+    #[test]
+    fn backup_stamp_reads_as_a_utc_date() {
+        assert_eq!(backup_stamp(0), "19700101-000000");
+        assert_eq!(backup_stamp(1_787_851_216), "20260827-172016");
+        // a leap day, the case an off-by-one in civil_from_days would break
+        assert_eq!(backup_stamp(1_709_164_800), "20240229-000000");
+    }
+
+    #[test]
+    fn deletes_a_stale_copy_that_already_matches_the_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (bundle, target) = fixture(tmp.path());
+        plant(&target, "skills/keep/SKILL.md", "keep");
+
+        let report = resolve_collisions(&bundle, &target, "20260827");
+
+        assert_eq!(report.replaced, vec!["skills/keep".to_string()]);
+        assert!(report.backed_up.is_empty());
+        assert!(!target.join("skills/keep").exists());
+    }
+
+    #[test]
+    fn backs_up_a_copy_whose_contents_drifted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (bundle, target) = fixture(tmp.path());
+        plant(&target, "skills/mine/SKILL.md", "my own edits");
+
+        let report = resolve_collisions(&bundle, &target, "20260827");
+
+        assert_eq!(report.backed_up, vec!["skills/mine".to_string()]);
+        assert!(!target.join("skills/mine").exists());
+        assert_eq!(
+            std::fs::read_to_string(target.join("skills/mine.bak-20260827/SKILL.md")).unwrap(),
+            "my own edits"
+        );
+    }
+
+    #[test]
+    fn a_users_extra_file_makes_the_whole_unit_a_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (bundle, target) = fixture(tmp.path());
+        plant(&target, "skills/keep/SKILL.md", "keep");
+        plant(&target, "skills/keep/notes.md", "mine alone");
+
+        let report = resolve_collisions(&bundle, &target, "20260827");
+
+        assert!(report.replaced.is_empty());
+        assert_eq!(report.backed_up, vec!["skills/keep".to_string()]);
+        assert_eq!(
+            std::fs::read_to_string(target.join("skills/keep.bak-20260827/notes.md")).unwrap(),
+            "mine alone"
+        );
+    }
+
+    #[test]
+    fn never_touches_a_path_the_cli_copies_and_keeps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (bundle, target) = fixture(tmp.path());
+        plant(&target, "settings.json", "my settings");
+
+        let report = resolve_collisions(&bundle, &target, "20260827");
+
+        assert!(report.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(target.join("settings.json")).unwrap(),
+            "my settings"
+        );
+    }
+
+    #[test]
+    fn leaves_an_already_linked_target_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (bundle, target) = fixture(tmp.path());
+        std::fs::create_dir_all(target.join("skills")).unwrap();
+        std::os::unix::fs::symlink(bundle.join("skills/keep"), target.join("skills/keep")).unwrap();
+
+        let report = resolve_collisions(&bundle, &target, "20260827");
+
+        assert!(report.is_empty());
+        assert!(std::fs::symlink_metadata(target.join("skills/keep"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    fn does_nothing_without_a_bundle_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_, target) = fixture(tmp.path());
+        assert!(resolve_collisions(&tmp.path().join("absent"), &target, "20260827").is_empty());
+    }
 
     const REAL_ADVERTISEMENT: &str = "001e# service=git-upload-pack\n0000015b4c5cf370aed5fffee3b98f741bd6d911965c9033 HEAD\0multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed allow-tip-sha1-in-want allow-reachable-sha1-in-want no-done symref=HEAD:refs/heads/master filter object-format=sha1 agent=git/github-fc08860132f4-Linux\n00470afb1cdf19d81169bcc77ee1c47756a702e2802e refs/heads/cla-signatures\n003f4c5cf370aed5fffee3b98f741bd6d911965c9033 refs/heads/master\n003e97ce1e1dd3f7b3d44a68951e5748c707220480b2 refs/pull/1/head\n0000";
 
@@ -215,4 +418,153 @@ mod tests {
         };
         assert!(!is_manageable_pair(&status));
     }
+}
+
+/// The CLI links every bundle file into its target except the ones it records in the
+/// target-side manifest, which it copies once and then keeps.
+const TARGET_MANIFEST: &str = ".hyprlayer-manifest.json";
+
+#[derive(Debug, Clone, Deserialize)]
+struct ManifestFile {
+    path: String,
+    sha256: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct Manifest {
+    #[serde(default)]
+    files: Vec<ManifestFile>,
+}
+
+fn read_manifest(path: &Path) -> Vec<ManifestFile> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Manifest>(&raw).ok())
+        .map(|m| m.files)
+        .unwrap_or_default()
+}
+
+fn sha256_file(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(format!("{:x}", Sha256::digest(&bytes)))
+}
+
+/// The CLI links whole skill directories but individual agent files, so the unit that has
+/// to be cleared is the first two path components — `skills/commit`, `agents/herald.md`.
+fn link_unit(rel: &str) -> String {
+    let mut parts = rel.split('/');
+    match (parts.next(), parts.next()) {
+        (Some(a), Some(b)) => format!("{a}/{b}"),
+        (Some(a), None) => a.to_string(),
+        _ => rel.to_string(),
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct CollisionReport {
+    /// Units removed because every file in them matched the bundle byte for byte.
+    pub replaced: Vec<String>,
+    /// Units renamed aside because their contents differed from the bundle.
+    pub backed_up: Vec<String>,
+}
+
+impl CollisionReport {
+    pub fn is_empty(&self) -> bool {
+        self.replaced.is_empty() && self.backed_up.is_empty()
+    }
+}
+
+fn unit_matches_bundle(unit_dir: &Path, bundle_unit: &Path, expected: &[&ManifestFile]) -> bool {
+    let mut seen = 0usize;
+    for entry in walkdir::WalkDir::new(unit_dir).follow_links(false) {
+        let Ok(entry) = entry else { return false };
+        if entry.file_type().is_symlink() || entry.file_type().is_dir() {
+            continue;
+        }
+        let Ok(rel) = entry.path().strip_prefix(unit_dir) else {
+            return false;
+        };
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        // an extra file the bundle does not know about is the user's, never ours to delete
+        let Some(want) = expected.iter().find(|f| {
+            Path::new(&f.path)
+                .strip_prefix(bundle_unit)
+                .map(|p| p.to_string_lossy().replace('\\', "/") == rel)
+                .unwrap_or(false)
+        }) else {
+            return false;
+        };
+        if sha256_file(entry.path()).as_deref() != Some(want.sha256.as_str()) {
+            return false;
+        }
+        seen += 1;
+    }
+    seen == expected.len()
+}
+
+/// Clear the target paths that block the CLI from linking its bundle: delete the ones that
+/// already match it byte for byte, rename the rest aside as `<name>.bak-<stamp>`.
+pub fn resolve_collisions(bundle_dir: &Path, target: &Path, stamp: &str) -> CollisionReport {
+    let bundle_files = read_manifest(&bundle_dir.join("manifest.json"));
+    if bundle_files.is_empty() {
+        return CollisionReport::default();
+    }
+    let copied: Vec<String> = read_manifest(&target.join(TARGET_MANIFEST))
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+
+    let mut units: Vec<String> = Vec::new();
+    for file in &bundle_files {
+        if copied.iter().any(|c| c == &file.path) {
+            continue;
+        }
+        let unit = link_unit(&file.path);
+        if !units.contains(&unit) {
+            units.push(unit);
+        }
+    }
+
+    let mut report = CollisionReport::default();
+    for unit in units {
+        let path = target.join(&unit);
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        let expected: Vec<&ManifestFile> = bundle_files
+            .iter()
+            .filter(|f| link_unit(&f.path) == unit)
+            .collect();
+        let identical = if meta.is_dir() {
+            unit_matches_bundle(&path, Path::new(&unit), &expected)
+        } else {
+            expected.len() == 1
+                && sha256_file(&path).as_deref() == Some(expected[0].sha256.as_str())
+        };
+
+        if identical {
+            let removed = if meta.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            if removed.is_ok() {
+                report.replaced.push(unit);
+            }
+            continue;
+        }
+        let backup = path.with_file_name(format!(
+            "{}.bak-{stamp}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        if std::fs::rename(&path, &backup).is_ok() {
+            report.backed_up.push(unit);
+        }
+    }
+    report
 }

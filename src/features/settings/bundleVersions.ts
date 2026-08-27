@@ -22,19 +22,6 @@ export function bundlePinState(status: AiStatus | undefined): BundlePinState {
   return { kind: "pinned", installed, binary, pinned, drifted: pinned !== binary };
 }
 
-export function isLegacyLayout(status: AiStatus | undefined): boolean {
-  return status?.installed === true && bundlePinState(status).kind === "unavailable";
-}
-
-export function needsCliUpgrade(
-  status: AiStatus | undefined,
-  bundle: AgentBundleStatus | undefined,
-): boolean {
-  if (!bundle) return false;
-  if (!bundle.manageable) return (status?.platforms?.length ?? 0) === 0;
-  return bundlePinState(status).kind === "unavailable";
-}
-
 export function formatPublished(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const ms = Date.parse(iso);
@@ -87,4 +74,32 @@ export function needsSkillsCliUpdate(version: string | null | undefined): boolea
     if (a !== b) return a < b;
   }
   return false;
+}
+
+export type BundleLayout = "managed" | "unpaired" | "legacy";
+
+/**
+ * Why the reported install does or doesn't support switching bundle versions.
+ * `null` until the freshness probe answers.
+ */
+export function bundleLayout(
+  status: AiStatus | undefined,
+  bundle: AgentBundleStatus | undefined,
+): BundleLayout | null {
+  if (!bundle) return null;
+  // a CLI too old to report its own version copied the files in place and cannot relink them
+  if (needsSkillsCliUpdate(status?.binaryVersion)) return "legacy";
+  return bundle.manageable ? "managed" : "unpaired";
+}
+
+/**
+ * Both streams of a failed CLI run, in terminal order. The hyprlayer CLI writes the
+ * actionable detail (which paths it kept) to stdout and only a generic error to stderr,
+ * so showing either one alone loses half the story.
+ */
+export function cliFailureText(run: { stdout: string; stderr: string }): string {
+  return [run.stdout, run.stderr]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("\n\n");
 }

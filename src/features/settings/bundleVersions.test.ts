@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { AiStatus, AiVersions } from "@/lib/bindings";
 
 import {
+  bundleLayout,
   bundlePinState,
+  cliFailureText,
   formatPublished,
   needsSkillsCliUpdate,
   selectedVersion,
@@ -192,5 +194,50 @@ describe("needsSkillsCliUpdate", () => {
   it("compares each part numerically, not as text", () => {
     expect(needsSkillsCliUpdate("1.10.0")).toBe(false);
     expect(needsSkillsCliUpdate("10.0.0")).toBe(false);
+  });
+});
+
+describe("cliFailureText", () => {
+  // `ai reinstall` names the kept paths on stdout and only a generic error on stderr
+  const COLLISION = {
+    stdout: "Downloading agent files...\n  Kept your modified settings.json\n",
+    stderr: "Error: Claude + Codex agent setup is incomplete because an existing path was left untouched.\n",
+  };
+
+  it("keeps the stdout detail that names the collision", () => {
+    const text = cliFailureText(COLLISION);
+    expect(text).toContain("Kept your modified settings.json");
+    expect(text).toContain("setup is incomplete");
+  });
+
+  it("reads in terminal order, detail before the error", () => {
+    const text = cliFailureText(COLLISION);
+    expect(text.indexOf("Kept your modified")).toBeLessThan(text.indexOf("Error:"));
+  });
+
+  it("drops an empty stream instead of leaving blank lines", () => {
+    expect(cliFailureText({ stdout: "", stderr: "boom\n" })).toBe("boom");
+    expect(cliFailureText({ stdout: "  \n", stderr: "" })).toBe("");
+  });
+});
+
+describe("bundleLayout", () => {
+  const BUNDLE = { manageable: true } as never;
+
+  it("calls a CLI too old to report its version a legacy layout", () => {
+    expect(bundleLayout({ ...STATUS, binaryVersion: null }, BUNDLE)).toBe("legacy");
+  });
+
+  it("calls a current CLI without the pair unpaired, not legacy", () => {
+    const status = { ...STATUS, binaryVersion: "1.6.1", assetsVersion: "1.6.1" };
+    expect(bundleLayout(status, { manageable: false } as never)).toBe("unpaired");
+  });
+
+  it("calls a current CLI with the pair managed", () => {
+    expect(bundleLayout({ ...STATUS, binaryVersion: "1.6.2" }, BUNDLE)).toBe("managed");
+  });
+
+  it("answers nothing until the freshness probe lands", () => {
+    expect(bundleLayout(STATUS, undefined)).toBeNull();
   });
 });

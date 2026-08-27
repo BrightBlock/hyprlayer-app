@@ -223,6 +223,7 @@ export type AgentBundleInstall = {
 	source: BundleSource,
 	stdout: string,
 	stderr: string,
+	resolved?: CollisionReport | null,
 };
 
 export type AgentBundleReport = {
@@ -521,6 +522,13 @@ export type CodexSettings = {
 	commitEffort?: string | null,
 	selectedModels?: string[],
 	personality?: string | null,
+};
+
+export type CollisionReport = {
+	/**  Units removed because every file in them matched the bundle byte for byte. */
+	replaced: string[],
+	/**  Units renamed aside because their contents differed from the bundle. */
+	backedUp: string[],
 };
 
 export type CommitEntry = {

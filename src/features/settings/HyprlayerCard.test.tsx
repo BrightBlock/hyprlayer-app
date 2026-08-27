@@ -173,6 +173,22 @@ const RUNG_1_6_0_UNPAIRED: Rung = {
   cli: { current: "1.6.0", latest: null, hint: null },
 };
 
+// A 1.6.1 CLI whose agent files were copied into ~/.claude alone: no platforms, no Codex.
+const RUNG_UNPAIRED_CURRENT: Rung = {
+  status: {
+    agentTool: "Claude Code",
+    installed: true,
+    location: "~/.claude/",
+    agentsInstalledSha: "8c1e7a45523db4bc8a548400628d47c53720d4b9",
+    assetsVersion: "1.6.1",
+    binaryVersion: "1.6.1",
+    pinnedVersion: null,
+    platforms: [],
+  },
+  bundle: { ...BUNDLE, manageable: false, installedVersion: "1.6.1", desiredVersion: "1.6.1" },
+  cli: { current: "1.6.1", latest: null, hint: null },
+};
+
 const RUNG_BUNDLE_BEHIND: Rung = {
   status: {
     agentTool: "Claude + Codex",
@@ -231,10 +247,26 @@ describe("the CLI row", () => {
     expect((await cliButton()).className).toContain("text-bad");
   });
 
-  it("leaves the action to the migration panel on a legacy install", async () => {
+  it("offers its own update action on every rung, migration panel or not", async () => {
+    for (const rung of [
+      RUNG_1_5_X,
+      RUNG_1_6_0_UNPAIRED,
+      RUNG_UNPAIRED_CURRENT,
+      RUNG_BUNDLE_BEHIND,
+      RUNG_CURRENT,
+    ]) {
+      renderRung(rung);
+      // the sha lands only once agentBundleStatus resolves, which is what settles upgradeOffered
+      await screen.findByText(/9a2a33c/);
+      expect(await cliButton()).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it("does not badge a version the migration panel already names", async () => {
     renderRung(RUNG_1_5_X);
     await screen.findByText(/Legacy layout/);
-    expect(screen.queryByRole("button", { name: /update the hyprlayer cli/i })).toBeNull();
+    expect(screen.getAllByText(/1\.6\.2 available/)).toHaveLength(1);
   });
 });
 
@@ -248,9 +280,32 @@ describe("the 1.5.x to 1.6.2 upgrade ladder", () => {
 
   it("does not call a 1.6.0 install with one platform a legacy layout", async () => {
     renderRung(RUNG_1_6_0_UNPAIRED);
-    expect(await screen.findByText(/hyprlayer 1\.6\.0/)).toBeTruthy();
+    await screen.findByText(/Agent bundle/);
     expect(screen.queryByText(/Legacy layout/)).toBeNull();
     expect(screen.queryByText(/Migration required/)).toBeNull();
+  });
+
+  it("does not nag a 1.6.0 install with one platform to upgrade its CLI", async () => {
+    renderRung(RUNG_1_6_0_UNPAIRED);
+    // the bundle sha only lands once agentBundleStatus resolves, which is what gates the note
+    await screen.findByText(/9a2a33c/);
+    expect(screen.queryByText(/hyprlayer 1\.6\.0/)).toBeNull();
+    expect(screen.queryByText(/update to 1\.6\.0/i)).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: /update the hyprlayer cli/i }),
+    ).toBeTruthy();
+  });
+
+  it("says why a current CLI with one target has no version list", async () => {
+    renderRung(RUNG_UNPAIRED_CURRENT);
+    expect(await screen.findByText(/Unpaired/)).toBeTruthy();
+    expect(screen.getByText(/Bundle versions need Claude and Codex/)).toBeTruthy();
+    expect(screen.getByText(/hyprlayer ai configure/)).toBeTruthy();
+    expect(screen.getByText(/Claude Code/)).toBeTruthy();
+    // the diagnosis used to hinge on absent version fields, which a 1.6.1 CLI populates
+    expect(screen.queryByText(/Legacy layout/)).toBeNull();
+    expect(screen.queryByText(/Migration required/)).toBeNull();
+    expect(screen.queryByLabelText(/agent bundle version/i)).toBeNull();
   });
 
   it("offers the bundle catch-up once the CLI is current", async () => {
@@ -284,6 +339,19 @@ describe("HyprlayerCard agent targets", () => {
     fireEvent.click(await repairButton());
     await waitFor(() => expect(b.repairAgentBundle).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("reports what a collision-clearing repair did to the user's files", async () => {
+    b.repairAgentBundle.mockReturnValue(
+      ok(repaired({ resolved: { replaced: ["skills/commit", "skills/create_plan"], backedUp: ["skills/mine"] } })),
+    );
+    renderCard();
+    fireEvent.click(await repairButton());
+    expect(await screen.findByText(/Removed 2 stale copies/)).toBeTruthy();
+    expect(screen.getByText(/Kept 1 edited copy/)).toBeTruthy();
+    expect(screen.getByText(/not deleted/)).toBeTruthy();
+    // a long list of paths belongs in the backup dirs, not in the receipt
+    expect(screen.queryByText(/skills\/mine/)).toBeNull();
   });
 
   it("calls a successful repair done, whatever source the CLI downloaded from", async () => {

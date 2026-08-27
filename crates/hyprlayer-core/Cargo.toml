@@ -25,6 +25,7 @@ memchr = "2"
 aho-corasick = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 walkdir = "2"
+sha2 = "0.10"
 globset = "0.4"
 toml = "0.8"
 toml_edit = "0.22"

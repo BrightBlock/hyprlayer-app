@@ -31,9 +31,9 @@ import {
 
 import { CardRow, CARD_ROW_SPAN } from "./cardRow";
 import {
+  bundleLayout,
   bundlePinState,
-  isLegacyLayout,
-  needsCliUpgrade,
+  cliFailureText,
   needsSkillsCliUpdate,
   selectedVersion,
   SKILLS_CLI_FLOOR,
@@ -49,7 +49,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
           {result.exitCode != null && <> (exit {result.exitCode})</>}. The CLI did not confirm a
           complete Claude and Codex link set; any personal path collision was left untouched.
         </p>
-        <CliOutput text={result.stderr || result.stdout} />
+        <CliOutput text={cliFailureText(result)} />
       </div>
     );
   }
@@ -183,7 +183,7 @@ export function CliUpdateOutcome({
               </>
             )}
           </p>
-          <CliOutput text={result.stderr || result.stdout} />
+          <CliOutput text={cliFailureText(result)} />
         </div>
       )}
       {result?.ok && (
@@ -198,9 +198,14 @@ export function CliUpdateNote({ version }: { version?: string | null }) {
   const update = useCliSelfUpdate();
   const { current, latest, hint } = check.data ?? {};
   const installed = current ?? version ?? null;
+  const stale = needsSkillsCliUpdate(installed) && !update.isSuccess;
+  const attempted = update.isPending || update.data != null || update.error != null;
+
+  // the version caption alone just restates the CLI row above it
+  if (!latest && !stale && !attempted) return null;
 
   return (
-    <div className="mt-2 text-ink-dim">
+    <div className="mt-2 text-sm text-ink-dim">
       <div className="flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
         <span>hyprlayer {installed ?? `pre-${SKILLS_CLI_FLOOR}`}</span>
         {latest ? (
@@ -211,16 +216,32 @@ export function CliUpdateNote({ version }: { version?: string | null }) {
             </Button>
           </>
         ) : (
-          needsSkillsCliUpdate(installed) &&
-          !update.isSuccess && (
-            <span>· update to {SKILLS_CLI_FLOOR} or newer for current skills</span>
-          )
+          stale && <span>· update to {SKILLS_CLI_FLOOR} or newer for current skills</span>
         )}
       </div>
 
       {!update.isPending && (
         <CliUpdateOutcome result={update.data ?? null} error={update.error} hint={hint} />
       )}
+    </div>
+  );
+}
+
+function UnpairedLayoutNote({ agentTool }: { agentTool?: string | null }) {
+  return (
+    <div className="mt-1 flex gap-2.5 rounded-md border border-warn/35 bg-warn/8 p-3 text-sm">
+      <span className="flex pt-0.5 text-warn">
+        <WarningTriangleIcon size={14} />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-ink">Bundle versions need Claude and Codex</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-pretty text-ink-dim">
+          One bundle is linked into <span className="font-mono">~/.claude</span> and{" "}
+          <span className="font-mono">~/.codex</span> together, so switching versions needs both
+          provisioned. This install reports {agentTool ?? "a single target"} only. Run{" "}
+          <span className="font-mono">hyprlayer ai configure</span> to set up the pair.
+        </p>
+      </div>
     </div>
   );
 }
@@ -248,10 +269,8 @@ function LegacyLayoutNote({ version }: { version?: string | null }) {
 export function AgentBundleSection({ status }: { status: AiStatus | undefined }) {
   const pin = bundlePinState(status);
   const bundle = useAgentBundle({ enabled: status?.installed === true });
-  const manageable = bundle.data?.manageable === true;
-  const versioned = manageable && pin.kind !== "unavailable";
-  const cliUpgrade = needsCliUpgrade(status, bundle.data);
-  const legacy = cliUpgrade && isLegacyLayout(status);
+  const layout = bundleLayout(status, bundle.data);
+  const versioned = layout === "managed";
   const [listWanted, setListWanted] = useState(false);
   const versions = useAgentBundleVersions({ enabled: versioned && listWanted });
   const [choice, setChoice] = useState<string | null>(null);
@@ -325,8 +344,10 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
                 <span className="text-xs text-warn">this CLI ships {pin.binary}</span>
               )}
             </>
+          ) : layout === "legacy" ? (
+            <Badge tone="bad">Legacy layout</Badge>
           ) : (
-            legacy && <Badge tone="bad">Legacy layout</Badge>
+            layout === "unpaired" && <Badge tone="warn">Unpaired</Badge>
           )}
         </div>
         {(sha || lastChecked != null) && (
@@ -371,10 +392,10 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
       </div>
 
       <div className={CARD_ROW_SPAN}>
-        {legacy ? (
+        {layout === "legacy" ? (
           <LegacyLayoutNote version={status?.binaryVersion} />
         ) : (
-          cliUpgrade && <CliUpdateNote version={status?.binaryVersion} />
+          layout === "unpaired" && <UnpairedLayoutNote agentTool={status?.agentTool} />
         )}
 
         {busy && (
