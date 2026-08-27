@@ -439,6 +439,40 @@ describe("AgentBundleSection", () => {
     expect(screen.getByText(/no tty present/)).toBeTruthy();
   });
 
+  it("does not nag a CLI that already clears the skills floor", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.6.1", latest: null, hint: null }));
+    renderSection(LEGACY_STATUS, {
+      ...FRESHNESS,
+      manageable: false,
+      installedVersion: null,
+      desiredVersion: null,
+    });
+    expect(await screen.findByText(/hyprlayer 1\.6\.1/)).toBeTruthy();
+    expect(screen.queryByText(/update to 1\.6\.0/i)).toBeNull();
+  });
+
+  it("falls back to the reported binary version when the check cannot run", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: null, latest: null, hint: null }));
+    renderSection(
+      { ...LEGACY_STATUS, binaryVersion: "1.6.1" },
+      { ...FRESHNESS, manageable: false, installedVersion: null, desiredVersion: null },
+    );
+    expect(await screen.findByText(/hyprlayer 1\.6\.1/)).toBeTruthy();
+    expect(screen.queryByText(/update to 1\.6\.0/i)).toBeNull();
+    expect(screen.queryByText(/pre-1\.6\.0/)).toBeNull();
+  });
+
+  it("still asks a pre-floor CLI to update", async () => {
+    b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
+    renderSection(LEGACY_STATUS, {
+      ...FRESHNESS,
+      manageable: false,
+      installedVersion: null,
+      desiredVersion: null,
+    });
+    expect(await screen.findByText(/update to 1\.6\.0 or newer/i)).toBeTruthy();
+  });
+
   it("offers no button when the check cannot name a version", async () => {
     b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
     renderSection(LEGACY_STATUS, {

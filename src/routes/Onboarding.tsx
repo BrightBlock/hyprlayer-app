@@ -195,7 +195,7 @@ function Step2({ onNext }: { onNext: () => void }) {
           <Button type="button" variant="primary" onClick={startRepair}>
             Repair setup
           </Button>
-          {platforms.length === 0 && <CliUpdateNote />}
+          {platforms.length === 0 && <CliUpdateNote version={aiStatus.data?.binaryVersion} />}
         </Card>
       )}
     </Step>

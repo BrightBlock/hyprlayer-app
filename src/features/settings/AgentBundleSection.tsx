@@ -27,7 +27,13 @@ import {
   useCliUpdateCheck,
 } from "@/lib/queries";
 
-import { bundlePinState, selectedVersion, versionOptions } from "./bundleVersions";
+import {
+  bundlePinState,
+  needsSkillsCliUpdate,
+  selectedVersion,
+  SKILLS_CLI_FLOOR,
+  versionOptions,
+} from "./bundleVersions";
 
 function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpinned: boolean }) {
   if (!result.ok) {
@@ -137,19 +143,20 @@ function UpdateOutcome({ report, target }: { report: AgentBundleReport; target: 
   );
 }
 
-export function CliUpdateNote() {
+export function CliUpdateNote({ version }: { version?: string | null }) {
   const check = useCliUpdateCheck();
   const update = useMutation({
     mutationFn: () => unwrap(commands.updateHyprlayerCli()),
     onSettled: () => invalidateCliBundleState(),
   });
   const { current, latest, hint } = check.data ?? {};
+  const installed = current ?? version ?? null;
   const result = update.data ?? null;
 
   return (
     <div className="mt-2 text-ink-dim">
       <div className="flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
-        <span>hyprlayer {current ?? "pre-1.6.0"}</span>
+        <span>hyprlayer {installed ?? `pre-${SKILLS_CLI_FLOOR}`}</span>
         {latest ? (
           <>
             <span className="text-warn">· {latest} available</span>
@@ -162,7 +169,10 @@ export function CliUpdateNote() {
             </Button>
           </>
         ) : (
-          !update.isSuccess && <span>· update to 1.6.0 or newer for current skills</span>
+          needsSkillsCliUpdate(installed) &&
+          !update.isSuccess && (
+            <span>· update to {SKILLS_CLI_FLOOR} or newer for current skills</span>
+          )
         )}
       </div>
 
@@ -308,7 +318,9 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
         </Link>
       </div>
 
-      {(legacyCli || (manageable && pin.kind === "unavailable")) && <CliUpdateNote />}
+      {(legacyCli || (manageable && pin.kind === "unavailable")) && (
+        <CliUpdateNote version={status?.binaryVersion} />
+      )}
 
       {versioned && !pending && pin.kind === "pinned" && (
         <div className="mt-2">

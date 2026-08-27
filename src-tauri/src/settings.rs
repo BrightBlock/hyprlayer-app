@@ -128,6 +128,20 @@ impl AppSettings {
 
         changed
     }
+
+    // A title model that only restates the outgoing harness's own default was never a
+    // deliberate pin: the picker shows the resolved default as its value, so selecting it
+    // is indistinguishable from leaving it unset. Drop it so the new harness's default wins.
+    fn refollow_title_model(&mut self, previous_harness: Option<&str>) {
+        if self.providers.default_harness.as_deref() == previous_harness {
+            return;
+        }
+        if self.tab_titles.model.as_deref()
+            == Some(TabTitleSettings::default_model_for(previous_harness))
+        {
+            self.tab_titles.model = None;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -151,14 +165,18 @@ impl Default for TabTitleSettings {
 }
 
 impl TabTitleSettings {
+    pub fn default_model_for(default_harness: Option<&str>) -> &'static str {
+        match default_harness {
+            Some("codex") => DEFAULT_CODEX_TAB_TITLE_MODEL,
+            _ => DEFAULT_TAB_TITLE_MODEL,
+        }
+    }
+
     pub fn effective_model<'a>(&'a self, providers: &ProviderSettings) -> &'a str {
         if let Some(explicit) = self.model.as_deref().filter(|m| !m.is_empty()) {
             return explicit;
         }
-        match providers.default_harness.as_deref() {
-            Some("codex") => DEFAULT_CODEX_TAB_TITLE_MODEL,
-            _ => DEFAULT_TAB_TITLE_MODEL,
-        }
+        Self::default_model_for(providers.default_harness.as_deref())
     }
 }
 
@@ -431,7 +449,9 @@ impl SettingsStore {
     {
         let mut guard = self.cache.write().await;
         let mut next = guard.clone();
+        let previous_harness = next.providers.default_harness.clone();
         mutate(&mut next);
+        next.refollow_title_model(previous_harness.as_deref());
         next.normalize();
         persist(&self.path, &next).await?;
         *guard = next.clone();
@@ -498,6 +518,76 @@ mod tests {
                 "harness {harness:?} should keep the Claude default"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn switching_the_default_harness_retargets_a_title_model_left_on_its_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path().to_path_buf());
+
+        store
+            .update(|settings| {
+                settings.providers.default_harness = Some("codex".into());
+                settings.tab_titles.model = Some(DEFAULT_CODEX_TAB_TITLE_MODEL.into());
+            })
+            .await
+            .unwrap();
+
+        let back = store
+            .update(|settings| settings.providers.default_harness = Some("claude".into()))
+            .await
+            .unwrap();
+
+        assert_eq!(back.tab_titles.model, None);
+        assert_eq!(
+            back.tab_titles.effective_model(&back.providers),
+            DEFAULT_TAB_TITLE_MODEL
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_the_default_harness_keeps_a_title_model_the_user_really_picked() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path().to_path_buf());
+
+        store
+            .update(|settings| {
+                settings.providers.default_harness = Some("codex".into());
+                settings.tab_titles.model = Some("claude:sonnet".into());
+            })
+            .await
+            .unwrap();
+
+        let back = store
+            .update(|settings| settings.providers.default_harness = Some("claude".into()))
+            .await
+            .unwrap();
+
+        assert_eq!(back.tab_titles.model.as_deref(), Some("claude:sonnet"));
+    }
+
+    #[tokio::test]
+    async fn a_title_model_survives_an_update_that_leaves_the_harness_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path().to_path_buf());
+
+        store
+            .update(|settings| {
+                settings.providers.default_harness = Some("codex".into());
+                settings.tab_titles.model = Some(DEFAULT_CODEX_TAB_TITLE_MODEL.into());
+            })
+            .await
+            .unwrap();
+
+        let same = store
+            .update(|settings| settings.tab_titles.enabled = false)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            same.tab_titles.model.as_deref(),
+            Some(DEFAULT_CODEX_TAB_TITLE_MODEL)
+        );
     }
 
     #[test]

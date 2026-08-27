@@ -5,6 +5,7 @@ import type { AiStatus, AiVersions } from "@/lib/bindings";
 import {
   bundlePinState,
   formatPublished,
+  needsSkillsCliUpdate,
   selectedVersion,
   VERSION_PICKER_LIMIT,
   versionLabel,
@@ -166,5 +167,30 @@ describe("versionLabel", () => {
     expect(versionLabel({ version: "1.6.0", publishedAt: "not-a-date" })).toBe("1.6.0");
     expect(formatPublished("not-a-date")).toBeNull();
     expect(formatPublished(null)).toBeNull();
+  });
+});
+
+describe("needsSkillsCliUpdate", () => {
+  it("stops nagging a CLI that already clears the floor", () => {
+    for (const version of ["1.6.0", "1.6.1", "1.6.2-dev", "1.7.0", "2.0.0", "v1.6.1"]) {
+      expect(needsSkillsCliUpdate(version)).toBe(false);
+    }
+  });
+
+  it("still asks an older CLI to update", () => {
+    for (const version of ["1.5.9", "1.5.10", "0.9.0", "1.5"]) {
+      expect(needsSkillsCliUpdate(version)).toBe(true);
+    }
+  });
+
+  it("asks when there is no readable version at all", () => {
+    for (const version of [null, undefined, "", "   ", "unknown"]) {
+      expect(needsSkillsCliUpdate(version)).toBe(true);
+    }
+  });
+
+  it("compares each part numerically, not as text", () => {
+    expect(needsSkillsCliUpdate("1.10.0")).toBe(false);
+    expect(needsSkillsCliUpdate("10.0.0")).toBe(false);
   });
 });

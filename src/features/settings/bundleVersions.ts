@@ -54,3 +54,24 @@ export function versionOptions(data: AiVersions | undefined): DropdownOption[] {
 export function selectedVersion(status: AiStatus | undefined): string {
   return status?.pinnedVersion ?? status?.assetsVersion ?? "";
 }
+
+export const SKILLS_CLI_FLOOR = "1.6.0";
+
+function numericVersion(version: string | null | undefined): number[] | null {
+  const core = version?.trim().replace(/^v/i, "").split(/[-+\s]/)[0];
+  if (!core) return null;
+  const parts = core.split(".").map((p) => Number.parseInt(p, 10));
+  return parts.some((p) => Number.isNaN(p)) ? null : parts;
+}
+
+export function needsSkillsCliUpdate(version: string | null | undefined): boolean {
+  const found = numericVersion(version);
+  const floor = numericVersion(SKILLS_CLI_FLOOR);
+  if (!found || !floor) return true;
+  for (let i = 0; i < Math.max(found.length, floor.length); i += 1) {
+    const a = found[i] ?? 0;
+    const b = floor[i] ?? 0;
+    if (a !== b) return a < b;
+  }
+  return false;
+}
