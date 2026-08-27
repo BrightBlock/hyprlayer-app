@@ -6,7 +6,7 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use crate::claude::{ClaudeDriver, ExitOutcome, SessionEvent};
-use crate::codex::CodexDriver;
+use crate::codex::{CodexDriver, CollabMode};
 use crate::error::{CoreError, Result};
 
 const KILL_NONE: u8 = 0;
@@ -81,6 +81,8 @@ pub trait AgentDriver: Send + Sync {
     fn set_model(&self, _model: Option<String>) {}
 
     fn set_effort(&self, _effort: Option<String>) {}
+
+    fn set_collab_mode(&self, _mode: Option<CollabMode>) {}
 
     fn respond_permission(
         &self,
@@ -172,6 +174,9 @@ impl AgentDriver for CodexDriver {
     }
     fn set_effort(&self, effort: Option<String>) {
         self.set_effort(effort)
+    }
+    fn set_collab_mode(&self, mode: Option<CollabMode>) {
+        self.set_collab_mode(mode)
     }
     fn respond_permission(
         &self,

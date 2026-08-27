@@ -4,11 +4,12 @@ use std::sync::{Arc, Weak};
 
 use hyprlayer_core::agent::{AgentDriver, Harness};
 use hyprlayer_core::agents;
+use hyprlayer_core::capability::{launch_policy, LaunchPolicy};
 use hyprlayer_core::claude::workflow::{self, SessionWorkflows, WorkflowLaunch};
 use hyprlayer_core::claude::{
-    ClaudeDriver, ExitOutcome, PermissionMode, SessionEvent, SessionState, SpawnConfig,
+    ClaudeDriver, ExitOutcome, PermissionMode, SessionEvent, SessionState, SpawnConfig, TurnStatus,
 };
-use hyprlayer_core::codex::{CodexDriver, SpawnConfig as CodexSpawnConfig};
+use hyprlayer_core::codex::{CodexDriver, CollabMode, SpawnConfig as CodexSpawnConfig};
 use hyprlayer_core::pipeline::{self, Stage};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::store::{Db, NewSession, Session, StoredEvent, Workstream};
@@ -125,6 +126,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
     } = params;
 
     let mut launched_mode: Option<PermissionMode> = None;
+    let policy = launch_policy(session.harness, session.stage, permission_mode);
     let (driver, rx): (Arc<dyn AgentDriver>, broadcast::Receiver<SessionEvent>) = match session
         .harness
     {
@@ -171,8 +173,13 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
 
             let effective = effective_for(state, &project_path).await?;
             let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
-            let permission_mode =
-                permission_mode.unwrap_or(pipeline::policy_for(session.stage).permission_mode);
+            let LaunchPolicy::Codex {
+                permission_mode,
+                posture,
+            } = policy
+            else {
+                unreachable!("codex harness yields a codex launch policy")
+            };
             launched_mode = Some(permission_mode);
 
             let path = state.binaries.augmented_path().await;
@@ -197,7 +204,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
             let (driver, rx) = CodexDriver::spawn(CodexSpawnConfig {
                 codex_bin: bin,
                 cwd: PathBuf::from(&session.cwd),
-                permission_mode,
+                posture,
                 add_dirs,
                 skill_roots: hyprlayer_core::skills::skill_roots(Some(std::path::Path::new(
                     &session.cwd,
@@ -223,7 +230,15 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
 
             let effective = effective_for(state, &project_path).await?;
             let add_dirs: Vec<PathBuf> = effective.backend.thoughts_root().into_iter().collect();
-            let mut policy = pipeline::policy_for(session.stage);
+            let LaunchPolicy::Claude {
+                permission_mode,
+                allowed_tools,
+                mut disallowed_tools,
+                agent,
+            } = policy
+            else {
+                unreachable!("claude harness yields a claude launch policy")
+            };
             let settings = state.settings.get().await;
             let library = &settings.agents;
             let drafts: Vec<String> =
@@ -237,10 +252,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
                     })
                     .map(|a| a.name)
                     .collect();
-            policy
-                .disallowed_tools
-                .extend(agents::agent_deny_rules(&drafts));
-            let permission_mode = permission_mode.unwrap_or(policy.permission_mode);
+            disallowed_tools.extend(agents::agent_deny_rules(&drafts));
             launched_mode = Some(permission_mode);
 
             let path = state.binaries.augmented_path().await;
@@ -253,8 +265,8 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
                 cwd: PathBuf::from(&session.cwd),
                 session_id: session.id.clone(),
                 permission_mode,
-                allowed_tools: policy.allowed_tools,
-                disallowed_tools: policy.disallowed_tools,
+                allowed_tools,
+                disallowed_tools,
                 add_dirs,
                 resume: resume.then(|| session.id.clone()),
                 fork: false,
@@ -262,7 +274,7 @@ async fn launch_session(state: &AppState, params: LaunchParams) -> CmdResult<Arc
                 model,
                 effort,
                 chrome: claude_cfg.chrome_enabled,
-                agent: pipeline::agent_for(session.stage),
+                agent,
                 env,
             })
             .map_err(AppError::from)?;
@@ -403,22 +415,25 @@ pub async fn start_stage_session(
     })?;
 
     let stage_kind = stage;
+    let harness = harness.unwrap_or_default();
     let bodies = action_prompt_bodies(&state, stage_kind, &ws).await;
-    let prompt = pipeline::compose_prompt(stage_kind, &input, &ws.base_branch, &bodies);
+    let prompt = pipeline::compose_prompt(stage_kind, &input, &ws.base_branch, &bodies, harness);
     let wire_prompt = pipeline::append_docs(prompt.clone(), &attached_docs);
+    let followup = followup_for(harness, stage_kind, &bodies);
 
     let session = {
         let new = NewSession {
             id: uuid::Uuid::new_v4().to_string(),
             workstream_id: ws.id.clone(),
             stage: stage_kind,
-            harness: harness.unwrap_or_default(),
+            harness,
             cwd: ws.worktree_path.clone(),
         };
         db_task(state.db.clone(), move |db| db.insert_session(new)).await?
     };
 
     let err_channel = on_event.clone();
+    let session_id = session.id.clone();
     let launch = LaunchParams {
         app: app.clone(),
         session: session.clone(),
@@ -434,15 +449,23 @@ pub async fn start_stage_session(
         let state = app.state::<AppState>();
         match launch_session(&state, launch).await {
             Ok(driver) => {
-                let mut turns = (stage_kind == Stage::Ship).then(|| driver.subscribe());
-                if let Err(e) = driver.send_user_turn(
-                    &wire_prompt,
-                    Some(stage_kind.as_str()),
-                    prompt_name.as_deref(),
-                ) {
+                let op_lock = state.sessions.op_lock(&session_id).await;
+                let mut turns = followup.as_ref().map(|_| driver.subscribe());
+                let first_send = {
+                    let _guard = op_lock.lock().await;
+                    if matches!(followup, Some(Followup::CodexExecute(_))) {
+                        driver.set_collab_mode(Some(CollabMode::Plan));
+                    }
+                    driver.send_user_turn(
+                        &wire_prompt,
+                        Some(stage_kind.as_str()),
+                        prompt_name.as_deref(),
+                    )
+                };
+                if let Err(e) = first_send {
                     emit_start_failure(&err_channel, &AppError::from(e).message);
-                } else if let Some(rx) = turns.as_mut() {
-                    ship_describe_followup(driver.as_ref(), rx).await;
+                } else if let (Some(rx), Some(followup)) = (turns.as_mut(), followup) {
+                    run_followup(driver.as_ref(), rx, followup, op_lock).await;
                 }
             }
             Err(e) => emit_start_failure(&err_channel, &e.message),
@@ -452,18 +475,53 @@ pub async fn start_stage_session(
     Ok(StartedSession { session, prompt })
 }
 
-async fn ship_describe_followup(
+#[derive(Debug, PartialEq)]
+enum Followup {
+    ShipDescribe,
+    CodexExecute(&'static str),
+}
+
+fn followup_for(
+    harness: Harness,
+    stage: Stage,
+    bodies: &pipeline::ActionPromptBodies,
+) -> Option<Followup> {
+    if stage == Stage::Ship {
+        return Some(Followup::ShipDescribe);
+    }
+    pipeline::codex_phase_two(harness, stage, bodies).map(Followup::CodexExecute)
+}
+
+async fn run_followup(
     driver: &dyn AgentDriver,
     rx: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    followup: Followup,
+    op_lock: Arc<Mutex<()>>,
 ) {
-    loop {
+    let status = loop {
         match rx.recv().await {
-            Ok(SessionEvent::TurnDone { .. }) => break,
+            Ok(SessionEvent::TurnDone { turn_status, .. }) => break turn_status,
             Ok(SessionEvent::Exited { .. }) | Err(_) => return,
             Ok(_) => {}
         }
+    };
+    match followup {
+        Followup::ShipDescribe => {
+            let _ = driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None);
+        }
+        Followup::CodexExecute(prompt) => {
+            // Destructive follow-up: only after a cleanly completed review turn.
+            // Codex reports a Stop as "interrupted" (verified on 0.149.1), but an
+            // absent or unrecognised status must fail safe too, so this requires
+            // an exact Completed rather than excluding the statuses we know.
+            if status.as_deref().map(TurnStatus::parse) != Some(TurnStatus::Completed) {
+                return;
+            }
+            let _guard = op_lock.lock().await;
+            driver.set_collab_mode(Some(CollabMode::Default));
+            let _ = driver.send_user_turn(prompt, None, None);
+        }
     }
-    let _ = driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None);
 }
 
 fn emit_start_failure(channel: &Channel<SessionEvent>, reason: &str) {
@@ -1419,6 +1477,42 @@ pub async fn list_active_sessions(state: State<'_, AppState>) -> CmdResult<Vec<A
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn followup_dispatch_matrix() {
+        let bodies = pipeline::ActionPromptBodies::default();
+        for harness in [Harness::Claude, Harness::Codex, Harness::Opencode] {
+            assert_eq!(
+                followup_for(harness, Stage::Ship, &bodies),
+                Some(Followup::ShipDescribe),
+                "ship's describe follow-up is harness-independent"
+            );
+        }
+        assert!(matches!(
+            followup_for(Harness::Codex, Stage::Commit, &bodies),
+            Some(Followup::CodexExecute(_))
+        ));
+        assert_eq!(followup_for(Harness::Claude, Stage::Commit, &bodies), None);
+        assert_eq!(
+            followup_for(Harness::Opencode, Stage::Commit, &bodies),
+            None
+        );
+        assert_eq!(
+            followup_for(Harness::Codex, Stage::Implement, &bodies),
+            None
+        );
+        for stage in [Stage::Plan, Stage::Research] {
+            assert!(
+                matches!(
+                    followup_for(Harness::Codex, stage, &bodies),
+                    Some(Followup::CodexExecute(_))
+                ),
+                "codex {stage:?} collaborates before it writes"
+            );
+            assert_eq!(followup_for(Harness::Claude, stage, &bodies), None);
+            assert_eq!(followup_for(Harness::Opencode, stage, &bodies), None);
+        }
+    }
 
     #[tokio::test]
     async fn a_dropped_session_reaps_its_workflow_watch_and_reader() {

@@ -579,6 +579,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             cost_usd: total_cost_usd,
             num_turns,
             context_tokens,
+            turn_status: None,
         }],
         ParsedLine::CompactBoundary {
             trigger,

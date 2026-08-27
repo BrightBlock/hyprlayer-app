@@ -5,7 +5,7 @@ use tokio::sync::broadcast;
 
 use hyprlayer_core::agent::AgentDriver;
 use hyprlayer_core::claude::{PermissionMode, SessionEvent};
-use hyprlayer_core::codex::{CodexDriver, SpawnConfig as CodexSpawnConfig};
+use hyprlayer_core::codex::{CodexDriver, CodexPosture, SpawnConfig as CodexSpawnConfig};
 use hyprlayer_core::process::binaries::BinaryKind;
 use hyprlayer_core::process::Exec;
 
@@ -164,7 +164,7 @@ async fn generate_with_codex(state: &AppState, model: &str, prompt: &str) -> Cmd
         codex_bin: bin,
         cwd: std::env::temp_dir(),
         prior_user_turns: 0,
-        permission_mode: PermissionMode::Plan,
+        posture: CodexPosture::from_permission_mode(PermissionMode::Plan),
         add_dirs: Vec::new(),
         skill_roots: Vec::new(),
         resume: None,
@@ -317,6 +317,7 @@ mod tests {
             cost_usd: None,
             num_turns: None,
             context_tokens: None,
+            turn_status: None,
         }
     }
 

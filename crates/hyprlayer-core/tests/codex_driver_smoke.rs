@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use hyprlayer_core::claude::{ExitOutcome, PermissionMode, SessionEvent};
-use hyprlayer_core::codex::{CodexDriver, SpawnConfig};
+use hyprlayer_core::codex::{CodexDriver, CodexPosture, CollabMode, SpawnConfig};
 
 fn spawn_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> SpawnConfig {
     SpawnConfig {
@@ -14,7 +14,7 @@ fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) ->
     SpawnConfig {
         codex_bin: bin,
         cwd: std::env::temp_dir(),
-        permission_mode,
+        posture: CodexPosture::from_permission_mode(permission_mode),
         prior_user_turns: 0,
         add_dirs: vec![],
         skill_roots: vec![],
@@ -239,6 +239,113 @@ async fn rewind_to_ordinal_truncates_model_memory() {
 }
 
 #[tokio::test]
+#[ignore = "requires a logged-in codex; makes real API calls"]
+async fn plan_mode_asks_a_structured_question_and_the_next_turn_remembers_it() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let tmp = tempfile::tempdir().expect("temp cwd");
+    // AcceptEdits, not Plan: `PermissionMode::Plan` is a read-only *sandbox*, which would
+    // refuse step 2's write on its own and hide what this test exists to prove — that
+    // leaving the plan *collaboration* mode is what unblocks it.
+    let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
+        cwd: tmp.path().to_path_buf(),
+        ..persisted_config(codex, PermissionMode::AcceptEdits)
+    })
+    .await
+    .expect("spawn codex app-server");
+
+    driver.set_collab_mode(Some(CollabMode::Plan));
+    let turn_status = run_turn_answering(
+        &driver,
+        &mut events,
+        "Ask me, using your structured question tool, a single question with exactly two \
+         options: \"Alpha\" and \"Bravo\". Do not run any commands or tools first — ask \
+         immediately, and do nothing else this turn.",
+        "Alpha",
+    )
+    .await;
+    assert_eq!(
+        turn_status.as_deref(),
+        Some("completed"),
+        "the plan-mode review turn should finish cleanly once the question is answered"
+    );
+    assert_eq!(
+        driver.observed_collab_mode().as_deref(),
+        Some("plan"),
+        "thread/settings/updated should echo back the plan mode we set"
+    );
+
+    driver.set_collab_mode(Some(CollabMode::Default));
+    let marker = tmp.path().join("chosen.txt");
+    run_turn(
+        &driver,
+        &mut events,
+        &format!(
+            "Write the exact word I chose a moment ago, and nothing else, to a new file at {}.",
+            marker.display()
+        ),
+    )
+    .await;
+    assert_eq!(
+        driver.observed_collab_mode().as_deref(),
+        Some("default"),
+        "the explicit mode-switch turn should have left plan mode"
+    );
+    let written = std::fs::read_to_string(&marker).unwrap_or_else(|e| {
+        panic!(
+            "the write should succeed once mode is set back to default — if the thread were \
+             still in plan mode this write would be refused: {e}"
+        )
+    });
+    assert!(
+        written.contains("Alpha"),
+        "the default-mode turn should remember the plan-mode answer, got {written:?}"
+    );
+
+    driver.kill();
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in codex; makes a real API call"]
+async fn interrupt_status_is_recorded() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let (driver, mut events) = CodexDriver::spawn(persisted_config(codex, PermissionMode::Plan))
+        .await
+        .expect("spawn codex app-server");
+
+    driver
+        .send_user_turn(
+            "Count slowly from 1 to 100, one number per line, pausing between each one.",
+            None,
+            None,
+        )
+        .expect("send turn");
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    driver.interrupt().expect("interrupt");
+
+    let turn_status = loop {
+        match tokio::time::timeout(Duration::from_secs(30), events.recv()).await {
+            Ok(Ok(SessionEvent::TurnDone { turn_status, .. })) => break turn_status,
+            Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
+                panic!("session exited before turn/completed followed the interrupt: {outcome:?}")
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => panic!("event channel closed after interrupt"),
+            Err(_) => panic!("no turn/completed within 30s of interrupt"),
+        }
+    };
+    println!("turn_status after interrupt: {turn_status:?}");
+    driver.kill();
+
+    assert_ne!(
+        turn_status.as_deref(),
+        Some("completed"),
+        "an interrupted turn must not read as a clean completion, or Phase 2's followup \
+         could fire after a Stop"
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires a logged-in codex; starts threads but makes no model call"]
 async fn every_permission_mode_starts_a_thread() {
     let codex = which::which("codex").expect("codex on PATH");
@@ -336,6 +443,59 @@ async fn run_turn(
                 } else {
                     finalized
                 };
+            }
+            Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
+                panic!("session exited mid-turn: {outcome:?}")
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => panic!("event channel closed mid-turn"),
+            Err(_) => panic!("turn did not finish within 120s: {text:?}"),
+        }
+    }
+}
+
+async fn run_turn_answering(
+    driver: &CodexDriver,
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    text: &str,
+    label: &str,
+) -> Option<String> {
+    driver.send_user_turn(text, None, None).expect("send turn");
+    let mut answered = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, events.recv()).await {
+            Ok(Ok(SessionEvent::QuestionAsk {
+                request_id,
+                questions,
+            })) => {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&questions).expect("question payload is valid JSON");
+                let question_text = parsed[0]["question"]
+                    .as_str()
+                    .expect("question has text")
+                    .to_string();
+                let mut answer = serde_json::Map::new();
+                answer.insert(question_text, serde_json::Value::String(label.to_string()));
+                driver
+                    .answer_question(&request_id, serde_json::Value::Object(answer))
+                    .expect("answer question");
+                answered = true;
+            }
+            Ok(Ok(SessionEvent::ToolUse { name, .. })) => {
+                assert!(
+                    !answered,
+                    "a tool ({name}) ran between the answered question and turn/completed \
+                     — isBlocking may not hold"
+                );
+            }
+            Ok(Ok(SessionEvent::TurnDone { turn_status, .. })) => {
+                assert!(
+                    answered,
+                    "the turn completed without ever asking a question"
+                );
+                return turn_status;
             }
             Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
                 panic!("session exited mid-turn: {outcome:?}")

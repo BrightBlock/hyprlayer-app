@@ -1,3 +1,4 @@
+use crate::agent::Harness;
 use crate::claude::PermissionMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -185,6 +186,76 @@ AskUserQuestion tool to ask whether to also push the branch and its new commits 
 remote, and push only if the user confirms. Never open a pull request from here. That's \
 Ship.";
 
+pub const COMMIT_PROMPT_NO_ASK_TOOL: &str = "/commit\n\nAfter the commit lands, ask whether to \
+also push the branch and its new commits to the remote, and push only if the user confirms. \
+Never open a pull request from here. That's Ship.";
+
+pub const COMMIT_PROMPT_CODEX_PLAN: &str = "/commit\n\nThis is a planning turn: do not \
+stage, commit, or modify anything — no `git add`, no `git commit`, no file writes. Review \
+the working tree with a small number of read-only commands (`git status --short`, \
+`git diff --stat`, and at most a few targeted diffs), then propose how you would split and \
+word the commit. Finish by asking the user, in a single structured question tool call, two \
+things: whether to proceed with the commit as proposed, and whether to also push the branch \
+and its new commits to the remote afterwards. Stop once the answers arrive — the next turn \
+executes them. Never open a pull request. That's Ship.";
+
+pub const COMMIT_PROMPT_CODEX_EXECUTE: &str = "Now execute the commit. If you have not yet \
+reviewed the working tree, review it now with read-only git commands first. Stage and commit \
+per the plan and the user's answers. Push only if the user approved a push; if they declined, \
+or if no answer was recorded, do not push. Never open a pull request. That's Ship.";
+
+pub const PLAN_PROMPT_CODEX_SUFFIX: &str = "\n\nThis is a collaboration turn: you cannot \
+write files and must not try. Read whatever you need, then ask every open question in a \
+single structured question tool call, with concrete options, and draft the plan in the \
+conversation for the user to react to. Do not write the plan document this turn — the next \
+turn does that.";
+
+pub const PLAN_PROMPT_CODEX_WRITE: &str = "Now write the plan document exactly as \
+/create_plan specifies — same path, same frontmatter, same structure — incorporating the \
+answers above. You are the only agent in this session: there is no parent to hand a draft \
+back to and no subagent to delegate the writing to, so create the file yourself with your \
+own tools rather than printing the plan in the conversation. If the previous turn produced \
+no draft, do the research now and write the plan anyway. Ask no further questions and \
+implement nothing.";
+
+pub const RESEARCH_PROMPT_CODEX_SUFFIX: &str = "\n\nThis is a collaboration turn: you cannot \
+write files and must not try. Explore whatever you need, then ask every open question in a \
+single structured question tool call, with concrete options, and summarise what you found in \
+the conversation for the user to react to. Do not write the research document this turn — the \
+next turn does that.";
+
+pub const RESEARCH_PROMPT_CODEX_WRITE: &str = "Now write the research document exactly as \
+/research_codebase specifies — same path, same frontmatter, same structure — incorporating the \
+answers above. You are the only agent in this session: there is no parent to hand findings \
+back to and no subagent to delegate the writing to, so create the file yourself with your own \
+tools rather than printing the document in the conversation. If the previous turn produced no \
+findings, do the research now and write the document anyway. Ask no further questions and \
+change no code.";
+
+pub fn commit_prompt_default(harness: Harness) -> &'static str {
+    match harness {
+        Harness::Claude => COMMIT_PROMPT_DEFAULT,
+        Harness::Codex => COMMIT_PROMPT_CODEX_PLAN,
+        Harness::Opencode => COMMIT_PROMPT_NO_ASK_TOOL,
+    }
+}
+
+pub fn codex_phase_two(
+    harness: Harness,
+    stage: Stage,
+    bodies: &ActionPromptBodies,
+) -> Option<&'static str> {
+    if harness != Harness::Codex {
+        return None;
+    }
+    match stage {
+        Stage::Commit if bodies.commit.is_none() => Some(COMMIT_PROMPT_CODEX_EXECUTE),
+        Stage::Plan => Some(PLAN_PROMPT_CODEX_WRITE),
+        Stage::Research => Some(RESEARCH_PROMPT_CODEX_WRITE),
+        _ => None,
+    }
+}
+
 pub fn ship_prompt(base: &str) -> String {
     let base = base.strip_prefix("origin/").unwrap_or(base);
     SHIP_PROMPT_TEMPLATE.replace("{{base_branch}}", base)
@@ -261,6 +332,7 @@ pub fn compose_prompt(
     input: &str,
     base_branch: &str,
     bodies: &ActionPromptBodies,
+    harness: Harness,
 ) -> String {
     let input = input.trim();
     match stage {
@@ -274,9 +346,25 @@ pub fn compose_prompt(
         }
         Stage::Revise => action_prompt(REVISE_PROMPT, input),
         Stage::Commit => action_prompt(
-            bodies.commit.as_deref().unwrap_or(COMMIT_PROMPT_DEFAULT),
+            bodies
+                .commit
+                .as_deref()
+                .unwrap_or_else(|| commit_prompt_default(harness)),
             input,
         ),
+        Stage::Plan if harness == Harness::Codex => {
+            let mut p = skill_prompt(Stage::Plan.command().expect("plan has a command"), input);
+            p.push_str(PLAN_PROMPT_CODEX_SUFFIX);
+            p
+        }
+        Stage::Research if harness == Harness::Codex => {
+            let mut p = skill_prompt(
+                Stage::Research.command().expect("research has a command"),
+                input,
+            );
+            p.push_str(RESEARCH_PROMPT_CODEX_SUFFIX);
+            p
+        }
         _ => skill_prompt(
             stage.command().expect("skill-driven stage has a command"),
             input,
@@ -299,6 +387,10 @@ pub fn append_docs(mut prompt: String, attached_docs: &[String]) -> String {
 mod tests {
     use super::*;
 
+    fn compose(stage: Stage, input: &str, base: &str, bodies: &ActionPromptBodies) -> String {
+        compose_prompt(stage, input, base, bodies, Harness::Claude)
+    }
+
     #[test]
     fn stage_parse_is_tolerant() {
         assert_eq!(Stage::parse("research"), Stage::Research);
@@ -317,19 +409,19 @@ mod tests {
         assert_eq!(Stage::Validate.command(), Some("/validate_plan"));
         assert_eq!(Stage::General.command(), None);
         assert_eq!(Stage::Ship.command(), None);
-        let composed = compose_prompt(Stage::Plan, "x", "main", &Default::default());
+        let composed = compose(Stage::Plan, "x", "main", &Default::default());
         assert!(composed.starts_with(Stage::Plan.command().unwrap()));
     }
 
     #[test]
     fn general_passes_input_through_verbatim() {
         assert_eq!(
-            compose_prompt(Stage::General, "  hello  ", "main", &Default::default()),
+            compose(Stage::General, "  hello  ", "main", &Default::default()),
             "hello"
         );
         assert_eq!(
             append_docs(
-                compose_prompt(Stage::General, "hello", "main", &Default::default()),
+                compose(Stage::General, "hello", "main", &Default::default()),
                 &["a.png".into()],
             ),
             "hello\n\nRelevant documents:\n- a.png"
@@ -339,7 +431,7 @@ mod tests {
     #[test]
     fn research_invokes_the_skill() {
         assert_eq!(
-            compose_prompt(
+            compose(
                 Stage::Research,
                 "how does auth work?",
                 "main",
@@ -352,7 +444,7 @@ mod tests {
     #[test]
     fn plan_lists_attached_docs() {
         let prompt = append_docs(
-            compose_prompt(Stage::Plan, "build it", "main", &Default::default()),
+            compose(Stage::Plan, "build it", "main", &Default::default()),
             &["repos/p/shared/research/2026-auth.md".into()],
         );
         assert!(prompt.starts_with("/create_plan build it"));
@@ -363,7 +455,7 @@ mod tests {
     #[test]
     fn empty_input_still_invokes_the_skill() {
         assert_eq!(
-            compose_prompt(Stage::Research, "", "main", &Default::default()),
+            compose(Stage::Research, "", "main", &Default::default()),
             "/research_codebase"
         );
     }
@@ -371,12 +463,10 @@ mod tests {
     #[test]
     fn ship_sends_the_directive_not_a_skill() {
         assert_eq!(
-            compose_prompt(Stage::Ship, "", "main", &Default::default()),
+            compose(Stage::Ship, "", "main", &Default::default()),
             ship_prompt("main")
         );
-        assert!(
-            compose_prompt(Stage::Ship, "", "develop", &Default::default()).contains("`develop`")
-        );
+        assert!(compose(Stage::Ship, "", "develop", &Default::default()).contains("`develop`"));
         assert_eq!(ship_prompt("origin/develop"), ship_prompt("develop"));
         assert!(ship_prompt("origin/main").contains("`main`"));
         assert_eq!(
@@ -387,7 +477,7 @@ as a short placeholder, since the description is written for you in a follow-up 
 improvise one."
         );
         assert_eq!(
-            compose_prompt(
+            compose(
                 Stage::Ship,
                 "skip the changelog",
                 "main",
@@ -426,11 +516,11 @@ improvise one."
         assert!(COMMIT_PROMPT_DEFAULT.starts_with("/commit\n"));
         assert!(COMMIT_PROMPT_DEFAULT.contains("AskUserQuestion"));
         assert_eq!(
-            compose_prompt(Stage::Commit, "", "main", &Default::default()),
+            compose(Stage::Commit, "", "main", &Default::default()),
             COMMIT_PROMPT_DEFAULT
         );
         assert_eq!(
-            compose_prompt(
+            compose(
                 Stage::Commit,
                 "split into two commits",
                 "main",
@@ -452,16 +542,215 @@ improvise one."
     }
 
     #[test]
+    fn claude_commit_still_names_the_ask_tool() {
+        assert_eq!(
+            commit_prompt_default(Harness::Claude),
+            COMMIT_PROMPT_DEFAULT
+        );
+        assert!(COMMIT_PROMPT_DEFAULT.contains("AskUserQuestion"));
+        assert!(compose_prompt(
+            Stage::Commit,
+            "",
+            "main",
+            &Default::default(),
+            Harness::Claude
+        )
+        .contains("AskUserQuestion"));
+    }
+
+    #[test]
+    fn opencode_commit_keeps_the_prose_prompt() {
+        assert!(COMMIT_PROMPT_NO_ASK_TOOL.starts_with("/commit\n"));
+        assert!(!COMMIT_PROMPT_NO_ASK_TOOL.contains("AskUserQuestion"));
+        assert_eq!(
+            commit_prompt_default(Harness::Opencode),
+            COMMIT_PROMPT_NO_ASK_TOOL
+        );
+        assert_eq!(
+            compose_prompt(
+                Stage::Commit,
+                "",
+                "main",
+                &Default::default(),
+                Harness::Opencode
+            ),
+            COMMIT_PROMPT_NO_ASK_TOOL
+        );
+    }
+
+    #[test]
+    fn codex_commit_asks_before_it_commits() {
+        assert_eq!(
+            commit_prompt_default(Harness::Codex),
+            COMMIT_PROMPT_CODEX_PLAN
+        );
+        let composed = compose_prompt(
+            Stage::Commit,
+            "",
+            "main",
+            &Default::default(),
+            Harness::Codex,
+        );
+        assert!(composed.starts_with("/commit"));
+        assert!(!composed.contains("AskUserQuestion"));
+        assert!(composed.contains("no `git add`"));
+        assert!(composed.contains("no `git commit`"));
+        assert!(composed.contains("whether to also push the branch"));
+    }
+
+    #[test]
+    fn codex_commit_phase_two_stands_alone() {
+        let phase_two = codex_phase_two(Harness::Codex, Stage::Commit, &Default::default());
+        assert_eq!(phase_two, Some(COMMIT_PROMPT_CODEX_EXECUTE));
+        assert!(phase_two
+            .unwrap()
+            .contains("If you have not yet reviewed the working tree"));
+    }
+
+    #[test]
+    fn a_custom_commit_body_stays_single_turn() {
+        let bodies = ActionPromptBodies {
+            commit: Some("do it".into()),
+            ship: None,
+        };
+        assert_eq!(
+            codex_phase_two(Harness::Codex, Stage::Commit, &bodies),
+            None
+        );
+        assert_eq!(
+            compose_prompt(Stage::Commit, "", "main", &bodies, Harness::Codex),
+            "do it"
+        );
+    }
+
+    #[test]
+    fn no_other_harness_two_phases() {
+        for harness in [Harness::Claude, Harness::Opencode] {
+            for stage in [Stage::Commit, Stage::Plan, Stage::Research] {
+                assert_eq!(
+                    codex_phase_two(harness, stage, &Default::default()),
+                    None,
+                    "{harness:?} {stage:?} must stay a single turn"
+                );
+            }
+        }
+        for stage in [
+            Stage::General,
+            Stage::Implement,
+            Stage::Validate,
+            Stage::Ship,
+            Stage::Revise,
+        ] {
+            assert_eq!(
+                codex_phase_two(Harness::Codex, stage, &Default::default()),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn claude_plan_is_still_a_bare_skill_invocation() {
+        assert_eq!(
+            compose(Stage::Plan, "x", "main", &Default::default()),
+            "/create_plan x"
+        );
+    }
+
+    #[test]
+    fn codex_plan_collaborates_before_it_writes() {
+        let composed = compose_prompt(
+            Stage::Plan,
+            "x",
+            "main",
+            &Default::default(),
+            Harness::Codex,
+        );
+        assert!(composed.starts_with("/create_plan x"));
+        assert!(composed.contains("you cannot write files"));
+        assert!(composed.contains("single structured question tool call"));
+        assert!(composed.contains("Do not write the plan document this turn"));
+
+        let phase_two = codex_phase_two(Harness::Codex, Stage::Plan, &Default::default());
+        assert_eq!(phase_two, Some(PLAN_PROMPT_CODEX_WRITE));
+        assert!(phase_two
+            .unwrap()
+            .contains("If the previous turn produced no draft"));
+        assert!(phase_two
+            .unwrap()
+            .contains("no subagent to delegate the writing to"));
+    }
+
+    #[test]
+    fn opencode_plan_is_unchanged() {
+        assert_eq!(
+            compose_prompt(
+                Stage::Plan,
+                "x",
+                "main",
+                &Default::default(),
+                Harness::Opencode
+            ),
+            compose(Stage::Plan, "x", "main", &Default::default())
+        );
+    }
+
+    #[test]
+    fn claude_research_is_still_a_bare_skill_invocation() {
+        assert_eq!(
+            compose(Stage::Research, "x", "main", &Default::default()),
+            "/research_codebase x"
+        );
+    }
+
+    #[test]
+    fn codex_research_collaborates_before_it_writes() {
+        let composed = compose_prompt(
+            Stage::Research,
+            "x",
+            "main",
+            &Default::default(),
+            Harness::Codex,
+        );
+        assert!(composed.starts_with("/research_codebase x"));
+        assert!(composed.contains("you cannot write files"));
+        assert!(composed.contains("single structured question tool call"));
+        assert!(composed.contains("Do not write the research document this turn"));
+
+        let phase_two = codex_phase_two(Harness::Codex, Stage::Research, &Default::default());
+        assert_eq!(phase_two, Some(RESEARCH_PROMPT_CODEX_WRITE));
+        assert!(phase_two
+            .unwrap()
+            .contains("If the previous turn produced no findings"));
+        assert!(phase_two
+            .unwrap()
+            .contains("no subagent to delegate the writing to"));
+    }
+
+    #[test]
+    fn opencode_research_is_unchanged() {
+        assert_eq!(
+            compose_prompt(
+                Stage::Research,
+                "x",
+                "main",
+                &Default::default(),
+                Harness::Opencode
+            ),
+            compose(Stage::Research, "x", "main", &Default::default())
+        );
+    }
+
+    #[test]
     fn revise_addresses_feedback_without_a_skill() {
         assert_eq!(Stage::parse("revise"), Stage::Revise);
         assert_eq!(Stage::Revise.as_str(), "revise");
         assert_eq!(Stage::Revise.command(), None);
         assert_eq!(
-            compose_prompt(Stage::Revise, "", "main", &Default::default()),
+            compose(Stage::Revise, "", "main", &Default::default()),
             REVISE_PROMPT
         );
         assert_eq!(
-            compose_prompt(Stage::Revise, "CI is failing", "main", &Default::default()),
+            compose(Stage::Revise, "CI is failing", "main", &Default::default()),
             format!("{REVISE_PROMPT}\n\nCI is failing"),
         );
         let revise = policy_for(Stage::Revise);
@@ -508,11 +797,11 @@ improvise one."
             ship: None,
         };
         assert_eq!(
-            compose_prompt(Stage::Commit, "", "main", &bodies),
+            compose(Stage::Commit, "", "main", &bodies),
             "Review the tree on feature/x and commit."
         );
         assert_eq!(
-            compose_prompt(Stage::Commit, "split into two", "main", &bodies),
+            compose(Stage::Commit, "split into two", "main", &bodies),
             "Review the tree on feature/x and commit.\n\nsplit into two"
         );
         let slash = ActionPromptBodies {
@@ -520,7 +809,7 @@ improvise one."
             ship: None,
         };
         assert_eq!(
-            compose_prompt(Stage::Commit, "now", "main", &slash),
+            compose(Stage::Commit, "now", "main", &slash),
             "/commit --strict now"
         );
     }
@@ -532,11 +821,11 @@ improvise one."
             ship: Some("Push and open a PR against `develop`. Link HYP-1.".into()),
         };
         assert_eq!(
-            compose_prompt(Stage::Ship, "", "main", &bodies),
+            compose(Stage::Ship, "", "main", &bodies),
             "Push and open a PR against `develop`. Link HYP-1."
         );
         assert_eq!(
-            compose_prompt(Stage::Commit, "", "main", &bodies),
+            compose(Stage::Commit, "", "main", &bodies),
             COMMIT_PROMPT_DEFAULT
         );
         assert_eq!(

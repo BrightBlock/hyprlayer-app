@@ -108,3 +108,4 @@ section banners, or preserve implementation history.
 @docs/adr/0004-vocabulary-standard.md
 @docs/adr/0005-git-access.md
 @docs/adr/0006-visual-conventions.md
+@docs/adr/0007-harness-capability-layer.md

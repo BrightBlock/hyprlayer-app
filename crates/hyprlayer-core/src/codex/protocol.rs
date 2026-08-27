@@ -66,6 +66,43 @@ pub fn approval_posture(mode: PermissionMode) -> (&'static str, &'static str) {
     }
 }
 
+/// Codex's native guardrail primitive. Unlike Claude, codex has no per-command
+/// allow/deny; a stage's intent is lowered onto this sandbox + approval posture.
+/// `network_access` only bites under `workspace-write` (the other sandboxes fix
+/// network on their own).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodexPosture {
+    pub approval_policy: &'static str,
+    pub sandbox: &'static str,
+    pub network_access: bool,
+}
+
+impl CodexPosture {
+    pub fn from_permission_mode(mode: PermissionMode) -> Self {
+        let (approval_policy, sandbox) = approval_posture(mode);
+        Self {
+            approval_policy,
+            sandbox,
+            network_access: sandbox == "workspace-write",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollabMode {
+    Plan,
+    Default,
+}
+
+impl CollabMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CollabMode::Plan => "plan",
+            CollabMode::Default => "default",
+        }
+    }
+}
+
 #[cfg(test)]
 const VALID_APPROVAL_POLICIES: [&str; 3] = ["untrusted", "on-request", "never"];
 #[cfg(test)]
@@ -99,6 +136,7 @@ pub struct Translator {
     pub pending_approvals: HashMap<String, (Value, ApprovalKind)>,
     pub pending_questions: HashMap<String, PendingQuestion>,
     pub user_turns: usize,
+    pub collab_mode: Option<String>,
 }
 
 impl Translator {
@@ -228,11 +266,11 @@ impl Translator {
                 self.child_file_change_inputs.clear();
                 self.active_turn = None;
                 self.requested_turn = None;
-                let status = p
+                let raw_status = p
                     .get("turn")
                     .and_then(|t| t.get("status"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("completed");
+                    .and_then(Value::as_str);
+                let status = raw_status.unwrap_or("completed");
                 let mut out = Vec::new();
                 if status == "failed" {
                     if let Some(msg) = p
@@ -252,6 +290,7 @@ impl Translator {
                     cost_usd: None,
                     num_turns: None,
                     context_tokens: None,
+                    turn_status: raw_status.map(str::to_string),
                 });
                 out
             }
@@ -283,10 +322,20 @@ impl Translator {
                         cost_usd: None,
                         num_turns: None,
                         context_tokens: None,
+                        turn_status: Some("failed".into()),
                     },
                 ],
                 None => Vec::new(),
             },
+            "thread/settings/updated" => {
+                self.collab_mode = p
+                    .get("threadSettings")
+                    .and_then(|s| s.get("collaborationMode"))
+                    .and_then(|c| c.get("mode"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                Vec::new()
+            }
             _ => Vec::new(),
         }
     }
@@ -1467,6 +1516,12 @@ mod tests {
         );
         assert_eq!(ev_names(&out), ["turnDone"]);
         assert!(t.active_turn.is_none());
+        match &out[0] {
+            SessionEvent::TurnDone { turn_status, .. } => {
+                assert_eq!(turn_status.as_deref(), Some("completed"))
+            }
+            other => panic!("expected TurnDone, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1490,6 +1545,22 @@ mod tests {
             &json!({ "turn": { "id": "t8", "status": "failed", "error": { "message": "rate limited" } } }),
         );
         assert_eq!(ev_names(&out), ["assistantText", "turnDone"]);
+        match &out[1] {
+            SessionEvent::TurnDone { turn_status, .. } => {
+                assert_eq!(turn_status.as_deref(), Some("failed"))
+            }
+            other => panic!("expected TurnDone, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_completed_turn_with_no_status_leaves_turn_status_unset() {
+        let mut t = Translator::default();
+        let out = t.notification("turn/completed", &json!({ "turn": { "id": "t9" } }));
+        match &out[0] {
+            SessionEvent::TurnDone { turn_status, .. } => assert_eq!(*turn_status, None),
+            other => panic!("expected TurnDone, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1694,6 +1765,29 @@ mod tests {
                 &json!({ "item": { "type": "sleep", "id": "s1" } })
             )
             .is_empty());
+    }
+
+    #[test]
+    fn thread_settings_updated_records_the_observed_collab_mode() {
+        let mut t = Translator::default();
+        let out = t.notification(
+            "thread/settings/updated",
+            &json!({
+                "threadId": "t1",
+                "threadSettings": {
+                    "model": "gpt-5.6-sol",
+                    "collaborationMode": { "mode": "plan", "settings": { "model": "gpt-5.6-sol" } },
+                },
+            }),
+        );
+        assert!(out.is_empty());
+        assert_eq!(t.collab_mode.as_deref(), Some("plan"));
+
+        t.notification(
+            "thread/settings/updated",
+            &json!({ "threadSettings": { "collaborationMode": { "mode": "default" } } }),
+        );
+        assert_eq!(t.collab_mode.as_deref(), Some("default"));
     }
 
     fn parse(s: &str) -> Value {

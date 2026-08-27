@@ -11,10 +11,9 @@ use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::protocol::{
-    approval_posture, approval_reply, decode_line, question_reply, Incoming, Translator,
+    approval_reply, decode_line, question_reply, CodexPosture, CollabMode, Incoming, Translator,
 };
 use crate::agent::KillFlag;
-use crate::claude::driver::PermissionMode;
 use crate::claude::events::{ExitOutcome, SessionEvent};
 use crate::error::{CoreError, Result};
 
@@ -22,10 +21,35 @@ const STDERR_RING_LINES: usize = 200;
 const EVENT_CHANNEL_CAP: usize = 1024;
 const STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
+const REQUEST_USER_INPUT_CONFIG: &str = "tools.experimental_request_user_input.enabled=true";
+// Personal custom agents are still guarded independently of the stable
+// multi-agent runtime in Codex 0.149.x. Set the documented agent registry gate
+// so installed persona TOMLs are available in every Hyprlayer Codex session.
+const AGENTS_ENABLED_CONFIG: &str = "agents.enabled=true";
+const APP_SERVER_ARGS: [&str; 6] = [
+    "app-server",
+    "--stdio",
+    "-c",
+    AGENTS_ENABLED_CONFIG,
+    "-c",
+    REQUEST_USER_INPUT_CONFIG,
+];
+
+fn initialize_params() -> Value {
+    json!({
+        "clientInfo": {
+            "name": "hyprlayer",
+            "title": "Hyprlayer",
+            "version": env!("CARGO_PKG_VERSION"),
+        },
+        "capabilities": { "experimentalApi": true },
+    })
+}
+
 pub struct SpawnConfig {
     pub codex_bin: PathBuf,
     pub cwd: PathBuf,
-    pub permission_mode: PermissionMode,
+    pub posture: CodexPosture,
     pub add_dirs: Vec<PathBuf>,
     pub skill_roots: Vec<PathBuf>,
     pub resume: Option<String>,
@@ -46,6 +70,8 @@ pub struct CodexDriver {
     rpc_seq: AtomicU64,
     model: StdMutex<Option<String>>,
     effort: StdMutex<Option<String>>,
+    collab_mode: StdMutex<Option<CollabMode>>,
+    thread_model: StdMutex<Option<String>>,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
     kill_flag: Arc<KillFlag>,
     pending: PendingReplies,
@@ -59,11 +85,7 @@ impl CodexDriver {
 
         let mut cmd = Command::new(&config.codex_bin);
         crate::process::appimage::scrub_tokio(&mut cmd);
-        // Personal custom agents are still guarded independently of the
-        // stable multi-agent runtime in Codex 0.149.x. Set the documented
-        // agent registry gate before the subcommand so installed persona
-        // TOMLs are available in every Hyprlayer Codex session.
-        cmd.args(["-c", "agents.enabled=true", "app-server", "--stdio"])
+        cmd.args(APP_SERVER_ARGS)
             .current_dir(&config.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -124,6 +146,8 @@ impl CodexDriver {
             rpc_seq: AtomicU64::new(1),
             model: StdMutex::new(config.model.clone()),
             effort: StdMutex::new(config.effort.clone()),
+            collab_mode: StdMutex::new(None),
+            thread_model: StdMutex::new(None),
             stderr_ring,
             kill_flag,
             pending,
@@ -143,6 +167,7 @@ impl CodexDriver {
 
         let driver = Self {
             thread_id,
+            thread_model: StdMutex::new(model.clone()),
             ..driver
         };
 
@@ -155,17 +180,7 @@ impl CodexDriver {
     }
 
     async fn handshake(&self, config: &SpawnConfig) -> Result<(String, Option<String>)> {
-        self.request(
-            "initialize",
-            json!({
-                "clientInfo": {
-                    "name": "hyprlayer",
-                    "title": "Hyprlayer",
-                    "version": env!("CARGO_PKG_VERSION"),
-                }
-            }),
-        )
-        .await?;
+        self.request("initialize", initialize_params()).await?;
         self.notify("initialized", json!({}))?;
 
         if !config.skill_roots.is_empty() {
@@ -179,7 +194,11 @@ impl CodexDriver {
                 .await;
         }
 
-        let (approval_policy, sandbox) = approval_posture(config.permission_mode);
+        let CodexPosture {
+            approval_policy,
+            sandbox,
+            network_access,
+        } = config.posture;
         let mut params = json!({
             "cwd": config.cwd.to_string_lossy(),
             "approvalPolicy": approval_policy,
@@ -196,7 +215,7 @@ impl CodexDriver {
                 .collect();
             params["config"] = json!({
                 "sandbox_workspace_write": {
-                    "network_access": true,
+                    "network_access": network_access,
                     "writable_roots": roots,
                 }
             });
@@ -257,16 +276,18 @@ impl CodexDriver {
             prompt_name: prompt_name.map(str::to_string),
         });
 
-        let mut params = json!({
-            "threadId": self.thread_id,
-            "input": [{ "type": "text", "text": text, "text_elements": [] }],
-        });
-        if let Some(model) = self.model.lock().ok().and_then(|m| m.clone()) {
-            params["model"] = json!(model);
-        }
-        if let Some(effort) = self.effort.lock().ok().and_then(|e| e.clone()) {
-            params["effort"] = json!(effort);
-        }
+        let model = self.model.lock().ok().and_then(|m| m.clone());
+        let effort = self.effort.lock().ok().and_then(|e| e.clone());
+        let collab_mode = self.collab_mode.lock().ok().and_then(|mut m| m.take());
+        let thread_model = self.thread_model.lock().ok().and_then(|m| m.clone());
+        let params = turn_params(
+            &self.thread_id,
+            text,
+            model.as_deref(),
+            effort.as_deref(),
+            collab_mode,
+            thread_model.as_deref(),
+        );
 
         let rx = self.request_channel("turn/start", params)?;
         let events = self.events.clone();
@@ -283,6 +304,7 @@ impl CodexDriver {
                         cost_usd: None,
                         num_turns: None,
                         context_tokens: None,
+                        turn_status: Some("failed".into()),
                     });
                 }
                 Ok(Ok(result)) => {
@@ -310,6 +332,16 @@ impl CodexDriver {
         if let Ok(mut e) = self.effort.lock() {
             *e = effort;
         }
+    }
+
+    pub fn set_collab_mode(&self, mode: Option<CollabMode>) {
+        if let Ok(mut m) = self.collab_mode.lock() {
+            *m = mode;
+        }
+    }
+
+    pub fn observed_collab_mode(&self) -> Option<String> {
+        self.state.lock().ok().and_then(|s| s.collab_mode.clone())
     }
 
     pub fn respond_permission(
@@ -482,6 +514,33 @@ impl CodexDriver {
                 detail: "session stdin is closed".into(),
             })
     }
+}
+
+fn turn_params(
+    thread_id: &str,
+    text: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    collab_mode: Option<CollabMode>,
+    thread_model: Option<&str>,
+) -> Value {
+    let mut params = json!({
+        "threadId": thread_id,
+        "input": [{ "type": "text", "text": text, "text_elements": [] }],
+    });
+    if let Some(model) = model {
+        params["model"] = json!(model);
+    }
+    if let Some(effort) = effort {
+        params["effort"] = json!(effort);
+    }
+    if let (Some(mode), Some(m)) = (collab_mode, model.or(thread_model)) {
+        params["collaborationMode"] = json!({
+            "mode": mode.as_str(),
+            "settings": { "model": m },
+        });
+    }
+    params
 }
 
 fn rollback_count(ordinal: usize, total: usize) -> Result<u64> {
@@ -712,6 +771,62 @@ mod tests {
             v["result"]["decision"]["denied"]["rejection"],
             json!("unsupported by this client")
         );
+    }
+
+    #[test]
+    fn app_server_args_enable_the_user_input_tool() {
+        assert_eq!(
+            APP_SERVER_ARGS,
+            [
+                "app-server",
+                "--stdio",
+                "-c",
+                "agents.enabled=true",
+                "-c",
+                "tools.experimental_request_user_input.enabled=true"
+            ]
+        );
+    }
+
+    #[test]
+    fn initialize_advertises_the_experimental_api() {
+        let params = initialize_params();
+        assert_eq!(params["capabilities"]["experimentalApi"], json!(true));
+        assert_eq!(params["clientInfo"]["name"], json!("hyprlayer"));
+    }
+
+    #[test]
+    fn a_turn_without_a_collab_mode_is_unchanged() {
+        let params = turn_params("t1", "hi", Some("gpt-5"), Some("high"), None, None);
+        assert_eq!(params["threadId"], json!("t1"));
+        assert_eq!(params["input"][0]["text"], json!("hi"));
+        assert_eq!(params["model"], json!("gpt-5"));
+        assert_eq!(params["effort"], json!("high"));
+        assert!(params.get("collaborationMode").is_none());
+    }
+
+    #[test]
+    fn collab_mode_falls_back_to_the_thread_model() {
+        let params = turn_params(
+            "t1",
+            "hi",
+            None,
+            None,
+            Some(CollabMode::Plan),
+            Some("gpt-5.6-sol"),
+        );
+        assert_eq!(
+            params["collaborationMode"]["settings"]["model"],
+            json!("gpt-5.6-sol")
+        );
+        assert_eq!(params["collaborationMode"]["mode"], json!("plan"));
+        assert!(params.get("model").is_none());
+    }
+
+    #[test]
+    fn a_collab_mode_without_a_model_is_dropped() {
+        let params = turn_params("t1", "hi", None, None, Some(CollabMode::Plan), None);
+        assert!(params.get("collaborationMode").is_none());
     }
 
     #[tokio::test]

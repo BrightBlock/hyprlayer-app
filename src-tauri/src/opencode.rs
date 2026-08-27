@@ -628,6 +628,7 @@ impl OpenCodeDriver {
                     cost_usd: None,
                     num_turns: None,
                     context_tokens: None,
+                    turn_status: None,
                 });
             }
         });
@@ -656,6 +657,7 @@ impl OpenCodeDriver {
                     cost_usd: None,
                     num_turns: None,
                     context_tokens: None,
+                    turn_status: None,
                 });
             }
         });
@@ -943,6 +945,7 @@ impl Translator {
                 cost_usd: None,
                 num_turns: None,
                 context_tokens: None,
+                turn_status: None,
             }],
             "session.error" => {
                 let err = p.get("error");
@@ -961,6 +964,7 @@ impl Translator {
                         cost_usd: None,
                         num_turns: None,
                         context_tokens: None,
+                        turn_status: None,
                     }];
                 }
                 vec![
@@ -973,6 +977,7 @@ impl Translator {
                         cost_usd: None,
                         num_turns: None,
                         context_tokens: None,
+                        turn_status: None,
                     },
                 ]
             }
@@ -1096,6 +1101,7 @@ impl Translator {
                     cost_usd: cost,
                     num_turns: None,
                     context_tokens: ctx,
+                    turn_status: None,
                 });
             }
             _ => {}

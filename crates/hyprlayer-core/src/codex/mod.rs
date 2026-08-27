@@ -4,6 +4,7 @@ pub mod protocol;
 
 pub use driver::{CodexDriver, SpawnConfig};
 pub use probe::{CodexAuthStatus, CodexModel, CodexProbe};
+pub use protocol::{CodexPosture, CollabMode};
 
 pub(crate) fn startup_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();

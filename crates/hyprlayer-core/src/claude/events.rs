@@ -125,6 +125,25 @@ impl From<ExitOutcome> for SessionState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnStatus {
+    Completed,
+    Failed,
+    Interrupted,
+    Unknown,
+}
+
+impl TurnStatus {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "completed" => TurnStatus::Completed,
+            "failed" => TurnStatus::Failed,
+            "interrupted" | "aborted" | "cancelled" => TurnStatus::Interrupted,
+            _ => TurnStatus::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
@@ -188,6 +207,8 @@ pub enum SessionEvent {
         cost_usd: Option<f64>,
         num_turns: Option<u32>,
         context_tokens: Option<u32>,
+        #[serde(default)]
+        turn_status: Option<String>,
     },
     CompactBoundary {
         trigger: String,
@@ -328,5 +349,13 @@ mod tests {
         ] {
             assert!(outcome.is_reportable(), "{outcome:?}");
         }
+    }
+
+    #[test]
+    fn turn_status_parse_is_tolerant() {
+        assert_eq!(TurnStatus::parse("completed"), TurnStatus::Completed);
+        assert_eq!(TurnStatus::parse("failed"), TurnStatus::Failed);
+        assert_eq!(TurnStatus::parse("aborted"), TurnStatus::Interrupted);
+        assert_eq!(TurnStatus::parse("anything-else"), TurnStatus::Unknown);
     }
 }
