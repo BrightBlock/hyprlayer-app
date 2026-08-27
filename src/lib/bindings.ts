@@ -193,6 +193,7 @@ export const commands = {
 	updateAgentBundle: () => typedError<AgentBundleReport, AppError>(__TAURI_INVOKE("update_agent_bundle")),
 	agentBundleVersions: () => typedError<AiVersions, AppError>(__TAURI_INVOKE("agent_bundle_versions")),
 	installAgentBundleVersion: (version: string | null) => typedError<AgentBundleInstall, AppError>(__TAURI_INVOKE("install_agent_bundle_version", { version })),
+	repairAgentBundle: () => typedError<AgentBundleInstall, AppError>(__TAURI_INVOKE("repair_agent_bundle")),
 };
 
 /** Events */

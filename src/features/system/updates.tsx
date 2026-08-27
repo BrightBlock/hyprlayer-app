@@ -1,7 +1,8 @@
 import { useState } from "react";
 
 import { CAN_SELF_INSTALL, useUpdate } from "@/lib/updater";
-import { Badge, Button, Card, CardTitle } from "@/components/ui";
+import { Button, Card, CardTitle } from "@/components/ui";
+import { formatRelativeTime } from "@/lib/format";
 
 const LINUX_UPDATE_COMMANDS = [
   ["Arch (AUR)", "paru -Syu hyprlayer-desktop-bin"],
@@ -10,10 +11,10 @@ const LINUX_UPDATE_COMMANDS = [
 ];
 
 export function UpdatesCard() {
-  const currentVersion = useUpdate((s) => s.currentVersion);
   const pendingVersion = useUpdate((s) => s.pendingVersion);
   const changelog = useUpdate((s) => s.changelog);
   const installing = useUpdate((s) => s.installing);
+  const lastChecked = useUpdate((s) => s.lastChecked);
   const checkNow = useUpdate((s) => s.checkNow);
   const install = useUpdate((s) => s.install);
 
@@ -31,12 +32,21 @@ export function UpdatesCard() {
   };
 
   return (
-    <Card>
-      <div className="flex items-center justify-between gap-3">
+    <Card className="p-0">
+      <div className="flex items-center justify-between gap-5 p-4">
         <div className="min-w-0">
           <CardTitle className="mb-0">Updates</CardTitle>
-          <p className="mt-1 text-sm text-ink-dim">
-            Current version <span className="font-mono text-ink">{currentVersion || "—"}</span>
+          <p className="mt-[3px] text-xs text-ink-dim">
+            {pendingVersion ? (
+              <span className="text-warn">{pendingVersion} available</span>
+            ) : result === "error" ? (
+              <span className="text-warn">Couldn’t check</span>
+            ) : lastChecked === null ? (
+              "Not checked yet"
+            ) : (
+              "Up to date"
+            )}
+            {lastChecked !== null && <> · last checked {formatRelativeTime(lastChecked)}</>}
           </p>
         </div>
         <Button onClick={() => void onCheck()} busy={checking}>
@@ -44,8 +54,8 @@ export function UpdatesCard() {
         </Button>
       </div>
 
-      {pendingVersion ? (
-        <div className="mt-3 rounded-md border border-accent/40 bg-accent/10 p-3">
+      {pendingVersion && (
+        <div className="mx-4 mb-4 rounded-md border border-accent/40 bg-accent/10 p-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-medium text-ink">
               Version <span className="font-mono">{pendingVersion}</span> is available
@@ -78,14 +88,6 @@ export function UpdatesCard() {
             </div>
           )}
         </div>
-      ) : (
-        result && (
-          <p className="mt-3">
-            {result === "uptodate" && <Badge tone="ok">Up to date</Badge>}
-            {result === "available" && <Badge tone="accent">Update found</Badge>}
-            {result === "error" && <Badge tone="warn">Couldn’t check. Try again</Badge>}
-          </p>
-        )
       )}
     </Card>
   );

@@ -145,6 +145,7 @@ pub fn parse_self_update_check(stdout: &str) -> CliUpdateCheck {
 pub enum BundleSelection<'a> {
     Version(&'a str),
     Unpin,
+    Force,
 }
 
 pub struct HyprCli<'a> {
@@ -282,6 +283,7 @@ impl<'a> HyprCli<'a> {
                 args.push(v);
             }
             BundleSelection::Unpin => args.push("--unpin"),
+            BundleSelection::Force => args.push("--force"),
         }
         self.command(cwd, &args, Duration::from_secs(300))
             .await?

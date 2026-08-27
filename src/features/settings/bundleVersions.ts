@@ -1,4 +1,4 @@
-import type { AiStatus, AiVersionEntry, AiVersions } from "@/lib/bindings";
+import type { AgentBundleStatus, AiStatus, AiVersionEntry, AiVersions } from "@/lib/bindings";
 import type { DropdownOption } from "@/components/ui";
 
 export type BundlePinState =
@@ -20,6 +20,19 @@ export function bundlePinState(status: AiStatus | undefined): BundlePinState {
   const pinned = status.pinnedVersion ?? null;
   if (pinned === null) return { kind: "unpinned", installed, binary };
   return { kind: "pinned", installed, binary, pinned, drifted: pinned !== binary };
+}
+
+export function isLegacyLayout(status: AiStatus | undefined): boolean {
+  return status?.installed === true && bundlePinState(status).kind === "unavailable";
+}
+
+export function needsCliUpgrade(
+  status: AiStatus | undefined,
+  bundle: AgentBundleStatus | undefined,
+): boolean {
+  if (!bundle) return false;
+  if (!bundle.manageable) return (status?.platforms?.length ?? 0) === 0;
+  return bundlePinState(status).kind === "unavailable";
 }
 
 export function formatPublished(iso: string | null | undefined): string | null {

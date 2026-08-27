@@ -187,6 +187,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::agents::update_agent_bundle,
             commands::agents::agent_bundle_versions,
             commands::agents::install_agent_bundle_version,
+            commands::agents::repair_agent_bundle,
         ])
         .events(collect_events![
             events::ConfigChanged,

@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Link, useSearch } from "@tanstack/react-router";
 
 import {
-  useAiStatus,
   useBootstrap,
   useGithubUsername,
   useClaudeProbe,
@@ -29,7 +28,6 @@ import { claudeModels, modelOptions } from "@/lib/domain/models";
 import { DEFAULT_HARNESS_OPTIONS } from "@/lib/domain/harnessing";
 import { invalidateNotificationSettingsCache, sendTestNotification } from "@/lib/notifications";
 import {
-  Badge,
   Button,
   Card,
   CardTitle,
@@ -39,32 +37,21 @@ import {
   Field,
   PageError,
   PageSpinner,
-  Spinner,
   TextInput,
   Toggle,
   SettingRow,
 } from "@/components/ui";
 import { BranchPrefixEditor } from "@/components/BranchPrefixEditor";
-import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
 import { BinaryCard } from "@/features/system/BinaryCard";
 import { UpdatesCard } from "@/features/system/updates";
+import { HyprlayerCard } from "@/features/settings/HyprlayerCard";
 import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 import { HarnessesSection } from "@/features/settings/harnesses/HarnessesSection";
-import { AgentBundleSection } from "@/features/settings/AgentBundleSection";
 import { THEMES, useThemeStore } from "@/lib/theme";
+import { useUpdate } from "@/lib/updater";
 import { IS_MACOS } from "@/lib/platform";
 import { SIDE_PANEL_WIDTH } from "@/lib/uiStore";
-import { AgentIcon, AnytypeIcon, BellIcon, CheckIcon, ClipboardIcon, GitBranchIcon, harnessIcon, KeyboardIcon, MultiplexerIcon, NotionIcon, ObsidianIcon, PaletteIcon, PersonIcon, PlusIcon, PuzzleIcon, SlidersIcon, TerminalIcon, XIcon } from "@/components/icons";
-
-function BackendIcon({ kind, size = 15 }: { kind: string; size?: number }) {
-  switch (kind) {
-    case "git": return <GitBranchIcon size={size} />;
-    case "obsidian": return <ObsidianIcon size={size} />;
-    case "notion": return <NotionIcon size={size} />;
-    case "anytype": return <AnytypeIcon size={size} />;
-    default: return null;
-  }
-}
+import { AgentIcon, BellIcon, CheckIcon, GitBranchIcon, harnessIcon, KeyboardIcon, MultiplexerIcon, PaletteIcon, PlusIcon, PuzzleIcon, SlidersIcon, TerminalIcon, XIcon } from "@/components/icons";
 
 const SWATCHES: Record<string, [string, string, string]> = {
   system: ["#0c0c0c", "#1c1c1c", "#d97757"],
@@ -601,171 +588,6 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
   );
 }
 
-function AiAgentsSubsection() {
-  const aiStatus = useAiStatus();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const platforms = aiStatus.data?.platforms ?? [];
-  const agentPaths = platforms
-    .map((platform) => platform.location)
-    .filter((location): location is string => !!location);
-
-  const handleExit = (code: number | null) => {
-    if (code === 0) {
-      void aiStatus.refetch();
-      setDialogOpen(false);
-    }
-  };
-
-  return (
-    <div className="mt-3 border-t border-edge/50 pt-3 text-sm">
-      <div className="flex items-center justify-between">
-        <span className="text-ink-dim">AI Agents</span>
-        {!aiStatus.isLoading && (
-          <Button type="button" onClick={() => setDialogOpen(true)}>
-            Repair / reinstall
-          </Button>
-        )}
-      </div>
-      <div className="mt-2 text-sm">
-        {aiStatus.isLoading && (
-          <p className="flex items-center gap-2 text-ink-dim">
-            <Spinner size={12} /> Ensuring Claude Code and Codex agent links…
-          </p>
-        )}
-        {!aiStatus.isLoading && aiStatus.data?.installed && (
-          <p>
-            <Badge tone="ok">Ready</Badge>
-            <span className="ml-2 text-ink-dim">
-              {agentPaths.length > 0 ? (
-                agentPaths.map((location, i) => (
-                  <span key={location}>
-                    {i > 0 && " · "}
-                    <span className="font-mono text-xs">{location}</span>
-                  </span>
-                ))
-              ) : (
-                <>
-                  {aiStatus.data.agentTool ?? "AI agents"}{" "}
-                  {aiStatus.data.location ? (
-                    <span className="font-mono text-xs">{aiStatus.data.location}</span>
-                  ) : null}
-                </>
-              )}
-            </span>
-          </p>
-        )}
-        {!aiStatus.isLoading && !aiStatus.data?.installed && (
-          <p>
-            <Badge tone="warn">Needs repair</Badge>
-            <span className="ml-2 text-ink-dim">
-              Claude Code and Codex agent links were not fully installed.
-            </span>
-          </p>
-        )}
-        {!aiStatus.isLoading && aiStatus.error != null && (
-          <div className="mt-2">
-            <ErrorNote error={aiStatus.error} />
-          </div>
-        )}
-      </div>
-
-      {!aiStatus.isLoading && aiStatus.data?.installed && (
-        <AgentBundleSection status={aiStatus.data} />
-      )}
-
-      <Dialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        title="Repair Claude Code + Codex agents"
-        size="2xl"
-      >
-        <p className="mb-3 text-sm text-ink-dim">
-          Reinstall the shared bundle and recreate Hyprlayer-managed links for both platforms.
-        </p>
-        <div className="relative h-80 overflow-hidden rounded-lg border border-edge bg-surface">
-          <SetupTerminal
-            args={["ai", "reinstall"]}
-            onExit={handleExit}
-            className="h-full"
-          />
-        </div>
-      </Dialog>
-    </div>
-  );
-}
-
-function HyprlayerConfigCard({ config }: { config: ReturnType<typeof useBootstrap>["data"] }) {
-  const data = config!;
-  const [pathCopied, setPathCopied] = useState(false);
-
-  function copyPath(path: string) {
-    void navigator.clipboard.writeText(path).then(() => {
-      setPathCopied(true);
-      window.setTimeout(() => setPathCopied(false), 1200);
-    });
-  }
-  return (
-    <Card>
-      <div className="flex items-center justify-between gap-4">
-        <CardTitle className="mb-0">Hyprlayer</CardTitle>
-        {data.config.state === "ready" && (
-          <span className="flex items-center gap-1.5 text-sm text-ink">
-            <BackendIcon kind={data.config.backendKind} size={15} />
-            <span className="font-mono font-semibold">{data.config.backendKind}</span>
-            {!data.config.configured && <Badge tone="warn">incomplete</Badge>}
-          </span>
-        )}
-      </div>
-      {data.config.state === "ready" && (() => {
-        const hlBinary = data.binaries.find((b) => b.kind === "hyprlayer");
-        const binaryOk = hlBinary?.state.state === "ok";
-        return (
-          <div className="mt-2 flex items-center justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-2">
-              {hlBinary && (
-                <Badge tone={binaryOk ? "ok" : "warn"}>{binaryOk ? "Found" : "Missing"}</Badge>
-              )}
-              <button
-                type="button"
-                onClick={() => copyPath(data.config.path)}
-                title={pathCopied ? "Copied" : "Copy path"}
-                className="group flex min-w-0 items-center gap-1.5 text-left"
-              >
-                <span className="truncate font-mono text-xs text-ink-dim group-hover:text-ink">
-                  {data.config.path}
-                </span>
-                <span className="shrink-0 text-ink-dim opacity-0 transition-opacity group-hover:opacity-100">
-                  {pathCopied ? <span className="text-xs text-ok">✓</span> : <ClipboardIcon size={11} />}
-                </span>
-              </button>
-            </div>
-            <p className="flex shrink-0 items-center gap-1 font-mono text-sm text-ink-dim">
-              <PersonIcon size={13} />
-              <span>{data.config.user || "—"}</span>
-            </p>
-          </div>
-        );
-      })()}
-      {data.config.state === "missing" && (
-        <div className="space-y-2 text-sm">
-          <p>
-            <Badge tone="warn">Not set up yet</Badge>
-          </p>
-          <p className="text-ink-dim">
-            No config found at{" "}
-            <span className="selectable font-mono text-xs">{data.config.path}</span>. Add your
-            first project from the dashboard.
-          </p>
-        </div>
-      )}
-      {data.config.state === "error" && (
-        <ErrorNote error={{ message: data.config.message, remedy: data.config.remedy }} />
-      )}
-      <AiAgentsSubsection />
-    </Card>
-  );
-}
-
 function BinariesCard({ data }: { data: NonNullable<ReturnType<typeof useBootstrap>["data"]> }) {
   const redetect = useRedetectBinaries();
   return (
@@ -1043,6 +865,16 @@ type SectionId =
   | "advanced"
   | "binaries";
 
+function GeneralHeading() {
+  const currentVersion = useUpdate((s) => s.currentVersion);
+  return (
+    <div className="flex items-baseline justify-between gap-4 px-0.5">
+      <h1 className="text-lg font-semibold tracking-tight">General</h1>
+      <span className="text-xs text-ink-dim">Hyprlayer {currentVersion || "—"}</span>
+    </div>
+  );
+}
+
 type NavItem = {
   id: SectionId;
   label: string;
@@ -1117,8 +949,9 @@ export function Settings() {
         <div className="mx-auto max-w-3xl space-y-4 p-8">
           {section === "general" && (
             <>
+              <GeneralHeading />
               {!IS_MACOS && <UpdatesCard />}
-              <HyprlayerConfigCard config={data} />
+              <HyprlayerCard data={data} />
               <DefaultHarnessCard settings={data.settings} />
               <TabTitlesCard settings={data.settings} />
               <QuitCard settings={data.settings} />

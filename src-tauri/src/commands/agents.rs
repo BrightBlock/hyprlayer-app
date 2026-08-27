@@ -264,6 +264,24 @@ pub struct AgentBundleInstall {
 
 #[tauri::command]
 #[specta::specta]
+pub async fn repair_agent_bundle(state: State<'_, AppState>) -> CmdResult<AgentBundleInstall> {
+    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let output = HyprCli::new(&state.binaries)
+        .ai_reinstall_selected(&cwd, BundleSelection::Force)
+        .await
+        .map_err(AppError::from)?;
+
+    Ok(AgentBundleInstall {
+        ok: output.exit_code == Some(0),
+        exit_code: output.exit_code,
+        source: agent_bundle::reinstall_source(&output.stdout),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn install_agent_bundle_version(
     state: State<'_, AppState>,
     version: Option<String>,

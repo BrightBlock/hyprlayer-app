@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
 
 import {
+  Badge,
   Button,
   CliOutput,
   DropdownSelect,
@@ -10,12 +11,13 @@ import {
   Spinner,
   type DropdownOption,
 } from "@/components/ui";
-import { DownloadIcon } from "@/components/icons";
+import { DownloadIcon, WarningTriangleIcon } from "@/components/icons";
 import {
   commands,
   type AgentBundleInstall,
   type AgentBundleReport,
   type AiStatus,
+  type CliUpdateResult,
 } from "@/lib/bindings";
 import { formatRelativeTime, shortSha } from "@/lib/format";
 import { unwrap } from "@/lib/ipc";
@@ -27,8 +29,11 @@ import {
   useCliUpdateCheck,
 } from "@/lib/queries";
 
+import { CardRow, CARD_ROW_SPAN } from "./cardRow";
 import {
   bundlePinState,
+  isLegacyLayout,
+  needsCliUpgrade,
   needsSkillsCliUpdate,
   selectedVersion,
   SKILLS_CLI_FLOOR,
@@ -143,45 +148,30 @@ function UpdateOutcome({ report, target }: { report: AgentBundleReport; target: 
   );
 }
 
-export function CliUpdateNote({ version }: { version?: string | null }) {
-  const check = useCliUpdateCheck();
-  const update = useMutation({
+export function useCliSelfUpdate() {
+  return useMutation({
     mutationFn: () => unwrap(commands.updateHyprlayerCli()),
     onSettled: () => invalidateCliBundleState(),
   });
-  const { current, latest, hint } = check.data ?? {};
-  const installed = current ?? version ?? null;
-  const result = update.data ?? null;
+}
 
+export function CliUpdateOutcome({
+  result,
+  error,
+  hint,
+}: {
+  result: CliUpdateResult | null;
+  error: unknown;
+  hint?: string | null;
+}) {
   return (
-    <div className="mt-2 text-ink-dim">
-      <div className="flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
-        <span>hyprlayer {installed ?? `pre-${SKILLS_CLI_FLOOR}`}</span>
-        {latest ? (
-          <>
-            <span className="text-warn">· {latest} available</span>
-            <Button
-              variant="primary"
-              busy={update.isPending}
-              onClick={() => update.mutate()}
-            >
-              Update
-            </Button>
-          </>
-        ) : (
-          needsSkillsCliUpdate(installed) &&
-          !update.isSuccess && (
-            <span>· update to {SKILLS_CLI_FLOOR} or newer for current skills</span>
-          )
-        )}
-      </div>
-
-      {!update.isPending && update.error != null && (
+    <>
+      {error != null && (
         <div className="mt-2">
-          <ErrorNote error={update.error} />
+          <ErrorNote error={error} />
         </div>
       )}
-      {!update.isPending && result && !result.ok && (
+      {result && !result.ok && (
         <div className="selectable mt-2 rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
           <p className="text-bad">
             The update failed{result.exitCode != null && <> (exit {result.exitCode})</>}.
@@ -196,9 +186,61 @@ export function CliUpdateNote({ version }: { version?: string | null }) {
           <CliOutput text={result.stderr || result.stdout} />
         </div>
       )}
-      {!update.isPending && result?.ok && (
+      {result?.ok && (
         <p className="mt-2 text-sm text-ok">hyprlayer updated. Re-open Settings to pick it up.</p>
       )}
+    </>
+  );
+}
+
+export function CliUpdateNote({ version }: { version?: string | null }) {
+  const check = useCliUpdateCheck();
+  const update = useCliSelfUpdate();
+  const { current, latest, hint } = check.data ?? {};
+  const installed = current ?? version ?? null;
+
+  return (
+    <div className="mt-2 text-ink-dim">
+      <div className="flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
+        <span>hyprlayer {installed ?? `pre-${SKILLS_CLI_FLOOR}`}</span>
+        {latest ? (
+          <>
+            <span className="text-warn">· {latest} available</span>
+            <Button variant="primary" busy={update.isPending} onClick={() => update.mutate()}>
+              Update
+            </Button>
+          </>
+        ) : (
+          needsSkillsCliUpdate(installed) &&
+          !update.isSuccess && (
+            <span>· update to {SKILLS_CLI_FLOOR} or newer for current skills</span>
+          )
+        )}
+      </div>
+
+      {!update.isPending && (
+        <CliUpdateOutcome result={update.data ?? null} error={update.error} hint={hint} />
+      )}
+    </div>
+  );
+}
+
+function LegacyLayoutNote({ version }: { version?: string | null }) {
+  return (
+    <div className="mt-1 flex gap-2.5 rounded-md border border-bad/35 bg-bad/8 p-3 text-sm">
+      <span className="flex pt-0.5 text-bad">
+        <WarningTriangleIcon size={14} />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-ink">Migration required for updates</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-pretty text-ink-dim">
+          Agent files were copied straight into each target before {SKILLS_CLI_FLOOR}, so
+          Hyprlayer cannot update them in place. A newer CLI moves them into one managed
+          directory and links them back into <span className="font-mono">~/.claude</span> and{" "}
+          <span className="font-mono">~/.codex</span>, so future updates land everywhere at once.
+        </p>
+        <CliUpdateNote version={version} />
+      </div>
     </div>
   );
 }
@@ -208,8 +250,8 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
   const bundle = useAgentBundle({ enabled: status?.installed === true });
   const manageable = bundle.data?.manageable === true;
   const versioned = manageable && pin.kind !== "unavailable";
-  const legacyCli =
-    bundle.data != null && !bundle.data.manageable && (status?.platforms?.length ?? 0) === 0;
+  const cliUpgrade = needsCliUpgrade(status, bundle.data);
+  const legacy = cliUpgrade && isLegacyLayout(status);
   const [listWanted, setListWanted] = useState(false);
   const versions = useAgentBundleVersions({ enabled: versioned && listWanted });
   const [choice, setChoice] = useState<string | null>(null);
@@ -252,15 +294,14 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
   const outcome = install.data ?? null;
   const behind =
     !pending && bundle.data?.updateAvailable === true ? (bundle.data.desiredVersion ?? null) : null;
+  const sha = bundle.data?.installedSha ? shortSha(bundle.data.installedSha) : null;
 
   return (
-    <div className="mt-3 border-t border-edge/50 pt-3 text-sm">
-      <div className="flex min-h-6 items-center justify-between gap-2">
-        <span className="flex min-w-0 flex-wrap items-center gap-x-1 text-ink-dim">
-          Agent bundle
+    <CardRow label="Agent bundle" align="center" className="pb-4">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-2">
           {versioned ? (
             <>
-              {" · "}
               <DropdownSelect
                 value={value}
                 options={options}
@@ -272,58 +313,48 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
                 onOpenChange={(open) => open && setListWanted(true)}
                 disabled={busy}
                 aria-label="Agent bundle version"
-                triggerLabel={
-                  value ||
-                  (bundle.data?.installedSha ? shortSha(bundle.data.installedSha) : "unknown")
-                }
-                className="w-auto border-transparent bg-transparent px-1 py-0 text-xs text-ink hover:border-edge hover:bg-panel-2"
+                triggerLabel={value || sha || "unknown"}
+                className="w-auto px-1.5 py-0.5 text-xs"
               />
-              {pending && (
-                <RowInstallButton
-                  label={`Install ${value}`}
-                  busy={busy}
-                  onClick={() => install.mutate(value)}
-                />
-              )}
-              {behind && (
-                <>
-                  {" · "}
-                  <span className="text-warn">{behind} available</span>
-                  <RowInstallButton
-                    label={`Update to ${behind}`}
-                    busy={busy}
-                    onClick={() => {
-                      install.reset();
-                      update.mutate(behind);
-                    }}
-                  />
-                </>
+              {behind ? (
+                <Badge tone="warn">{behind} available</Badge>
+              ) : (
+                !pending && <Badge tone="ok">Latest</Badge>
               )}
               {pin.kind === "pinned" && pin.drifted && pin.binary && (
-                <span className="text-warn">{" · "}this CLI ships {pin.binary}</span>
+                <span className="text-xs text-warn">this CLI ships {pin.binary}</span>
               )}
             </>
           ) : (
-            bundle.data?.installedSha && (
-              <>
-                {" · "}
-                <span className="font-mono text-xs">{shortSha(bundle.data.installedSha)}</span>
-              </>
-            )
+            legacy && <Badge tone="bad">Legacy layout</Badge>
           )}
-          {lastChecked != null && <> · checked {formatRelativeTime(lastChecked * 1000)}</>}
-        </span>
-        <Link to="/agents" className="shrink-0 text-xs text-accent hover:underline">
-          Manage Agents
-        </Link>
+        </div>
+        {(sha || lastChecked != null) && (
+          <span className="font-mono text-xs text-ink-dim">
+            {sha}
+            {lastChecked != null && <> · checked {formatRelativeTime(lastChecked * 1000)}</>}
+          </span>
+        )}
       </div>
 
-      {(legacyCli || (manageable && pin.kind === "unavailable")) && (
-        <CliUpdateNote version={status?.binaryVersion} />
-      )}
-
-      {versioned && !pending && pin.kind === "pinned" && (
-        <div className="mt-2">
+      <div className="flex items-center gap-1.5">
+        {pending && (
+          <RowInstallButton label={`Install ${value}`} busy={busy} onClick={() => install.mutate(value)} />
+        )}
+        {behind && (
+          <Button
+            variant="primary"
+            busy={busy}
+            onClick={() => {
+              install.reset();
+              update.mutate(behind);
+            }}
+          >
+            <DownloadIcon size={13} />
+            <span>Update to {behind}</span>
+          </Button>
+        )}
+        {versioned && !pending && pin.kind === "pinned" && (
           <Button
             busy={busy}
             onClick={() => {
@@ -333,44 +364,55 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
           >
             Clear pin
           </Button>
-        </div>
-      )}
+        )}
+        <Link to="/agents" className="shrink-0 px-1 text-xs text-accent hover:underline">
+          Manage
+        </Link>
+      </div>
 
-      {busy && (
-        <p className="mt-2 flex items-center gap-2 text-ink-dim">
-          <Spinner size={14} />
-          Installing the bundle pair and switching the Claude and Codex links…
-        </p>
-      )}
+      <div className={CARD_ROW_SPAN}>
+        {legacy ? (
+          <LegacyLayoutNote version={status?.binaryVersion} />
+        ) : (
+          cliUpgrade && <CliUpdateNote version={status?.binaryVersion} />
+        )}
 
-      {versioned && !busy && versions.isError && (
-        <p className="mt-2 text-ink-dim">
-          Could not reach GitHub for the version list, so there is nothing to choose from right
-          now. The installed version above is still accurate.
-        </p>
-      )}
-      {versioned && !busy && versions.data && listOptions.length === 0 && (
-        <p className="mt-2 text-ink-dim">
-          No recent release publishes an agent bundle for this tool.
-        </p>
-      )}
+        {busy && (
+          <p className="mt-2 flex items-center gap-2 text-sm text-ink-dim">
+            <Spinner size={14} />
+            Installing the bundle pair and switching the Claude and Codex links…
+          </p>
+        )}
 
-      {!busy && install.error != null && (
-        <div className="mt-2">
-          <ErrorNote error={install.error} />
-        </div>
-      )}
-      {!busy && outcome && (
-        <InstallOutcome result={outcome} unpinned={install.variables === null} />
-      )}
-      {!busy && update.error != null && (
-        <div className="mt-2">
-          <ErrorNote error={update.error} />
-        </div>
-      )}
-      {!busy && update.data && update.variables != null && (
-        <UpdateOutcome report={update.data} target={update.variables} />
-      )}
-    </div>
+        {versioned && !busy && versions.isError && (
+          <p className="mt-2 text-sm text-ink-dim">
+            Could not reach GitHub for the version list, so there is nothing to choose from right
+            now. The installed version above is still accurate.
+          </p>
+        )}
+        {versioned && !busy && versions.data && listOptions.length === 0 && (
+          <p className="mt-2 text-sm text-ink-dim">
+            No recent release publishes an agent bundle for this tool.
+          </p>
+        )}
+
+        {!busy && install.error != null && (
+          <div className="mt-2">
+            <ErrorNote error={install.error} />
+          </div>
+        )}
+        {!busy && outcome && (
+          <InstallOutcome result={outcome} unpinned={install.variables === null} />
+        )}
+        {!busy && update.error != null && (
+          <div className="mt-2">
+            <ErrorNote error={update.error} />
+          </div>
+        )}
+        {!busy && update.data && update.variables != null && (
+          <UpdateOutcome report={update.data} target={update.variables} />
+        )}
+      </div>
+    </CardRow>
   );
 }

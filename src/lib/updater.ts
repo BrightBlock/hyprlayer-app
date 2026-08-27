@@ -42,6 +42,7 @@ interface UpdateState {
   changelog: ChangelogEntry[] | null;
   installing: Installing;
   dismissedVersion: string;
+  lastChecked: number | null;
 
   init: () => void;
   checkNow: () => Promise<"available" | "uptodate" | "error">;
@@ -86,6 +87,7 @@ export const useUpdate = create<UpdateState>()(
       changelog: null,
       installing: null,
       dismissedVersion: "",
+      lastChecked: null,
 
       init: () => {
         if (_initialized) return;
@@ -121,7 +123,7 @@ export const useUpdate = create<UpdateState>()(
         const probe = async () => {
           try {
             const v = await findPending(set, get);
-            set({ pendingVersion: v });
+            set({ pendingVersion: v, lastChecked: Date.now() });
             if (v && v !== toastedVersion && v !== get().dismissedVersion) {
               toastedVersion = v;
               showUpdateToast();
@@ -137,15 +139,16 @@ export const useUpdate = create<UpdateState>()(
       checkNow: async () => {
         if (import.meta.env.DEV) {
           if (import.meta.env.VITE_MOCK_UPDATE) {
-            set({ currentVersion: "0.1.0", pendingVersion: "9.9.9" });
+            set({ currentVersion: "0.1.0", pendingVersion: "9.9.9", lastChecked: Date.now() });
             return "available";
           }
+          set({ lastChecked: Date.now() });
           return "uptodate";
         }
         if (!IS_LINUX) void fetchChangelog(set);
         try {
           const v = await findPending(set, get);
-          set({ pendingVersion: v });
+          set({ pendingVersion: v, lastChecked: Date.now() });
           return v ? "available" : "uptodate";
         } catch (e) {
           console.warn("[updater] manual check failed:", e);
@@ -174,7 +177,7 @@ export const useUpdate = create<UpdateState>()(
     {
       name: "hyprlayer:updates",
       version: 1,
-      partialize: (s) => ({ dismissedVersion: s.dismissedVersion }),
+      partialize: (s) => ({ dismissedVersion: s.dismissedVersion, lastChecked: s.lastChecked }),
     },
   ),
 );

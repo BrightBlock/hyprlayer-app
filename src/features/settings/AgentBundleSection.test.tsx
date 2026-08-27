@@ -175,11 +175,12 @@ describe("AgentBundleSection", () => {
     expect(screen.getByRole("button", { name: /clear pin/i })).toBeTruthy();
   });
 
-  it("shows no separate SHA row alongside the version", async () => {
+  it("shows the installed SHA beside the version, not inside the picker", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection();
-    await screen.findByRole("button", { name: /agent bundle version/i });
-    expect(screen.queryByText(/9a2a33c/)).toBeNull();
+    const trigger = await screen.findByRole("button", { name: /agent bundle version/i });
+    expect(trigger.textContent).not.toContain("9a2a33c");
+    expect(screen.getAllByText(/9a2a33c/)).toHaveLength(1);
   });
 
   it("says so when the pin no longer matches the binary", async () => {
@@ -386,7 +387,7 @@ describe("AgentBundleSection", () => {
       latestSha: "def",
       updateAvailable: true,
     });
-    await screen.findByText(/hyprlayer/i);
+    await screen.findByText(/hyprlayer pre-1\.6\.0/i);
     expect(screen.queryByRole("button", { name: /update to/i })).toBeNull();
   });
 
