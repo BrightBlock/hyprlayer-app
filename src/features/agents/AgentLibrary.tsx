@@ -439,7 +439,6 @@ export function AgentLibrary({
       <AgentSidebar
         width={sidebarWidth}
         collapsed={agentsCollapsed}
-        resizing={dragWidth !== null}
         section={effectiveSection}
         onSection={onSection}
         selectedAgent={working}

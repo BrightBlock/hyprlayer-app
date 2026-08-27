@@ -46,7 +46,6 @@ export function LibraryPage() {
   const libraryWidth = useUiStore((s) => s.libraryWidth);
   const setLibraryWidth = useUiStore((s) => s.setLibraryWidth);
   const libraryCollapsed = useUiStore((s) => s.libraryCollapsed);
-  const [resizingLibrary, setResizingLibrary] = useState(false);
   const { narrow } = useViewport();
 
   const query = useMemo(() => docQueryFromSearch(search), [search]);
@@ -69,7 +68,6 @@ export function LibraryPage() {
         sync={thoughtsSync}
         width={narrow ? SIDE_PANEL_MIN : libraryWidth}
         collapsed={libraryCollapsed}
-        resizing={resizingLibrary}
       />
 
       {!libraryCollapsed && !narrow && (
@@ -85,8 +83,6 @@ export function LibraryPage() {
               max: SIDE_PANEL_MAX,
               direction: 1,
               onResize: setLibraryWidth,
-              onStart: () => setResizingLibrary(true),
-              onEnd: () => setResizingLibrary(false),
             })
           }
         />

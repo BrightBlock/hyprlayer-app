@@ -40,7 +40,6 @@ function sidebar(rows: AgentRow[] = ROWS, overrides: Partial<AgentSidebarProps> 
     <AgentSidebar
       width={288}
       collapsed={false}
-      resizing={false}
       section="agents"
       onSection={vi.fn()}
       selectedAgent={null}

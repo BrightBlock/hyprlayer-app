@@ -112,12 +112,10 @@ describe("insideNestedScroller", () => {
 describe("re-pinning on resize", () => {
   let resizes: ResizeObserverCallback[] = [];
   let frames: FrameRequestCallback[] = [];
-  let now = 0;
 
   beforeEach(() => {
     resizes = [];
     frames = [];
-    now = 0;
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -130,7 +128,6 @@ describe("re-pinning on resize", () => {
     );
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
     vi.stubGlobal("cancelAnimationFrame", () => {});
-    vi.spyOn(performance, "now").mockImplementation(() => now);
   });
 
   afterEach(() => {
@@ -139,11 +136,11 @@ describe("re-pinning on resize", () => {
     vi.restoreAllMocks();
   });
 
-  function renderStuck() {
+  function renderStuck(busy = false) {
     const { container } = render(
       <TranscriptView
         items={[]}
-        busy={false}
+        busy={busy}
         connecting={false}
         harnessLabel="Claude Code"
         workingSince={null}
@@ -161,10 +158,6 @@ describe("re-pinning on resize", () => {
 
   const resize = () => {
     resizes.forEach((cb) => cb([], {} as ResizeObserver));
-    now += 10_000;
-    const pending = frames;
-    frames = [];
-    pending.forEach((cb) => cb(now));
   };
 
   it("re-pins to the new bottom when the viewport shrinks", () => {
@@ -181,5 +174,16 @@ describe("re-pinning on resize", () => {
     shrinkViewportTo(300);
     resize();
     expect(el.scrollTop).toBe(200);
+  });
+
+  it("does not start a second animation loop while a turn is busy", () => {
+    const { el, shrinkViewportTo } = renderStuck(true);
+    expect(frames).toHaveLength(1);
+
+    shrinkViewportTo(300);
+    resize();
+
+    expect(el.scrollTop).toBe(700);
+    expect(frames).toHaveLength(1);
   });
 });

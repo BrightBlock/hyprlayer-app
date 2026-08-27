@@ -585,7 +585,6 @@ export function Root() {
     prevCompactRef.current = compact;
   }, [narrow, compact, setNarrowDrawer]);
   const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
-  const [resizingSidebar, setResizingSidebar] = useState(false);
 
   const projects = useMemo(
     () => bootstrap.data?.projects ?? [],
@@ -884,8 +883,6 @@ export function Root() {
       max: PROJECT_SIDEBAR_MAX,
       direction: 1,
       onResize: setSidebarWidth,
-      onStart: () => setResizingSidebar(true),
-      onEnd: () => setResizingSidebar(false),
     });
   };
 
@@ -1301,7 +1298,7 @@ export function Root() {
           <aside
             className={`shrink-0 overflow-hidden border-r border-edge bg-panel ${
               compact ? "absolute inset-y-0 z-30 shadow-lg" : "relative"
-            } ${resizingSidebar ? "" : "transition-[width] duration-200 ease-out"}`}
+            }`}
             style={
               compact
                 ? {

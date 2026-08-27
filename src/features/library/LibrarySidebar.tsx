@@ -25,7 +25,6 @@ type Props = {
   sync: ThoughtsSyncState;
   width: number;
   collapsed: boolean;
-  resizing: boolean;
 };
 
 export function LibrarySidebar({
@@ -40,16 +39,13 @@ export function LibrarySidebar({
   sync,
   width,
   collapsed,
-  resizing,
 }: Props) {
   const groups = groupDocsByType(result?.items ?? []);
   const now = Date.now();
 
   return (
     <aside
-      className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
-        resizing ? "" : "transition-[width] duration-200 ease-out"
-      }`}
+      className="relative shrink-0 overflow-hidden border-r border-edge bg-panel"
       style={{ width: collapsed ? 0 : width }}
       inert={collapsed}
     >

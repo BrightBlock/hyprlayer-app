@@ -280,7 +280,6 @@ export function ProjectPage() {
   const diffHidden = useUiStore((state) => state.diffHidden);
   const diffWidth = useUiStore((state) => state.diffWidth);
   const setDiffWidth = useUiStore((state) => state.setDiffWidth);
-  const [resizingDiff, setResizingDiff] = useState(false);
   const [rightRatio, setRightRatio] = useState(0.5);
   const [maximized, setMaximized] = useState<{ wsId: string; pane: "main" | "right" } | null>(
     null,
@@ -902,8 +901,6 @@ export function ProjectPage() {
       max: DIFF_SIDEBAR_MAX,
       direction: -1,
       onResize: setDiffWidth,
-      onStart: () => setResizingDiff(true),
-      onEnd: () => setResizingDiff(false),
     });
   };
 
@@ -1513,7 +1510,7 @@ export function ProjectPage() {
       <aside
         className={`shrink-0 overflow-hidden border-l border-edge bg-panel ${
           narrow ? "absolute inset-y-0 right-0 z-30 shadow-lg" : "relative"
-        } ${resizingDiff ? "" : "transition-[width] duration-200 ease-out"}`}
+        }`}
         style={{ width: showAside ? asideWidth : 0 }}
         inert={!showAside}
       >

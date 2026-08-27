@@ -44,7 +44,6 @@ const AGENT_ROW_BASE = FOLDER_LABEL_X - 15;
 export type AgentSidebarProps = {
   width: number;
   collapsed: boolean;
-  resizing: boolean;
   section: AgentSection;
   onSection: (section: AgentSection) => void;
   selectedAgent: AgentFile | null;
@@ -85,7 +84,6 @@ export function AgentSidebar(props: AgentSidebarProps) {
   const {
     width,
     collapsed,
-    resizing,
     section,
     onSection,
     selectedAgent,
@@ -151,9 +149,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
 
   return (
     <aside
-      className={`relative shrink-0 overflow-hidden border-r border-edge bg-panel ${
-        resizing ? "" : "transition-[width] duration-200 ease-out"
-      }`}
+      className="relative shrink-0 overflow-hidden border-r border-edge bg-panel"
       style={{ width: collapsed ? 0 : shellWidth }}
       inert={collapsed}
     >
