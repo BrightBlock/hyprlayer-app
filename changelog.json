@@ -1,6 +1,20 @@
 {
   "versions": [
     {
+      "version": "0.7.2",
+      "date": "2026-08-27",
+      "summary": "Codex gains Claude skills, agents, and question cards; agent settings repair flow.",
+      "notes": [
+        "Codex sessions can now use your .claude/skills library, which only the Claude harness could see before. The composer's slash menu is harness-aware too: a Codex session lists skills under codex's own $name sigil and drops the Claude-only prompt expansions it can't run.",
+        "Codex now asks through the same structured question card Claude uses instead of asking in prose. Commit, Plan and Research run as two turns there — the first reviews or explores and asks its questions, the second carries the work out with your answers. Commit asks whether to push before it commits anything, so answering no means no push is ever attempted.",
+        "Fixed layout flicker when resizing panes: the animated sidebar width transitions are gone, and the transcript stays pinned to the bottom through a resize instead of drifting.",
+        "The Hyprlayer and AI Agents settings cards are now one card, with a one-click Repair that reinstalls the agent bundle directly instead of handing you a terminal dialog.",
+        "Repair now clears what was blocking it. A stale or hand-edited file sitting on a bundle's target path used to leave the relink permanently stuck; identical copies are now deleted, modified ones are backed up alongside as .bak files, and the receipt showing which is which stays on screen.",
+        "A CLI that reports only one of the Claude/Codex agent pair gets its own Unpaired state rather than being folded in with a pre-1.6.0 CLI, the CLI update button is always available, and the app no longer nags you to update a CLI that's already current.",
+        "Fixed the tab-title model staying on the outgoing harness's default after you switch your default harness, and OpenCode's model list is now reconciled against the running server so models it no longer offers can't be selected."
+      ]
+    },
+    {
       "version": "0.7.1",
       "date": "2026-08-25",
       "summary": "Fixed the AI Agents bundle status going stale after a CLI upgrade.",
