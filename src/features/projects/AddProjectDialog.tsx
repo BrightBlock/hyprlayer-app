@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import type { Project } from "@/lib/bindings";
+import type { CreateProjectOutcome, Project } from "@/lib/bindings";
+import { events } from "@/lib/bindings";
 import {
   Badge,
   Button,
@@ -15,20 +16,32 @@ import {
   Toggle,
 } from "@/components/ui";
 import { HyprlayerMark } from "@/components/Logo";
+import { UploadCloudIcon } from "@/components/icons";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { githubRepoRef } from "@/lib/github";
 import { basename } from "@/lib/path";
 import {
   useBootstrap,
   useCloneProject,
+  useCreateProject,
   useCreateThoughtsProfile,
   useDefaultUsername,
   useImportLocalFolder,
+  useGithubOwners,
   useImportProject,
+  usePublishProjectToGithub,
   useRepoPathInfo,
   useThoughtsProfiles,
 } from "@/lib/queries";
 import { useDebounced } from "@/lib/useDebounced";
+import {
+  CreateProjectFields,
+  githubRepoName,
+  isReservedRepoName,
+  sanitizeProjectName,
+  type CreateSpec,
+} from "./CreateProjectFields";
+import { CreateProgressPanel, applyProgress, type ProgressMap } from "./CreateProgressPanel";
 import { RepoSourcePicker, type RepoSource } from "./RepoSourcePicker";
 
 type Props = {
@@ -81,6 +94,25 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const [user, setUser] = useState("");
   const [initBranch, setInitBranch] = useState("main");
   const [setUpGit, setSetUpGit] = useState(false);
+  const [spec, setSpec] = useState<CreateSpec>({
+    name: "",
+    location: "",
+    branch: "main",
+    readme: true,
+    gitignore: null,
+    github: true,
+    owner: null,
+    private: true,
+  });
+  const [progress, setProgress] = useState<ProgressMap>({});
+  const [stalled, setStalled] = useState<CreateProjectOutcome | null>(null);
+  // Seeded from the spec when a publish stalls, so a name or owner GitHub
+  // rejected can be corrected before retrying rather than resent unchanged.
+  const [retry, setRetry] = useState<{ owner: string | null; name: string }>({
+    owner: null,
+    name: "",
+  });
+  const [opId, setOpId] = useState<string | null>(null);
 
   const [profileName, setProfileName] = useState<string | null>(null);
   const [folder, setFolder] = useState(AUTO_FOLDER);
@@ -92,6 +124,9 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const clone = useCloneProject();
   const importProject = useImportProject();
   const importFolder = useImportLocalFolder();
+  const createProject = useCreateProject();
+  const publishToGithub = usePublishProjectToGithub();
+  const owners = useGithubOwners();
   const defaultUser = useDefaultUsername();
   const profiles = useThoughtsProfiles();
   const createProfile = useCreateThoughtsProfile();
@@ -104,8 +139,29 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   const isBare = status === "bare";
   const asFolder = needsInit && !setUpGit;
 
-  const pending = clone.isPending || importProject.isPending || importFolder.isPending;
-  const error = clone.error ?? importProject.error ?? importFolder.error;
+  const isCreate = source.mode === "create";
+  const pending =
+    clone.isPending || importProject.isPending || importFolder.isPending || createProject.isPending;
+  const busy = pending || publishToGithub.isPending;
+  const error = clone.error ?? importProject.error ?? importFolder.error ?? createProject.error;
+  const ownerList = owners.data ?? [];
+  const ownersState = {
+    owners: ownerList,
+    loading: owners.isLoading,
+    unreachable: owners.isError,
+  };
+  const effectiveOwner = spec.owner ?? ownerList[0]?.login ?? null;
+  const remoteName = githubRepoName(spec.name);
+  const githubTarget =
+    isCreate && spec.github && effectiveOwner && !isReservedRepoName(remoteName)
+      ? { owner: effectiveOwner, name: remoteName, private: spec.private }
+      : null;
+  const retryName = githubRepoName(retry.name);
+  const retryTarget =
+    retry.owner && !isReservedRepoName(retryName)
+      ? { owner: retry.owner, name: retryName, private: spec.private }
+      : null;
+  const busyPanel = createProject.isPending || stalled !== null;
 
   useEffect(() => {
     if (configMissing && defaultUser.data) {
@@ -114,22 +170,20 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
   }, [configMissing, defaultUser.data]);
 
   useEffect(() => {
+    const apply = (root: string) => {
+      setSource((cur) => (cur.mode === "clone" && !cur.location ? { ...cur, location: root } : cur));
+      setSpec((cur) => (cur.location ? cur : { ...cur, location: root }));
+    };
     const configured = bootstrap.data?.settings.reposRoot;
     if (configured) {
-      setSource((cur) =>
-        cur.mode === "clone" && !cur.location ? { ...cur, location: configured } : cur,
-      );
+      apply(configured);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
         const def = await join(await homeDir(), "hyprlayer", "repos");
-        if (!cancelled) {
-          setSource((cur) =>
-            cur.mode === "clone" && !cur.location ? { ...cur, location: def } : cur,
-          );
-        }
+        if (!cancelled) apply(def);
       } catch {
       }
     })();
@@ -138,10 +192,35 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
     };
   }, [bootstrap.data?.settings.reposRoot]);
 
+  useEffect(() => {
+    if (!isCreate || !opId) return;
+    let live = true;
+    let unlisten: (() => void) | null = null;
+    void events.projectCreateProgress
+      .listen((e) => {
+        if (e.payload.opId !== opId) return;
+        setProgress((cur) => applyProgress(cur, e.payload));
+      })
+      .then((off) => {
+        if (live) unlisten = off;
+        else off();
+      })
+      .catch(() => {
+      });
+    return () => {
+      live = false;
+      unlisten?.();
+    };
+  }, [isCreate, opId]);
+
   const profileList = profiles.data ?? [];
   const selectedProfile = profileList.find((p) => p.name === profileName) ?? profileList[0];
   const folders = selectedProfile?.folders ?? [];
-  const repoName = autoFolderName(source);
+  const createName = sanitizeProjectName(spec.name);
+  const repoName = isCreate
+    ? createName.replace(/[^A-Za-z0-9_-]/g, "_")
+    : autoFolderName(source);
+  const displayLabel = isCreate ? createName || "project" : repoLabel(source);
   const folderChoice =
     folder === AUTO_FOLDER || folder === NEW_FOLDER || folders.includes(folder)
       ? folder
@@ -160,7 +239,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
       : null;
 
   const close = () => {
-    if (pending) return;
+    if (busy) return;
     onClose();
   };
 
@@ -176,6 +255,11 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
     clone.reset();
     importProject.reset();
     importFolder.reset();
+    createProject.reset();
+    publishToGithub.reset();
+    setProgress({});
+    setStalled(null);
+    setOpId(null);
   };
 
   const bootstrapUser = configMissing ? user.trim() || null : null;
@@ -186,23 +270,28 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
       : source.mode === "disk"
         ? source.path.trim()
         : "";
-  const step1Ok =
-    Boolean(primaryInput) &&
-    (source.mode !== "disk" || status !== undefined || pathInfo.isError) &&
-    (!configMissing || asFolder || Boolean(user.trim())) &&
-    (!needsInit || asFolder || Boolean(initBranch.trim())) &&
-    !isBare;
+  const step1Ok = isCreate
+    ? Boolean(createName) &&
+      (!configMissing || Boolean(user.trim())) &&
+      !(spec.github && owners.isLoading)
+    : Boolean(primaryInput) &&
+      (source.mode !== "disk" || status !== undefined || pathInfo.isError) &&
+      (!configMissing || asFolder || Boolean(user.trim())) &&
+      (!needsInit || asFolder || Boolean(initBranch.trim())) &&
+      !isBare;
   const folderOk = folderChoice === NEW_FOLDER ? Boolean(customFolder.trim()) : true;
   const canSubmit = step1Ok && (asFolder || folderOk) && !newProfileOpen && !pending;
 
   const [submitIdle, submitBusy] =
     source.mode === "clone"
       ? ["Clone repo", "Cloning…"]
-      : asFolder
-        ? ["Add folder", "Adding…"]
-        : needsInit
-          ? ["Initialize & add", "Initializing…"]
-          : ["Add project", "Importing…"];
+      : isCreate
+        ? ["Create project", "Creating…"]
+        : asFolder
+          ? ["Add folder", "Adding…"]
+          : needsInit
+            ? ["Initialize & add", "Initializing…"]
+            : ["Add project", "Importing…"];
 
   const submit = () => {
     if (!canSubmit) return;
@@ -215,6 +304,36 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
     }
     const thoughtsDir = folderChoice === AUTO_FOLDER ? null : resolvedFolder || null;
     const profile = selectedProfile?.name ?? null;
+    if (isCreate) {
+      const id = crypto.randomUUID();
+      setProgress({});
+      setStalled(null);
+      setOpId(id);
+      createProject.mutate(
+        {
+          opId: id,
+          name: createName,
+          location: spec.location.trim() || null,
+          branch: spec.branch.trim() || null,
+          scaffold: { readme: spec.readme, gitignore: spec.gitignore },
+          github: githubTarget,
+          thoughtsDir,
+          profile,
+          bootstrapUser,
+        },
+        {
+          onSuccess: (outcome) => {
+            if (outcome.githubError) {
+              setRetry({ owner: githubTarget?.owner ?? effectiveOwner, name: remoteName });
+              setStalled(outcome);
+            } else {
+              succeed(outcome.project);
+            }
+          },
+        },
+      );
+      return;
+    }
     if (source.mode === "clone") {
       clone.mutate(
         {
@@ -268,6 +387,23 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
     );
   };
 
+  const retryGithub = () => {
+    if (!stalled || !retryTarget || publishToGithub.isPending) return;
+    const id = crypto.randomUUID();
+    setOpId(id);
+    setProgress((cur) => ({ ...cur, githubRepo: undefined, push: undefined }));
+    publishToGithub.mutate(
+      {
+        opId: id,
+        path: stalled.project.path,
+        owner: retryTarget.owner,
+        name: retryTarget.name,
+        isPrivate: retryTarget.private,
+      },
+      { onSuccess: () => succeed(stalled.project) },
+    );
+  };
+
   const browseNpRepo = async () => {
     try {
       const picked = await open({
@@ -288,11 +424,15 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
         <span className="flex items-baseline justify-between gap-3">
           <span>Add project</span>
           <span className="text-xs font-normal tracking-normal text-ink-dim">
-            {asFolder
-              ? "Local folder"
-              : step === 1
-                ? "Step 1 of 2 · Repository"
-                : "Step 2 of 2 · Thoughts"}
+            {stalled
+              ? `${displayLabel} · local only`
+              : createProject.isPending
+                ? `Creating ${displayLabel}`
+                : asFolder
+                  ? "Local folder"
+                  : step === 1
+                    ? "Step 1 of 2 · Repository"
+                    : "Step 2 of 2 · Thoughts"}
           </span>
         </span>
       }
@@ -308,13 +448,22 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
           }
         }}
       >
-        {step === 1 && (
+        {!busyPanel && step === 1 && (
           <>
             <RepoSourcePicker
               value={source}
               onChange={setSource}
-              modes={["clone", "disk"]}
+              modes={["clone", "disk", "create"]}
               disabled={pending}
+              createSlot={
+                <CreateProjectFields
+                  value={spec}
+                  onChange={setSpec}
+                  owners={ownersState}
+                  effectiveOwner={effectiveOwner}
+                  disabled={pending}
+                />
+              }
               diskLabel={asFolder ? "Folder" : "Repository or folder"}
               diskBrowseTitle="Select a repository or folder"
               diskPlaceholder="/path/to/repo-or-folder"
@@ -373,19 +522,34 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
           </>
         )}
 
-        {step === 2 && (
+        {!busyPanel && step === 2 && (
           <div className="space-y-4">
             <div className="rounded-md border border-edge bg-panel-2/40 px-3.5 py-3">
               <div className="flex items-center gap-2.5">
                 <RepoAvatar
                   source={source.mode === "clone" ? source.url.trim() : null}
-                  name={repoLabel(source)}
+                  name={displayLabel}
                   size={24}
                 />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
-                  {repoLabel(source)}
+                  {displayLabel}
                 </span>
+                {isCreate && <Badge tone="dim">new</Badge>}
               </div>
+              {githubTarget && (
+                <>
+                  <div className="my-1 ml-3 h-3 w-px bg-edge" />
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-6 w-6 items-center justify-center text-ink-dim">
+                      <UploadCloudIcon size={16} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">
+                      {githubTarget.owner}/{githubTarget.name}
+                    </span>
+                    <Badge tone="dim">{githubTarget.private ? "private" : "public"}</Badge>
+                  </div>
+                </>
+              )}
               {previewPath && (
                 <>
                   <div className="my-1 ml-3 h-3 w-px bg-edge" />
@@ -539,18 +703,100 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
           </div>
         )}
 
-        {error != null && (
+        {!busyPanel && error != null && (
           <ErrorNote
             error={error}
             onDismiss={() => {
               clone.reset();
               importProject.reset();
               importFolder.reset();
+              createProject.reset();
             }}
           />
         )}
 
-        <div className="flex justify-end gap-2 pt-1">
+        {busyPanel && (
+          <div className="space-y-4">
+            <CreateProgressPanel
+              progress={progress}
+              withGithub={githubTarget !== null || stalled !== null}
+            />
+            {stalled ? (
+              <>
+                <ErrorNote error={stalled.githubError} />
+                {publishToGithub.error != null && (
+                  <ErrorNote
+                    error={publishToGithub.error}
+                    onDismiss={() => publishToGithub.reset()}
+                  />
+                )}
+                <p className="text-xs leading-relaxed text-ink-dim">
+                  The project is added and usable — only the GitHub step is outstanding.
+                </p>
+                <div className="flex items-end gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Field label="Owner">
+                      <DropdownSelect
+                        aria-label="Retry owner"
+                        value={retry.owner ?? ""}
+                        onChange={(v) => setRetry((cur) => ({ ...cur, owner: v }))}
+                        disabled={publishToGithub.isPending}
+                        options={ownerList.map((o) => ({
+                          value: o.login,
+                          label: o.login,
+                          group: o.kind === "user" ? "Your account" : "Organizations",
+                        }))}
+                      />
+                    </Field>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <Field label="Repository name">
+                      <TextInput
+                        value={retry.name}
+                        onChange={(e) => setRetry((cur) => ({ ...cur, name: e.target.value }))}
+                        spellCheck={false}
+                        disabled={publishToGithub.isPending}
+                        className="font-mono text-xs"
+                      />
+                    </Field>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button
+                    type="button"
+                    disabled={publishToGithub.isPending}
+                    onClick={() => succeed(stalled.project)}
+                  >
+                    Open project
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    busy={publishToGithub.isPending}
+                    disabled={retryTarget === null}
+                    onClick={retryGithub}
+                  >
+                    Try GitHub again
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs leading-relaxed text-ink-dim">
+                  Everything up to this point is already on disk. Closing now leaves the repository
+                  where it is.
+                </p>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button type="button" variant="primary" busy disabled>
+                    {submitBusy}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {!busyPanel && <div className="flex justify-end gap-2 pt-1">
           {step === 1 ? (
             <>
               <Button type="button" onClick={close} disabled={pending}>
@@ -575,7 +821,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
               </Button>
             </>
           )}
-        </div>
+        </div>}
       </form>
     </Dialog>
   );

@@ -37,6 +37,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::projects::import_project,
             commands::projects::import_local_folder,
             commands::projects::clone_project,
+            commands::projects::create_project,
+            commands::projects::list_github_owners,
+            commands::projects::publish_project_to_github,
             commands::projects::remove_project,
             commands::projects::reorder_projects,
             commands::projects::list_recent_repos,
@@ -191,6 +194,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             events::ConfigChanged,
+            events::ProjectCreateProgress,
             events::OmarchyThemeChanged,
             events::BinariesChanged,
             events::ThoughtsIndexUpdated,

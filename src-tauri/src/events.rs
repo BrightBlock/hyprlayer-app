@@ -55,5 +55,34 @@ pub struct ScriptRunChanged {
     pub port: Option<u16>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CreateStep {
+    Folder,
+    Repository,
+    Commit,
+    GithubRepo,
+    Push,
+    Thoughts,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum StepStatus {
+    Running,
+    Done,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCreateProgress {
+    pub op_id: String,
+    pub step: CreateStep,
+    pub status: StepStatus,
+    pub detail: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct QuitRequested;

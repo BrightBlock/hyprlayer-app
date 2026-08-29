@@ -11,6 +11,9 @@ export const commands = {
 	importProject: (path: string, branch: string | null, directoryName: string | null, thoughtsDir: string | null, profile: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("import_project", { path, branch, directoryName, thoughtsDir, profile, bootstrapUser })),
 	importLocalFolder: (path: string, directoryName: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("import_local_folder", { path, directoryName })),
 	cloneProject: (url: string, location: string | null, name: string | null, thoughtsDir: string | null, profile: string | null, bootstrapUser: string | null) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, location, name, thoughtsDir, profile, bootstrapUser })),
+	createProject: (req: CreateProjectRequest) => typedError<CreateProjectOutcome, AppError>(__TAURI_INVOKE("create_project", { req })),
+	listGithubOwners: () => typedError<GithubOwners, AppError>(__TAURI_INVOKE("list_github_owners")),
+	publishProjectToGithub: (opId: string, path: string, owner: string, name: string, isPrivate: boolean) => typedError<string, AppError>(__TAURI_INVOKE("publish_project_to_github", { opId, path, owner, name, isPrivate })),
 	removeProject: (path: string, deleteFiles: boolean) => typedError<null, AppError>(__TAURI_INVOKE("remove_project", { path, deleteFiles })),
 	reorderProjects: (paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("reorder_projects", { paths })),
 	listRecentRepos: () => typedError<GithubRepo[], AppError>(__TAURI_INVOKE("list_recent_repos")),
@@ -202,6 +205,7 @@ export const events = {
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
 	omarchyThemeChanged: makeEvent<OmarchyThemeChanged>("omarchy-theme-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
+	projectCreateProgress: makeEvent<ProjectCreateProgress>("project-create-progress"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
@@ -552,6 +556,26 @@ export type CreateDocInput = {
 	tags?: string[],
 };
 
+export type CreateProjectOutcome = {
+	project: Project,
+	githubUrl: string | null,
+	githubError: AppError | null,
+};
+
+export type CreateProjectRequest = {
+	opId: string,
+	name: string,
+	location: string | null,
+	branch: string | null,
+	scaffold: Scaffold,
+	github: GithubTarget | null,
+	thoughtsDir: string | null,
+	profile: string | null,
+	bootstrapUser: string | null,
+};
+
+export type CreateStep = "folder" | "repository" | "commit" | "githubRepo" | "push" | "thoughts";
+
 export type CustomPrompt = {
 	id?: string,
 	name?: string,
@@ -661,6 +685,15 @@ export type GitSettings = {
 	pruneIgnoredOnArchive?: boolean,
 };
 
+export type GithubOwner = {
+	login: string,
+	kind: GithubOwnerKind,
+};
+
+export type GithubOwnerKind = "user" | "organization";
+
+export type GithubOwners = { state: "signedOut" } | { state: "unavailable"; message: string } | { state: "ready"; owners: GithubOwner[] };
+
 export type GithubRepo = {
 	nameWithOwner: string,
 	description?: string | null,
@@ -668,6 +701,14 @@ export type GithubRepo = {
 	pushedAt: string | null,
 	private: boolean,
 };
+
+export type GithubTarget = {
+	owner: string,
+	name: string,
+	private: boolean,
+};
+
+export type GitignoreTemplate = "node" | "rust" | "python" | "go";
 
 export type Harness = "claude" | "opencode" | "codex";
 
@@ -816,6 +857,13 @@ export type Project = {
 	source: ProjectSource,
 };
 
+export type ProjectCreateProgress = {
+	opId: string,
+	step: CreateStep,
+	status: StepStatus,
+	detail: string | null,
+};
+
 export type ProjectDetail = {
 	project: Project,
 	storage: StorageInfo | null,
@@ -880,6 +928,11 @@ export type RewindResult = {
 };
 
 export type RunPhase = "running" | "passed" | "failed";
+
+export type Scaffold = {
+	readme: boolean,
+	gitignore: GitignoreTemplate | null,
+};
 
 export type SchemaFieldInfo = {
 	name: string,
@@ -978,6 +1031,8 @@ export type StartedSession = {
 	session: Session,
 	prompt: string,
 };
+
+export type StepStatus = "running" | "done" | "failed" | "skipped";
 
 export type StorageInfo = {
 	backend: string,

@@ -23,6 +23,7 @@ type Props = {
   diskLabel?: string;
   diskBrowseTitle?: string;
   diskPlaceholder?: string;
+  createSlot?: ReactNode;
 };
 
 const MODE_LABELS: Record<RepoSource["mode"], string> = {
@@ -43,6 +44,7 @@ export function RepoSourcePicker({
   diskLabel = "Local repository",
   diskBrowseTitle = "Select a git repository",
   diskPlaceholder = "/path/to/your/repo",
+  createSlot,
 }: Props) {
   const recents = useRecentRepos(showRecents && value.mode === "clone");
 
@@ -161,7 +163,9 @@ export function RepoSourcePicker({
         </Field>
       )}
 
-      {value.mode === "create" && (
+      {value.mode === "create" && createSlot}
+
+      {value.mode === "create" && !createSlot && (
         <Field label="New repository location">
           <div className="flex gap-2">
             <TextInput

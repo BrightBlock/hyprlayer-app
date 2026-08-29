@@ -976,6 +976,27 @@ export function CheckIcon({ size = 13, strokeWidth = 1.8, className }: IconProps
   );
 }
 
+export function UploadCloudIcon({ size = 16, strokeWidth = 1.7, className }: IconProps) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M6 15.5a4.5 4.5 0 0 1 .6-8.96 5 5 0 0 1 9.5-.9A4.25 4.25 0 0 1 18 15.5"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 20v-8.5M12 11.5 9.2 14.3M12 11.5l2.8 2.8"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function GlobeIcon({ size = 13, strokeWidth = 1.5, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>

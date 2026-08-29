@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RepoPathStatus, ThoughtsProfile } from "@/lib/bindings";
+import type { GithubOwner, RepoPathStatus, ThoughtsProfile } from "@/lib/bindings";
 import { AddProjectDialog } from "./AddProjectDialog";
 
 const q = vi.hoisted(() => ({
@@ -15,6 +15,9 @@ const q = vi.hoisted(() => ({
   useRecentRepos: vi.fn(),
   useThoughtsProfiles: vi.fn(),
   useCreateThoughtsProfile: vi.fn(),
+  useCreateProject: vi.fn(),
+  usePublishProjectToGithub: vi.fn(),
+  useGithubOwners: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/useDebounced", () => ({ useDebounced: (v: unknown) => v }));
@@ -23,6 +26,9 @@ vi.mock("@tauri-apps/api/path", () => ({
   join: (...p: string[]) => Promise.resolve(p.join("/")),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: () => Promise.resolve(() => {}),
+}));
 
 afterEach(cleanup);
 
@@ -43,11 +49,14 @@ const defaultProfile: ThoughtsProfile = {
 function setupHooks(
   profiles: ThoughtsProfile[] = [defaultProfile],
   configState: "ok" | "missing" = "ok",
+  owners: GithubOwner[] = [],
 ) {
   const clone = mutation();
   const importProject = mutation();
   const importFolder = mutation();
   const createProfile = mutation();
+  const createProject = mutation();
+  const publish = mutation();
   q.useBootstrap.mockReturnValue({
     data: { config: { state: configState }, settings: { reposRoot: "/repos" } },
   });
@@ -59,7 +68,10 @@ function setupHooks(
   q.useRecentRepos.mockReturnValue({ data: [], isLoading: false });
   q.useThoughtsProfiles.mockReturnValue({ data: profiles, isLoading: false, error: null });
   q.useCreateThoughtsProfile.mockReturnValue(createProfile);
-  return { clone, importProject, importFolder, createProfile };
+  q.useCreateProject.mockReturnValue(createProject);
+  q.usePublishProjectToGithub.mockReturnValue(publish);
+  q.useGithubOwners.mockReturnValue({ data: owners, isLoading: false, isError: false });
+  return { clone, importProject, importFolder, createProfile, createProject, publish };
 }
 
 const next = () => fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -297,5 +309,170 @@ describe("AddProjectDialog thoughts step", () => {
     );
     expect(screen.queryByLabelText("Profile name")).toBeNull();
     expect(submit.disabled).toBe(false);
+  });
+});
+
+describe("AddProjectDialog · create new", () => {
+  const owners: GithubOwner[] = [
+    { login: "jane", kind: "user" },
+    { login: "acme", kind: "organization" },
+  ];
+
+  function setupCreate(withOwners: GithubOwner[] = owners) {
+    const hooks = setupHooks([defaultProfile], "ok", withOwners);
+    render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create new" }));
+    fireEvent.change(screen.getByPlaceholderText("my-project"), {
+      target: { value: "aurora-api" },
+    });
+    return hooks;
+  }
+
+  it("creates the repo locally and on GitHub under the chosen org", () => {
+    const { createProject } = setupCreate();
+    fireEvent.click(screen.getByRole("switch", { name: ".gitignore" }));
+    pick("Gitignore template", "Rust");
+    pick("Owner", "acme");
+    next();
+    expect(screen.getByText("acme/aurora-api")).toBeDefined();
+    expect(screen.getByText("private")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(createProject.mutate).toHaveBeenCalledWith(
+      {
+        opId: expect.any(String),
+        name: "aurora-api",
+        location: "/repos",
+        branch: "main",
+        scaffold: { readme: true, gitignore: "rust" },
+        github: { owner: "acme", name: "aurora-api", private: true },
+        thoughtsDir: null,
+        profile: null,
+        bootstrapUser: null,
+      },
+      expect.anything(),
+    );
+  });
+
+  it("still creates the project locally when gh has no signed-in account", () => {
+    const { createProject } = setupCreate([]);
+    expect(screen.getByText(/gh auth login/)).toBeDefined();
+    next();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(createProject.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ github: null }),
+      expect.anything(),
+    );
+  });
+
+  it("keeps the project and offers a retry when the GitHub step fails", () => {
+    const { createProject, publish } = setupCreate();
+    const project = { path: "/repos/aurora-api", mappedName: "aurora-api" };
+    createProject.mutate.mockImplementation(
+      (_args: unknown, opts?: { onSuccess?: (r: unknown) => void }) =>
+        opts?.onSuccess?.({
+          project,
+          githubUrl: null,
+          githubError: { code: "gh", message: "Name already exists", remedy: "Pick another name." },
+        }),
+    );
+    next();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    expect(screen.getByText("Name already exists")).toBeDefined();
+    expect(screen.getByText("Pick another name.")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Open project" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try GitHub again" }));
+    expect(publish.mutate).toHaveBeenCalledWith(
+      {
+        opId: expect.any(String),
+        path: "/repos/aurora-api",
+        owner: "jane",
+        name: "aurora-api",
+        isPrivate: true,
+      },
+      expect.anything(),
+    );
+  });
+
+  it("retries GitHub under a corrected name after the first one was taken", () => {
+    const { createProject, publish } = setupCreate();
+    const project = { path: "/repos/aurora-api", mappedName: "aurora-api" };
+    createProject.mutate.mockImplementation(
+      (_args: unknown, opts?: { onSuccess?: (r: unknown) => void }) =>
+        opts?.onSuccess?.({
+          project,
+          githubUrl: null,
+          githubError: { code: "github_name_taken", message: "Name already exists", remedy: null },
+        }),
+    );
+    next();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    fireEvent.change(screen.getByLabelText("Repository name"), {
+      target: { value: "aurora-api-2" },
+    });
+    pick("Retry owner", "acme");
+    fireEvent.click(screen.getByRole("button", { name: "Try GitHub again" }));
+    expect(publish.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "acme", name: "aurora-api-2" }),
+      expect.anything(),
+    );
+  });
+
+  it("will not advance past the owner list while it is still loading", () => {
+    setupHooks([defaultProfile], "ok", []);
+    q.useGithubOwners.mockReturnValue({ data: undefined, isLoading: true, isError: false });
+    render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create new" }));
+    fireEvent.change(screen.getByPlaceholderText("my-project"), {
+      target: { value: "aurora-api" },
+    });
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("says GitHub is unreachable rather than claiming the user is signed out", () => {
+    setupHooks([defaultProfile], "ok", []);
+    q.useGithubOwners.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+    render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create new" }));
+    expect(screen.getByText(/could not be reached/)).toBeDefined();
+    expect(screen.queryByText(/gh auth login/)).toBeNull();
+  });
+
+  it("names the thoughts folder after the project", () => {
+    setupCreate();
+    next();
+    expect(screen.getByText("~/thoughts/repos/aurora-api/")).toBeDefined();
+  });
+  it("names the remote the way GitHub will, and says so", () => {
+    const { createProject } = setupCreate();
+    fireEvent.change(screen.getByPlaceholderText("my-project"), {
+      target: { value: "Aurora API!" },
+    });
+    expect(screen.getByText("jane/Aurora-API")).toBeDefined();
+    expect(screen.getByText(/GitHub only allows/)).toBeDefined();
+    next();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(createProject.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Aurora API!",
+        github: { owner: "jane", name: "Aurora-API", private: true },
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("refuses to name a GitHub repo after an unusable project name", () => {
+    const { createProject } = setupCreate();
+    fireEvent.change(screen.getByPlaceholderText("my-project"), { target: { value: "!!!" } });
+    expect(screen.getByText(/can't name a repository after/)).toBeDefined();
+    next();
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(createProject.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ github: null }),
+      expect.anything(),
+    );
   });
 });

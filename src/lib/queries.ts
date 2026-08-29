@@ -11,6 +11,7 @@ import {
   type CliInstallMethodId,
   type CreateDocInput,
   type FmPatchDto,
+  type CreateProjectRequest,
   type MergeMethod,
   type Project,
   type ScriptKind,
@@ -230,6 +231,53 @@ export function useCloneProject() {
           args.thoughtsDir,
           args.profile,
           args.bootstrapUser,
+        ),
+      ),
+    onSettled: invalidateProjects,
+  });
+}
+
+export function useCreateProject() {
+  return useMutation({
+    mutationFn: (req: CreateProjectRequest) => unwrap(commands.createProject(req)),
+    onSettled: invalidateProjects,
+  });
+}
+
+// `unavailable` is thrown rather than returned so react-query retries it and
+// never caches it as an answer — a transient `gh` failure that resolved to a
+// value would read as "signed out" for the whole staleTime.
+export function useGithubOwners(enabled = true) {
+  return useQuery({
+    queryKey: ["github-owners"],
+    queryFn: async () => {
+      const result = await unwrap(commands.listGithubOwners());
+      if (result.state === "unavailable") {
+        throw new Error(result.message);
+      }
+      return result.state === "ready" ? result.owners : [];
+    },
+    enabled,
+    staleTime: 10 * 60_000,
+  });
+}
+
+export function usePublishProjectToGithub() {
+  return useMutation({
+    mutationFn: (args: {
+      opId: string;
+      path: string;
+      owner: string;
+      name: string;
+      isPrivate: boolean;
+    }) =>
+      unwrap(
+        commands.publishProjectToGithub(
+          args.opId,
+          args.path,
+          args.owner,
+          args.name,
+          args.isPrivate,
         ),
       ),
     onSettled: invalidateProjects,

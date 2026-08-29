@@ -11,12 +11,13 @@ use hyprlayer_core::store::{NewProject, ProjectSource};
 use hyprlayer_core::thoughts_repo::{classify_root, scaffold as scaffold_thoughts_root, RootState};
 use hyprlayer_core::worktree::thoughts_links;
 use hyprlayer_core::CoreError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri_specta::Event;
 
 use super::{blocking, db_task};
 use crate::error::{AppError, CmdResult};
+use crate::events::{CreateStep, ProjectCreateProgress, StepStatus};
 use crate::settings::AppSettings;
 use crate::state::AppState;
 
@@ -292,14 +293,14 @@ async fn ensure_config(state: &AppState, bootstrap_user: Option<String>) -> CmdR
 
 async fn repos_root(state: &AppState, location: Option<&str>) -> PathBuf {
     if let Some(l) = location.map(str::trim).filter(|l| !l.is_empty()) {
-        return PathBuf::from(l);
+        return repos::expand_user_path(l);
     }
     state
         .settings
         .get()
         .await
         .repos_root
-        .map(PathBuf::from)
+        .map(|r| repos::expand_user_path(&r))
         .unwrap_or_else(repos::default_repos_root)
 }
 
@@ -316,9 +317,26 @@ fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> St
         })
 }
 
-async fn remove_dir_all_bg(path: &Path) {
-    let path = path.to_path_buf();
-    let _ = blocking("remove_dir", move || std::fs::remove_dir_all(path)).await;
+async fn remove_dir_all_bg(path: &Path) -> Result<(), String> {
+    let owned = path.to_path_buf();
+    match blocking("remove_dir", move || std::fs::remove_dir_all(owned)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(e) => Err(e.message),
+    }
+}
+
+// A failed rollback is the difference between "try again" and "every retry now
+// dies on repo_exists", so it has to reach the user attached to whatever error
+// triggered the rollback.
+async fn rollback_dir(path: &Path, mut err: AppError) -> AppError {
+    if let Err(reason) = remove_dir_all_bg(path).await {
+        err.remedy = Some(format!(
+            "{} could not be cleaned up ({reason}). Remove it manually before trying again.",
+            path.display()
+        ));
+    }
+    err
 }
 
 #[derive(Clone, Copy, Default)]
@@ -342,10 +360,12 @@ async fn register_repo(
         .thoughts_init(repo, thoughts.dir.unwrap_or(name), thoughts.profile)
         .await
     {
-        if owned {
-            remove_dir_all_bg(repo).await;
-        }
-        return Err(AppError::from(e));
+        let err = AppError::from(e);
+        return Err(if owned {
+            rollback_dir(repo, err).await
+        } else {
+            err
+        });
     }
 
     let origin = repos::origin_url(git, repo).await;
@@ -357,12 +377,12 @@ async fn register_repo(
         source: kind,
     };
     if let Err(e) = db_task(state.db.clone(), move |db| db.insert_project(row)).await {
-        if owned {
-            remove_dir_all_bg(repo).await;
+        return Err(if owned {
+            rollback_dir(repo, e).await
         } else {
             let _ = HyprCli::new(&state.binaries).thoughts_uninit(repo).await;
-        }
-        return Err(e);
+            e
+        });
     }
 
     state.config.invalidate().await;
@@ -370,6 +390,35 @@ async fn register_repo(
     crate::rebuild_thoughts_index(app.clone()).await;
 
     find_project(&registry_projects(state).await, &path)
+}
+
+// The project row is written before a remote exists, so publishing has to fold
+// the new origin back into it. `insert_project` upserts on path.
+async fn sync_origin(state: &AppState, git: &Path, repo: &Path) -> CmdResult<Option<Project>> {
+    let path = repo.display().to_string();
+    let Some(record) = db_task(state.db.clone(), {
+        let key = path.clone();
+        move |db| db.get_project_record(&key)
+    })
+    .await?
+    else {
+        return Ok(None);
+    };
+    let origin = repos::origin_url(git, repo).await;
+    if origin == record.origin_url {
+        return Ok(None);
+    }
+    db_task(state.db.clone(), {
+        let row = NewProject {
+            path: record.path,
+            name: record.name,
+            origin_url: origin,
+            source: record.source,
+        };
+        move |db| db.insert_project(row)
+    })
+    .await?;
+    Ok(find_project(&registry_projects(state).await, &path).ok())
 }
 
 async fn provision_project(
@@ -493,11 +542,10 @@ pub async fn import_project(
         Err(e) => Err(e),
     };
 
-    if result.is_err() && created {
-        remove_dir_all_bg(&repo.join(".git")).await;
+    match result {
+        Err(e) if created => Err(rollback_dir(&repo.join(".git"), e).await),
+        other => other,
     }
-
-    result
 }
 
 #[tauri::command]
@@ -627,6 +675,430 @@ pub async fn clone_project(
     .await
 }
 
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubTarget {
+    pub owner: String,
+    pub name: String,
+    pub private: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProjectRequest {
+    pub op_id: String,
+    pub name: String,
+    pub location: Option<String>,
+    pub branch: Option<String>,
+    pub scaffold: repos::Scaffold,
+    pub github: Option<GithubTarget>,
+    pub thoughts_dir: Option<String>,
+    pub profile: Option<String>,
+    pub bootstrap_user: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProjectOutcome {
+    pub project: Project,
+    pub github_url: Option<String>,
+    pub github_error: Option<AppError>,
+}
+
+// Progress is a broadcast event, so every emission carries the id of the call
+// that produced it: a second create (or a publish retry) running concurrently
+// would otherwise drive whichever panel happens to be listening.
+struct Progress<'a> {
+    app: &'a tauri::AppHandle,
+    op_id: &'a str,
+}
+
+impl Progress<'_> {
+    fn emit(&self, step: CreateStep, status: StepStatus, detail: Option<&str>) {
+        let _ = ProjectCreateProgress {
+            op_id: self.op_id.to_string(),
+            step,
+            status,
+            detail: detail.map(str::to_string),
+        }
+        .emit(self.app);
+    }
+}
+
+// Three answers, not two: conflating "gh failed" with "you are not signed in"
+// is what silently drops the GitHub half of a create and then caches the lie.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "state"
+)]
+pub enum GithubOwners {
+    SignedOut,
+    Unavailable { message: String },
+    Ready { owners: Vec<repos::GithubOwner> },
+}
+
+fn validate_project_name(name: &str) -> CmdResult<()> {
+    if name.is_empty() {
+        return Err(AppError {
+            code: "invalid_name".into(),
+            message: "A project name is required.".into(),
+            remedy: None,
+        });
+    }
+    if name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err(AppError {
+            code: "invalid_name".into(),
+            message: format!("`{name}` can't be used as a folder name."),
+            remedy: Some("Use a plain name, with no slashes.".into()),
+        });
+    }
+    Ok(())
+}
+
+fn github_error(failure: repos::GithubFailure) -> AppError {
+    AppError {
+        code: failure.code.into(),
+        message: failure.message,
+        remedy: failure.remedy,
+    }
+}
+
+fn exec_stderr(err: &CoreError) -> String {
+    match err {
+        CoreError::Exec { stderr_tail, .. } => stderr_tail.clone(),
+        other => other.to_string(),
+    }
+}
+
+async fn publish_to_github(
+    progress: &Progress<'_>,
+    state: &AppState,
+    git: &Path,
+    repo: &Path,
+    branch: &str,
+    target: &GithubTarget,
+) -> CmdResult<String> {
+    let fail = |step: CreateStep| {
+        progress.emit(step, StepStatus::Failed, None);
+        if matches!(step, CreateStep::GithubRepo) {
+            progress.emit(CreateStep::Push, StepStatus::Skipped, None);
+        }
+    };
+
+    let owner = target.owner.trim().to_string();
+    let name = repos::github_repo_name(&target.name);
+    if owner.is_empty() || repos::is_reserved_repo_name(&name) {
+        return Err(AppError {
+            code: "github_name_invalid".into(),
+            message: format!(
+                "`{}` can't be used as a GitHub repository name.",
+                target.name
+            ),
+            remedy: Some("Use letters, digits, dots, dashes or underscores.".into()),
+        });
+    }
+
+    progress.emit(CreateStep::GithubRepo, StepStatus::Running, None);
+
+    let origin = repos::origin_url(git, repo).await;
+    let url = match repos::plan_publish(origin.as_deref(), &owner, &name) {
+        repos::PublishPlan::PushOnly { url } => url,
+        repos::PublishPlan::Conflict { origin } => {
+            fail(CreateStep::GithubRepo);
+            return Err(AppError {
+                code: "origin_exists".into(),
+                message: format!("This repository already points at {origin}."),
+                remedy: Some(
+                    "Remove or repoint the `origin` remote first, then publish again.".into(),
+                ),
+            });
+        }
+        repos::PublishPlan::Create => {
+            let gh = match state.binaries.require(BinaryKind::Gh).await {
+                Ok(gh) => gh,
+                Err(e) => {
+                    fail(CreateStep::GithubRepo);
+                    return Err(AppError::from(e));
+                }
+            };
+            match repos::create_github_repo(&gh, repo, &owner, &name, target.private).await {
+                Ok(url) => url,
+                Err(e) => {
+                    fail(CreateStep::GithubRepo);
+                    return Err(github_error(repos::classify_github_failure(
+                        &exec_stderr(&e),
+                        &owner,
+                        &name,
+                    )));
+                }
+            }
+        }
+    };
+    progress.emit(CreateStep::GithubRepo, StepStatus::Done, Some(&url));
+
+    progress.emit(CreateStep::Push, StepStatus::Running, None);
+    if let Err(e) = repos::push_upstream(git, repo, branch).await {
+        fail(CreateStep::Push);
+        return Err(github_error(repos::classify_push_failure(&exec_stderr(&e))));
+    }
+    progress.emit(CreateStep::Push, StepStatus::Done, Some(branch));
+    Ok(url)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn create_project(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    req: CreateProjectRequest,
+) -> CmdResult<CreateProjectOutcome> {
+    let CreateProjectRequest {
+        op_id,
+        name,
+        location,
+        branch,
+        scaffold,
+        github,
+        thoughts_dir,
+        profile,
+        bootstrap_user,
+    } = req;
+    let progress = Progress {
+        app: &app,
+        op_id: &op_id,
+    };
+    let name = name.trim().to_string();
+    validate_project_name(&name)?;
+    ensure_config(&state, bootstrap_user).await?;
+
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+
+    let dest = repos_root(&state, location.as_deref()).await.join(&name);
+    let branch = branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .unwrap_or("main")
+        .to_string();
+
+    // `create_dir` is the claim: it fails with AlreadyExists rather than
+    // adopting a directory someone else owns, which matters because everything
+    // below stages the whole tree, may push it, and deletes it on failure.
+    progress.emit(CreateStep::Folder, StepStatus::Running, None);
+    let claimed = blocking("create_project_dir", {
+        let dest = dest.clone();
+        move || {
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::create_dir(&dest)
+        }
+    })
+    .await?;
+    if let Err(e) = claimed {
+        progress.emit(CreateStep::Folder, StepStatus::Failed, None);
+        return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
+            AppError {
+                code: "repo_exists".into(),
+                message: format!("{} already exists", dest.display()),
+                remedy: Some("Choose a different name or location.".into()),
+            }
+        } else {
+            AppError::from(CoreError::Io(e))
+        });
+    }
+    progress.emit(
+        CreateStep::Folder,
+        StepStatus::Done,
+        Some(&dest.display().to_string()),
+    );
+
+    progress.emit(CreateStep::Repository, StepStatus::Running, None);
+    if let Err(e) = repos::init_repo(&git, &dest, &branch).await {
+        progress.emit(CreateStep::Repository, StepStatus::Failed, None);
+        return Err(rollback_dir(&dest, AppError::from(e)).await);
+    }
+    progress.emit(CreateStep::Repository, StepStatus::Done, Some(&branch));
+
+    progress.emit(CreateStep::Commit, StepStatus::Running, None);
+    let commit = async {
+        let written = blocking("scaffold_project", {
+            let dest = dest.clone();
+            let name = name.clone();
+            move || repos::write_scaffold(&dest, &name, &scaffold)
+        })
+        .await?
+        .map_err(AppError::from)?;
+        repos::stage_all(&git, &dest)
+            .await
+            .map_err(AppError::from)?;
+        repos::commit_empty_initial(&git, &dest)
+            .await
+            .map_err(AppError::from)?;
+        Ok::<Vec<String>, AppError>(written)
+    }
+    .await;
+    let written = match commit {
+        Ok(written) => written,
+        Err(e) => {
+            progress.emit(CreateStep::Commit, StepStatus::Failed, None);
+            return Err(rollback_dir(&dest, e).await);
+        }
+    };
+    let commit_detail = if written.is_empty() {
+        "empty initial commit".to_string()
+    } else {
+        written.join(" · ")
+    };
+    progress.emit(CreateStep::Commit, StepStatus::Done, Some(&commit_detail));
+
+    // Registration runs before publishing so its failure path is a clean
+    // rollback of a purely local repo. Publishing first would mean a failed
+    // register had to choose between deleting a pushed tree and stranding an
+    // unregistered one.
+    progress.emit(CreateStep::Thoughts, StepStatus::Running, None);
+    let thoughts = ThoughtsTarget {
+        dir: thoughts_dir.as_deref(),
+        profile: profile.as_deref(),
+    };
+    let project = match register_repo(
+        &app,
+        &state,
+        &git,
+        &dest,
+        &name,
+        thoughts,
+        ProjectSource::Clone,
+        true,
+    )
+    .await
+    {
+        Ok(project) => project,
+        Err(e) => {
+            progress.emit(CreateStep::Thoughts, StepStatus::Failed, None);
+            return Err(e);
+        }
+    };
+    progress.emit(
+        CreateStep::Thoughts,
+        StepStatus::Done,
+        Some(thoughts_dir.as_deref().unwrap_or(&name)),
+    );
+
+    let mut github_url = None;
+    let mut github_error = None;
+    match github.as_ref() {
+        Some(target) => {
+            match publish_to_github(&progress, &state, &git, &dest, &branch, target).await {
+                Ok(url) => github_url = Some(url),
+                Err(e) => github_error = Some(e),
+            }
+        }
+        None => {
+            progress.emit(CreateStep::GithubRepo, StepStatus::Skipped, None);
+            progress.emit(CreateStep::Push, StepStatus::Skipped, None);
+        }
+    }
+    // The project row was written before origin existed, so re-read it.
+    let project = match sync_origin(&state, &git, &dest).await {
+        Ok(Some(refreshed)) => refreshed,
+        _ => project,
+    };
+
+    Ok(CreateProjectOutcome {
+        project,
+        github_url,
+        github_error,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_github_owners(state: State<'_, AppState>) -> CmdResult<GithubOwners> {
+    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
+        return Ok(GithubOwners::SignedOut);
+    };
+    match repos::github_owners(&gh).await {
+        Ok(owners) => Ok(GithubOwners::Ready { owners }),
+        Err(e) => {
+            let detail = exec_stderr(&e);
+            if repos::is_github_auth_failure(&detail) {
+                return Ok(GithubOwners::SignedOut);
+            }
+            log::debug!("gh owners unavailable: {e}");
+            Ok(GithubOwners::Unavailable {
+                message: if detail.trim().is_empty() {
+                    "GitHub could not be reached.".to_string()
+                } else {
+                    detail
+                },
+            })
+        }
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn publish_project_to_github(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    op_id: String,
+    path: String,
+    owner: String,
+    name: String,
+    is_private: bool,
+) -> CmdResult<String> {
+    let progress = Progress {
+        app: &app,
+        op_id: &op_id,
+    };
+    let repo = PathBuf::from(&path);
+    if db_task(state.db.clone(), {
+        let key = path.clone();
+        move |db| db.get_project_record(&key)
+    })
+    .await?
+    .is_none()
+    {
+        return Err(AppError::project_not_found(&path));
+    }
+
+    let git = state
+        .binaries
+        .require(BinaryKind::Git)
+        .await
+        .map_err(AppError::from)?;
+    let branch =
+        hyprlayer_core::gitops::current_branch(&repo).unwrap_or_else(|| "main".to_string());
+
+    let published = publish_to_github(
+        &progress,
+        &state,
+        &git,
+        &repo,
+        &branch,
+        &GithubTarget {
+            owner,
+            name,
+            private: is_private,
+        },
+    )
+    .await;
+
+    // `gh repo create --remote origin` wires up the remote before the push runs,
+    // so a failed publish can still have changed origin. Record it either way,
+    // which is what makes the next retry a push rather than a re-create.
+    let _ = sync_origin(&state, &git, &repo).await;
+    published
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_project(
@@ -664,7 +1136,9 @@ pub async fn remove_project(
     db_task(state.db.clone(), move |db| db.delete_project(&path_for_db)).await?;
 
     if delete_files && repo.is_dir() {
-        remove_dir_all_bg(&repo).await;
+        if let Err(e) = remove_dir_all_bg(&repo).await {
+            log::warn!("could not delete {}: {e}", repo.display());
+        }
     }
 
     if git_backed {

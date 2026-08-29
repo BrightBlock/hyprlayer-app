@@ -121,7 +121,7 @@ pub fn current_branch(repo_path: &Path) -> Option<String> {
     head.shorthand().map(|s| s.to_string())
 }
 
-fn remote_to_web_url(raw: &str) -> Option<String> {
+pub fn remote_to_web_url(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let (host, path) = if let Some(rest) = raw
         .strip_prefix("ssh://")
