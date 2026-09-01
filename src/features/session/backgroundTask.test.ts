@@ -627,4 +627,31 @@ describe("backgroundTasksFromItems, fixture replay", () => {
     const afterRelaunch = replayFixture([...events, { kind: "relaunched" }]);
     expect(backgroundTasksFromItems(afterRelaunch)).toHaveLength(0);
   });
+
+  it("tracks an Agent spawn that omits run_in_background, and drops it on completion", () => {
+    const spawn = makeTool(
+      "Agent",
+      JSON.stringify({ description: "Adjudicate rewritten plan", prompt: "…" }),
+      "toolu_a",
+      { content: "Async agent launched successfully.", isError: false },
+    );
+    const tasks = backgroundTasksFromItems([spawn]);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].label).toBe("Adjudicate rewritten plan");
+
+    expect(
+      backgroundTasksFromItems([spawn, taskUpdate("a8097e4ed", "toolu_a", "completed")]),
+    ).toHaveLength(0);
+  });
+
+  it("ignores an Agent call that explicitly opts out of backgrounding", () => {
+    const sync = makeTool(
+      "Agent",
+      JSON.stringify({ description: "Write the PR body", run_in_background: false }),
+      "toolu_b",
+      { content: "## What problem was I solving?", isError: false },
+    );
+    expect(isBackgroundSpawn(sync)).toBe(false);
+    expect(backgroundTasksFromItems([sync])).toHaveLength(0);
+  });
 });

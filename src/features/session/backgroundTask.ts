@@ -34,8 +34,11 @@ function parseTaskIdFromSpawnResult(content: string): string | null {
 export function isBackgroundSpawn(item: TranscriptItem): boolean {
   if (item.kind !== "tool") return false;
   if (item.name === "Workflow") return true;
-  if (item.name !== "Bash") return false;
-  return parseToolInput(item.input)?.run_in_background === true;
+  const agent = item.name === "Agent" || item.name === "Task";
+  if (!agent && item.name !== "Bash") return false;
+  const background = parseToolInput(item.input)?.run_in_background;
+  // Agent backgrounds unless told not to; Bash is the other way round.
+  return agent ? background !== false : background === true;
 }
 
 export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTask[] {

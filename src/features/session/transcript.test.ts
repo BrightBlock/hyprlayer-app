@@ -472,6 +472,53 @@ describe("permission flow", () => {
     ).toBe(true);
   });
 
+  it("a parented assistantText or thinking after turnDone cannot re-raise `streaming`", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "agent1",
+      name: "Agent",
+      input: JSON.stringify({ description: "Adjudicate rewritten plan" }),
+      parentId: null,
+    });
+    view = reduceEvent(view, {
+      kind: "turnDone",
+      costUsd: null,
+      numTurns: 1,
+      contextTokens: null,
+    });
+    expect(view.streaming).toBe(false);
+
+    view = reduceEvent(view, {
+      kind: "assistantText",
+      text: "Now let me verify the backend claims.",
+      parentId: "agent1",
+    });
+    expect(view.streaming).toBe(false);
+
+    view = reduceEvent(view, { kind: "thinking", text: "checking the cites", parentId: "agent1" });
+    expect(view.streaming).toBe(false);
+    expect(isBusy(view)).toBe(false);
+  });
+
+  it("a foreground subagent's parented events keep a live turn streaming", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "toolUse",
+      id: "agent1",
+      name: "Agent",
+      input: JSON.stringify({ description: "Write the PR body", run_in_background: false }),
+      parentId: null,
+    });
+    expect(view.streaming).toBe(true);
+
+    view = reduceEvent(view, { kind: "assistantText", text: "sub answer", parentId: "agent1" });
+    expect(view.streaming).toBe(true);
+
+    view = reduceEvent(view, { kind: "thinking", text: "sub reasoning", parentId: "agent1" });
+    expect(view.streaming).toBe(true);
+  });
+
   it("resolvePermission marks the card, clears pending, and resumes", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, {

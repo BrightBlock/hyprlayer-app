@@ -397,7 +397,14 @@ function appended(
 
 
 export function reduceEvent(view: SessionView, event: SessionEvent): SessionView {
-  const next = reduceEventInner(view, event);
+  const inner = reduceEventInner(view, event);
+  // A background subagent's events keep arriving after the launching turn's
+  // own turnDone; letting one raise `streaming` pins the session at "working"
+  // from the moment its work stops until the next turn.
+  const next =
+    "parentId" in event && event.parentId && inner.streaming && !view.streaming
+      ? { ...inner, streaming: false }
+      : inner;
   if (next.state === "starting" && next.streaming) {
     return { ...next, state: "running" };
   }
@@ -576,7 +583,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           }),
           !event.parentId,
         ),
-        streaming: event.parentId ? view.streaming : true,
+        streaming: true,
       };
     }
 
@@ -587,7 +594,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           const items = view.items.slice();
           items[i] = { ...item, result: { content: event.content, isError: event.isError } };
           return event.parentId
-            ? { ...view, items, streaming: view.streaming }
+            ? { ...view, items }
             : settleAnsweredPrompt(view, items, item.name);
         }
       }
@@ -602,7 +609,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           result: { content: event.content, isError: event.isError },
           parentId: event.parentId,
         })),
-        streaming: event.parentId ? view.streaming : true,
+        streaming: true,
       };
     }
 

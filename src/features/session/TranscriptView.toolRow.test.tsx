@@ -70,3 +70,39 @@ describe("tool row with a file card", () => {
     expect(row.getAttribute("aria-expanded")).toBe("false");
   });
 });
+
+const asyncAgentSpawn: TranscriptItem = {
+  kind: "tool",
+  id: "a1",
+  toolUseId: "toolu_agent",
+  name: "Agent",
+  input: JSON.stringify({ description: "Map core PTY runtime" }),
+  result: { content: "Async agent launched successfully.", isError: false },
+  parentId: null,
+};
+
+const agentChildTool: TranscriptItem = {
+  kind: "tool",
+  id: "a1c",
+  toolUseId: "toolu_child",
+  name: "Read",
+  input: JSON.stringify({ file_path: "/repo/a.rs" }),
+  result: { content: "ok", isError: false },
+  parentId: "toolu_agent",
+};
+
+describe("a still-running background subagent row", () => {
+  it("shows working… while its background task is open, though the launch ack already resolved", () => {
+    renderTranscript([asyncAgentSpawn, agentChildTool]);
+    expect(screen.getByText(/working…/)).toBeTruthy();
+  });
+
+  it("stops showing working… once the completion notification arrives", () => {
+    renderTranscript([
+      asyncAgentSpawn,
+      agentChildTool,
+      { kind: "taskUpdate", id: "u1", taskId: "a1", toolUseId: "toolu_agent", status: "completed" },
+    ]);
+    expect(screen.queryByText(/working…/)).toBeNull();
+  });
+});

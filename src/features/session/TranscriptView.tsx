@@ -1,9 +1,12 @@
 import {
+  createContext,
   forwardRef,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type WheelEvent,
@@ -24,6 +27,7 @@ import {
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { stageLabel } from "@/lib/domain/stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
+import { backgroundTasksFromItems } from "./backgroundTask";
 import { AttachmentCards } from "./AttachmentCard";
 import { FileCard } from "./FileCard";
 import { PromptCard } from "./PromptCard";
@@ -305,13 +309,24 @@ const SkillBlock = memo(function SkillBlock({ name, body }: { name: string; body
   );
 });
 
+// A backgrounded spawn answers with a launch ack in milliseconds, so `result`
+// says nothing about whether its work is still going; only the open-task set does.
+const OpenBackgroundIds = createContext<ReadonlySet<string>>(new Set<string>());
+
+function useBackgroundRunning(toolUseId: string): boolean {
+  return useContext(OpenBackgroundIds).has(toolUseId);
+}
+
 function ToolStatusDot({
   result,
   busy,
+  running,
 }: {
   result: { isError: boolean } | null;
   busy: boolean;
+  running: boolean;
 }) {
+  if (running || (!result && busy)) return <Spinner size={12} />;
   if (result) {
     return (
       <span
@@ -320,7 +335,6 @@ function ToolStatusDot({
       />
     );
   }
-  if (busy) return <Spinner size={12} />;
   return <span className="h-2 w-2 shrink-0 rounded-full bg-ink-dim/50" aria-hidden="true" />;
 }
 
@@ -358,6 +372,7 @@ const ToolBlock = memo(function ToolBlock({
 }) {
   const [open, setOpen] = useState(false);
   const result = item.result;
+  const bgRunning = useBackgroundRunning(item.toolUseId);
   const isFileTool = toolFilePath(item.name, item.input) !== null;
   const isSkill = item.name === "Skill";
   const preview =
@@ -379,7 +394,7 @@ const ToolBlock = memo(function ToolBlock({
         }}
         className={`${STEP_ROW} cursor-pointer`}
       >
-        <ToolStatusDot result={result} busy={busy} />
+        <ToolStatusDot result={result} busy={busy} running={bgRunning} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">{item.name}</span>
         <ToolArg name={item.name} input={item.input} />
@@ -684,8 +699,11 @@ function toUnits(items: TranscriptItem[], hasChildren: (it: TranscriptItem) => b
 
 function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) {
   const [open, setOpen] = useState(false);
+  const openBg = useContext(OpenBackgroundIds);
   const tools = items.filter((i) => i.kind === "tool");
-  const running = busy && tools.some((t) => t.kind === "tool" && t.result === null);
+  const running = tools.some(
+    (t) => t.kind === "tool" && ((busy && t.result === null) || openBg.has(t.toolUseId)),
+  );
   const label =
     tools.length > 0
       ? `${tools.length} tool call${tools.length === 1 ? "" : "s"}`
@@ -792,11 +810,12 @@ function SubagentBlock({
   const summary = toolSummary(item.name, item.input);
   const toolCount = childItems.filter((c) => c.kind === "tool").length;
   const result = item.result;
-  const running = busy && result === null;
+  const bgRunning = useBackgroundRunning(item.toolUseId);
+  const running = bgRunning || (busy && result === null);
   return (
     <div className="text-xs">
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
-        <ToolStatusDot result={result} busy={busy} />
+        <ToolStatusDot result={result} busy={busy} running={running} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">
           {item.name === "Workflow" ? "Workflow" : "Subagent"}
@@ -1033,6 +1052,11 @@ export const TranscriptView = memo(
       [],
     );
 
+    const openBackgroundIds = useMemo(
+      () => new Set(backgroundTasksFromItems(items).map((t) => t.toolUseId)),
+      [items],
+    );
+
     const childrenByParent: ChildMap = new Map();
     for (const item of items) {
       const parent = parentIdOf(item);
@@ -1052,13 +1076,15 @@ export const TranscriptView = memo(
         className="-mt-9 min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pt-14 [overflow-anchor:none]"
       >
         <div ref={contentRef} className="mx-auto w-[90%]">
-          <ItemList
-            items={topLevel}
-            childrenByParent={childrenByParent}
-            busy={busy}
-            permission={permission}
-            prompt={prompt}
-          />
+          <OpenBackgroundIds.Provider value={openBackgroundIds}>
+            <ItemList
+              items={topLevel}
+              childrenByParent={childrenByParent}
+              busy={busy}
+              permission={permission}
+              prompt={prompt}
+            />
+          </OpenBackgroundIds.Provider>
           {connecting && (
             <div className="mt-3 flex items-center gap-2 text-sm text-ink-dim">
               <Spinner size={14} />
