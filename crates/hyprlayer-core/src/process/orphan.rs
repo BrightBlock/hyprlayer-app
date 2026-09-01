@@ -93,8 +93,13 @@ fn process_cmdline(pid: u32) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn process_cmdline(pid: u32) -> Option<String> {
+    // `-ww` is belt and braces, not a fix: BSD ps can wrap to the width of an
+    // attached terminal, and the recorded string ends in `--port <n>`, so a
+    // truncated line would fail the match. Measured on macOS 26.6.2 it makes no
+    // difference here — `output()` always pipes, and a 177-character command
+    // line came back whole either way, even under COLUMNS=40.
     let out = std::process::Command::new("/bin/ps")
-        .args(["-p", &pid.to_string(), "-o", "command="])
+        .args(["-ww", "-p", &pid.to_string(), "-o", "command="])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -213,6 +218,74 @@ mod tests {
             assert_eq!(reap_with(&file, |_| Some(live.clone()), kill), Some(4321));
         });
         assert_eq!(seen, vec![4321]);
+    }
+
+    // A version-manager shim and the install it execs into: different
+    // directories, same file name. The literal paths carry no meaning — the
+    // property under test is only that the process reports a path other than
+    // the one that was spawned, which is what any shim does. Found for real
+    // against a mise shim, where recording the spawned path matched nothing.
+    const SHIM_BIN: &str = "/opt/toolchain/shims/opencode";
+    const RESOLVED_BIN: &str = "/opt/toolchain/installs/opencode/1.2.3/opencode";
+    const PORT: u16 = 46603;
+
+    fn serve_args(port: u16) -> String {
+        format!("serve --hostname 127.0.0.1 --port {port}")
+    }
+
+    /// What `/proc/<pid>/cmdline` reports once the shim has exec'd, joined the
+    /// way `process_cmdline` joins it (trailing separator included).
+    fn live_cmdline(port: u16) -> String {
+        format!("{RESOLVED_BIN} {} ", serve_args(port))
+    }
+
+    /// What `OpenCodeServer::start` records: file name plus the spawned args.
+    fn recorded(bin: &str, port: u16) -> String {
+        let name = bin.rsplit('/').next().unwrap_or(bin);
+        format!("{name} {}", serve_args(port))
+    }
+
+    #[test]
+    fn matches_a_server_reached_through_a_shim() {
+        let dir = temp_dir("shim");
+        let file = dir.join("server.pid");
+        record(&file, 4321, &recorded(SHIM_BIN, PORT));
+        let seen = killed(|kill| {
+            assert_eq!(
+                reap_with(&file, |_| Some(live_cmdline(PORT)), kill),
+                Some(4321)
+            );
+        });
+        assert_eq!(seen, vec![4321]);
+    }
+
+    #[test]
+    fn an_absolute_spawned_path_would_not_have_matched() {
+        let dir = temp_dir("shim-regression");
+        let file = dir.join("server.pid");
+        // The old record: the path we spawned, which the shim exec'd away from.
+        record(&file, 4321, &format!("{SHIM_BIN} serve"));
+        let seen = killed(|kill| {
+            assert_eq!(reap_with(&file, |_| Some(live_cmdline(PORT)), kill), None);
+        });
+        assert!(
+            seen.is_empty(),
+            "documents the bug the file-name record fixes"
+        );
+    }
+
+    #[test]
+    fn the_port_keeps_a_different_server_from_matching() {
+        let dir = temp_dir("other-port");
+        let file = dir.join("server.pid");
+        record(&file, 4321, &recorded(SHIM_BIN, PORT));
+        let seen = killed(|kill| {
+            assert_eq!(
+                reap_with(&file, |_| Some(live_cmdline(PORT + 1)), kill),
+                None
+            );
+        });
+        assert!(seen.is_empty(), "a server on another port is not ours");
     }
 
     #[test]

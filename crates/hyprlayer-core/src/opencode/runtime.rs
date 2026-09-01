@@ -129,6 +129,20 @@ pub struct OpenCodeServer {
     _child: Mutex<crate::process::SupervisedChild>,
 }
 
+/// The string the reaper matches against the live process's command line.
+///
+/// Deliberately the binary's file name rather than `bin` itself: `bin` may be a
+/// version-manager shim that execs a different path, and the process then reports
+/// the path it exec'd into, so a record built from `bin` would never match. The
+/// args carry the port, which is what keeps the match specific to this server.
+fn orphan_program(bin: &Path, args: &[String]) -> String {
+    let name = bin
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("opencode");
+    format!("{name} {}", args.join(" "))
+}
+
 impl OpenCodeServer {
     async fn start(config: OpenCodeServerConfig) -> Result<Self, String> {
         let OpenCodeServerConfig {
@@ -143,21 +157,23 @@ impl OpenCodeServer {
         let base_url = format!("http://127.0.0.1:{port}");
         let _ = std::fs::create_dir_all(&data_dir);
 
+        let serve_args = [
+            "serve".to_string(),
+            "--hostname".to_string(),
+            "127.0.0.1".to_string(),
+            "--port".to_string(),
+            port.to_string(),
+        ];
+
         let mut cmd = Command::new(&bin);
         crate::process::appimage::scrub_tokio(&mut cmd);
-        cmd.args([
-            "serve",
-            "--hostname",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-        ])
-        .current_dir(&home)
-        .env("PATH", &path)
-        .env("XDG_DATA_HOME", &data_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        cmd.args(&serve_args)
+            .current_dir(&home)
+            .env("PATH", &path)
+            .env("XDG_DATA_HOME", &data_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         if let Some(content) = std::fs::read_to_string(&auth_file)
             .ok()
             .filter(|c| !c.trim().is_empty())
@@ -182,7 +198,7 @@ impl OpenCodeServer {
             .map_err(|e| format!("spawn `opencode serve`: {e}"))?;
 
         if let Some(pid) = child.id() {
-            crate::process::orphan::record(&pid_file, pid, &format!("{} serve", bin.display()));
+            crate::process::orphan::record(&pid_file, pid, &orphan_program(&bin, &serve_args));
         }
 
         let client = reqwest::Client::builder()
