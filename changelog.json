@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.7.4",
+      "date": "2026-09-01",
+      "summary": "Memory fixes: terminal buffers freed, orphaned OpenCode servers reaped, output backpressured.",
+      "notes": [
+        "Switching agent tabs or workstreams no longer leaves the old terminal's scrollback sitting in memory. The channel feeding a terminal outlives the view that shows it, so a closed terminal stayed reachable and kept filling a buffer nobody could see — roughly 9–15 MB per terminal once its 5,000-line scrollback filled up. Closing a terminal now releases the buffer, and writes to one that's already closed are dropped rather than accumulated.",
+        "An OpenCode server orphaned by a crash or a force-quit is now cleaned up on the next launch. Quitting normally always shut the server down, but a crash skipped that path and left `opencode serve` running indefinitely — three strays measured on one machine came to about 700 MB combined, alive for six to nine hours. The app now records its server and reaps it at startup, first confirming the live process still matches what it recorded so an unrelated process that reused the same pid is never touched.",
+        "A command that floods its output no longer grows an unbounded backlog in the background. Terminal output is capped at about 128 KB in flight, which lets the pty push back on the program the same way a real terminal would.",
+        "That orphan cleanup now also works on mise-managed installs and on macOS. It had identified the server by the exact path it launched, which never matches once a mise shim re-execs the real binary — so on those setups every orphan was skipped as an unrelated process. It now matches on the binary name and the port being served, so a plain `opencode` session, or a server on a different port, is still left alone."
+      ]
+    },
+    {
       "version": "0.7.3",
       "date": "2026-09-01",
       "summary": "Create new projects from the app, plus a fix for stuck working indicators.",
