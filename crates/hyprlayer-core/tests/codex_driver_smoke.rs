@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use hyprlayer_core::claude::{ExitOutcome, PermissionMode, SessionEvent};
 use hyprlayer_core::codex::{CodexDriver, CodexPosture, CollabMode, SpawnConfig};
+use hyprlayer_models::session::QuestionAnswers;
 
 fn spawn_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> SpawnConfig {
     SpawnConfig {
@@ -40,16 +42,16 @@ async fn drives_a_real_no_tool_turn_to_completion() {
 
     let thread_id = match tokio::time::timeout(Duration::from_secs(5), events.recv()).await {
         Ok(Ok(SessionEvent::Init {
-            claude_session_id,
+            provider_session_id,
             model,
         })) => {
-            println!("init: thread={claude_session_id} model={model:?}");
+            println!("init: thread={provider_session_id} model={model:?}");
             assert!(
-                !claude_session_id.is_empty(),
+                !provider_session_id.is_empty(),
                 "codex should mint a thread id"
             );
             assert_eq!(model.as_deref(), Some("gpt-5.4"));
-            claude_session_id
+            provider_session_id
         }
         other => panic!("expected Init first, got {other:?}"),
     };
@@ -470,16 +472,14 @@ async fn run_turn_answering(
                 request_id,
                 questions,
             })) => {
-                let parsed: serde_json::Value =
-                    serde_json::from_str(&questions).expect("question payload is valid JSON");
-                let question_text = parsed[0]["question"]
-                    .as_str()
-                    .expect("question has text")
-                    .to_string();
-                let mut answer = serde_json::Map::new();
-                answer.insert(question_text, serde_json::Value::String(label.to_string()));
+                let question_text = questions
+                    .first()
+                    .expect("the question list is not empty")
+                    .question
+                    .clone();
+                let answers = QuestionAnswers(BTreeMap::from([(question_text, label.to_string())]));
                 driver
-                    .answer_question(&request_id, serde_json::Value::Object(answer))
+                    .answer_question(&request_id, answers)
                     .expect("answer question");
                 answered = true;
             }

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use hyprlayer_core::terminal::PtySession;
 use tokio::sync::Mutex;
+
+use crate::terminal::PtySession;
 
 #[derive(Default)]
 pub struct TerminalRegistry {

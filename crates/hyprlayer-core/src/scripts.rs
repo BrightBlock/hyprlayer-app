@@ -1,23 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "lowercase")]
-pub enum ScriptKind {
-    Setup,
-    Run,
-    Archive,
-}
-
-impl ScriptKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Setup => "setup",
-            Self::Run => "run",
-            Self::Archive => "archive",
-        }
-    }
-}
+pub use hyprlayer_models::script::ScriptKind;
 
 pub const ENV_PORT: &str = "HL_PORT";
 pub const ENV_WORKTREE: &str = "HL_WORKTREE_PATH";

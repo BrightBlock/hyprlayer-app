@@ -1,5 +1,6 @@
 pub mod appimage;
 pub mod binaries;
+pub mod exit;
 #[cfg(windows)]
 mod job;
 

@@ -1,0 +1,884 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
+
+use crate::agent::AgentDriver;
+use crate::claude::{self, SessionEvent};
+use crate::codex::{self, CodexDriver, CodexPosture, SpawnConfig as CodexSpawnConfig};
+use crate::error::{CoreError, Result};
+use crate::opencode::catalog::{self, OpencodeCatalog};
+use crate::opencode::runtime::{OpenCodeDriver, OpenCodeServer, OpenCodeServerConfig};
+use crate::process::binaries::BinaryKind;
+use crate::process::Exec;
+use crate::settings::ClaudeSettings;
+
+use super::ports::{CredentialLookupRequest, CredentialLookupResult, ProviderHttpRequest};
+use super::HyprlayerRuntime;
+
+const TITLE_TIMEOUT: Duration = Duration::from_secs(20);
+const MODEL_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
+const OLLAMA_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
+    if runtime.coordinator.is_stopped() {
+        return Err(CoreError::RuntimeStopped);
+    }
+    Ok(())
+}
+
+/// The Claude session's environment override: an explicit API key (and, only
+/// with it, a custom base URL / cloud vendor flag) set in Settings. Absent an
+/// explicit key, a launched `claude` process is left to resolve its own
+/// authenticated session — the precedence's final, implicit step.
+pub fn claude_auth_env(cfg: &ClaudeSettings) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if cfg.auth_mode.as_deref() != Some("apiKey") {
+        return env;
+    }
+    if let Some(key) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
+        env.push(("ANTHROPIC_API_KEY".to_string(), key.to_string()));
+    }
+    if let Some(url) = cfg.base_url.as_deref().filter(|u| !u.is_empty()) {
+        env.push(("ANTHROPIC_BASE_URL".to_string(), url.to_string()));
+    }
+    if cfg.use_bedrock {
+        env.push(("CLAUDE_CODE_USE_BEDROCK".to_string(), "1".to_string()));
+    }
+    if cfg.use_vertex {
+        env.push(("CLAUDE_CODE_USE_VERTEX".to_string(), "1".to_string()));
+    }
+    env
+}
+
+/// Extracts the OAuth access token the `claude` CLI stores after `claude
+/// login`, from either its `.credentials.json` file or a macOS Keychain
+/// item — both hold the identical JSON shape.
+pub fn extract_claude_oauth_token(raw: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()?
+        .get("claudeAiOauth")?
+        .get("accessToken")?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn title_case(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeAuthStatus {
+    pub connected: bool,
+    pub provider: Option<String>,
+    pub plan: Option<String>,
+    pub org: Option<String>,
+    pub account: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ModelWindow {
+    pub id: String,
+    pub context_window: u32,
+}
+
+#[derive(Deserialize)]
+struct RawModels {
+    #[serde(default)]
+    data: Vec<RawModel>,
+}
+#[derive(Deserialize)]
+struct RawModel {
+    id: String,
+    max_input_tokens: Option<u32>,
+}
+
+enum ClaudeApiCredential {
+    ApiKey {
+        key: String,
+        base_url: Option<String>,
+    },
+    OAuth(String),
+}
+
+async fn resolve_claude_api_credential(
+    runtime: &HyprlayerRuntime,
+    cfg: &ClaudeSettings,
+) -> Result<Option<ClaudeApiCredential>> {
+    if cfg.auth_mode.as_deref() == Some("apiKey") {
+        if let Some(key) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
+            return Ok(Some(ClaudeApiCredential::ApiKey {
+                key: key.to_string(),
+                base_url: cfg.base_url.clone(),
+            }));
+        }
+    }
+
+    // `CredentialLookup::lookup` is synchronous and a real adapter reaches platform
+    // credential storage through a blocking syscall or subprocess (macOS shells out
+    // to `security`), so it cannot run on a runtime worker.
+    let lookup = Arc::clone(&runtime.credential_lookup);
+    let lookup_result = tokio::task::spawn_blocking(move || {
+        lookup.lookup(&CredentialLookupRequest {
+            provider: "claude".to_string(),
+            account: None,
+        })
+    })
+    .await
+    .map_err(|e| CoreError::CredentialLookup {
+        detail: format!("credential lookup task failed: {e}"),
+    })?;
+
+    match lookup_result {
+        Ok(CredentialLookupResult::Found(value)) => {
+            return Ok(Some(ClaudeApiCredential::OAuth(value.expose().to_string())));
+        }
+        Ok(CredentialLookupResult::NotFound) => {}
+        Err(e) => {
+            return Err(CoreError::CredentialLookup {
+                detail: e.to_string(),
+            })
+        }
+    }
+
+    let credentials_file = runtime.paths.claude_config_dir.join(".credentials.json");
+    if let Ok(raw) = tokio::fs::read_to_string(&credentials_file).await {
+        if let Some(token) = extract_claude_oauth_token(&raw) {
+            return Ok(Some(ClaudeApiCredential::OAuth(token)));
+        }
+    }
+
+    Ok(None)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaModelInfo {
+    pub id: String,
+    pub family: Option<String>,
+    pub parameter_size: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaStatus {
+    pub reachable: bool,
+    pub endpoint: String,
+    pub models: Vec<OllamaModelInfo>,
+}
+
+#[derive(Deserialize)]
+struct RawTags {
+    #[serde(default)]
+    models: Vec<RawTagModel>,
+}
+#[derive(Deserialize)]
+struct RawTagModel {
+    name: String,
+    #[serde(default)]
+    details: Option<RawTagDetails>,
+}
+#[derive(Deserialize)]
+struct RawTagDetails {
+    #[serde(default)]
+    family: Option<String>,
+    #[serde(default)]
+    parameter_size: Option<String>,
+}
+
+pub enum TitleModel<'a> {
+    Claude(&'a str),
+    OpenCode(&'a str),
+    Codex(&'a str),
+}
+
+pub fn parse_model_tag(tag: &str) -> TitleModel<'_> {
+    if let Some(rest) = tag.strip_prefix("opencode:") {
+        TitleModel::OpenCode(rest)
+    } else if let Some(rest) = tag.strip_prefix("codex:") {
+        TitleModel::Codex(rest)
+    } else {
+        TitleModel::Claude(tag.strip_prefix("claude:").unwrap_or(tag))
+    }
+}
+
+const MAX_INPUT_CHARS: usize = 1500;
+const MAX_TITLE_CHARS: usize = 48;
+
+pub fn build_title_prompt(text: &str) -> String {
+    let snippet: String = text.chars().take(MAX_INPUT_CHARS).collect();
+    format!(
+        "Generate a concise tab title (2-5 words, Title Case, no punctuation, no \
+         quotes) summarizing this coding task. Reply with ONLY the title.\n\nTask:\n{snippet}"
+    )
+}
+
+pub fn sanitize_title(raw: &str) -> String {
+    let first_line = raw.lines().next().unwrap_or("").trim();
+    let unquoted = first_line
+        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+        .trim();
+    let collapsed = unquoted.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() > MAX_TITLE_CHARS {
+        collapsed
+            .chars()
+            .take(MAX_TITLE_CHARS)
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    } else {
+        collapsed
+    }
+}
+
+pub async fn drain_title(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<String> {
+    let deadline = tokio::time::sleep(TITLE_TIMEOUT);
+    tokio::pin!(deadline);
+    let mut streamed = String::new();
+    let mut finalized = String::new();
+    loop {
+        tokio::select! {
+            _ = &mut deadline => break,
+            ev = rx.recv() => match ev {
+                Ok(SessionEvent::PartialText { text: t, .. }) => streamed.push_str(&t),
+                Ok(SessionEvent::AssistantText { text: t, .. }) => {
+                    if t.starts_with('⚠') {
+                        return None;
+                    }
+                    finalized.push_str(&t);
+                }
+                Ok(SessionEvent::TurnDone { .. })
+                    if !finalized.trim().is_empty() || !streamed.trim().is_empty() =>
+                {
+                    break
+                }
+                Ok(SessionEvent::Exited { .. }) => break,
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    }
+    let raw = if !finalized.trim().is_empty() {
+        finalized
+    } else {
+        streamed
+    };
+    let title = raw.trim().to_string();
+    (!title.is_empty()).then_some(title)
+}
+
+pub struct ProviderService<'a> {
+    runtime: &'a HyprlayerRuntime,
+}
+
+impl HyprlayerRuntime {
+    pub fn providers(&self) -> ProviderService<'_> {
+        ProviderService { runtime: self }
+    }
+}
+
+impl ProviderService<'_> {
+    pub async fn claude_auth_status(&self) -> Result<ClaudeAuthStatus> {
+        ensure_running(self.runtime)?;
+        let Some(bin) = self.runtime.binaries.resolve(BinaryKind::Claude).await else {
+            return Ok(ClaudeAuthStatus::default());
+        };
+        let path = self.runtime.binaries.augmented_path().await;
+        let Ok(out) = Exec::new(&bin)
+            .args(["auth", "status", "--json"])
+            .env("PATH", path)
+            .timeout(Duration::from_secs(10))
+            .run_unchecked()
+            .await
+        else {
+            return Ok(ClaudeAuthStatus::default());
+        };
+
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(out.stdout.trim()) else {
+            return Ok(ClaudeAuthStatus::default());
+        };
+
+        let connected = v.get("loggedIn").and_then(|x| x.as_bool()).unwrap_or(false);
+        let provider = match v.get("apiProvider").and_then(|x| x.as_str()) {
+            Some("firstParty") => Some("Anthropic API".to_string()),
+            Some(other) => Some(other.to_string()),
+            None => v
+                .get("authMethod")
+                .and_then(|x| x.as_str())
+                .map(str::to_string),
+        };
+        let plan = v
+            .get("subscriptionType")
+            .and_then(|x| x.as_str())
+            .map(title_case);
+        let org = v
+            .get("orgName")
+            .and_then(|x| x.as_str())
+            .map(str::to_string);
+        let account = v.get("email").and_then(|x| x.as_str()).map(str::to_string);
+
+        Ok(ClaudeAuthStatus {
+            connected,
+            provider,
+            plan,
+            org,
+            account,
+        })
+    }
+
+    pub async fn claude_probe(&self) -> Result<claude::ClaudeProbe> {
+        ensure_running(self.runtime)?;
+        let Some(bin) = self.runtime.binaries.resolve(BinaryKind::Claude).await else {
+            return Ok(claude::ClaudeProbe::default());
+        };
+        let path = self.runtime.binaries.augmented_path().await;
+        let cfg = self.runtime.settings.get().await.providers.claude;
+        let env = claude_auth_env(&cfg);
+        claude::probe::probe(
+            &bin,
+            &path,
+            &claude::probe::neutral_cwd(Some(&self.runtime.environment.home_dir)),
+            &env,
+        )
+        .await
+    }
+
+    pub async fn codex_probe(&self) -> Result<codex::CodexProbe> {
+        ensure_running(self.runtime)?;
+        let Some(bin) = self.runtime.binaries.resolve(BinaryKind::Codex).await else {
+            return Ok(codex::CodexProbe::default());
+        };
+        let path = self.runtime.binaries.augmented_path().await;
+        codex::probe::probe(&bin, &path).await
+    }
+
+    pub async fn codex_login_with_api_key(&self, api_key: String) -> Result<codex::CodexProbe> {
+        ensure_running(self.runtime)?;
+        let key = api_key.trim().to_string();
+        if key.is_empty() {
+            return Err(CoreError::ApiKeyEmpty);
+        }
+        let bin = self.runtime.binaries.require(BinaryKind::Codex).await?;
+        let path = self.runtime.binaries.augmented_path().await;
+
+        Exec::new(&bin)
+            .args(["login", "--with-api-key"])
+            .stdin(format!("{key}\n").into_bytes())
+            .env("PATH", path.clone())
+            .timeout(Duration::from_secs(30))
+            .run()
+            .await?;
+
+        Ok(codex::probe::probe(&bin, &path).await.unwrap_or_default())
+    }
+
+    pub async fn codex_logout(&self) -> Result<codex::CodexProbe> {
+        ensure_running(self.runtime)?;
+        let bin = self.runtime.binaries.require(BinaryKind::Codex).await?;
+        let path = self.runtime.binaries.augmented_path().await;
+        let _ = Exec::new(&bin)
+            .arg("logout")
+            .env("PATH", path.clone())
+            .timeout(Duration::from_secs(15))
+            .run_unchecked()
+            .await;
+        Ok(codex::probe::probe(&bin, &path).await.unwrap_or_default())
+    }
+
+    pub async fn claude_model_windows(&self) -> Result<Vec<ModelWindow>> {
+        ensure_running(self.runtime)?;
+        let cfg = self.runtime.settings.get().await.providers.claude;
+        let credential = resolve_claude_api_credential(self.runtime, &cfg)
+            .await?
+            .ok_or_else(|| CoreError::ProviderCredentialsMissing {
+                provider: "Claude".into(),
+            })?;
+
+        let base = match &credential {
+            ClaudeApiCredential::ApiKey {
+                base_url: Some(b), ..
+            } if !b.is_empty() => b.trim_end_matches('/').to_string(),
+            _ => "https://api.anthropic.com".to_string(),
+        };
+        let url = format!("{base}/v1/models?limit=1000");
+
+        let mut request = ProviderHttpRequest::new(url)
+            .header("anthropic-version", "2023-06-01")
+            .timeout(MODEL_FETCH_TIMEOUT);
+        request = match &credential {
+            ClaudeApiCredential::ApiKey { key, .. } => request.header("x-api-key", key.clone()),
+            ClaudeApiCredential::OAuth(token) => request
+                .header("authorization", format!("Bearer {token}"))
+                .header("anthropic-beta", "oauth-2025-04-20"),
+        };
+
+        let response = self.runtime.provider_http.get(request).await.map_err(|e| {
+            CoreError::ProviderRequestFailed {
+                provider: "Claude".into(),
+                detail: e.to_string(),
+            }
+        })?;
+        if response.status >= 400 {
+            return Err(CoreError::ProviderRequestFailed {
+                provider: "Claude".into(),
+                detail: format!("HTTP {}", response.status),
+            });
+        }
+
+        let parsed: RawModels =
+            serde_json::from_str(&response.body).map_err(|e| CoreError::OutputParse {
+                program: "claude models".into(),
+                detail: e.to_string(),
+            })?;
+
+        Ok(parsed
+            .data
+            .into_iter()
+            .filter_map(|m| {
+                m.max_input_tokens.map(|context_window| ModelWindow {
+                    id: m.id,
+                    context_window,
+                })
+            })
+            .collect())
+    }
+
+    async fn ollama_probe(&self, endpoint: &str) -> OllamaStatus {
+        let unreachable = || OllamaStatus {
+            reachable: false,
+            endpoint: endpoint.to_string(),
+            models: Vec::new(),
+        };
+        let url = format!("{endpoint}/api/tags");
+        let response = match self
+            .runtime
+            .provider_http
+            .get(ProviderHttpRequest::new(url.clone()).timeout(OLLAMA_PROBE_TIMEOUT))
+            .await
+        {
+            Ok(response) if response.status < 400 => response,
+            Ok(response) => {
+                tracing::warn!("ollama probe {url} returned HTTP {}", response.status);
+                return unreachable();
+            }
+            Err(e) => {
+                tracing::warn!("ollama probe {url} failed: {e}");
+                return unreachable();
+            }
+        };
+        let tags = match serde_json::from_str::<RawTags>(&response.body) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!("ollama probe {url} returned unparseable /api/tags: {e}");
+                return unreachable();
+            }
+        };
+        let mut models: Vec<OllamaModelInfo> = tags
+            .models
+            .into_iter()
+            .map(|m| {
+                let (family, parameter_size) = match m.details {
+                    Some(d) => (d.family, d.parameter_size),
+                    None => (None, None),
+                };
+                OllamaModelInfo {
+                    id: m.name,
+                    family,
+                    parameter_size,
+                }
+            })
+            .collect();
+        models.sort_by_key(|m| m.id.to_lowercase());
+        OllamaStatus {
+            reachable: true,
+            endpoint: endpoint.to_string(),
+            models,
+        }
+    }
+
+    pub async fn ollama_status(&self) -> Result<OllamaStatus> {
+        ensure_running(self.runtime)?;
+        let endpoint = self
+            .runtime
+            .settings
+            .get()
+            .await
+            .providers
+            .ollama
+            .effective_endpoint();
+        Ok(self.ollama_probe(&endpoint).await)
+    }
+
+    async fn sync_opencode_ollama_provider(&self) -> Result<()> {
+        let settings = self.runtime.settings.get().await;
+        let endpoint = settings.providers.ollama.effective_endpoint();
+        let models = settings.providers.ollama.selected_models.clone();
+        crate::opencode::config::set_ollama_provider(
+            &self.runtime.paths.opencode_config_file,
+            &endpoint,
+            &models,
+        )
+    }
+
+    pub async fn ollama_set_endpoint(&self, endpoint: Option<String>) -> Result<OllamaStatus> {
+        ensure_running(self.runtime)?;
+        let normalized = endpoint
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty());
+        self.runtime
+            .settings
+            .update(|s| s.providers.ollama.endpoint = normalized.clone())
+            .await?;
+
+        let effective = self
+            .runtime
+            .settings
+            .get()
+            .await
+            .providers
+            .ollama
+            .effective_endpoint();
+        let status = self.ollama_probe(&effective).await;
+        if status.reachable {
+            let available: std::collections::HashSet<&str> =
+                status.models.iter().map(|m| m.id.as_str()).collect();
+            self.runtime
+                .settings
+                .update(|s| {
+                    s.providers
+                        .ollama
+                        .selected_models
+                        .retain(|id| available.contains(id.as_str()));
+                    s.providers.ollama.reconcile_default();
+                })
+                .await?;
+        }
+        self.sync_opencode_ollama_provider().await?;
+        Ok(status)
+    }
+
+    pub async fn ollama_set_selected_models(&self, models: Vec<String>) -> Result<()> {
+        ensure_running(self.runtime)?;
+        self.runtime
+            .settings
+            .update(|s| {
+                s.providers.ollama.selected_models = models.clone();
+                s.providers.ollama.reconcile_default();
+            })
+            .await?;
+        self.sync_opencode_ollama_provider().await
+    }
+
+    pub async fn ollama_set_default_model(&self, model: Option<String>) -> Result<()> {
+        ensure_running(self.runtime)?;
+        let requested = model.filter(|m| !m.is_empty());
+        self.runtime
+            .settings
+            .update(|s| {
+                let valid = requested.as_deref().is_some_and(|m| {
+                    m.strip_prefix("ollama/").is_some_and(|id| {
+                        s.providers
+                            .ollama
+                            .selected_models
+                            .iter()
+                            .any(|sel| sel == id)
+                    })
+                });
+                s.providers.ollama.default_model = if valid { requested.clone() } else { None };
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn generate_title_claude(&self, flag: &str, prompt: &str) -> Result<String> {
+        ensure_running(self.runtime)?;
+        let bin = self.runtime.binaries.require(BinaryKind::Claude).await?;
+        let path = self.runtime.binaries.augmented_path().await;
+        let claude_cfg = self.runtime.settings.get().await.providers.claude;
+
+        let mut exec = Exec::new(&bin).arg("-p").stdin(prompt.as_bytes().to_vec());
+        if !flag.is_empty() {
+            exec = exec.arg("--model").arg(flag);
+        }
+        exec = exec
+            .arg("--output-format")
+            .arg("json")
+            .env("PATH", path)
+            .timeout(TITLE_TIMEOUT);
+        for (k, v) in claude_auth_env(&claude_cfg) {
+            exec = exec.env(k, v);
+        }
+
+        let out = exec.run().await?;
+        Ok(serde_json::from_str::<serde_json::Value>(out.stdout.trim())
+            .ok()
+            .and_then(|v| v.get("result").and_then(|r| r.as_str()).map(str::to_string))
+            .unwrap_or(out.stdout))
+    }
+
+    pub async fn generate_title_codex(&self, model: &str, prompt: &str) -> Result<String> {
+        ensure_running(self.runtime)?;
+        let bin = self.runtime.binaries.require(BinaryKind::Codex).await?;
+        let path = self.runtime.binaries.augmented_path().await;
+
+        let (driver, mut rx) = CodexDriver::spawn(CodexSpawnConfig {
+            codex_bin: bin,
+            cwd: std::env::temp_dir(),
+            prior_user_turns: 0,
+            posture: CodexPosture::from_permission_mode(claude::PermissionMode::Plan),
+            add_dirs: Vec::new(),
+            skill_roots: Vec::new(),
+            resume: None,
+            model: (!model.is_empty()).then(|| model.to_string()),
+            effort: None,
+            ephemeral: true,
+            env: vec![("PATH".to_string(), path.to_string_lossy().into_owned())],
+        })
+        .await?;
+
+        driver.send_user_turn(prompt, None, None)?;
+        let collected = drain_title(&mut rx).await;
+        driver.kill();
+
+        collected.ok_or_else(|| CoreError::TitleGenerationEmpty {
+            provider: "Codex".into(),
+        })
+    }
+
+    pub async fn generate_title_opencode(&self, model: &str, prompt: &str) -> Result<String> {
+        ensure_running(self.runtime)?;
+        let server = self.opencode_server().await?;
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        let (driver, mut rx) = OpenCodeDriver::spawn(server, &cwd, Some(model.to_string()))
+            .await
+            .map_err(|detail| CoreError::Opencode { detail })?;
+
+        driver.send_user_turn(prompt, None, None)?;
+        let collected = drain_title(&mut rx).await;
+        driver.kill();
+        driver.delete_session().await;
+
+        collected.ok_or_else(|| CoreError::TitleGenerationEmpty {
+            provider: "OpenCode".into(),
+        })
+    }
+
+    pub async fn opencode_server(&self) -> Result<Arc<OpenCodeServer>> {
+        ensure_running(self.runtime)?;
+        let bin = self.runtime.binaries.require(BinaryKind::OpenCode).await?;
+        self.start_opencode_server(bin).await
+    }
+
+    pub async fn opencode_server_if_running(&self) -> Option<Arc<OpenCodeServer>> {
+        self.runtime.opencode.current().await
+    }
+
+    pub async fn invalidate_opencode_server(&self) {
+        self.runtime.opencode.invalidate().await;
+    }
+
+    async fn start_opencode_server(&self, bin: std::path::PathBuf) -> Result<Arc<OpenCodeServer>> {
+        let path = self.runtime.binaries.augmented_path().await;
+        self.runtime
+            .opencode
+            .ensure(OpenCodeServerConfig {
+                bin,
+                path,
+                data_dir: self.runtime.paths.app_data_dir.join("opencode"),
+                home: self.runtime.environment.home_dir.clone(),
+                auth_file: self.runtime.paths.opencode_auth_file.clone(),
+            })
+            .await
+            .map_err(|detail| CoreError::Opencode { detail })
+    }
+
+    pub async fn opencode_catalog(&self, force: bool) -> Result<OpencodeCatalog> {
+        ensure_running(self.runtime)?;
+        let cache = self
+            .runtime
+            .paths
+            .app_data_dir
+            .join(catalog::CATALOG_CACHE_FILE);
+        let loaded = catalog::load(Some(&cache), force)
+            .await
+            .map_err(|detail| CoreError::Opencode { detail })?;
+
+        // models.dev lags the gateways' real rosters, so a running server's own
+        // registry decides which of a provider's models actually exist. An explicit
+        // refresh may start the shared server to get that registry; a passive read
+        // only consults one that is already running.
+        let server = if force {
+            match self.runtime.binaries.resolve(BinaryKind::OpenCode).await {
+                Some(bin) => match self.start_opencode_server(bin).await {
+                    Ok(server) => Some(server),
+                    Err(error) => {
+                        tracing::warn!(
+                            "could not start opencode for catalog reconciliation: {error}"
+                        );
+                        None
+                    }
+                },
+                None => None,
+            }
+        } else {
+            self.opencode_server_if_running().await
+        };
+
+        let providers = match server {
+            Some(server) => match server.provider_models().await {
+                Some(registry) => catalog::reconcile_with_server(loaded.providers, &registry),
+                None => loaded.providers,
+            },
+            None => loaded.providers,
+        };
+        Ok(OpencodeCatalog {
+            providers,
+            source: loaded.source,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_access_token_from_credentials_json() {
+        let raw = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-abc","refreshToken":"x","expiresAt":1,"scopes":["user:inference"]}}"#;
+        assert_eq!(
+            extract_claude_oauth_token(raw).as_deref(),
+            Some("sk-ant-oat01-abc")
+        );
+    }
+
+    #[test]
+    fn missing_or_malformed_credentials_yield_none() {
+        assert_eq!(extract_claude_oauth_token("not json"), None);
+        assert_eq!(extract_claude_oauth_token("{}"), None);
+        assert_eq!(extract_claude_oauth_token(r#"{"claudeAiOauth":{}}"#), None);
+    }
+
+    #[test]
+    fn strips_quotes_and_collapses_whitespace() {
+        assert_eq!(
+            sanitize_title("\"OAuth Token Refresh\""),
+            "OAuth Token Refresh"
+        );
+        assert_eq!(sanitize_title("`Fix   Flaky Tests`"), "Fix Flaky Tests");
+    }
+
+    #[test]
+    fn takes_first_line_only() {
+        assert_eq!(
+            sanitize_title("Add Dark Mode\nHere is why: ..."),
+            "Add Dark Mode"
+        );
+    }
+
+    #[test]
+    fn caps_length() {
+        let long = "Word ".repeat(40);
+        assert!(sanitize_title(&long).chars().count() <= 48);
+    }
+
+    #[test]
+    fn empty_stays_empty() {
+        assert_eq!(sanitize_title("   \n  "), "");
+    }
+
+    #[test]
+    fn routes_model_tags() {
+        assert!(matches!(
+            parse_model_tag("claude:haiku"),
+            TitleModel::Claude("haiku")
+        ));
+        assert!(matches!(parse_model_tag("claude:"), TitleModel::Claude("")));
+        assert!(matches!(
+            parse_model_tag("opencode:anthropic/claude-haiku-4-5"),
+            TitleModel::OpenCode("anthropic/claude-haiku-4-5")
+        ));
+        assert!(matches!(
+            parse_model_tag("codex:gpt-5.4-codex"),
+            TitleModel::Codex("gpt-5.4-codex")
+        ));
+        assert!(matches!(
+            parse_model_tag("sonnet"),
+            TitleModel::Claude("sonnet")
+        ));
+    }
+
+    fn partial(text: &str) -> SessionEvent {
+        SessionEvent::PartialText {
+            text: text.into(),
+            parent_id: None,
+        }
+    }
+    fn assistant(text: &str) -> SessionEvent {
+        SessionEvent::AssistantText {
+            text: text.into(),
+            parent_id: None,
+            injected: false,
+        }
+    }
+    fn turn_done() -> SessionEvent {
+        SessionEvent::TurnDone {
+            cost_usd: None,
+            num_turns: None,
+            context_tokens: None,
+            turn_status: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn title_falls_back_to_streamed_text() {
+        let (tx, mut rx) = broadcast::channel(8);
+        tx.send(partial("OAuth ")).unwrap();
+        tx.send(partial("Token Refresh")).unwrap();
+        tx.send(turn_done()).unwrap();
+        assert_eq!(
+            drain_title(&mut rx).await.as_deref(),
+            Some("OAuth Token Refresh"),
+        );
+    }
+
+    #[tokio::test]
+    async fn title_prefers_finalized_block() {
+        let (tx, mut rx) = broadcast::channel(8);
+        tx.send(partial("OAuth")).unwrap();
+        tx.send(assistant("Refresh Token Flow")).unwrap();
+        tx.send(turn_done()).unwrap();
+        assert_eq!(
+            drain_title(&mut rx).await.as_deref(),
+            Some("Refresh Token Flow"),
+        );
+    }
+
+    #[tokio::test]
+    async fn title_rejects_error_sentinels() {
+        for sentinel in [
+            "⚠ OpenCode error: unknown model",
+            "⚠ Codex error: rate limited",
+            "⚠ Codex request failed: turn/start: not signed in",
+        ] {
+            let (tx, mut rx) = broadcast::channel(8);
+            tx.send(assistant(sentinel)).unwrap();
+            assert_eq!(
+                drain_title(&mut rx).await,
+                None,
+                "sentinel must not become a title: {sentinel:?}",
+            );
+        }
+    }
+}

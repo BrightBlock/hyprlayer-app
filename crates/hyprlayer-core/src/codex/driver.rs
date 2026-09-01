@@ -16,6 +16,7 @@ use super::protocol::{
 use crate::agent::KillFlag;
 use crate::claude::events::{ExitOutcome, SessionEvent};
 use crate::error::{CoreError, Result};
+use hyprlayer_models::session::QuestionAnswers;
 
 const STDERR_RING_LINES: usize = 200;
 const EVENT_CHANNEL_CAP: usize = 1024;
@@ -172,7 +173,7 @@ impl CodexDriver {
         };
 
         let _ = driver.events.send(SessionEvent::Init {
-            claude_session_id: driver.thread_id.clone(),
+            provider_session_id: driver.thread_id.clone(),
             model,
         });
 
@@ -361,7 +362,7 @@ impl CodexDriver {
         self.reply(rpc_id, approval_reply(&kind, allow, message))
     }
 
-    pub fn answer_question(&self, request_id: &str, answers: Value) -> Result<()> {
+    pub fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
         let pending = self
             .state
             .lock()
@@ -370,7 +371,7 @@ impl CodexDriver {
         let Some(pending) = pending else {
             return Ok(());
         };
-        let body = question_reply(&pending, &answers);
+        let body = question_reply(&pending, &json!(answers));
         self.reply(pending.rpc_id.clone(), body)
     }
 
@@ -622,7 +623,7 @@ async fn read_and_wait(
 
     let outcome = kill_flag.outcome().unwrap_or_else(|| match &status {
         Ok(s) if s.success() || clean_exit => ExitOutcome::Completed,
-        Ok(s) => ExitOutcome::from_status(s),
+        Ok(s) => crate::process::exit::outcome_from_status(s),
         Err(_) => ExitOutcome::SpawnFailed,
     });
 

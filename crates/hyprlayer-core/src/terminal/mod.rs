@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use base64::Engine as _;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 const SCROLLBACK_CAP: usize = 256 * 1024;
@@ -13,13 +12,7 @@ const FLUSH_BYTES: usize = 64 * 1024;
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum TerminalEvent {
-    Output { data: String },
-    Exited { code: Option<i32> },
-}
+pub use hyprlayer_models::terminal::TerminalEvent;
 
 pub struct SpawnTerminal {
     pub shell: PathBuf,

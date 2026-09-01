@@ -165,6 +165,10 @@ export function useDocWebUrl(id: string) {
   });
 }
 
+export function invalidateBootstrap() {
+  void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+}
+
 function invalidateProjects() {
   void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
   void queryClient.invalidateQueries({ queryKey: ["project"] });

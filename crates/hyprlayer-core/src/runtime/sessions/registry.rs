@@ -1,40 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use hyprlayer_core::agent::AgentDriver;
-use hyprlayer_core::claude::workflow::SessionWorkflows;
-use hyprlayer_core::claude::{PermissionMode, SessionEvent};
-use tauri::async_runtime::JoinHandle;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::Mutex;
 
-pub struct ForwarderHandle {
-    pub join: JoinHandle<()>,
-    pub shutdown: oneshot::Sender<()>,
-}
-
-#[derive(Clone)]
-pub struct WorkflowChannel {
-    pub tx: mpsc::UnboundedSender<SessionEvent>,
-    pub rx: Arc<Mutex<mpsc::UnboundedReceiver<SessionEvent>>>,
-    pub workflows: Arc<Mutex<SessionWorkflows>>,
-}
-
-impl WorkflowChannel {
-    fn new() -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
-        Self {
-            tx,
-            rx: Arc::new(Mutex::new(rx)),
-            workflows: Arc::new(Mutex::new(SessionWorkflows::new())),
-        }
-    }
-}
+use crate::agent::AgentDriver;
+use crate::claude::PermissionMode;
 
 struct LiveSession {
     driver: Arc<dyn AgentDriver>,
     permission_mode: Option<PermissionMode>,
-    forwarder: Option<ForwarderHandle>,
-    workflow: WorkflowChannel,
 }
 
 #[derive(Default)]
@@ -59,29 +33,8 @@ impl SessionRegistry {
             LiveSession {
                 driver,
                 permission_mode,
-                forwarder: None,
-                workflow: WorkflowChannel::new(),
             },
         );
-    }
-
-    pub async fn set_forwarder(&self, id: &str, handle: ForwarderHandle) {
-        if let Some(session) = self.live.lock().await.get_mut(id) {
-            if let Some(old) = session.forwarder.replace(handle) {
-                old.join.abort();
-            }
-        }
-    }
-
-    pub async fn stop_forwarder(&self, id: &str) {
-        let handle = {
-            let mut live = self.live.lock().await;
-            live.get_mut(id).and_then(|s| s.forwarder.take())
-        };
-        if let Some(handle) = handle {
-            let _ = handle.shutdown.send(());
-            let _ = handle.join.await;
-        }
     }
 
     pub async fn op_lock(&self, id: &str) -> Arc<Mutex<()>> {
@@ -103,10 +56,6 @@ impl SessionRegistry {
             .await
             .get(id)
             .and_then(|s| s.permission_mode)
-    }
-
-    pub async fn workflow(&self, id: &str) -> Option<WorkflowChannel> {
-        self.live.lock().await.get(id).map(|s| s.workflow.clone())
     }
 
     pub async fn remove(&self, id: &str) {
@@ -131,8 +80,9 @@ impl SessionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyprlayer_core::error::Result;
-    use serde_json::Value;
+    use crate::claude::SessionEvent;
+    use crate::error::Result;
+    use hyprlayer_models::session::QuestionAnswers;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
     use tokio::sync::broadcast;
@@ -155,7 +105,7 @@ mod tests {
         fn respond_permission(&self, _: &str, _: bool, _: Option<&str>) -> Result<()> {
             Ok(())
         }
-        fn answer_question(&self, _: &str, _: Value) -> Result<()> {
+        fn answer_question(&self, _: &str, _: QuestionAnswers) -> Result<()> {
             Ok(())
         }
         fn interrupt(&self) -> Result<()> {
@@ -213,44 +163,6 @@ mod tests {
         let reg = SessionRegistry::new();
         reg.kill_all_blocking();
         assert!(reg.live_ids().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn the_workflow_channel_is_per_session_not_per_forwarder() {
-        let kills = Arc::new(Kills::default());
-        let reg = registry_with(1, &kills).await;
-
-        let first = reg.workflow("s0").await.expect("a live session has one");
-        first.tx.send(SessionEvent::Rewound {}).unwrap();
-        drop(first);
-
-        let second = reg.workflow("s0").await.unwrap();
-        assert!(
-            second.rx.lock().await.try_recv().is_ok(),
-            "the queued event must survive the forwarder swap"
-        );
-
-        reg.remove("s0").await;
-        assert!(reg.workflow("s0").await.is_none());
-    }
-
-    #[tokio::test]
-    async fn remove_drops_the_sessions_workflow_state() {
-        let kills = Arc::new(Kills::default());
-        let reg = registry_with(1, &kills).await;
-
-        let weak = {
-            let w = reg.workflow("s0").await.expect("a live session has one");
-            Arc::downgrade(&w.workflows)
-        };
-        assert!(weak.upgrade().is_some(), "the live session holds it");
-
-        reg.remove("s0").await;
-
-        assert!(
-            weak.upgrade().is_none(),
-            "something outside the registry is keeping this session's workflow watch alive"
-        );
     }
 
     #[tokio::test]

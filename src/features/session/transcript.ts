@@ -1,29 +1,30 @@
 
-import type { ExitOutcome, SessionEvent, SessionState } from "@/lib/bindings";
+import type {
+  ExitOutcome,
+  Question,
+  QuestionOption,
+  SessionEvent,
+  SessionState,
+} from "@/lib/bindings";
 import type { Attachment } from "./attachments";
 import { parseToolInput } from "./toolDisplay";
 
-export type { SessionState };
+export type { Question, QuestionOption, SessionState };
 
 export type PermissionDecision = "allow" | "deny";
 
-export type QuestionOption = { label: string; description: string };
-
-export type Question = {
-  question: string;
-  header: string;
-  multiSelect: boolean;
-  options: QuestionOption[];
-};
-
 export type PendingQuestion = { requestId: string; questions: Question[] };
 
-export function parseQuestions(json: string): Question[] {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(json);
-  } catch {
-    return [];
+// Stored rows written before typed questions still carry a raw JSON string here.
+// Removable no earlier than 0.9, once that wire shape is retired.
+export function parseQuestions(value: unknown): Question[] {
+  let raw = value;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return [];
+    }
   }
   if (!Array.isArray(raw)) return [];
   const out: Question[] = [];

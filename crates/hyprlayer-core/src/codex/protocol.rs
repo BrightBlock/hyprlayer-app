@@ -4,6 +4,7 @@ use serde_json::{json, Map, Value};
 
 use crate::claude::driver::PermissionMode;
 use crate::claude::events::SessionEvent;
+use crate::store::session_event_codec::questions_from_value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Incoming {
@@ -476,7 +477,7 @@ impl Translator {
                 );
                 vec![SessionEvent::QuestionAsk {
                     request_id,
-                    questions: Value::Array(ui).to_string(),
+                    questions: questions_from_value(Some(&Value::Array(ui))),
                 }]
             }
             _ => Vec::new(),
@@ -1680,10 +1681,9 @@ mod tests {
                 questions,
             } => {
                 assert_eq!(request_id, "q1");
-                let qs = parse(questions);
-                assert_eq!(qs[0]["question"], json!("Which auth method?"));
-                assert_eq!(qs[0]["header"], json!("Auth"));
-                assert_eq!(qs[0]["options"][0]["label"], json!("OAuth"));
+                assert_eq!(questions[0].question, "Which auth method?");
+                assert_eq!(questions[0].header, "Auth");
+                assert_eq!(questions[0].options[0].label, "OAuth");
             }
             other => panic!("expected QuestionAsk, got {other:?}"),
         }

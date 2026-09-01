@@ -1,51 +1,32 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use hyprlayer_core::agents::AgentOverlay;
-use hyprlayer_core::branch_prefix::BranchPrefix;
-use hyprlayer_core::process::binaries::BinaryKind;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::error::{AppError, CmdResult};
+use crate::agents::AgentOverlay;
+use crate::branch_prefix::BranchPrefix;
+use crate::error::{CoreError, Result};
+use crate::opencode::support::opencode_model_is_supported;
+use crate::process::binaries::BinaryKind;
 
-const UNSUPPORTED_OPENCODE_PROVIDER_IDS: &[&str] = &["github-copilot"];
-
-pub(crate) fn opencode_provider_is_supported(provider: &str) -> bool {
-    let provider = provider.trim().trim_end_matches('/');
-    !UNSUPPORTED_OPENCODE_PROVIDER_IDS
-        .iter()
-        .any(|unsupported| provider.eq_ignore_ascii_case(unsupported))
-}
-
-pub(crate) fn opencode_model_is_supported(model: &str) -> bool {
-    let model = model
-        .strip_prefix("opencode:")
-        .or_else(|| {
-            model
-                .get(.."opencode:".len())
-                .filter(|prefix| prefix.eq_ignore_ascii_case("opencode:"))
-                .map(|_| &model["opencode:".len()..])
-        })
-        .unwrap_or(model);
-    let provider = model.split('/').next().unwrap_or(model);
-    opencode_provider_is_supported(provider)
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct KeybindingSettings {
     pub overrides: HashMap<String, Option<String>>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct PromptSettings {
     pub builtin_bodies: HashMap<String, String>,
     pub custom: Vec<CustomPrompt>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct CustomPrompt {
     pub id: String,
@@ -56,7 +37,8 @@ pub struct CustomPrompt {
     pub pinned: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentLibrarySettings {
     pub folders: Vec<String>,
@@ -78,7 +60,8 @@ impl Default for AgentLibrarySettings {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub binary_overrides: HashMap<BinaryKind, String>,
@@ -144,7 +127,8 @@ impl AppSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct TabTitleSettings {
     pub enabled: bool,
@@ -180,7 +164,8 @@ impl TabTitleSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct NotificationSettings {
     pub enabled: bool,
@@ -196,7 +181,8 @@ impl Default for NotificationSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct QuitSettings {
     pub confirm: bool,
@@ -208,7 +194,8 @@ impl Default for QuitSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderSettings {
     pub default_harness: Option<String>,
@@ -218,7 +205,8 @@ pub struct ProviderSettings {
     pub codex: CodexSettings,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct ClaudeSettings {
     pub default_model: Option<String>,
@@ -241,7 +229,8 @@ pub struct ClaudeSettings {
     pub default_fast_mode: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct OpenCodeSettings {
     pub default_model: Option<String>,
@@ -251,7 +240,8 @@ pub struct OpenCodeSettings {
 
 pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://localhost:11434";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct OllamaSettings {
     pub endpoint: Option<String>,
@@ -287,7 +277,8 @@ impl OllamaSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct CodexSettings {
     pub default_model: Option<String>,
@@ -298,7 +289,8 @@ pub struct CodexSettings {
     pub personality: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct GitSettings {
     pub branch_prefix: Option<String>,
@@ -334,7 +326,8 @@ impl GitSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct MultiplexerSettings {
     pub enabled: bool,
@@ -358,7 +351,8 @@ impl Default for MultiplexerSettings {
 
 pub const DEFAULT_ENGINE_ID: &str = "claude-code";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct Engine {
     pub id: String,
@@ -406,19 +400,6 @@ pub struct SettingsStore {
     cache: RwLock<AppSettings>,
 }
 
-#[cfg(not(test))]
-fn scrub_unsupported_opencode_defaults() {
-    for provider in UNSUPPORTED_OPENCODE_PROVIDER_IDS {
-        match hyprlayer_core::opencode::config::clear_default_model_for_provider(provider) {
-            Ok(true) => log::info!("removed the retired OpenCode default model for {provider}"),
-            Ok(false) => {}
-            Err(error) => {
-                log::warn!("could not remove unsupported OpenCode default model: {error}")
-            }
-        }
-    }
-}
-
 impl SettingsStore {
     pub fn load(dir: PathBuf) -> Self {
         let path = dir.join("settings.json");
@@ -428,11 +409,9 @@ impl SettingsStore {
             .unwrap_or_default();
         if settings.normalize() {
             if let Err(error) = persist_sync(&path, &settings) {
-                log::warn!("could not persist normalized settings: {error}");
+                tracing::warn!("could not persist normalized settings: {error}");
             }
         }
-        #[cfg(not(test))]
-        std::thread::spawn(scrub_unsupported_opencode_defaults);
         Self {
             path,
             cache: RwLock::new(settings),
@@ -443,7 +422,7 @@ impl SettingsStore {
         self.cache.read().await.clone()
     }
 
-    pub async fn update<F>(&self, mutate: F) -> CmdResult<AppSettings>
+    pub async fn update<F>(&self, mutate: F) -> Result<AppSettings>
     where
         F: FnOnce(&mut AppSettings),
     {
@@ -458,38 +437,32 @@ impl SettingsStore {
         Ok(next)
     }
 
-    pub async fn set(&self, settings: AppSettings) -> CmdResult<()> {
+    pub async fn set(&self, settings: AppSettings) -> Result<()> {
         self.update(|s| *s = settings).await.map(|_| ())
     }
 }
 
-fn persist_sync(path: &std::path::Path, settings: &AppSettings) -> Result<(), String> {
+fn persist_sync(path: &std::path::Path, settings: &AppSettings) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| format!("create settings dir: {error}"))?;
+        std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(settings)
-        .map_err(|error| format!("serialize settings: {error}"))?;
+        .map_err(|error| std::io::Error::other(format!("serialize settings: {error}")))?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json).map_err(|error| format!("write settings: {error}"))?;
-    std::fs::rename(&tmp, path).map_err(|error| format!("persist settings: {error}"))
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, path)
 }
 
-async fn persist(path: &std::path::Path, settings: &AppSettings) -> CmdResult<()> {
+async fn persist(path: &std::path::Path, settings: &AppSettings) -> Result<()> {
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| AppError::internal(format!("create settings dir: {e}")))?;
+        tokio::fs::create_dir_all(parent).await?;
     }
     let json = serde_json::to_string_pretty(settings)
-        .map_err(|e| AppError::internal(format!("serialize settings: {e}")))?;
+        .map_err(|e| CoreError::Io(std::io::Error::other(format!("serialize settings: {e}"))))?;
 
     let tmp = path.with_extension("json.tmp");
-    tokio::fs::write(&tmp, json)
-        .await
-        .map_err(|e| AppError::internal(format!("write settings: {e}")))?;
-    tokio::fs::rename(&tmp, path)
-        .await
-        .map_err(|e| AppError::internal(format!("persist settings: {e}")))?;
+    tokio::fs::write(&tmp, json).await?;
+    tokio::fs::rename(&tmp, path).await?;
     Ok(())
 }
 
@@ -931,5 +904,49 @@ mod tests {
         assert!(!s.dev_tools);
         let on: AppSettings = serde_json::from_str(r#"{"devTools":true}"#).unwrap();
         assert!(on.dev_tools);
+    }
+
+    const V0_7_SETTINGS_FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/compat/v0_7/settings.json"
+    ));
+
+    #[test]
+    fn the_v0_7_settings_fixture_parses_with_todays_shape() {
+        let s: AppSettings = serde_json::from_str(V0_7_SETTINGS_FIXTURE).unwrap();
+
+        assert_eq!(
+            s.binary_overrides
+                .get(&BinaryKind::Claude)
+                .map(String::as_str),
+            Some("/opt/homebrew/bin/claude")
+        );
+        assert_eq!(
+            s.worktree_root.as_deref(),
+            Some("/Users/jt/hyprlayer/worktrees")
+        );
+        assert_eq!(s.git.branch_prefix.as_deref(), Some("jt/"));
+        assert_eq!(s.git.prefixes.as_ref().map(Vec::len), Some(2));
+        assert_eq!(s.prompts.custom.len(), 1);
+        assert_eq!(s.agents.overlays.len(), 1);
+        assert_eq!(
+            s.providers.claude.default_model.as_deref(),
+            Some("claude-opus-4-8")
+        );
+        assert_eq!(
+            s.providers.opencode.selected_models,
+            ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
+        );
+        assert_eq!(s.multiplexer.engines.len(), 4);
+        assert!(s.full_disk_access_notice_dismissed);
+    }
+
+    #[test]
+    fn the_v0_7_settings_fixture_round_trips_losslessly() {
+        let settings: AppSettings = serde_json::from_str(V0_7_SETTINGS_FIXTURE).unwrap();
+        let once = serde_json::to_value(&settings).unwrap();
+        let reparsed: AppSettings = serde_json::from_value(once.clone()).unwrap();
+        let twice = serde_json::to_value(&reparsed).unwrap();
+        assert_eq!(once, twice);
     }
 }

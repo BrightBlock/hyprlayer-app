@@ -15,8 +15,8 @@ use tauri_specta::Event;
 use crate::editors::{self, EditorTarget};
 use crate::error::{AppError, CmdResult};
 use crate::events::BinariesChanged;
-use crate::settings::AppSettings;
 use crate::state::AppState;
+use hyprlayer_core::settings::AppSettings;
 
 #[tauri::command]
 #[specta::specta]
@@ -27,7 +27,8 @@ pub async fn set_binary_override(
     path: Option<String>,
 ) -> CmdResult<Vec<BinaryStatus>> {
     state
-        .settings
+        .runtime
+        .settings()
         .update(|s| match &path {
             Some(p) => {
                 s.binary_overrides.insert(kind, p.clone());
@@ -38,12 +39,10 @@ pub async fn set_binary_override(
         })
         .await?;
 
-    state
-        .binaries
-        .set_override(kind, path.map(PathBuf::from))
-        .await;
+    let binaries = state.runtime.settings().binaries();
+    binaries.set_override(kind, path.map(PathBuf::from)).await;
 
-    let statuses = state.binaries.status_all().await;
+    let statuses = binaries.status_all().await;
     let _ = BinariesChanged.emit(&app);
     Ok(statuses)
 }
@@ -64,7 +63,7 @@ pub fn play_sound() -> CmdResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub fn full_disk_access_status() -> FullDiskAccess {
-    hyprlayer_core::system::full_disk_access()
+    hyprlayer_core::system::full_disk_access(dirs::home_dir().as_deref())
 }
 
 #[tauri::command]
@@ -81,7 +80,8 @@ pub fn open_full_disk_access_settings() -> CmdResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub fn get_omarchy_theme() -> omarchy::OmarchyStatus {
-    omarchy::status()
+    let dir = omarchy::current_dir(dirs::state_dir().as_deref(), dirs::config_dir().as_deref());
+    omarchy::status(dir.as_deref())
 }
 
 #[tauri::command]
@@ -92,7 +92,19 @@ pub async fn quit_app(
     dont_ask_again: bool,
 ) -> CmdResult<()> {
     if dont_ask_again {
-        state.settings.update(|s| s.quit.confirm = false).await?;
+        state
+            .runtime
+            .settings()
+            .update(|s| s.quit.confirm = false)
+            .await?;
+    }
+    let report = state.runtime.shutdown().await;
+    if report.forced_process_count > 0 || !report.task_failures.is_empty() {
+        log::warn!(
+            "quit: forced {} process(es), task failures: {:?}",
+            report.forced_process_count,
+            report.task_failures
+        );
     }
     app.exit(0);
     Ok(())
@@ -104,17 +116,20 @@ pub async fn redetect_binaries(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<BinaryStatus>> {
-    state.binaries.redetect().await;
-    let statuses = state.binaries.status_all().await;
+    let binaries = state.runtime.settings().binaries();
+    binaries.redetect().await;
+    let statuses = binaries.status_all().await;
     let _ = BinariesChanged.emit(&app);
-    crate::migrate_config_if_needed(&state.binaries, &state.config, &app).await;
+    if state.runtime.migrate_config_if_needed().await {
+        let _ = crate::events::ConfigChanged.emit(&app);
+    }
     Ok(statuses)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn get_app_settings(state: State<'_, AppState>) -> CmdResult<AppSettings> {
-    Ok(state.settings.get().await)
+    Ok(state.runtime.settings().get().await)
 }
 
 fn branch_prefix_changed(incoming: Option<&str>, current: Option<&str>) -> bool {
@@ -128,9 +143,12 @@ pub async fn set_app_settings(
     mut settings: AppSettings,
 ) -> CmdResult<AppSettings> {
     settings.git.branch_prefix = settings.git.branch_prefix.map(|p| p.trim().to_string());
-    settings.git.prefixes = settings.git.prefixes.map(super::normalize_branch_prefixes);
+    settings.git.prefixes = settings
+        .git
+        .prefixes
+        .map(hyprlayer_core::branch_prefix::normalize_prefixes);
 
-    let current = state.settings.get().await;
+    let current = state.runtime.settings().get().await;
     if branch_prefix_changed(
         settings.git.branch_prefix.as_deref(),
         current.git.branch_prefix.as_deref(),
@@ -144,8 +162,8 @@ pub async fn set_app_settings(
             .map_err(AppError::from)?;
     }
 
-    state.settings.set(settings).await?;
-    Ok(state.settings.get().await)
+    state.runtime.settings().set(settings).await?;
+    Ok(state.runtime.settings().get().await)
 }
 
 #[tauri::command]
@@ -156,7 +174,8 @@ pub async fn claude_sync_models(
     seen: Vec<String>,
 ) -> CmdResult<AppSettings> {
     state
-        .settings
+        .runtime
+        .settings()
         .update(|s| {
             let claude = &mut s.providers.claude;
             if let Some(visible) = claude.visible_models.as_mut() {
@@ -169,6 +188,7 @@ pub async fn claude_sync_models(
             claude.seen_model_keys = Some(seen);
         })
         .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -182,7 +202,13 @@ pub async fn detect_editors() -> CmdResult<Vec<EditorTarget>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn github_username(state: State<'_, AppState>) -> CmdResult<Option<String>> {
-    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
+    let Ok(gh) = state
+        .runtime
+        .settings()
+        .binaries()
+        .require(BinaryKind::Gh)
+        .await
+    else {
         return Ok(None);
     };
     Ok(hyprlayer_core::pr::github_login(&gh).await)
@@ -251,7 +277,7 @@ fn cli_install_candidates() -> &'static [CliCandidate] {
 pub async fn detect_cli_install_methods(
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<CliInstallMethod>> {
-    let path = state.binaries.augmented_path().await;
+    let path = state.runtime.settings().binaries().augmented_path().await;
     let shell = super::terminal::default_shell();
 
     let mut methods = Vec::new();
@@ -283,7 +309,7 @@ pub async fn install_hyprlayer_cli(
             remedy: None,
         })?;
 
-    let path = state.binaries.augmented_path().await;
+    let path = state.runtime.settings().binaries().augmented_path().await;
     let shell = super::terminal::default_shell();
 
     Exec::new(&shell)
@@ -294,7 +320,7 @@ pub async fn install_hyprlayer_cli(
         .await
         .map_err(AppError::from)?;
 
-    state.binaries.redetect().await;
+    state.runtime.settings().binaries().redetect().await;
     let _ = BinariesChanged.emit(&app);
     Ok(())
 }
@@ -303,7 +329,8 @@ pub async fn install_hyprlayer_cli(
 #[specta::specta]
 pub async fn hyprlayer_cli_update_check(state: State<'_, AppState>) -> CmdResult<CliUpdateCheck> {
     let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    HyprCli::new(&state.binaries)
+    let binaries = state.runtime.settings().binaries();
+    HyprCli::new(&binaries)
         .self_update_check(&cwd)
         .await
         .map_err(AppError::from)
@@ -325,12 +352,13 @@ pub async fn update_hyprlayer_cli(
     state: State<'_, AppState>,
 ) -> CmdResult<CliUpdateResult> {
     let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let output = HyprCli::new(&state.binaries)
+    let binaries = state.runtime.settings().binaries();
+    let output = HyprCli::new(&binaries)
         .self_update(&cwd)
         .await
         .map_err(AppError::from)?;
 
-    state.binaries.redetect().await;
+    binaries.redetect().await;
     let _ = BinariesChanged.emit(&app);
 
     Ok(CliUpdateResult {

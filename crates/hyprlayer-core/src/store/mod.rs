@@ -1,5 +1,6 @@
 mod migrations;
 mod projects;
+pub mod session_event_codec;
 mod sessions;
 mod workstreams;
 
@@ -16,6 +17,8 @@ use crate::error::Result;
 
 pub struct Db {
     conn: Mutex<Connection>,
+    #[cfg(any(test, feature = "test-support"))]
+    session_event_gate: Mutex<Option<std::sync::Arc<sessions::SessionEventGateFn>>>,
 }
 
 impl Db {
@@ -39,12 +42,19 @@ impl Db {
         migrations::migrate(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            #[cfg(any(test, feature = "test-support"))]
+            session_event_gate: Mutex::new(None),
         })
     }
 
     pub(crate) fn with<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         Ok(f(&conn)?)
+    }
+
+    pub(crate) fn with_core<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        f(&conn)
     }
 }
 

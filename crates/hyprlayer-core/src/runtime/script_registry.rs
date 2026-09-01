@@ -1,36 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use hyprlayer_core::scripts::{self, ScriptKind};
-use hyprlayer_core::store::now_ms;
-use hyprlayer_core::terminal::PtySession;
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "lowercase")]
-pub enum RunPhase {
-    Running,
-    Passed,
-    Failed,
-}
+use crate::scripts::{self, ScriptKind};
+use crate::store::now_ms;
+use crate::terminal::PtySession;
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptStatus {
-    pub kind: ScriptKind,
-    pub phase: RunPhase,
-    pub exit_code: Option<i32>,
-    pub at: f64,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptRuntime {
-    pub run_terminal_id: Option<String>,
-    pub port: Option<u16>,
-    pub statuses: Vec<ScriptStatus>,
-}
+pub use hyprlayer_models::script::{RunPhase, ScriptRuntime, ScriptStatus};
 
 struct RunHandle {
     terminal_id: String,
@@ -186,7 +163,6 @@ impl ScriptRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyprlayer_core::scripts::ScriptKind;
 
     #[tokio::test]
     async fn port_allocated_once_and_reused_per_workstream() {

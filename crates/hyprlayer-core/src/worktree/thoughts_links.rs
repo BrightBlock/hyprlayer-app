@@ -228,6 +228,26 @@ mod tests {
         }
     }
 
+    // Why WorkstreamService::reprovision refuses a missing worktree: this call
+    // would otherwise recreate the path, leaving a bare symlink farm with no
+    // .git that blocks a later restore.
+    #[test]
+    fn provisioning_a_missing_worktree_recreates_the_directory() {
+        let thoughts = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        for dir in ["repos/myproj/jt", "repos/myproj/shared", "global"] {
+            std::fs::create_dir_all(thoughts.path().join(dir)).unwrap();
+        }
+        let eff = effective(thoughts.path(), "jt", Some("myproj"));
+
+        let gone = parent.path().join("deleted-worktree");
+        assert!(!gone.exists());
+
+        assert_eq!(provision_thoughts(&gone, &eff).unwrap(), LinkStatus::Ok);
+        assert!(gone.join("thoughts/jt").exists());
+        assert!(!gone.join(".git").exists());
+    }
+
     #[test]
     fn provisions_and_checks_links() {
         let thoughts = tempfile::tempdir().unwrap();

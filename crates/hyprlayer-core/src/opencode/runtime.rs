@@ -1,17 +1,20 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hyprlayer_core::agent::{AgentDriver, KillFlag};
-use hyprlayer_core::claude::{ExitOutcome, SessionEvent};
-use hyprlayer_core::error::Result as CoreResult;
 use serde_json::{json, Value};
 use tokio::process::Command;
+use tokio::runtime::Handle;
 use tokio::sync::{broadcast, Mutex};
 
-use crate::settings::opencode_provider_is_supported;
+use crate::agent::{AgentDriver, KillFlag};
+use crate::claude::{ExitOutcome, SessionEvent};
+use crate::error::Result as CoreResult;
+use crate::models::session::QuestionAnswers;
+use crate::opencode::support::opencode_provider_is_supported;
+use crate::store::session_event_codec::questions_from_value;
 
 const EVENT_CAP: usize = 1024;
 
@@ -27,6 +30,14 @@ fn supported_auth_content(content: &str) -> Option<String> {
 struct OcEvent {
     kind: String,
     properties: Value,
+}
+
+pub struct OpenCodeServerConfig {
+    pub bin: PathBuf,
+    pub path: OsString,
+    pub data_dir: PathBuf,
+    pub home: PathBuf,
+    pub auth_file: PathBuf,
 }
 
 #[derive(Default)]
@@ -47,11 +58,17 @@ impl OpenCodeManager {
         }
     }
 
+    /// The graceful counterpart to `kill_blocking`, used by the explicit quit
+    /// path — it can await the lock instead of skipping a held one.
+    pub async fn shutdown(&self) {
+        if let Some(server) = self.inner.lock().await.take() {
+            server.kill_blocking();
+        }
+    }
+
     pub async fn ensure(
         &self,
-        bin: PathBuf,
-        path: OsString,
-        data_dir: PathBuf,
+        config: OpenCodeServerConfig,
     ) -> Result<Arc<OpenCodeServer>, String> {
         let mut guard = self.inner.lock().await;
         if let Some(s) = guard.as_ref() {
@@ -62,7 +79,7 @@ impl OpenCodeManager {
         if let Some(dead) = guard.take() {
             dead.kill_blocking();
         }
-        let server = Arc::new(OpenCodeServer::start(bin, path, data_dir).await?);
+        let server = Arc::new(OpenCodeServer::start(config).await?);
         *guard = Some(server.clone());
         Ok(server)
     }
@@ -76,23 +93,51 @@ impl OpenCodeManager {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
+impl OpenCodeManager {
+    #[doc(hidden)]
+    pub async fn install_child_for_test(&self, child: crate::process::SupervisedChild) {
+        let (events, _) = broadcast::channel(EVENT_CAP);
+        *self.inner.lock().await = Some(Arc::new(OpenCodeServer {
+            base_url: String::new(),
+            client: reqwest::Client::new(),
+            events,
+            model_context: std::collections::HashMap::new(),
+            home: PathBuf::new(),
+            tasks: Handle::current(),
+            _child: Mutex::new(child),
+        }));
+    }
+}
+
 pub struct OpenCodeServer {
     base_url: String,
     client: reqwest::Client,
     events: broadcast::Sender<OcEvent>,
     model_context: std::collections::HashMap<String, u32>,
-    _child: Mutex<hyprlayer_core::process::SupervisedChild>,
+    home: PathBuf,
+    // The sync `AgentDriver` methods fire their HTTP calls from whatever thread
+    // ends a session — including the app's non-async exit hook — so they need a
+    // handle onto the runtime rather than an ambient `tokio::spawn` context.
+    tasks: Handle,
+    _child: Mutex<crate::process::SupervisedChild>,
 }
 
 impl OpenCodeServer {
-    async fn start(bin: PathBuf, path: OsString, data_dir: PathBuf) -> Result<Self, String> {
+    async fn start(config: OpenCodeServerConfig) -> Result<Self, String> {
+        let OpenCodeServerConfig {
+            bin,
+            path,
+            data_dir,
+            home,
+            auth_file,
+        } = config;
         let port = free_port()?;
         let base_url = format!("http://127.0.0.1:{port}");
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let _ = std::fs::create_dir_all(&data_dir);
 
         let mut cmd = Command::new(&bin);
-        hyprlayer_core::process::appimage::scrub_tokio(&mut cmd);
+        crate::process::appimage::scrub_tokio(&mut cmd);
         cmd.args([
             "serve",
             "--hostname",
@@ -106,12 +151,12 @@ impl OpenCodeServer {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-        if let Some(content) = hyprlayer_core::opencode::config::auth_json_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
+        if let Some(content) = std::fs::read_to_string(&auth_file)
+            .ok()
             .filter(|c| !c.trim().is_empty())
         {
             let filtered = supported_auth_content(&content).unwrap_or_else(|| {
-                log::warn!(
+                tracing::warn!(
                     "opencode auth.json did not parse as a JSON object; passing it through unfiltered"
                 );
                 content
@@ -126,7 +171,7 @@ impl OpenCodeServer {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let child = hyprlayer_core::process::spawn_supervised(&mut cmd)
+        let child = crate::process::spawn_supervised(&mut cmd)
             .map_err(|e| format!("spawn `opencode serve`: {e}"))?;
 
         let client = reqwest::Client::builder()
@@ -155,15 +200,18 @@ impl OpenCodeServer {
         }
 
         let model_context = fetch_model_context(&client, &base_url).await;
+        let tasks = Handle::current();
 
         let (events, _) = broadcast::channel(EVENT_CAP);
-        spawn_sse(base_url.clone(), client.clone(), events.clone());
+        spawn_sse(&tasks, base_url.clone(), client.clone(), events.clone());
 
         Ok(Self {
             base_url,
             client,
             events,
             model_context,
+            home,
+            tasks,
             _child: Mutex::new(child),
         })
     }
@@ -176,6 +224,10 @@ impl OpenCodeServer {
 
     fn context_window(&self, model_id: &str) -> Option<u32> {
         self.model_context.get(model_id).copied()
+    }
+
+    fn home(&self) -> &Path {
+        &self.home
     }
 
     pub async fn knows_model(&self, model: &str) -> Option<bool> {
@@ -217,8 +269,13 @@ impl OpenCodeServer {
     }
 }
 
-fn spawn_sse(base_url: String, client: reqwest::Client, tx: broadcast::Sender<OcEvent>) {
-    tauri::async_runtime::spawn(async move {
+fn spawn_sse(
+    tasks: &Handle,
+    base_url: String,
+    client: reqwest::Client,
+    tx: broadcast::Sender<OcEvent>,
+) {
+    tasks.spawn(async move {
         loop {
             if let Ok(mut resp) = client.get(format!("{base_url}/global/event")).send().await {
                 let mut buf = String::new();
@@ -280,12 +337,12 @@ async fn fetch_model_context(
         Ok(r) => match r.text().await {
             Ok(b) => b,
             Err(e) => {
-                log::warn!("opencode /config/providers read failed: {e}");
+                tracing::warn!("opencode /config/providers read failed: {e}");
                 return std::collections::HashMap::new();
             }
         },
         Err(e) => {
-            log::warn!("opencode /config/providers fetch failed: {e}");
+            tracing::warn!("opencode /config/providers fetch failed: {e}");
             return std::collections::HashMap::new();
         }
     };
@@ -344,7 +401,7 @@ fn parse_model_context(body: &str) -> std::collections::HashMap<String, u32> {
 
     let mut out = std::collections::HashMap::new();
     let Ok(parsed) = serde_json::from_str::<Resp>(body) else {
-        log::warn!("opencode /config/providers parse failed");
+        tracing::warn!("opencode /config/providers parse failed");
         return out;
     };
     for p in parsed.providers {
@@ -412,7 +469,7 @@ pub struct OpenCodeDriver {
     model: std::sync::Mutex<Option<(String, String)>>,
     events: broadcast::Sender<SessionEvent>,
     kill_flag: Arc<KillFlag>,
-    filter_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    filter_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     pending_questions: Arc<std::sync::Mutex<std::collections::HashMap<String, Value>>>,
 }
 
@@ -449,8 +506,9 @@ impl OpenCodeDriver {
         // cross-harness routing preamble.
         let skill_scan = tokio::task::spawn_blocking({
             let cwd = cwd.to_string();
+            let home = server.home().to_path_buf();
             move || {
-                hyprlayer_core::skills::list_skills(Some(std::path::Path::new(&cwd)))
+                crate::skills::list_skills(Some(std::path::Path::new(&cwd)), Some(&home))
                     .into_iter()
                     .map(|skill| skill.name)
                     .collect::<std::collections::HashSet<String>>()
@@ -464,7 +522,7 @@ impl OpenCodeDriver {
         let commands = match commands {
             Ok(names) => names,
             Err(error) => {
-                log::warn!(
+                tracing::warn!(
                     "opencode command discovery failed; explicit invocations fall back to plain prompts: {error}"
                 );
                 std::collections::HashSet::new()
@@ -475,13 +533,13 @@ impl OpenCodeDriver {
         let primary_rx = events.subscribe();
 
         let _ = events.send(SessionEvent::Init {
-            claude_session_id: session_id.clone(),
+            provider_session_id: session_id.clone(),
             model: model.as_ref().map(|(p, m)| format!("{p}/{m}")),
         });
 
         if let Some(tokens) = model.as_ref().and_then(|(p, m)| {
             let id = format!("{p}/{m}");
-            hyprlayer_core::opencode::config::opencode_model_context_window(&id)
+            crate::opencode::config::opencode_model_context_window(&id)
                 .or_else(|| server.context_window(&id))
         }) {
             let _ = events.send(SessionEvent::ContextWindow { tokens });
@@ -493,7 +551,7 @@ impl OpenCodeDriver {
         let pending_questions: Arc<std::sync::Mutex<std::collections::HashMap<String, Value>>> =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let pq = pending_questions.clone();
-        let task = tauri::async_runtime::spawn(async move {
+        let task = server.tasks.spawn(async move {
             let mut xlate = Translator::default();
             loop {
                 match sse_rx.recv().await {
@@ -556,9 +614,9 @@ impl OpenCodeDriver {
     fn post_async(&self, path: String, body: Value) {
         let client = self.server.client.clone();
         let url = format!("{}{}", self.server.base_url, path);
-        tauri::async_runtime::spawn(async move {
+        self.server.tasks.spawn(async move {
             if let Err(e) = client.post(url).json(&body).send().await {
-                log::warn!("opencode POST failed: {e}");
+                tracing::warn!("opencode POST failed: {e}");
             }
         });
     }
@@ -599,7 +657,7 @@ impl OpenCodeDriver {
             self.server.base_url, self.session_id
         );
         let directory = self.cwd.clone();
-        tauri::async_runtime::spawn(async move {
+        self.server.tasks.spawn(async move {
             let sent = client
                 .post(command_url)
                 .query(&[("directory", directory)])
@@ -608,7 +666,7 @@ impl OpenCodeDriver {
                 .await
                 .and_then(reqwest::Response::error_for_status);
             let Err(command_error) = sent else { return };
-            log::warn!(
+            tracing::warn!(
                 "opencode command failed; delivering the turn as a plain prompt: {command_error}"
             );
             let delivered = client
@@ -618,7 +676,7 @@ impl OpenCodeDriver {
                 .await
                 .and_then(reqwest::Response::error_for_status);
             if let Err(e) = delivered {
-                log::warn!("opencode request failed: {e}");
+                tracing::warn!("opencode request failed: {e}");
                 let _ = events.send(SessionEvent::AssistantText {
                     text: format!("⚠ OpenCode request failed: {e}"),
                     parent_id: None,
@@ -637,7 +695,7 @@ impl OpenCodeDriver {
     fn request_async(&self, url: String, body: Value, directory: Option<String>) {
         let client = self.server.client.clone();
         let events = self.events.clone();
-        tauri::async_runtime::spawn(async move {
+        self.server.tasks.spawn(async move {
             let mut request = client.post(url).json(&body);
             if let Some(directory) = directory {
                 request = request.query(&[("directory", directory)]);
@@ -647,7 +705,7 @@ impl OpenCodeDriver {
                 .await
                 .and_then(reqwest::Response::error_for_status);
             if let Err(e) = result {
-                log::warn!("opencode request failed: {e}");
+                tracing::warn!("opencode request failed: {e}");
                 let _ = events.send(SessionEvent::AssistantText {
                     text: format!("⚠ OpenCode request failed: {e}"),
                     parent_id: None,
@@ -673,7 +731,7 @@ impl OpenCodeDriver {
             .await
             .and_then(reqwest::Response::error_for_status)
         {
-            log::warn!("opencode session delete failed: {e}");
+            tracing::warn!("opencode session delete failed: {e}");
         }
     }
 }
@@ -726,14 +784,13 @@ impl AgentDriver for OpenCodeDriver {
         Ok(())
     }
 
-    fn answer_question(&self, request_id: &str, answers: Value) -> CoreResult<()> {
+    fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> CoreResult<()> {
         let questions = self
             .pending_questions
             .lock()
             .ok()
             .and_then(|mut m| m.remove(request_id));
-        let empty = answers.as_object().map(|o| o.is_empty()).unwrap_or(true);
-        if empty {
+        if answers.is_empty() {
             self.post_async(format!("/question/{request_id}/reject"), json!({}));
             return Ok(());
         }
@@ -749,7 +806,6 @@ impl AgentDriver for OpenCodeDriver {
                             .unwrap_or_default();
                         answers
                             .get(text)
-                            .and_then(Value::as_str)
                             .filter(|s| !s.is_empty())
                             .map(|s| s.split(", ").map(str::to_string).collect())
                             .unwrap_or_default()
@@ -877,6 +933,8 @@ struct Translator {
     part_types: std::collections::HashMap<String, String>,
     tool_started: std::collections::HashSet<String>,
     tool_done: std::collections::HashSet<String>,
+    cost_total: f64,
+    context_tokens: Option<u32>,
 }
 
 impl Translator {
@@ -939,12 +997,12 @@ impl Translator {
             }],
             "question.asked" => vec![SessionEvent::QuestionAsk {
                 request_id: str_field(p, "id"),
-                questions: p.get("questions").cloned().unwrap_or(json!([])).to_string(),
+                questions: questions_from_value(p.get("questions")),
             }],
             "session.idle" => vec![SessionEvent::TurnDone {
-                cost_usd: None,
+                cost_usd: Some(self.cost_total),
                 num_turns: None,
-                context_tokens: None,
+                context_tokens: self.context_tokens,
                 turn_status: None,
             }],
             "session.error" => {
@@ -1097,12 +1155,13 @@ impl Translator {
                         f("input") + f("output")
                     }) as u32
                 });
-                out.push(SessionEvent::TurnDone {
-                    cost_usd: cost,
-                    num_turns: None,
-                    context_tokens: ctx,
-                    turn_status: None,
-                });
+                self.cost_total += cost.unwrap_or(0.0);
+                if let Some(ctx) = ctx {
+                    self.context_tokens = Some(ctx);
+                    out.push(SessionEvent::Usage {
+                        context_tokens: ctx,
+                    });
+                }
             }
             _ => {}
         }
@@ -1346,6 +1405,50 @@ mod tests {
         OcEvent {
             kind: kind.to_string(),
             properties,
+        }
+    }
+
+    #[test]
+    fn a_multi_step_turn_emits_exactly_one_turn_done_carrying_summed_usage() {
+        let mut x = Translator::default();
+        x.handle(&oc(
+            "message.updated",
+            json!({ "info": { "id": "m1", "role": "assistant" } }),
+        ));
+
+        let mut events = Vec::new();
+        for (id, cost, total) in [("s1", 0.25, 100), ("s2", 0.75, 250)] {
+            events.extend(x.handle(&oc(
+                "message.part.updated",
+                json!({ "part": {
+                    "id": id, "type": "step-finish", "messageID": "m1",
+                    "cost": cost, "tokens": { "total": total },
+                } }),
+            )));
+        }
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, SessionEvent::TurnDone { .. })),
+            "step-finish is a per-step boundary and must not end the turn: {events:?}"
+        );
+
+        events.extend(x.handle(&oc("session.idle", json!({}))));
+        let done: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, SessionEvent::TurnDone { .. }))
+            .collect();
+        assert_eq!(done.len(), 1, "expected one TurnDone, got {events:?}");
+        match done[0] {
+            SessionEvent::TurnDone {
+                cost_usd,
+                context_tokens,
+                ..
+            } => {
+                assert_eq!(*cost_usd, Some(1.0));
+                assert_eq!(*context_tokens, Some(250));
+            }
+            other => panic!("unexpected event: {other:?}"),
         }
     }
 

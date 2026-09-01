@@ -1,262 +1,132 @@
 import { describe, expect, it } from "vitest";
 
-import type { CustomPrompt } from "@/lib/bindings";
+import type { PromptImportPreview } from "@/lib/bindings";
 import {
-  applyImport,
-  buildPromptsFile,
-  parsePromptsFile,
-  planImport,
+  buildExportRequest,
+  conflictActions,
+  exportFileName,
+  importRows,
+  willImportCount,
   type ExportEntry,
   type ImportDecision,
-  type LibrarySnapshot,
-  type PromptsFile,
 } from "./promptsIo";
 
-function idMinter() {
-  let n = 0;
-  return () => `new-${++n}`;
-}
+const entry: ExportEntry = {
+  id: "p1",
+  name: "Backfill tests",
+  builtin: false,
+  body: "Write tests for {{changed_files}}.",
+  chord: "mod+shift+t",
+  overrides: { "/repos/app": "vitest override" },
+};
 
-function snapshot(overrides: Partial<LibrarySnapshot> = {}): LibrarySnapshot {
+function preview(over: Partial<PromptImportPreview> = {}): PromptImportPreview {
   return {
-    builtins: [
-      { id: "commit", name: "Commit" },
-      { id: "ship", name: "Ship" },
+    sourceSha256: "abc",
+    sourceVersion: 1,
+    source: null,
+    prompts: [
+      { key: "0", name: "Fresh", body: "a", chord: null, chordTaken: false, unknownProjects: [] },
+      { key: "1", name: "Commit", body: "b", chord: null, chordTaken: false, unknownProjects: [] },
+      { key: "2", name: "Mine", body: "c", chord: null, chordTaken: false, unknownProjects: [] },
     ],
-    custom: [],
-    takenChords: new Set(),
-    projectPathByName: new Map(),
-    ...overrides,
+    conflicts: [
+      { key: "1", kind: "builtin" },
+      { key: "2", kind: "custom" },
+    ],
+    ...over,
   };
 }
 
-describe("buildPromptsFile", () => {
-  const entry: ExportEntry = {
-    id: "p1",
-    name: "Backfill tests",
-    builtin: false,
-    body: "Write tests for {{changed_files}}.",
-    chord: "mod+shift+t",
-    overrides: { "/repos/app": "vitest override" },
-  };
-  const projectName = (path: string) => (path === "/repos/app" ? "app" : path);
-
-  it("round-trips through parse with chords and overrides on", () => {
-    const text = buildPromptsFile([entry], {
-      includeChords: true,
-      includeOverrides: true,
-      projectName,
-    });
-    const parsed = parsePromptsFile(text);
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) return;
-    expect(parsed.file.prompts).toHaveLength(1);
-    expect(parsed.file.prompts[0]).toEqual({
-      name: "Backfill tests",
-      body: "Write tests for {{changed_files}}.",
-      chord: "mod+shift+t",
-      overrides: { app: "vitest override" },
-    });
-  });
-
-  it("omits chords when includeChords is off", () => {
-    const text = buildPromptsFile([entry], {
-      includeChords: false,
-      includeOverrides: true,
-      projectName,
-    });
-    const p = JSON.parse(text).prompts[0];
-    expect(p.chord).toBeUndefined();
-    expect(p.overrides).toEqual({ app: "vitest override" });
-  });
-
-  it("omits overrides when includeOverrides is off", () => {
-    const text = buildPromptsFile([entry], {
-      includeChords: true,
-      includeOverrides: false,
-      projectName,
-    });
-    const p = JSON.parse(text).prompts[0];
-    expect(p.overrides).toBeUndefined();
-    expect(p.chord).toBe("mod+shift+t");
-  });
-
-  it("writes the version and an optional source", () => {
-    const text = buildPromptsFile([entry], {
-      includeChords: true,
-      includeOverrides: false,
-      projectName,
-      source: "jon",
-    });
-    const doc = JSON.parse(text);
-    expect(doc.hlprompts).toBe(1);
-    expect(doc.source).toBe("jon");
-  });
-});
-
-describe("parsePromptsFile", () => {
-  it("rejects non-JSON", () => {
-    const r = parsePromptsFile("not json {");
-    expect(r.ok).toBe(false);
-  });
-
-  it("rejects the wrong shape", () => {
-    expect(parsePromptsFile(JSON.stringify({ nope: true })).ok).toBe(false);
-    expect(parsePromptsFile(JSON.stringify({ prompts: "x" })).ok).toBe(false);
-  });
-
-  it("rejects a newer format version", () => {
-    const r = parsePromptsFile(JSON.stringify({ hlprompts: 99, prompts: [{ name: "X", body: "b" }] }));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/newer version/);
-  });
-
-  it("drops entries with no name and tolerates missing bodies", () => {
-    const r = parsePromptsFile(
-      JSON.stringify({
-        hlprompts: 1,
-        prompts: [{ body: "no name" }, { name: "  Kept  " }],
-      }),
-    );
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.file.prompts).toEqual([{ name: "Kept", body: "" }]);
-  });
-
-  it("errors when there is nothing importable", () => {
-    const r = parsePromptsFile(JSON.stringify({ hlprompts: 1, prompts: [{ body: "x" }] }));
-    expect(r.ok).toBe(false);
-  });
-});
-
-describe("planImport", () => {
-  const file: PromptsFile = {
-    hlprompts: 1,
-    prompts: [
-      { name: "Fresh", body: "new one" },
-      { name: "Commit", body: "clashes with a built-in" },
-      { name: "Mine", body: "clashes with a custom", chord: "mod+shift+t" },
-      { name: "WithOverride", body: "x", overrides: { app: "a", ghost: "g" } },
-    ],
-  };
-  const snap = snapshot({
-    custom: [{ id: "c1", name: "Mine", body: "existing" }],
-    takenChords: new Set(["mod+shift+t"]),
-    projectPathByName: new Map([["app", "/repos/app"]]),
-  });
-
-  it("flags built-in and custom name conflicts, else new", () => {
-    const rows = planImport(file, snap);
-    expect(rows[0].conflict).toBeNull();
-    expect(rows[1].conflict).toEqual({ kind: "builtin" });
-    expect(rows[2].conflict).toEqual({ kind: "custom" });
-  });
-
-  it("detects a taken chord and unknown override projects", () => {
-    const rows = planImport(file, snap);
-    expect(rows[2].chordTaken).toBe(true);
-    expect(rows[3].unknownProjects).toEqual(["ghost"]);
-  });
-});
-
-function decide(
-  keys: string[],
-  resolutions: Record<string, ImportDecision["resolution"]> = {},
-): Record<string, ImportDecision> {
+function decide(over: Record<string, Partial<ImportDecision>> = {}) {
   return Object.fromEntries(
-    keys.map((k) => [k, { include: true, resolution: resolutions[k] ?? "keep-both" }]),
+    ["0", "1", "2"].map((key) => [
+      key,
+      { include: true, resolution: "keepBoth", ...over[key] } as ImportDecision,
+    ]),
   );
 }
 
-describe("applyImport", () => {
-  it("adds a brand-new prompt with a free chord", () => {
-    const file: PromptsFile = { hlprompts: 1, prompts: [{ name: "Fresh", body: "b", chord: "mod+j" }] };
-    const snap = snapshot();
-    const rows = planImport(file, snap);
-    const out = applyImport(rows, decide(["0"]), {}, snap, idMinter());
-    expect(out.imported).toBe(1);
-    expect(out.firstId).toBe("new-1");
-    expect(out.prompts.custom).toEqual([
-      { id: "new-1", name: "Fresh", body: "b", overrides: {}, chord: "mod+j", pinned: false },
-    ]);
+describe("exportFileName", () => {
+  it("slugifies the prompt name and adds the extension", () => {
+    expect(exportFileName("Backfill Tests!")).toBe("backfill-tests.hlprompts");
   });
 
-  it("drops a chord that is already taken", () => {
-    const file: PromptsFile = { hlprompts: 1, prompts: [{ name: "Fresh", body: "b", chord: "mod+shift+t" }] };
-    const snap = snapshot({ takenChords: new Set(["mod+shift+t"]) });
-    const out = applyImport(planImport(file, snap), decide(["0"]), {}, snap, idMinter());
-    expect(out.prompts.custom?.[0].chord).toBeNull();
+  it("falls back to a generic name when nothing survives slugification", () => {
+    expect(exportFileName("///")).toBe("prompt.hlprompts");
   });
+});
 
-  it("gives two imports competing for the same free chord to the first only", () => {
-    const file: PromptsFile = {
-      hlprompts: 1,
-      prompts: [
-        { name: "A", body: "a", chord: "mod+k" },
-        { name: "B", body: "b", chord: "mod+k" },
+describe("buildExportRequest", () => {
+  it("maps the dialog's entries and options onto the command payload", () => {
+    const request = buildExportRequest("/tmp/out", [entry], {
+      includeChords: true,
+      includeOverrides: false,
+      source: "jon",
+    });
+    expect(request).toEqual({
+      path: "/tmp/out",
+      entries: [
+        {
+          name: "Backfill tests",
+          body: "Write tests for {{changed_files}}.",
+          chord: "mod+shift+t",
+          overrides: { "/repos/app": "vitest override" },
+        },
       ],
-    };
-    const snap = snapshot();
-    const out = applyImport(planImport(file, snap), decide(["0", "1"]), {}, snap, idMinter());
-    expect(out.prompts.custom?.[0].chord).toBe("mod+k");
-    expect(out.prompts.custom?.[1].chord).toBeNull();
+      includeChords: true,
+      includeOverrides: false,
+      source: "jon",
+    });
   });
 
-  it("keep-both suffixes a name that collides", () => {
-    const file: PromptsFile = { hlprompts: 1, prompts: [{ name: "Mine", body: "incoming" }] };
-    const base = { custom: [{ id: "c1", name: "Mine", body: "existing" }] as CustomPrompt[] };
-    const snap = snapshot(base);
-    const out = applyImport(planImport(file, snap), decide(["0"]), base, snap, idMinter());
-    expect(out.prompts.custom).toHaveLength(2);
-    expect(out.prompts.custom?.[1].name).toBe("Mine (imported)");
-    expect(out.prompts.custom?.[0].body).toBe("existing");
+  it("sends a null source when the caller omits one", () => {
+    const request = buildExportRequest("/tmp/out", [entry], {
+      includeChords: false,
+      includeOverrides: true,
+    });
+    expect(request.source).toBeNull();
+  });
+});
+
+describe("importRows", () => {
+  it("joins each conflict onto the candidate it belongs to", () => {
+    const rows = importRows(preview());
+    expect(rows.map((r) => r.conflict)).toEqual([null, "builtin", "custom"]);
+    expect(rows[0].name).toBe("Fresh");
+  });
+});
+
+describe("conflictActions", () => {
+  it("sends keepBoth for a candidate with no name conflict", () => {
+    const rows = importRows(preview());
+    expect(conflictActions(rows, decide())["0"]).toBe("keepBoth");
   });
 
-  it("replace overwrites a custom prompt's body in place", () => {
-    const file: PromptsFile = { hlprompts: 1, prompts: [{ name: "Mine", body: "incoming", chord: "mod+m" }] };
-    const base = { custom: [{ id: "c1", name: "Mine", body: "old", chord: null }] as CustomPrompt[] };
-    const snap = snapshot(base);
-    const out = applyImport(planImport(file, snap), decide(["0"], { "0": "replace" }), base, snap, idMinter());
-    expect(out.prompts.custom).toHaveLength(1);
-    expect(out.prompts.custom?.[0]).toMatchObject({ id: "c1", body: "incoming", chord: "mod+m" });
-    expect(out.firstId).toBe("c1");
+  it("passes a conflicting candidate's chosen resolution through", () => {
+    const rows = importRows(preview());
+    const actions = conflictActions(rows, decide({ "1": { resolution: "replace" } }));
+    expect(actions["1"]).toBe("replace");
+    expect(actions["2"]).toBe("keepBoth");
   });
 
-  it("replace of a built-in writes its builtinBodies override, not a custom", () => {
-    const file: PromptsFile = { hlprompts: 1, prompts: [{ name: "Commit", body: "my commit rules" }] };
-    const snap = snapshot();
-    const out = applyImport(planImport(file, snap), decide(["0"], { "0": "replace" }), {}, snap, idMinter());
-    expect(out.prompts.builtinBodies).toEqual({ commit: "my commit rules" });
-    expect(out.prompts.custom).toEqual([]);
-    expect(out.firstId).toBe("commit");
+  it("turns an unchecked candidate into a skip regardless of its resolution", () => {
+    const rows = importRows(preview());
+    const actions = conflictActions(rows, decide({ "2": { include: false, resolution: "replace" } }));
+    expect(actions["2"]).toBe("skip");
   });
 
-  it("skip drops a conflicting entry entirely", () => {
-    const file: PromptsFile = { hlprompts: 1, prompts: [{ name: "Commit", body: "x" }] };
-    const snap = snapshot();
-    const out = applyImport(planImport(file, snap), decide(["0"], { "0": "skip" }), {}, snap, idMinter());
-    expect(out.imported).toBe(0);
-    expect(out.prompts.custom).toEqual([]);
-    expect(out.prompts.builtinBodies).toEqual({});
+  it("defaults a candidate with no decision to a skip", () => {
+    const rows = importRows(preview());
+    expect(conflictActions(rows, {})).toEqual({ "0": "skip", "1": "skip", "2": "skip" });
   });
+});
 
-  it("re-homes known overrides by name and drops unknown ones", () => {
-    const file: PromptsFile = {
-      hlprompts: 1,
-      prompts: [{ name: "P", body: "b", overrides: { app: "for app", ghost: "dropped" } }],
-    };
-    const snap = snapshot({ projectPathByName: new Map([["app", "/repos/app"]]) });
-    const out = applyImport(planImport(file, snap), decide(["0"]), {}, snap, idMinter());
-    expect(out.prompts.custom?.[0].overrides).toEqual({ "/repos/app": "for app" });
-  });
-
-  it("skips unchecked candidates", () => {
-    const file: PromptsFile = { hlprompts: 1, prompts: [{ name: "A", body: "a" }, { name: "B", body: "b" }] };
-    const snap = snapshot();
-    const rows = planImport(file, snap);
-    const decisions = { "0": { include: false, resolution: "keep-both" as const }, "1": { include: true, resolution: "keep-both" as const } };
-    const out = applyImport(rows, decisions, {}, snap, idMinter());
-    expect(out.imported).toBe(1);
-    expect(out.prompts.custom?.[0].name).toBe("B");
+describe("willImportCount", () => {
+  it("counts everything that is not skipped", () => {
+    const rows = importRows(preview());
+    expect(willImportCount(rows, decide())).toBe(3);
+    expect(willImportCount(rows, decide({ "1": { resolution: "skip" } }))).toBe(2);
+    expect(willImportCount(rows, decide({ "0": { include: false } }))).toBe(2);
   });
 });

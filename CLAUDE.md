@@ -32,7 +32,15 @@ signature the bindings depend on.
 
 ## Architecture: two thin shells
 
-The backend mirrors ADR-0001: `crates/hyprlayer-core` (zero Tauri deps, all logic) + `src-tauri` (thin IPC shell). The frontend mirrors that same contract via ADR-0003: routes are wiring, features are content, `src/lib` and `src/components` are the shared foundation.
+The backend is three crates (ADR-0008): `crates/hyprlayer-models` (dependency-light
+serde contracts) → `crates/hyprlayer-core` (zero Tauri deps, all logic, exposed
+through the `HyprlayerRuntime` facade) → `src-tauri` (thin IPC shell). The frontend
+mirrors that same contract via ADR-0003: routes are wiring, features are content,
+`src/lib` and `src/components` are the shared foundation.
+
+`docs/architecture/rust-runtime-library.md` is the runtime's API reference: what the
+supported surface is, what the 30 `pub mod`s below it are not, and the hermeticity
+contract `HyprlayerRuntime::open` holds to.
 
 **Import direction is one-way downward.** No layer may import upward.
 
@@ -56,7 +64,7 @@ When a shared module needs feature-side behavior, expose a registration seam
 | Is a shared formatting helper | `src/lib/format.ts` |
 | Is a shared path helper | `src/lib/path.ts` |
 | Is a terminal/PTY concern | `src/lib/terminal/` |
-| Is an agent-bundle (`~/.claude`) backup/restore/diff concern | `crates/hyprlayer-core/src/agent_bundle.rs` — pure and filesystem-only; the GitHub probe is in `src-tauri/src/commands/agents.rs`, ADR-0001 keeps core dependency-light |
+| Is an agent-bundle (`~/.claude`) backup/restore/diff concern | `crates/hyprlayer-core/src/agent_bundle.rs` — pure and filesystem-only; the GitHub probe is fetched in `crates/hyprlayer-core/src/runtime/agents.rs` through the `ProviderHttp` port, since ADR-0008 moved every service's network calls into core |
 | Is used by exactly one feature | that feature's directory |
 | Is used by *two or more* features | graduate to `src/lib/` or `src/components/` |
 | Is a route/page definition | `src/routes/` — keep it dumb: layout, params, pane wiring only. No domain types, no store imports. |
@@ -109,3 +117,4 @@ section banners, or preserve implementation history.
 @docs/adr/0005-git-access.md
 @docs/adr/0006-visual-conventions.md
 @docs/adr/0007-harness-capability-layer.md
+@docs/adr/0008-rust-runtime-library-boundary.md

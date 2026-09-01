@@ -9,13 +9,6 @@ use crate::process::Exec;
 
 use super::thoughts_links::LinkStatus;
 
-pub fn default_worktree_root() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hyprlayer")
-        .join("worktrees")
-}
-
 pub const ARCHIVE_SUBDIR: &str = "archived-contexts";
 
 pub fn archive_dir_for(project_repo: &Path, slug: &str) -> PathBuf {

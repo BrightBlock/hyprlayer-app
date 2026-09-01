@@ -4,14 +4,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
 
-pub fn current_dir() -> Option<PathBuf> {
-    let candidate = dirs::state_dir()?.join("omarchy/current");
-    if candidate.join("theme.name").is_file() {
-        return Some(candidate);
+// `state_dir`/`config_dir` are OS-convention roots the caller resolves (e.g. via
+// `dirs::state_dir()`/`dirs::config_dir()`); core only joins the fixed suffix and
+// checks for the marker file, so it never reads the platform environment itself.
+pub fn current_dir(state_dir: Option<&Path>, config_dir: Option<&Path>) -> Option<PathBuf> {
+    if let Some(state_dir) = state_dir {
+        let candidate = state_dir.join("omarchy/current");
+        if candidate.join("theme.name").is_file() {
+            return Some(candidate);
+        }
     }
-    let candidate = dirs::config_dir()?.join("omarchy/current");
-    if candidate.join("theme.name").is_file() {
-        return Some(candidate);
+    if let Some(config_dir) = config_dir {
+        let candidate = config_dir.join("omarchy/current");
+        if candidate.join("theme.name").is_file() {
+            return Some(candidate);
+        }
     }
     None
 }
@@ -148,7 +155,7 @@ pub fn hex(s: &str) -> Option<[u8; 3]> {
         6 => digits.to_string(),
         _ => return None,
     };
-    let mut channels = expanded.as_bytes().chunks_exact(2).map(|pair| {
+    let mut channels = expanded.as_bytes().as_chunks::<2>().0.iter().map(|pair| {
         std::str::from_utf8(pair)
             .ok()
             .and_then(|hex| u8::from_str_radix(hex, 16).ok())
@@ -400,15 +407,15 @@ pub struct OmarchyStatus {
     pub theme: Option<OmarchyTheme>,
 }
 
-pub fn status() -> OmarchyStatus {
-    let Some(dir) = current_dir() else {
+pub fn status(dir: Option<&Path>) -> OmarchyStatus {
+    let Some(dir) = dir else {
         return OmarchyStatus {
             installed: false,
             theme: None,
         };
     };
-    let name = theme_name(&dir);
-    let theme = match read_palette(&dir) {
+    let name = theme_name(dir);
+    let theme = match read_palette(dir) {
         Ok(p) => Some(resolve(name, &p)),
         Err(e) => {
             tracing::warn!(error = %e, "omarchy palette read failed");

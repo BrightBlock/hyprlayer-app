@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -13,35 +13,17 @@ use super::events::{ExitOutcome, SessionEvent};
 use super::protocol::{self, Block, ParsedLine};
 use crate::agent::KillFlag;
 use crate::error::{CoreError, Result};
+use crate::store::session_event_codec::questions_from_value;
+use hyprlayer_models::session::QuestionAnswers;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionMode {
-    Default,
-    AcceptEdits,
-    Plan,
-    BypassPermissions,
-}
+pub use hyprlayer_models::agent::PermissionMode;
 
-impl PermissionMode {
-    fn as_flag(self) -> &'static str {
-        match self {
-            PermissionMode::Default => "default",
-            PermissionMode::AcceptEdits => "acceptEdits",
-            PermissionMode::Plan => "plan",
-            PermissionMode::BypassPermissions => "bypassPermissions",
-        }
-    }
-
-    pub fn from_flag(s: &str) -> Option<PermissionMode> {
-        match s {
-            "default" => Some(PermissionMode::Default),
-            "acceptEdits" => Some(PermissionMode::AcceptEdits),
-            "plan" => Some(PermissionMode::Plan),
-            "bypassPermissions" => Some(PermissionMode::BypassPermissions),
-            _ => None,
-        }
+fn permission_mode_flag(mode: PermissionMode) -> &'static str {
+    match mode {
+        PermissionMode::Default => "default",
+        PermissionMode::AcceptEdits => "acceptEdits",
+        PermissionMode::Plan => "plan",
+        PermissionMode::BypassPermissions => "bypassPermissions",
     }
 }
 
@@ -61,6 +43,7 @@ pub struct SpawnConfig {
     pub chrome: bool,
     pub agent: Option<crate::pipeline::SessionAgent>,
     pub env: Vec<(String, String)>,
+    pub claude_config_dir: Option<PathBuf>,
 }
 
 const STDERR_RING_LINES: usize = 200;
@@ -81,6 +64,7 @@ pub struct ClaudeDriver {
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
     killer: Killer,
+    claude_config_dir: Option<PathBuf>,
 }
 
 impl ClaudeDriver {
@@ -92,7 +76,10 @@ impl ClaudeDriver {
             .arg("--verbose")
             .arg("--include-partial-messages")
             .args(["--permission-prompt-tool", "stdio"])
-            .args(["--permission-mode", config.permission_mode.as_flag()]);
+            .args([
+                "--permission-mode",
+                permission_mode_flag(config.permission_mode),
+            ]);
 
         if let Some(resume) = &config.resume {
             cmd.args(["--resume", resume]);
@@ -209,6 +196,7 @@ impl ClaudeDriver {
                 pending_permissions,
                 pending_controls,
                 killer: Killer { pid },
+                claude_config_dir: config.claude_config_dir,
             },
             primary_rx,
         ))
@@ -251,7 +239,7 @@ impl ClaudeDriver {
         ))
     }
 
-    pub fn answer_question(&self, request_id: &str, answers: Value) -> Result<()> {
+    pub fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
         let mut input = self
             .pending_permissions
             .lock()
@@ -259,7 +247,7 @@ impl ClaudeDriver {
             .and_then(|mut map| map.remove(request_id))
             .unwrap_or_else(|| json!({}));
         if let Value::Object(map) = &mut input {
-            map.insert("answers".to_string(), answers);
+            map.insert("answers".to_string(), json!(answers));
         }
         self.write_line(protocol::permission_response_json(
             request_id,
@@ -279,7 +267,7 @@ impl ClaudeDriver {
         self.write_line(protocol::control_request_json(
             &id,
             "set_permission_mode",
-            json!({ "mode": mode.as_flag() }),
+            json!({ "mode": permission_mode_flag(mode) }),
         ))
     }
 
@@ -307,8 +295,9 @@ impl ClaudeDriver {
 
     async fn transcript_user_uuids(&self) -> Vec<String> {
         let session_id = self.session_id.clone();
+        let claude_config_dir = self.claude_config_dir.clone();
         tokio::task::spawn_blocking(move || {
-            transcript_path(&session_id)
+            transcript_path(&session_id, claude_config_dir.as_deref())
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .map(|c| parse_transcript_user_uuids(&c))
                 .unwrap_or_default()
@@ -492,7 +481,7 @@ async fn read_and_wait(
             .outcome()
             .unwrap_or_else(|| match (&status, saw_result, saw_error_result) {
                 (Ok(s), true, false) if s.success() => ExitOutcome::Completed,
-                (Ok(s), _, _) => ExitOutcome::from_status(s),
+                (Ok(s), _, _) => crate::process::exit::outcome_from_status(s),
                 (Err(_), _, _) => ExitOutcome::SpawnFailed,
             });
 
@@ -510,7 +499,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             model,
             ..
         } => vec![SessionEvent::Init {
-            claude_session_id: claude_session_id.unwrap_or_default(),
+            provider_session_id: claude_session_id.unwrap_or_default(),
             model,
         }],
         ParsedLine::PartialText { text, parent_id } => {
@@ -561,7 +550,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             match questions {
                 Some(questions) => vec![SessionEvent::QuestionAsk {
                     request_id,
-                    questions: questions.to_string(),
+                    questions: questions_from_value(Some(questions)),
                 }],
                 None => vec![SessionEvent::PermissionAsk {
                     request_id,
@@ -657,14 +646,8 @@ fn rewind_local_start(ordinal: usize, len: usize) -> std::result::Result<usize, 
     Ok(idx)
 }
 
-fn claude_config_dir() -> Option<PathBuf> {
-    std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
-}
-
-fn transcript_path(session_id: &str) -> Option<PathBuf> {
-    let projects = claude_config_dir()?.join("projects");
+fn transcript_path(session_id: &str, claude_config_dir: Option<&Path>) -> Option<PathBuf> {
+    let projects = claude_config_dir?.join("projects");
     let filename = format!("{session_id}.jsonl");
     for entry in std::fs::read_dir(&projects).ok()?.flatten() {
         let candidate = entry.path().join(&filename);
@@ -807,7 +790,7 @@ mod tests {
                 questions: q,
             }] => {
                 assert_eq!(request_id, "req-1");
-                assert_eq!(serde_json::from_str::<Value>(q).unwrap(), questions);
+                assert_eq!(serde_json::to_value(q).unwrap(), questions);
             }
             other => panic!("expected one QuestionAsk, got {other:?}"),
         }

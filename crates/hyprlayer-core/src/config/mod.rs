@@ -12,10 +12,6 @@ use tokio::sync::RwLock;
 
 use crate::error::{CoreError, Result};
 
-pub fn default_config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("hyprlayer").join("config.json"))
-}
-
 pub fn parse_config(raw: &str, path: &Path) -> Result<HyprlayerConfig> {
     let value: serde_json::Value =
         serde_json::from_str(raw).map_err(|source| CoreError::ConfigParse {
@@ -212,15 +208,6 @@ impl ConfigService {
             path,
             cache: RwLock::new(None),
         }
-    }
-
-    pub fn with_default_path() -> Result<Self> {
-        let path = default_config_path().ok_or_else(|| {
-            CoreError::Io(std::io::Error::other(
-                "could not determine the OS config directory",
-            ))
-        })?;
-        Ok(Self::new(path))
     }
 
     pub fn path(&self) -> &Path {

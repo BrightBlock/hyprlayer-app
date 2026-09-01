@@ -27,6 +27,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         chrome: false,
         agent: None,
         env: std::env::vars().collect(),
+        claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
     })
     .expect("spawn claude");
 
@@ -133,6 +134,7 @@ async fn rewind_to_ordinal_truncates_model_memory() {
         chrome: false,
         agent: None,
         env: std::env::vars().collect(),
+        claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
     })
     .expect("spawn claude");
 
@@ -209,6 +211,7 @@ fn spawn_haiku(
         chrome: false,
         agent: None,
         env: std::env::vars().collect(),
+        claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
     })
     .expect("spawn claude")
 }

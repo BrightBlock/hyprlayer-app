@@ -550,6 +550,24 @@ const CompactDivider = memo(function CompactDivider({
   );
 });
 
+const BoundaryDivider = memo(function BoundaryDivider({
+  label,
+  hint,
+}: {
+  label: string;
+  hint: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-ink-dim/70">
+      <span className="h-px flex-1 bg-edge" aria-hidden />
+      <span className="shrink-0" title={hint}>
+        {label}
+      </span>
+      <span className="h-px flex-1 bg-edge" aria-hidden />
+    </div>
+  );
+});
+
 const QueuedCommandRow = memo(function QueuedCommandRow({
   item,
 }: {
@@ -730,6 +748,20 @@ function renderSingle(
       return <ProtocolErrorBlock detail={item.detail} raw={item.raw} />;
     case "compact":
       return <CompactDivider item={item} />;
+    case "rewound":
+      return (
+        <BoundaryDivider
+          label="Rewound to here"
+          hint="The turns after this point were removed from the transcript."
+        />
+      );
+    case "relaunched":
+      return (
+        <BoundaryDivider
+          label="Agent relaunched"
+          hint="The harness process was restarted; the conversation continues on the resumed session."
+        />
+      );
     case "queuedCommand":
       return <QueuedCommandRow item={item} />;
     case "exit":

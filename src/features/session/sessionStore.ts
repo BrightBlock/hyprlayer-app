@@ -371,7 +371,14 @@ async function restartSession(
   if (!current) return;
 
   channels.delete(sessionId);
-  setEntry(sessionId, { ...current, permissionMode: mode, reloading: true, live: false, state: "starting" });
+  setEntry(sessionId, {
+    ...current,
+    permissionMode: mode,
+    autoAllow: [],
+    reloading: true,
+    live: false,
+    state: "starting",
+  });
 
   const { channel, activate } = bufferedChannel();
   try {
@@ -451,6 +458,7 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
     setEntry(sessionId, {
       ...latest,
       ...truncated,
+      autoAllow: liveRewound ? latest.autoAllow : [],
       reloading: false,
       live: true,
       streaming: false,
@@ -482,10 +490,8 @@ export async function applyPermissionMode(
   const current = entryOf(sessionId);
   if (!current || current.permissionMode === mode) return;
 
-  if (!channels.has(sessionId)) {
-    setEntry(sessionId, { ...current, permissionMode: mode });
-    return;
-  }
+  setEntry(sessionId, { ...current, permissionMode: mode, autoAllow: [] });
+  if (!channels.has(sessionId)) return;
   await restartSession(sessionId, mode);
 }
 
@@ -595,7 +601,7 @@ export async function answerQuestion(
     await resumeSession(sessionId);
     return;
   }
-  await unwrap(commands.answerQuestion(sessionId, requestId, JSON.stringify(answers)));
+  await unwrap(commands.answerQuestion(sessionId, requestId, answers));
 }
 
 export async function allowForSession(
@@ -624,7 +630,7 @@ export async function stopSession(sessionId: string): Promise<void> {
     setEntry(sessionId, { ...parked, ...cleared, streaming: false, state: parkedState(cleared) });
     try {
       if (parked.pendingQuestion) {
-        await unwrap(commands.answerQuestion(sessionId, parked.pendingQuestion.requestId, "{}"));
+        await unwrap(commands.answerQuestion(sessionId, parked.pendingQuestion.requestId, {}));
       } else {
         const requestId = openPermissionRequestId(parked);
         if (requestId) await unwrap(commands.respondPermission(sessionId, requestId, false, null));
@@ -856,7 +862,7 @@ export async function restoreSessionIfNeeded(
     let view = initialSessionView("starting");
     for (const stored of log) {
       try {
-        view = reduceEvent(view, JSON.parse(stored.payload) as SessionEvent);
+        view = reduceEvent(view, stored.event);
         const last = view.items[view.items.length - 1];
         if (stored.kind === "userMessage" && last?.kind === "user" && last.createdAt === null) {
           view = { ...view, items: [...view.items.slice(0, -1), { ...last, createdAt: stored.createdAt }] };

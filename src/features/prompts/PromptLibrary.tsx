@@ -3,7 +3,7 @@ import { confirm, open, save as saveFileDialog } from "@tauri-apps/plugin-dialog
 
 import { commands } from "@/lib/bindings";
 import type { AppSettings, CustomPrompt, PromptSettings } from "@/lib/bindings";
-import { useBootstrap, useSetAppSettings } from "@/lib/queries";
+import { invalidateBootstrap, useBootstrap, useSetAppSettings } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
 import { useToast } from "@/lib/toast";
 import { startEdgeDrag } from "@/lib/resize";
@@ -51,16 +51,16 @@ import {
 import { ExportPromptsDialog } from "./ExportPromptsDialog";
 import { ImportPromptsDialog } from "./ImportPromptsDialog";
 import {
+  DEFAULT_EXPORT_NAME,
   PROMPTS_FILE_EXT,
-  applyImport,
-  buildPromptsFile,
-  parsePromptsFile,
-  planImport,
+  buildExportRequest,
+  conflictActions,
+  exportFileName,
+  importRows,
   type ExportEntry,
   type ExportOptions,
-  type ImportCandidate,
   type ImportDecision,
-  type LibrarySnapshot,
+  type ImportRow,
 } from "./promptsIo";
 
 const EMPTY_OVERRIDES: Overrides = {};
@@ -209,9 +209,11 @@ export function PromptLibrary({
   const [filter, setFilter] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [importFile, setImportFile] = useState<{
+    path: string;
     fileName: string;
+    sourceSha256: string;
     source: string | null;
-    candidates: ImportCandidate[];
+    rows: ImportRow[];
   } | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
@@ -424,8 +426,6 @@ export function PromptLibrary({
 
   const chordLabel = (c: string) => formatChord(normalizeChord(c), IS_MACOS);
   const basename = (p: string) => p.split(/[\\/]/).pop() || p;
-  const slugify = (name: string) =>
-    name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "prompt";
 
   const exportEntries: ExportEntry[] = useMemo(() => {
     const builtins = BUILTIN_PROMPTS.map((b) => ({
@@ -455,42 +455,49 @@ export function PromptLibrary({
     [exportEntries, asSettings, defaults],
   );
 
-  const librarySnapshot: LibrarySnapshot = useMemo(() => {
-    const takenChords = new Set<string>();
+  const takenChords = useMemo(() => {
+    const taken = new Set<string>();
     for (const b of BUILTIN_PROMPTS) {
       const ch = effectiveChord(kbOverrides, b.commandId, IS_MACOS);
-      if (ch) takenChords.add(ch);
+      if (ch) taken.add(ch);
     }
-    for (const c of custom) if (c.chord) takenChords.add(normalizeChord(c.chord));
-    const projectPathByName = new Map<string, string>();
-    for (const p of projects) projectPathByName.set(p.mappedName, p.path);
-    return {
-      builtins: BUILTIN_PROMPTS.map((b) => ({ id: b.id, name: b.name })),
-      custom,
-      takenChords,
-      projectPathByName,
-    };
-  }, [kbOverrides, custom, projects]);
+    for (const c of custom) if (c.chord) taken.add(normalizeChord(c.chord));
+    return [...taken];
+  }, [kbOverrides, custom]);
 
-  const writeToChosenPath = async (defaultName: string, content: string): Promise<string | null> => {
+  const adopt = (next: PromptSettings) => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    promptsRef.current = next;
+    setPrompts(next);
+    invalidateBootstrap();
+  };
+
+  const exportTo = async (
+    defaultName: string,
+    entries: ExportEntry[],
+    opts: ExportOptions,
+  ): Promise<string | null> => {
     const chosen = await saveFileDialog({
       title: "Export prompts",
       defaultPath: defaultName,
       filters: [{ name: "Hyprlayer prompts", extensions: [PROMPTS_FILE_EXT] }],
     });
     if (!chosen) return null;
-    const path = chosen.endsWith(`.${PROMPTS_FILE_EXT}`) ? chosen : `${chosen}.${PROMPTS_FILE_EXT}`;
-    const res = await commands.writePromptsFile(path, content);
+    const res = await commands.exportPrompts(buildExportRequest(chosen, entries, opts));
     if (res.status === "error") {
       useToast.getState().show("Export failed", res.error.message || "Couldn't write the file.", {
         tone: "bad",
       });
       return null;
     }
-    return basename(path);
+    return basename(res.data.path);
   };
 
   const openImportDialog = async () => {
+    flushPending();
     const selected = await open({
       multiple: false,
       directory: false,
@@ -499,48 +506,52 @@ export function PromptLibrary({
     });
     const path = Array.isArray(selected) ? selected[0] : selected;
     if (!path) return;
-    const res = await commands.readPromptsFile(path);
+    const res = await commands.previewPromptImport(path, takenChords);
     if (res.status === "error") {
       useToast.getState().show("Import failed", res.error.message || "Couldn't read that file.", {
         tone: "bad",
       });
       return;
     }
-    const parsed = parsePromptsFile(res.data);
-    if (!parsed.ok) {
-      useToast.getState().show("Import failed", parsed.error, { tone: "bad" });
-      return;
-    }
     setImportFile({
+      path,
       fileName: basename(path),
-      source: parsed.file.source ?? null,
-      candidates: planImport(parsed.file, librarySnapshot),
+      sourceSha256: res.data.sourceSha256,
+      source: res.data.source,
+      rows: importRows(res.data),
     });
   };
 
-  const runImport = (decisions: Record<string, ImportDecision>) => {
+  const runImport = async (decisions: Record<string, ImportDecision>) => {
     if (!importFile) return;
-    const outcome = applyImport(
-      importFile.candidates,
-      decisions,
-      promptsRef.current,
-      librarySnapshot,
-      newPromptId,
-    );
     const from = importFile.fileName;
+    const res = await commands.applyPromptImport({
+      path: importFile.path,
+      expectedSourceSha256: importFile.sourceSha256,
+      mode: "merge",
+      conflictActions: conflictActions(importFile.rows, decisions),
+      takenChords,
+    });
     setImportFile(null);
-    if (!outcome.imported) return;
-    update(() => outcome.prompts, { immediate: true });
+    if (res.status === "error") {
+      useToast.getState().show("Import failed", res.error.message || "Couldn't import that file.", {
+        tone: "bad",
+      });
+      return;
+    }
+    const outcome = res.data;
+    adopt(outcome.settings);
+    const imported = outcome.added + outcome.replaced + outcome.renamed;
+    if (!imported) return;
     if (outcome.firstId) select(outcome.firstId);
     useToast.getState().show(
       "Prompts imported",
-      `Imported ${outcome.imported} prompt${outcome.imported === 1 ? "" : "s"} from ${from}.`,
+      `Imported ${imported} prompt${imported === 1 ? "" : "s"} from ${from}.`,
     );
   };
 
   const runExport = async (selected: ExportEntry[], opts: ExportOptions) => {
-    const content = buildPromptsFile(selected, { ...opts, projectName });
-    const name = await writeToChosenPath(`hyprlayer-prompts.${PROMPTS_FILE_EXT}`, content);
+    const name = await exportTo(DEFAULT_EXPORT_NAME, selected, opts);
     if (name === null) return;
     setExportOpen(false);
     useToast.getState().show(
@@ -552,12 +563,10 @@ export function PromptLibrary({
   const exportSelected = async () => {
     const entry = exportEntries.find((e) => e.id === selectedId);
     if (!entry) return;
-    const content = buildPromptsFile([entry], {
+    const name = await exportTo(exportFileName(entry.name), [entry], {
       includeChords: true,
       includeOverrides: true,
-      projectName,
     });
-    const name = await writeToChosenPath(`${slugify(entry.name)}.${PROMPTS_FILE_EXT}`, content);
     if (name === null) return;
     useToast.getState().show("Prompt exported", `Exported “${entry.name}” → ${name}.`);
   };
@@ -1040,9 +1049,9 @@ export function PromptLibrary({
         <ImportPromptsDialog
           fileName={importFile.fileName}
           source={importFile.source}
-          candidates={importFile.candidates}
+          rows={importFile.rows}
           chordLabel={chordLabel}
-          onConfirm={runImport}
+          onConfirm={(decisions) => void runImport(decisions)}
           onChooseAnother={() => {
             setImportFile(null);
             void openImportDialog();

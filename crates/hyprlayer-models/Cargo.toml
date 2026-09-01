@@ -1,0 +1,17 @@
+[package]
+name = "hyprlayer-models"
+description = "Dependency-light serialized contracts shared by the Hyprlayer core runtime and its shells"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+specta = ["dep:specta"]
+
+[dependencies]
+serde.workspace = true
+specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"], optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

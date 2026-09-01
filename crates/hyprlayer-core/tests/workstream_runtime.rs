@@ -1,0 +1,728 @@
+#![cfg(feature = "test-support")]
+
+use std::collections::BTreeMap;
+use std::ffi::OsString;
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::Arc;
+
+use hyprlayer_core::env::{RuntimeEnvironment, RuntimePaths};
+use hyprlayer_core::runtime::builder::RuntimeBuilder;
+use hyprlayer_core::runtime::ports::LifecycleRunner;
+use hyprlayer_core::runtime::script_registry::RunPhase;
+use hyprlayer_core::runtime::workstreams::{
+    ArchiveWorkstreamRequest, CreateWorkstreamRequest, HeadBranchObservation,
+    ListWorkstreamsRequest, PurgeWorkstreamRequest, ReprovisionWorkstreamRequest,
+    RestoreWorkstreamRequest,
+};
+use hyprlayer_core::runtime::HyprlayerRuntime;
+use hyprlayer_core::scripts::ScriptKind;
+use hyprlayer_core::store::{Workstream, WorkstreamStatus, WorktreeMode};
+use hyprlayer_core::terminal::{PtySession, SpawnTerminal};
+use hyprlayer_core::worktree::archive_dir_for;
+use hyprlayer_core::CoreError;
+use hyprlayer_models::RuntimeEvent;
+
+fn test_environment(home: &Path) -> RuntimeEnvironment {
+    let mut process_env = BTreeMap::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        process_env.insert(OsString::from("PATH"), path);
+    }
+    RuntimeEnvironment {
+        home_dir: home.to_path_buf(),
+        process_cwd: home.to_path_buf(),
+        process_env,
+    }
+}
+
+fn test_paths(root: &Path) -> RuntimePaths {
+    RuntimePaths {
+        hyprlayer_config_file: root.join("hyprlayer-config.json"),
+        app_config_dir: root.join("app-config"),
+        app_data_dir: root.join("app-data"),
+        default_worktree_root: root.join("worktrees"),
+        default_repos_root: root.join("repos"),
+        opencode_config_file: root.join("opencode.json"),
+        opencode_auth_file: root.join("opencode-auth.json"),
+        opencode_data_dir: root.join("opencode-data"),
+        claude_config_dir: root.join("claude"),
+        claude_managed_settings_files: Vec::new(),
+        codex_home: root.join("codex"),
+        agent_roots: Vec::new(),
+        download_dir: root.join("downloads"),
+    }
+}
+
+// A fake `hyprlayer` binary, standing in for `thoughts init`: its whole job
+// is to succeed or fail on cue so create()'s CLI-then-manual-fallback branch
+// is deterministic regardless of whether the real CLI is installed on the
+// machine running the test (same technique as project_runtime.rs).
+fn write_fake_hyprlayer(root: &Path, exit_code: i32) -> PathBuf {
+    let script = root.join(format!("fake-hyprlayer-{exit_code}.sh"));
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo \"hyprlayer 9.9.9\"\n  exit 0\nfi\nexit {exit_code}\n"
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script
+}
+
+fn write_hyprlayer_override(paths: &RuntimePaths, bin: &Path) {
+    std::fs::create_dir_all(&paths.app_config_dir).unwrap();
+    let body = serde_json::json!({
+        "binaryOverrides": { "hyprlayer": bin.display().to_string() }
+    });
+    std::fs::write(
+        paths.app_config_dir.join("settings.json"),
+        serde_json::to_string(&body).unwrap(),
+    )
+    .unwrap();
+}
+
+// The manual-provisioning fallback (`thoughts_links::provision_thoughts`)
+// requires a non-empty user; leaving it empty here is a deliberate,
+// deterministic way to make that fallback fail on cue, exactly like an
+// unconfigured profile would (ADR-0005: real filesystem/git, not a port).
+fn write_config(paths: &RuntimePaths, thoughts_root: &Path, mappings: &[(&Path, &str)]) {
+    let mut repo_mappings = serde_json::Map::new();
+    for (path, mapped) in mappings {
+        repo_mappings.insert(
+            path.display().to_string(),
+            serde_json::Value::String((*mapped).to_string()),
+        );
+    }
+    let config = serde_json::json!({
+        "version": 4,
+        "thoughts": {
+            "user": "",
+            "backend": {
+                "kind": "git",
+                "thoughtsRepo": thoughts_root.display().to_string(),
+                "reposDir": "repos",
+                "globalDir": "global",
+            },
+            "repoMappings": repo_mappings,
+        }
+    });
+    std::fs::write(
+        &paths.hyprlayer_config_file,
+        serde_json::to_string_pretty(&config).unwrap(),
+    )
+    .unwrap();
+}
+
+fn sh(repo: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .arg("-c")
+        .arg("commit.gpgsign=false")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .output()
+        .expect("git runs");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// ADR-0005: filesystem/Git tests use real temporary repositories, not a port.
+fn fixture_repo(root: &Path, name: &str) -> PathBuf {
+    let repo = root.join(name);
+    std::fs::create_dir_all(&repo).unwrap();
+    sh(&repo, &["init", "-b", "main"]);
+    std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+    sh(&repo, &["add", "."]);
+    sh(&repo, &["commit", "-m", "init"]);
+    repo
+}
+
+fn branch_exists(repo: &Path, branch: &str) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "--verify", "--quiet", branch])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    paths: RuntimePaths,
+    runtime: Arc<HyprlayerRuntime>,
+}
+
+/// A `LifecycleRunner` double: reports a fixed phase for the requested kind
+/// and `None` (unconfigured) for every other kind, matching the desktop
+/// script runner's own "no command configured" contract.
+struct FixedLifecycleRunner {
+    kind: ScriptKind,
+    phase: RunPhase,
+}
+
+impl LifecycleRunner for FixedLifecycleRunner {
+    fn run<'a>(
+        &'a self,
+        _item: &'a Workstream,
+        kind: ScriptKind,
+    ) -> Pin<Box<dyn Future<Output = Option<RunPhase>> + Send + 'a>> {
+        let result = (kind == self.kind).then_some(self.phase);
+        Box::pin(async move { result })
+    }
+}
+
+async fn fixture(hyprlayer_exit: Option<i32>) -> (Fixture, PathBuf) {
+    fixture_with_runner(hyprlayer_exit, None).await
+}
+
+async fn fixture_with_runner(
+    hyprlayer_exit: Option<i32>,
+    lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
+) -> (Fixture, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let paths = test_paths(&root.join("profile"));
+    let thoughts_root = root.join("thoughts");
+    std::fs::create_dir_all(&thoughts_root).unwrap();
+    std::fs::create_dir_all(&paths.app_data_dir).unwrap();
+
+    let repo = fixture_repo(&root, "project");
+    write_config(&paths, &thoughts_root, &[(&repo, "project")]);
+    if let Some(code) = hyprlayer_exit {
+        write_hyprlayer_override(&paths, &write_fake_hyprlayer(&root, code));
+    }
+
+    let mut builder = RuntimeBuilder::new(test_environment(&root), paths.clone());
+    if let Some(runner) = lifecycle_runner {
+        builder = builder.with_lifecycle_runner(runner);
+    }
+    let runtime = builder.open().await.unwrap();
+
+    (
+        Fixture {
+            _dir: dir,
+            paths,
+            runtime,
+        },
+        repo,
+    )
+}
+
+fn isolated_request(project_path: &Path, title: &str) -> CreateWorkstreamRequest {
+    CreateWorkstreamRequest {
+        project_path: project_path.display().to_string(),
+        title: title.into(),
+        base: None,
+        mode: WorktreeMode::Isolated,
+        branch: None,
+        branch_prefix: None,
+    }
+}
+
+fn inplace_request(project_path: &Path, title: &str) -> CreateWorkstreamRequest {
+    CreateWorkstreamRequest {
+        project_path: project_path.display().to_string(),
+        title: title.into(),
+        base: None,
+        mode: WorktreeMode::Inplace,
+        branch: Some("main".into()),
+        branch_prefix: None,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_in_place_creates_yield_one_row() {
+    let (f, repo) = fixture(Some(0)).await;
+
+    let mut handles = Vec::new();
+    for i in 0..5 {
+        let runtime = f.runtime.clone();
+        let req = inplace_request(&repo, &format!("Same Title {i}"));
+        handles.push(tokio::spawn(async move {
+            runtime.workstreams().create(req).await
+        }));
+    }
+
+    let mut ok = 0;
+    let mut guard_errors = 0;
+    for h in handles {
+        match h.await.unwrap() {
+            Ok(_) => ok += 1,
+            Err(CoreError::InplaceWorkstreamExists) => guard_errors += 1,
+            Err(e) => panic!("unexpected error racing in-place creates: {e}"),
+        }
+    }
+    assert_eq!(ok, 1, "exactly one concurrent in-place create must win");
+    assert_eq!(
+        guard_errors, 4,
+        "the rest must see the one-active-in-place guard"
+    );
+
+    let rows = f
+        .runtime
+        .workstreams()
+        .list(ListWorkstreamsRequest {
+            project_path: repo.display().to_string(),
+            include_archived: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "only one row must land in the database");
+    assert!(rows[0].is_inplace());
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_creates_in_different_projects_do_not_block_each_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let paths = test_paths(&root.join("profile"));
+    let thoughts_root = root.join("thoughts");
+    std::fs::create_dir_all(&thoughts_root).unwrap();
+    std::fs::create_dir_all(&paths.app_data_dir).unwrap();
+
+    let repo_a = fixture_repo(&root, "project-a");
+    let repo_b = fixture_repo(&root, "project-b");
+    write_config(
+        &paths,
+        &thoughts_root,
+        &[(&repo_a, "project-a"), (&repo_b, "project-b")],
+    );
+    write_hyprlayer_override(&paths, &write_fake_hyprlayer(&root, 0));
+
+    let runtime = RuntimeBuilder::new(test_environment(&root), paths)
+        .open()
+        .await
+        .unwrap();
+
+    let ra = runtime.clone();
+    let req_a = isolated_request(&repo_a, "Workstream A");
+    let a = tokio::spawn(async move { ra.workstreams().create(req_a).await });
+    let rb = runtime.clone();
+    let req_b = isolated_request(&repo_b, "Workstream B");
+    let b = tokio::spawn(async move { rb.workstreams().create(req_b).await });
+
+    let (a, b) = tokio::join!(a, b);
+    let a = a.unwrap().expect("project A create must succeed");
+    let b = b.unwrap().expect("project B create must succeed");
+    assert_ne!(a.item.id, b.item.id);
+    assert_eq!(a.item.project_path, repo_a.display().to_string());
+    assert_eq!(b.item.project_path, repo_b.display().to_string());
+
+    runtime.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn same_project_create_and_archive_serialize_without_corruption() {
+    let (f, repo) = fixture(Some(0)).await;
+
+    let first = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "First"))
+        .await
+        .unwrap();
+
+    let runtime_a = f.runtime.clone();
+    let id_a = first.item.id.clone();
+    let archive = tokio::spawn(async move {
+        runtime_a
+            .workstreams()
+            .archive(ArchiveWorkstreamRequest {
+                id: id_a,
+                skip_scripts: true,
+            })
+            .await
+    });
+
+    let runtime_b = f.runtime.clone();
+    let create = tokio::spawn(async move {
+        runtime_b
+            .workstreams()
+            .create(isolated_request(&repo, "Second"))
+            .await
+    });
+
+    let (archived, created) = tokio::join!(archive, create);
+    archived
+        .unwrap()
+        .expect("archiving the first workstream must succeed");
+    let second = created
+        .unwrap()
+        .expect("creating the second workstream concurrently must succeed");
+
+    let active = f.runtime.workstreams().list_all().await.unwrap();
+    assert_eq!(active.len(), 1, "only the second workstream stays active");
+    assert_eq!(active[0].id, second.item.id);
+
+    let archived_rows = f.runtime.workstreams().list_archived().await.unwrap();
+    assert_eq!(archived_rows.len(), 1);
+    assert_eq!(archived_rows[0].id, first.item.id);
+    assert_eq!(archived_rows[0].status, WorkstreamStatus::Archived);
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn thoughts_failure_removes_only_the_app_created_worktree_and_branch() {
+    // exit 1: thoughts_init fails and create() falls into the manual
+    // provisioning fallback, which itself fails because `user` is empty.
+    let (f, repo) = fixture(Some(1)).await;
+
+    let result = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Doomed"))
+        .await;
+    assert!(
+        result.is_err(),
+        "a failed thoughts provisioning must fail create()"
+    );
+
+    let rows = f.runtime.workstreams().list_all().await.unwrap();
+    assert!(rows.is_empty(), "no row may be inserted on rollback");
+
+    let worktrees_root = f.paths.default_worktree_root.join("project");
+    assert!(
+        !worktrees_root.exists() || std::fs::read_dir(&worktrees_root).unwrap().next().is_none(),
+        "the worktree directory this call created must be removed"
+    );
+
+    // main survives untouched -- only the app-created branch is deleted.
+    assert!(branch_exists(&repo, "main"));
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn failed_archive_script_leaves_disk_and_row_active() {
+    let (f, repo) = fixture_with_runner(
+        Some(0),
+        Some(Arc::new(FixedLifecycleRunner {
+            kind: ScriptKind::Archive,
+            phase: RunPhase::Failed,
+        })),
+    )
+    .await;
+    let created = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Guarded"))
+        .await
+        .unwrap();
+    let worktree_path = PathBuf::from(&created.item.worktree_path);
+    assert!(worktree_path.is_dir());
+
+    let result = f
+        .runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: created.item.id.clone(),
+            skip_scripts: false,
+        })
+        .await;
+    assert!(
+        matches!(result, Err(CoreError::ArchiveScriptFailed)),
+        "a failed Archive script must be the fatal pre-destructive gate: {result:?}"
+    );
+
+    assert!(worktree_path.is_dir(), "the worktree must not have moved");
+    let row = f
+        .runtime
+        .workstreams()
+        .list_all()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|w| w.id == created.item.id)
+        .expect("the row must still be active");
+    assert_eq!(row.status, WorkstreamStatus::Active);
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn archive_stops_a_live_terminal_before_moving_the_worktree() {
+    let (f, repo) = fixture(Some(0)).await;
+    let created = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Attended"))
+        .await
+        .unwrap();
+
+    let session = PtySession::spawn(SpawnTerminal {
+        shell: PathBuf::from("/bin/sh"),
+        args: vec![],
+        cwd: PathBuf::from(&created.item.worktree_path),
+        cols: 80,
+        rows: 24,
+        env: vec![],
+        workstream_id: created.item.id.clone(),
+    })
+    .expect("spawn a pty for the workstream");
+    let terminal_id = "test-terminal".to_string();
+    f.runtime
+        .test_terminals()
+        .insert(terminal_id.clone(), session)
+        .await;
+
+    f.runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: created.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        f.runtime.test_terminals().get(&terminal_id).await.is_none(),
+        "archive must stop terminals attached to the workstream before moving it"
+    );
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn reprovision_refuses_a_deleted_worktree_instead_of_recreating_it() {
+    let (f, repo) = fixture(Some(0)).await;
+    let created = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Vanished"))
+        .await
+        .unwrap();
+
+    let worktree = PathBuf::from(&created.item.worktree_path);
+    assert!(worktree.is_dir());
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    let result = f
+        .runtime
+        .workstreams()
+        .reprovision(ReprovisionWorkstreamRequest {
+            id: created.item.id.clone(),
+        })
+        .await;
+    match result {
+        Err(CoreError::WorkstreamWorktreeMissing { .. }) => {}
+        Err(e) => panic!("expected WorkstreamWorktreeMissing, got: {e}"),
+        Ok(_) => panic!("reprovision must refuse a worktree that is gone"),
+    }
+
+    assert!(
+        !worktree.exists(),
+        "reprovision must not resurrect the worktree path; a bare directory there blocks restore"
+    );
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn restore_failure_leaves_the_row_archived() {
+    let (f, repo) = fixture(Some(0)).await;
+    let created = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Fragile"))
+        .await
+        .unwrap();
+    f.runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: created.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await
+        .unwrap();
+
+    let archive_path = archive_dir_for(&repo, &created.item.slug);
+    assert!(archive_path.exists());
+    std::fs::remove_dir_all(&archive_path).unwrap();
+
+    let result = f
+        .runtime
+        .workstreams()
+        .restore(RestoreWorkstreamRequest {
+            id: created.item.id.clone(),
+        })
+        .await;
+    match result {
+        Err(CoreError::WorkstreamArchiveMissing { .. }) => {}
+        Err(e) => panic!("expected WorkstreamArchiveMissing, got: {e}"),
+        Ok(_) => panic!("a missing archive directory must fail restore"),
+    }
+
+    let row = f
+        .runtime
+        .workstreams()
+        .list_archived()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|w| w.id == created.item.id)
+        .expect("the row must still be listed as archived");
+    assert_eq!(row.status, WorkstreamStatus::Archived);
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn purge_deletes_the_branch_only_when_the_app_owns_it() {
+    let (f, repo) = fixture(Some(0)).await;
+
+    // Isolated mode: the app creates the branch, so purge deletes it.
+    let owned = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "App Owned"))
+        .await
+        .unwrap();
+    assert!(owned.item.app_owns_branch());
+    let owned_branch = owned.item.branch.clone();
+
+    f.runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: owned.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await
+        .unwrap();
+    f.runtime
+        .workstreams()
+        .purge(PurgeWorkstreamRequest {
+            id: owned.item.id.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        !branch_exists(&repo, &owned_branch),
+        "purge must delete a branch the app created"
+    );
+
+    // Existing mode: the app adopts a pre-existing branch, so purge must
+    // leave it alone.
+    sh(&repo, &["branch", "adopted-feature"]);
+    let adopted = f
+        .runtime
+        .workstreams()
+        .create(CreateWorkstreamRequest {
+            project_path: repo.display().to_string(),
+            title: "Adopted".into(),
+            base: None,
+            mode: WorktreeMode::Existing,
+            branch: Some("adopted-feature".into()),
+            branch_prefix: None,
+        })
+        .await
+        .unwrap();
+    assert!(!adopted.item.app_owns_branch());
+
+    f.runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: adopted.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await
+        .unwrap();
+    f.runtime
+        .workstreams()
+        .purge(PurgeWorkstreamRequest {
+            id: adopted.item.id.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        branch_exists(&repo, "adopted-feature"),
+        "purge must never delete a branch the app did not create"
+    );
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn head_branch_adoption_moves_only_the_workstreams_that_follow_head() {
+    let (f, repo) = fixture(Some(0)).await;
+    let mut events = f.runtime.subscribe();
+
+    let inplace = f
+        .runtime
+        .workstreams()
+        .create(inplace_request(&repo, "Inplace"))
+        .await
+        .unwrap()
+        .item;
+    let isolated = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Isolated"))
+        .await
+        .unwrap()
+        .item;
+
+    let adoptions = f
+        .runtime
+        .workstreams()
+        .adopt_head_branches(vec![
+            HeadBranchObservation {
+                item: inplace.clone(),
+                head_branch: Some("feature".into()),
+            },
+            HeadBranchObservation {
+                item: isolated.clone(),
+                head_branch: Some("feature".into()),
+            },
+        ])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        adoptions.len(),
+        1,
+        "only the in-place workstream follows head"
+    );
+    assert_eq!(adoptions[0].workstream_id, inplace.id);
+    assert_eq!(adoptions[0].branch, "feature");
+
+    let ws = f.runtime.workstreams().find(&inplace.id).await.unwrap();
+    assert_eq!(ws.branch, "feature");
+    let untouched = f.runtime.workstreams().find(&isolated.id).await.unwrap();
+    assert_eq!(untouched.branch, isolated.branch);
+
+    let mut announced = None;
+    while let Ok(event) = events.try_recv() {
+        if let RuntimeEvent::WorkstreamBranchChanged {
+            workstream_id,
+            branch,
+            previous,
+        } = event
+        {
+            announced = Some((workstream_id, branch, previous));
+        }
+    }
+    assert_eq!(
+        announced,
+        Some((inplace.id.clone(), "feature".into(), inplace.branch.clone())),
+        "the adoption must reach the runtime event stream"
+    );
+
+    f.runtime.shutdown().await;
+}

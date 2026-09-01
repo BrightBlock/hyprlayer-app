@@ -27,11 +27,36 @@ export interface TerminalEngine {
   dispose(): void;
 }
 
+const FIT_RETRY_LIMIT = 20;
+
+type XtermCore = {
+  _core: {
+    _createRenderer: () => unknown;
+    _renderService: {
+      setRenderer: (renderer: unknown) => void;
+      handleResize: (cols: number, rows: number) => void;
+    };
+  };
+};
+
+// @xterm/addon-webgl 0.19 releases its GPU context only when the detached canvas
+// is collected, and WebKit silently marks the oldest context lost once a web
+// process holds ~16 of them — blanking whichever terminal owned it.
+function releaseWebglContext(canvas: HTMLCanvasElement | null): void {
+  if (!canvas) return;
+  try {
+    canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext();
+  } catch {
+  }
+}
+
 class XtermEngine implements TerminalEngine {
   private readonly term: Terminal;
   private readonly fitAddon: FitAddon;
   private webgl?: WebglAddon;
   private rendererReady = false;
+  private disposed = false;
+  private fitRetries = 0;
 
   constructor(opts: { fontSize: number; theme: TerminalTheme; cursorBlink?: boolean }) {
     this.term = new Terminal({
@@ -56,16 +81,42 @@ class XtermEngine implements TerminalEngine {
     try {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => {
+        const canvas = this.webglCanvas();
         try {
           webgl.dispose();
         } catch {
         }
         if (this.webgl === webgl) this.webgl = undefined;
+        releaseWebglContext(canvas);
+        this.restoreDomRenderer();
       });
       this.term.loadAddon(webgl);
       this.webgl = webgl;
     } catch {
     }
+  }
+
+  // The addon's own DOM-renderer restore is gated on `_core._store._isDisposed`,
+  // a field @xterm/xterm 5.5 does not have, so it throws *after* tearing the WebGL
+  // canvas down and leaves the terminal with no renderer at all — blank for good.
+  // Verified against @xterm/xterm 5.5.0 + @xterm/addon-webgl 0.19.0.
+  private restoreDomRenderer(): void {
+    if (this.disposed) return;
+    try {
+      const core = (this.term as unknown as XtermCore)._core;
+      core._renderService.setRenderer(core._createRenderer());
+      core._renderService.handleResize(this.term.cols, this.term.rows);
+      this.rendererReady = false;
+      this.fitRetries = 0;
+      this.fit();
+    } catch {
+    }
+  }
+
+  private webglCanvas(): HTMLCanvasElement | null {
+    const screen = this.term.element?.querySelector(".xterm-screen");
+    if (!screen) return null;
+    return [...screen.querySelectorAll("canvas")].find((c) => !c.className) ?? null;
   }
 
   write(data: Uint8Array | string): void {
@@ -83,11 +134,25 @@ class XtermEngine implements TerminalEngine {
   }
 
   fit(): TerminalGrid {
-    // xterm computes renderer dimensions on its first paint.
+    // fitAddon.fit() reads xterm's renderer dimensions, which aren't set
+    // until the renderer has completed its first paint — a race a fast
+    // programmatic mount can lose in a way a human's slower click-then-look
+    // cadence usually doesn't. The previous code set rendererReady only
+    // inside this same try, so a single miss disabled refresh() forever.
+    // Retry on the next frame instead, bounded, and self-heal once ready.
     try {
       this.fitAddon.fit();
       this.rendererReady = true;
+      this.fitRetries = 0;
     } catch {
+      if (!this.rendererReady && this.fitRetries < FIT_RETRY_LIMIT) {
+        this.fitRetries += 1;
+        requestAnimationFrame(() => {
+          if (this.disposed) return;
+          this.fit();
+          if (this.rendererReady) this.refresh();
+        });
+      }
     }
     return this.grid();
   }
@@ -135,12 +200,15 @@ class XtermEngine implements TerminalEngine {
   }
 
   dispose(): void {
+    this.disposed = true;
+    const canvas = this.webglCanvas();
     // xterm 5.5 may throw while reverting the WebGL renderer.
     try {
       this.webgl?.dispose();
     } catch {
     }
     this.webgl = undefined;
+    releaseWebglContext(canvas);
     this.term.dispose();
   }
 }

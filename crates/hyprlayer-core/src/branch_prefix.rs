@@ -217,6 +217,22 @@ static INVALID_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
     .expect("branch-prefix regex is a fixed literal")
 });
 
+pub fn normalize_prefixes(prefixes: Vec<BranchPrefix>) -> Vec<BranchPrefix> {
+    prefixes
+        .into_iter()
+        .map(|p| BranchPrefix {
+            label: p.label.trim().to_string(),
+            prefix: p.prefix.trim().to_string(),
+            keywords: p
+                .keywords
+                .into_iter()
+                .map(|k| k.trim().to_lowercase())
+                .filter(|k| !k.is_empty())
+                .collect(),
+        })
+        .collect()
+}
+
 pub fn validate_prefixes(list: &[BranchPrefix]) -> Result<()> {
     let invalid = |detail: String| CoreError::BranchPrefixInvalid { detail };
     let mut seen_prefixes = std::collections::HashSet::new();

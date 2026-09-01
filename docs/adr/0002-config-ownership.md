@@ -5,7 +5,8 @@
 (the agent-bundle SHA probe is read-only against GitHub — not a new exception) ·
 amended 2026-08-24 (version pinning classifies `ai reinstall`'s install source from its
 stdout — not a new exception) · amended 2026-08-24 (freshness is a version comparison on a
-1.6.0 CLI; the SHA probe narrows to older binaries)
+1.6.0 CLI; the SHA probe narrows to older binaries) · amended 2026-08-30 (the SHA probe
+now runs in `hyprlayer-core` — ADR-0008 moved the bundle network calls out of the shell)
 
 ## Decision
 
@@ -41,9 +42,17 @@ sentinels, unsafe charset) and reads the created entry back from the config the 
   `agent_bundle::desired_version` (the pin, else `binaryVersion`) — so nothing is written,
   nothing is fetched, and the answer is correct offline. Older binaries keep the read-only
   GitHub ref-advertisement probe of `BrightBlock/hyprlayer-cli@master` (parsed in
-  `crates/hyprlayer-core/src/agent_bundle.rs`, fetched in `src-tauri/src/commands/agents.rs`),
+  `crates/hyprlayer-core/src/agent_bundle.rs`, fetched in
+  `crates/hyprlayer-core/src/runtime/agents.rs` through the `ProviderHttp` port),
   compared against the CLI's own `agentsInstalledSha` — not a new exception to the
   single-writer rule.
+
+  The fetch used to live in `src-tauri/src/commands/agents.rs` because ADR-0001 kept core
+  dependency-light. ADR-0008 reverses that: core owns `reqwest` and every service's network
+  calls, and the desktop shell no longer has an HTTP client of its own — `tauri-plugin-updater`
+  still reaches the network from inside the shell, as a carve-out ADR-0008 keeps there
+  deliberately. Where the probe runs does not change what it does — it still writes nothing
+  and reads no config.
 
   The split is not an optimisation: 1.6.0's `AgentTool::install` records `fetch_master_sha()`
   as `agentsInstalledSha` regardless of which release asset it unpacked, so there the SHA

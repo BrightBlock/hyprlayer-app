@@ -6,15 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CoreError, Result};
 use crate::process::Exec;
 
-pub fn expand_user_path(raw: &str) -> PathBuf {
-    PathBuf::from(shellexpand::tilde(raw).into_owned())
-}
-
-pub fn default_repos_root() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hyprlayer")
-        .join("repos")
+pub fn expand_user_path(raw: &str, home: Option<&Path>) -> PathBuf {
+    let expanded = shellexpand::tilde_with_context(raw, || home.and_then(Path::to_str));
+    PathBuf::from(expanded.as_ref())
 }
 
 pub fn repo_name_from_url(source: &str) -> Option<String> {

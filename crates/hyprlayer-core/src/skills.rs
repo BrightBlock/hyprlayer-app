@@ -32,11 +32,11 @@ pub struct AgentSkill {
     pub user_only: bool,
 }
 
-pub fn list_slash_commands(worktree: &Path) -> Vec<SlashCommand> {
+pub fn list_slash_commands(worktree: &Path, home: Option<&Path>) -> Vec<SlashCommand> {
     let mut found: Vec<SlashCommand> = Vec::new();
 
     let mut roots: Vec<(PathBuf, &str)> = vec![(worktree.join(".claude"), "project")];
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home {
         roots.push((home.join(".claude"), "user"));
     }
     for (root, source) in &roots {
@@ -44,7 +44,7 @@ pub fn list_slash_commands(worktree: &Path) -> Vec<SlashCommand> {
         collect_commands(&root.join("commands"), "", source, &mut found);
     }
 
-    collect_plugins(&mut found);
+    collect_plugins(&mut found, home);
 
     found.extend(builtin_commands());
 
@@ -54,14 +54,14 @@ pub fn list_slash_commands(worktree: &Path) -> Vec<SlashCommand> {
     found
 }
 
-pub fn list_skills(worktree: Option<&Path>) -> Vec<AgentSkill> {
+pub fn list_skills(worktree: Option<&Path>, home: Option<&Path>) -> Vec<AgentSkill> {
     let mut out: Vec<AgentSkill> = Vec::new();
 
     let mut roots: Vec<(PathBuf, &str)> = Vec::new();
     if let Some(wt) = worktree {
         roots.push((wt.join(".claude"), "project"));
     }
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home {
         roots.push((home.join(".claude"), "user"));
     }
     for (root, source) in &roots {
@@ -81,8 +81,8 @@ pub fn list_skills(worktree: Option<&Path>) -> Vec<AgentSkill> {
         }
     }
 
-    let enabled = enabled_plugins(worktree);
-    for install in plugin_installs() {
+    let enabled = enabled_plugins(worktree, home);
+    for install in plugin_installs(home) {
         if !enabled.contains(&install.key) {
             continue;
         }
@@ -106,12 +106,12 @@ pub fn list_skills(worktree: Option<&Path>) -> Vec<AgentSkill> {
     out
 }
 
-pub fn skill_roots(worktree: Option<&Path>) -> Vec<PathBuf> {
+pub fn skill_roots(worktree: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(wt) = worktree {
         roots.push(wt.join(".claude/skills"));
     }
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home {
         roots.push(home.join(".claude/skills"));
     }
     roots.retain(|r| r.is_dir());
@@ -124,9 +124,9 @@ struct PluginInstall {
     path: PathBuf,
 }
 
-fn plugin_installs() -> Vec<PluginInstall> {
+fn plugin_installs(home: Option<&Path>) -> Vec<PluginInstall> {
     let mut out = Vec::new();
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = home else {
         return out;
     };
     let manifest = home.join(".claude/plugins/installed_plugins.json");
@@ -157,9 +157,9 @@ fn plugin_installs() -> Vec<PluginInstall> {
     out
 }
 
-fn settings_chain(worktree: Option<&Path>) -> Vec<PathBuf> {
+fn settings_chain(worktree: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home {
         files.push(home.join(".claude/settings.json"));
     }
     if let Some(wt) = worktree {
@@ -176,9 +176,12 @@ fn settings_chain(worktree: Option<&Path>) -> Vec<PathBuf> {
     files
 }
 
-fn enabled_plugins(worktree: Option<&Path>) -> std::collections::HashSet<String> {
+fn enabled_plugins(
+    worktree: Option<&Path>,
+    home: Option<&Path>,
+) -> std::collections::HashSet<String> {
     let mut on = std::collections::HashSet::new();
-    for file in settings_chain(worktree) {
+    for file in settings_chain(worktree, home) {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
@@ -199,8 +202,8 @@ fn enabled_plugins(worktree: Option<&Path>) -> std::collections::HashSet<String>
     on
 }
 
-fn collect_plugins(out: &mut Vec<SlashCommand>) {
-    for install in plugin_installs() {
+fn collect_plugins(out: &mut Vec<SlashCommand>, home: Option<&Path>) {
+    for install in plugin_installs(home) {
         collect_skills(&install.path.join("skills"), "plugin", out);
         collect_commands(&install.path.join("commands"), "", "plugin", out);
     }
@@ -404,7 +407,7 @@ mod tests {
             "---\nname: demo\ndescription: A demo skill.\n---\n",
         )
         .unwrap();
-        let cmds = list_slash_commands(wt);
+        let cmds = list_slash_commands(wt, None);
         assert!(cmds
             .iter()
             .any(|c| c.name == "demo" && c.source == "project"));
@@ -438,7 +441,7 @@ mod tests {
     #[test]
     fn includes_builtin_commands() {
         let dir = tempfile::tempdir().unwrap();
-        let cmds = list_slash_commands(dir.path());
+        let cmds = list_slash_commands(dir.path(), None);
         for name in ["init", "review", "security-review"] {
             assert!(
                 cmds.iter().any(|c| c.name == name && c.source == "builtin"),
@@ -468,7 +471,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = list_skills(Some(wt));
+        let skills = list_skills(Some(wt), Some(home.path()));
         let demo: Vec<_> = skills.iter().filter(|s| s.name == "demo").collect();
         assert_eq!(demo.len(), 1, "expected one demo entry, got {demo:?}");
         assert_eq!(demo[0].source, "project");
@@ -493,7 +496,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = list_skills(Some(wt));
+        let skills = list_skills(Some(wt), None);
 
         let counted = skills.iter().find(|s| s.name == "counted").unwrap();
         let body_offset = crate::docs::frontmatter::parse(text).body_offset;
@@ -532,7 +535,7 @@ mod tests {
         let project = install_plugin(home.path());
         let wt = project.path();
 
-        let disabled = list_skills(Some(wt));
+        let disabled = list_skills(Some(wt), Some(home.path()));
         assert!(
             !disabled.iter().any(|s| s.name == "demoplug:greet"),
             "installed-but-disabled plugin should contribute nothing: {:?}",
@@ -546,7 +549,7 @@ mod tests {
         )
         .unwrap();
 
-        let enabled = list_skills(Some(wt));
+        let enabled = list_skills(Some(wt), Some(home.path()));
         let hit = enabled
             .iter()
             .find(|s| s.name == "demoplug:greet")
@@ -566,7 +569,7 @@ mod tests {
             r#"{"enabledPlugins": {"demoplug@mkt": true}}"#,
         )
         .unwrap();
-        assert!(list_skills(Some(wt))
+        assert!(list_skills(Some(wt), Some(home.path()))
             .iter()
             .any(|s| s.name == "demoplug:greet"));
 
@@ -577,7 +580,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !list_skills(Some(wt))
+            !list_skills(Some(wt), Some(home.path()))
                 .iter()
                 .any(|s| s.name == "demoplug:greet"),
             "local settings should win over the user-level enable",
@@ -586,7 +589,7 @@ mod tests {
 
     #[test]
     fn list_skills_without_worktree_never_panics() {
-        let skills = list_skills(None);
+        let skills = list_skills(None, None);
         assert!(skills.iter().all(|s| s.source != "project"));
     }
 
@@ -602,10 +605,10 @@ mod tests {
         )
         .unwrap();
 
-        let skills = list_skills(Some(wt));
+        let skills = list_skills(Some(wt), None);
         assert!(!skills.iter().any(|s| s.name == "sync"));
 
-        let cmds = list_slash_commands(wt);
+        let cmds = list_slash_commands(wt, None);
         assert!(cmds.iter().any(|c| c.name == "sync"));
     }
 
@@ -626,7 +629,7 @@ mod tests {
         )
         .unwrap();
 
-        let cmds = list_slash_commands(wt);
+        let cmds = list_slash_commands(wt, None);
         let kind = |name: &str| cmds.iter().find(|c| c.name == name).map(|c| c.kind);
         assert_eq!(kind("plan"), Some(SlashKind::Skill));
         assert_eq!(kind("sync"), Some(SlashKind::Command));
@@ -638,12 +641,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let wt = dir.path();
         assert!(
-            !skill_roots(Some(wt)).iter().any(|r| r.starts_with(wt)),
+            !skill_roots(Some(wt), None)
+                .iter()
+                .any(|r| r.starts_with(wt)),
             "a worktree with no .claude/skills contributes no root"
         );
 
         std::fs::create_dir_all(wt.join(".claude/skills")).unwrap();
-        let roots = skill_roots(Some(wt));
+        let roots = skill_roots(Some(wt), None);
         assert_eq!(roots.first(), Some(&wt.join(".claude/skills")));
         assert!(roots.iter().all(|r| r.ends_with("skills")));
         assert!(roots.iter().all(|r| r.is_dir()));

@@ -50,30 +50,12 @@ pub struct SessionLifecycle {
 pub struct ScriptRunChanged {
     pub workstream_id: String,
     pub kind: hyprlayer_core::scripts::ScriptKind,
-    pub phase: crate::script_registry::RunPhase,
+    pub phase: hyprlayer_core::models::script::RunPhase,
     pub exit_code: Option<i32>,
     pub port: Option<u16>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub enum CreateStep {
-    Folder,
-    Repository,
-    Commit,
-    GithubRepo,
-    Push,
-    Thoughts,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub enum StepStatus {
-    Running,
-    Done,
-    Failed,
-    Skipped,
-}
+pub use hyprlayer_core::models::project::{CreateStep, StepStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 #[serde(rename_all = "camelCase")]

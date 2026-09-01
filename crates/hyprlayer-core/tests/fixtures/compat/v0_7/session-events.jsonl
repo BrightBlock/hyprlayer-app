@@ -1,0 +1,24 @@
+{"seq":0,"kind":"init","payload":"{\"kind\":\"init\",\"claudeSessionId\":\"claude-legacy-abc123\",\"model\":\"claude-opus-4-6\"}","createdAt":1700000000000.0}
+{"seq":1,"kind":"userMessage","payload":"{\"kind\":\"userMessage\",\"text\":\"Please add tests for the settings module.\",\"stage\":\"validate\",\"promptName\":\"commit\"}","createdAt":1700000000100.0}
+{"seq":2,"kind":"partialText","payload":"{\"kind\":\"partialText\",\"text\":\"Sure, I can\",\"parentId\":\"msg-42\"}","createdAt":1700000000200.0}
+{"seq":3,"kind":"assistantText","payload":"{\"kind\":\"assistantText\",\"text\":\"Here is the summary.\",\"parentId\":\"msg-42\",\"injected\":false}","createdAt":1700000000300.0}
+{"seq":4,"kind":"thinking","payload":"{\"kind\":\"thinking\",\"text\":\"Considering the diff...\",\"parentId\":null}","createdAt":1700000000400.0}
+{"seq":5,"kind":"toolUse","payload":"{\"kind\":\"toolUse\",\"id\":\"tool-1\",\"name\":\"Bash\",\"input\":\"{\\\"command\\\":\\\"git status\\\"}\",\"parentId\":\"msg-42\"}","createdAt":1700000000500.0}
+{"seq":6,"kind":"toolResult","payload":"{\"kind\":\"toolResult\",\"toolUseId\":\"tool-1\",\"content\":\"On branch main\",\"isError\":false,\"parentId\":\"msg-42\"}","createdAt":1700000000600.0}
+{"seq":7,"kind":"permissionAsk","payload":"{\"kind\":\"permissionAsk\",\"requestId\":\"perm-1\",\"toolName\":\"Bash\",\"input\":\"{\\\"command\\\":\\\"git push\\\"}\"}","createdAt":1700000000700.0}
+{"seq":8,"kind":"questionAsk","payload":"{\"kind\":\"questionAsk\",\"requestId\":\"q-1\",\"questions\":\"[{\\\"id\\\":\\\"q1\\\",\\\"label\\\":\\\"Push the branch?\\\",\\\"kind\\\":\\\"confirm\\\",\\\"options\\\":[{\\\"id\\\":\\\"yes\\\",\\\"label\\\":\\\"Yes\\\"},{\\\"id\\\":\\\"no\\\",\\\"label\\\":\\\"No\\\"}]}]\"}","createdAt":1700000000800.0}
+{"seq":9,"kind":"usage","payload":"{\"kind\":\"usage\",\"contextTokens\":128000}","createdAt":1700000000900.0}
+{"seq":10,"kind":"contextWindow","payload":"{\"kind\":\"contextWindow\",\"tokens\":200000}","createdAt":1700000001000.0}
+{"seq":11,"kind":"turnDone","payload":"{\"kind\":\"turnDone\",\"costUsd\":0.0421,\"numTurns\":3,\"contextTokens\":15000,\"turnStatus\":\"completed\"}","createdAt":1700000001100.0}
+{"seq":12,"kind":"compactBoundary","payload":"{\"kind\":\"compactBoundary\",\"trigger\":\"auto\",\"preTokens\":180000}","createdAt":1700000001200.0}
+{"seq":13,"kind":"commandLifecycle","payload":"{\"kind\":\"commandLifecycle\",\"commandUuid\":\"cmd-9\",\"state\":\"running\"}","createdAt":1700000001300.0}
+{"seq":14,"kind":"backgroundTaskUpdate","payload":"{\"kind\":\"backgroundTaskUpdate\",\"taskId\":\"task-1\",\"toolUseId\":\"tool-1\",\"status\":\"completed\"}","createdAt":1700000001400.0}
+{"seq":15,"kind":"relaunched","payload":"{\"kind\":\"relaunched\"}","createdAt":1700000001500.0}
+{"seq":16,"kind":"rewound","payload":"{\"kind\":\"rewound\"}","createdAt":1700000001600.0}
+{"seq":17,"kind":"protocolError","payload":"{\"kind\":\"protocolError\",\"detail\":\"unexpected message type\",\"raw\":\"{\\\"type\\\":\\\"unknown\\\"}\"}","createdAt":1700000001700.0}
+{"seq":18,"kind":"exited","payload":"{\"kind\":\"exited\",\"outcome\":\"completed\",\"code\":0,\"stderrTail\":\"\"}","createdAt":1700000001800.0}
+{"seq":19,"kind":"questionAsk","payload":"{\"kind\":\"questionAsk\",\"requestId\":\"q-2\"}","createdAt":1700000001900.0}
+{"seq":20,"kind":"questionAsk","payload":"{\"kind\":\"questionAsk\",\"requestId\":\"q-3\",\"questions\":\"not-valid-json{\"}","createdAt":1700000002000.0}
+{"seq":21,"kind":"questionAsk","payload":"{\"kind\":\"questionAsk\",\"requestId\":\"q-4\",\"questions\":\"[{\\\"unexpected\\\":\\\"shape\\\"},\\\"not-even-an-object\\\"]\"}","createdAt":1700000002100.0}
+{"seq":22,"kind":"toolPermissionEscalated","payload":"{\"kind\":\"toolPermissionEscalated\",\"requestId\":\"future-1\",\"scope\":\"workspace-write\"}","createdAt":1700000002200.0}
+{"seq":23,"kind":"questionAsk","createdAt":1787936400023,"payload":"{\"kind\":\"questionAsk\",\"requestId\":\"legacy-real-1\",\"questions\":\"[{\\\"header\\\":\\\"Branch base\\\",\\\"multiSelect\\\":false,\\\"question\\\":\\\"Which branch should this work start from?\\\",\\\"options\\\":[{\\\"label\\\":\\\"main\\\",\\\"description\\\":\\\"Branch from the default branch.\\\"},{\\\"label\\\":\\\"Current worktree\\\",\\\"description\\\":\\\"Continue on the branch already checked out.\\\"}]},{\\\"header\\\":\\\"Follow-ups\\\",\\\"multiSelect\\\":true,\\\"question\\\":\\\"Which follow-ups should be filed?\\\",\\\"options\\\":[{\\\"label\\\":\\\"Docs\\\",\\\"description\\\":\\\"File a docs follow-up.\\\"},{\\\"label\\\":\\\"Tests\\\",\\\"description\\\":\\\"File a test-coverage follow-up.\\\"},{\\\"label\\\":\\\"Telemetry\\\",\\\"description\\\":\\\"File a telemetry follow-up.\\\"}]}]\"}"}

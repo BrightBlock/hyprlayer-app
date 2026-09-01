@@ -3,14 +3,31 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use hyprlayer_core::config::ConfigService;
+use hyprlayer_core::env::RuntimeEnvironment;
 use hyprlayer_core::hyprcli::HyprCli;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryResolver, BinaryState};
 use hyprlayer_core::process::spawn_supervised;
 
+fn real_environment() -> RuntimeEnvironment {
+    RuntimeEnvironment {
+        home_dir: dirs::home_dir().unwrap_or_default(),
+        process_cwd: std::env::current_dir().unwrap_or_default(),
+        process_env: std::env::vars_os().collect(),
+    }
+}
+
+fn real_config_service() -> ConfigService {
+    let path = dirs::config_dir()
+        .expect("OS config dir")
+        .join("hyprlayer")
+        .join("config.json");
+    ConfigService::new(path)
+}
+
 #[tokio::test]
 #[ignore = "requires opencode installed; run in the session the app launches from"]
 async fn a_resolved_binary_spawns_directly() {
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
     let status = resolver.status(BinaryKind::OpenCode).await;
     let path = status.path.clone().expect("opencode should resolve");
@@ -35,7 +52,7 @@ async fn a_resolved_binary_spawns_directly() {
 #[tokio::test]
 #[ignore = "spawns a real `opencode serve`; run in the session the app launches from"]
 async fn opencode_serve_dies_with_its_handle() {
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
     let bin = resolver
         .status(BinaryKind::OpenCode)
@@ -110,7 +127,7 @@ async fn port_settles(port: u16, want_open: bool, budget: Duration) -> bool {
 #[tokio::test]
 #[ignore = "requires a configured hyprlayer install"]
 async fn real_config_parses_and_lists_projects() {
-    let service = ConfigService::with_default_path().expect("config dir");
+    let service = real_config_service();
     let loaded = service.load().await.expect("config should parse");
     let thoughts = loaded
         .config
@@ -128,7 +145,7 @@ async fn real_config_parses_and_lists_projects() {
 #[tokio::test]
 #[ignore = "requires codex installed; run in the session the app launches from"]
 async fn real_codex_resolves() {
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
 
     let status = resolver.status(BinaryKind::Codex).await;
@@ -146,7 +163,7 @@ async fn real_codex_resolves() {
 #[tokio::test]
 #[ignore = "requires hyprlayer/git/claude on PATH"]
 async fn real_binaries_resolve() {
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
 
     for kind in [BinaryKind::Hyprlayer, BinaryKind::Git, BinaryKind::Claude] {
@@ -164,7 +181,7 @@ async fn real_binaries_resolve() {
 #[tokio::test]
 #[ignore = "requires a configured hyprlayer install with mapped repos"]
 async fn real_storage_info_round_trips() {
-    let service = ConfigService::with_default_path().expect("config dir");
+    let service = real_config_service();
     let loaded = service.load().await.expect("config should parse");
     let thoughts = loaded
         .config
@@ -177,7 +194,7 @@ async fn real_storage_info_round_trips() {
         .find(|p| std::path::Path::new(p.as_str()).is_dir())
         .expect("at least one mapped repo exists on disk");
 
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
 
     let info = HyprCli::new(&resolver)
@@ -284,7 +301,7 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
 #[tokio::test]
 #[ignore = "spawns a real `claude`; run in the session the app launches from"]
 async fn claude_answers_the_model_catalog_probe() {
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
     let bin = resolver
         .status(BinaryKind::Claude)
@@ -296,7 +313,7 @@ async fn claude_answers_the_model_catalog_probe() {
     let probe = hyprlayer_core::claude::probe::probe(
         std::path::Path::new(&bin),
         &path_env,
-        &hyprlayer_core::claude::probe::neutral_cwd(),
+        &hyprlayer_core::claude::probe::neutral_cwd(dirs::home_dir().as_deref()),
         &[],
     )
     .await
@@ -323,7 +340,7 @@ async fn claude_answers_the_model_catalog_probe() {
 #[tokio::test]
 #[ignore = "hits the real GitHub API through the signed-in gh"]
 async fn github_owners_lists_the_signed_in_account_then_orgs() {
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
     let gh = resolver
         .status(BinaryKind::Gh)
@@ -431,7 +448,7 @@ async fn create_github_repo_then_push_lands_the_first_commit() {
         eprintln!("HYPRLAYER_GH_SMOKE_OWNER unset — skipping");
         return;
     };
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
     let gh = resolver.status(BinaryKind::Gh).await.path.expect("gh");
     let gh = std::path::PathBuf::from(gh);
@@ -511,7 +528,7 @@ async fn a_taken_name_is_reported_as_taken() {
     };
     let (owner, name) = slug.split_once('/').expect("owner/name");
 
-    let resolver = BinaryResolver::initialize(HashMap::new());
+    let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
     let gh = std::path::PathBuf::from(resolver.status(BinaryKind::Gh).await.path.expect("gh"));
     let git = which::which("git").expect("git on PATH");

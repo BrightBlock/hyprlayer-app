@@ -20,16 +20,17 @@ fn classify(path: &Path) -> FullDiskAccess {
     }
 }
 
-pub fn full_disk_access() -> FullDiskAccess {
+pub fn full_disk_access(home: Option<&Path>) -> FullDiskAccess {
     #[cfg(target_os = "macos")]
     {
-        let Some(home) = dirs::home_dir() else {
+        let Some(home) = home else {
             return FullDiskAccess::Unknown;
         };
         classify(&home.join("Library/Application Support/com.apple.TCC/TCC.db"))
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = home;
         FullDiskAccess::Unknown
     }
 }

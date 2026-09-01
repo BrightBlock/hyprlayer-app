@@ -29,9 +29,11 @@ import {
   useDocWebUrl,
   useEditorTargets,
   useReorderProjects,
+  useReprovisionWorkstream,
   useWorkstreamPr,
   useWorktreeFilesCheck,
 } from "@/lib/queries";
+import { errorMessage } from "@/lib/ipc";
 import { triggerActiveFileSave } from "@/lib/fileSave";
 import { docTitle } from "@/features/library/text";
 import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
@@ -797,6 +799,7 @@ export function Root() {
     null,
   );
   const detachPr = useDetachPr();
+  const reprovision = useReprovisionWorkstream();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [projectMenu, setProjectMenu] = useState<{
     x: number;
@@ -1689,6 +1692,22 @@ export function Root() {
               }}
             >
               Detach PR #{itemMenu.view.item.prNumber}
+            </ContextMenuItem>
+          )}
+          {itemMenu.view.git.exists && itemMenu.view.git.thoughts === "broken" && (
+            <ContextMenuItem
+              hint="Symlinks into the thoughts repo are missing or stale."
+              onClick={() => {
+                const { id, title } = itemMenu.view.item;
+                setItemMenu(null);
+                reprovision.mutate(id, {
+                  onSuccess: () => showToast("Thoughts links repaired", title, { tone: "ok" }),
+                  onError: (e) =>
+                    showToast("Couldn't repair thoughts links", errorMessage(e), { tone: "bad" }),
+                });
+              }}
+            >
+              Repair thoughts links
             </ContextMenuItem>
           )}
           <ContextMenuItem

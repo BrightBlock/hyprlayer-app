@@ -1,0 +1,211 @@
+{
+  "binaryOverrides": {
+    "claude": "/opt/homebrew/bin/claude",
+    "git": "/usr/bin/git"
+  },
+  "worktreeRoot": "/Users/jt/hyprlayer/worktrees",
+  "reposRoot": "/Users/jt/hyprlayer/repos",
+  "git": {
+    "branchPrefix": "jt/",
+    "prefixes": [
+      {
+        "label": "Feature",
+        "prefix": "feature/",
+        "keywords": [
+          "feat",
+          "feature"
+        ]
+      },
+      {
+        "label": "Fix",
+        "prefix": "fix/",
+        "keywords": [
+          "fix",
+          "bug"
+        ]
+      }
+    ],
+    "deleteBranchOnArchive": true,
+    "archiveOnMerge": false,
+    "automerge": false,
+    "pruneIgnoredOnArchive": true
+  },
+  "keybindings": {
+    "overrides": {
+      "commit": "mod+shift+c",
+      "quit": null
+    }
+  },
+  "prompts": {
+    "builtinBodies": {
+      "commit": "/commit\n\nNever use chore:."
+    },
+    "custom": [
+      {
+        "id": "p1",
+        "name": "Backfill tests",
+        "body": "Cover {{changed_files}} with tests.",
+        "overrides": {
+          "/repos/app": "Use vitest for {{changed_files}}."
+        },
+        "chord": "mod+shift+t",
+        "pinned": true
+      }
+    ]
+  },
+  "agents": {
+    "folders": [
+      "Research",
+      "Ship"
+    ],
+    "overlays": {
+      "codebase-analyzer": {
+        "effort": "high",
+        "harness": "claude",
+        "folder": "Research",
+        "status": "published",
+        "permissionMode": "default",
+        "rules": [
+          {
+            "id": "r1",
+            "action": "allow",
+            "pattern": "Bash(git *)"
+          }
+        ],
+        "network": true,
+        "outsideWorktree": false,
+        "context": [
+          "docs/adr"
+        ],
+        "delegates": [],
+        "visibility": "private",
+        "collaborators": [
+          {
+            "name": "Jon Tsiros",
+            "email": "jon@tsiros.me",
+            "role": "owner"
+          }
+        ]
+      }
+    },
+    "defaultAgent": "codebase-analyzer",
+    "groupUncategorized": true,
+    "closedFolders": [
+      "Archive"
+    ]
+  },
+  "providers": {
+    "defaultHarness": "claude",
+    "claude": {
+      "defaultModel": "claude-opus-4-8",
+      "defaultEffort": "high",
+      "commitModel": "claude-haiku-4-5",
+      "commitEffort": "low",
+      "defaultPlanMode": false,
+      "visibleModels": [
+        "claude-opus-4-8",
+        "claude-sonnet-4-5"
+      ],
+      "seenModelKeys": [
+        "claude-opus-4-8"
+      ],
+      "authMode": "cli",
+      "apiKey": null,
+      "baseUrl": null,
+      "useBedrock": false,
+      "useVertex": false,
+      "chromeEnabled": true,
+      "reviewModel": "claude-sonnet-4-5",
+      "reviewEffort": "medium",
+      "defaultFastMode": false
+    },
+    "opencode": {
+      "defaultModel": "anthropic/claude-sonnet-4-5",
+      "commitModel": null,
+      "selectedModels": [
+        "anthropic/claude-sonnet-4-5",
+        "openai/gpt-4o"
+      ]
+    },
+    "ollama": {
+      "endpoint": "http://localhost:11434",
+      "selectedModels": [
+        "qwen2.5-coder:7b"
+      ],
+      "defaultModel": null,
+      "commitModel": null
+    },
+    "codex": {
+      "defaultModel": "gpt-5.4-codex",
+      "defaultEffort": "high",
+      "commitModel": "gpt-5.4-mini",
+      "commitEffort": "low",
+      "selectedModels": [
+        "gpt-5.4-codex",
+        "gpt-5.4-mini"
+      ],
+      "personality": null
+    }
+  },
+  "notifications": {
+    "enabled": true,
+    "sound": true
+  },
+  "quit": {
+    "confirm": true
+  },
+  "tabTitles": {
+    "enabled": true,
+    "model": null
+  },
+  "multiplexer": {
+    "enabled": true,
+    "defaultEngineId": "claude-code",
+    "notifyOnBlocked": true,
+    "persistAcrossRestarts": true,
+    "engines": [
+      {
+        "id": "claude-code",
+        "label": "Claude Code",
+        "glyph": "✻",
+        "accentToken": "--color-accent",
+        "command": "claude",
+        "args": [],
+        "enabled": true,
+        "builtin": true
+      },
+      {
+        "id": "codex",
+        "label": "Codex",
+        "glyph": "◆",
+        "accentToken": "--color-validate",
+        "command": "codex",
+        "args": [],
+        "enabled": true,
+        "builtin": true
+      },
+      {
+        "id": "gemini",
+        "label": "Gemini",
+        "glyph": "✦",
+        "accentToken": "--color-brand",
+        "command": "gemini",
+        "args": [],
+        "enabled": true,
+        "builtin": true
+      },
+      {
+        "id": "antigravity",
+        "label": "Antigravity",
+        "glyph": "◉",
+        "accentToken": "--color-commit",
+        "command": "agy",
+        "args": [],
+        "enabled": true,
+        "builtin": true
+      }
+    ]
+  },
+  "devTools": false,
+  "fullDiskAccessNoticeDismissed": true
+}

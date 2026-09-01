@@ -51,7 +51,7 @@ impl BinaryKind {
         match self {
             BinaryKind::Claude => Some(("2.1.0", [2, 1, 0])),
             BinaryKind::OpenCode => Some(("1.0.0", [1, 0, 0])),
-            BinaryKind::Codex => Some(("0.145.0", [0, 145, 0])),
+            BinaryKind::Codex => Some(("0.149.0", [0, 149, 0])),
             _ => None,
         }
     }
@@ -95,30 +95,38 @@ pub struct BinaryResolver {
     overrides: RwLock<HashMap<BinaryKind, PathBuf>>,
     cache: RwLock<HashMap<BinaryKind, BinaryStatus>>,
     generation: AtomicU64,
+    cwd: PathBuf,
+    #[cfg_attr(not(unix), allow(dead_code))]
+    shell: Option<OsString>,
 }
 
 impl BinaryResolver {
-    pub fn initialize(overrides: HashMap<BinaryKind, PathBuf>) -> Self {
+    pub fn initialize(
+        environment: &crate::env::RuntimeEnvironment,
+        overrides: HashMap<BinaryKind, PathBuf>,
+    ) -> Self {
         let mut segments: Vec<PathBuf> = Vec::new();
-        if let Some(process_path) = env::var_os("PATH") {
+        if let Some(process_path) = environment.var("PATH") {
             segments.extend(
-                env::split_paths(&process_path).filter(|p| !super::appimage::is_appdir_path(p)),
+                env::split_paths(process_path).filter(|p| !super::appimage::is_appdir_path(p)),
             );
         }
-        segments.extend(well_known_dirs());
+        segments.extend(well_known_dirs(environment));
 
         Self {
             augmented_path: RwLock::new(join_deduped(segments)),
             overrides: RwLock::new(overrides),
             cache: RwLock::new(HashMap::new()),
             generation: AtomicU64::new(0),
+            cwd: environment.process_cwd.clone(),
+            shell: environment.var("SHELL").map(OsString::from),
         }
     }
 
     pub async fn enrich_with_login_shell(&self) -> bool {
         #[cfg(unix)]
         {
-            let Some(shell_path) = capture_login_shell_path().await else {
+            let Some(shell_path) = capture_login_shell_path(self.shell.as_deref()).await else {
                 return false;
             };
             let mut segments: Vec<PathBuf> =
@@ -151,7 +159,7 @@ impl BinaryResolver {
             return Some(p.clone());
         }
         let path = self.augmented_path.read().await.clone();
-        which_in_augmented(kind.command_name(), &path)
+        which_in_augmented(kind.command_name(), &path, &self.cwd)
     }
 
     pub async fn require(&self, kind: BinaryKind) -> Result<PathBuf> {
@@ -220,6 +228,13 @@ impl BinaryResolver {
         let Some(path) = self.resolve(kind).await else {
             return missing_status(kind, overridden);
         };
+        // `resolve` takes an override on trust, so a directory, a deleted file, or a
+        // non-executable can reach here. Only `hyprlayer` requires a version, so for
+        // every other kind an unrunnable path would otherwise probe to `None` and
+        // fall through `state_for` to `Ok` — reported as "Found" with no version.
+        if !is_runnable(&path) {
+            return missing_status(kind, overridden);
+        }
 
         let version = probe_version(&path).await;
         let state = state_for(kind, version.as_deref());
@@ -237,6 +252,19 @@ impl BinaryResolver {
             overridden,
         }
     }
+}
+
+#[cfg(unix)]
+fn is_runnable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_runnable(path: &Path) -> bool {
+    path.is_file()
 }
 
 fn missing_status(kind: BinaryKind, overridden: bool) -> BinaryStatus {
@@ -295,9 +323,7 @@ fn build_artifact_dirs(exe: Option<&Path>) -> Vec<PathBuf> {
         .collect()
 }
 
-fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> {
-    let cwd = env::current_dir().ok()?;
-
+fn which_in_augmented(name: &str, augmented_path: &OsString, cwd: &Path) -> Option<PathBuf> {
     let forbidden = build_artifact_dirs(env::current_exe().ok().as_deref());
     let is_build_artifact = |p: &PathBuf| {
         if forbidden.is_empty() {
@@ -311,7 +337,7 @@ fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> 
 
     #[cfg(windows)]
     {
-        if let Ok(mut hits) = which::which_in_all(format!("{name}.exe"), Some(augmented_path), &cwd)
+        if let Ok(mut hits) = which::which_in_all(format!("{name}.exe"), Some(augmented_path), cwd)
         {
             if let Some(exe) = hits.find(|p| !is_build_artifact(p)) {
                 return Some(exe);
@@ -319,14 +345,18 @@ fn which_in_augmented(name: &str, augmented_path: &OsString) -> Option<PathBuf> 
         }
     }
 
-    let found = which::which_in_all(name, Some(augmented_path), &cwd)
+    let found = which::which_in_all(name, Some(augmented_path), cwd)
         .ok()?
         .find(|p| !is_build_artifact(p));
     found
 }
 
-fn well_known_dirs() -> Vec<PathBuf> {
-    let home = dirs::home_dir().unwrap_or_default();
+// XDG_DATA_HOME/APPDATA/LOCALAPPDATA are read from the supplied `RuntimeEnvironment`
+// rather than via `dirs::data_dir()`/`dirs::data_local_dir()`, which would read the
+// process environment ambiently; the fallbacks below mirror what those functions
+// compute from the same variables.
+fn well_known_dirs(environment: &crate::env::RuntimeEnvironment) -> Vec<PathBuf> {
+    let home = &environment.home_dir;
     let common = [
         ".local/bin",
         ".cargo/bin",
@@ -345,10 +375,19 @@ fn well_known_dirs() -> Vec<PathBuf> {
     ];
     #[cfg(target_os = "windows")]
     let platform = [
-        dirs::data_local_dir().map(|local| local.join("Programs")),
-        dirs::home_dir().map(|profile| profile.join("scoop").join("shims")),
-        dirs::data_local_dir().map(|local| local.join("Microsoft").join("WinGet").join("Links")),
-        dirs::data_dir().map(|appdata| appdata.join("npm")),
+        environment
+            .var("LOCALAPPDATA")
+            .map(|local| PathBuf::from(local).join("Programs")),
+        Some(home.join("scoop").join("shims")),
+        environment.var("LOCALAPPDATA").map(|local| {
+            PathBuf::from(local)
+                .join("Microsoft")
+                .join("WinGet")
+                .join("Links")
+        }),
+        environment
+            .var("APPDATA")
+            .map(|appdata| PathBuf::from(appdata).join("npm")),
     ]
     .into_iter()
     .flatten()
@@ -358,8 +397,16 @@ fn well_known_dirs() -> Vec<PathBuf> {
         Some(PathBuf::from("/usr/local/bin")),
         Some(PathBuf::from("/var/lib/flatpak/exports/bin")),
         Some(PathBuf::from("/snap/bin")),
-        dirs::home_dir().map(|home| home.join(".nix-profile").join("bin")),
-        dirs::data_dir().map(|share| share.join("flatpak").join("exports").join("bin")),
+        Some(home.join(".nix-profile").join("bin")),
+        Some(
+            environment
+                .var("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".local/share"))
+                .join("flatpak")
+                .join("exports")
+                .join("bin"),
+        ),
     ]
     .into_iter()
     .flatten()
@@ -369,8 +416,10 @@ fn well_known_dirs() -> Vec<PathBuf> {
 }
 
 #[cfg(unix)]
-async fn capture_login_shell_path() -> Option<OsString> {
-    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+async fn capture_login_shell_path(shell: Option<&std::ffi::OsStr>) -> Option<OsString> {
+    let shell = shell
+        .map(OsString::from)
+        .unwrap_or_else(|| "/bin/zsh".into());
     let output = Exec::new(&shell)
         .args(["-lic", r#"printf %s "$PATH""#])
         .timeout(Duration::from_secs(8))
@@ -412,6 +461,15 @@ fn parse_semver(s: &str) -> Option<[u64; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env::RuntimeEnvironment;
+
+    fn real_environment() -> RuntimeEnvironment {
+        RuntimeEnvironment {
+            home_dir: dirs::home_dir().unwrap_or_default(),
+            process_cwd: std::env::current_dir().unwrap_or_default(),
+            process_env: std::env::vars_os().collect(),
+        }
+    }
 
     #[test]
     fn parses_version_tokens() {
@@ -482,9 +540,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn codex_version_floor_still_flags_too_old() {
+        assert_eq!(
+            state_for(BinaryKind::Codex, Some("0.148.0")),
+            BinaryState::TooOld {
+                min: "0.149.0".into()
+            }
+        );
+        assert_eq!(
+            state_for(BinaryKind::Codex, Some("0.149.0")),
+            BinaryState::Ok
+        );
+    }
+
     #[tokio::test]
     async fn resolved_hyprlayer_without_version_reports_missing() {
-        let resolver = BinaryResolver::initialize(HashMap::new());
+        let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
         resolver
             .set_override(
                 BinaryKind::Hyprlayer,
@@ -497,9 +569,42 @@ mod tests {
         assert!(resolver.require(BinaryKind::Hyprlayer).await.is_err());
     }
 
+    // Every kind except `hyprlayer` returns `false` from `requires_version`, so before
+    // `probe` checked the path these all reported `Ok` — "Found", with a blank version.
+    #[tokio::test]
+    async fn an_override_that_cannot_be_run_reports_missing_for_every_kind() {
+        let dir = std::env::temp_dir();
+        let absent = dir.join("hyprlayer-no-such-binary-9f3a");
+        let not_executable = dir.join("hyprlayer-not-executable-9f3a");
+        std::fs::write(&not_executable, b"#!/bin/sh\necho nope\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&not_executable, std::fs::Permissions::from_mode(0o644))
+                .unwrap();
+        }
+
+        for kind in BinaryKind::ALL {
+            for bogus in [dir.clone(), absent.clone(), not_executable.clone()] {
+                let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
+                resolver.set_override(kind, Some(bogus.clone())).await;
+                let status = resolver.status(kind).await;
+                assert_eq!(
+                    status.state,
+                    BinaryState::Missing,
+                    "{kind:?} with override {bogus:?} must not report healthy"
+                );
+                assert!(status.overridden, "{kind:?} keeps its manual-path flag");
+                assert!(resolver.require(kind).await.is_err());
+            }
+        }
+
+        let _ = std::fs::remove_file(&not_executable);
+    }
+
     #[tokio::test]
     async fn resolves_git_on_dev_machines() {
-        let resolver = BinaryResolver::initialize(HashMap::new());
+        let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
         let status = resolver.status(BinaryKind::Git).await;
         assert_eq!(
             status.state,
@@ -512,7 +617,7 @@ mod tests {
 
     #[tokio::test]
     async fn override_beats_path_and_redetect_clears() {
-        let resolver = BinaryResolver::initialize(HashMap::new());
+        let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
         let fake = PathBuf::from("/nonexistent/fake-claude");
         resolver
             .set_override(BinaryKind::Claude, Some(fake.clone()))

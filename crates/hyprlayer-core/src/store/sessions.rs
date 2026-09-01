@@ -1,29 +1,14 @@
-use rusqlite::{params, Row};
+use rusqlite::{params, OptionalExtension, Row, ToSql, Transaction};
 use serde::{Deserialize, Serialize};
 
+use super::session_event_codec::decode_raw_event;
 use super::{now_ms, Db};
 use crate::agent::Harness;
 use crate::claude::SessionState;
-use crate::error::Result;
+use crate::error::{CoreError, Result};
 use crate::pipeline::Stage;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
-pub struct Session {
-    pub id: String,
-    pub workstream_id: String,
-    pub stage: Stage,
-    pub harness: Harness,
-    pub claude_session_id: Option<String>,
-    pub cwd: String,
-    pub state: SessionState,
-    pub model: Option<String>,
-    pub cost_usd: Option<f64>,
-    pub started_at: f64,
-    pub ended_at: Option<f64>,
-    pub exit_summary: Option<String>,
-}
+pub use hyprlayer_models::session::{Session, SessionLogEntry};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -35,12 +20,168 @@ pub struct StoredEvent {
     pub created_at: f64,
 }
 
+impl TryFrom<StoredEvent> for SessionLogEntry {
+    type Error = CoreError;
+
+    fn try_from(stored: StoredEvent) -> Result<Self> {
+        if !stored.created_at.is_finite() {
+            return Err(CoreError::SessionEventDecode {
+                detail: format!("seq {} carries a non-finite createdAt", stored.seq),
+            });
+        }
+        Ok(SessionLogEntry {
+            seq: stored.seq as i64,
+            kind: stored.kind,
+            event: decode_raw_event(&stored.payload)?,
+            created_at: stored.created_at,
+        })
+    }
+}
+
+pub fn decode_session_log(session_id: &str, rows: Vec<StoredEvent>) -> Vec<SessionLogEntry> {
+    rows.into_iter()
+        .filter_map(|stored| {
+            let seq = stored.seq;
+            match SessionLogEntry::try_from(stored) {
+                Ok(entry) => Some(entry),
+                Err(err) => {
+                    tracing::warn!("session {session_id}: skipping event {seq}: {err}");
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 pub struct NewSession {
     pub id: String,
     pub workstream_id: String,
     pub stage: Stage,
     pub harness: Harness,
     pub cwd: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) enum FieldOp<T> {
+    #[default]
+    Unchanged,
+    Set(T),
+    Clear,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionRowMutation {
+    pub provider_session_id: FieldOp<String>,
+    pub model: FieldOp<String>,
+    pub state: FieldOp<SessionState>,
+    pub cost_usd: FieldOp<f64>,
+    pub ended_at: FieldOp<f64>,
+    pub exit_summary: FieldOp<String>,
+    pub clear_orphans: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApplySessionEventOutcome {
+    Applied,
+    AlreadyApplied,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) type SessionEventGateFn = dyn Fn(&str, i64) -> SessionEventGateAction + Send + Sync;
+
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Debug, Clone)]
+pub enum SessionEventGateAction {
+    Proceed,
+    Delay(std::time::Duration),
+    FailRowMutation,
+}
+
+struct SetBuilder<'a> {
+    session_id: &'a str,
+    clauses: Vec<String>,
+    values: Vec<Box<dyn ToSql>>,
+}
+
+impl<'a> SetBuilder<'a> {
+    fn new(session_id: &'a str) -> Self {
+        Self {
+            session_id,
+            clauses: Vec::new(),
+            values: Vec::new(),
+        }
+    }
+
+    fn set<T: ToSql + 'static>(&mut self, column: &str, value: T) {
+        self.values.push(Box::new(value));
+        self.clauses
+            .push(format!("{column} = ?{}", self.values.len()));
+    }
+
+    fn clear(&mut self, column: &str) {
+        self.clauses.push(format!("{column} = NULL"));
+    }
+
+    fn apply(self, tx: &Transaction<'_>) -> rusqlite::Result<()> {
+        if self.clauses.is_empty() {
+            return Ok(());
+        }
+        let sql = format!(
+            "UPDATE sessions SET {} WHERE id = ?{}",
+            self.clauses.join(", "),
+            self.values.len() + 1
+        );
+        let mut params: Vec<&dyn ToSql> = self.values.iter().map(|v| v.as_ref()).collect();
+        params.push(&self.session_id);
+        tx.execute(&sql, params.as_slice())?;
+        Ok(())
+    }
+}
+
+fn apply_row_mutation(
+    tx: &Transaction<'_>,
+    session_id: &str,
+    mutation: &SessionRowMutation,
+) -> rusqlite::Result<()> {
+    let mut builder = SetBuilder::new(session_id);
+    match &mutation.provider_session_id {
+        FieldOp::Unchanged => {}
+        FieldOp::Set(v) => builder.set("claude_session_id", v.clone()),
+        FieldOp::Clear => builder.clear("claude_session_id"),
+    }
+    match &mutation.model {
+        FieldOp::Unchanged => {}
+        FieldOp::Set(v) => builder.set("model", v.clone()),
+        FieldOp::Clear => builder.clear("model"),
+    }
+    match &mutation.state {
+        FieldOp::Unchanged => {}
+        FieldOp::Set(v) => builder.set("state", v.as_str()),
+        FieldOp::Clear => builder.clear("state"),
+    }
+    match &mutation.cost_usd {
+        FieldOp::Unchanged => {}
+        FieldOp::Set(v) => builder.set("cost_usd", *v),
+        FieldOp::Clear => builder.clear("cost_usd"),
+    }
+    match &mutation.ended_at {
+        FieldOp::Unchanged => {}
+        FieldOp::Set(v) => builder.set("ended_at", *v),
+        FieldOp::Clear => builder.clear("ended_at"),
+    }
+    match &mutation.exit_summary {
+        FieldOp::Unchanged => {}
+        FieldOp::Set(v) => builder.set("exit_summary", v.clone()),
+        FieldOp::Clear => builder.clear("exit_summary"),
+    }
+    builder.apply(tx)?;
+    if mutation.clear_orphans {
+        tx.execute(
+            "DELETE FROM orphan_pids WHERE session_id = ?1",
+            params![session_id],
+        )?;
+    }
+    Ok(())
 }
 
 const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, state, model, \
@@ -52,7 +193,7 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         workstream_id: row.get("workstream_id")?,
         stage: Stage::parse(&row.get::<_, String>("stage")?),
         harness: Harness::parse(&row.get::<_, String>("harness")?),
-        claude_session_id: row.get("claude_session_id")?,
+        provider_session_id: row.get("claude_session_id")?,
         cwd: row.get("cwd")?,
         state: SessionState::parse(&row.get::<_, String>("state")?),
         model: row.get("model")?,
@@ -70,7 +211,7 @@ impl Db {
             workstream_id: new.workstream_id,
             stage: new.stage,
             harness: new.harness,
-            claude_session_id: None,
+            provider_session_id: None,
             cwd: new.cwd,
             state: SessionState::Starting,
             model: None,
@@ -89,7 +230,7 @@ impl Db {
                     session.workstream_id,
                     session.stage.as_str(),
                     session.harness.as_str(),
-                    session.claude_session_id,
+                    session.provider_session_id,
                     session.cwd,
                     session.state.as_str(),
                     session.model,
@@ -132,14 +273,14 @@ impl Db {
     pub fn mark_session_init(
         &self,
         id: &str,
-        claude_session_id: &str,
+        provider_session_id: &str,
         model: Option<&str>,
     ) -> Result<()> {
         self.with(|conn| {
             conn.execute(
                 "UPDATE sessions SET claude_session_id = ?2, model = ?3, state = 'running'
                  WHERE id = ?1",
-                params![id, claude_session_id, model],
+                params![id, provider_session_id, model],
             )?;
             Ok(())
         })
@@ -195,6 +336,36 @@ impl Db {
             stmt.execute(params![session_id, seq, kind, payload, now_ms()])?;
             Ok(())
         })
+    }
+
+    pub fn session_log(&self, session_id: &str) -> Result<Vec<SessionLogEntry>> {
+        Ok(decode_session_log(
+            session_id,
+            self.session_events(session_id)?,
+        ))
+    }
+
+    pub(crate) fn session_log_after(
+        &self,
+        session_id: &str,
+        after_seq: Option<i64>,
+    ) -> Result<Vec<SessionLogEntry>> {
+        let rows = self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT seq, kind, payload, created_at FROM session_events
+                 WHERE session_id = ?1 AND seq > ?2 ORDER BY seq",
+            )?;
+            let rows = stmt.query_map(params![session_id, after_seq.unwrap_or(-1)], |row| {
+                Ok(StoredEvent {
+                    seq: row.get::<_, i64>("seq")? as f64,
+                    kind: row.get("kind")?,
+                    payload: row.get("payload")?,
+                    created_at: row.get("created_at")?,
+                })
+            })?;
+            rows.collect()
+        })?;
+        Ok(decode_session_log(session_id, rows))
     }
 
     pub fn next_session_seq(&self, session_id: &str) -> Result<i64> {
@@ -347,6 +518,98 @@ impl Db {
             Ok(())
         })
     }
+
+    pub(crate) fn apply_session_event(
+        &self,
+        session_id: &str,
+        seq: i64,
+        kind: &str,
+        raw_payload: &str,
+        mutation: SessionRowMutation,
+    ) -> Result<ApplySessionEventOutcome> {
+        self.with_core(|conn| {
+            let tx = conn.unchecked_transaction()?;
+
+            let existing: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT kind, payload FROM session_events WHERE session_id = ?1 AND seq = ?2",
+                    params![session_id, seq],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+
+            let outcome = match existing {
+                None => {
+                    tx.execute(
+                        "INSERT INTO session_events (session_id, seq, kind, payload, created_at)
+                         VALUES (?1,?2,?3,?4,?5)",
+                        params![session_id, seq, kind, raw_payload, now_ms()],
+                    )?;
+                    ApplySessionEventOutcome::Applied
+                }
+                Some((existing_kind, existing_payload)) => {
+                    if existing_kind == kind && existing_payload == raw_payload {
+                        ApplySessionEventOutcome::AlreadyApplied
+                    } else {
+                        return Err(CoreError::SessionSequenceConflict {
+                            session_id: session_id.to_string(),
+                            seq,
+                        });
+                    }
+                }
+            };
+
+            #[cfg(any(test, feature = "test-support"))]
+            if let Some(action) = self.session_event_gate_check(session_id, seq) {
+                match action {
+                    SessionEventGateAction::Proceed => {}
+                    SessionEventGateAction::Delay(delay) => std::thread::sleep(delay),
+                    SessionEventGateAction::FailRowMutation => {
+                        return Err(CoreError::Db(rusqlite::Error::InvalidParameterName(
+                            "session_event_gate: forced row-mutation failure".into(),
+                        )));
+                    }
+                }
+            }
+
+            apply_row_mutation(&tx, session_id, &mutation)?;
+
+            tx.commit()?;
+            Ok(outcome)
+        })
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Db {
+    fn session_event_gate_check(
+        &self,
+        session_id: &str,
+        seq: i64,
+    ) -> Option<SessionEventGateAction> {
+        self.session_event_gate
+            .lock()
+            .expect("session event gate mutex poisoned")
+            .as_ref()
+            .map(|hook| hook(session_id, seq))
+    }
+
+    pub fn set_session_event_gate(
+        &self,
+        hook: impl Fn(&str, i64) -> SessionEventGateAction + Send + Sync + 'static,
+    ) {
+        *self
+            .session_event_gate
+            .lock()
+            .expect("session event gate mutex poisoned") = Some(std::sync::Arc::new(hook));
+    }
+
+    pub fn clear_session_event_gate(&self) {
+        *self
+            .session_event_gate
+            .lock()
+            .expect("session event gate mutex poisoned") = None;
+    }
 }
 
 #[cfg(test)]
@@ -396,7 +659,7 @@ mod tests {
             .unwrap();
 
         let reloaded = db.get_session("s1").unwrap().unwrap();
-        assert_eq!(reloaded.claude_session_id.as_deref(), Some("claude-abc"));
+        assert_eq!(reloaded.provider_session_id.as_deref(), Some("claude-abc"));
         assert_eq!(reloaded.state, SessionState::Completed);
         assert_eq!(reloaded.cost_usd, Some(0.05));
         assert!(reloaded.ended_at.is_some());

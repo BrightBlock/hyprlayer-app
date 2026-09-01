@@ -1,50 +1,9 @@
 use rusqlite::{params, Row};
-use serde::{Deserialize, Serialize};
 
 use super::{now_ms, Db};
 use crate::error::Result;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "lowercase")]
-pub enum ProjectSource {
-    Clone,
-    Disk,
-    Folder,
-}
-
-impl ProjectSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ProjectSource::Clone => "clone",
-            ProjectSource::Disk => "disk",
-            ProjectSource::Folder => "folder",
-        }
-    }
-
-    pub fn parse(s: &str) -> Self {
-        match s {
-            "clone" => ProjectSource::Clone,
-            "folder" => ProjectSource::Folder,
-            _ => ProjectSource::Disk,
-        }
-    }
-
-    pub fn is_git(self) -> bool {
-        self != ProjectSource::Folder
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectRecord {
-    pub path: String,
-    pub name: String,
-    pub origin_url: Option<String>,
-    pub source: ProjectSource,
-    pub created_at: f64,
-}
+pub use hyprlayer_models::project::{ProjectRecord, ProjectSource};
 
 pub struct NewProject {
     pub path: String,

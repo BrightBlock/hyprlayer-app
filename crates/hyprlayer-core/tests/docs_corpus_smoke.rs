@@ -5,16 +5,19 @@ use hyprlayer_core::docs::frontmatter::{self, FmPatch, FmValue};
 use hyprlayer_core::index::thoughts_roots;
 
 async fn corpus_roots() -> Vec<PathBuf> {
-    let from_config = match ConfigService::with_default_path() {
-        Ok(service) => match service.load().await {
-            Ok(loaded) => thoughts_roots(&loaded.config)
-                .into_iter()
-                .map(|r| r.root)
-                .filter(|p| p.is_dir())
-                .collect(),
-            Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
+    let from_config = match dirs::config_dir() {
+        Some(dir) => {
+            let service = ConfigService::new(dir.join("hyprlayer").join("config.json"));
+            match service.load().await {
+                Ok(loaded) => thoughts_roots(&loaded.config)
+                    .into_iter()
+                    .map(|r| r.root)
+                    .filter(|p| p.is_dir())
+                    .collect(),
+                Err(_) => Vec::new(),
+            }
+        }
+        None => Vec::new(),
     };
     if !from_config.is_empty() {
         return from_config;

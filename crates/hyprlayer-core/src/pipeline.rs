@@ -1,63 +1,7 @@
 use crate::agent::Harness;
 use crate::claude::PermissionMode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "snake_case")]
-pub enum Stage {
-    Research,
-    Plan,
-    Implement,
-    Validate,
-    Commit,
-    Ship,
-    Revise,
-    General,
-}
-
-impl Stage {
-    pub fn try_parse(s: &str) -> Option<Stage> {
-        match s {
-            "general" => Some(Stage::General),
-            "research" => Some(Stage::Research),
-            "plan" => Some(Stage::Plan),
-            "implement" => Some(Stage::Implement),
-            "validate" => Some(Stage::Validate),
-            "commit" => Some(Stage::Commit),
-            "ship" => Some(Stage::Ship),
-            "revise" => Some(Stage::Revise),
-            _ => None,
-        }
-    }
-
-    pub fn parse(s: &str) -> Stage {
-        Stage::try_parse(s).unwrap_or(Stage::General)
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Stage::General => "general",
-            Stage::Research => "research",
-            Stage::Plan => "plan",
-            Stage::Implement => "implement",
-            Stage::Validate => "validate",
-            Stage::Commit => "commit",
-            Stage::Ship => "ship",
-            Stage::Revise => "revise",
-        }
-    }
-
-    pub fn command(self) -> Option<&'static str> {
-        match self {
-            Stage::Research => Some("/research_codebase"),
-            Stage::Plan => Some("/create_plan"),
-            Stage::Implement => Some("/implement_plan"),
-            Stage::Validate => Some("/validate_plan"),
-            Stage::Commit => Some("/commit"),
-            Stage::General | Stage::Ship | Stage::Revise => None,
-        }
-    }
-}
+pub use hyprlayer_models::agent::Stage;
 
 pub struct StagePolicy {
     pub permission_mode: PermissionMode,

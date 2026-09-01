@@ -26,6 +26,7 @@ const h = vi.hoisted(() => {
   const killSession = vi.fn(async () => ({ status: "ok", data: null }));
   const respondPermission = vi.fn(async () => ({ status: "ok", data: null }));
   const answerQuestion = vi.fn(async () => ({ status: "ok", data: null }));
+  const getSessionLog = vi.fn(async () => ({ status: "ok", data: [] as unknown[] }));
   const restartSession = vi.fn(async (...args: unknown[]) => {
     state.lastChannel = args[args.length - 1] as FakeChannel;
     return { status: "ok", data: null };
@@ -40,6 +41,7 @@ const h = vi.hoisted(() => {
     killSession,
     respondPermission,
     answerQuestion,
+    getSessionLog,
     restartSession,
   };
 });
@@ -54,12 +56,15 @@ vi.mock("../../lib/bindings", () => ({
     killSession: h.killSession,
     respondPermission: h.respondPermission,
     answerQuestion: h.answerQuestion,
+    getSessionLog: h.getSessionLog,
     restartSession: h.restartSession,
   },
 }));
 
 const {
   activeWorkstreamIds,
+  answerQuestion,
+  restoreSessionIfNeeded,
   startSession,
   sendMessage,
   cancelQueuedMessage,
@@ -110,6 +115,8 @@ beforeEach(() => {
   h.killSession.mockClear();
   h.respondPermission.mockClear();
   h.answerQuestion.mockClear();
+  h.getSessionLog.mockClear();
+  h.getSessionLog.mockResolvedValue({ status: "ok", data: [] });
   h.restartSession.mockClear();
   h.state.lastChannel = null;
 });
@@ -344,6 +351,14 @@ describe("taskStartedAt, per-task elapsed timestamps", () => {
 
 const entryOf = (id: string) => useSessionStore.getState().sessions[id]!;
 
+const QUESTION_ASK: SessionEvent = {
+  kind: "questionAsk",
+  requestId: "q-1",
+  questions: [
+    { question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }] },
+  ],
+};
+
 
 describe("parked-turn recovery (permission mode change / stop)", () => {
   const PERMISSION_ASK: SessionEvent = {
@@ -352,14 +367,6 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     toolName: "Bash",
     input: "{}",
   };
-  const QUESTION_ASK: SessionEvent = {
-    kind: "questionAsk",
-    requestId: "q-1",
-    questions: JSON.stringify([
-      { question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }] },
-    ]),
-  };
-
   it("changing the permission mode while parked on a permission un-sticks the session", async () => {
     const id = await startBusySession();
     emit(INIT);
@@ -433,7 +440,7 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
 
     await stopSession(id);
 
-    expect(h.answerQuestion).toHaveBeenCalledWith(id, "q-1", "{}");
+    expect(h.answerQuestion).toHaveBeenCalledWith(id, "q-1", {});
     expect(h.interruptSession).toHaveBeenCalledWith(id);
     expect(h.respondPermission).not.toHaveBeenCalled();
 
@@ -830,5 +837,96 @@ describe("useMostRecentDoc", () => {
 
     const { result } = renderHook(() => useMostRecentDoc("ws2", "plan"));
     expect(result.current).toBeNull();
+  });
+});
+
+describe("restoring a stored session log", () => {
+  type LogEntry = { seq: number; kind: string; event: unknown; createdAt: number };
+
+  function entry(seq: number, event: unknown, kind?: string): LogEntry {
+    return {
+      seq,
+      kind: kind ?? (event as { kind: string }).kind,
+      event,
+      createdAt: 1_700_000_000_000 + seq,
+    };
+  }
+
+  async function restoreLog(log: LogEntry[]): Promise<ReturnType<typeof entryOf>> {
+    h.getSessionLog.mockResolvedValue({ status: "ok", data: log });
+    await restoreSessionIfNeeded("stored-1", "ws1", "general");
+    return entryOf("stored-1");
+  }
+
+  it("replays a typed question array straight into the pending question", async () => {
+    const restored = await restoreLog([
+      entry(0, INIT),
+      entry(1, QUESTION_ASK),
+    ]);
+    expect(restored.pendingQuestion).toEqual({
+      requestId: "q-1",
+      questions: [
+        { question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }] },
+      ],
+    });
+  });
+
+  it("normalizes a legacy string-encoded question row from an older build", async () => {
+    const restored = await restoreLog([
+      entry(0, INIT),
+      entry(1, {
+        kind: "questionAsk",
+        requestId: "q-1",
+        questions: JSON.stringify([
+          { question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }] },
+        ]),
+      }),
+    ]);
+    expect(restored.pendingQuestion?.questions).toEqual([
+      { question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }] },
+    ]);
+  });
+
+  it("parks with no questions when the stored row's questions are missing or malformed", async () => {
+    for (const questions of [undefined, "not json{", { not: "an array" }]) {
+      useSessionStore.setState({ sessions: {} });
+      const restored = await restoreLog([
+        entry(0, INIT),
+        entry(1, { kind: "questionAsk", requestId: "q-1", questions }),
+      ]);
+      expect(restored.pendingQuestion).toEqual({ requestId: "q-1", questions: [] });
+    }
+  });
+
+  it("skips a stored row the reducer does not recognize instead of dropping the log", async () => {
+    const restored = await restoreLog([
+      entry(0, INIT),
+      entry(1, { kind: "toolPermissionEscalated", requestId: "future-1" }, "toolPermissionEscalated"),
+      entry(2, { kind: "assistantText", text: "still here", parentId: null, injected: false }),
+    ]);
+    expect(restored.items.map((it) => it.kind)).toEqual(["assistant"]);
+  });
+
+  it("stamps a stored user message with the row's createdAt", async () => {
+    const restored = await restoreLog([
+      entry(0, INIT),
+      entry(1, { kind: "userMessage", text: "hello", stage: null, promptName: null }),
+    ]);
+    const first = restored.items[0];
+    expect(first.kind).toBe("user");
+    expect(first.kind === "user" && first.createdAt).toBe(1_700_000_000_001);
+  });
+});
+
+describe("answering a question", () => {
+  it("hands the answer record to the command without stringifying it", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(QUESTION_ASK);
+
+    await answerQuestion(id, "q-1", { "Which?": "A" });
+
+    expect(h.answerQuestion).toHaveBeenCalledWith(id, "q-1", { "Which?": "A" });
+    expect(entryOf(id).pendingQuestion).toBeNull();
   });
 });

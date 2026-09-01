@@ -37,6 +37,9 @@ if ($new -eq $txt) {
 }
 [System.IO.File]::WriteAllText($confPath, $new, (New-Object System.Text.UTF8Encoding($false)))
 
+Step "Verifying hyprlayer-models + hyprlayer-core for x86_64-pc-windows-msvc"
+Run 'cargo check -p hyprlayer-models -p hyprlayer-core --target x86_64-pc-windows-msvc'
+
 Step "pnpm install (frozen lockfile)"
 Run 'pnpm install --frozen-lockfile'
 

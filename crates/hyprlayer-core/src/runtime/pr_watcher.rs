@@ -1,18 +1,21 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hyprlayer_core::docs::pr_record;
-use hyprlayer_core::error::Result;
-use hyprlayer_core::pr::{self, ChecksState, PrState, PrStatus};
-use hyprlayer_core::process::binaries::BinaryKind;
-use hyprlayer_core::store::Workstream;
-use tauri::Manager;
-use tauri_specta::Event;
+use tokio::sync::{broadcast, Mutex as AsyncMutex, Notify};
 
-use crate::events::PrStatusChanged;
-use crate::state::AppState;
+use crate::config::ConfigService;
+use crate::docs::pr_record;
+use crate::error::Result;
+use crate::index::watcher::WatchHandle;
+use crate::pr::{self, ChecksState, PrState, PrStatus};
+use crate::process::binaries::{BinaryKind, BinaryResolver};
+use crate::store::{Db, Workstream};
+use hyprlayer_models::RuntimeEvent;
+
+use super::shutdown::TrackedTask;
 
 const FAST: Duration = Duration::from_secs(8);
 const MEDIUM: Duration = Duration::from_secs(20);
@@ -27,6 +30,18 @@ const MIN_TICK: Duration = Duration::from_secs(4);
 
 const MAX_CONCURRENT: usize = 6;
 
+pub type WorktreeWatch = Arc<AsyncMutex<Option<(String, WatchHandle)>>>;
+
+pub struct PrWatcherContext {
+    pub binaries: Arc<BinaryResolver>,
+    pub db: Arc<Db>,
+    pub config: Arc<ConfigService>,
+    pub worktree_watch: WorktreeWatch,
+    pub focused: Arc<AtomicBool>,
+    pub focus_changed: Arc<Notify>,
+    pub events: broadcast::Sender<RuntimeEvent>,
+}
+
 struct Tracked {
     status: Option<PrStatus>,
     due: Instant,
@@ -39,37 +54,30 @@ struct WatchState {
     backoff_until: Option<Instant>,
 }
 
-pub fn spawn(app: tauri::AppHandle) {
-    tauri::async_runtime::spawn(async move {
+pub fn spawn(ctx: PrWatcherContext) -> TrackedTask {
+    TrackedTask::spawn(move |stop| async move {
         let mut state = WatchState::default();
         loop {
-            let (focused, wake) = {
-                let app_state = app.state::<AppState>();
-                (
-                    app_state.focused.load(Ordering::Relaxed),
-                    app_state.focus_changed.clone(),
-                )
-            };
-
-            if !focused {
+            if !ctx.focused.load(Ordering::Relaxed) {
                 tokio::select! {
-                    _ = wake.notified() => {}
+                    _ = ctx.focus_changed.notified() => {}
                     _ = tokio::time::sleep(SLOW) => {}
+                    _ = stop.notified() => return,
                 }
                 continue;
             }
 
-            let delay = tick(&app, &mut state).await;
+            let delay = tick(&ctx, &mut state).await;
             tokio::select! {
                 _ = tokio::time::sleep(delay) => {}
-                _ = wake.notified() => {}
+                _ = ctx.focus_changed.notified() => {}
+                _ = stop.notified() => return,
             }
         }
-    });
+    })
 }
 
-async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
-    let app_state = app.state::<AppState>();
+async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
     let now = Instant::now();
 
     if let Some(until) = st.backoff_until {
@@ -79,25 +87,24 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
         st.backoff_until = None;
     }
 
-    let Ok(gh) = app_state.binaries.require(BinaryKind::Gh).await else {
+    let Ok(gh) = ctx.binaries.require(BinaryKind::Gh).await else {
         return SLOW;
     };
 
-    let db = app_state.db.clone();
-    let items =
-        match tauri::async_runtime::spawn_blocking(move || db.list_active_workstreams()).await {
-            Ok(Ok(items)) => items,
-            Ok(Err(e)) => {
-                log::debug!("pr watch: listing workstreams failed: {e}");
-                return SLOW;
-            }
-            Err(e) => {
-                log::debug!("pr watch: list task join error: {e}");
-                return SLOW;
-            }
-        };
+    let db = ctx.db.clone();
+    let items = match tokio::task::spawn_blocking(move || db.list_active_workstreams()).await {
+        Ok(Ok(items)) => items,
+        Ok(Err(e)) => {
+            tracing::debug!("pr watch: listing workstreams failed: {e}");
+            return SLOW;
+        }
+        Err(e) => {
+            tracing::debug!("pr watch: list task join error: {e}");
+            return SLOW;
+        }
+    };
 
-    let active = app_state
+    let active = ctx
         .worktree_watch
         .lock()
         .await
@@ -144,7 +151,7 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
             Ok(status) => status,
             Err(e) => {
                 rate_limited |= is_rate_limited(&e.to_string());
-                log::debug!("pr watch: gh status failed for {id}: {e}");
+                tracing::debug!("pr watch: gh status failed for {id}: {e}");
                 let is_active = active.as_deref() == Some(id.as_str());
                 let due = polled_at
                     + st.tracked
@@ -162,19 +169,21 @@ async fn tick(app: &tauri::AppHandle, st: &mut WatchState) -> Duration {
         if changed {
             if let Some(s) = status.as_ref().filter(|s| s.state == PrState::Merged) {
                 if let Some(project) = projects.get(&id) {
-                    promote_record(app, project, s.number).await;
+                    promote_record(ctx, project, s.number).await;
                 }
             }
         }
         let due = polled_at + cadence(&status, active.as_deref() == Some(id.as_str()));
         st.tracked.insert(id.clone(), Tracked { status, due });
         if changed {
-            let _ = PrStatusChanged { workstream_id: id }.emit(app);
+            let _ = ctx
+                .events
+                .send(RuntimeEvent::PrStatusChanged { workstream_id: id });
         }
     }
 
     st.backoff_until = rate_limited.then(|| {
-        log::warn!("pr watch: GitHub API quota spent, holding off {RATE_LIMITED:?}");
+        tracing::warn!("pr watch: GitHub API quota spent, holding off {RATE_LIMITED:?}");
         polled_at + RATE_LIMITED
     });
 
@@ -186,9 +195,8 @@ fn is_rate_limited(stderr: &str) -> bool {
     s.contains("rate limit") || s.contains("secondary rate limit")
 }
 
-async fn promote_record(app: &tauri::AppHandle, project_path: &str, number: u32) {
-    let config = app.state::<AppState>().config.clone();
-    let Ok(loaded) = config.load().await else {
+async fn promote_record(ctx: &PrWatcherContext, project_path: &str, number: u32) {
+    let Ok(loaded) = ctx.config.load().await else {
         return;
     };
     let Some(thoughts) = loaded.config.thoughts.as_ref() else {
@@ -205,13 +213,11 @@ async fn promote_record(app: &tauri::AppHandle, project_path: &str, number: u32)
     };
     let path = pr_record::record_path(&root, repos_dir, mapped, number);
 
-    match tauri::async_runtime::spawn_blocking(move || pr_record::promote_merged_record(&path))
-        .await
-    {
-        Ok(Ok(true)) => log::info!("pr watch: PR #{number} merged, record promoted"),
+    match tokio::task::spawn_blocking(move || pr_record::promote_merged_record(&path)).await {
+        Ok(Ok(true)) => tracing::info!("pr watch: PR #{number} merged, record promoted"),
         Ok(Ok(false)) => {}
-        Ok(Err(e)) => log::debug!("pr watch: promoting PR #{number} record failed: {e}"),
-        Err(e) => log::debug!("pr watch: promote task join error: {e}"),
+        Ok(Err(e)) => tracing::debug!("pr watch: promoting PR #{number} record failed: {e}"),
+        Err(e) => tracing::debug!("pr watch: promote task join error: {e}"),
     }
 }
 
@@ -270,7 +276,7 @@ fn next_tick(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyprlayer_core::pr::MergeableState;
+    use crate::pr::MergeableState;
 
     fn pr(state: PrState, checks: ChecksState) -> Option<PrStatus> {
         Some(PrStatus {

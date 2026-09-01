@@ -4,15 +4,16 @@ import { Badge, Button, Dialog } from "@/components/ui";
 import { DocIcon, ImportIcon, WarningTriangleIcon } from "@/components/icons";
 import { PromptRowIcon, ShareCheck } from "./promptShareUi";
 import { promptFirstLine } from "./prompts";
-import type { ImportCandidate, ImportDecision, ImportResolution } from "./promptsIo";
+import type { PromptConflictAction } from "@/lib/bindings";
+import { willImportCount, type ImportDecision, type ImportRow } from "./promptsIo";
 
-const RESOLUTIONS: { value: ImportResolution; label: string }[] = [
-  { value: "keep-both", label: "Keep both" },
+const RESOLUTIONS: { value: PromptConflictAction; label: string }[] = [
+  { value: "keepBoth", label: "Keep both" },
   { value: "replace", label: "Replace yours" },
   { value: "skip", label: "Skip" },
 ];
 
-function rowNotes(c: ImportCandidate, resolution: ImportResolution, chordLabel: (c: string) => string): string[] {
+function rowNotes(c: ImportRow, resolution: PromptConflictAction, chordLabel: (c: string) => string): string[] {
   const notes: string[] = [];
   const chordShown = !c.conflict || resolution !== "replace";
   if (c.chordTaken && c.chord && chordShown) {
@@ -31,7 +32,7 @@ function rowNotes(c: ImportCandidate, resolution: ImportResolution, chordLabel: 
 export function ImportPromptsDialog({
   fileName,
   source,
-  candidates,
+  rows,
   chordLabel,
   onConfirm,
   onChooseAnother,
@@ -39,28 +40,20 @@ export function ImportPromptsDialog({
 }: {
   fileName: string;
   source: string | null;
-  candidates: ImportCandidate[];
+  rows: ImportRow[];
   chordLabel: (chord: string) => string;
   onConfirm: (decisions: Record<string, ImportDecision>) => void;
   onChooseAnother: () => void;
   onClose: () => void;
 }) {
   const [decisions, setDecisions] = useState<Record<string, ImportDecision>>(() =>
-    Object.fromEntries(candidates.map((c) => [c.key, { include: true, resolution: "keep-both" }])),
+    Object.fromEntries(rows.map((c) => [c.key, { include: true, resolution: "keepBoth" }])),
   );
 
   const setDecision = (key: string, patch: Partial<ImportDecision>) =>
     setDecisions((d) => ({ ...d, [key]: { ...d[key], ...patch } }));
 
-  const willImport = useMemo(
-    () =>
-      candidates.filter((c) => {
-        const d = decisions[c.key];
-        if (!d?.include) return false;
-        return !(c.conflict && d.resolution === "skip");
-      }).length,
-    [candidates, decisions],
-  );
+  const willImport = useMemo(() => willImportCount(rows, decisions), [rows, decisions]);
 
   return (
     <Dialog
@@ -80,7 +73,7 @@ export function ImportPromptsDialog({
       footer={
         <div className="flex items-center gap-2.5">
           <span className="text-[11px] text-ink-dim">
-            {willImport} of {candidates.length} will be imported
+            {willImport} of {rows.length} will be imported
           </span>
           <div className="ml-auto flex items-center gap-2">
             <Button onClick={onClose}>Cancel</Button>
@@ -105,8 +98,8 @@ export function ImportPromptsDialog({
       </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
-        {candidates.map((c) => {
-          const d = decisions[c.key] ?? { include: true, resolution: "keep-both" as ImportResolution };
+        {rows.map((c) => {
+          const d = decisions[c.key] ?? { include: true, resolution: "keepBoth" as PromptConflictAction };
           const skipped = Boolean(c.conflict) && d.resolution === "skip";
           const notes = d.include && !skipped ? rowNotes(c, d.resolution, chordLabel) : [];
           const showConflict = Boolean(c.conflict) && d.include;

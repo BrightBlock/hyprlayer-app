@@ -58,6 +58,33 @@ pub fn desired_version<'a>(pinned: Option<&'a str>, binary: Option<&'a str>) -> 
     pinned.or(binary)
 }
 
+/// Whether answering "is my bundle behind" needs the network. Only an
+/// unversioned CLI does: from 1.6.0 on, `assetsVersion` against the desired
+/// version answers it locally and the SHA would answer a different question
+/// ("has master moved") — see ADR-0002.
+pub fn needs_sha_probe(status: &AiStatus) -> bool {
+    is_manageable_pair(status)
+        && desired_version(
+            status.pinned_version.as_deref(),
+            status.binary_version.as_deref(),
+        )
+        .is_none()
+}
+
+pub fn update_available(status: &AiStatus, latest_sha: Option<&str>) -> bool {
+    if !is_manageable_pair(status) {
+        return false;
+    }
+    match desired_version(
+        status.pinned_version.as_deref(),
+        status.binary_version.as_deref(),
+    ) {
+        Some(desired) => is_stale(status.assets_version.as_deref(), desired),
+        None => latest_sha
+            .is_some_and(|latest| is_stale(status.agents_installed_sha.as_deref(), latest)),
+    }
+}
+
 pub fn is_manageable_pair(status: &AiStatus) -> bool {
     status.installed
         && status.agent_tool.as_deref() == Some(MANAGEABLE_AGENT_TOOL)
@@ -69,8 +96,9 @@ pub fn is_manageable_pair(status: &AiStatus) -> bool {
         })
 }
 
-fn expand_tilde(path: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(shellexpand::tilde(path).into_owned())
+fn expand_tilde(path: &str, home: Option<&Path>) -> std::path::PathBuf {
+    let expanded = shellexpand::tilde_with_context(path, || home.and_then(Path::to_str));
+    std::path::PathBuf::from(expanded.as_ref())
 }
 
 /// `YYYYMMDD-HHMMSS` in UTC, for naming a backup the user can read at a glance.
@@ -95,7 +123,11 @@ pub fn backup_stamp(epoch_secs: u64) -> String {
 }
 
 /// Clear every target path blocking a link, across each platform the status reports.
-pub fn clear_link_collisions(status: &AiStatus, stamp: &str) -> CollisionReport {
+pub fn clear_link_collisions(
+    status: &AiStatus,
+    stamp: &str,
+    home: Option<&Path>,
+) -> CollisionReport {
     let (Some(root), Some(version)) = (
         status.location.as_deref(),
         desired_version(
@@ -110,11 +142,11 @@ pub fn clear_link_collisions(status: &AiStatus, stamp: &str) -> CollisionReport 
         let Some(target) = platform.location.as_deref() else {
             continue;
         };
-        let target = expand_tilde(target);
+        let target = expand_tilde(target, home);
         // codex is linked its skills out of the claude bundle, and its own manifest never
         // mentions them, so every bundle has to be checked against every target
         for source in &status.platforms {
-            let bundle = expand_tilde(root).join(version).join(&source.id);
+            let bundle = expand_tilde(root, home).join(version).join(&source.id);
             let one = resolve_collisions(&bundle, &target, stamp);
             report.replaced.extend(one.replaced);
             report.backed_up.extend(one.backed_up);
@@ -417,6 +449,120 @@ mod tests {
             ..Default::default()
         };
         assert!(!is_manageable_pair(&status));
+    }
+
+    #[test]
+    fn a_versioned_cli_answers_freshness_without_the_network() {
+        let mut status = paired_status();
+        status.binary_version = Some("1.6.0".to_string());
+        status.assets_version = Some("1.5.9".to_string());
+
+        assert!(!needs_sha_probe(&status));
+        assert!(update_available(&status, None));
+
+        status.assets_version = Some("1.6.0".to_string());
+        assert!(!update_available(&status, None));
+    }
+
+    #[test]
+    fn a_pin_decides_freshness_even_when_the_binary_is_newer() {
+        let mut status = paired_status();
+        status.binary_version = Some("1.6.0".to_string());
+        status.pinned_version = Some("1.5.9".to_string());
+        status.assets_version = Some("1.5.9".to_string());
+
+        assert!(!needs_sha_probe(&status));
+        assert!(!update_available(&status, None));
+    }
+
+    #[test]
+    fn only_an_unversioned_cli_reaches_for_the_sha() {
+        let status = paired_status();
+        assert!(needs_sha_probe(&status));
+
+        let latest = "4c5cf370aed5fffee3b98f741bd6d911965c9033";
+        assert!(update_available(&status, Some(latest)));
+
+        let mut current = paired_status();
+        current.agents_installed_sha = Some(latest.to_string());
+        assert!(!update_available(&current, Some(latest)));
+    }
+
+    #[test]
+    fn an_unreachable_probe_reports_no_update_rather_than_guessing() {
+        assert!(!update_available(&paired_status(), None));
+    }
+
+    #[test]
+    fn an_unmanageable_pair_is_never_stale_and_never_probes() {
+        let mut status = paired_status();
+        status.platforms.pop();
+        status.binary_version = Some("1.6.0".to_string());
+        status.assets_version = Some("1.5.9".to_string());
+
+        assert!(!needs_sha_probe(&status));
+        assert!(!update_available(&status, None));
+        assert!(!update_available(
+            &status,
+            Some("4c5cf370aed5fffee3b98f741bd6d911965c9033")
+        ));
+    }
+
+    fn bundle_at(dir: &Path, files: &[(&str, &str)]) {
+        let manifest: Vec<String> = files
+            .iter()
+            .map(|(rel, body)| {
+                let p = dir.join(rel);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(&p, body).unwrap();
+                format!(r#"{{"path":"{rel}","sha256":"{}"}}"#, sha_of(body))
+            })
+            .collect();
+        std::fs::write(
+            dir.join("manifest.json"),
+            format!(r#"{{"files":[{}]}}"#, manifest.join(",")),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn clear_link_collisions_checks_every_bundle_against_every_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let store = home.join("store");
+        bundle_at(
+            &store.join("1.6.0/claude"),
+            &[
+                ("skills/keep/SKILL.md", "keep"),
+                ("skills/mine/SKILL.md", "mine"),
+            ],
+        );
+        bundle_at(&store.join("1.6.0/codex"), &[("agents/one.md", "one")]);
+
+        let claude_target = home.join(".claude");
+        let codex_target = home.join(".codex");
+        plant(&claude_target, "skills/keep/SKILL.md", "keep");
+        plant(&codex_target, "skills/mine/SKILL.md", "my own edits");
+
+        let mut status = paired_status();
+        status.location = Some(store.to_string_lossy().into_owned());
+        status.binary_version = Some("1.6.0".to_string());
+        status.platforms[0].location = Some(claude_target.to_string_lossy().into_owned());
+        status.platforms[1].location = Some(codex_target.to_string_lossy().into_owned());
+
+        let report = clear_link_collisions(&status, "20260830", Some(home));
+
+        assert_eq!(report.replaced, vec!["skills/keep".to_string()]);
+        assert_eq!(report.backed_up, vec!["skills/mine".to_string()]);
+        assert!(codex_target
+            .join("skills/mine.bak-20260830/SKILL.md")
+            .exists());
+    }
+
+    #[test]
+    fn clear_link_collisions_does_nothing_without_a_location_or_version() {
+        let status = paired_status();
+        assert!(clear_link_collisions(&status, "20260830", None).is_empty());
     }
 }
 

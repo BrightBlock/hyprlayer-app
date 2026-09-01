@@ -114,19 +114,23 @@ pub(crate) fn agents_dir(claude_root: &Path) -> PathBuf {
     claude_root.join("agents")
 }
 
-fn roots(worktree: Option<&Path>) -> Vec<(PathBuf, &'static str)> {
+fn roots(worktree: Option<&Path>, home: Option<&Path>) -> Vec<(PathBuf, &'static str)> {
     let mut out = Vec::new();
     if let Some(wt) = worktree {
         out.push((agents_dir(&wt.join(".claude")), "project"));
     }
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home {
         out.push((agents_dir(&home.join(".claude")), "user"));
     }
     out
 }
 
-pub fn agents_dir_for(worktree: Option<&Path>, source: &str) -> Option<PathBuf> {
-    roots(worktree)
+pub fn agents_dir_for(
+    worktree: Option<&Path>,
+    home: Option<&Path>,
+    source: &str,
+) -> Option<PathBuf> {
+    roots(worktree, home)
         .into_iter()
         .find(|(_, s)| *s == source)
         .map(|(dir, _)| dir)
@@ -219,11 +223,6 @@ fn mtime_ms(path: &Path) -> Option<f64> {
         .map(|d| d.as_millis() as f64)
 }
 
-fn collect(dir: &Path, source: &str, plugin: Option<&str>, out: &mut Vec<AgentFile>) {
-    let store_root = hyprlayer_agent_store_root();
-    collect_with_store_root(dir, source, plugin, store_root.as_deref(), out);
-}
-
 fn collect_with_store_root(
     dir: &Path,
     source: &str,
@@ -255,8 +254,8 @@ fn collect_with_store_root(
     }
 }
 
-fn collect_plugin_agents(out: &mut Vec<AgentFile>) {
-    let Some(home) = dirs::home_dir() else {
+fn collect_plugin_agents(out: &mut Vec<AgentFile>, home: Option<&Path>, store_root: Option<&Path>) {
+    let Some(home) = home else {
         return;
     };
     let Ok(text) = std::fs::read_to_string(home.join(".claude/plugins/installed_plugins.json"))
@@ -278,16 +277,26 @@ fn collect_plugin_agents(out: &mut Vec<AgentFile>) {
             let Some(path) = install.get("installPath").and_then(|p| p.as_str()) else {
                 continue;
             };
-            collect(&Path::new(path).join("agents"), "plugin", Some(label), out);
+            collect_with_store_root(
+                &Path::new(path).join("agents"),
+                "plugin",
+                Some(label),
+                store_root,
+                out,
+            );
         }
     }
 }
 
-pub fn list_agents(worktree: Option<&Path>) -> Vec<AgentFile> {
+pub fn list_agents(
+    worktree: Option<&Path>,
+    home: Option<&Path>,
+    store_root: Option<&Path>,
+) -> Vec<AgentFile> {
     let mut owned: Vec<AgentFile> = Vec::new();
-    for (dir, source) in roots(worktree) {
+    for (dir, source) in roots(worktree, home) {
         let mut found = Vec::new();
-        collect(&dir, source, None, &mut found);
+        collect_with_store_root(&dir, source, None, store_root, &mut found);
         for agent in found {
             if !owned.iter().any(|a| a.name == agent.name) {
                 owned.push(agent);
@@ -296,7 +305,7 @@ pub fn list_agents(worktree: Option<&Path>) -> Vec<AgentFile> {
     }
 
     let mut plugins = Vec::new();
-    collect_plugin_agents(&mut plugins);
+    collect_plugin_agents(&mut plugins, home, store_root);
 
     let mut out: Vec<AgentFile> = Vec::new();
     for mut shipped in plugins {
@@ -390,9 +399,8 @@ fn separator_of(original: &str) -> String {
     "\n".repeat(blanks + 1)
 }
 
-pub fn save_agent(agent: &AgentFile) -> Result<AgentFile> {
-    let store_root = hyprlayer_agent_store_root();
-    save_agent_with_store_root(agent, store_root.as_deref())
+pub fn save_agent(agent: &AgentFile, store_root: Option<&Path>) -> Result<AgentFile> {
+    save_agent_with_store_root(agent, store_root)
 }
 
 fn save_agent_with_store_root(agent: &AgentFile, store_root: Option<&Path>) -> Result<AgentFile> {
@@ -411,9 +419,8 @@ fn save_agent_with_store_root(agent: &AgentFile, store_root: Option<&Path>) -> R
     Ok(saved)
 }
 
-pub fn delete_agent(path: &Path) -> Result<()> {
-    let store_root = hyprlayer_agent_store_root();
-    delete_agent_with_store_root(path, store_root.as_deref())
+pub fn delete_agent(path: &Path, store_root: Option<&Path>) -> Result<()> {
+    delete_agent_with_store_root(path, store_root)
 }
 
 fn delete_agent_with_store_root(path: &Path, store_root: Option<&Path>) -> Result<()> {
@@ -434,10 +441,6 @@ fn reject_managed_link(path: &Path, store_root: Option<&Path>) -> Result<()> {
         .into());
     }
     Ok(())
-}
-
-fn hyprlayer_agent_store_root() -> Option<PathBuf> {
-    dirs::config_dir().map(|root| root.join("hyprlayer").join("agents"))
 }
 
 fn link_targets_store(path: &Path, store_root: &Path) -> bool {
@@ -476,12 +479,15 @@ fn path_is_within(path: &Path, root: &Path) -> bool {
     }
 }
 
+// Every real caller (agent files under a `.claude`/store root, both always
+// absolute) already passes an absolute path; a relative one is treated as
+// unverifiable rather than resolved against the process cwd, which would be
+// an ambient read core must not perform.
 fn absolute_lexical(path: &Path) -> Option<PathBuf> {
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir().ok()?.join(path)
-    };
+    if !path.is_absolute() {
+        return None;
+    }
+    let path = path.to_path_buf();
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
@@ -558,13 +564,13 @@ pub fn context_candidates(worktree: Option<&Path>) -> Vec<AgentContextFile> {
     out
 }
 
-pub fn mcp_servers(worktree: Option<&Path>) -> Vec<AgentMcpServer> {
+pub fn mcp_servers(worktree: Option<&Path>, home: Option<&Path>) -> Vec<AgentMcpServer> {
     let mut out: Vec<AgentMcpServer> = Vec::new();
     let mut sources: Vec<(PathBuf, &'static str)> = Vec::new();
     if let Some(wt) = worktree {
         sources.push((wt.join(".mcp.json"), "project"));
     }
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home {
         sources.push((home.join(".claude.json"), "user"));
     }
     for (file, scope) in sources {
@@ -608,11 +614,8 @@ pub fn agent_deny_rules(names: &[String]) -> Vec<String> {
         .collect()
 }
 
-pub fn export_agent(agent: &AgentFile, overlay: &AgentOverlay) -> Result<String> {
-    let dir = dirs::download_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."));
-    std::fs::create_dir_all(&dir)?;
+pub fn export_agent(agent: &AgentFile, overlay: &AgentOverlay, dir: &Path) -> Result<String> {
+    std::fs::create_dir_all(dir)?;
     let target = dir.join(format!("{}.agent.json", file_stem_for(&agent.name)));
     let body = serde_json::json!({
         "name": agent.name,
@@ -1071,13 +1074,13 @@ mod tests {
         let mut agent = parse_agent(&path, "user", SAMPLE);
         agent.prompt = "personal edit".into();
 
-        let saved = save_agent(&agent).unwrap();
+        let saved = save_agent(&agent, None).unwrap();
         assert!(!saved.managed);
         assert!(std::fs::read_to_string(&path)
             .unwrap()
             .contains("personal edit"));
 
-        delete_agent(&path).unwrap();
+        delete_agent(&path, None).unwrap();
         assert!(!path.exists());
     }
 

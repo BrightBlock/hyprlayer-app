@@ -46,3 +46,52 @@ impl AppError {
 }
 
 pub type CmdResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const V0_7_APP_ERRORS_FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/compat/v0_7/app-errors.json"
+    ));
+
+    fn pinned(slice: &str) -> (String, String, Option<String>) {
+        let fixture: serde_json::Value = serde_json::from_str(V0_7_APP_ERRORS_FIXTURE).unwrap();
+        let entry = &fixture[slice];
+        (
+            entry["code"].as_str().unwrap().to_string(),
+            entry["message"].as_str().unwrap().to_string(),
+            entry["remedy"].as_str().map(str::to_string),
+        )
+    }
+
+    #[test]
+    fn binary_missing_maps_to_the_pinned_v0_7_fixture() {
+        let err = AppError::from(CoreError::BinaryMissing {
+            name: "claude".into(),
+        });
+        assert_eq!((err.code, err.message, err.remedy), pinned("binaries"));
+    }
+
+    #[test]
+    fn config_missing_carries_no_extra_punctuation() {
+        let err = AppError::from(CoreError::ConfigMissing {
+            path: "/nonexistent-hyprlayer-config-fixture/hyprlayer/config.json".into(),
+        });
+        let (code, message, remedy) = pinned("settingsConfig");
+        assert_eq!((err.code, err.message, err.remedy), (code, message, remedy));
+    }
+
+    #[test]
+    fn project_not_found_is_a_public_constructor() {
+        let err = AppError::project_not_found("/tmp/example-project");
+        let (code, message, remedy) = pinned("projects");
+        assert_eq!((err.code, err.message, err.remedy), (code, message, remedy));
+    }
+
+    #[test]
+    fn internal_carries_no_remedy() {
+        assert_eq!(AppError::internal("boom").remedy, None);
+    }
+}

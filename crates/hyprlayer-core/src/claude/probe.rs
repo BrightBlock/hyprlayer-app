@@ -76,7 +76,6 @@ async fn ask(
     }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
@@ -183,8 +182,9 @@ fn parse_models(body: &Value) -> Vec<ClaudeModel> {
         .unwrap_or_default()
 }
 
-pub fn neutral_cwd() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(std::env::temp_dir)
+pub fn neutral_cwd(home: Option<&Path>) -> PathBuf {
+    home.map(Path::to_path_buf)
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 #[cfg(test)]

@@ -4,9 +4,7 @@ import { Badge, Button, Dialog } from "@/components/ui";
 import { ExportIcon } from "@/components/icons";
 import { PromptRowIcon, ShareCheck } from "./promptShareUi";
 import type { ExportEntry, ExportOptions } from "./promptsIo";
-import { PROMPTS_FILE_EXT } from "./promptsIo";
-
-export const DEFAULT_EXPORT_NAME = `hyprlayer-prompts.${PROMPTS_FILE_EXT}`;
+import { DEFAULT_EXPORT_NAME, PROMPTS_FILE_EXT } from "./promptsIo";
 
 export function ExportPromptsDialog({
   entries,

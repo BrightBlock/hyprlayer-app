@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "completed": {
+    "some_future_migration_v7": {
+      "completedAt": 1700000000000.0
+    }
+  }
+}

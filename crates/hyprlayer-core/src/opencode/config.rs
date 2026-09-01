@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
@@ -26,31 +26,8 @@ pub struct OpencodeAuthEntry {
     pub kind: String,
 }
 
-pub fn auth_json_path() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("OPENCODE_AUTH_JSON") {
-        return Some(PathBuf::from(p));
-    }
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("share")))?;
-    Some(base.join("opencode").join("auth.json"))
-}
-
-pub fn config_json_path() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("OPENCODE_CONFIG") {
-        return Some(PathBuf::from(p));
-    }
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))?;
-    Some(base.join("opencode").join("opencode.json"))
-}
-
-pub fn list_auth() -> Result<Vec<OpencodeAuthEntry>> {
-    let Some(path) = auth_json_path() else {
-        return Ok(Vec::new());
-    };
-    let map = read_object(&path, "opencode auth.json")?;
+pub fn list_auth(path: &Path) -> Result<Vec<OpencodeAuthEntry>> {
+    let map = read_object(path, "opencode auth.json")?;
     let mut out: Vec<OpencodeAuthEntry> = map
         .into_iter()
         .map(|(provider, v)| {
@@ -66,29 +43,24 @@ pub fn list_auth() -> Result<Vec<OpencodeAuthEntry>> {
     Ok(out)
 }
 
-pub fn set_provider_key(provider: &str, key: &str) -> Result<()> {
-    let path = auth_json_path().ok_or_else(|| no_home("auth.json"))?;
-    let mut map = read_object_or_empty(&path, "opencode auth.json")?;
+pub fn set_provider_key(path: &Path, provider: &str, key: &str) -> Result<()> {
+    let mut map = read_object_or_empty(path, "opencode auth.json")?;
     let entry = serde_json::json!({ "type": "api", "key": key });
     map.insert(provider.trim_end_matches('/').to_string(), entry);
-    write_json_atomic(&path, &Value::Object(map), 0o600)
+    write_json_atomic(path, &Value::Object(map), 0o600)
 }
 
-pub fn remove_provider(provider: &str) -> Result<()> {
-    let path = auth_json_path().ok_or_else(|| no_home("auth.json"))?;
+pub fn remove_provider(path: &Path, provider: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let mut map = read_object_or_empty(&path, "opencode auth.json")?;
+    let mut map = read_object_or_empty(path, "opencode auth.json")?;
     map.remove(provider.trim_end_matches('/'));
-    write_json_atomic(&path, &Value::Object(map), 0o600)
+    write_json_atomic(path, &Value::Object(map), 0o600)
 }
 
-pub fn set_default_model(model: Option<&str>) -> Result<()> {
-    let Some(path) = config_json_path() else {
-        return Ok(());
-    };
-    let mut obj = match std::fs::read_to_string(&path) {
+pub fn set_default_model(path: &Path, model: Option<&str>) -> Result<()> {
+    let mut obj = match std::fs::read_to_string(path) {
         Ok(s) => match serde_json::from_str::<Value>(&s) {
             Ok(Value::Object(m)) => m,
             // Rewriting JSONC would discard the user's comments.
@@ -108,14 +80,11 @@ pub fn set_default_model(model: Option<&str>) -> Result<()> {
             obj.remove("model");
         }
     }
-    write_json_atomic(&path, &Value::Object(obj), 0o644)
+    write_json_atomic(path, &Value::Object(obj), 0o644)
 }
 
-pub fn clear_default_model_for_provider(provider: &str) -> Result<bool> {
-    let Some(path) = config_json_path() else {
-        return Ok(false);
-    };
-    let mut obj = match std::fs::read_to_string(&path) {
+pub fn clear_default_model_for_provider(path: &Path, provider: &str) -> Result<bool> {
+    let mut obj = match std::fs::read_to_string(path) {
         Ok(s) => match serde_json::from_str::<Value>(&s) {
             Ok(Value::Object(m)) => m,
             // Rewriting JSONC would discard the user's comments.
@@ -133,15 +102,12 @@ pub fn clear_default_model_for_provider(provider: &str) -> Result<bool> {
         return Ok(false);
     }
     obj.remove("model");
-    write_json_atomic(&path, &Value::Object(obj), 0o644)?;
+    write_json_atomic(path, &Value::Object(obj), 0o644)?;
     Ok(true)
 }
 
-pub fn set_ollama_provider(base_url: &str, models: &[String]) -> Result<()> {
-    let Some(path) = config_json_path() else {
-        return Ok(());
-    };
-    let mut obj = match std::fs::read_to_string(&path) {
+pub fn set_ollama_provider(path: &Path, base_url: &str, models: &[String]) -> Result<()> {
+    let mut obj = match std::fs::read_to_string(path) {
         Ok(s) if s.trim().is_empty() => Map::new(),
         Ok(s) => match serde_json::from_str::<Value>(&s) {
             Ok(Value::Object(m)) => m,
@@ -197,14 +163,7 @@ pub fn set_ollama_provider(base_url: &str, models: &[String]) -> Result<()> {
         obj.insert("provider".into(), Value::Object(providers));
     }
 
-    write_json_atomic(&path, &Value::Object(obj), 0o644)
-}
-
-fn no_home(what: &str) -> CoreError {
-    CoreError::Io(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        format!("cannot resolve OpenCode {what} path (no home directory)"),
-    ))
+    write_json_atomic(path, &Value::Object(obj), 0o644)
 }
 
 fn read_object(path: &Path, label: &str) -> Result<Map<String, Value>> {
@@ -252,6 +211,7 @@ fn write_json_atomic(path: &Path, value: &Value, mode: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn context_window_pins_ollama_only() {
@@ -266,70 +226,35 @@ mod tests {
         );
     }
 
-    struct TmpHome {
-        dir: PathBuf,
-        prev_home: Option<std::ffi::OsString>,
-        prev_data: Option<std::ffi::OsString>,
-        prev_config: Option<std::ffi::OsString>,
-        prev_auth: Option<std::ffi::OsString>,
-        prev_cfg: Option<std::ffi::OsString>,
-    }
-    impl TmpHome {
-        fn new(tag: &str) -> Self {
-            let dir =
-                std::env::temp_dir().join(format!("hl-opencode-test-{tag}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            let s = Self {
-                prev_home: std::env::var_os("HOME"),
-                prev_data: std::env::var_os("XDG_DATA_HOME"),
-                prev_config: std::env::var_os("XDG_CONFIG_HOME"),
-                prev_auth: std::env::var_os("OPENCODE_AUTH_JSON"),
-                prev_cfg: std::env::var_os("OPENCODE_CONFIG"),
-                dir: dir.clone(),
-            };
-            std::env::set_var("HOME", &dir);
-            std::env::remove_var("XDG_DATA_HOME");
-            std::env::remove_var("XDG_CONFIG_HOME");
-            std::env::remove_var("OPENCODE_AUTH_JSON");
-            std::env::remove_var("OPENCODE_CONFIG");
-            s
-        }
-    }
-    impl Drop for TmpHome {
-        fn drop(&mut self) {
-            restore("HOME", &self.prev_home);
-            restore("XDG_DATA_HOME", &self.prev_data);
-            restore("XDG_CONFIG_HOME", &self.prev_config);
-            restore("OPENCODE_AUTH_JSON", &self.prev_auth);
-            restore("OPENCODE_CONFIG", &self.prev_cfg);
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
-    }
-    fn restore(key: &str, prev: &Option<std::ffi::OsString>) {
-        match prev {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
-        }
+    fn temp_paths(tag: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "hl-opencode-test-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        (dir.join("auth.json"), dir.join("opencode.json"))
     }
 
     #[test]
     fn auth_and_config_io() {
-        let _h = TmpHome::new("io");
+        let (auth_path, config_path) = temp_paths("io");
 
-        assert!(list_auth().unwrap().is_empty());
+        assert!(list_auth(&auth_path).unwrap().is_empty());
 
-        set_provider_key("anthropic", "sk-ant-1").unwrap();
-        set_provider_key("openai/", "sk-oai-2").unwrap();
+        set_provider_key(&auth_path, "anthropic", "sk-ant-1").unwrap();
+        set_provider_key(&auth_path, "openai/", "sk-oai-2").unwrap();
 
-        let entries = list_auth().unwrap();
+        let entries = list_auth(&auth_path).unwrap();
         assert_eq!(entries.len(), 2);
         assert!(entries
             .iter()
             .any(|e| e.provider == "anthropic" && e.kind == "api"));
         assert!(entries.iter().any(|e| e.provider == "openai"));
 
-        let auth_path = auth_json_path().unwrap();
         let raw = std::fs::read_to_string(&auth_path).unwrap();
         assert!(raw.contains("sk-ant-1") && raw.contains("sk-oai-2"));
         #[cfg(unix)]
@@ -338,40 +263,43 @@ mod tests {
             assert_eq!(std::fs::metadata(&auth_path).unwrap().mode() & 0o777, 0o600);
         }
 
-        remove_provider("anthropic").unwrap();
-        let entries = list_auth().unwrap();
+        remove_provider(&auth_path, "anthropic").unwrap();
+        let entries = list_auth(&auth_path).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].provider, "openai");
 
-        set_default_model(Some("anthropic/claude-sonnet-4-5")).unwrap();
-        let path = config_json_path().unwrap();
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        set_default_model(&config_path, Some("anthropic/claude-sonnet-4-5")).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert_eq!(v["model"], "anthropic/claude-sonnet-4-5");
         assert_eq!(v["$schema"], CONFIG_SCHEMA_URL);
 
         let mut obj = v.as_object().unwrap().clone();
         obj.insert("theme".into(), Value::String("dark".into()));
         std::fs::write(
-            &path,
+            &config_path,
             serde_json::to_string_pretty(&Value::Object(obj)).unwrap(),
         )
         .unwrap();
-        set_default_model(Some("openai/gpt-4o")).unwrap();
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        set_default_model(&config_path, Some("openai/gpt-4o")).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert_eq!(v["model"], "openai/gpt-4o");
         assert_eq!(v["theme"], "dark");
 
-        set_default_model(None).unwrap();
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        set_default_model(&config_path, None).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert!(v.get("model").is_none());
         assert_eq!(v["theme"], "dark");
 
-        set_default_model(Some("GitHub-Copilot/gpt-5")).unwrap();
-        assert!(clear_default_model_for_provider("github-copilot").unwrap());
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        set_default_model(&config_path, Some("GitHub-Copilot/gpt-5")).unwrap();
+        assert!(clear_default_model_for_provider(&config_path, "github-copilot").unwrap());
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert!(v.get("model").is_none());
         assert_eq!(v["theme"], "dark");
-        assert!(!clear_default_model_for_provider("github-copilot").unwrap());
+        assert!(!clear_default_model_for_provider(&config_path, "github-copilot").unwrap());
 
         let mut obj = v.as_object().unwrap().clone();
         obj.insert(
@@ -379,17 +307,19 @@ mod tests {
             serde_json::json!({ "openai": { "npm": "x" } }),
         );
         std::fs::write(
-            &path,
+            &config_path,
             serde_json::to_string_pretty(&Value::Object(obj)).unwrap(),
         )
         .unwrap();
 
         set_ollama_provider(
+            &config_path,
             "http://nexus:11434/",
             &["qwen2.5-coder:7b".into(), "llama3.2:latest".into()],
         )
         .unwrap();
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert_eq!(v["theme"], "dark");
         assert_eq!(v["provider"]["openai"]["npm"], "x");
         assert_eq!(
@@ -404,8 +334,9 @@ mod tests {
         );
         assert!(v["provider"]["ollama"]["models"]["llama3.2:latest"].is_object());
 
-        set_ollama_provider("http://localhost:11434", &[]).unwrap();
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        set_ollama_provider(&config_path, "http://localhost:11434", &[]).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert!(v["provider"].get("ollama").is_none());
         assert_eq!(v["provider"]["openai"]["npm"], "x");
     }

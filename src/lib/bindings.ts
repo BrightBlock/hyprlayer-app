@@ -113,13 +113,13 @@ export const commands = {
 	rewindSession: (sessionId: string, userTurn: number, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionEvent>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
 	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[], promptName: string | null) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs, promptName })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
-	answerQuestion: (sessionId: string, requestId: string, answers: string) => typedError<null, AppError>(__TAURI_INVOKE("answer_question", { sessionId, requestId, answers })),
+	answerQuestion: (sessionId: string, requestId: string, answers: QuestionAnswers) => typedError<null, AppError>(__TAURI_INVOKE("answer_question", { sessionId, requestId, answers })),
 	interruptSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_session", { sessionId })),
 	killSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("kill_session", { sessionId })),
 	setSessionModel: (sessionId: string, model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_model", { sessionId, model })),
 	setSessionEffort: (sessionId: string, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_effort", { sessionId, effort })),
 	listSessions: (workstreamId: string) => typedError<Session[], AppError>(__TAURI_INVOKE("list_sessions", { workstreamId })),
-	getSessionLog: (sessionId: string) => typedError<StoredEvent[], AppError>(__TAURI_INVOKE("get_session_log", { sessionId })),
+	getSessionLog: (sessionId: string) => typedError<SessionLogEntryDto[], AppError>(__TAURI_INVOKE("get_session_log", { sessionId })),
 	attachSession: (sessionId: string, onEvent: Channel<SessionEvent>) => typedError<null, AppError>(__TAURI_INVOKE("attach_session", { sessionId, onEvent })),
 	listActiveSessions: () => typedError<ActiveSessionView[], AppError>(__TAURI_INVOKE("list_active_sessions")),
 	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
@@ -182,8 +182,9 @@ export const commands = {
 	getAiStatus: () => typedError<AiStatus, AppError>(__TAURI_INVOKE("get_ai_status")),
 	probeDefaultThoughts: () => __TAURI_INVOKE<ThoughtsProbe>("probe_default_thoughts"),
 	initThoughtsRepo: (user: string, source: ThoughtsSource) => typedError<Bootstrap, AppError>(__TAURI_INVOKE("init_thoughts_repo", { user, source })),
-	readPromptsFile: (path: string) => typedError<string, AppError>(__TAURI_INVOKE("read_prompts_file", { path })),
-	writePromptsFile: (path: string, contents: string) => typedError<null, AppError>(__TAURI_INVOKE("write_prompts_file", { path, contents })),
+	previewPromptImport: (path: string, takenChords: string[]) => typedError<PromptImportPreview, AppError>(__TAURI_INVOKE("preview_prompt_import", { path, takenChords })),
+	applyPromptImport: (decision: PromptImportDecision) => typedError<PromptImportResult, AppError>(__TAURI_INVOKE("apply_prompt_import", { decision })),
+	exportPrompts: (request: PromptExportRequest) => typedError<PromptExportResult, AppError>(__TAURI_INVOKE("export_prompts", { request })),
 	listAgentFiles: (projectPath: string | null) => typedError<AgentFile[], AppError>(__TAURI_INVOKE("list_agent_files", { projectPath })),
 	saveAgentFile: (agent: AgentFile) => typedError<AgentFile, AppError>(__TAURI_INVOKE("save_agent_file", { agent })),
 	deleteAgentFile: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_agent_file", { path })),
@@ -872,6 +873,10 @@ export type ProjectDetail = {
 
 export type ProjectSource = "clone" | "disk" | "folder";
 
+export type PromptConflictAction = "keepBoth" | "replace" | "skip";
+
+export type PromptConflictKind = "builtin" | "custom";
+
 export type PromptContext = {
 	branch: string,
 	baseBranch: string,
@@ -883,6 +888,67 @@ export type PromptContext = {
 export type PromptDefaults = {
 	commit: string,
 	ship: string,
+};
+
+export type PromptExportEntry = {
+	name: string,
+	body: string,
+	chord: string | null,
+	overrides: { [key in string]: string },
+};
+
+export type PromptExportRequest = {
+	path: string,
+	entries: PromptExportEntry[],
+	includeChords: boolean,
+	includeOverrides: boolean,
+	source: string | null,
+};
+
+export type PromptExportResult = {
+	path: string,
+	promptCount: number,
+};
+
+export type PromptImportCandidate = {
+	key: string,
+	name: string,
+	body: string,
+	chord: string | null,
+	chordTaken: boolean,
+	unknownProjects: string[],
+};
+
+export type PromptImportConflict = {
+	key: string,
+	kind: PromptConflictKind,
+};
+
+export type PromptImportDecision = {
+	path: string,
+	expectedSourceSha256: string,
+	mode: PromptImportMode,
+	conflictActions: { [key in string]: PromptConflictAction },
+	takenChords: string[],
+};
+
+export type PromptImportMode = "merge" | "replace";
+
+export type PromptImportPreview = {
+	sourceSha256: string,
+	sourceVersion: number,
+	source: string | null,
+	prompts: PromptImportCandidate[],
+	conflicts: PromptImportConflict[],
+};
+
+export type PromptImportResult = {
+	settings: PromptSettings,
+	added: number,
+	replaced: number,
+	renamed: number,
+	skipped: number,
+	firstId: string | null,
 };
 
 export type PromptSettings = {
@@ -903,6 +969,20 @@ export type PullOutcome = { kind: "upToDate" } | { kind: "merged" } | { kind: "c
 export type QueryResult = {
 	total: number,
 	items: DocMeta[],
+};
+
+export type Question = {
+	question: string,
+	header: string,
+	multiSelect: boolean,
+	options: QuestionOption[],
+};
+
+export type QuestionAnswers = { [key in string]: string };
+
+export type QuestionOption = {
+	label: string,
+	description: string,
 };
 
 export type QuitRequested = null;
@@ -996,12 +1076,19 @@ export type Session = {
 	exitSummary: string | null,
 };
 
-export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | { kind: "questionAsk"; requestId: string; questions: string } | { kind: "usage"; contextTokens: number } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "relaunched" } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
+export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "usage"; contextTokens: number } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "relaunched" } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
 
 export type SessionLifecycle = {
 	sessionId: string,
 	workstreamId: string,
 	state: SessionState,
+};
+
+export type SessionLogEntryDto = {
+	seq: number | null,
+	kind: string,
+	event: SessionEvent,
+	createdAt: number | null,
 };
 
 export type SessionState = "idle" | "starting" | "running" | "awaiting_permission" | "awaiting_question" | "completed" | "interrupted" | "killed" | "spawn_failed" | "crashed";
@@ -1056,13 +1143,6 @@ export type StorageSettings = {
 	spaceId?: string | null,
 	typeId?: string | null,
 	apiTokenEnv?: string | null,
-};
-
-export type StoredEvent = {
-	seq: number | null,
-	kind: string,
-	payload: string,
-	createdAt: number | null,
 };
 
 export type SyncReport = {

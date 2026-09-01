@@ -2,8 +2,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use serde_json::Value;
 use tokio::sync::broadcast;
+
+pub use hyprlayer_models::agent::Harness;
+use hyprlayer_models::session::QuestionAnswers;
 
 use crate::claude::{ClaudeDriver, ExitOutcome, SessionEvent};
 use crate::codex::{CodexDriver, CollabMode};
@@ -40,34 +42,6 @@ impl KillFlag {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "lowercase")]
-pub enum Harness {
-    #[default]
-    Claude,
-    Opencode,
-    Codex,
-}
-
-impl Harness {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Harness::Claude => "claude",
-            Harness::Opencode => "opencode",
-            Harness::Codex => "codex",
-        }
-    }
-
-    pub fn parse(s: &str) -> Self {
-        match s {
-            "opencode" => Harness::Opencode,
-            "codex" => Harness::Codex,
-            _ => Harness::Claude,
-        }
-    }
-}
-
 pub trait AgentDriver: Send + Sync {
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent>;
 
@@ -91,7 +65,7 @@ pub trait AgentDriver: Send + Sync {
         message: Option<&str>,
     ) -> Result<()>;
 
-    fn answer_question(&self, request_id: &str, answers: Value) -> Result<()>;
+    fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()>;
 
     fn interrupt(&self) -> Result<()>;
 
@@ -134,7 +108,7 @@ impl AgentDriver for ClaudeDriver {
     ) -> Result<()> {
         self.respond_permission(request_id, allow, message)
     }
-    fn answer_question(&self, request_id: &str, answers: Value) -> Result<()> {
+    fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
         self.answer_question(request_id, answers)
     }
     fn interrupt(&self) -> Result<()> {
@@ -186,7 +160,7 @@ impl AgentDriver for CodexDriver {
     ) -> Result<()> {
         self.respond_permission(request_id, allow, message)
     }
-    fn answer_question(&self, request_id: &str, answers: Value) -> Result<()> {
+    fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
         self.answer_question(request_id, answers)
     }
     fn interrupt(&self) -> Result<()> {

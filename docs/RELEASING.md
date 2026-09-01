@@ -80,7 +80,10 @@ it *is* the update signal (see "How Linux updates work").
 ./scripts/release.sh patch     # or minor / major / an explicit version
 ```
 
-The script gates on `changelog.json`: it scaffolds a stub entry for the new
+The script first runs the verification gate — `cargo test`, a standalone
+`cargo check` of the two library crates (see "Library target checks"),
+`pnpm typecheck && pnpm lint && pnpm test` — which `RELEASE_SKIP_CHECKS=1`
+skips. It then gates on `changelog.json`: it scaffolds a stub entry for the new
 version if missing and refuses to proceed until you've written a `summary`
 (≤15 words) and at least one `notes` bullet. It then bumps the version in
 `package.json`, `Cargo.toml` (`[workspace.package]`), and
@@ -258,7 +261,9 @@ Inside the guest:
   `cmd`. Switching the default shell to PowerShell is the most commonly applied
   Windows-OpenSSH tweak and it breaks the build with a literal-path error that
   looks nothing like its cause.
-- **Rust** via `rustup`, host target `x86_64-pc-windows-msvc`.
+- **Rust** via `rustup`, host target `x86_64-pc-windows-msvc` —
+  `release-win-remote.ps1` checks the libraries against it before the bundle
+  build.
 - **VS Build Tools 2022** ("Desktop development with C++") **plus the Windows 11
   SDK**. The SDK supplies `rc.exe`, which `release-win-remote.ps1` pins into
   `$env:RC` because an SSH session's PATH does not include the SDK bin dir.
@@ -318,6 +323,32 @@ sudo pacman -S --needed webkit2gtk-4.1 gtk3 librsvg base-devel
 Both bundlers are pure Rust — no `dpkg`, no `rpmbuild`, no FUSE. `makepkg`
 (from `pacman`, always present) renders the `.SRCINFO`, which is why that file
 is generated on the builder rather than on the Mac.
+
+### Library target checks
+
+`hyprlayer-models` and `hyprlayer-core` are checked on their own before anything
+is published:
+
+```sh
+cargo check -p hyprlayer-models -p hyprlayer-core                                    # host target
+cargo check -p hyprlayer-models -p hyprlayer-core --target x86_64-pc-windows-msvc   # Windows builder
+```
+
+This is not redundant with the bundle build that follows it, though it looks it.
+`hyprlayer-app` depends on core with `features = ["specta"]`, and cargo unifies
+features across a workspace build — so `cargo test --workspace` and `tauri build`
+only ever compile core *with* specta. A headless embedder gets neither the app nor
+that feature, and this is the only check that compiles core the way they will.
+
+It runs in `release.sh`'s gate (the Mac), `release-linux-remote.sh` (nexus),
+`release-win-remote.ps1`, and the Windows workflow. If the Windows target isn't
+installed, `rustup target add x86_64-pc-windows-msvc`; if core fails to build
+there it is usually the MSVC C toolchain, which needs VS Build Tools 2022 with
+"Desktop development with C++" plus the Windows 11 SDK.
+
+`x86_64-pc-windows-gnu` is not a support target and nothing gates on it, but
+`cargo check -p hyprlayer-core --target x86_64-pc-windows-gnu` is a cheap way to
+compile the Windows `cfg` arms from a Linux or macOS box.
 
 ### Linux packaging
 

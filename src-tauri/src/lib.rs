@@ -1,31 +1,22 @@
-mod commands;
+pub mod commands;
 mod editors;
-mod error;
+pub mod error;
 mod events;
-mod opencode;
-mod pr_watch;
-mod script_registry;
-mod session_registry;
-mod settings;
+mod runtime_events;
 mod state;
-mod terminal_registry;
 mod webview_gestures;
 mod window_geometry;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
 
-use hyprlayer_core::config::ConfigService;
-use hyprlayer_core::hyprcli::HyprCli;
-use hyprlayer_core::process::binaries::{BinaryKind, BinaryResolver};
+use hyprlayer_core::env::{RuntimeEnvironment, RuntimePaths};
+use hyprlayer_core::runtime::{HyprlayerRuntime, RuntimeOptions};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
-use crate::settings::SettingsStore;
 use crate::state::AppState;
 
 fn specta_builder() -> Builder<tauri::Wry> {
@@ -176,8 +167,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::onboarding::get_ai_status,
             commands::onboarding::probe_default_thoughts,
             commands::onboarding::init_thoughts_repo,
-            commands::prompts::read_prompts_file,
-            commands::prompts::write_prompts_file,
+            commands::prompts::preview_prompt_import,
+            commands::prompts::apply_prompt_import,
+            commands::prompts::export_prompts,
             commands::agents::list_agent_files,
             commands::agents::save_agent_file,
             commands::agents::delete_agent_file,
@@ -205,6 +197,84 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ScriptRunChanged,
             events::QuitRequested
         ])
+}
+
+fn hyprlayer_config_file() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("hyprlayer")
+        .join("config.json")
+}
+
+pub(crate) fn opencode_auth_file() -> PathBuf {
+    if let Some(p) = std::env::var_os("OPENCODE_AUTH_JSON") {
+        return PathBuf::from(p);
+    }
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("share")))
+        .map(|base| base.join("opencode").join("auth.json"))
+        .unwrap_or_else(|| PathBuf::from(".").join("opencode-auth.json"))
+}
+
+pub(crate) fn opencode_config_file() -> PathBuf {
+    if let Some(p) = std::env::var_os("OPENCODE_CONFIG") {
+        return PathBuf::from(p);
+    }
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+        .map(|base| base.join("opencode").join("opencode.json"))
+        .unwrap_or_else(|| PathBuf::from(".").join("opencode.json"))
+}
+
+fn claude_config_dir(home: &std::path::Path) -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".claude"))
+}
+
+fn claude_managed_settings_files() -> Vec<PathBuf> {
+    vec![PathBuf::from(if cfg!(target_os = "windows") {
+        r"C:\Program Files\ClaudeCode\managed-settings.json"
+    } else if cfg!(target_os = "macos") {
+        "/Library/Application Support/ClaudeCode/managed-settings.json"
+    } else {
+        "/etc/claude-code/managed-settings.json"
+    })]
+}
+
+fn resolve_paths(app: &tauri::App) -> tauri::Result<RuntimePaths> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let app_config_dir = app.path().app_config_dir()?;
+    let app_data_dir = app.path().app_data_dir()?;
+    Ok(RuntimePaths {
+        hyprlayer_config_file: hyprlayer_config_file(),
+        app_config_dir,
+        app_data_dir,
+        default_worktree_root: home.join("hyprlayer").join("worktrees"),
+        default_repos_root: home.join("hyprlayer").join("repos"),
+        opencode_config_file: opencode_config_file(),
+        opencode_auth_file: opencode_auth_file(),
+        opencode_data_dir: dirs::data_dir()
+            .unwrap_or_else(|| home.join(".local").join("share"))
+            .join("opencode"),
+        claude_config_dir: claude_config_dir(&home),
+        claude_managed_settings_files: claude_managed_settings_files(),
+        codex_home: std::env::var_os("CODEX_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".codex")),
+        agent_roots: vec![home.join(".claude").join("agents")],
+        download_dir: dirs::download_dir().unwrap_or_else(|| home.clone()),
+    })
+}
+
+fn resolve_environment() -> RuntimeEnvironment {
+    RuntimeEnvironment {
+        home_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+        process_cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        process_env: std::env::vars_os().collect(),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -265,56 +335,58 @@ pub fn run() {
                 webview_gestures::disable_pinch_zoom(&window);
             }
 
-            let config = Arc::new(ConfigService::with_default_path()?);
-            let settings_dir = app.path().app_config_dir()?;
-            let settings = Arc::new(SettingsStore::load(settings_dir));
+            let paths = resolve_paths(app)?;
+            let environment = resolve_environment();
+            let options = RuntimeOptions::new(environment, paths);
+            #[cfg(target_os = "macos")]
+            let options = options.with_credential_lookup(std::sync::Arc::new(
+                commands::models::KeychainCredentialLookup,
+            ));
 
-            let overrides: HashMap<BinaryKind, PathBuf> =
-                tauri::async_runtime::block_on(settings.get())
-                    .binary_overrides
-                    .iter()
-                    .map(|(k, v)| (*k, PathBuf::from(v)))
-                    .collect();
-            let binaries = Arc::new(BinaryResolver::initialize(overrides));
-
-            let db_path = app.path().app_data_dir()?.join("hyprlayer.db");
-            let db = Arc::new(hyprlayer_core::store::Db::open(&db_path)?);
-
-            let settings_snapshot = tauri::async_runtime::block_on(settings.get());
-            let worktree_root = settings_snapshot
-                .worktree_root
-                .as_deref()
-                .map(PathBuf::from)
-                .unwrap_or_else(hyprlayer_core::worktree::default_worktree_root);
-
-            if let Ok(orphans) = db.list_orphans() {
-                if !orphans.is_empty() {
-                    log::warn!(
-                        "found {} orphan session PID(s) from a prior run: {:?}",
-                        orphans.len(),
-                        orphans
-                    );
-                    let _ = db.clear_all_orphans();
+            let runtime = match tauri::async_runtime::block_on(HyprlayerRuntime::open(options)) {
+                Ok(runtime) => runtime,
+                Err(hyprlayer_core::CoreError::RuntimeInUse { path }) => {
+                    app.dialog()
+                        .message(format!(
+                            "Another Hyprlayer window or process is already using the profile at {}.",
+                            path.display()
+                        ))
+                        .title("Hyprlayer is already running")
+                        .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                        .blocking_show();
+                    std::process::exit(1);
                 }
-            }
+                Err(e @ hyprlayer_core::CoreError::RuntimeMigrationLedgerInvalid { .. })
+                | Err(e @ hyprlayer_core::CoreError::RuntimeMigrationLedgerTooNew { .. }) => {
+                    let detail = match e.remedy() {
+                        Some(remedy) => format!("{e}\n\n{remedy}"),
+                        None => e.to_string(),
+                    };
+                    app.dialog()
+                        .message(detail)
+                        .title("Hyprlayer cannot start")
+                        .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                        .blocking_show();
+                    std::process::exit(1);
+                }
+                Err(e) => return Err(e.into()),
+            };
 
             if let Err(e) = app
                 .asset_protocol_scope()
-                .allow_directory(&worktree_root, true)
+                .allow_directory(runtime.worktree_root(), true)
             {
                 log::warn!("could not register worktree root with the asset scope: {e}");
             }
 
-            let focused = Arc::new(std::sync::atomic::AtomicBool::new(true));
-            let focus_changed = Arc::new(tokio::sync::Notify::new());
+            runtime_events::spawn(app.handle().clone(), runtime.clone());
+
             if let Some(window) = app.get_webview_window("main") {
-                let focused = focused.clone();
-                let focus_changed = focus_changed.clone();
+                let runtime = runtime.clone();
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::Focused(is_focused) => {
-                        focused.store(*is_focused, std::sync::atomic::Ordering::Relaxed);
-                        focus_changed.notify_waiters();
+                        runtime.set_foreground(*is_focused);
                     }
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
@@ -324,59 +396,18 @@ pub fn run() {
                 });
             }
 
-            app.manage(AppState {
-                config: config.clone(),
-                binaries: binaries.clone(),
-                settings,
-                db,
-                worktrees: Arc::new(hyprlayer_core::worktree::WorktreeManager::new(
-                    worktree_root,
-                )),
-                index: Arc::new(hyprlayer_core::index::ThoughtsIndex::new()),
-                index_watch: tokio::sync::Mutex::new(None),
-                worktree_watch: tokio::sync::Mutex::new(None),
-                sessions: Arc::new(session_registry::SessionRegistry::new()),
-                opencode: Arc::new(opencode::OpenCodeManager::new()),
-                terminals: Arc::new(terminal_registry::TerminalRegistry::new()),
-                scripts: Arc::new(script_registry::ScriptRegistry::new()),
-                focused,
-                focus_changed,
-            });
+            app.manage(AppState::new(runtime.clone()));
 
-            let handle = app.handle().clone();
-            let binaries_bg = binaries.clone();
-            let config_bg = config.clone();
             tauri::async_runtime::spawn(async move {
-                if binaries_bg.enrich_with_login_shell().await {
-                    let _ = events::BinariesChanged.emit(&handle);
-                }
-                migrate_config_if_needed(&binaries_bg, &config_bg, &handle).await;
-                rebuild_thoughts_index(handle.clone()).await;
-            });
-
-            let handle = app.handle().clone();
-            let config_bg = config.clone();
-            tauri::async_runtime::spawn(async move {
-                let path = config_bg.path().to_path_buf();
-                let key = |p: &std::path::Path| {
-                    std::fs::metadata(p)
-                        .ok()
-                        .map(|m| (m.modified().ok(), m.len()))
-                };
-                let mut last = key(&path);
-                loop {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    let current = key(&path);
-                    if current != last {
-                        last = current;
-                        config_bg.invalidate().await;
-                        let _ = events::ConfigChanged.emit(&handle);
-                        rebuild_thoughts_index(handle.clone()).await;
-                    }
+                if let Err(e) = runtime.start().await {
+                    log::warn!("runtime failed to start: {e}");
                 }
             });
 
-            if let Some(omarchy_dir) = hyprlayer_core::omarchy::current_dir() {
+            if let Some(omarchy_dir) = hyprlayer_core::omarchy::current_dir(
+                dirs::state_dir().as_deref(),
+                dirs::config_dir().as_deref(),
+            ) {
                 log::info!("watching Omarchy theme state at {}", omarchy_dir.display());
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -393,7 +424,7 @@ pub fn run() {
                     };
                     let mut last = key(&omarchy_dir);
                     loop {
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                         let current = key(&omarchy_dir);
                         if current != last {
                             last = current;
@@ -402,8 +433,6 @@ pub fn run() {
                     }
                 });
             }
-
-            pr_watch::spawn(app.handle().clone());
 
             #[cfg(target_os = "macos")]
             app.on_menu_event(|app, event| match event.id().as_ref() {
@@ -431,9 +460,7 @@ pub fn run() {
             ) {
                 use tauri::Manager;
                 let state = app.state::<AppState>();
-                state.terminals.kill_all_blocking();
-                state.sessions.kill_all_blocking();
-                state.opencode.kill_blocking();
+                state.runtime.shutdown_now();
             }
         });
 }
@@ -442,7 +469,7 @@ fn request_quit(handle: &tauri::AppHandle) {
     let handle = handle.clone();
     tauri::async_runtime::spawn(async move {
         let confirm = match handle.try_state::<AppState>() {
-            Some(state) => state.settings.get().await.quit.confirm,
+            Some(state) => state.runtime.settings().get().await.quit.confirm,
             None => false,
         };
         let Some(window) = handle.get_webview_window("main").filter(|_| confirm) else {
@@ -545,103 +572,6 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         .build()
 }
 
-pub(crate) async fn rebuild_thoughts_index(app: tauri::AppHandle) {
-    use tauri::Manager;
-
-    let state = app.state::<AppState>();
-    let roots = match state.config.load().await {
-        Ok(loaded) => hyprlayer_core::index::thoughts_roots(&loaded.config),
-        Err(_) => Vec::new(),
-    };
-
-    let index = state.index.clone();
-    let scan_roots = roots.clone();
-    let stats = tauri::async_runtime::spawn_blocking(move || index.full_scan(&scan_roots)).await;
-    if let Ok(stats) = &stats {
-        log::info!(
-            "thoughts index: {} docs ({} skipped, {} errors) across {} roots",
-            stats.indexed,
-            stats.skipped,
-            stats.errors,
-            roots.len()
-        );
-    }
-
-    let watch = if roots.is_empty() {
-        None
-    } else {
-        let emit_handle = app.clone();
-        let callback = Box::new(move |event: hyprlayer_core::index::watcher::IndexEvent| {
-            use hyprlayer_core::index::watcher::IndexEvent;
-            let payload = match event {
-                IndexEvent::Updated { ids } => events::ThoughtsIndexUpdated {
-                    kind: "updated".into(),
-                    ids,
-                },
-                IndexEvent::Removed { ids } => events::ThoughtsIndexUpdated {
-                    kind: "removed".into(),
-                    ids,
-                },
-                IndexEvent::Rescanned => events::ThoughtsIndexUpdated {
-                    kind: "rescanned".into(),
-                    ids: Vec::new(),
-                },
-            };
-            let _ = payload.emit(&emit_handle);
-        });
-        let watch_index = state.index.clone();
-        let armed = tauri::async_runtime::spawn_blocking(move || {
-            hyprlayer_core::index::watcher::watch_roots(watch_index, roots, callback)
-        })
-        .await;
-        match armed {
-            Ok(Ok(handle)) => Some(handle),
-            Ok(Err(e)) => {
-                log::warn!("thoughts watcher failed to start: {e}");
-                None
-            }
-            Err(e) => {
-                log::warn!("thoughts watcher task failed: {e}");
-                None
-            }
-        }
-    };
-    *state.index_watch.lock().await = watch;
-
-    let _ = events::ThoughtsIndexUpdated {
-        kind: "rescanned".into(),
-        ids: Vec::new(),
-    }
-    .emit(&app);
-}
-
-pub(crate) async fn migrate_config_if_needed(
-    binaries: &BinaryResolver,
-    config: &ConfigService,
-    handle: &tauri::AppHandle,
-) {
-    if !config.exists() {
-        return;
-    }
-    let needs = matches!(
-        config.load().await,
-        Err(ref e) if e.code() == "config_needs_migration"
-    );
-    if !needs {
-        return;
-    }
-    let Some(home) = dirs::home_dir() else {
-        return;
-    };
-    match HyprCli::new(binaries).storage_info(&home).await {
-        Ok(_) => {
-            config.invalidate().await;
-            let _ = events::ConfigChanged.emit(handle);
-        }
-        Err(e) => log::warn!("config migration nudge failed: {e}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
@@ -655,6 +585,26 @@ mod tests {
                 "../src/lib/bindings.ts",
             )
             .expect("bindings must export cleanly");
+    }
+
+    #[test]
+    fn selected_ipc_commands_stay_registered() {
+        let out = tempfile::NamedTempFile::new().expect("tempfile");
+        super::specta_builder()
+            .export(specta_typescript::Typescript::default(), out.path())
+            .expect("bindings must export cleanly");
+        let bindings = std::fs::read_to_string(out.path()).unwrap();
+        for command in [
+            "getSessionLog:",
+            "answerQuestion:",
+            "setBinaryOverride:",
+            "getAppSettings:",
+        ] {
+            assert!(
+                bindings.contains(command),
+                "{command} is missing from the generated bindings"
+            );
+        }
     }
 
     fn merge(base: &mut Value, overlay: &Value) {

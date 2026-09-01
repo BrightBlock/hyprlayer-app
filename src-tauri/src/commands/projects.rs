@@ -1,25 +1,16 @@
-use std::path::{Path, PathBuf};
-
-use hyprlayer_core::config::{
-    bootstrap_default_profile, get_profile, list_profiles, validate_profile_name, ThoughtsProfile,
-    DEFAULT_GLOBAL_DIR, DEFAULT_REPOS_DIR,
-};
-use hyprlayer_core::hyprcli::{HyprCli, StorageInfo};
-use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
+use hyprlayer_core::config::ThoughtsProfile;
+use hyprlayer_core::hyprcli::StorageInfo;
+use hyprlayer_core::process::binaries::BinaryStatus;
 use hyprlayer_core::repos;
-use hyprlayer_core::store::{NewProject, ProjectSource};
-use hyprlayer_core::thoughts_repo::{classify_root, scaffold as scaffold_thoughts_root, RootState};
-use hyprlayer_core::worktree::thoughts_links;
-use hyprlayer_core::CoreError;
+use hyprlayer_core::runtime::projects as core_projects;
+use hyprlayer_core::store::ProjectSource;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri_specta::Event;
 
-use super::{blocking, db_task};
 use crate::error::{AppError, CmdResult};
-use crate::events::{CreateStep, ProjectCreateProgress, StepStatus};
-use crate::settings::AppSettings;
 use crate::state::AppState;
+use hyprlayer_core::settings::AppSettings;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +23,21 @@ pub struct Project {
     pub exists_on_disk: bool,
     pub origin_url: Option<String>,
     pub source: ProjectSource,
+}
+
+impl From<core_projects::ProjectView> for Project {
+    fn from(v: core_projects::ProjectView) -> Self {
+        Self {
+            path: v.path,
+            mapped_name: v.mapped_name,
+            thoughts_project: v.thoughts_project,
+            profile: v.profile,
+            backend_kind: v.backend_kind,
+            exists_on_disk: v.exists_on_disk,
+            origin_url: v.origin_url,
+            source: v.source,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -56,6 +62,36 @@ pub enum ConfigSummary {
         backend_kind: String,
         configured: bool,
     },
+}
+
+impl From<core_projects::ConfigSummary> for ConfigSummary {
+    fn from(s: core_projects::ConfigSummary) -> Self {
+        match s {
+            core_projects::ConfigSummary::Missing { path } => Self::Missing { path },
+            core_projects::ConfigSummary::Error {
+                path,
+                code,
+                message,
+                remedy,
+            } => Self::Error {
+                path,
+                code,
+                message,
+                remedy,
+            },
+            core_projects::ConfigSummary::Ready {
+                path,
+                user,
+                backend_kind,
+                configured,
+            } => Self::Ready {
+                path,
+                user,
+                backend_kind,
+                configured,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -84,12 +120,34 @@ pub struct Bootstrap {
     pub prompt_defaults: PromptDefaults,
 }
 
+impl From<core_projects::BootstrapResult> for Bootstrap {
+    fn from(r: core_projects::BootstrapResult) -> Self {
+        Self {
+            config: r.config.into(),
+            projects: r.projects.into_iter().map(Project::from).collect(),
+            binaries: r.binaries,
+            settings: r.settings,
+            prompt_defaults: PromptDefaults::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDetail {
     pub project: Project,
     pub storage: Option<StorageInfo>,
     pub thoughts_root: Option<String>,
+}
+
+impl From<core_projects::ProjectInspection> for ProjectDetail {
+    fn from(i: core_projects::ProjectInspection) -> Self {
+        Self {
+            project: i.project.into(),
+            storage: i.storage,
+            thoughts_root: i.thoughts_root,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
@@ -101,11 +159,12 @@ pub enum CheckStatus {
     Fail,
 }
 
-fn pass_if(ok: bool) -> CheckStatus {
-    if ok {
-        CheckStatus::Pass
-    } else {
-        CheckStatus::Fail
+impl From<core_projects::HealthStatus> for CheckStatus {
+    fn from(s: core_projects::HealthStatus) -> Self {
+        match s {
+            core_projects::HealthStatus::Pass => Self::Pass,
+            core_projects::HealthStatus::Fail => Self::Fail,
+        }
     }
 }
 
@@ -119,10 +178,30 @@ pub struct HealthCheck {
     pub remedy: Option<String>,
 }
 
+impl From<core_projects::BackendHealthCheck> for HealthCheck {
+    fn from(c: core_projects::BackendHealthCheck) -> Self {
+        Self {
+            id: c.id,
+            label: c.label,
+            status: c.status.into(),
+            detail: c.detail,
+            remedy: c.remedy,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HealthReport {
     pub checks: Vec<HealthCheck>,
+}
+
+impl From<core_projects::BackendHealth> for HealthReport {
+    fn from(h: core_projects::BackendHealth) -> Self {
+        Self {
+            checks: h.checks.into_iter().map(HealthCheck::from).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -131,331 +210,44 @@ pub struct SyncReport {
     pub output: String,
 }
 
-pub(crate) async fn registry_projects(state: &AppState) -> Vec<Project> {
-    let records = match db_task(state.db.clone(), |db| db.list_projects()).await {
-        Ok(records) => records,
-        Err(e) => {
-            log::warn!("could not load project registry: {}", e.message);
-            return Vec::new();
-        }
-    };
-    let loaded = state.config.load().await.ok();
-    let thoughts = loaded.as_ref().and_then(|l| l.config.thoughts.as_ref());
-    records
-        .into_iter()
-        .map(|r| {
-            let eff = thoughts.map(|t| t.effective_config_for(&r.path));
-            let profile = eff.as_ref().and_then(|e| e.profile_name.clone());
-            let backend_kind = eff
-                .as_ref()
-                .map(|e| e.backend.kind().as_str().to_string())
-                .unwrap_or_else(|| "git".to_string());
-            let thoughts_project = if r.source.is_git() {
-                eff.as_ref()
-                    .and_then(|e| e.mapped_name.clone())
-                    .unwrap_or_else(|| r.name.clone())
-            } else {
-                String::new()
-            };
-            Project {
-                exists_on_disk: Path::new(&r.path).is_dir(),
-                path: r.path,
-                mapped_name: r.name,
-                thoughts_project,
-                profile,
-                backend_kind,
-                origin_url: r.origin_url,
-                source: r.source,
-            }
-        })
-        .collect()
-}
-
-pub(crate) async fn project_source(state: &AppState, path: &str) -> ProjectSource {
-    let path = path.to_string();
-    db_task(state.db.clone(), move |db| db.get_project_record(&path))
-        .await
-        .ok()
-        .flatten()
-        .map(|r| r.source)
-        .unwrap_or(ProjectSource::Disk)
-}
-
-pub(crate) async fn config_summary(state: &AppState) -> ConfigSummary {
-    let path = state.config.path().display().to_string();
-    match state.config.load().await {
-        Ok(loaded) => {
-            let (user, backend_kind, configured) = loaded
-                .config
-                .thoughts
-                .as_ref()
-                .map(|t| {
-                    (
-                        t.user.clone(),
-                        t.backend.kind().as_str().to_string(),
-                        t.is_configured(),
-                    )
-                })
-                .unwrap_or_else(|| (String::new(), "git".into(), false));
-            ConfigSummary::Ready {
-                path,
-                user,
-                backend_kind,
-                configured,
-            }
-        }
-        Err(CoreError::ConfigMissing { .. }) => ConfigSummary::Missing { path },
-        Err(err) => {
-            let app_err = AppError::from(err);
-            ConfigSummary::Error {
-                path,
-                code: app_err.code,
-                message: app_err.message,
-                remedy: app_err.remedy,
-            }
-        }
+impl From<core_projects::SyncThoughtsResult> for SyncReport {
+    fn from(r: core_projects::SyncThoughtsResult) -> Self {
+        Self { output: r.output }
     }
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn get_bootstrap(state: State<'_, AppState>) -> CmdResult<Bootstrap> {
-    Ok(Bootstrap {
-        config: config_summary(&state).await,
-        projects: registry_projects(&state).await,
-        binaries: state.binaries.status_all().await,
-        settings: state.settings.get().await,
-        prompt_defaults: PromptDefaults::default(),
-    })
-}
-
-fn find_project(projects: &[Project], path: &str) -> CmdResult<Project> {
-    projects
-        .iter()
-        .find(|p| p.path == path)
-        .cloned()
-        .ok_or_else(|| AppError::project_not_found(path))
+    let result = state
+        .runtime
+        .projects()
+        .bootstrap()
+        .await
+        .map_err(AppError::from)?;
+    Ok(Bootstrap::from(result))
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn get_project(state: State<'_, AppState>, path: String) -> CmdResult<ProjectDetail> {
-    let project = find_project(&registry_projects(&state).await, &path)?;
-
-    if !project.source.is_git() {
-        return Ok(ProjectDetail {
-            project,
-            storage: None,
-            thoughts_root: None,
-        });
-    }
-
-    let storage = HyprCli::new(&state.binaries)
-        .storage_info(Path::new(&path))
-        .await?;
-
-    let thoughts_root = effective_thoughts_root(&state, &path).await;
-
-    Ok(ProjectDetail {
-        project,
-        storage: Some(storage),
-        thoughts_root,
-    })
-}
-
-async fn effective_thoughts_root(state: &AppState, repo_path: &str) -> Option<String> {
-    let loaded = state.config.load().await.ok()?;
-    let thoughts = loaded.config.thoughts.as_ref()?;
-    let effective = thoughts.effective_config_for(repo_path);
-    effective
-        .backend
-        .thoughts_root()
-        .map(|p| p.display().to_string())
-}
-
-async fn ensure_config(state: &AppState, bootstrap_user: Option<String>) -> CmdResult<()> {
-    if state.config.exists() {
-        return Ok(());
-    }
-    let user = bootstrap_user.unwrap_or_default();
-    if user.trim().is_empty() {
-        return Err(AppError {
-            code: "bootstrap_user_required".into(),
-            message: "No hyprlayer config exists yet; a username is needed to create one.".into(),
-            remedy: Some(
-                "Enter the username your thought documents should be attributed to.".into(),
-            ),
-        });
-    }
-    hyprlayer_core::config::write_bootstrap_config(state.config.path(), &user)
-        .map_err(AppError::from)
-}
-
-async fn repos_root(state: &AppState, location: Option<&str>) -> PathBuf {
-    if let Some(l) = location.map(str::trim).filter(|l| !l.is_empty()) {
-        return repos::expand_user_path(l);
-    }
-    state
-        .settings
-        .get()
+    let inspection = state
+        .runtime
+        .projects()
+        .inspect(&path)
         .await
-        .repos_root
-        .map(|r| repos::expand_user_path(&r))
-        .unwrap_or_else(repos::default_repos_root)
-}
-
-fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> String {
-    directory_name
-        .map(|d| d.trim().to_string())
-        .filter(|d| !d.is_empty())
-        .or_else(|| repos::repo_name_from_url(source))
-        .unwrap_or_else(|| {
-            repo.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unnamed_repo")
-                .to_string()
-        })
-}
-
-async fn remove_dir_all_bg(path: &Path) -> Result<(), String> {
-    let owned = path.to_path_buf();
-    match blocking("remove_dir", move || std::fs::remove_dir_all(owned)).await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(e) => Err(e.message),
-    }
-}
-
-// A failed rollback is the difference between "try again" and "every retry now
-// dies on repo_exists", so it has to reach the user attached to whatever error
-// triggered the rollback.
-async fn rollback_dir(path: &Path, mut err: AppError) -> AppError {
-    if let Err(reason) = remove_dir_all_bg(path).await {
-        err.remedy = Some(format!(
-            "{} could not be cleaned up ({reason}). Remove it manually before trying again.",
-            path.display()
-        ));
-    }
-    err
-}
-
-#[derive(Clone, Copy, Default)]
-struct ThoughtsTarget<'a> {
-    dir: Option<&'a str>,
-    profile: Option<&'a str>,
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn register_repo(
-    app: &tauri::AppHandle,
-    state: &AppState,
-    git: &Path,
-    repo: &Path,
-    name: &str,
-    thoughts: ThoughtsTarget<'_>,
-    kind: ProjectSource,
-    owned: bool,
-) -> CmdResult<Project> {
-    if let Err(e) = HyprCli::new(&state.binaries)
-        .thoughts_init(repo, thoughts.dir.unwrap_or(name), thoughts.profile)
-        .await
-    {
-        let err = AppError::from(e);
-        return Err(if owned {
-            rollback_dir(repo, err).await
-        } else {
-            err
-        });
-    }
-
-    let origin = repos::origin_url(git, repo).await;
-    let path = repo.display().to_string();
-    let row = NewProject {
-        path: path.clone(),
-        name: name.to_string(),
-        origin_url: origin,
-        source: kind,
-    };
-    if let Err(e) = db_task(state.db.clone(), move |db| db.insert_project(row)).await {
-        return Err(if owned {
-            rollback_dir(repo, e).await
-        } else {
-            let _ = HyprCli::new(&state.binaries).thoughts_uninit(repo).await;
-            e
-        });
-    }
-
-    state.config.invalidate().await;
-    let _ = crate::events::ConfigChanged.emit(app);
-    crate::rebuild_thoughts_index(app.clone()).await;
-
-    find_project(&registry_projects(state).await, &path)
-}
-
-// The project row is written before a remote exists, so publishing has to fold
-// the new origin back into it. `insert_project` upserts on path.
-async fn sync_origin(state: &AppState, git: &Path, repo: &Path) -> CmdResult<Option<Project>> {
-    let path = repo.display().to_string();
-    let Some(record) = db_task(state.db.clone(), {
-        let key = path.clone();
-        move |db| db.get_project_record(&key)
-    })
-    .await?
-    else {
-        return Ok(None);
-    };
-    let origin = repos::origin_url(git, repo).await;
-    if origin == record.origin_url {
-        return Ok(None);
-    }
-    db_task(state.db.clone(), {
-        let row = NewProject {
-            path: record.path,
-            name: record.name,
-            origin_url: origin,
-            source: record.source,
-        };
-        move |db| db.insert_project(row)
-    })
-    .await?;
-    Ok(find_project(&registry_projects(state).await, &path).ok())
-}
-
-async fn provision_project(
-    app: &tauri::AppHandle,
-    state: &AppState,
-    source: &str,
-    name: &str,
-    thoughts: ThoughtsTarget<'_>,
-    kind: ProjectSource,
-    location: Option<&str>,
-) -> CmdResult<Project> {
-    let git = state
-        .binaries
-        .require(BinaryKind::Git)
-        .await
-        .map_err(AppError::from)?;
-
-    let dest = repos_root(state, location).await.join(name);
-    if dest.exists() {
-        return Err(AppError {
-            code: "repo_exists".into(),
-            message: format!("{} already exists", dest.display()),
-            remedy: Some("Remove it first, or choose a different name or location.".into()),
-        });
-    }
-
-    repos::clone_repo(&git, source, &dest)
-        .await
-        .map_err(AppError::from)?;
-
-    register_repo(app, state, &git, &dest, name, thoughts, kind, true).await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::project_not_found(&path))?;
+    Ok(ProjectDetail::from(inspection))
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn inspect_repo_path(path: String) -> CmdResult<repos::RepoPathStatus> {
-    Ok(repos::classify_repo_path(Path::new(&path)))
+pub fn inspect_repo_path(
+    state: State<'_, AppState>,
+    path: String,
+) -> CmdResult<repos::RepoPathStatus> {
+    Ok(state.runtime.projects().inspect_repo_path(&path))
 }
 
 #[tauri::command]
@@ -471,81 +263,21 @@ pub async fn import_project(
     profile: Option<String>,
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
-    let repo = Path::new(&path);
-    let status = repos::classify_repo_path(repo);
-
-    match status {
-        repos::RepoPathStatus::Missing => {
-            return Err(AppError {
-                code: "invalid_path".into(),
-                message: format!("{path} is not a directory"),
-                remedy: None,
-            });
-        }
-        repos::RepoPathStatus::Bare => {
-            return Err(AppError {
-                code: "bare_repo".into(),
-                message: format!("{path} is a bare git repository"),
-                remedy: Some(
-                    "Choose a normal working copy instead. Worktrees can't be created from a bare repo."
-                        .into(),
-                ),
-            });
-        }
-        _ => {}
-    }
-
-    let canonical = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let key = canonical.display().to_string();
-    let existing = db_task(state.db.clone(), move |db| db.get_project_record(&key)).await?;
-    if existing.is_some_and(|r| !r.source.is_git()) {
-        return Err(AppError {
-            code: "project_kind_conflict".into(),
-            message: format!("{path} is already added as a local folder project."),
-            remedy: Some("Remove the project first, then re-add it as a repository.".into()),
-        });
-    }
-
-    ensure_config(&state, bootstrap_user).await?;
-
-    let git = state
-        .binaries
-        .require(BinaryKind::Git)
+    let view = state
+        .runtime
+        .projects()
+        .import_repository(core_projects::ImportRepositoryRequest {
+            path,
+            branch,
+            directory_name,
+            thoughts_dir,
+            profile,
+            bootstrap_user,
+        })
         .await
         .map_err(AppError::from)?;
-
-    let created = matches!(status, repos::RepoPathStatus::NonGit);
-
-    let setup: Result<(), AppError> = match status {
-        repos::RepoPathStatus::NonGit => {
-            let branch = branch
-                .as_deref()
-                .map(str::trim)
-                .filter(|b| !b.is_empty())
-                .unwrap_or("main");
-            repos::init_repo_with_commit(&git, repo, branch)
-                .await
-                .map_err(AppError::from)
-        }
-        repos::RepoPathStatus::Unborn => repos::commit_empty_initial(&git, repo)
-            .await
-            .map_err(AppError::from),
-        _ => Ok(()),
-    };
-
-    let thoughts = ThoughtsTarget {
-        dir: thoughts_dir.as_deref(),
-        profile: profile.as_deref(),
-    };
-    let result = match setup {
-        Ok(()) => register_disk_project(&app, &state, &git, repo, directory_name, thoughts).await,
-        Err(e) => Err(e),
-    };
-
-    match result {
-        Err(e) if created => Err(rollback_dir(&repo.join(".git"), e).await),
-        other => other,
-    }
+    let _ = crate::events::ConfigChanged.emit(&app);
+    Ok(Project::from(view))
 }
 
 #[tauri::command]
@@ -555,74 +287,16 @@ pub async fn import_local_folder(
     path: String,
     directory_name: Option<String>,
 ) -> CmdResult<Project> {
-    let dir = Path::new(&path);
-    match repos::classify_repo_path(dir) {
-        repos::RepoPathStatus::Missing => {
-            return Err(AppError {
-                code: "invalid_path".into(),
-                message: format!("{path} is not a directory"),
-                remedy: None,
-            });
-        }
-        repos::RepoPathStatus::NonGit => {}
-        _ => {
-            return Err(AppError {
-                code: "folder_is_git_repo".into(),
-                message: format!("{path} is a git repository."),
-                remedy: Some(
-                    "Add it as a repository instead, so it keeps its branches and thoughts.".into(),
-                ),
-            });
-        }
-    }
-
-    let dir = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    let name = project_name(directory_name, &dir.to_string_lossy(), &dir);
-    let registered = dir.display().to_string();
-    let key = registered.clone();
-    let existing = db_task(state.db.clone(), move |db| db.get_project_record(&key)).await?;
-    if existing.is_some_and(|r| r.source.is_git()) {
-        return Err(AppError {
-            code: "project_kind_conflict".into(),
-            message: format!("{path} is already added as a repository project."),
-            remedy: Some("Remove the project first, then re-add it as a folder.".into()),
-        });
-    }
-    db_task(state.db.clone(), {
-        let row = NewProject {
-            path: registered.clone(),
-            name,
-            origin_url: None,
-            source: ProjectSource::Folder,
-        };
-        move |db| db.insert_project(row)
-    })
-    .await?;
-
-    find_project(&registry_projects(&state).await, &registered)
-}
-
-async fn register_disk_project(
-    app: &tauri::AppHandle,
-    state: &AppState,
-    git: &Path,
-    repo: &Path,
-    directory_name: Option<String>,
-    thoughts: ThoughtsTarget<'_>,
-) -> CmdResult<Project> {
-    let repo = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let name = project_name(directory_name, &repo.to_string_lossy(), &repo);
-    register_repo(
-        app,
-        state,
-        git,
-        &repo,
-        &name,
-        thoughts,
-        ProjectSource::Disk,
-        false,
-    )
-    .await
+    let view = state
+        .runtime
+        .projects()
+        .import_folder(core_projects::ImportFolderRequest {
+            path,
+            directory_name,
+        })
+        .await
+        .map_err(AppError::from)?;
+    Ok(Project::from(view))
 }
 
 #[tauri::command]
@@ -638,41 +312,21 @@ pub async fn clone_project(
     profile: Option<String>,
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
-    let url = url.trim().to_string();
-    if url.is_empty() {
-        return Err(AppError {
-            code: "invalid_url".into(),
-            message: "A repository URL is required.".into(),
-            remedy: None,
-        });
-    }
-
-    ensure_config(&state, bootstrap_user).await?;
-
-    let name = name
-        .map(|n| n.trim().to_string())
-        .filter(|n| !n.is_empty())
-        .or_else(|| repos::repo_name_from_url(&url))
-        .ok_or_else(|| AppError {
-            code: "invalid_url".into(),
-            message: format!("Couldn't derive a project name from {url}."),
-            remedy: Some("Add an explicit name, or check the URL.".into()),
-        })?;
-
-    let thoughts = ThoughtsTarget {
-        dir: thoughts_dir.as_deref(),
-        profile: profile.as_deref(),
-    };
-    provision_project(
-        &app,
-        &state,
-        &url,
-        &name,
-        thoughts,
-        ProjectSource::Clone,
-        location.as_deref(),
-    )
-    .await
+    let view = state
+        .runtime
+        .projects()
+        .clone(core_projects::CloneProjectRequest {
+            url,
+            location,
+            name,
+            thoughts_dir,
+            profile,
+            bootstrap_user,
+        })
+        .await
+        .map_err(AppError::from)?;
+    let _ = crate::events::ConfigChanged.emit(&app);
+    Ok(Project::from(view))
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
@@ -681,6 +335,16 @@ pub struct GithubTarget {
     pub owner: String,
     pub name: String,
     pub private: bool,
+}
+
+impl From<GithubTarget> for core_projects::GithubTarget {
+    fn from(t: GithubTarget) -> Self {
+        Self {
+            owner: t.owner,
+            name: t.name,
+            private: t.private,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
@@ -697,32 +361,28 @@ pub struct CreateProjectRequest {
     pub bootstrap_user: Option<String>,
 }
 
+impl From<CreateProjectRequest> for core_projects::CreateProjectRequest {
+    fn from(r: CreateProjectRequest) -> Self {
+        Self {
+            op_id: r.op_id,
+            name: r.name,
+            location: r.location,
+            branch: r.branch,
+            scaffold: r.scaffold,
+            github: r.github.map(Into::into),
+            thoughts_dir: r.thoughts_dir,
+            profile: r.profile,
+            bootstrap_user: r.bootstrap_user,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProjectOutcome {
     pub project: Project,
     pub github_url: Option<String>,
     pub github_error: Option<AppError>,
-}
-
-// Progress is a broadcast event, so every emission carries the id of the call
-// that produced it: a second create (or a publish retry) running concurrently
-// would otherwise drive whichever panel happens to be listening.
-struct Progress<'a> {
-    app: &'a tauri::AppHandle,
-    op_id: &'a str,
-}
-
-impl Progress<'_> {
-    fn emit(&self, step: CreateStep, status: StepStatus, detail: Option<&str>) {
-        let _ = ProjectCreateProgress {
-            op_id: self.op_id.to_string(),
-            step,
-            status,
-            detail: detail.map(str::to_string),
-        }
-        .emit(self.app);
-    }
 }
 
 // Three answers, not two: conflating "gh failed" with "you are not signed in"
@@ -739,112 +399,16 @@ pub enum GithubOwners {
     Ready { owners: Vec<repos::GithubOwner> },
 }
 
-fn validate_project_name(name: &str) -> CmdResult<()> {
-    if name.is_empty() {
-        return Err(AppError {
-            code: "invalid_name".into(),
-            message: "A project name is required.".into(),
-            remedy: None,
-        });
-    }
-    if name == "." || name == ".." || name.contains(['/', '\\']) {
-        return Err(AppError {
-            code: "invalid_name".into(),
-            message: format!("`{name}` can't be used as a folder name."),
-            remedy: Some("Use a plain name, with no slashes.".into()),
-        });
-    }
-    Ok(())
-}
-
-fn github_error(failure: repos::GithubFailure) -> AppError {
-    AppError {
-        code: failure.code.into(),
-        message: failure.message,
-        remedy: failure.remedy,
-    }
-}
-
-fn exec_stderr(err: &CoreError) -> String {
-    match err {
-        CoreError::Exec { stderr_tail, .. } => stderr_tail.clone(),
-        other => other.to_string(),
-    }
-}
-
-async fn publish_to_github(
-    progress: &Progress<'_>,
-    state: &AppState,
-    git: &Path,
-    repo: &Path,
-    branch: &str,
-    target: &GithubTarget,
-) -> CmdResult<String> {
-    let fail = |step: CreateStep| {
-        progress.emit(step, StepStatus::Failed, None);
-        if matches!(step, CreateStep::GithubRepo) {
-            progress.emit(CreateStep::Push, StepStatus::Skipped, None);
-        }
-    };
-
-    let owner = target.owner.trim().to_string();
-    let name = repos::github_repo_name(&target.name);
-    if owner.is_empty() || repos::is_reserved_repo_name(&name) {
-        return Err(AppError {
-            code: "github_name_invalid".into(),
-            message: format!(
-                "`{}` can't be used as a GitHub repository name.",
-                target.name
-            ),
-            remedy: Some("Use letters, digits, dots, dashes or underscores.".into()),
-        });
-    }
-
-    progress.emit(CreateStep::GithubRepo, StepStatus::Running, None);
-
-    let origin = repos::origin_url(git, repo).await;
-    let url = match repos::plan_publish(origin.as_deref(), &owner, &name) {
-        repos::PublishPlan::PushOnly { url } => url,
-        repos::PublishPlan::Conflict { origin } => {
-            fail(CreateStep::GithubRepo);
-            return Err(AppError {
-                code: "origin_exists".into(),
-                message: format!("This repository already points at {origin}."),
-                remedy: Some(
-                    "Remove or repoint the `origin` remote first, then publish again.".into(),
-                ),
-            });
-        }
-        repos::PublishPlan::Create => {
-            let gh = match state.binaries.require(BinaryKind::Gh).await {
-                Ok(gh) => gh,
-                Err(e) => {
-                    fail(CreateStep::GithubRepo);
-                    return Err(AppError::from(e));
-                }
-            };
-            match repos::create_github_repo(&gh, repo, &owner, &name, target.private).await {
-                Ok(url) => url,
-                Err(e) => {
-                    fail(CreateStep::GithubRepo);
-                    return Err(github_error(repos::classify_github_failure(
-                        &exec_stderr(&e),
-                        &owner,
-                        &name,
-                    )));
-                }
+impl From<core_projects::GithubOwnersOutcome> for GithubOwners {
+    fn from(o: core_projects::GithubOwnersOutcome) -> Self {
+        match o {
+            core_projects::GithubOwnersOutcome::SignedOut => Self::SignedOut,
+            core_projects::GithubOwnersOutcome::Unavailable { message } => {
+                Self::Unavailable { message }
             }
+            core_projects::GithubOwnersOutcome::Ready { owners } => Self::Ready { owners },
         }
-    };
-    progress.emit(CreateStep::GithubRepo, StepStatus::Done, Some(&url));
-
-    progress.emit(CreateStep::Push, StepStatus::Running, None);
-    if let Err(e) = repos::push_upstream(git, repo, branch).await {
-        fail(CreateStep::Push);
-        return Err(github_error(repos::classify_push_failure(&exec_stderr(&e))));
     }
-    progress.emit(CreateStep::Push, StepStatus::Done, Some(branch));
-    Ok(url)
 }
 
 #[tauri::command]
@@ -855,199 +419,35 @@ pub async fn create_project(
     state: State<'_, AppState>,
     req: CreateProjectRequest,
 ) -> CmdResult<CreateProjectOutcome> {
-    let CreateProjectRequest {
-        op_id,
-        name,
-        location,
-        branch,
-        scaffold,
-        github,
-        thoughts_dir,
-        profile,
-        bootstrap_user,
-    } = req;
-    let progress = Progress {
-        app: &app,
-        op_id: &op_id,
-    };
-    let name = name.trim().to_string();
-    validate_project_name(&name)?;
-    ensure_config(&state, bootstrap_user).await?;
-
-    let git = state
-        .binaries
-        .require(BinaryKind::Git)
+    let result = state
+        .runtime
+        .projects()
+        .create(req.into())
         .await
         .map_err(AppError::from)?;
-
-    let dest = repos_root(&state, location.as_deref()).await.join(&name);
-    let branch = branch
-        .as_deref()
-        .map(str::trim)
-        .filter(|b| !b.is_empty())
-        .unwrap_or("main")
-        .to_string();
-
-    // `create_dir` is the claim: it fails with AlreadyExists rather than
-    // adopting a directory someone else owns, which matters because everything
-    // below stages the whole tree, may push it, and deletes it on failure.
-    progress.emit(CreateStep::Folder, StepStatus::Running, None);
-    let claimed = blocking("create_project_dir", {
-        let dest = dest.clone();
-        move || {
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::create_dir(&dest)
-        }
-    })
-    .await?;
-    if let Err(e) = claimed {
-        progress.emit(CreateStep::Folder, StepStatus::Failed, None);
-        return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
-            AppError {
-                code: "repo_exists".into(),
-                message: format!("{} already exists", dest.display()),
-                remedy: Some("Choose a different name or location.".into()),
-            }
-        } else {
-            AppError::from(CoreError::Io(e))
-        });
-    }
-    progress.emit(
-        CreateStep::Folder,
-        StepStatus::Done,
-        Some(&dest.display().to_string()),
-    );
-
-    progress.emit(CreateStep::Repository, StepStatus::Running, None);
-    if let Err(e) = repos::init_repo(&git, &dest, &branch).await {
-        progress.emit(CreateStep::Repository, StepStatus::Failed, None);
-        return Err(rollback_dir(&dest, AppError::from(e)).await);
-    }
-    progress.emit(CreateStep::Repository, StepStatus::Done, Some(&branch));
-
-    progress.emit(CreateStep::Commit, StepStatus::Running, None);
-    let commit = async {
-        let written = blocking("scaffold_project", {
-            let dest = dest.clone();
-            let name = name.clone();
-            move || repos::write_scaffold(&dest, &name, &scaffold)
-        })
-        .await?
-        .map_err(AppError::from)?;
-        repos::stage_all(&git, &dest)
-            .await
-            .map_err(AppError::from)?;
-        repos::commit_empty_initial(&git, &dest)
-            .await
-            .map_err(AppError::from)?;
-        Ok::<Vec<String>, AppError>(written)
-    }
-    .await;
-    let written = match commit {
-        Ok(written) => written,
-        Err(e) => {
-            progress.emit(CreateStep::Commit, StepStatus::Failed, None);
-            return Err(rollback_dir(&dest, e).await);
-        }
-    };
-    let commit_detail = if written.is_empty() {
-        "empty initial commit".to_string()
-    } else {
-        written.join(" · ")
-    };
-    progress.emit(CreateStep::Commit, StepStatus::Done, Some(&commit_detail));
-
-    // Registration runs before publishing so its failure path is a clean
-    // rollback of a purely local repo. Publishing first would mean a failed
-    // register had to choose between deleting a pushed tree and stranding an
-    // unregistered one.
-    progress.emit(CreateStep::Thoughts, StepStatus::Running, None);
-    let thoughts = ThoughtsTarget {
-        dir: thoughts_dir.as_deref(),
-        profile: profile.as_deref(),
-    };
-    let project = match register_repo(
-        &app,
-        &state,
-        &git,
-        &dest,
-        &name,
-        thoughts,
-        ProjectSource::Clone,
-        true,
-    )
-    .await
-    {
-        Ok(project) => project,
-        Err(e) => {
-            progress.emit(CreateStep::Thoughts, StepStatus::Failed, None);
-            return Err(e);
-        }
-    };
-    progress.emit(
-        CreateStep::Thoughts,
-        StepStatus::Done,
-        Some(thoughts_dir.as_deref().unwrap_or(&name)),
-    );
-
-    let mut github_url = None;
-    let mut github_error = None;
-    match github.as_ref() {
-        Some(target) => {
-            match publish_to_github(&progress, &state, &git, &dest, &branch, target).await {
-                Ok(url) => github_url = Some(url),
-                Err(e) => github_error = Some(e),
-            }
-        }
-        None => {
-            progress.emit(CreateStep::GithubRepo, StepStatus::Skipped, None);
-            progress.emit(CreateStep::Push, StepStatus::Skipped, None);
-        }
-    }
-    // The project row was written before origin existed, so re-read it.
-    let project = match sync_origin(&state, &git, &dest).await {
-        Ok(Some(refreshed)) => refreshed,
-        _ => project,
-    };
-
+    let _ = crate::events::ConfigChanged.emit(&app);
     Ok(CreateProjectOutcome {
-        project,
-        github_url,
-        github_error,
+        project: Project::from(result.project),
+        github_url: result.github_url,
+        github_error: result.github_error.map(AppError::from),
     })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn list_github_owners(state: State<'_, AppState>) -> CmdResult<GithubOwners> {
-    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
-        return Ok(GithubOwners::SignedOut);
-    };
-    match repos::github_owners(&gh).await {
-        Ok(owners) => Ok(GithubOwners::Ready { owners }),
-        Err(e) => {
-            let detail = exec_stderr(&e);
-            if repos::is_github_auth_failure(&detail) {
-                return Ok(GithubOwners::SignedOut);
-            }
-            log::debug!("gh owners unavailable: {e}");
-            Ok(GithubOwners::Unavailable {
-                message: if detail.trim().is_empty() {
-                    "GitHub could not be reached.".to_string()
-                } else {
-                    detail
-                },
-            })
-        }
-    }
+    let outcome = state
+        .runtime
+        .projects()
+        .github_owners()
+        .await
+        .map_err(AppError::from)?;
+    Ok(GithubOwners::from(outcome))
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn publish_project_to_github(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     op_id: String,
     path: String,
@@ -1055,48 +455,28 @@ pub async fn publish_project_to_github(
     name: String,
     is_private: bool,
 ) -> CmdResult<String> {
-    let progress = Progress {
-        app: &app,
-        op_id: &op_id,
-    };
-    let repo = PathBuf::from(&path);
-    if db_task(state.db.clone(), {
-        let key = path.clone();
-        move |db| db.get_project_record(&key)
-    })
-    .await?
-    .is_none()
+    if state
+        .runtime
+        .projects()
+        .find(&path)
+        .await
+        .map_err(AppError::from)?
+        .is_none()
     {
         return Err(AppError::project_not_found(&path));
     }
-
-    let git = state
-        .binaries
-        .require(BinaryKind::Git)
-        .await
-        .map_err(AppError::from)?;
-    let branch =
-        hyprlayer_core::gitops::current_branch(&repo).unwrap_or_else(|| "main".to_string());
-
-    let published = publish_to_github(
-        &progress,
-        &state,
-        &git,
-        &repo,
-        &branch,
-        &GithubTarget {
+    state
+        .runtime
+        .projects()
+        .publish(core_projects::PublishProjectRequest {
+            op_id,
+            path,
             owner,
             name,
-            private: is_private,
-        },
-    )
-    .await;
-
-    // `gh repo create --remote origin` wires up the remote before the push runs,
-    // so a failed publish can still have changed origin. Record it either way,
-    // which is what makes the next retry a push rather than a re-create.
-    let _ = sync_origin(&state, &git, &repo).await;
-    published
+            is_private,
+        })
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -1107,44 +487,15 @@ pub async fn remove_project(
     path: String,
     delete_files: bool,
 ) -> CmdResult<()> {
-    let repo = PathBuf::from(&path);
-
-    let path_for_count = path.clone();
-    let active = db_task(state.db.clone(), move |db| {
-        db.list_workstreams(&path_for_count, false)
-    })
-    .await?
-    .len();
-    if active > 0 {
-        return Err(AppError {
-            code: "active_workstreams".into(),
-            message: format!(
-                "This project still has {active} active workstream{}.",
-                if active == 1 { "" } else { "s" }
-            ),
-            remedy: Some("Archive its workstreams first, then remove the project.".into()),
-        });
-    }
-
-    let git_backed = project_source(&state, &path).await.is_git();
-
-    if git_backed && repo.is_dir() {
-        let _ = HyprCli::new(&state.binaries).thoughts_uninit(&repo).await;
-    }
-
-    let path_for_db = path.clone();
-    db_task(state.db.clone(), move |db| db.delete_project(&path_for_db)).await?;
-
-    if delete_files && repo.is_dir() {
-        if let Err(e) = remove_dir_all_bg(&repo).await {
-            log::warn!("could not delete {}: {e}", repo.display());
-        }
-    }
-
+    let git_backed = state.runtime.projects().source_of(&path).await.is_git();
+    state
+        .runtime
+        .projects()
+        .remove(&path, delete_files)
+        .await
+        .map_err(AppError::from)?;
     if git_backed {
-        state.config.invalidate().await;
         let _ = crate::events::ConfigChanged.emit(&app);
-        crate::rebuild_thoughts_index(app.clone()).await;
     }
     Ok(())
 }
@@ -1152,38 +503,34 @@ pub async fn remove_project(
 #[tauri::command]
 #[specta::specta]
 pub async fn reorder_projects(state: State<'_, AppState>, paths: Vec<String>) -> CmdResult<()> {
-    db_task(state.db.clone(), move |db| db.reorder_projects(&paths)).await?;
-    Ok(())
+    state
+        .runtime
+        .projects()
+        .reorder(paths)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repos::GithubRepo>> {
-    let Ok(gh) = state.binaries.require(BinaryKind::Gh).await else {
-        return Ok(Vec::new());
-    };
-    match repos::github_repos(&gh, 100).await {
-        Ok(list) => Ok(list),
-        Err(e) => {
-            log::debug!("gh repo list unavailable: {e}");
-            Ok(Vec::new())
-        }
-    }
+    state
+        .runtime
+        .projects()
+        .recent_repos()
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn list_thoughts_profiles(state: State<'_, AppState>) -> CmdResult<Vec<ThoughtsProfile>> {
-    let thoughts = match state.config.load().await {
-        Ok(loaded) => loaded.config.thoughts.clone(),
-        Err(CoreError::ConfigMissing { .. }) => None,
-        Err(e) => return Err(AppError::from(e)),
-    };
-    blocking("list_thoughts_profiles", move || match thoughts {
-        Some(t) => list_profiles(&t),
-        None => vec![bootstrap_default_profile()],
-    })
-    .await
+    state
+        .runtime
+        .projects()
+        .profiles()
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -1194,72 +541,14 @@ pub async fn create_thoughts_profile(
     name: String,
     thoughts_repo: Option<String>,
 ) -> CmdResult<ThoughtsProfile> {
-    let name = name.trim().to_string();
-    validate_profile_name(&name).map_err(AppError::from)?;
-
-    let loaded = state.config.load().await.map_err(AppError::from)?;
-    if loaded
-        .config
-        .thoughts
-        .as_ref()
-        .is_some_and(|t| t.profiles.contains_key(&name))
-    {
-        return Err(AppError::from(CoreError::ProfileExists { name }));
-    }
-
-    let repo = thoughts_repo
-        .as_deref()
-        .map(str::trim)
-        .filter(|r| !r.is_empty())
-        .map(String::from)
-        .unwrap_or_else(|| format!("~/{name}-thoughts"));
-
-    let root = hyprlayer_core::config::expand_path(&repo);
-    if matches!(
-        classify_root(&root, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR),
-        RootState::Scaffoldable | RootState::Adoptable
-    ) {
-        let git = state
-            .binaries
-            .require(BinaryKind::Git)
-            .await
-            .map_err(AppError::from)?;
-        let user = loaded
-            .config
-            .thoughts
-            .as_ref()
-            .map(|t| t.user.as_str())
-            .unwrap_or_default();
-        scaffold_thoughts_root(&git, &root, user, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
-            .await
-            .map_err(AppError::from)?;
-    }
-
-    let cwd = state
-        .config
-        .path()
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(std::env::temp_dir);
-    HyprCli::new(&state.binaries)
-        .thoughts_profile_create(&cwd, &name, &repo, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
+    let profile = state
+        .runtime
+        .projects()
+        .create_profile(&name, thoughts_repo)
         .await
         .map_err(AppError::from)?;
-
-    state.config.invalidate().await;
     let _ = crate::events::ConfigChanged.emit(&app);
-
-    let loaded = state.config.load().await.map_err(AppError::from)?;
-    let thoughts = loaded
-        .config
-        .thoughts
-        .clone()
-        .ok_or_else(AppError::thoughts_not_configured)?;
-    blocking("create_thoughts_profile", move || {
-        get_profile(&thoughts, &name)
-    })
-    .await?
-    .ok_or_else(|| AppError::internal("profile missing from config after CLI create"))
+    Ok(profile)
 }
 
 #[tauri::command]
@@ -1269,11 +558,13 @@ pub async fn sync_thoughts(
     path: String,
     message: Option<String>,
 ) -> CmdResult<SyncReport> {
-    let output = HyprCli::new(&state.binaries)
-        .thoughts_sync(Path::new(&path), message.as_deref())
-        .await?;
-    state.config.invalidate().await;
-    Ok(SyncReport { output })
+    let result = state
+        .runtime
+        .projects()
+        .sync_thoughts(core_projects::SyncThoughtsRequest { path, message })
+        .await
+        .map_err(AppError::from)?;
+    Ok(SyncReport::from(result))
 }
 
 #[tauri::command]
@@ -1282,111 +573,13 @@ pub async fn run_backend_health(
     state: State<'_, AppState>,
     path: String,
 ) -> CmdResult<HealthReport> {
-    let mut checks = Vec::new();
-
-    let git_backed = project_source(&state, &path).await.is_git();
-
-    if !git_backed {
-        let dir = Path::new(&path);
-        let exists = dir.is_dir();
-        checks.push(HealthCheck {
-            id: "folder.exists".into(),
-            label: "Project folder".into(),
-            status: pass_if(exists),
-            detail: Some(path.clone()),
-            remedy: (!exists).then(|| {
-                "The folder was moved or deleted. Remove the project and re-add it.".into()
-            }),
-        });
-        return Ok(HealthReport { checks });
-    }
-
-    match HyprCli::new(&state.binaries)
-        .storage_info(Path::new(&path))
+    let result = state
+        .runtime
+        .projects()
+        .backend_health(&path)
         .await
-    {
-        Ok(info) => {
-            checks.push(HealthCheck {
-                id: "project.mapped".into(),
-                label: "Project mapping".into(),
-                status: pass_if(info.mapped_name.is_some()),
-                detail: info.mapped_name.clone(),
-                remedy: if info.mapped_name.is_some() {
-                    None
-                } else {
-                    Some("Run `hyprlayer thoughts init` in this repository.".into())
-                },
-            });
-
-            checks.push(HealthCheck {
-                id: "backend.kind".into(),
-                label: "Storage backend".into(),
-                status: CheckStatus::Pass,
-                detail: Some(info.backend.clone()),
-                remedy: None,
-            });
-        }
-        Err(err) => {
-            let app_err = AppError::from(err);
-            checks.push(HealthCheck {
-                id: "project.mapped".into(),
-                label: "Project mapping".into(),
-                status: CheckStatus::Fail,
-                detail: Some(app_err.message),
-                remedy: app_err.remedy,
-            });
-        }
-    }
-
-    checks.extend(thoughts_health_checks(&state, &path).await);
-
-    Ok(HealthReport { checks })
-}
-
-async fn thoughts_health_checks(state: &AppState, path: &str) -> Vec<HealthCheck> {
-    let Ok(loaded) = state.config.load().await else {
-        return Vec::new();
-    };
-    let Some(thoughts) = loaded.config.thoughts.as_ref() else {
-        return Vec::new();
-    };
-    let effective = thoughts.effective_config_for(path);
-    if !effective.backend.kind().uses_filesystem() {
-        return Vec::new();
-    }
-
-    let mut checks = Vec::new();
-
-    if let Some(root) = effective.backend.thoughts_root() {
-        let exists = root.is_dir();
-        checks.push(HealthCheck {
-            id: "thoughts.root".into(),
-            label: "Thoughts storage root".into(),
-            status: pass_if(exists),
-            detail: Some(root.display().to_string()),
-            remedy: (!exists).then(|| "The configured thoughts directory does not exist. Re-run `hyprlayer thoughts init` or fix the path in the hyprlayer config.".into()),
-        });
-    }
-
-    let repo = Path::new(path);
-    let repo_thoughts = repo.join(hyprlayer_core::worktree::THOUGHTS_DIR);
-    let broken = thoughts_links::broken_thoughts_links(repo, &effective);
-    let links_ok = broken.is_empty();
-    checks.push(HealthCheck {
-        id: "thoughts.symlinks".into(),
-        label: "Repository thoughts/ links".into(),
-        status: pass_if(links_ok),
-        detail: Some(if links_ok {
-            repo_thoughts.display().to_string()
-        } else {
-            format!("broken or stale: thoughts/{}", broken.join(", thoughts/"))
-        }),
-        remedy: (!links_ok).then(|| {
-            "Run `hyprlayer thoughts init` in the repository to recreate the links.".into()
-        }),
-    });
-
-    checks
+        .map_err(AppError::from)?;
+    Ok(HealthReport::from(result))
 }
 
 #[tauri::command]
@@ -1395,12 +588,12 @@ pub async fn get_worktree_files(
     state: State<'_, AppState>,
     path: String,
 ) -> CmdResult<Vec<String>> {
-    let _ = &state;
-    blocking("read_repo_settings", move || {
-        hyprlayer_core::repo_settings::read(std::path::Path::new(&path)).map(|s| s.worktree.copy)
-    })
-    .await?
-    .map_err(AppError::from)
+    state
+        .runtime
+        .projects()
+        .worktree_files(&path)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -1410,20 +603,12 @@ pub async fn set_worktree_files(
     path: String,
     patterns: Vec<String>,
 ) -> CmdResult<Vec<String>> {
-    let _ = &state;
-    let cleaned: Vec<String> = patterns
-        .into_iter()
-        .map(|p| p.trim().to_string())
-        .filter(|p| !p.is_empty())
-        .collect();
-    let p = path.clone();
-    let saved = cleaned.clone();
-    blocking("write_repo_settings", move || {
-        hyprlayer_core::repo_settings::set_worktree_copy(std::path::Path::new(&p), &cleaned)
-    })
-    .await?
-    .map_err(AppError::from)?;
-    Ok(saved)
+    state
+        .runtime
+        .projects()
+        .set_worktree_files(&path, patterns)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -1432,26 +617,10 @@ pub async fn check_worktree_files(
     state: State<'_, AppState>,
     path: String,
 ) -> CmdResult<hyprlayer_core::worktree::seed::SeedReport> {
-    let _ = &state;
-    blocking("check_worktree_files", move || {
-        let repo = std::path::Path::new(&path);
-        let patterns = hyprlayer_core::repo_settings::read(repo)
-            .map(|s| s.worktree.copy)
-            .unwrap_or_default();
-        hyprlayer_core::worktree::seed::check_worktree_patterns(repo, &patterns)
-    })
-    .await
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn canonicalized_project_path_has_no_verbatim_prefix() {
-        let here = dunce::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
-        assert!(
-            !here.to_string_lossy().starts_with(r"\\?\"),
-            "registered project path must not carry the \\\\?\\ prefix: {}",
-            here.display(),
-        );
-    }
+    state
+        .runtime
+        .projects()
+        .check_worktree_files(&path)
+        .await
+        .map_err(AppError::from)
 }

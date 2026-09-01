@@ -25,7 +25,7 @@ import {
   type TranscriptItem,
 } from "./transcript";
 
-const TABS_QUESTION = JSON.stringify([
+const TABS_QUESTION: Question[] = [
   {
     question: "Tabs or spaces?",
     header: "Indentation",
@@ -35,7 +35,9 @@ const TABS_QUESTION = JSON.stringify([
       { label: "Spaces", description: "Space characters." },
     ],
   },
-]);
+];
+
+const LEGACY_TABS_QUESTION = JSON.stringify(TABS_QUESTION);
 
 function reduceAll(events: SessionEvent[], start = initialSessionView("starting")): SessionView {
   return events.reduce(reduceEvent, start);
@@ -588,9 +590,37 @@ describe("question flow", () => {
     expect(isBusy(view)).toBe(false);
   });
 
+  it("a legacy string-encoded questionAsk still parks the session with typed questions", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, {
+      kind: "questionAsk",
+      requestId: "q-1",
+      questions: LEGACY_TABS_QUESTION as unknown as Question[],
+    });
+    expect(view.state).toBe("awaiting_question");
+    expect(view.pendingQuestion).toEqual({ requestId: "q-1", questions: TABS_QUESTION });
+  });
+
+  it("a questionAsk with a missing or malformed questions field parks with no questions", () => {
+    for (const questions of [undefined, null, "not json{", 17, { not: "an array" }]) {
+      let view = initialSessionView("running");
+      view = reduceEvent(view, {
+        kind: "questionAsk",
+        requestId: "q-1",
+        questions: questions as unknown as Question[],
+      });
+      expect(view.state).toBe("awaiting_question");
+      expect(view.pendingQuestion).toEqual({ requestId: "q-1", questions: [] });
+    }
+  });
+
   it("parseQuestions drops malformed payloads instead of throwing", () => {
+    expect(parseQuestions(undefined)).toEqual([]);
+    expect(parseQuestions(null)).toEqual([]);
+    expect(parseQuestions(17)).toEqual([]);
     expect(parseQuestions("not json")).toEqual([]);
     expect(parseQuestions(JSON.stringify({ not: "an array" }))).toEqual([]);
+    expect(parseQuestions(TABS_QUESTION)).toEqual(TABS_QUESTION);
     const mixed = JSON.stringify([
       { header: "x", options: [] },
       { question: "Real?", options: [{ label: "Yes" }, { bogus: true }] },

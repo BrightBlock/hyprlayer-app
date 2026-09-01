@@ -31,6 +31,9 @@ tmp="$(mktemp)"
 sed -E 's/"createUpdaterArtifacts"[[:space:]]*:[[:space:]]*true/"createUpdaterArtifacts": false/' \
   "$CONF" > "$tmp" && mv "$tmp" "$CONF"
 
+step "Verifying hyprlayer-models + hyprlayer-core build standalone"
+cargo check -p hyprlayer-models -p hyprlayer-core   # specta-less: the app enables it, embedders don't
+
 step "pnpm install (frozen lockfile)"
 pnpm install --frozen-lockfile
 

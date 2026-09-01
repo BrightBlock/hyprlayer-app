@@ -16,6 +16,7 @@ const mutate = vi.fn();
 const confirmMock = vi.fn(async (..._args: unknown[]) => true);
 
 vi.mock("../../lib/queries", () => ({
+  invalidateBootstrap: vi.fn(),
   useSetAppSettings: () => ({ mutate, isError: false, error: null }),
   useBootstrap: () => ({
     data: {

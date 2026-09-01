@@ -1,22 +1,12 @@
-use std::io::BufRead;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::PathBuf;
 
-use base64::Engine as _;
-use hyprlayer_core::terminal::{PtySession, SpawnTerminal, TerminalEvent};
+use hyprlayer_core::runtime::terminals as core_terminals;
+use hyprlayer_core::terminal::TerminalEvent;
 use tauri::ipc::Channel;
 use tauri::State;
-use tokio::sync::broadcast;
 
-use super::db_task;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
-use crate::terminal_registry::TerminalRegistry;
-
-const B64: base64::engine::general_purpose::GeneralPurpose =
-    base64::engine::general_purpose::STANDARD;
-
-const CAPTURE_SKEW_MS: f64 = 2000.0;
 
 #[tauri::command]
 #[specta::specta]
@@ -27,42 +17,17 @@ pub async fn terminal_open(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let ws = {
-        let id = workstream_id.clone();
-        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
-    }
-    .ok_or_else(|| AppError {
-        code: "workstream_not_found".into(),
-        message: format!("No workstream with id {workstream_id}"),
-        remedy: None,
-    })?;
-
-    let path = state.binaries.augmented_path().await;
-    let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-
-    let session = PtySession::spawn(SpawnTerminal {
-        shell: default_shell(),
-        args: vec!["-l".to_string()],
-        cwd: PathBuf::from(&ws.worktree_path),
-        cols,
-        rows,
-        env,
-        workstream_id: ws.id.clone(),
-    })
-    .map_err(|e| AppError::internal(format!("open pty: {e}")))?;
-
-    let terminal_id = uuid::Uuid::new_v4().to_string();
-    state
-        .terminals
-        .insert(terminal_id.clone(), session.clone())
-        .await;
-    attach_stream(
-        &session,
-        on_event,
-        state.terminals.clone(),
-        terminal_id.clone(),
-    );
-    Ok(terminal_id)
+    let attachment = state
+        .runtime
+        .terminals()
+        .open(core_terminals::OpenTerminalRequest {
+            workstream_id,
+            cols,
+            rows,
+        })
+        .await
+        .map_err(AppError::from)?;
+    Ok(pump(attachment, on_event))
 }
 
 #[tauri::command]
@@ -72,11 +37,19 @@ pub async fn terminal_attach(
     terminal_id: String,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<bool> {
-    let Some(session) = state.terminals.get(&terminal_id).await else {
-        return Ok(false);
-    };
-    attach_stream(&session, on_event, state.terminals.clone(), terminal_id);
-    Ok(true)
+    let attachment = state
+        .runtime
+        .terminals()
+        .attach(core_terminals::AttachTerminalRequest { terminal_id })
+        .await
+        .map_err(AppError::from)?;
+    Ok(match attachment {
+        Some(attachment) => {
+            pump(attachment, on_event);
+            true
+        }
+        None => false,
+    })
 }
 
 #[tauri::command]
@@ -86,14 +59,12 @@ pub async fn terminal_write(
     terminal_id: String,
     data: String,
 ) -> CmdResult<()> {
-    let bytes = B64
-        .decode(data)
-        .map_err(|e| AppError::internal(format!("bad input: {e}")))?;
-    if let Some(s) = state.terminals.get(&terminal_id).await {
-        s.write_input(&bytes)
-            .map_err(|e| AppError::internal(e.to_string()))?;
-    }
-    Ok(())
+    state
+        .runtime
+        .terminals()
+        .write(core_terminals::WriteTerminalRequest { terminal_id, data })
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -104,19 +75,27 @@ pub async fn terminal_resize(
     cols: u16,
     rows: u16,
 ) -> CmdResult<()> {
-    if let Some(s) = state.terminals.get(&terminal_id).await {
-        let _ = s.resize(cols, rows);
-    }
-    Ok(())
+    state
+        .runtime
+        .terminals()
+        .resize(core_terminals::ResizeTerminalRequest {
+            terminal_id,
+            cols,
+            rows,
+        })
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> CmdResult<()> {
-    if let Some(s) = state.terminals.remove(&terminal_id).await {
-        s.kill();
-    }
-    Ok(())
+    state
+        .runtime
+        .terminals()
+        .close(core_terminals::CloseTerminalRequest { terminal_id })
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -128,37 +107,13 @@ pub async fn spawn_cli_terminal(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let bin = state
-        .binaries
-        .require(hyprlayer_core::process::binaries::BinaryKind::Hyprlayer)
+    let attachment = state
+        .runtime
+        .terminals()
+        .open_cli(core_terminals::OpenCliTerminalRequest { args, cols, rows })
         .await
         .map_err(AppError::from)?;
-    let path = state.binaries.augmented_path().await;
-    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-
-    let session = PtySession::spawn(SpawnTerminal {
-        shell: bin,
-        args,
-        cwd,
-        cols,
-        rows,
-        env: vec![("PATH".into(), path.to_string_lossy().into_owned())],
-        workstream_id: "onboarding".into(),
-    })
-    .map_err(|e| AppError::internal(format!("open pty: {e}")))?;
-
-    let terminal_id = uuid::Uuid::new_v4().to_string();
-    state
-        .terminals
-        .insert(terminal_id.clone(), session.clone())
-        .await;
-    attach_stream(
-        &session,
-        on_event,
-        state.terminals.clone(),
-        terminal_id.clone(),
-    );
-    Ok(terminal_id)
+    Ok(pump(attachment, on_event))
 }
 
 #[tauri::command]
@@ -170,34 +125,17 @@ pub async fn spawn_shell_terminal(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let path = state.binaries.augmented_path().await;
-    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-
-    let args = login_shell_args(&command);
-
-    let session = PtySession::spawn(SpawnTerminal {
-        shell: default_shell(),
-        args,
-        cwd,
-        cols,
-        rows,
-        env: vec![("PATH".into(), path.to_string_lossy().into_owned())],
-        workstream_id: "harness".into(),
-    })
-    .map_err(|e| AppError::internal(format!("open pty: {e}")))?;
-
-    let terminal_id = uuid::Uuid::new_v4().to_string();
-    state
-        .terminals
-        .insert(terminal_id.clone(), session.clone())
-        .await;
-    attach_stream(
-        &session,
-        on_event,
-        state.terminals.clone(),
-        terminal_id.clone(),
-    );
-    Ok(terminal_id)
+    let attachment = state
+        .runtime
+        .terminals()
+        .open_shell(core_terminals::OpenShellTerminalRequest {
+            command,
+            cols,
+            rows,
+        })
+        .await
+        .map_err(AppError::from)?;
+    Ok(pump(attachment, on_event))
 }
 
 #[tauri::command]
@@ -211,46 +149,19 @@ pub async fn agent_open(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let ws = {
-        let id = workstream_id.clone();
-        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
-    }
-    .ok_or_else(|| AppError {
-        code: "workstream_not_found".into(),
-        message: format!("No workstream with id {workstream_id}"),
-        remedy: None,
-    })?;
-
-    if command.trim().is_empty() {
-        return Err(AppError::internal("multiplexer engine command is empty"));
-    }
-
-    let path = state.binaries.augmented_path().await;
-    let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-
-    let session = PtySession::spawn(SpawnTerminal {
-        shell: default_shell(),
-        args: login_shell_args(&agent_command_line(&command, &args)),
-        cwd: PathBuf::from(&ws.worktree_path),
-        cols,
-        rows,
-        env,
-        workstream_id: ws.id.clone(),
-    })
-    .map_err(|e| AppError::internal(format!("open agent pty: {e}")))?;
-
-    let terminal_id = uuid::Uuid::new_v4().to_string();
-    state
-        .terminals
-        .insert(terminal_id.clone(), session.clone())
-        .await;
-    attach_stream(
-        &session,
-        on_event,
-        state.terminals.clone(),
-        terminal_id.clone(),
-    );
-    Ok(terminal_id)
+    let attachment = state
+        .runtime
+        .terminals()
+        .open_agent(core_terminals::OpenAgentTerminalRequest {
+            workstream_id,
+            command,
+            args,
+            cols,
+            rows,
+        })
+        .await
+        .map_err(AppError::from)?;
+    Ok(pump(attachment, on_event))
 }
 
 #[tauri::command]
@@ -261,16 +172,16 @@ pub async fn agent_resize(
     cols: u16,
     rows: u16,
 ) -> CmdResult<()> {
-    let Some(session) = state.terminals.get(&terminal_id).await else {
-        return Ok(());
-    };
-    let nudge = rows.saturating_sub(1).max(2);
-    if nudge != rows {
-        let _ = session.resize(cols, nudge);
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-    }
-    let _ = session.resize(cols, rows);
-    Ok(())
+    state
+        .runtime
+        .terminals()
+        .resize_agent(core_terminals::ResizeAgentTerminalRequest {
+            terminal_id,
+            cols,
+            rows,
+        })
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -282,19 +193,17 @@ pub async fn capture_agent_session(
     after_ms: f64,
     exclude: Vec<String>,
 ) -> CmdResult<Option<String>> {
-    let worktree = {
-        let id = workstream_id.clone();
-        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
-    }
-    .map(|ws| ws.worktree_path);
-    let id = tokio::task::spawn_blocking(move || match engine_id.as_str() {
-        "codex" => capture_codex(worktree.as_deref(), after_ms, &exclude),
-        "antigravity" => capture_antigravity(after_ms, &exclude),
-        _ => None,
-    })
-    .await
-    .map_err(|e| AppError::internal(format!("capture join: {e}")))?;
-    Ok(id)
+    state
+        .runtime
+        .terminals()
+        .capture_session(core_terminals::CaptureSessionRequest {
+            workstream_id,
+            engine_id,
+            after_ms,
+            exclude,
+        })
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -304,27 +213,15 @@ pub async fn mint_codex_session(
     workstream_id: String,
     command: String,
 ) -> CmdResult<Option<String>> {
-    let ws = {
-        let id = workstream_id.clone();
-        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
-    }
-    .ok_or_else(|| AppError {
-        code: "workstream_not_found".into(),
-        message: format!("No workstream with id {workstream_id}"),
-        remedy: None,
-    })?;
-    let path = state.binaries.augmented_path().await;
-    let worktree = PathBuf::from(&ws.worktree_path);
-    let path = path.to_string_lossy().into_owned();
-    let id = tokio::time::timeout(
-        std::time::Duration::from_secs(90),
-        tokio::task::spawn_blocking(move || mint_codex_blocking(&command, &worktree, &path)),
-    )
-    .await
-    .ok()
-    .and_then(Result::ok)
-    .flatten();
-    Ok(id)
+    state
+        .runtime
+        .terminals()
+        .mint_codex_session(core_terminals::MintCodexSessionRequest {
+            workstream_id,
+            command,
+        })
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -335,275 +232,43 @@ pub async fn agent_session_exists(
     engine_id: String,
     session_id: String,
 ) -> CmdResult<bool> {
-    let worktree = {
-        let id = workstream_id.clone();
-        db_task(state.db.clone(), move |db| db.get_workstream(&id)).await?
-    }
-    .map(|ws| ws.worktree_path);
-    let exists = tokio::task::spawn_blocking(move || match engine_id.as_str() {
-        "claude-code" => claude_session_exists(worktree.as_deref(), &session_id),
-        "codex" => codex_rollout_exists(&session_id),
-        "antigravity" => antigravity_brain_exists(&session_id),
-        _ => false,
-    })
-    .await
-    .map_err(|e| AppError::internal(format!("session-exists join: {e}")))?;
-    Ok(exists)
-}
-
-fn agent_command_line(command: &str, args: &[String]) -> String {
-    #[cfg(not(windows))]
-    {
-        let mut parts = Vec::with_capacity(args.len() + 2);
-        parts.push("exec".to_string());
-        parts.push(sh_quote(command));
-        parts.extend(args.iter().map(|a| sh_quote(a)));
-        parts.join(" ")
-    }
-    #[cfg(windows)]
-    {
-        let mut parts = Vec::with_capacity(args.len() + 1);
-        parts.push(ps_quote(command));
-        parts.extend(args.iter().map(|a| ps_quote(a)));
-        format!("& {}", parts.join(" "))
-    }
-}
-
-#[cfg(not(windows))]
-fn sh_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-#[cfg(windows)]
-fn ps_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
-}
-
-fn mtime_ms(path: &Path) -> Option<f64> {
-    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    Some(
-        modified
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_millis() as f64,
-    )
-}
-
-fn recent_jsonl(dir: &Path, max_depth: usize, cutoff_ms: f64) -> Vec<(PathBuf, f64)> {
-    fn walk(dir: &Path, depth: usize, cutoff: f64, out: &mut Vec<(PathBuf, f64)>) {
-        if depth == 0 {
-            return;
-        }
-        let Ok(rd) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in rd.flatten() {
-            let path = entry.path();
-            let Ok(ft) = entry.file_type() else { continue };
-            if ft.is_dir() {
-                walk(&path, depth - 1, cutoff, out);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                if let Some(m) = mtime_ms(&path) {
-                    if m >= cutoff {
-                        out.push((path, m));
-                    }
-                }
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(dir, max_depth, cutoff_ms, &mut out);
-    out
-}
-
-fn codex_session_meta(file: &Path) -> Option<(String, String)> {
-    let f = std::fs::File::open(file).ok()?;
-    let mut first = String::new();
-    std::io::BufReader::new(f).read_line(&mut first).ok()?;
-    let v: serde_json::Value = serde_json::from_str(first.trim()).ok()?;
-    let payload = v.get("payload")?;
-    let id = payload.get("session_id")?.as_str()?.to_string();
-    let cwd = payload.get("cwd")?.as_str()?.to_string();
-    Some((id, cwd))
-}
-
-fn capture_codex(worktree: Option<&str>, after_ms: f64, exclude: &[String]) -> Option<String> {
-    let root = dirs::home_dir()?.join(".codex").join("sessions");
-    let cutoff = after_ms - CAPTURE_SKEW_MS;
-    let mut best: Option<(f64, String)> = None;
-    for (file, mtime) in recent_jsonl(&root, 4, cutoff) {
-        let Some((id, cwd)) = codex_session_meta(&file) else {
-            continue;
-        };
-        if worktree.is_some_and(|w| w != cwd) || exclude.iter().any(|e| e == &id) {
-            continue;
-        }
-        if best.as_ref().is_none_or(|(m, _)| mtime > *m) {
-            best = Some((mtime, id));
-        }
-    }
-    best.map(|(_, id)| id)
-}
-
-fn mint_codex_blocking(command: &str, worktree: &Path, path: &str) -> Option<String> {
-    use std::process::{Command, Stdio};
-    let mut cmd = Command::new(command);
-    hyprlayer_core::process::appimage::scrub_std(&mut cmd);
-    let mut child = cmd
-        .args([
-            "exec",
-            "--json",
-            "--skip-git-repo-check",
-            "-s",
-            "read-only",
-            "hello.",
-        ])
-        .current_dir(worktree)
-        .env("PATH", path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut id = None;
-    if let Some(stdout) = child.stdout.take() {
-        for line in std::io::BufReader::new(stdout)
-            .lines()
-            .map_while(Result::ok)
-        {
-            if id.is_none() {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if v.get("type").and_then(|t| t.as_str()) == Some("thread.started") {
-                        id = v
-                            .get("thread_id")
-                            .and_then(|t| t.as_str())
-                            .map(String::from);
-                    }
-                }
-            }
-        }
-    }
-    let _ = child.wait();
-    id
-}
-
-fn claude_session_exists(worktree: Option<&str>, session_id: &str) -> bool {
-    let (Some(worktree), Some(home)) = (worktree, dirs::home_dir()) else {
-        return false;
-    };
-    let slug: String = worktree
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    home.join(".claude")
-        .join("projects")
-        .join(slug)
-        .join(format!("{session_id}.jsonl"))
-        .exists()
-}
-
-fn codex_rollout_exists(session_id: &str) -> bool {
-    let Some(root) = dirs::home_dir().map(|h| h.join(".codex").join("sessions")) else {
-        return false;
-    };
-    recent_jsonl(&root, 4, 0.0).iter().any(|(p, _)| {
-        p.file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.contains(session_id))
-    })
-}
-
-fn antigravity_brain_exists(session_id: &str) -> bool {
-    dirs::home_dir()
-        .map(|h| {
-            h.join(".gemini")
-                .join("antigravity-cli")
-                .join("brain")
-                .join(session_id)
-                .is_dir()
+    state
+        .runtime
+        .terminals()
+        .session_exists(core_terminals::SessionExistsRequest {
+            workstream_id,
+            engine_id,
+            session_id,
         })
-        .unwrap_or(false)
+        .await
+        .map_err(AppError::from)
 }
 
-fn capture_antigravity(after_ms: f64, exclude: &[String]) -> Option<String> {
-    let root = dirs::home_dir()?
-        .join(".gemini")
-        .join("antigravity-cli")
-        .join("brain");
-    let cutoff = after_ms - CAPTURE_SKEW_MS;
-    let mut best: Option<(f64, String)> = None;
-    for entry in std::fs::read_dir(&root).ok()?.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || exclude.iter().any(|e| e == &name) {
-            continue;
-        }
-        let Some(m) = mtime_ms(&entry.path()) else {
-            continue;
-        };
-        if m >= cutoff && best.as_ref().is_none_or(|(bm, _)| m > *bm) {
-            best = Some((m, name));
-        }
-    }
-    best.map(|(_, id)| id)
-}
-
-pub(crate) fn attach_stream(
-    session: &PtySession,
+fn pump(
+    attachment: core_terminals::TerminalAttachment,
     on_event: Channel<TerminalEvent>,
-    registry: Arc<TerminalRegistry>,
-    terminal_id: String,
-) {
-    let (rx, scrollback) = session.subscribe_with_scrollback();
-    if !scrollback.is_empty() {
-        let _ = on_event.send(TerminalEvent::Output { data: scrollback });
-    }
-    forward(rx, on_event, registry, terminal_id);
-}
-
-fn forward(
-    mut rx: broadcast::Receiver<TerminalEvent>,
-    on_event: Channel<TerminalEvent>,
-    registry: Arc<TerminalRegistry>,
-    terminal_id: String,
-) {
+) -> String {
+    let core_terminals::TerminalAttachment {
+        terminal_id,
+        mut live,
+    } = attachment;
+    let id = terminal_id.clone();
     tauri::async_runtime::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(ev) => {
-                    let exited = matches!(ev, TerminalEvent::Exited { .. });
-                    let closed = on_event.send(ev).is_err();
-                    if exited {
-                        registry.remove(&terminal_id).await;
-                        break;
-                    }
-                    if closed {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
+        while let Some(ev) = live.recv().await {
+            if on_event.send(ev).is_err() {
+                break;
             }
         }
     });
+    id
 }
 
-#[cfg(not(windows))]
 pub(crate) fn default_shell() -> PathBuf {
-    std::env::var_os("SHELL")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/bin/sh"))
+    core_terminals::default_shell()
 }
 
-#[cfg(windows)]
-pub(crate) fn default_shell() -> PathBuf {
-    which::which("pwsh")
-        .or_else(|_| which::which("powershell"))
-        .ok()
-        .or_else(|| std::env::var_os("ComSpec").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("powershell.exe"))
+pub(crate) fn login_shell_args(command: &str) -> Vec<String> {
+    core_terminals::login_shell_args(command)
 }
 
 #[tauri::command]
@@ -614,19 +279,4 @@ pub fn default_shell_name() -> CmdResult<String> {
         .and_then(|s| s.to_str())
         .unwrap_or("shell")
         .to_string())
-}
-
-pub(crate) fn login_shell_args(command: &str) -> Vec<String> {
-    #[cfg(not(windows))]
-    {
-        vec!["-lc".to_string(), command.to_string()]
-    }
-    #[cfg(windows)]
-    {
-        vec![
-            "-NoProfile".to_string(),
-            "-Command".to_string(),
-            command.to_string(),
-        ]
-    }
 }

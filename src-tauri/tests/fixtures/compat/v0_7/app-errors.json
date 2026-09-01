@@ -1,0 +1,107 @@
+{
+  "settingsConfig": {
+    "code": "config_missing",
+    "message": "hyprlayer config not found at /nonexistent-hyprlayer-config-fixture/hyprlayer/config.json",
+    "remedy": "Run `hyprlayer thoughts init` in a repository, or add a project from the app to bootstrap the config."
+  },
+  "binaries": {
+    "code": "binary_missing",
+    "message": "required binary `claude` was not found",
+    "remedy": "Install Claude Code from https://claude.com/claude-code, or set its path in Settings."
+  },
+  "providersSessions": {
+    "code": "session_not_found",
+    "message": "No live session with id sess-fixture",
+    "remedy": "The session may have ended; start a new one."
+  },
+  "projects": {
+    "code": "project_not_found",
+    "message": "No hyprlayer project is mapped at /tmp/example-project",
+    "remedy": "Add the repository as a project first."
+  },
+  "library": {
+    "code": "internal",
+    "message": "document was written but not indexable",
+    "remedy": null
+  },
+  "agentsPrompts": {
+    "code": "prompts_file_too_large",
+    "message": "That file is too large to be a prompt export.",
+    "remedy": "Choose a .hlprompts file exported from Hyprlayer."
+  },
+  "workstreams": {
+    "code": "internal",
+    "message": "base branch cannot be empty",
+    "remedy": null
+  },
+  "attachments": {
+    "code": "workstream_not_found",
+    "message": "No workstream with id ws-fixture",
+    "remedy": null
+  },
+  "terminals": {
+    "code": "internal",
+    "message": "multiplexer engine command is empty",
+    "remedy": null
+  },
+  "scripts": {
+    "code": "script_empty",
+    "message": "No run script is configured for this project.",
+    "remedy": "Add commands in Project Settings → Scripts."
+  },
+  "profileLock": {
+    "code": "runtime_in_use",
+    "message": "another Hyprlayer runtime is already using the profile at /tmp/example-profile",
+    "remedy": "Quit any other Hyprlayer window or headless process using this profile, then try again."
+  },
+  "configMigration": {
+    "code": "config_needs_migration",
+    "message": "hyprlayer config is schema version 2 and needs migration to 4",
+    "remedy": "Run any hyprlayer command in a terminal (e.g. `hyprlayer storage info`) to upgrade the config file. The app picks it up on the next launch."
+  },
+  "providerAuth": {
+    "code": "provider_credentials_missing",
+    "message": "no Claude credentials found",
+    "remedy": "Log in with the Claude CLI, or set an API key in Settings."
+  },
+  "credentialLookup": {
+    "code": "credential_lookup",
+    "message": "credential lookup failed: keychain is locked",
+    "remedy": null
+  },
+  "migrationLedgerInvalid": {
+    "code": "runtime_migration_ledger_invalid",
+    "message": "runtime migration ledger at /tmp/example-profile/runtime-migrations.json is not valid JSON: missing or non-numeric \"version\"",
+    "remedy": "Restore runtime-migrations.json from a backup, or delete it to let migrations rerun."
+  },
+  "migrationLedgerTooNew": {
+    "code": "runtime_migration_ledger_too_new",
+    "message": "runtime migration ledger at /tmp/example-profile/runtime-migrations.json is version 2, newer than this app supports (max 1)",
+    "remedy": "Update Hyprlayer to a version that can read this profile."
+  },
+  "projectProvisioning": {
+    "code": "repo_exists",
+    "message": "/tmp/example-repo already exists",
+    "remedy": "Remove it first, or choose a different name or location."
+  },
+  "libraryDocuments": {
+    "code": "doc_conflict",
+    "message": "The document changed on disk since you opened it.",
+    "remedy": "Reload the document to pick up the external changes, then re-apply yours."
+  },
+  "agentBundle": {
+    "code": "agent_bundle_not_manageable",
+    "message": "Bundle versions require both Claude Code and Codex to be provisioned.",
+    "remedy": "Update the Hyprlayer CLI, then run `hyprlayer ai reinstall`."
+  },
+  "workstreamLifecycle": {
+    "code": "inplace_exists",
+    "message": "This project already has an in-place workstream.",
+    "remedy": "Archive it first, or create the workstream in a dedicated worktree."
+  },
+  "attachmentTransfer": {
+    "code": "invalid_path",
+    "message": "unsafe or out-of-worktree path: ../escape.txt",
+    "remedy": null
+  }
+}

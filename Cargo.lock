@@ -1355,6 +1355,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs4"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e72ed92b67c146290f88e9c89d60ca163ea417a446f61ffd7b72df3e7f1dfd5"
+dependencies = [
+ "rustix",
+ "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1986,11 +1997,9 @@ version = "0.7.2"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
- "dunce",
  "gtk",
  "hyprlayer-core",
  "log",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "specta",
@@ -2022,15 +2031,20 @@ dependencies = [
  "aho-corasick",
  "base64 0.22.1",
  "dirs 5.0.1",
+ "dunce",
+ "fs4",
  "git2",
  "globset",
+ "hyprlayer-models",
  "junction",
  "libc",
+ "log",
  "memchr",
  "notify",
  "notify-debouncer-full",
  "portable-pty",
  "regex",
+ "reqwest 0.12.28",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2049,6 +2063,15 @@ dependencies = [
  "which",
  "windows-sys 0.60.2",
  "xxhash-rust",
+]
+
+[[package]]
+name = "hyprlayer-models"
+version = "0.7.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
 ]
 
 [[package]]
@@ -5905,6 +5928,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
