@@ -218,6 +218,70 @@ async fn prior_orphan_pids_are_cleared_on_open() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn open_reaps_an_opencode_server_orphaned_by_a_previous_run() {
+    use std::os::unix::process::CommandExt;
+    use std::time::Instant;
+
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let paths = test_paths(root.path());
+    std::fs::create_dir_all(&paths.app_data_dir).unwrap();
+
+    let mut cmd = std::process::Command::new("sleep");
+    cmd.arg("30");
+    cmd.process_group(0);
+    let mut child = cmd.spawn().expect("spawn stand-in server");
+    let pid = child.id();
+
+    let identifiable = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < identifiable {
+        let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        if String::from_utf8_lossy(&cmdline).contains("sleep") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let pid_file = paths
+        .app_data_dir
+        .join(hyprlayer_core::opencode::runtime::OPENCODE_PID_FILE);
+    hyprlayer_core::process::orphan::record(&pid_file, pid, "sleep 30");
+
+    let runtime = RuntimeBuilder::new(test_environment(home.path()), paths.clone())
+        .open()
+        .await
+        .expect("open");
+    runtime.shutdown().await;
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut exited = false;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                exited = true;
+                break;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+            Err(_) => break,
+        }
+    }
+
+    if !exited {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    assert!(
+        exited,
+        "open() must kill an opencode server left behind by a prior run"
+    );
+    assert!(
+        !pid_file.exists(),
+        "open() must drop the record once it has acted on it"
+    );
+}
+
 struct FixedConfigCli {
     result: fn() -> Result<StorageInfo>,
 }

@@ -18,6 +18,9 @@ use crate::store::session_event_codec::questions_from_value;
 
 const EVENT_CAP: usize = 1024;
 
+/// Name, under the app data dir, of the record `HyprlayerRuntime::open` reaps.
+pub const OPENCODE_PID_FILE: &str = "opencode-server.pid";
+
 fn supported_auth_content(content: &str) -> Option<String> {
     let Value::Object(mut auth) = serde_json::from_str::<Value>(content).ok()? else {
         return None;
@@ -38,6 +41,7 @@ pub struct OpenCodeServerConfig {
     pub data_dir: PathBuf,
     pub home: PathBuf,
     pub auth_file: PathBuf,
+    pub pid_file: PathBuf,
 }
 
 #[derive(Default)]
@@ -105,6 +109,7 @@ impl OpenCodeManager {
             model_context: std::collections::HashMap::new(),
             home: PathBuf::new(),
             tasks: Handle::current(),
+            pid_file: PathBuf::new(),
             _child: Mutex::new(child),
         }));
     }
@@ -120,6 +125,7 @@ pub struct OpenCodeServer {
     // ends a session — including the app's non-async exit hook — so they need a
     // handle onto the runtime rather than an ambient `tokio::spawn` context.
     tasks: Handle,
+    pid_file: PathBuf,
     _child: Mutex<crate::process::SupervisedChild>,
 }
 
@@ -131,6 +137,7 @@ impl OpenCodeServer {
             data_dir,
             home,
             auth_file,
+            pid_file,
         } = config;
         let port = free_port()?;
         let base_url = format!("http://127.0.0.1:{port}");
@@ -174,6 +181,10 @@ impl OpenCodeServer {
         let child = crate::process::spawn_supervised(&mut cmd)
             .map_err(|e| format!("spawn `opencode serve`: {e}"))?;
 
+        if let Some(pid) = child.id() {
+            crate::process::orphan::record(&pid_file, pid, &format!("{} serve", bin.display()));
+        }
+
         let client = reqwest::Client::builder()
             .build()
             .map_err(|e| e.to_string())?;
@@ -212,6 +223,7 @@ impl OpenCodeServer {
             model_context,
             home,
             tasks,
+            pid_file,
             _child: Mutex::new(child),
         })
     }
@@ -220,6 +232,7 @@ impl OpenCodeServer {
         if let Ok(child) = self._child.try_lock() {
             child.kill_blocking();
         }
+        crate::process::orphan::clear(&self.pid_file);
     }
 
     fn context_window(&self, model_id: &str) -> Option<u32> {

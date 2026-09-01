@@ -9,6 +9,28 @@ use tokio::sync::broadcast;
 
 const SCROLLBACK_CAP: usize = 256 * 1024;
 const FLUSH_BYTES: usize = 64 * 1024;
+
+/// Chunks the pty reader may run ahead of the encoder. Each is at most 8 KiB, so
+/// the reader can hold ~128 KiB in flight — near VS Code's 100,000-char high
+/// watermark. Blocking the reader stops it draining the pty, and the kernel's own
+/// buffer then backpressures the shell: the effect of VS Code's
+/// `ptyProcess.pause()` without needing an ack protocol, because both ends are
+/// threads in one process. Unbounded, a `cat` of a large file outruns base64
+/// encoding and the queue grows without limit.
+const READ_QUEUE_CHUNKS: usize = 16;
+
+/// Output events retained for subscribers that fall behind. The ring's cost is
+/// `capacity x event size`, and an event is one encoder flush: a few KiB when the
+/// pty trickles, up to `FLUSH_BYTES` of base64 (~87 KiB) when a batch fills. So the
+/// ceiling is high (~178 MiB all-worst-case) but the common case is far smaller.
+///
+/// Left at 2048 deliberately. Shrinking it to 256 — matching the per-attachment
+/// queue downstream — was tried and reverted: a plain `seq 1 50000` burst emits
+/// well over 256 flushes, so a prompt subscriber took a `Lagged` gap and lost
+/// output. Bounding this properly needs byte-based accounting or an ack protocol,
+/// not a smaller constant. `a_burst_larger_than_the_reader_queue_arrives_whole_and_in_order`
+/// fails if someone shrinks it again without that.
+const OUTPUT_RING_EVENTS: usize = 2048;
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
@@ -69,7 +91,7 @@ impl PtySession {
 
         let reader = pair.master.try_clone_reader().map_err(to_io)?;
         let writer = pair.master.take_writer().map_err(to_io)?;
-        let (tx, _rx) = broadcast::channel(2048);
+        let (tx, _rx) = broadcast::channel(OUTPUT_RING_EVENTS);
         let scrollback = Arc::new(StdMutex::new(VecDeque::with_capacity(SCROLLBACK_CAP)));
         let master = Arc::new(StdMutex::new(Some(pair.master)));
 
@@ -86,7 +108,7 @@ impl PtySession {
 
         let (code_tx, code_rx) = std::sync::mpsc::channel::<Option<i32>>();
 
-        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let (chunk_tx, chunk_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(READ_QUEUE_CHUNKS);
 
         let mut reader = reader;
         std::thread::spawn(move || {
@@ -240,6 +262,65 @@ mod tests {
         }
         assert!(seen.contains("MARKER_OK"), "got: {seen:?}");
         s.resize(100, 30).expect("resize ok");
+        s.kill();
+    }
+
+    // `READ_QUEUE_CHUNKS` bounds how far the reader may run ahead of the encoder,
+    // so a burst bigger than that queue blocks the reader. Assert that costs neither
+    // bytes nor liveness. Scrollback is the oracle rather than a live subscriber:
+    // the broadcast ring is explicitly allowed to drop for a receiver that falls
+    // behind (`Lagged`), so it cannot answer "was anything lost in the queue".
+    #[tokio::test]
+    async fn a_burst_larger_than_the_reader_queue_drains_whole_and_in_order() {
+        const LAST: usize = 30_000;
+
+        let s = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), format!("seq 1 {LAST}")],
+            cwd: std::env::temp_dir(),
+            cols: 200,
+            rows: 50,
+            env: vec![],
+            workstream_id: "burst".into(),
+        })
+        .expect("spawn pty");
+
+        // Nobody subscribes: if a full reader queue could wedge the pipeline, or if
+        // the encoder only drained when watched, the tail would never appear.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut raw = Vec::new();
+        while tokio::time::Instant::now() < deadline {
+            raw = s.scrollback_bytes();
+            if String::from_utf8_lossy(&raw).contains(&format!("\r\n{LAST}\r\n")) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        assert!(
+            raw.len() < SCROLLBACK_CAP,
+            "burst must fit in scrollback for it to be a completeness oracle: {} >= {}",
+            raw.len(),
+            SCROLLBACK_CAP
+        );
+        assert!(
+            raw.len() > READ_QUEUE_CHUNKS * 8192,
+            "burst must exceed the in-flight bound to exercise backpressure: {} <= {}",
+            raw.len(),
+            READ_QUEUE_CHUNKS * 8192
+        );
+
+        let numbers: Vec<usize> = String::from_utf8_lossy(&raw)
+            .split(['\r', '\n'])
+            .filter_map(|line| line.parse::<usize>().ok())
+            .collect();
+        assert_eq!(
+            numbers,
+            (1..=LAST).collect::<Vec<_>>(),
+            "output was dropped, reordered or corrupted (saw {} numbers)",
+            numbers.len()
+        );
+
         s.kill();
     }
 
@@ -408,7 +489,7 @@ mod tests {
                 gone = true;
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         assert!(gone, "backgrounded child {child_pid} survived kill()");
     }

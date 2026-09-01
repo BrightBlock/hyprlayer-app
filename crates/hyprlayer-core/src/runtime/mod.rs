@@ -146,6 +146,12 @@ impl HyprlayerRuntime {
             .map(|(k, v)| (*k, std::path::PathBuf::from(v)))
             .collect();
         let binaries = Arc::new(BinaryResolver::initialize(&environment, binary_overrides));
+        crate::process::orphan::reap(
+            &paths
+                .app_data_dir
+                .join(crate::opencode::runtime::OPENCODE_PID_FILE),
+        );
+
         let db_path = paths.app_data_dir.join("hyprlayer.db");
         let db = Arc::new(Db::open(&db_path)?);
 

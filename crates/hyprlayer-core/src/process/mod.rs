@@ -3,6 +3,7 @@ pub mod binaries;
 pub mod exit;
 #[cfg(windows)]
 mod job;
+pub mod orphan;
 
 use std::ffi::OsString;
 use std::path::PathBuf;

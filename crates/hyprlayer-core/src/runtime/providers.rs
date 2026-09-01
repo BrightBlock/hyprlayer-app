@@ -699,6 +699,11 @@ impl ProviderService<'_> {
                 data_dir: self.runtime.paths.app_data_dir.join("opencode"),
                 home: self.runtime.environment.home_dir.clone(),
                 auth_file: self.runtime.paths.opencode_auth_file.clone(),
+                pid_file: self
+                    .runtime
+                    .paths
+                    .app_data_dir
+                    .join(crate::opencode::runtime::OPENCODE_PID_FILE),
             })
             .await
             .map_err(|detail| CoreError::Opencode { detail })

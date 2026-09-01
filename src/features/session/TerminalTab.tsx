@@ -3,6 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands, type TerminalEvent } from "@/lib/bindings";
+import { releaseChannels } from "@/lib/terminal/channelRelease";
 import { unwrap } from "@/lib/ipc";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import {
@@ -48,8 +49,10 @@ export function TerminalTab({
     if (autoFocus) engine.focus();
 
     // Tauri Channels are single-use, including failed attach attempts.
+    const created: Channel<TerminalEvent>[] = [];
     const newChannel = (): Channel<TerminalEvent> => {
       const channel = new Channel<TerminalEvent>();
+      created.push(channel);
       channel.onmessage = (ev) => {
         if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
         else if (ev.kind === "exited")
@@ -133,6 +136,7 @@ export function TerminalTab({
       ro.disconnect();
       engine.dispose();
       engineRef.current = null;
+      releaseChannels(created);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, shellId]);

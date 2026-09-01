@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
+import { releaseChannels } from "@/lib/terminal/channelRelease";
 import {
   attachTerminalClipboard,
   useTerminalThemeSync,
@@ -106,8 +107,10 @@ export function AgentPtyTab({
     if (autoFocus) eng.focus();
 
     let disposed = false;
+    const created: Channel<TerminalEvent>[] = [];
     const newChannel = (): Channel<TerminalEvent> => {
       const channel = new Channel<TerminalEvent>();
+      created.push(channel);
       channel.onmessage = (ev) => {
         if (disposed) return;
         if (ev.kind === "output") eng.write(b64ToBytes(ev.data));
@@ -253,6 +256,7 @@ export function AgentPtyTab({
       ro.disconnect();
       eng.dispose();
       engineRef.current = null;
+      releaseChannels(created);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, shellId]);

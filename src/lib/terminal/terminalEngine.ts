@@ -29,6 +29,8 @@ export interface TerminalEngine {
 
 const FIT_RETRY_LIMIT = 20;
 
+const EMPTY_GRID: TerminalGrid = { cols: 0, rows: 0 };
+
 type XtermCore = {
   _core: {
     _createRenderer: () => unknown;
@@ -51,8 +53,8 @@ function releaseWebglContext(canvas: HTMLCanvasElement | null): void {
 }
 
 class XtermEngine implements TerminalEngine {
-  private readonly term: Terminal;
-  private readonly fitAddon: FitAddon;
+  private term: Terminal | null;
+  private fitAddon: FitAddon | null;
   private webgl?: WebglAddon;
   private rendererReady = false;
   private disposed = false;
@@ -77,6 +79,7 @@ class XtermEngine implements TerminalEngine {
   }
 
   mount(host: HTMLElement): void {
+    if (!this.term) return;
     this.term.open(host);
     try {
       const webgl = new WebglAddon();
@@ -101,7 +104,7 @@ class XtermEngine implements TerminalEngine {
   // canvas down and leaves the terminal with no renderer at all — blank for good.
   // Verified against @xterm/xterm 5.5.0 + @xterm/addon-webgl 0.19.0.
   private restoreDomRenderer(): void {
-    if (this.disposed) return;
+    if (this.disposed || !this.term) return;
     try {
       const core = (this.term as unknown as XtermCore)._core;
       core._renderService.setRenderer(core._createRenderer());
@@ -114,23 +117,23 @@ class XtermEngine implements TerminalEngine {
   }
 
   private webglCanvas(): HTMLCanvasElement | null {
-    const screen = this.term.element?.querySelector(".xterm-screen");
+    const screen = this.term?.element?.querySelector(".xterm-screen");
     if (!screen) return null;
     return [...screen.querySelectorAll("canvas")].find((c) => !c.className) ?? null;
   }
 
   write(data: Uint8Array | string): void {
-    this.term.write(data);
+    this.term?.write(data);
   }
 
   onInput(cb: (data: string) => void): () => void {
-    const sub = this.term.onData(cb);
-    return () => sub.dispose();
+    const sub = this.term?.onData(cb);
+    return () => sub?.dispose();
   }
 
   onKey(cb: (e: { key: string; domEvent: KeyboardEvent }) => void): () => void {
-    const sub = this.term.onKey(cb);
-    return () => sub.dispose();
+    const sub = this.term?.onKey(cb);
+    return () => sub?.dispose();
   }
 
   fit(): TerminalGrid {
@@ -140,6 +143,7 @@ class XtermEngine implements TerminalEngine {
     // cadence usually doesn't. The previous code set rendererReady only
     // inside this same try, so a single miss disabled refresh() forever.
     // Retry on the next frame instead, bounded, and self-heal once ready.
+    if (!this.fitAddon) return EMPTY_GRID;
     try {
       this.fitAddon.fit();
       this.rendererReady = true;
@@ -158,47 +162,55 @@ class XtermEngine implements TerminalEngine {
   }
 
   grid(): TerminalGrid {
+    if (!this.term) return EMPTY_GRID;
     return { cols: this.term.cols, rows: this.term.rows };
   }
 
   refresh(): void {
-    if (!this.rendererReady) return;
+    if (!this.rendererReady || !this.term) return;
     this.term.refresh(0, this.term.rows - 1);
   }
 
   setFontSize(px: number): TerminalGrid {
+    if (!this.term) return EMPTY_GRID;
     this.term.options.fontSize = px;
     return this.fit();
   }
 
   setTheme(theme: TerminalTheme): void {
+    if (!this.term) return;
     this.term.options.theme = theme;
   }
 
   focus(): void {
-    this.term.focus();
+    this.term?.focus();
   }
 
   hasSelection(): boolean {
-    return this.term.hasSelection();
+    return this.term?.hasSelection() ?? false;
   }
 
   selectionText(): string {
-    return this.term.getSelection();
+    return this.term?.getSelection() ?? "";
   }
 
   paste(text: string): void {
-    this.term.paste(text);
+    this.term?.paste(text);
   }
 
   interceptKeys(filter: (e: KeyboardEvent) => boolean): void {
-    this.term.attachCustomKeyEventHandler(filter);
+    this.term?.attachCustomKeyEventHandler(filter);
   }
 
   reset(): void {
-    this.term.reset();
+    this.term?.reset();
   }
 
+  // Dropping both references is what actually frees the scrollback buffer: an
+  // attach callback that outlives this engine keeps the engine reachable, and
+  // `FitAddon.dispose()` is an empty method that leaves the addon's own
+  // `_terminal` field pointing at the Terminal. Verified against
+  // @xterm/addon-fit 0.11.0.
   dispose(): void {
     this.disposed = true;
     const canvas = this.webglCanvas();
@@ -209,7 +221,9 @@ class XtermEngine implements TerminalEngine {
     }
     this.webgl = undefined;
     releaseWebglContext(canvas);
-    this.term.dispose();
+    this.term?.dispose();
+    this.term = null;
+    this.fitAddon = null;
   }
 }
 

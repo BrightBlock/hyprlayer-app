@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type ScriptKind, type TerminalEvent } from "@/lib/bindings";
+import { releaseChannels } from "@/lib/terminal/channelRelease";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
@@ -58,8 +59,10 @@ export function ScriptRunView({
     let id: string | undefined = attachRef.current ?? undefined;
     const reattaching = id != null;
 
+    const created: Channel<TerminalEvent>[] = [];
     const newChannel = (): Channel<TerminalEvent> => {
       const channel = new Channel<TerminalEvent>();
+      created.push(channel);
       channel.onmessage = (ev) => {
         if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
         else if (ev.kind === "exited") {
@@ -135,6 +138,7 @@ export function ScriptRunView({
       ro.disconnect();
       engineRef.current = null;
       engine.dispose();
+      releaseChannels(created);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, gen]);
