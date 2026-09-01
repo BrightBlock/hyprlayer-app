@@ -40,6 +40,8 @@ impl Db {
         conn.pragma_update(None, "busy_timeout", 5_000)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         migrations::migrate(&conn)?;
+        // sqlite_stat1 for ad-hoc joins on DB copies; the app's own PK lookups don't need it.
+        conn.execute_batch("PRAGMA optimize;")?;
         Ok(Self {
             conn: Mutex::new(conn),
             #[cfg(any(test, feature = "test-support"))]
