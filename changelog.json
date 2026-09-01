@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.7.5",
+      "date": "2026-09-01",
+      "summary": "Model pickers show the live Claude catalog, with reasons for unavailable models.",
+      "notes": [
+        "The Claude model pickers now show what your installed CLI actually supports, merged from a live probe instead of a fixed list. The entry that follows the CLI's own default is labeled \"Default\", with the model it currently resolves to shown in the hint beneath it — so you can see what you'll actually get rather than having to guess which one \"default\" means today.",
+        "Models your setup can't use are now listed with the reason they're unavailable, instead of being hidden outright. That covers both the agent editor's model rows and the composer's model menu, where a missing model previously just wasn't there, with nothing to explain why.",
+        "Updating the Claude CLI now refreshes that catalog on its own, rather than leaving a stale list behind until the next restart."
+      ]
+    },
+    {
       "version": "0.7.4",
       "date": "2026-09-01",
       "summary": "Memory fixes: terminal buffers freed, orphaned OpenCode servers reaped, output backpressured.",
