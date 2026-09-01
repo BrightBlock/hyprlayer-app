@@ -313,6 +313,8 @@ const SkillBlock = memo(function SkillBlock({ name, body }: { name: string; body
 // says nothing about whether its work is still going; only the open-task set does.
 const OpenBackgroundIds = createContext<ReadonlySet<string>>(new Set<string>());
 
+const JumpTargetId = createContext<string | null>(null);
+
 function useBackgroundRunning(toolUseId: string): boolean {
   return useContext(OpenBackgroundIds).has(toolUseId);
 }
@@ -700,7 +702,13 @@ function toUnits(items: TranscriptItem[], hasChildren: (it: TranscriptItem) => b
 function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) {
   const [open, setOpen] = useState(false);
   const openBg = useContext(OpenBackgroundIds);
+  const jump = useContext(JumpTargetId);
   const tools = items.filter((i) => i.kind === "tool");
+  const holdsJump =
+    jump !== null && tools.some((t) => t.kind === "tool" && t.toolUseId === jump);
+  useEffect(() => {
+    if (holdsJump) setOpen(true);
+  }, [holdsJump]);
   const running = tools.some(
     (t) => t.kind === "tool" && ((busy && t.result === null) || openBg.has(t.toolUseId)),
   );
@@ -813,7 +821,7 @@ function SubagentBlock({
   const bgRunning = useBackgroundRunning(item.toolUseId);
   const running = bgRunning || (busy && result === null);
   return (
-    <div className="text-xs">
+    <div className="text-xs" data-tooluse-id={item.toolUseId}>
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} running={running} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
@@ -926,6 +934,10 @@ const RESTICK_PX = 24;
 
 const RELOCK_MS = 200;
 
+const JUMP_SETTLE_MS = 150;
+
+const JUMP_MAX_FRAMES = 10;
+
 const SEND_GLIDE_FACTOR = 0.12;
 const SEND_GLIDE_MS = 600;
 
@@ -960,10 +972,54 @@ export const TranscriptView = memo(
     const lastTop = useRef(0);
     const relockUntil = useRef(0);
     const easeFrame = useRef(0);
+    const jumpNonce = useRef(0);
+    const jumping = useRef(false);
+    const jumpSettle = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [jump, setJump] = useState<{ toolUseId: string; nonce: number } | null>(null);
+
+    const settleJump = useCallback(() => {
+      if (jumpSettle.current) clearTimeout(jumpSettle.current);
+      jumpSettle.current = setTimeout(() => {
+        jumping.current = false;
+        jumpSettle.current = null;
+      }, JUMP_SETTLE_MS);
+    }, []);
+
+    // The group holding the target expands via JumpTargetId in a child effect, which
+    // commits a render after this one — so the anchor may not exist yet on the first try.
+    useEffect(() => {
+      if (!jump) return;
+      let frame = 0;
+      let tries = 0;
+      const attempt = () => {
+        const el = scrollRef.current?.querySelector(
+          `[data-tooluse-id="${CSS.escape(jump.toolUseId)}"]`,
+        );
+        if (!el) {
+          if (tries++ < JUMP_MAX_FRAMES) frame = requestAnimationFrame(attempt);
+          return;
+        }
+        atBottom.current = false;
+        jumping.current = true;
+        settleJump();
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      };
+      attempt();
+      return () => {
+        if (frame) cancelAnimationFrame(frame);
+      };
+    }, [jump, settleJump]);
+
+    useEffect(
+      () => () => {
+        if (jumpSettle.current) clearTimeout(jumpSettle.current);
+      },
+      [],
+    );
 
     const pin = useCallback((factor = 0.3) => {
       const el = scrollRef.current;
-      if (!el || !atBottom.current) return;
+      if (!el || !atBottom.current || jumping.current) return;
       const target = el.scrollHeight - el.clientHeight;
       const gap = target - el.scrollTop;
       if (gap <= 0) return;
@@ -976,10 +1032,7 @@ export const TranscriptView = memo(
 
     useImperativeHandle(ref, () => ({
       scrollToTool(toolUseId) {
-        const container = scrollRef.current;
-        if (!container) return;
-        const el = container.querySelector(`[data-tooluse-id="${toolUseId}"]`);
-        if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        setJump({ toolUseId, nonce: jumpNonce.current++ });
       },
       scrollToBottom() {
         atBottom.current = true;
@@ -1004,6 +1057,13 @@ export const TranscriptView = memo(
       const el = scrollRef.current;
       if (!el) return;
       const top = el.scrollTop;
+      // A jump owns the scroll position until it settles. Re-sticking mid-flight would
+      // hand it straight back to the pin loop, which drags it to the bottom again.
+      if (jumping.current) {
+        lastTop.current = top;
+        settleJump();
+        return;
+      }
       const gap = el.scrollHeight - el.clientHeight - top;
       const wasBottom = atBottom.current;
       atBottom.current = stickAfterScroll(lastTop.current, top, gap, wasBottom);
@@ -1077,13 +1137,15 @@ export const TranscriptView = memo(
       >
         <div ref={contentRef} className="mx-auto w-[90%]">
           <OpenBackgroundIds.Provider value={openBackgroundIds}>
-            <ItemList
-              items={topLevel}
-              childrenByParent={childrenByParent}
-              busy={busy}
-              permission={permission}
-              prompt={prompt}
-            />
+            <JumpTargetId.Provider value={jump?.toolUseId ?? null}>
+              <ItemList
+                items={topLevel}
+                childrenByParent={childrenByParent}
+                busy={busy}
+                permission={permission}
+                prompt={prompt}
+              />
+            </JumpTargetId.Provider>
           </OpenBackgroundIds.Provider>
           {connecting && (
             <div className="mt-3 flex items-center gap-2 text-sm text-ink-dim">
