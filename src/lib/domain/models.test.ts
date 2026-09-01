@@ -148,8 +148,8 @@ describe("live catalog merge", () => {
 
   it("prefers live rows and keeps the legacy pins the CLI omits", () => {
     const merged = claudeModels(live);
-    expect(merged.slice(0, 3).map((m) => m.label)).toEqual(["Opus 5", "Sonnet 5", "Haiku 4.5"]);
-    expect(merged[0].hint).toBe("1M · default");
+    expect(merged.slice(0, 3).map((m) => m.label)).toEqual(["Default", "Sonnet 5", "Haiku 4.5"]);
+    expect(merged[0].hint).toBe("Opus 5 · 1M");
     const legacy = merged.find((m) => m.key === "opus-4-7");
     expect(legacy).toMatchObject({ flag: "claude-opus-4-7", unlisted: true });
     expect(merged.filter((m) => m.flag === "sonnet")).toHaveLength(1);
@@ -157,7 +157,7 @@ describe("live catalog merge", () => {
 
   it("keys the null-flag row as the default so stored settings still resolve", () => {
     const merged = claudeModels(live);
-    expect(modelOption("opus", merged)).toMatchObject({ flag: null, label: "Opus 5" });
+    expect(modelOption("opus", merged)).toMatchObject({ flag: null, label: "Default" });
     expect(modelOption("sonnet-1m", merged).flag).toBe("sonnet[1m]");
   });
 

@@ -29,6 +29,7 @@ export function attachEventListeners(): () => void {
     events.binariesChanged.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["health"] });
+      void queryClient.invalidateQueries({ queryKey: ["claude-probe"] });
       void queryClient.invalidateQueries({ queryKey: ["project"] });
       invalidateCliBundleState();
     }),

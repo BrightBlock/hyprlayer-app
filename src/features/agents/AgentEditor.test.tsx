@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -32,31 +33,33 @@ const agent = (managed: boolean): AgentFile => ({
 
 function renderEditor(draft: AgentFile) {
   render(
-    <AgentEditor
-      draft={draft}
-      overlay={DEFAULT_OVERLAY}
-      isDefault={false}
-      patch={vi.fn()}
-      patchOverlay={vi.fn()}
-      onDefault={vi.fn()}
-      dirty={true}
-      tab="setup"
-      onTab={vi.fn()}
-      onBack={vi.fn()}
-      breadcrumb={{ folder: "", onAgents: vi.fn(), onFolder: vi.fn() }}
-      onSave={vi.fn()}
-      onStatus={vi.fn()}
-      onReset={vi.fn()}
-      onExport={vi.fn()}
-      onCopyPath={vi.fn()}
-      saving={false}
-      projectName={null}
-      folders={[]}
-      contextFiles={[]}
-      mcpServers={[]}
-      skills={[]}
-      peers={[]}
-    />,
+    <QueryClientProvider client={new QueryClient()}>
+      <AgentEditor
+        draft={draft}
+        overlay={DEFAULT_OVERLAY}
+        isDefault={false}
+        patch={vi.fn()}
+        patchOverlay={vi.fn()}
+        onDefault={vi.fn()}
+        dirty={true}
+        tab="setup"
+        onTab={vi.fn()}
+        onBack={vi.fn()}
+        breadcrumb={{ folder: "", onAgents: vi.fn(), onFolder: vi.fn() }}
+        onSave={vi.fn()}
+        onStatus={vi.fn()}
+        onReset={vi.fn()}
+        onExport={vi.fn()}
+        onCopyPath={vi.fn()}
+        saving={false}
+        projectName={null}
+        folders={[]}
+        contextFiles={[]}
+        mcpServers={[]}
+        skills={[]}
+        peers={[]}
+      />
+    </QueryClientProvider>,
   );
 }
 

@@ -199,6 +199,7 @@ type ComposerMenuOption = {
   icon?: ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  disabledReason?: string;
   accent?: boolean;
 };
 
@@ -327,9 +328,10 @@ function ComposerMenu({
                     key={it.key}
                     disabled
                     title={
-                      it.disabled && !g.disabled
-                        ? "Locked to this session's provider. Start a new agent to use a different provider"
-                        : undefined
+                      g.disabled
+                        ? undefined
+                        : (it.disabledReason ??
+                          "Locked to this session's provider. Start a new agent to use a different provider")
                     }
                   >
                     <span className="flex w-full items-center gap-2 text-ink-dim/40">
@@ -1137,9 +1139,11 @@ export function SessionChat({
   const claudeRow = (m: ModelOption): ComposerMenuOption => ({
     key: `claude:${m.key}`,
     label: m.label,
-    hint: m.disabled ? "disabled by org policy" : m.hint,
+    hint: m.disabled ? (m.description ?? "unavailable") : m.hint,
     icon: composerMark("claude"),
-    ...(m.disabled ? { disabled: true } : lockOther("claude")),
+    ...(m.disabled
+      ? { disabled: true, disabledReason: m.description ?? "Unavailable in this CLI version" }
+      : lockOther("claude")),
   });
 
   const modelGroups: MenuGroup[] = [

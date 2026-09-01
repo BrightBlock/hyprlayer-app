@@ -28,9 +28,10 @@ import type {
   AgentSkill,
 } from "@/lib/bindings";
 import { HARNESSES } from "@/lib/domain/harnessing";
-import { EFFORTS, MODELS } from "@/lib/domain/models";
+import { claudeModels, EFFORTS } from "@/lib/domain/models";
 import { PERMISSION_MODES } from "@/lib/domain/permissions";
 import { PROMPT_VARS } from "@/lib/domain/promptVars";
+import { useClaudeProbe } from "@/lib/queries";
 import {
   AGENT_TOOLS,
   collaboratorFor,
@@ -118,6 +119,7 @@ export function AgentEditor(props: Props) {
     onReset,
     saving,
   } = props;
+  const catalog = claudeModels(useClaudeProbe().data?.models);
   const isNew = isUnsaved(draft);
   const system = isSystem(draft);
   const managed = draft.managed;
@@ -156,7 +158,7 @@ export function AgentEditor(props: Props) {
             )}
           </div>
           <div className="mt-0.5 truncate font-mono text-xs text-ink-dim">
-            {`${draft.name || "untitled"} · ${modelLabel(draft.model)} · ${
+            {`${draft.name || "untitled"} · ${modelLabel(draft.model, catalog)} · ${
               isAllProjects(draft) ? "all projects" : (props.projectName ?? "this project")
             }`}
           </div>
@@ -325,6 +327,7 @@ function SetupTab({
   projectName,
   folders,
 }: Props) {
+  const catalog = claudeModels(useClaudeProbe().data?.models);
   const descRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const el = descRef.current;
@@ -382,14 +385,15 @@ function SetupTab({
               onSelect={() => patch({ model: null })}
               label="Inherit from session"
             />
-            {MODELS.map((m) => (
+            {catalog.map((m) => (
               <RadioRow
                 key={m.key}
                 name="agent-model"
                 checked={draft.model === m.key}
+                disabled={m.disabled}
                 onSelect={() => patch({ model: m.key })}
                 label={m.label}
-                hint={m.hint}
+                hint={m.disabled ? (m.description ?? "unavailable") : m.hint}
               />
             ))}
           </div>

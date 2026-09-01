@@ -91,13 +91,13 @@ export function liveModelOptions(models: readonly ClaudeModel[]): ModelOption[] 
     const key = keys[i];
     if (!key) return [];
     const oneMillion = isOneMillion(m.flag, m.resolvedModel);
-    const hint = [oneMillion ? "1M" : null, m.flag === null ? "default" : null]
-      .filter(Boolean)
-      .join(" · ");
+    const isDefault = m.flag === null;
+    const name = modelDisplayName(m.resolvedModel) ?? m.displayName.replace(/\s*\(disabled\)$/i, "");
+    const hint = [isDefault ? name : null, oneMillion ? "1M" : null].filter(Boolean).join(" · ");
     return [
       {
         key,
-        label: modelDisplayName(m.resolvedModel) ?? m.displayName,
+        label: isDefault ? "Default" : name,
         hint: hint || undefined,
         flag: m.flag,
         contextWindow: oneMillion ? 1_000_000 : 200_000,
@@ -214,7 +214,9 @@ export function visibleModels(
   keys: readonly string[] | null | undefined,
   catalog: readonly ModelOption[] = MODELS,
 ): ModelOption[] {
-  return visibleModelKeys(keys, catalog).map((key) => modelOption(key, catalog));
+  const shown = new Set(visibleModelKeys(keys, catalog));
+  for (const m of catalog) if (m.disabled) shown.add(m.key);
+  return normalizeVisibleModelKeys([...shown], catalog).map((key) => modelOption(key, catalog));
 }
 
 export type EffortOption = { key: string; label: string };

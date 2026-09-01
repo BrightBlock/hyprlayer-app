@@ -13,7 +13,8 @@ import {
 import { ArchiveIcon, GitBranchIcon, ModeIcon, SearchIcon, UnarchiveIcon, XIcon } from "@/components/icons";
 import type { ShellTab } from "./workstreamTabs";
 import { engineLabel } from "@/features/multiplexer/engines";
-import { modelOption } from "@/lib/domain/models";
+import { claudeModels, modelOption, type ModelOption } from "@/lib/domain/models";
+import { useClaudeProbe } from "@/lib/queries";
 import { formatRelativeTime } from "@/lib/format";
 import type { ArchivedShell, ArchivedStatus } from "./workstreamTabs";
 
@@ -25,19 +26,29 @@ const STATUS: Record<ArchivedStatus, { label: string; tone: BadgeTone }> = {
   idle: { label: "Idle", tone: "dim" },
 };
 
-function modelLabel(shell: ShellTab): string {
+function modelLabel(shell: ShellTab, catalog: readonly ModelOption[]): string {
   if (shell.ptyAgent) return engineLabel(shell.ptyAgent.engineId);
   if (shell.harness === "opencode") return shell.opencodeModel ?? "OpenCode";
   if (shell.harness === "codex") return shell.codexModel ?? "Codex";
-  return modelOption(shell.model).label;
+  return modelOption(shell.model, catalog).label;
 }
 
-function ArchivedMeta({ shell, branch, archivedAt }: { shell: ShellTab; branch: string; archivedAt: number }) {
+function ArchivedMeta({
+  shell,
+  branch,
+  archivedAt,
+  catalog,
+}: {
+  shell: ShellTab;
+  branch: string;
+  archivedAt: number;
+  catalog: readonly ModelOption[];
+}) {
   return (
     <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-ink-dim">
       <span className="inline-flex shrink-0 items-center gap-1">
         <span className="h-1.5 w-1.5 rounded-full bg-brand" />
-        {modelLabel(shell)}
+        {modelLabel(shell, catalog)}
       </span>
       <span className="inline-flex min-w-0 items-center gap-1 font-mono">
         <GitBranchIcon size={11} />
@@ -66,20 +77,23 @@ export function ArchivedAgentsView({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
   const [confirmRemove, setConfirmRemove] = useState<ArchivedShell | null>(null);
+  const probed = useClaudeProbe().data?.models;
+  const catalog = useMemo(() => claudeModels(probed), [probed]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const matched = q
       ? archived.filter(
           (a) =>
-            a.shell.title.toLowerCase().includes(q) || modelLabel(a.shell).toLowerCase().includes(q),
+            a.shell.title.toLowerCase().includes(q) ||
+            modelLabel(a.shell, catalog).toLowerCase().includes(q),
         )
       : archived;
     const sorted = [...matched];
     if (sort === "recent") sorted.sort((a, b) => b.archivedAt - a.archivedAt);
     else sorted.sort((a, b) => a.shell.title.localeCompare(b.shell.title));
     return sorted;
-  }, [archived, query, sort]);
+  }, [archived, catalog, query, sort]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-panel">
@@ -142,7 +156,12 @@ export function ArchivedAgentsView({
                   <div className="truncate text-sm font-medium text-ink" title={a.shell.title}>
                     {a.shell.title}
                   </div>
-                  <ArchivedMeta shell={a.shell} branch={branch} archivedAt={a.archivedAt} />
+                  <ArchivedMeta
+                    shell={a.shell}
+                    branch={branch}
+                    archivedAt={a.archivedAt}
+                    catalog={catalog}
+                  />
                 </div>
                 <Badge tone={STATUS[a.status].tone}>{STATUS[a.status].label}</Badge>
                 <Button onClick={() => onUnarchive(a.shell.id)}>

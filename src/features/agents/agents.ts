@@ -8,7 +8,7 @@ import type {
   AgentRule,
   AgentSkill,
 } from "@/lib/bindings";
-import { MODELS } from "@/lib/domain/models";
+import { MODELS, type ModelOption } from "@/lib/domain/models";
 import { shortSha } from "@/lib/format";
 import { treeIndent } from "@/lib/layout";
 import {
@@ -24,9 +24,12 @@ import {
 
 export const INHERIT_MODEL = "inherit";
 
-export function modelLabel(model: string | null): string {
+export function modelLabel(
+  model: string | null,
+  catalog: readonly ModelOption[] = MODELS,
+): string {
   if (!model || model === INHERIT_MODEL) return "Inherit";
-  const option = MODELS.find((m) => m.key === model);
+  const option = catalog.find((m) => m.key === model) ?? MODELS.find((m) => m.key === model);
   return option ? `${option.label}${option.hint ? ` (${option.hint})` : ""}` : model;
 }
 
