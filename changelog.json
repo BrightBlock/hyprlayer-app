@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.7.3",
+      "date": "2026-09-01",
+      "summary": "Create new projects from the app, plus a fix for stuck working indicators.",
+      "notes": [
+        "Add Project can now create a brand-new project instead of only importing or cloning one. It makes the folder, runs git init on the branch name you pick, puts a README and .gitignore in the first commit, and can publish straight to GitHub in the same pass with an owner/organization picker and live per-step progress. If only the GitHub step fails the project is still usable locally, and you can correct a rejected name or owner and retry just that step rather than starting over.",
+        "Fixed a session that could sit on \"working…\" forever. A background agent's events kept arriving after its parent turn had already finished, and each one re-flagged the session as still streaming. Background agent and subagent tasks now track their own open state, so their spinners stop when the task actually stops.",
+        "The repair for a workstream's broken thoughts links is reachable again — it's an item in the workstream's right-click menu, shown only when the links are genuinely broken. It now refuses outright when the worktree itself is missing, instead of recreating it as an empty shell that would block recovering the workstream properly.",
+        "Settings → Binaries now flags a Codex older than 0.149, which is what the Codex features added in 0.7.2 actually need. Before this, a too-old Codex reported healthy and then failed when a session tried to start.",
+        "Internal: the Rust backend is reorganized behind a runtime library boundary — shared contracts, a core engine, and a thin desktop shell. No behavior change is intended; your settings, database and stored session history carry over untouched, pinned by new compatibility tests against the previous release's on-disk formats."
+      ]
+    },
+    {
       "version": "0.7.2",
       "date": "2026-08-27",
       "summary": "Codex gains Claude skills, agents, and question cards; agent settings repair flow.",
