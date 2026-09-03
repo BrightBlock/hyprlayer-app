@@ -166,7 +166,7 @@ if (-not (Test-Path (Join-Path $SrcDir '.git'))) {
 
 if (-not $NoFetch) {
   Step "Fetching $Ref"
-  try { RunGit @('-C', $SrcDir, 'fetch', '--quiet', '--prune', 'origin') | Out-Null }
+  try { RunGit @('-C', $SrcDir, 'fetch', '--quiet', '--prune', '--tags', 'origin') | Out-Null }
   catch { throw ('fetch failed (try -NoFetch to build what is already here): ' + $_.Exception.Message) }
 }
 
@@ -189,8 +189,17 @@ RunGit @('-C', $SrcDir, 'clean', '-qfd') | Out-Null
 
 Set-Location $SrcDir
 
+# package.json only bumps in the release commit, so a build off untagged main would
+# report the *previous* release and the updater would offer an upgrade to the one it
+# already contains. Take the newest tag instead, and keep the sha as build metadata
+# ('+', not '-') so semver reads it as equal to that release rather than older.
 $Version = (Get-Content (Join-Path $SrcDir 'package.json') -Raw | ConvertFrom-Json).version
-$BuildVersion = if ($NoVersionSuffix) { $Version } else { "$Version+main.$Short" }
+$LatestTag = GitLine @('-C', $SrcDir, 'tag', '--list', 'v[0-9]*', '--sort=-v:refname')
+if ($LatestTag) {
+  $tagVersion = $LatestTag.TrimStart('v')
+  if ([version]$tagVersion -gt [version]$Version) { $Version = $tagVersion }
+}
+$BuildVersion = if ($NoVersionSuffix) { $Version } else { "$Version+dev.$Short" }
 
 $Overlay = 'src-tauri/tauri.devinstall.conf.json'
 $OverlayJs = Join-Path $CacheDir 'overlay.js'

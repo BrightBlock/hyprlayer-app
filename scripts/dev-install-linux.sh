@@ -108,7 +108,7 @@ fi
 
 if [[ $FETCH -eq 1 ]]; then
   step "Fetching $REF"
-  git -C "$SRC_DIR" fetch --quiet --prune origin \
+  git -C "$SRC_DIR" fetch --quiet --prune --tags origin \
     || die "fetch failed (try --no-fetch to build what's already here)"
 fi
 
@@ -130,9 +130,17 @@ git -C "$SRC_DIR" clean -qfd
 
 cd "$SRC_DIR"
 
+# package.json only bumps in the release commit, so a build off untagged main would
+# report the *previous* release and the updater would offer an upgrade to the one it
+# already contains. Take the newest tag instead, and keep the sha as build metadata
+# (`+`, not `-`) so semver reads it as equal to that release rather than older.
 VERSION="$(node -p 'require("./package.json").version')"
+LATEST_TAG="$(git -C "$SRC_DIR" tag --list 'v[0-9]*' --sort=-v:refname | head -1)"
+if [[ -n "$LATEST_TAG" ]]; then
+  VERSION="$(printf '%s\n%s\n' "$VERSION" "${LATEST_TAG#v}" | sort -V | tail -1)"
+fi
 if [[ $VERSION_SUFFIX -eq 1 ]]; then
-  BUILD_VERSION="$VERSION+main.$SHORT"
+  BUILD_VERSION="$VERSION+dev.$SHORT"
 else
   BUILD_VERSION="$VERSION"
 fi
