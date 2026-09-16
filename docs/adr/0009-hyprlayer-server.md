@@ -66,11 +66,36 @@ Two consequences follow, accepted rather than designed around:
 launchd has no `SSH_AUTH_SOCK`, so every `git fetch`/`push` and every `gh` call would
 fail with exactly the failure ADR-0005 exists to prevent. So each attach carries the
 client's `SSH_AUTH_SOCK`, `DISPLAY`, `TERM`, `LANG`, and `LC_*`, and the server merges
-them over `process_env` at every child spawn (plan Phase 4 §7). `RuntimeEnvironment`
+them over `process_env` at every child spawn (plan Phase 4 §7) — terminals, harness
+drivers, lifecycle and Run scripts, and every `git`/`gh` shell-out. The one asymmetry is
+opencode, recorded below. `RuntimeEnvironment`
 therefore stops being a value fixed at `open()` and becomes a base plus a mutable
 overlay. Nothing else in core reads the overlay; the exception is deliberate and
 singular. Remotely, the value the client sends is a path on the *client*, so a remote
 server needs its own agent access (`ssh -A`, or a key on the server).
+
+#### opencode takes the overlay of whoever started it
+
+Every other spawn reads the overlay at spawn time, so the newest attach wins. opencode
+cannot: one `opencode serve` is started lazily and cached for the profile's lifetime
+(`opencode/runtime.rs`, `OpenCodeManager::ensure`), and its sessions are HTTP calls into
+that one process — there is no per-session child to hand an environment to. The overlay
+is therefore baked into `OpenCodeServerConfig` at spawn, and **first attach wins**:
+a server outliving the client that started it keeps that client's `SSH_AUTH_SOCK`.
+
+Invalidating and respawning when the overlay changes was considered and rejected. A
+reconnect almost always brings a new `SSH_AUTH_SOCK` — a new SSH session means a new
+agent socket path — so that rule would kill the opencode server on every client
+relaunch, destroying live sessions to fix a variable. Surviving a client relaunch is
+the whole point of the server (Phase 4); trading it away here would be the larger bug.
+
+What makes the asymmetry tolerable is what the overlay actually carries:
+`SSH_AUTH_SOCK`, `DISPLAY`, `TERM`, `LANG`, `LC_*`. No secrets, no tokens. A stale
+`SSH_AUTH_SOCK` fails the same way an absent one does — `ssh` cannot reach either
+agent, so a non-interactive push fails rather than succeeding wrongly — which makes
+first-attach-wins strictly better than the no-overlay behaviour it replaced, never
+worse. The remaining cost is a confusing failure after a client swap, not a silent
+one. Revisit only if the overlay ever grows a value where stale and absent differ.
 
 ### `RuntimePaths::detect` and hermeticity
 
@@ -181,8 +206,11 @@ frontend leak figure and is not comparable.
   permissions on the socket are the authorization; SSH is the only remote path.
 - No browser or mobile client — there is no listener one could reach, and adding one
   means adding authentication, which this decision deliberately does not design.
-- No change to `TerminalEvent`, `SessionEvent`, or `src/lib/bindings.ts` beyond the
-  one `browse_directory` command the plan's Phase 5 adds.
+- No change to `TerminalEvent` or `SessionEvent`. `src/lib/bindings.ts` gains two
+  things, not one: `browse_directory` (Phase 5) and the `serverDisconnected` event
+  with its `ServerDisconnected` type (Phase 4's follow-up, recorded below).
+  *(Corrected 2026-09-15 — this said "beyond the one command" while the same
+  document already recorded the follow-up by name.)*
 - No change to codex's app-wide `startup_lock()`.
 
 ## Rationale
@@ -209,7 +237,9 @@ would need all of the authentication machinery this decision declines to build.
   session and terminal on that profile. Release notes from that version onward say so.
 - The shell holds no runtime: `AppState` becomes an RPC client handle, and the 161
   Tauri commands keep their signatures while their bodies become RPC calls, so
-  `src/lib/bindings.ts` and the frontend do not change.
+  the frontend does not change *for the transport itself*. It changed for the
+  consequences: a server that outlives the client needs a client that can notice
+  the connection dropped and reattach. See the Phase 4 follow-ups below.
 - `ProfileLock` stays in core and is taken by the server; `tauri-plugin-single-instance`
   keeps answering only "is another *window* open".
 - The desktop never respawns a server that exited. A clean exit is the user's
@@ -373,7 +403,7 @@ would need all of the authentication machinery this decision declines to build.
     yourself and let the app connect to it.
 
     **Three frontend gaps the manual pass surfaced, closed as a follow-up
-    the same day** (the phase itself shipped no frontend change): the scripts
+    the same day** (the transport itself shipped no frontend change): the scripts
     dock now persists its terminal list and backend ids, so a relaunch
     reattaches through the existing `TerminalTab` path instead of opening a
     fresh terminal; `restoreSessionIfNeeded` asks `list_active_sessions` and
@@ -389,7 +419,19 @@ would need all of the authentication machinery this decision declines to build.
     were verified live against a hand-started server on 2026-09-07.
 
     **The env overlay reaches every terminal PTY spawn and every `git`/`gh`
-    shell-out.** `RuntimeEnvironment` gained `set_env_overlay`/`overlay_env`
+    shell-out.** *(Amended 2026-09-15: at the time this was written that was the
+    literal truth and also the bug — it reached nothing else. Validation found
+    harness drivers and script spawns had none of it, so a Commit- or Ship-stage
+    agent pushing on its own, and any `.hyprlayer` Setup/Run script, failed on a
+    daemonized server exactly as ADR-0005 predicts, while a terminal in the same
+    session succeeded. Phase 6's manual `git push` check passed because it used a
+    terminal — the one path that already worked — so a green check here was
+    structurally incapable of catching it. Closed by extending the overlay onto the
+    claude and codex driver env vectors (`runtime/sessions/service.rs`) and onto
+    `script_env()` (`runtime/scripts.rs`), guarded by
+    `the_attach_overlay_reaches_a_lifecycle_script` in
+    `crates/hyprlayer-core/tests/workstream_runtime.rs`, which drives a real Setup
+    script and fails without the fix.)* `RuntimeEnvironment` gained `set_env_overlay`/`overlay_env`
     (env.rs) and `HyprlayerRuntime::set_env_overlay` (mirroring
     `set_foreground`'s shape); `SetEnvOverlay` is a new plain RPC command the
     desktop calls once per connection, right after handshake, alongside the

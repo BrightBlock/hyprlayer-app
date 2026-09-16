@@ -25,11 +25,14 @@ APP_NAME="Hyprlayer Dev"
 BIN_NAME="Hyprlayer-Dev"
 
 INSTALLED_BIN="$PREFIX/bin/$BIN_NAME"
+# supervisor.rs spawns the server from beside the app binary, so the name is
+# fixed and the two must land in the same directory.
+INSTALLED_SERVER="$PREFIX/bin/hyprlayer-server"
 DESKTOP_FILE="$PREFIX/share/applications/$BIN_NAME.desktop"
 DATA_DIR="$HOME/.local/share/$APP_ID"
 CONFIG_DIR="$HOME/.config/$APP_ID"
 ICON_MAP=("32x32:32x32.png" "128x128:128x128.png" "256x256:128x128@2x.png")
-INSTALL_PATHS=("$INSTALLED_BIN" "$DESKTOP_FILE")
+INSTALL_PATHS=("$INSTALLED_BIN" "$INSTALLED_SERVER" "$DESKTOP_FILE")
 for icon in "${ICON_MAP[@]}"; do
   INSTALL_PATHS+=("$PREFIX/share/icons/hicolor/${icon%%:*}/apps/$BIN_NAME.png")
 done
@@ -178,11 +181,20 @@ pnpm tauri build --no-bundle --config "$OVERLAY"
 
 BUILT_BIN="$TARGET_DIR/release/Hyprlayer"
 [[ -x "$BUILT_BIN" ]] || die "expected binary not found: $BUILT_BIN"
+# --no-bundle does no bundling, so nothing installs the sidecar; without this
+# the app starts, finds no server beside it, and dies in the ENOENT dialog.
+BUILT_SERVER="$TARGET_DIR/release/hyprlayer-server"
+[[ -x "$BUILT_SERVER" ]] || die "expected server not found: $BUILT_SERVER — did beforeBuildCommand run?"
 
 step "Installing to $PREFIX"
 mkdir -p "$PREFIX/bin"
 install -m 755 "$BUILT_BIN" "$INSTALLED_BIN.new"
 mv -f "$INSTALLED_BIN.new" "$INSTALLED_BIN"
+if [[ -e "$INSTALLED_SERVER" ]] && ! cmp -s "$BUILT_SERVER" "$INSTALLED_SERVER"; then
+  info "replacing the existing $INSTALLED_SERVER"
+fi
+install -m 755 "$BUILT_SERVER" "$INSTALLED_SERVER.new"
+mv -f "$INSTALLED_SERVER.new" "$INSTALLED_SERVER"
 
 for icon in "${ICON_MAP[@]}"; do
   mkdir -p "$PREFIX/share/icons/hicolor/${icon%%:*}/apps"

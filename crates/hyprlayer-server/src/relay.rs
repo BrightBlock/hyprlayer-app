@@ -47,15 +47,7 @@ fn spawn_detached(app_config_dir: &Path, app_data_dir: &Path) -> io::Result<()> 
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    #[cfg(unix)]
-    cmd.process_group(0);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        cmd.creation_flags(DETACHED_PROCESS);
-    }
-    cmd.spawn()?;
+    hyprlayer_core::process::spawn_orphan(&mut cmd)?;
     Ok(())
 }
 

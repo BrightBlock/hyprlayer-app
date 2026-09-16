@@ -704,6 +704,7 @@ impl ProviderService<'_> {
                     .paths
                     .app_data_dir
                     .join(crate::opencode::runtime::OPENCODE_PID_FILE),
+                overlay: self.runtime.environment.overlay_env(),
             })
             .await
             .map_err(|detail| CoreError::Opencode { detail })

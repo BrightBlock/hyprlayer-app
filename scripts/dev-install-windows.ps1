@@ -41,6 +41,8 @@ $BinName  = 'Hyprlayer-Dev'
 
 $InstallDir   = Join-Path $Prefix $BinName
 $InstalledExe = Join-Path $InstallDir "$BinName.exe"
+# supervisor.rs spawns the server from beside the app binary.
+$InstalledServer = Join-Path $InstallDir 'hyprlayer-server.exe'
 $StartMenu    = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 $Shortcut     = Join-Path $StartMenu "$AppName.lnk"
 $DataDir      = Join-Path $env:APPDATA $AppId
@@ -249,6 +251,12 @@ Run ('pnpm tauri build --no-bundle --config "' + $Overlay + '"')
 
 $BuiltExe = Join-Path $TargetDir 'release\Hyprlayer.exe'
 if (-not (Test-Path $BuiltExe)) { throw "expected binary not found: $BuiltExe" }
+# --no-bundle does no bundling, so nothing installs the sidecar; without this the
+# app starts, finds no server beside it, and dies in the ENOENT dialog.
+$BuiltServer = Join-Path $TargetDir 'release\hyprlayer-server.exe'
+if (-not (Test-Path $BuiltServer)) {
+  throw "expected server not found: $BuiltServer - did beforeBuildCommand run?"
+}
 
 Step "Installing to $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -261,6 +269,19 @@ if (Test-Path $InstalledExe) { Move-Item -Force $InstalledExe $Parked }
 Move-Item -Force $Staged $InstalledExe
 Remove-Item $Parked -Force -ErrorAction SilentlyContinue
 if (Test-Path $Parked) { Warn "$AppName is running; the old exe is parked at $Parked and clears on the next run" }
+
+# The server is a deliberate orphan and outlives the app, so it is more likely
+# than the app to be running here. Same park-and-swap.
+$ServerStaged = "$InstalledServer.new"
+$ServerParked = "$InstalledServer.old"
+Remove-Item $ServerParked -Force -ErrorAction SilentlyContinue
+Copy-Item -Force $BuiltServer $ServerStaged
+if (Test-Path $InstalledServer) { Move-Item -Force $InstalledServer $ServerParked }
+Move-Item -Force $ServerStaged $InstalledServer
+Remove-Item $ServerParked -Force -ErrorAction SilentlyContinue
+if (Test-Path $ServerParked) {
+  Warn "a hyprlayer-server is still running; the old exe is parked at $ServerParked - run ``hyprlayer-server stop`` and rerun"
+}
 
 if (AddToUserPath $InstallDir) {
   Info "added $InstallDir to the user PATH"

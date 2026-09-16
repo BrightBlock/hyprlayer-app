@@ -157,7 +157,12 @@ impl ScriptService<'_> {
 
         let port = self.runtime.scripts.take_port(&item.id).await;
         let augmented = self.runtime.binaries.augmented_path().await;
-        let env = script_env(&item, port, &augmented);
+        let env = script_env(
+            &item,
+            port,
+            &augmented,
+            self.runtime.environment.overlay_env(),
+        );
         let args = login_shell_args(&scripts::build_block(&commands));
 
         let session = PtySession::spawn(SpawnTerminal {
@@ -303,7 +308,8 @@ impl ScriptService<'_> {
             .cwd(item.worktree_path.clone())
             .own_process_group()
             .timeout(Duration::from_secs(timeout));
-        for (key, value) in script_env(&item, port, &augmented) {
+        let overlay = self.runtime.environment.overlay_env();
+        for (key, value) in script_env(&item, port, &augmented, overlay) {
             exec = exec.env(key, value);
         }
 
@@ -348,8 +354,13 @@ impl ScriptService<'_> {
     }
 }
 
-fn script_env(item: &Workstream, port: u16, augmented: &OsStr) -> Vec<(String, String)> {
-    vec![
+fn script_env(
+    item: &Workstream,
+    port: u16,
+    augmented: &OsStr,
+    overlay: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    let mut env = vec![
         ("PATH".to_string(), augmented.to_string_lossy().into_owned()),
         (scripts::ENV_PORT.to_string(), port.to_string()),
         (
@@ -359,7 +370,11 @@ fn script_env(item: &Workstream, port: u16, augmented: &OsStr) -> Vec<(String, S
         (scripts::ENV_BRANCH.to_string(), item.branch.clone()),
         (scripts::ENV_PROJECT.to_string(), item.project_path.clone()),
         (scripts::ENV_SLUG.to_string(), item.slug.clone()),
-    ]
+    ];
+    // A repo script pushing or pulling needs the client's agent socket, same as
+    // an agent does — the server process has none of its own (ADR-0009 §7).
+    env.extend(overlay);
+    env
 }
 
 fn emit_changed(

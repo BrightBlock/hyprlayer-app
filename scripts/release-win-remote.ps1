@@ -61,5 +61,14 @@ $setup = Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' -ErrorAction Stop |
   Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $setup) { throw ("no *-setup.exe found under " + $nsisDir) }
 
+Step "Locating the hyprlayer-server sidecar"
+# Staged by beforeBuildCommand during `tauri build`. The NSIS installer carries
+# it beside the app, and the release publishes it as a standalone asset.
+$serverExe = Join-Path $BuildDir 'src-tauri\binaries\hyprlayer-server-x86_64-pc-windows-msvc.exe'
+if (-not (Test-Path $serverExe)) {
+  throw ("no hyprlayer-server sidecar at " + $serverExe + " - did beforeBuildCommand run?")
+}
+
 Write-Host ""
 Write-Host ("SETUP_EXE=" + $setup.FullName)
+Write-Host ("SERVER_EXE=" + (Resolve-Path $serverExe).ProviderPath)

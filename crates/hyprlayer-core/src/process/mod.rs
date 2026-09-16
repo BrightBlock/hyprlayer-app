@@ -248,6 +248,37 @@ impl SupervisedChild {
     }
 }
 
+/// The mirror of `spawn_supervised`: a child that must *outlive* us.
+///
+/// `DETACHED_PROCESS` leaves the console but not an inherited job object, so a
+/// kill-on-close job — OpenSSH makes one per session — takes the "orphan" down
+/// with its parent. `CREATE_BREAKAWAY_FROM_JOB` leaves the job too, and a job
+/// that forbids breakaway fails the spawn outright, hence the retry.
+pub fn spawn_orphan(cmd: &mut tokio::process::Command) -> std::io::Result<tokio::process::Child> {
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+        cmd.spawn()
+    }
+
+    #[cfg(windows)]
+    {
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        const ERROR_ACCESS_DENIED: i32 = 5;
+
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB);
+        match cmd.spawn() {
+            Err(e) if e.raw_os_error() == Some(ERROR_ACCESS_DENIED) => {
+                tracing::warn!("job forbids breakaway; the server will not outlive this process");
+                cmd.creation_flags(DETACHED_PROCESS);
+                cmd.spawn()
+            }
+            other => other,
+        }
+    }
+}
+
 pub fn spawn_supervised(cmd: &mut tokio::process::Command) -> std::io::Result<SupervisedChild> {
     cmd.kill_on_drop(true);
 

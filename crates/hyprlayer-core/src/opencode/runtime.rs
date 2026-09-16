@@ -42,6 +42,9 @@ pub struct OpenCodeServerConfig {
     pub home: PathBuf,
     pub auth_file: PathBuf,
     pub pid_file: PathBuf,
+    /// The attaching client's env overlay, baked in at spawn. First attach wins:
+    /// this server is cached for the profile's lifetime (ADR-0009).
+    pub overlay: Vec<(String, String)>,
 }
 
 #[derive(Default)]
@@ -152,6 +155,7 @@ impl OpenCodeServer {
             home,
             auth_file,
             pid_file,
+            overlay,
         } = config;
         let port = free_port()?;
         let base_url = format!("http://127.0.0.1:{port}");
@@ -171,6 +175,7 @@ impl OpenCodeServer {
             .current_dir(&home)
             .env("PATH", &path)
             .env("XDG_DATA_HOME", &data_dir)
+            .envs(overlay)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());

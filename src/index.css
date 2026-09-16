@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* Release packaging is not frontend source, and Tailwind v4's Ruby
+   pre-processor aborts the Linux build on a non-ASCII .rb (oxide
+   ruby.rs slices mid-character and unwraps). */
+@source not "../packaging";
 
 @font-face {
   font-family: "Inter Variable";

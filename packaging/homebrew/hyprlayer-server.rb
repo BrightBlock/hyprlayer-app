@@ -1,5 +1,10 @@
 # Formula, not a cask: this is a CLI-shaped binary, not an .app bundle.
-# Lives in BrightBlock/homebrew-tap; @VERSION@/@SHA256@ are filled at release.
+# Lives in BrightBlock/homebrew-tap. The version, both sha256 values and the
+# launchd plist body are substituted by scripts/release-local.sh, which takes
+# the plist from packaging/launchd/ so the two can never drift. Placeholders
+# are spelled only where they are substituted, never in prose -- a mention in
+# a comment would be rewritten too.
+# ASCII only: Tailwind v4's oxide Ruby pre-processor aborts on a non-ASCII .rb.
 class HyprlayerServer < Formula
   desc "Hyprlayer runtime as a headless server, reached over a local socket or SSH"
   homepage "https://brightblock.ai/hyprlayer"
@@ -20,14 +25,25 @@ class HyprlayerServer < Formula
     end
   end
 
+  AGENT_PLIST = <<~PLIST
+@PLIST@
+  PLIST
+
   def install
     bin.install Dir["hyprlayer-server-*"].first => "hyprlayer-server"
+    # Placed, never loaded. The caveats tell the user how, because installing
+    # must not start a server: one server owns the profile, and the desktop
+    # starts its own.
+    # OS.mac?, not an on_macos block: that DSL is class-level only.
+    if OS.mac?
+      (prefix/"ai.brightblock.hyprlayer.server.plist")
+        .write(AGENT_PLIST.gsub("@BIN@", (opt_bin/"hyprlayer-server").to_s))
+    end
   end
 
-  # Deliberately no `service` block. ADR-0009 requires a LaunchAgent in the user's
-  # session — `security find-generic-password` needs an unlocked login keychain,
-  # which a brew-managed daemon does not have. Installing must also never start a
-  # server: one server owns the profile, and the desktop starts its own.
+  # Deliberately no `service` block. ADR-0009 requires a LaunchAgent in the
+  # user's session -- `security find-generic-password` needs an unlocked login
+  # keychain, which a brew-managed daemon does not have.
   def caveats
     <<~EOS
       hyprlayer-server is installed but not running, by design.
@@ -35,7 +51,7 @@ class HyprlayerServer < Formula
       Run it directly:
         hyprlayer-server serve
 
-      Or load it as a user agent (never a LaunchDaemon — the Keychain lookup
+      Or load it as a user agent (never a LaunchDaemon -- the Keychain lookup
       needs an unlocked login keychain):
         cp #{opt_prefix}/ai.brightblock.hyprlayer.server.plist ~/Library/LaunchAgents/
         launchctl load ~/Library/LaunchAgents/ai.brightblock.hyprlayer.server.plist

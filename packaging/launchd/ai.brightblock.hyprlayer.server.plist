@@ -5,16 +5,21 @@
   <key>Label</key>
   <string>ai.brightblock.hyprlayer.server</string>
 
+  <!-- @BIN@ is the absolute path to hyprlayer-server. There is no correct
+       default (/opt/homebrew/bin, /usr/local/bin and /usr/bin are all real
+       install prefixes), so the consumer substitutes it: the Homebrew formula
+       renders it at install time, and a hand install edits it. -->
+
   <!-- A LaunchAgent in ~/Library/LaunchAgents, never a LaunchDaemon: the
        relocated Keychain lookup shells `security find-generic-password`, which
        needs an unlocked login keychain that only a user session has (ADR-0009). -->
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/hyprlayer-server</string>
+    <string>@BIN@</string>
     <string>serve</string>
   </array>
 
-  <!-- Restart on a crash, but let `hyprlayer-server stop` stay stopped —
+  <!-- Restart on a crash, but let `hyprlayer-server stop` stay stopped --
        the launchd equivalent of Restart=on-failure. -->
   <key>KeepAlive</key>
   <dict>

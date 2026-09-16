@@ -26,8 +26,13 @@ WIN_VM_STARTED=0
 LINUX_SSH_HOST="${HYPRLAYER_LINUX_SSH_HOST:-nexus}"
 LINUX_HELPER="scripts/release-linux-remote.sh"
 AUR_PKGNAME="hyprlayer-desktop-bin"
+AUR_SERVER_PKGNAME="hyprlayer-server-bin"
 AUR_SSH="${HYPRLAYER_AUR_SSH:-aur@aur.archlinux.org}"
 AUR_REPO="ssh://${AUR_SSH}/${AUR_PKGNAME}.git"
+AUR_SERVER_REPO="ssh://${AUR_SSH}/${AUR_SERVER_PKGNAME}.git"
+FORMULA_PATH="Formula/hyprlayer-server.rb"
+MAC_SERVER_BIN="src-tauri/binaries/hyprlayer-server-aarch64-apple-darwin"
+LAUNCHD_PLIST="packaging/launchd/ai.brightblock.hyprlayer.server.plist"
 AUR_AUTHOR_NAME="${HYPRLAYER_AUR_AUTHOR_NAME:-Jon Tsiros}"
 AUR_AUTHOR_EMAIL="${HYPRLAYER_AUR_AUTHOR_EMAIL:-jon@brightblock.ai}"
 WIN_OUT="target/windows-release"
@@ -282,6 +287,12 @@ elif [[ "$INCLUDE_WINDOWS" == "1" ]]; then
       mkdir -p "$WIN_OUT"
       scp -q "$WIN_SSH_HOST:${SETUP_REMOTE_FWD}" "$WIN_OUT/$SETUP_NAME" \
         || die "failed to copy $SETUP_NAME down from $WIN_SSH_HOST"
+      SERVER_REMOTE_WIN="$(grep -E '^SERVER_EXE=' "$WIN_LOG" | tail -n1 | sed 's/^SERVER_EXE=//' | tr -d '\r')"
+      [[ -n "$SERVER_REMOTE_WIN" ]] \
+        || { cat "$WIN_LOG"; die "no SERVER_EXE line in Windows build output"; }
+      scp -q "$WIN_SSH_HOST:${SERVER_REMOTE_WIN//\\//}" \
+        "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe" \
+        || die "failed to copy the Windows hyprlayer-server down from $WIN_SSH_HOST"
       ;;
     actions)
       say "Waiting for the GitHub Actions Windows build (${WIN_ACTIONS_REPO})…"
@@ -296,6 +307,10 @@ elif [[ "$INCLUDE_WINDOWS" == "1" ]]; then
       mkdir -p "$WIN_OUT"
       gh run download "$RUN_ID" --repo "$WIN_ACTIONS_REPO" -n windows-installer -D "$WIN_OUT" \
         || die "failed to download windows-installer artifact from run $RUN_ID"
+      # windows-build.yml uploads the installer only. The server asset needs the
+      # ssh builder until that workflow uploads the sidecar too.
+      [[ -f "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe" ]] \
+        || die "the Actions builder produces no hyprlayer-server asset — re-run with HYPRLAYER_WIN_BUILDER=ssh, or --no-windows"
       # $WIN_OUT keeps every past release's installer, so glob order would pick the oldest.
       SETUP_NAME="$WIN_SETUP_NAME"
       [[ -f "$WIN_OUT/$SETUP_NAME" ]] \
@@ -312,17 +327,19 @@ elif [[ "$INCLUDE_WINDOWS" == "1" ]]; then
   ok "Built + signed $SETUP_NAME (sha256 $WIN_SHA)"
 fi
 
+linux_out_path() {
+  grep -E "^$1=" "$LINUX_LOG" | tail -n1 | sed "s/^$1=//" | tr -d '\r'
+}
+
+LINUX_SERVER_BIN="$LINUX_OUT/hyprlayer-server-x86_64-unknown-linux-gnu"
 DEB_NAME=""; RPM_NAME=""
 if [[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" == "1" ]]; then
   DEB_NAME="$LINUX_DEB_NAME"
   RPM_NAME="$(basename "$LINUX_RPM_EXPECTED")"
-  SERVER_REMOTE="$(linux_out_path SERVER_BIN)"
-  if [[ -n "$SERVER_REMOTE" ]]; then
-    scp -q "$LINUX_SSH_HOST:${SERVER_REMOTE}" "$LINUX_OUT/hyprlayer-server-x86_64-unknown-linux-gnu" \
-      || die "failed to copy the Linux hyprlayer-server down from $LINUX_SSH_HOST"
-  else
-    warn "Linux build produced no hyprlayer-server sidecar — the server asset will be missing from this release"
-  fi
+  [[ -f "$LINUX_SERVER_BIN" ]] \
+    || die "cached Linux build has no $LINUX_SERVER_BIN — re-run with --rebuild"
+  [[ -f "$LINUX_OUT/aur-server/PKGBUILD" && -s "$LINUX_OUT/aur-server/.SRCINFO" ]] \
+    || die "cached Linux build has no server AUR files under $LINUX_OUT/aur-server — re-run with --rebuild"
   DEB_SHA="$(shasum -a 256 "$LINUX_OUT/$DEB_NAME" | awk '{print $1}')"
   RPM_SHA="$(shasum -a 256 "$LINUX_OUT/$RPM_NAME" | awk '{print $1}')"
   ok "Reused $DEB_NAME (sha256 $DEB_SHA)"
@@ -335,14 +352,14 @@ elif [[ "$INCLUDE_LINUX" == "1" ]]; then
     echo "──────────────────────────────────────────────────────────"
     die "Linux build failed on $LINUX_SSH_HOST (log above)"
   fi
-  linux_out_path() {
-    grep -E "^$1=" "$LINUX_LOG" | tail -n1 | sed "s/^$1=//" | tr -d '\r'
-  }
   DEB_REMOTE="$(linux_out_path DEB)"
   RPM_REMOTE="$(linux_out_path RPM)"
   AUR_REMOTE="$(linux_out_path AUR_DIR)"
-  [[ -n "$DEB_REMOTE" && -n "$RPM_REMOTE" && -n "$AUR_REMOTE" ]] \
-    || { cat "$LINUX_LOG"; die "Linux build output is missing a DEB/RPM/AUR_DIR line"; }
+  SERVER_REMOTE="$(linux_out_path SERVER_BIN)"
+  AUR_SERVER_REMOTE="$(linux_out_path AUR_SERVER_DIR)"
+  [[ -n "$DEB_REMOTE" && -n "$RPM_REMOTE" && -n "$AUR_REMOTE" \
+     && -n "$SERVER_REMOTE" && -n "$AUR_SERVER_REMOTE" ]] \
+    || { cat "$LINUX_LOG"; die "Linux build output is missing a DEB/RPM/AUR_DIR/SERVER_BIN/AUR_SERVER_DIR line"; }
   DEB_NAME="$(basename "$DEB_REMOTE")"
   RPM_NAME="$(basename "$RPM_REMOTE")"
   mkdir -p "$LINUX_OUT"
@@ -355,6 +372,18 @@ elif [[ "$INCLUDE_LINUX" == "1" ]]; then
     || die "failed to copy the AUR files down from $LINUX_SSH_HOST"
   [[ -f "$LINUX_OUT/aur/PKGBUILD" && -s "$LINUX_OUT/aur/.SRCINFO" ]] \
     || die "AUR files incomplete under $LINUX_OUT/aur (need PKGBUILD + .SRCINFO)"
+  scp -q "$LINUX_SSH_HOST:${SERVER_REMOTE}" "$LINUX_SERVER_BIN" \
+    || die "failed to copy the Linux hyprlayer-server down from $LINUX_SSH_HOST"
+  rm -rf "$LINUX_OUT/aur-server"
+  scp -qr "$LINUX_SSH_HOST:${AUR_SERVER_REMOTE}" "$LINUX_OUT/aur-server" \
+    || die "failed to copy the server AUR files down from $LINUX_SSH_HOST"
+  [[ -f "$LINUX_OUT/aur-server/PKGBUILD" && -s "$LINUX_OUT/aur-server/.SRCINFO" ]] \
+    || die "server AUR files incomplete under $LINUX_OUT/aur-server (need PKGBUILD + .SRCINFO)"
+  SERVER_SHA_REMOTE="$(linux_out_path SERVER_SHA)"
+  grep -qF "$SERVER_SHA_REMOTE" "$LINUX_OUT/aur-server/PKGBUILD" \
+    || die "server PKGBUILD sha256 does not match the built server binary"
+  [[ "$(shasum -a 256 "$LINUX_SERVER_BIN" | awk '{print $1}')" == "$SERVER_SHA_REMOTE" ]] \
+    || die "the copied-down hyprlayer-server does not match the sha the builder reported"
   DEB_SHA="$(shasum -a 256 "$LINUX_OUT/$DEB_NAME" | awk '{print $1}')"
   grep -qF "$DEB_SHA" "$LINUX_OUT/aur/PKGBUILD" \
     || die "PKGBUILD sha256 does not match the copied-down $DEB_NAME ($DEB_SHA)"
@@ -367,7 +396,7 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
   echo ""
   KEYS="darwin-aarch64"
   [[ "$INCLUDE_WINDOWS" == "1" ]] && KEYS="$KEYS + windows-x86_64"
-  ASSET_DESC="dmg + updater tarball"
+  ASSET_DESC="dmg + updater tarball + hyprlayer-server binaries"
   [[ "$INCLUDE_WINDOWS" == "1" ]] && ASSET_DESC="$ASSET_DESC + Windows setup.exe"
   [[ "$INCLUDE_LINUX" == "1" ]] && ASSET_DESC="$ASSET_DESC + Linux deb/rpm"
   echo "About to publish $TAG:"
@@ -376,7 +405,8 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
   echo "  • updater manifest ($KEYS) → $WEBSITE_REPO"
   [[ "$INCLUDE_WINDOWS" == "1" ]] || echo "  Windows installs will NOT be served this version."
   echo "  • Homebrew cask bump → $TAP_REPO"
-  [[ "$INCLUDE_AUR" == "1" ]] && echo "  • AUR push → $AUR_PKGNAME"
+  [[ "$INCLUDE_LINUX" == "1" ]] && echo "  • Homebrew formula bump → $TAP_REPO ($FORMULA_PATH)"
+  [[ "$INCLUDE_AUR" == "1" ]] && echo "  • AUR push → $AUR_PKGNAME + $AUR_SERVER_PKGNAME"
   [[ "$INCLUDE_LINUX" == "1" ]] || echo "  Linux packages will NOT be published this version."
   read -r -p "Proceed? [y/N] " reply
   [[ "$reply" == "y" || "$reply" == "Y" ]] || die "aborted (build artifacts kept under target/)"
@@ -396,25 +426,21 @@ if [[ "$INCLUDE_LINUX" == "1" ]]; then
 fi
 
 # Standalone server binaries, per target triple. These feed the hyprlayer-server
-# packages and the client-managed remote install (ADR-0009). Warn rather than die
-# while nothing consumes them yet; tighten to a hard requirement once it does.
-SERVER_ASSETS=()
-for _s in "src-tauri/binaries/hyprlayer-server-aarch64-apple-darwin" \
-          "$LINUX_OUT/hyprlayer-server-x86_64-unknown-linux-gnu" \
-          "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe"; do
-  [[ -f "$_s" ]] && SERVER_ASSETS+=("$_s")
+# packages and the client-managed remote install (ADR-0009). Required, not
+# best-effort: a missing one publishes a release pointing at an absent asset.
+SERVER_ASSETS=("$MAC_SERVER_BIN")
+[[ "$INCLUDE_LINUX" == "1" ]] && SERVER_ASSETS+=("$LINUX_SERVER_BIN")
+[[ "$INCLUDE_WINDOWS" == "1" ]] && SERVER_ASSETS+=("$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe")
+for _s in "${SERVER_ASSETS[@]}"; do
+  [[ -f "$_s" ]] || die "missing server asset $_s — every platform in this release must ship one"
 done
-if (( ${#SERVER_ASSETS[@]} )); then
-  # Basename-keyed: a consumer downloads hyprlayer-server-<triple>, not a path.
-  SERVER_SUMS="$TMP/hyprlayer-server-sha256sums.txt"
-  : > "$SERVER_SUMS"
-  for _s in "${SERVER_ASSETS[@]}"; do
-    ( cd "$(dirname "$_s")" && shasum -a 256 "$(basename "$_s")" ) >> "$SERVER_SUMS"
-  done
-  ASSETS+=("${SERVER_ASSETS[@]}" "$SERVER_SUMS")
-else
-  warn "no hyprlayer-server binaries found — release will carry no server assets"
-fi
+# Basename-keyed: a consumer downloads hyprlayer-server-<triple>, not a path.
+SERVER_SUMS="$TMP/hyprlayer-server-sha256sums.txt"
+: > "$SERVER_SUMS"
+for _s in "${SERVER_ASSETS[@]}"; do
+  ( cd "$(dirname "$_s")" && shasum -a 256 "$(basename "$_s")" ) >> "$SERVER_SUMS"
+done
+ASSETS+=("${SERVER_ASSETS[@]}" "$SERVER_SUMS")
 
 NOTES_FILE="$(mktemp)"; TMPDIRS+=("$NOTES_FILE")
 HYPRLAYER_AUR_PKGNAME="$AUR_PKGNAME" \
@@ -491,6 +517,48 @@ else
 fi
 ok "Homebrew cask bumped"
 
+# The formula carries both platforms' sha256, so a mac-only release leaves the
+# tap alone rather than publishing one with a stale Linux sha.
+if [[ "$INCLUDE_LINUX" == "1" ]]; then
+  say "Bumping hyprlayer-server formula in ${TAP_REPO}…"
+  MAC_SERVER_SHA="$(shasum -a 256 "$MAC_SERVER_BIN" | awk '{print $1}')"
+  LINUX_SERVER_SHA="$(shasum -a 256 "$LINUX_SERVER_BIN" | awk '{print $1}')"
+  FORMULA_OUT="$TMP/hyprlayer-server.rb"
+  # @PLIST@ takes the canonical launchd plist verbatim, indented into the
+  # formula's squiggly heredoc, so the packaged and brewed plists cannot drift.
+  VERSION="$VERSION" MAC_SHA="$MAC_SERVER_SHA" LINUX_SHA="$LINUX_SERVER_SHA" \
+  PLIST_SRC="$LAUNCHD_PLIST" TEMPLATE="packaging/homebrew/hyprlayer-server.rb" \
+  python3 - "$FORMULA_OUT" <<'PYRENDER'
+import os, sys
+tpl = open(os.environ["TEMPLATE"]).read()
+plist = open(os.environ["PLIST_SRC"]).read().rstrip("\n")
+body = "\n".join("    " + line if line.strip() else "" for line in plist.split("\n"))
+out = (tpl.replace("@VERSION@", os.environ["VERSION"])
+          .replace("@SHA256_MACOS_ARM64@", os.environ["MAC_SHA"])
+          .replace("@SHA256_LINUX_X86_64@", os.environ["LINUX_SHA"])
+          .replace("@PLIST@", body))
+# @BIN@ deliberately survives: the formula substitutes it at install time.
+leftover = [m for m in ("@VERSION@", "@SHA256_MACOS_ARM64@",
+                        "@SHA256_LINUX_X86_64@", "@PLIST@") if m in out]
+if leftover:
+    sys.exit(f"formula still has unsubstituted placeholders: {leftover}")
+open(sys.argv[1], "w").write(out)
+PYRENDER
+  [[ -s "$FORMULA_OUT" ]] || die "rendering the hyprlayer-server formula produced nothing"
+  ruby -c "$FORMULA_OUT" >/dev/null || die "the rendered formula is not valid Ruby"
+  cp "$FORMULA_OUT" "$TAP/$FORMULA_PATH"
+  git -C "$TAP" add "$FORMULA_PATH"
+  if git -C "$TAP" diff --cached --quiet; then
+    say "formula already at $VERSION — nothing to commit"
+  else
+    git -C "$TAP" commit -q -m "hyprlayer-server $VERSION"
+    git -C "$TAP" push -q
+  fi
+  ok "Homebrew formula bumped"
+else
+  warn "no Linux build this release — hyprlayer-server formula left at its previous version"
+fi
+
 say "Verifying published assets…"
 curl -fsI -L "$BASE/$TARBALL_NAME" >/dev/null || die "tarball not reachable at $BASE/$TARBALL_NAME"
 ok "updater tarball reachable"
@@ -525,6 +593,26 @@ if [[ "$INCLUDE_AUR" == "1" ]]; then
       || die "AUR push rejected — inspect $LINUX_OUT/aur and push by hand"
   fi
   ok "AUR package published"
+
+  say "Pushing $AUR_SERVER_PKGNAME $VERSION to the AUR…"
+  AUR_SERVER="$(mktemp -d)"; TMPDIRS+=("$AUR_SERVER")
+  git clone -q "$AUR_SERVER_REPO" "$AUR_SERVER" \
+    || die "could not clone $AUR_SERVER_REPO — check AUR SSH access, or re-run with --no-aur"
+  git -C "$AUR_SERVER" checkout -q -B master
+  # The unit is a local source= entry, so it is committed beside the PKGBUILD.
+  cp "$LINUX_OUT/aur-server/PKGBUILD" "$LINUX_OUT/aur-server/.SRCINFO" \
+     "$LINUX_OUT/aur-server/hyprlayer-server.service" "$AUR_SERVER/"
+  git -C "$AUR_SERVER" config user.name "$AUR_AUTHOR_NAME"
+  git -C "$AUR_SERVER" config user.email "$AUR_AUTHOR_EMAIL"
+  git -C "$AUR_SERVER" add PKGBUILD .SRCINFO hyprlayer-server.service
+  if git -C "$AUR_SERVER" diff --cached --quiet; then
+    say "AUR server package already at $VERSION — nothing to commit"
+  else
+    git -C "$AUR_SERVER" commit -q -m "$AUR_SERVER_PKGNAME $VERSION"
+    git -C "$AUR_SERVER" push -q origin master \
+      || die "AUR push rejected — inspect $LINUX_OUT/aur-server and push by hand"
+  fi
+  ok "AUR server package published"
 fi
 
 echo ""
@@ -532,6 +620,7 @@ ok "Released Hyprlayer $TAG ($PLATFORM_DESC)"
 echo "  Release : https://github.com/$RELEASES_REPO/releases/tag/$TAG"
 echo "  Updates : https://brightblock.ai/hyprlayer/updates/latest.json"
 [[ "$INCLUDE_AUR" == "1" ]] && echo "  AUR     : https://aur.archlinux.org/packages/$AUR_PKGNAME"
+[[ "$INCLUDE_AUR" == "1" ]] && echo "  AUR srv : https://aur.archlinux.org/packages/$AUR_SERVER_PKGNAME"
 if [[ "$INCLUDE_WINDOWS" != "1" ]]; then
   echo "  Note    : Windows + Intel installs stay on their current version until"
   echo "            the next all-platform release."

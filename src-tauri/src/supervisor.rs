@@ -19,6 +19,12 @@ use crate::error::AppError;
 
 const CONNECT_RETRIES: u32 = 10;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
+/// A server we just spawned gets far longer than a reconnect does: cold start
+/// opens SQLite and runs migrations, which on a debug build or a large profile
+/// takes many seconds. At 10 retries this timed out and the app died with a
+/// dialog, leaving the started server orphaned and holding the profile lock,
+/// so the next launch failed differently.
+const SPAWN_LISTEN_RETRIES: u32 = 300;
 const SPAWN_RETRIES: u32 = 5;
 const SPAWN_RETRY_DELAY: Duration = Duration::from_secs(1);
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -194,9 +200,9 @@ fn read_runtime_fatal(app_data_dir: &Path, since: SystemTime) -> Option<AppError
     Some(AppError::from(wire))
 }
 
-/// Resolves the sibling `hyprlayer-server` binary next to this executable —
-/// correct for cargo/dev/`tauri dev` builds, where both land in the same
-/// target directory. Production sidecar bundling is Phase 6's job.
+/// Resolves the sibling `hyprlayer-server` binary next to this executable.
+/// Every install shape puts it there: cargo/`tauri dev` target dirs, the
+/// bundled sidecar, `/usr/bin` from the packages, and the dev-install scripts.
 fn server_binary() -> PathBuf {
     let name = if cfg!(windows) {
         "hyprlayer-server.exe"
@@ -224,16 +230,7 @@ fn spawn_detached(
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
 
-    #[cfg(unix)]
-    cmd.process_group(0);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        cmd.creation_flags(DETACHED_PROCESS);
-    }
-
-    cmd.spawn()
+    hyprlayer_core::process::spawn_orphan(&mut cmd)
 }
 
 /// Drains a spawned child's stderr into a shared buffer, both to recognise a
@@ -262,7 +259,7 @@ enum SpawnWait {
 }
 
 async fn wait_for_spawn(child: &mut Child, app_data_dir: &Path) -> SpawnWait {
-    for _ in 0..CONNECT_RETRIES {
+    for _ in 0..SPAWN_LISTEN_RETRIES {
         if matches!(child.try_wait(), Ok(Some(_))) {
             return SpawnWait::ExitedEarly;
         }

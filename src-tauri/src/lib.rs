@@ -304,6 +304,10 @@ pub fn run() {
             let client = match outcome {
                 supervisor::Outcome::Connected(client) => client,
                 supervisor::Outcome::Blocked { title, detail } => {
+                    // Also to stderr: the dialog is all a packaged user sees, but it
+                    // renders nothing from a terminal launch, which left `tauri dev`
+                    // exiting 1 with no reason anywhere.
+                    eprintln!("{title}: {detail}");
                     app.dialog()
                         .message(detail)
                         .title(title)

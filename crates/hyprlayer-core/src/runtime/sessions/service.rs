@@ -601,7 +601,8 @@ impl SessionService<'_> {
                 };
 
                 let path = self.runtime.binaries.augmented_path().await;
-                let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+                let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+                env.extend(self.runtime.environment.overlay_env());
 
                 let resume_thread = resume
                     .then(|| session.provider_session_id.clone())
@@ -676,6 +677,9 @@ impl SessionService<'_> {
                 let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
                 let claude_cfg = settings.providers.claude;
                 env.extend(crate::runtime::providers::claude_auth_env(&claude_cfg));
+                // A daemonized server has no SSH_AUTH_SOCK of its own; without this an
+                // agent's own `git push` fails where a terminal's succeeds (ADR-0009 §7).
+                env.extend(self.runtime.environment.overlay_env());
 
                 let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
                     claude_bin: claude,

@@ -8,9 +8,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use hyprlayer_core::env::{RuntimeEnvironment, RuntimePaths};
+use hyprlayer_core::repo_settings::ScriptSettings;
 use hyprlayer_core::runtime::builder::RuntimeBuilder;
 use hyprlayer_core::runtime::ports::LifecycleRunner;
 use hyprlayer_core::runtime::script_registry::RunPhase;
+use hyprlayer_core::runtime::scripts::{RunLifecycleRequest, ScriptSettingsRequest};
 use hyprlayer_core::runtime::workstreams::{
     ArchiveWorkstreamRequest, CreateWorkstreamRequest, HeadBranchObservation,
     ListWorkstreamsRequest, PurgeWorkstreamRequest, ReprovisionWorkstreamRequest,
@@ -723,6 +725,58 @@ async fn head_branch_adoption_moves_only_the_workstreams_that_follow_head() {
         announced,
         Some((inplace.id.clone(), "feature".into(), inplace.branch.clone())),
         "the adoption must reach the runtime event stream"
+    );
+
+    f.runtime.shutdown().await;
+}
+
+/// The gap Phase 6's manual `git push` check could not catch: that one went
+/// through a terminal, the single path that already merged the overlay. A
+/// lifecycle script is a different spawn, and had none of it (ADR-0009 §7).
+#[tokio::test]
+async fn the_attach_overlay_reaches_a_lifecycle_script() {
+    let (f, repo) = fixture_with_runner(Some(0), None).await;
+    let created = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Overlay"))
+        .await
+        .unwrap();
+
+    let probe = f.paths.app_data_dir.join("agent-sock-probe");
+    f.runtime
+        .scripts()
+        .settings(ScriptSettingsRequest {
+            project_path: repo.display().to_string(),
+            set: Some(ScriptSettings {
+                setup: format!("printf '%s' \"$SSH_AUTH_SOCK\" > {}", probe.display()),
+                run: String::new(),
+                archive: String::new(),
+            }),
+        })
+        .await
+        .unwrap();
+
+    f.runtime.set_env_overlay(BTreeMap::from([(
+        "SSH_AUTH_SOCK".to_string(),
+        "/tmp/overlay-probe.sock".to_string(),
+    )]));
+
+    let result = f
+        .runtime
+        .scripts()
+        .run_lifecycle(RunLifecycleRequest {
+            workstream: created.item,
+            kind: ScriptKind::Setup,
+        })
+        .await
+        .unwrap();
+    assert!(result.is_some(), "the Setup script must have run");
+
+    let seen = std::fs::read_to_string(&probe).unwrap_or_default();
+    assert_eq!(
+        seen, "/tmp/overlay-probe.sock",
+        "a lifecycle script must inherit the attaching client's SSH_AUTH_SOCK"
     );
 
     f.runtime.shutdown().await;
