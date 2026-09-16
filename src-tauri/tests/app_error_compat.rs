@@ -60,6 +60,18 @@ struct Fixture {
     workstream_lifecycle: Pinned,
     #[serde(rename = "attachmentTransfer")]
     attachment_transfer: Pinned,
+    #[serde(rename = "npmMissing")]
+    npm_missing: Pinned,
+    #[serde(rename = "opencodeInstallFailed")]
+    opencode_install_failed: Pinned,
+    #[serde(rename = "cliInstallUnsupported")]
+    cli_install_unsupported: Pinned,
+    #[serde(rename = "remoteUnsupported")]
+    remote_unsupported: Pinned,
+    #[serde(rename = "workstreamFolderNoGit")]
+    workstream_folder_no_git: Pinned,
+    #[serde(rename = "prNotFound")]
+    pr_not_found: Pinned,
 }
 
 fn fixture() -> Fixture {
@@ -70,9 +82,9 @@ fn fixture() -> Fixture {
     serde_json::from_str(&raw).expect("app-errors.json is valid JSON")
 }
 
-// commands/mod.rs::effective_for loads the hyprlayer config through ConfigService;
-// a missing config file is the real, currently-reachable failure every unconfigured
-// profile hits before a project is added.
+// SettingsService::effective_config_for loads the hyprlayer config through
+// ConfigService; a missing config file is the real, currently-reachable failure
+// every unconfigured profile hits before a project is added.
 async fn settings_config_failure() -> AppError {
     let path =
         Path::new("/nonexistent-hyprlayer-config-fixture/hyprlayer/config.json").to_path_buf();
@@ -93,8 +105,12 @@ fn binaries_failure() -> AppError {
     })
 }
 
+// runtime::sessions's real guard on every driver-bound operation (send, answer,
+// interrupt, kill) once the session has left the live registry.
 fn providers_sessions_failure() -> AppError {
-    hyprlayer_app_lib::commands::sessions::session_not_found("sess-fixture")
+    AppError::from(CoreError::SessionNotFound {
+        session_id: "sess-fixture".into(),
+    })
 }
 
 // error.rs::AppError::project_not_found, the real public constructor.
@@ -116,9 +132,10 @@ fn agents_prompts_failure() -> AppError {
     AppError::from(CoreError::PromptsFileTooLarge)
 }
 
-// commands/workstreams.rs:709, a static AppError::internal call.
+// runtime::workstreams::WorkstreamService::set_base_branch's real empty-base
+// guard, now a typed CoreError variant that keeps the legacy `internal` code.
 fn workstreams_failure() -> AppError {
-    AppError::internal("base branch cannot be empty")
+    AppError::from(CoreError::WorkstreamBaseBranchEmpty)
 }
 
 // runtime::attachments's real workstream lookup guard, now shared with every
@@ -139,7 +156,7 @@ fn scripts_failure() -> AppError {
     hyprlayer_app_lib::commands::scripts::script_empty(ScriptKind::Run)
 }
 
-// runtime::HyprlayerRuntime::open returns this for real once a second runtime
+// runtime::ProfileLock::acquire returns this for real once a second server
 // opens the same profile; constructed directly here (matching binaries_failure's
 // own reasoning) so the pinned message does not depend on an unpredictable
 // tempdir path.
@@ -386,4 +403,93 @@ fn attachment_transfer_failure_matches_the_pinned_v0_7_fixture() {
         Pinned::from(attachment_transfer_failure()),
         fixture().attachment_transfer
     );
+}
+
+// runtime::settings_service::SettingsService::install_opencode's real Windows
+// preflight; constructed directly so the case runs on every platform.
+fn npm_missing_failure() -> AppError {
+    AppError::from(CoreError::NpmMissing)
+}
+
+#[test]
+fn npm_missing_failure_matches_the_pinned_fixture() {
+    assert_eq!(Pinned::from(npm_missing_failure()), fixture().npm_missing);
+}
+
+// The same service's real Windows npm-install failure, wrapping the Exec error
+// the shell used to format inline.
+fn opencode_install_failure() -> AppError {
+    AppError::from(CoreError::OpencodeInstallFailed {
+        detail: CoreError::Exec {
+            program: "npm".into(),
+            exit: Some(1),
+            stderr_tail: String::new(),
+        }
+        .to_string(),
+    })
+}
+
+#[test]
+fn opencode_install_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(opencode_install_failure()),
+        fixture().opencode_install_failed
+    );
+}
+
+// SettingsService::install_hyprlayer_cli's real guard on a method the running
+// platform has no candidate for.
+fn cli_install_unsupported_failure() -> AppError {
+    AppError::from(CoreError::CliInstallUnsupported)
+}
+
+#[test]
+fn cli_install_unsupported_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(cli_install_unsupported_failure()),
+        fixture().cli_install_unsupported
+    );
+}
+
+// Declared ahead of its first producer (plan Phase 5) so the envelope lands once.
+fn remote_unsupported_failure() -> AppError {
+    AppError::from(CoreError::RemoteUnsupported {
+        action: "Reveal in Finder".into(),
+        host: "nexus".into(),
+    })
+}
+
+#[test]
+fn remote_unsupported_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(remote_unsupported_failure()),
+        fixture().remote_unsupported
+    );
+}
+
+// WorkstreamService::attach_pr's real guard on a plain-folder workstream.
+fn workstream_folder_no_git_failure() -> AppError {
+    AppError::from(CoreError::WorkstreamFolderNoGit)
+}
+
+#[test]
+fn workstream_folder_no_git_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(workstream_folder_no_git_failure()),
+        fixture().workstream_folder_no_git
+    );
+}
+
+// WorkstreamService::attach_pr's real not-found envelope when `gh` reports no
+// such PR and has no message of its own to relay.
+fn pr_not_found_failure() -> AppError {
+    AppError::from(CoreError::PrNotFound {
+        pr_number: 7,
+        detail: String::new(),
+    })
+}
+
+#[test]
+fn pr_not_found_failure_matches_the_pinned_fixture() {
+    assert_eq!(Pinned::from(pr_not_found_failure()), fixture().pr_not_found);
 }

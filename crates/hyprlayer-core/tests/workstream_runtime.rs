@@ -33,6 +33,7 @@ fn test_environment(home: &Path) -> RuntimeEnvironment {
         home_dir: home.to_path_buf(),
         process_cwd: home.to_path_buf(),
         process_env,
+        env_overlay: Default::default(),
     }
 }
 

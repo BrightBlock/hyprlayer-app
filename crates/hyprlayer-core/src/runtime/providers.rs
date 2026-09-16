@@ -72,7 +72,7 @@ fn title_case(s: &str) -> String {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeAuthStatus {
@@ -83,7 +83,7 @@ pub struct ClaudeAuthStatus {
     pub account: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ModelWindow {
@@ -160,7 +160,7 @@ async fn resolve_claude_api_credential(
     Ok(None)
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct OllamaModelInfo {
@@ -169,7 +169,7 @@ pub struct OllamaModelInfo {
     pub parameter_size: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct OllamaStatus {
@@ -681,7 +681,7 @@ impl ProviderService<'_> {
         self.start_opencode_server(bin).await
     }
 
-    pub async fn opencode_server_if_running(&self) -> Option<Arc<OpenCodeServer>> {
+    pub(crate) async fn opencode_server_if_running(&self) -> Option<Arc<OpenCodeServer>> {
         self.runtime.opencode.current().await
     }
 

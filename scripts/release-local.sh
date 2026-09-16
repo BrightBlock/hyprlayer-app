@@ -56,6 +56,7 @@ done
 say() { printf '\033[1;36m→ %s\033[0m\n' "$*"; }
 ok()  { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+warn() { printf '\033[1;33m! %s\033[0m\n' "$*" >&2; }
 
 TMPDIRS=()
 cleanup() {
@@ -315,6 +316,13 @@ DEB_NAME=""; RPM_NAME=""
 if [[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" == "1" ]]; then
   DEB_NAME="$LINUX_DEB_NAME"
   RPM_NAME="$(basename "$LINUX_RPM_EXPECTED")"
+  SERVER_REMOTE="$(linux_out_path SERVER_BIN)"
+  if [[ -n "$SERVER_REMOTE" ]]; then
+    scp -q "$LINUX_SSH_HOST:${SERVER_REMOTE}" "$LINUX_OUT/hyprlayer-server-x86_64-unknown-linux-gnu" \
+      || die "failed to copy the Linux hyprlayer-server down from $LINUX_SSH_HOST"
+  else
+    warn "Linux build produced no hyprlayer-server sidecar — the server asset will be missing from this release"
+  fi
   DEB_SHA="$(shasum -a 256 "$LINUX_OUT/$DEB_NAME" | awk '{print $1}')"
   RPM_SHA="$(shasum -a 256 "$LINUX_OUT/$RPM_NAME" | awk '{print $1}')"
   ok "Reused $DEB_NAME (sha256 $DEB_SHA)"
@@ -385,6 +393,27 @@ if [[ "$INCLUDE_WINDOWS" == "1" ]]; then
 fi
 if [[ "$INCLUDE_LINUX" == "1" ]]; then
   ASSETS+=("$LINUX_OUT/$DEB_NAME" "$LINUX_OUT/$RPM_NAME")
+fi
+
+# Standalone server binaries, per target triple. These feed the hyprlayer-server
+# packages and the client-managed remote install (ADR-0009). Warn rather than die
+# while nothing consumes them yet; tighten to a hard requirement once it does.
+SERVER_ASSETS=()
+for _s in "src-tauri/binaries/hyprlayer-server-aarch64-apple-darwin" \
+          "$LINUX_OUT/hyprlayer-server-x86_64-unknown-linux-gnu" \
+          "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe"; do
+  [[ -f "$_s" ]] && SERVER_ASSETS+=("$_s")
+done
+if (( ${#SERVER_ASSETS[@]} )); then
+  # Basename-keyed: a consumer downloads hyprlayer-server-<triple>, not a path.
+  SERVER_SUMS="$TMP/hyprlayer-server-sha256sums.txt"
+  : > "$SERVER_SUMS"
+  for _s in "${SERVER_ASSETS[@]}"; do
+    ( cd "$(dirname "$_s")" && shasum -a 256 "$(basename "$_s")" ) >> "$SERVER_SUMS"
+  done
+  ASSETS+=("${SERVER_ASSETS[@]}" "$SERVER_SUMS")
+else
+  warn "no hyprlayer-server binaries found — release will carry no server assets"
 fi
 
 NOTES_FILE="$(mktemp)"; TMPDIRS+=("$NOTES_FILE")

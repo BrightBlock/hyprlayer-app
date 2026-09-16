@@ -103,5 +103,35 @@
     "code": "invalid_path",
     "message": "unsafe or out-of-worktree path: ../escape.txt",
     "remedy": null
+  },
+  "npmMissing": {
+    "code": "npm_missing",
+    "message": "Node.js (npm) isn't installed, so OpenCode can't be installed automatically.",
+    "remedy": "Install Node.js (it includes npm) and click Refresh, or install OpenCode with Scoop (scoop install opencode), Chocolatey (choco install opencode), or WSL. You can also use Locate… to point at an existing opencode.exe."
+  },
+  "opencodeInstallFailed": {
+    "code": "opencode_install_failed",
+    "message": "Couldn't install OpenCode via npm. `npm` failed with exit code 1",
+    "remedy": "Install Node.js/npm, or install OpenCode with Scoop (scoop install opencode), Chocolatey (choco install opencode), or WSL. then click Refresh. You can also use Locate… to point at an existing opencode.exe."
+  },
+  "cliInstallUnsupported": {
+    "code": "cli_install_unsupported",
+    "message": "That install method isn't available on this platform.",
+    "remedy": null
+  },
+  "remoteUnsupported": {
+    "code": "remote_unsupported",
+    "message": "Reveal in Finder is not available while connected to the remote host nexus.",
+    "remedy": "Do this on nexus directly, or connect to the local server."
+  },
+  "workstreamFolderNoGit": {
+    "code": "folder_no_git",
+    "message": "This workstream runs in a plain folder, so it has no branches or PRs.",
+    "remedy": null
+  },
+  "prNotFound": {
+    "code": "pr_not_found",
+    "message": "No pull request #7 found in this repository",
+    "remedy": null
   }
 }

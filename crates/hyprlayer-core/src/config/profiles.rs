@@ -1,10 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
 
 use super::{BackendConfig, GitConfig, ThoughtsConfig, DEFAULT_THOUGHTS_REPO};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ThoughtsProfile {

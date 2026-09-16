@@ -24,6 +24,7 @@ export const commands = {
 	getWorktreeFiles: (path: string) => typedError<string[], AppError>(__TAURI_INVOKE("get_worktree_files", { path })),
 	setWorktreeFiles: (path: string, patterns: string[]) => typedError<string[], AppError>(__TAURI_INVOKE("set_worktree_files", { path, patterns })),
 	checkWorktreeFiles: (path: string) => typedError<SeedReport, AppError>(__TAURI_INVOKE("check_worktree_files", { path })),
+	browseDirectory: (path: string | null) => typedError<DirListing, AppError>(__TAURI_INVOKE("browse_directory", { path })),
 	queryDocs: (query: ThoughtQuery) => typedError<QueryResult, AppError>(__TAURI_INVOKE("query_docs", { query })),
 	getDoc: (id: string) => typedError<DocContent, AppError>(__TAURI_INVOKE("get_doc", { id })),
 	saveDoc: (id: string, content: string, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("save_doc", { id, content, baseMtimeMs })),
@@ -209,6 +210,7 @@ export const events = {
 	projectCreateProgress: makeEvent<ProjectCreateProgress>("project-create-progress"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
+	serverDisconnected: makeEvent<ServerDisconnected>("server-disconnected"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
 	workstreamBranchChanged: makeEvent<WorkstreamBranchChanged>("workstream-branch-changed"),
@@ -586,10 +588,22 @@ export type CustomPrompt = {
 	pinned?: boolean,
 };
 
+export type DirBrowseEntry = {
+	name: string,
+	isDir: boolean,
+	isRepo: boolean,
+};
+
 export type DirEntry = {
 	name: string,
 	path: string,
 	isDir: boolean,
+};
+
+export type DirListing = {
+	path: string,
+	parent: string | null,
+	entries: DirBrowseEntry[],
 };
 
 export type DocContent = {
@@ -1060,6 +1074,12 @@ export type SeedReport = {
 	missing: string[],
 	errors: SeedError[],
 };
+
+/**
+ *  The RPC connection to the server ended. Nothing respawns the server
+ *  (ADR-0009), so the frontend offers a relaunch.
+ */
+export type ServerDisconnected = null;
 
 export type Session = {
 	id: string,

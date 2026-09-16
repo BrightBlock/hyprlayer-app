@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/hyprlayer-core", "crates/hyprlayer-models"]
+members = [
+    "src-tauri",
+    "crates/hyprlayer-core",
+    "crates/hyprlayer-models",
+    "crates/hyprlayer-proto",
+    "crates/hyprlayer-server",
+]
 
 [workspace.package]
 version = "0.7.5"
@@ -11,10 +17,12 @@ repository = "https://github.com/brightblock-ai/hyprlayer-app"
 [workspace.dependencies]
 hyprlayer-core = { path = "crates/hyprlayer-core" }
 hyprlayer-models = { path = "crates/hyprlayer-models" }
+hyprlayer-proto = { path = "crates/hyprlayer-proto" }
+hyprlayer-server = { path = "crates/hyprlayer-server" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "fs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "io-std", "sync", "time", "fs", "net"] }
 dirs = "5"
 tracing = { version = "0.1", features = ["log"] }
 

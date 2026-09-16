@@ -21,11 +21,12 @@ pub fn repo_name_from_url(source: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-pub async fn origin_url(git: &Path, repo: &Path) -> Option<String> {
+pub async fn origin_url(git: &Path, repo: &Path, overlay: &[(String, String)]) -> Option<String> {
     let out = Exec::new(git)
         .arg("-C")
         .arg(repo)
         .args(["remote", "get-url", "origin"])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(15))
         .run()
         .await
@@ -34,7 +35,12 @@ pub async fn origin_url(git: &Path, repo: &Path) -> Option<String> {
     (!url.is_empty()).then(|| url.to_string())
 }
 
-pub async fn clone_repo(git: &Path, source: &str, dest: &Path) -> Result<()> {
+pub async fn clone_repo(
+    git: &Path,
+    source: &str,
+    dest: &Path,
+    overlay: &[(String, String)],
+) -> Result<()> {
     if dest.exists() {
         return Err(CoreError::Io(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
@@ -50,13 +56,19 @@ pub async fn clone_repo(git: &Path, source: &str, dest: &Path) -> Result<()> {
     })?;
     Exec::new(git)
         .args(["clone", source, dest_str])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(600))
         .run()
         .await?;
     Ok(())
 }
 
-pub async fn init_repo(git: &Path, dest: &Path, branch: &str) -> Result<()> {
+pub async fn init_repo(
+    git: &Path,
+    dest: &Path,
+    branch: &str,
+    overlay: &[(String, String)],
+) -> Result<()> {
     std::fs::create_dir_all(dest)?;
     let dest_str = dest.to_str().ok_or_else(|| CoreError::OutputParse {
         program: "git init".into(),
@@ -64,26 +76,37 @@ pub async fn init_repo(git: &Path, dest: &Path, branch: &str) -> Result<()> {
     })?;
     Exec::new(git)
         .args(["init", "-b", branch, dest_str])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run()
         .await?;
     Ok(())
 }
 
-pub async fn init_repo_with_commit(git: &Path, dest: &Path, branch: &str) -> Result<()> {
+pub async fn init_repo_with_commit(
+    git: &Path,
+    dest: &Path,
+    branch: &str,
+    overlay: &[(String, String)],
+) -> Result<()> {
     let dest_str = dest.to_str().ok_or_else(|| CoreError::OutputParse {
         program: "git init".into(),
         detail: "destination path is not valid UTF-8".into(),
     })?;
     Exec::new(git)
         .args(["init", "-b", branch, dest_str])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run()
         .await?;
-    commit_empty_initial(git, dest).await
+    commit_empty_initial(git, dest, overlay).await
 }
 
-pub async fn commit_empty_initial(git: &Path, repo: &Path) -> Result<()> {
+pub async fn commit_empty_initial(
+    git: &Path,
+    repo: &Path,
+    overlay: &[(String, String)],
+) -> Result<()> {
     let repo_str = repo.to_str().ok_or_else(|| CoreError::OutputParse {
         program: "git commit".into(),
         detail: "repository path is not valid UTF-8".into(),
@@ -100,6 +123,7 @@ pub async fn commit_empty_initial(git: &Path, repo: &Path) -> Result<()> {
     ];
     if Exec::new(git)
         .args(commit)
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run()
         .await
@@ -120,6 +144,7 @@ pub async fn commit_empty_initial(git: &Path, repo: &Path) -> Result<()> {
                 "-m",
                 "Initial commit",
             ])
+            .envs(overlay.iter().cloned())
             .timeout(Duration::from_secs(30))
             .run()
             .await?;
@@ -127,11 +152,12 @@ pub async fn commit_empty_initial(git: &Path, repo: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn stage_all(git: &Path, repo: &Path) -> Result<()> {
+pub async fn stage_all(git: &Path, repo: &Path, overlay: &[(String, String)]) -> Result<()> {
     Exec::new(git)
         .arg("-C")
         .arg(repo)
         .args(["add", "-A"])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(60))
         .run()
         .await?;
@@ -212,9 +238,14 @@ struct ApiLogin {
     login: String,
 }
 
-async fn gh_json<T: serde::de::DeserializeOwned>(gh: &Path, endpoint: &str) -> Result<T> {
+async fn gh_json<T: serde::de::DeserializeOwned>(
+    gh: &Path,
+    endpoint: &str,
+    overlay: &[(String, String)],
+) -> Result<T> {
     let out = Exec::new(gh)
         .args(["api", endpoint])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run()
         .await?;
@@ -238,13 +269,13 @@ pub fn is_github_auth_failure(stderr: &str) -> bool {
         || low.contains("http 401")
 }
 
-pub async fn github_owners(gh: &Path) -> Result<Vec<GithubOwner>> {
-    let me: ApiLogin = gh_json(gh, "user").await?;
+pub async fn github_owners(gh: &Path, overlay: &[(String, String)]) -> Result<Vec<GithubOwner>> {
+    let me: ApiLogin = gh_json(gh, "user", overlay).await?;
     let mut owners = vec![GithubOwner {
         login: me.login,
         kind: GithubOwnerKind::User,
     }];
-    let orgs: Vec<ApiLogin> = gh_json(gh, "user/orgs?per_page=100")
+    let orgs: Vec<ApiLogin> = gh_json(gh, "user/orgs?per_page=100", overlay)
         .await
         .unwrap_or_default();
     owners.extend(orgs.into_iter().map(|o| GithubOwner {
@@ -453,6 +484,7 @@ pub async fn create_github_repo(
     owner: &str,
     name: &str,
     private: bool,
+    overlay: &[(String, String)],
 ) -> Result<String> {
     let repo_str = repo.to_str().ok_or_else(|| CoreError::OutputParse {
         program: "gh repo create".into(),
@@ -470,6 +502,7 @@ pub async fn create_github_repo(
             "--remote",
             "origin",
         ])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(300))
         .run()
         .await?;
@@ -484,11 +517,17 @@ pub async fn create_github_repo(
     Ok(url)
 }
 
-pub async fn push_upstream(git: &Path, repo: &Path, branch: &str) -> Result<()> {
+pub async fn push_upstream(
+    git: &Path,
+    repo: &Path,
+    branch: &str,
+    overlay: &[(String, String)],
+) -> Result<()> {
     Exec::new(git)
         .arg("-C")
         .arg(repo)
         .args(["push", "-u", "origin", branch])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(300))
         .run()
         .await?;
@@ -540,11 +579,16 @@ pub struct GithubRepo {
     pub private: bool,
 }
 
-pub async fn github_repos(gh: &Path, limit: u32) -> Result<Vec<GithubRepo>> {
+pub async fn github_repos(
+    gh: &Path,
+    limit: u32,
+    overlay: &[(String, String)],
+) -> Result<Vec<GithubRepo>> {
     // `gh repo list` omits organization-member repositories.
     let endpoint = format!("user/repos?per_page={}&sort=pushed", limit.min(100));
     let out = Exec::new(gh)
         .args(["api", &endpoint])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run()
         .await?;
@@ -580,6 +624,8 @@ pub async fn github_repos(gh: &Path, limit: u32) -> Result<Vec<GithubRepo>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const NO_OVERLAY: &[(String, String)] = &[];
 
     #[test]
     fn names_from_various_source_shapes() {
@@ -634,7 +680,9 @@ mod tests {
         std::fs::write(repo.join("notes.md"), "hi\n").unwrap();
 
         let git = which::which("git").unwrap();
-        init_repo_with_commit(&git, &repo, "trunk").await.unwrap();
+        init_repo_with_commit(&git, &repo, "trunk", NO_OVERLAY)
+            .await
+            .unwrap();
 
         let r = git2::Repository::open(&repo).unwrap();
         let head = r.head().unwrap();
@@ -666,7 +714,7 @@ mod tests {
 
         let git = which::which("git").unwrap();
         let dest = dir.path().join("clones").join("myproj");
-        clone_repo(&git, source.to_str().unwrap(), &dest)
+        clone_repo(&git, source.to_str().unwrap(), &dest, NO_OVERLAY)
             .await
             .unwrap();
         assert!(
@@ -675,11 +723,11 @@ mod tests {
         );
 
         assert_eq!(
-            origin_url(&git, &dest).await.as_deref(),
+            origin_url(&git, &dest, NO_OVERLAY).await.as_deref(),
             Some(source.to_str().unwrap())
         );
 
-        let err = clone_repo(&git, source.to_str().unwrap(), &dest)
+        let err = clone_repo(&git, source.to_str().unwrap(), &dest, NO_OVERLAY)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "io");
@@ -735,7 +783,7 @@ mod tests {
         let repo = dir.path().join("nested").join("aurora");
         let git = which::which("git").unwrap();
 
-        init_repo(&git, &repo, "trunk").await.unwrap();
+        init_repo(&git, &repo, "trunk", NO_OVERLAY).await.unwrap();
         let written = write_scaffold(
             &repo,
             "aurora",
@@ -746,8 +794,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(written.len(), 2);
-        stage_all(&git, &repo).await.unwrap();
-        commit_empty_initial(&git, &repo).await.unwrap();
+        stage_all(&git, &repo, NO_OVERLAY).await.unwrap();
+        commit_empty_initial(&git, &repo, NO_OVERLAY).await.unwrap();
 
         assert_eq!(classify_repo_path(&repo), RepoPathStatus::Ready);
         let r = git2::Repository::open(&repo).unwrap();
@@ -934,7 +982,7 @@ mod tests {
         assert_eq!(classify_repo_path(&repo), RepoPathStatus::Unborn);
 
         let git = which::which("git").unwrap();
-        commit_empty_initial(&git, &repo).await.unwrap();
+        commit_empty_initial(&git, &repo, NO_OVERLAY).await.unwrap();
         assert_eq!(classify_repo_path(&repo), RepoPathStatus::Ready);
     }
 

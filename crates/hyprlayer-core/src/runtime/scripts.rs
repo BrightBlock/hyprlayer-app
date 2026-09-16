@@ -382,7 +382,7 @@ fn emit_changed(
 /// Forwards a running script's PTY output to whichever client attached to
 /// `run()`'s result, mirroring `TerminalService`'s own forwarder. Kept
 /// separate from `spawn_monitor` below because they are two independent
-/// subscribers on the same broadcast channel: this one exists purely to
+/// readers on the same output ring: this one exists purely to
 /// bridge to the caller and cleans up the shared `TerminalRegistry` entry
 /// once the session actually exits (never gated on the forward send
 /// succeeding, so a client that already detached can't leak the entry);
@@ -394,31 +394,17 @@ fn spawn_output_forward(
     registry: Arc<TerminalRegistry>,
 ) -> mpsc::Receiver<TerminalEvent> {
     let (tx, rx) = mpsc::channel(ATTACH_CHANNEL_CAPACITY);
-    let (mut live, scrollback) = session.subscribe_with_scrollback();
+    let mut live = session.subscribe();
     tokio::spawn(async move {
-        if !scrollback.is_empty()
-            && tx
-                .send(TerminalEvent::Output { data: scrollback })
-                .await
-                .is_err()
-        {
-            return;
-        }
-        loop {
-            match live.recv().await {
-                Ok(ev) => {
-                    let exited = matches!(ev, TerminalEvent::Exited { .. });
-                    let closed = tx.send(ev).await.is_err();
-                    if exited {
-                        registry.remove(&terminal_id).await;
-                        break;
-                    }
-                    if closed {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
+        while let Some(ev) = live.recv().await {
+            let exited = matches!(ev, TerminalEvent::Exited { .. });
+            let closed = tx.send(ev).await.is_err();
+            if exited {
+                registry.remove(&terminal_id).await;
+                break;
+            }
+            if closed {
+                break;
             }
         }
     });
@@ -436,9 +422,9 @@ fn spawn_monitor(
     let mut rx = session.subscribe();
     tokio::spawn(async move {
         let mut port_found = false;
-        loop {
-            match rx.recv().await {
-                Ok(TerminalEvent::Output { data }) => {
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                TerminalEvent::Output { data } => {
                     if kind == ScriptKind::Run && !port_found {
                         if let Some(port) = scan_for_port(&data) {
                             port_found = true;
@@ -456,7 +442,7 @@ fn spawn_monitor(
                         }
                     }
                 }
-                Ok(TerminalEvent::Exited { code }) => {
+                TerminalEvent::Exited { code } => {
                     let phase = if code == Some(0) {
                         RunPhase::Passed
                     } else {
@@ -476,8 +462,6 @@ fn spawn_monitor(
                     emit_changed(&events, &workstream_id, kind, phase, code, None);
                     break;
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });
@@ -521,6 +505,66 @@ mod tests {
         let second = registry.take_port("ws-scripts").await;
         assert_eq!(first, second, "a workstream reuses its allocated port");
         assert!(first > 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_monitor_detects_the_port_and_records_the_exit_phase() {
+        let (events, mut rx) = broadcast::channel(16);
+        let scripts = Arc::new(ScriptRegistry::new());
+        let session = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), "echo 'Local: http://localhost:5174/'".into()],
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "ws-monitor".into(),
+        })
+        .expect("spawn pty");
+        scripts
+            .register_run("ws-monitor", "tid".into(), session.clone())
+            .await;
+
+        spawn_monitor(
+            events,
+            scripts.clone(),
+            session,
+            "ws-monitor".into(),
+            ScriptKind::Run,
+            "tid".into(),
+        );
+
+        let mut port = None;
+        let mut exit = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while exit.is_none() {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            match tokio::time::timeout(left, rx.recv()).await {
+                Ok(Ok(RuntimeEvent::ScriptRunChanged {
+                    kind: ScriptKind::Run,
+                    phase: RunPhase::Running,
+                    port: Some(p),
+                    ..
+                })) => port = Some(p),
+                Ok(Ok(RuntimeEvent::ScriptRunChanged {
+                    kind: ScriptKind::Run,
+                    phase,
+                    exit_code,
+                    ..
+                })) => exit = Some((phase, exit_code)),
+                other => panic!("monitor never reported the exit: {other:?}"),
+            }
+        }
+
+        assert_eq!(port, Some(5174), "port badge was not detected");
+        assert_eq!(exit, Some((RunPhase::Passed, Some(0))));
+        assert!(scripts.live_run("ws-monitor").await.is_none());
+        let output = scripts
+            .get_output("ws-monitor", ScriptKind::Run)
+            .await
+            .expect("exit captured the output");
+        assert!(output.contains("localhost:5174"), "got: {output:?}");
     }
 
     #[tokio::test]

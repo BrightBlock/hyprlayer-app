@@ -1,14 +1,14 @@
 use hyprlayer_core::hyprcli::AiStatus;
 use hyprlayer_core::runtime::projects as core_projects;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 use tauri_specta::Event;
 
 use super::projects::Bootstrap;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-#[derive(Debug, Deserialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", tag = "mode")]
 pub enum ThoughtsSource {
     Clone {
@@ -36,15 +36,10 @@ impl From<ThoughtsSource> for core_projects::ThoughtsSource {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_ai_status(state: State<'_, AppState>) -> CmdResult<AiStatus> {
-    state
-        .runtime
-        .projects()
-        .ai_status()
-        .await
-        .map_err(AppError::from)
+    state.client.get_ai_status().await.map_err(AppError::from)
 }
 
-#[derive(Debug, Serialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ThoughtsProbe {
     pub default_path: String,
@@ -62,10 +57,23 @@ impl From<core_projects::ThoughtsProbe> for ThoughtsProbe {
     }
 }
 
+// Infallible in the bindings, so a dead transport degrades to an empty probe
+// rather than changing the wire type or leaving the promise hanging.
 #[tauri::command]
 #[specta::specta]
-pub fn probe_default_thoughts(state: State<'_, AppState>) -> ThoughtsProbe {
-    state.runtime.projects().probe_default_thoughts().into()
+pub async fn probe_default_thoughts(app: tauri::AppHandle) -> ThoughtsProbe {
+    let state = app.state::<AppState>();
+    match state.client.probe_default_thoughts().await {
+        Ok(probe) => probe.into(),
+        Err(e) => {
+            log::error!("probe_default_thoughts: {}", e.message);
+            ThoughtsProbe {
+                default_path: String::new(),
+                exists: false,
+                is_git_repo: false,
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -77,12 +85,8 @@ pub async fn init_thoughts_repo(
     source: ThoughtsSource,
 ) -> CmdResult<Bootstrap> {
     let result = state
-        .runtime
-        .projects()
-        .run_onboarding(core_projects::RunOnboardingRequest {
-            user,
-            source: source.into(),
-        })
+        .client
+        .init_thoughts_repo(user, source.into())
         .await
         .map_err(AppError::from)?;
     let _ = crate::events::ConfigChanged.emit(&app);

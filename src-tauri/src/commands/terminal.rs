@@ -1,7 +1,5 @@
-use std::path::PathBuf;
-
-use hyprlayer_core::runtime::terminals as core_terminals;
 use hyprlayer_core::terminal::TerminalEvent;
+use hyprlayer_server::client::EventStream;
 use tauri::ipc::Channel;
 use tauri::State;
 
@@ -17,17 +15,13 @@ pub async fn terminal_open(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let attachment = state
-        .runtime
-        .terminals()
-        .open(core_terminals::OpenTerminalRequest {
-            workstream_id,
-            cols,
-            rows,
-        })
+    let (terminal_id, stream_id, events) = state
+        .client
+        .terminal_open_stream(workstream_id, cols, rows)
         .await
         .map_err(AppError::from)?;
-    Ok(pump(attachment, on_event))
+    pump(state.client.clone(), stream_id, events, on_event);
+    Ok(terminal_id)
 }
 
 #[tauri::command]
@@ -37,19 +31,18 @@ pub async fn terminal_attach(
     terminal_id: String,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<bool> {
-    let attachment = state
-        .runtime
-        .terminals()
-        .attach(core_terminals::AttachTerminalRequest { terminal_id })
+    match state
+        .client
+        .terminal_attach_stream(terminal_id)
         .await
-        .map_err(AppError::from)?;
-    Ok(match attachment {
-        Some(attachment) => {
-            pump(attachment, on_event);
-            true
+        .map_err(AppError::from)?
+    {
+        Some((stream_id, events)) => {
+            pump(state.client.clone(), stream_id, events, on_event);
+            Ok(true)
         }
-        None => false,
-    })
+        None => Ok(false),
+    }
 }
 
 #[tauri::command]
@@ -60,9 +53,8 @@ pub async fn terminal_write(
     data: String,
 ) -> CmdResult<()> {
     state
-        .runtime
-        .terminals()
-        .write(core_terminals::WriteTerminalRequest { terminal_id, data })
+        .client
+        .terminal_write(terminal_id, data)
         .await
         .map_err(AppError::from)
 }
@@ -76,13 +68,8 @@ pub async fn terminal_resize(
     rows: u16,
 ) -> CmdResult<()> {
     state
-        .runtime
-        .terminals()
-        .resize(core_terminals::ResizeTerminalRequest {
-            terminal_id,
-            cols,
-            rows,
-        })
+        .client
+        .terminal_resize(terminal_id, cols, rows)
         .await
         .map_err(AppError::from)
 }
@@ -91,9 +78,8 @@ pub async fn terminal_resize(
 #[specta::specta]
 pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> CmdResult<()> {
     state
-        .runtime
-        .terminals()
-        .close(core_terminals::CloseTerminalRequest { terminal_id })
+        .client
+        .terminal_close(terminal_id)
         .await
         .map_err(AppError::from)
 }
@@ -107,13 +93,13 @@ pub async fn spawn_cli_terminal(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let attachment = state
-        .runtime
-        .terminals()
-        .open_cli(core_terminals::OpenCliTerminalRequest { args, cols, rows })
+    let (terminal_id, stream_id, events) = state
+        .client
+        .spawn_cli_terminal_stream(args, cols, rows)
         .await
         .map_err(AppError::from)?;
-    Ok(pump(attachment, on_event))
+    pump(state.client.clone(), stream_id, events, on_event);
+    Ok(terminal_id)
 }
 
 #[tauri::command]
@@ -125,17 +111,13 @@ pub async fn spawn_shell_terminal(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let attachment = state
-        .runtime
-        .terminals()
-        .open_shell(core_terminals::OpenShellTerminalRequest {
-            command,
-            cols,
-            rows,
-        })
+    let (terminal_id, stream_id, events) = state
+        .client
+        .spawn_shell_terminal_stream(command, cols, rows)
         .await
         .map_err(AppError::from)?;
-    Ok(pump(attachment, on_event))
+    pump(state.client.clone(), stream_id, events, on_event);
+    Ok(terminal_id)
 }
 
 #[tauri::command]
@@ -149,19 +131,13 @@ pub async fn agent_open(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let attachment = state
-        .runtime
-        .terminals()
-        .open_agent(core_terminals::OpenAgentTerminalRequest {
-            workstream_id,
-            command,
-            args,
-            cols,
-            rows,
-        })
+    let (terminal_id, stream_id, events) = state
+        .client
+        .agent_open_stream(workstream_id, command, args, cols, rows)
         .await
         .map_err(AppError::from)?;
-    Ok(pump(attachment, on_event))
+    pump(state.client.clone(), stream_id, events, on_event);
+    Ok(terminal_id)
 }
 
 #[tauri::command]
@@ -173,13 +149,8 @@ pub async fn agent_resize(
     rows: u16,
 ) -> CmdResult<()> {
     state
-        .runtime
-        .terminals()
-        .resize_agent(core_terminals::ResizeAgentTerminalRequest {
-            terminal_id,
-            cols,
-            rows,
-        })
+        .client
+        .agent_resize(terminal_id, cols, rows)
         .await
         .map_err(AppError::from)
 }
@@ -194,14 +165,8 @@ pub async fn capture_agent_session(
     exclude: Vec<String>,
 ) -> CmdResult<Option<String>> {
     state
-        .runtime
-        .terminals()
-        .capture_session(core_terminals::CaptureSessionRequest {
-            workstream_id,
-            engine_id,
-            after_ms,
-            exclude,
-        })
+        .client
+        .capture_agent_session(workstream_id, engine_id, after_ms, exclude)
         .await
         .map_err(AppError::from)
 }
@@ -214,12 +179,8 @@ pub async fn mint_codex_session(
     command: String,
 ) -> CmdResult<Option<String>> {
     state
-        .runtime
-        .terminals()
-        .mint_codex_session(core_terminals::MintCodexSessionRequest {
-            workstream_id,
-            command,
-        })
+        .client
+        .mint_codex_session(workstream_id, command)
         .await
         .map_err(AppError::from)
 }
@@ -233,50 +194,38 @@ pub async fn agent_session_exists(
     session_id: String,
 ) -> CmdResult<bool> {
     state
-        .runtime
-        .terminals()
-        .session_exists(core_terminals::SessionExistsRequest {
-            workstream_id,
-            engine_id,
-            session_id,
-        })
+        .client
+        .agent_session_exists(workstream_id, engine_id, session_id)
         .await
         .map_err(AppError::from)
 }
 
-fn pump(
-    attachment: core_terminals::TerminalAttachment,
+/// Pumps one server-side stream into the Tauri channel the frontend holds.
+/// Shared by every `Channel<TerminalEvent>` command in this module and by
+/// `commands::scripts::script_run`, since a terminal stream and a script's
+/// own terminal stream are the same shape once both come off the wire.
+pub(crate) fn pump(
+    client: std::sync::Arc<hyprlayer_server::client::RpcClient>,
+    stream_id: u64,
+    mut events: EventStream<TerminalEvent>,
     on_event: Channel<TerminalEvent>,
-) -> String {
-    let core_terminals::TerminalAttachment {
-        terminal_id,
-        mut live,
-    } = attachment;
-    let id = terminal_id.clone();
+) {
     tauri::async_runtime::spawn(async move {
-        while let Some(ev) = live.recv().await {
+        while let Some(ev) = events.recv().await {
             if on_event.send(ev).is_err() {
+                let _ = client.cancel_stream(stream_id).await;
                 break;
             }
         }
     });
-    id
-}
-
-pub(crate) fn default_shell() -> PathBuf {
-    core_terminals::default_shell()
-}
-
-pub(crate) fn login_shell_args(command: &str) -> Vec<String> {
-    core_terminals::login_shell_args(command)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn default_shell_name() -> CmdResult<String> {
-    Ok(default_shell()
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("shell")
-        .to_string())
+pub async fn default_shell_name(state: State<'_, AppState>) -> CmdResult<String> {
+    state
+        .client
+        .default_shell_name()
+        .await
+        .map_err(AppError::from)
 }

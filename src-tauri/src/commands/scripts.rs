@@ -1,6 +1,5 @@
 use hyprlayer_core::repo_settings::ScriptSettings;
 use hyprlayer_core::runtime::script_registry::ScriptRuntime;
-use hyprlayer_core::runtime::scripts as core_scripts;
 use hyprlayer_core::scripts::ScriptKind;
 use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_core::CoreError;
@@ -8,6 +7,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use super::ensure_registered_project;
+use super::terminal::pump;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
@@ -19,12 +19,8 @@ pub async fn get_scripts(
 ) -> CmdResult<ScriptSettings> {
     ensure_registered_project(&state, &project_path).await?;
     state
-        .runtime
-        .scripts()
-        .settings(core_scripts::ScriptSettingsRequest {
-            project_path,
-            set: None,
-        })
+        .client
+        .get_scripts(project_path)
         .await
         .map_err(AppError::from)
 }
@@ -38,15 +34,10 @@ pub async fn set_scripts(
 ) -> CmdResult<()> {
     ensure_registered_project(&state, &project_path).await?;
     state
-        .runtime
-        .scripts()
-        .settings(core_scripts::ScriptSettingsRequest {
-            project_path,
-            set: Some(scripts),
-        })
+        .client
+        .set_scripts(project_path, scripts)
         .await
-        .map_err(AppError::from)?;
-    Ok(())
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -56,9 +47,8 @@ pub async fn get_script_runtime(
     workstream_id: String,
 ) -> CmdResult<ScriptRuntime> {
     state
-        .runtime
-        .scripts()
-        .runtime(core_scripts::ScriptRuntimeRequest { workstream_id })
+        .client
+        .get_script_runtime(workstream_id)
         .await
         .map_err(AppError::from)
 }
@@ -67,9 +57,8 @@ pub async fn get_script_runtime(
 #[specta::specta]
 pub async fn list_running_scripts(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
     state
-        .runtime
-        .scripts()
-        .running_ids()
+        .client
+        .list_running_scripts()
         .await
         .map_err(AppError::from)
 }
@@ -82,14 +71,8 @@ pub async fn get_script_output(
     kind: ScriptKind,
 ) -> CmdResult<Option<String>> {
     state
-        .runtime
-        .scripts()
-        .output(core_scripts::ScriptOutputRequest {
-            workstream_id,
-            kind,
-            clear: false,
-            terminal_id: None,
-        })
+        .client
+        .get_script_output(workstream_id, kind)
         .await
         .map_err(AppError::from)
 }
@@ -103,17 +86,10 @@ pub async fn script_clear_output(
     terminal_id: Option<String>,
 ) -> CmdResult<()> {
     state
-        .runtime
-        .scripts()
-        .output(core_scripts::ScriptOutputRequest {
-            workstream_id,
-            kind,
-            clear: true,
-            terminal_id,
-        })
+        .client
+        .script_clear_output(workstream_id, kind, terminal_id)
         .await
-        .map_err(AppError::from)?;
-    Ok(())
+        .map_err(AppError::from)
 }
 
 pub fn script_empty(kind: ScriptKind) -> AppError {
@@ -130,43 +106,21 @@ pub async fn script_run(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
-    let run = state
-        .runtime
-        .scripts()
-        .run(core_scripts::RunScriptRequest {
-            workstream_id,
-            kind,
-            cols,
-            rows,
-        })
+    let (terminal_id, stream_id, events) = state
+        .client
+        .script_run_stream(workstream_id, kind, cols, rows)
         .await
         .map_err(AppError::from)?;
-    Ok(pump(run, on_event))
+    pump(state.client.clone(), stream_id, events, on_event);
+    Ok(terminal_id)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn script_stop(state: State<'_, AppState>, workstream_id: String) -> CmdResult<()> {
     state
-        .runtime
-        .scripts()
-        .stop(core_scripts::StopScriptRequest { workstream_id })
+        .client
+        .script_stop(workstream_id)
         .await
         .map_err(AppError::from)
-}
-
-fn pump(run: core_scripts::ScriptRun, on_event: Channel<TerminalEvent>) -> String {
-    let core_scripts::ScriptRun {
-        terminal_id,
-        mut live,
-    } = run;
-    let id = terminal_id.clone();
-    tauri::async_runtime::spawn(async move {
-        while let Some(ev) = live.recv().await {
-            if on_event.send(ev).is_err() {
-                break;
-            }
-        }
-    });
-    id
 }

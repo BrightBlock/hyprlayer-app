@@ -1,13 +1,19 @@
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
 use crate::process::Exec;
 
 use super::thoughts_links::LinkStatus;
+
+/// Empty overlay, for tests that don't care about it.
+#[cfg(test)]
+const NO_OVERLAY: &[(String, String)] = &[];
 
 pub const ARCHIVE_SUBDIR: &str = "archived-contexts";
 
@@ -52,7 +58,7 @@ pub enum CreateMode {
     InPlace { branch: String },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedWorktree {
@@ -62,7 +68,7 @@ pub struct CreatedWorktree {
     pub base_branch: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeStatus {
@@ -86,11 +92,32 @@ pub enum RemovePolicy {
 
 pub struct WorktreeManager {
     root: PathBuf,
+    env_overlay: Arc<RwLock<BTreeMap<String, String>>>,
 }
 
 impl WorktreeManager {
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            root,
+            env_overlay: Arc::default(),
+        }
+    }
+
+    /// Shares the runtime's live overlay (ADR-0009 §7) rather than copying
+    /// it once, so a later attach's `SSH_AUTH_SOCK` reaches every git shell
+    /// this manager spawns from then on.
+    pub fn with_env_overlay(mut self, env_overlay: Arc<RwLock<BTreeMap<String, String>>>) -> Self {
+        self.env_overlay = env_overlay;
+        self
+    }
+
+    fn overlay_pairs(&self) -> Vec<(String, String)> {
+        self.env_overlay
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     pub fn root(&self) -> &Path {
@@ -103,11 +130,17 @@ impl WorktreeManager {
 
     pub async fn create(&self, git: &Path, spec: &CreateSpec) -> Result<CreatedWorktree> {
         let slug = unique_slug(&spec.title);
+        let overlay = self.overlay_pairs();
 
-        let _ = git_in(git, &spec.project_repo, &["fetch", "--prune", "origin"])
-            .timeout(Duration::from_secs(30))
-            .run()
-            .await;
+        let _ = git_in(
+            git,
+            &spec.project_repo,
+            &["fetch", "--prune", "origin"],
+            &overlay,
+        )
+        .timeout(Duration::from_secs(30))
+        .run()
+        .await;
 
         match &spec.mode {
             CreateMode::Isolated => {
@@ -115,7 +148,7 @@ impl WorktreeManager {
                 let path = self.prepare_worktree_dir(&spec.mapped_name, &slug)?;
                 let base = match &spec.base_override {
                     Some(b) => b.clone(),
-                    None => detect_base_branch(git, &spec.project_repo).await?,
+                    None => detect_base_branch(git, &spec.project_repo, &overlay).await?,
                 };
                 self.worktree_add(git, &spec.project_repo, &path, &["-b", &branch], &base)
                     .await?;
@@ -129,7 +162,7 @@ impl WorktreeManager {
             }
             CreateMode::Existing { branch } => {
                 let path = self.prepare_worktree_dir(&spec.mapped_name, &slug)?;
-                let base = detect_base_branch(git, &spec.project_repo)
+                let base = detect_base_branch(git, &spec.project_repo, &overlay)
                     .await
                     .unwrap_or_else(|_| branch.clone());
                 self.worktree_add(git, &spec.project_repo, &path, &[], branch)
@@ -150,12 +183,12 @@ impl WorktreeManager {
                     if dirty > 0 {
                         return Err(CoreError::CheckoutDirty { count: dirty });
                     }
-                    git_in(git, &spec.project_repo, &["checkout", branch])
+                    git_in(git, &spec.project_repo, &["checkout", branch], &overlay)
                         .timeout(Duration::from_secs(60))
                         .run()
                         .await?;
                 }
-                let base = detect_base_branch(git, &spec.project_repo)
+                let base = detect_base_branch(git, &spec.project_repo, &overlay)
                     .await
                     .unwrap_or_else(|_| branch.clone());
                 Ok(CreatedWorktree {
@@ -196,7 +229,7 @@ impl WorktreeManager {
         args.extend_from_slice(extra);
         args.push(path_str);
         args.push(committish);
-        git_in(git, project_repo, &args)
+        git_in(git, project_repo, &args, &self.overlay_pairs())
             .timeout(Duration::from_secs(120))
             .run()
             .await?;
@@ -206,9 +239,14 @@ impl WorktreeManager {
     async fn windows_longpaths(&self, _git: &Path, _worktree: &Path) {
         #[cfg(windows)]
         {
-            let _ = git_in(_git, _worktree, &["config", "core.longpaths", "true"])
-                .run()
-                .await;
+            let _ = git_in(
+                _git,
+                _worktree,
+                &["config", "core.longpaths", "true"],
+                &self.overlay_pairs(),
+            )
+            .run()
+            .await;
         }
     }
 
@@ -223,17 +261,23 @@ impl WorktreeManager {
         policy: RemovePolicy,
         delete_branch: bool,
     ) -> Result<()> {
+        let overlay = self.overlay_pairs();
         if is_live_worktree(worktree) {
             if policy == RemovePolicy::Safe {
                 ensure_removable(worktree, base_branch, branch)?;
             }
             let wt = worktree.display().to_string();
-            git_in(git, project_repo, &["worktree", "remove", "--force", &wt])
-                .timeout(Duration::from_secs(60))
-                .run()
-                .await?;
+            git_in(
+                git,
+                project_repo,
+                &["worktree", "remove", "--force", &wt],
+                &overlay,
+            )
+            .timeout(Duration::from_secs(60))
+            .run()
+            .await?;
         } else {
-            let _ = git_in(git, project_repo, &["worktree", "prune"])
+            let _ = git_in(git, project_repo, &["worktree", "prune"], &overlay)
                 .run()
                 .await;
             if worktree.exists() {
@@ -247,18 +291,28 @@ impl WorktreeManager {
             } else {
                 "-d"
             };
-            let _ = git_in(git, project_repo, &["branch", delete_flag, branch])
-                .run()
-                .await;
+            let _ = git_in(
+                git,
+                project_repo,
+                &["branch", delete_flag, branch],
+                &overlay,
+            )
+            .run()
+            .await;
         }
 
         Ok(())
     }
 
     pub async fn prune(&self, git: &Path, project_repo: &Path) -> Result<()> {
-        git_in(git, project_repo, &["worktree", "prune"])
-            .run()
-            .await?;
+        git_in(
+            git,
+            project_repo,
+            &["worktree", "prune"],
+            &self.overlay_pairs(),
+        )
+        .run()
+        .await?;
         Ok(())
     }
 
@@ -269,8 +323,9 @@ impl WorktreeManager {
         worktree: &Path,
         dest: &Path,
     ) -> Result<bool> {
+        let overlay = self.overlay_pairs();
         if !is_live_worktree(worktree) {
-            let _ = git_in(git, project_repo, &["worktree", "prune"])
+            let _ = git_in(git, project_repo, &["worktree", "prune"], &overlay)
                 .run()
                 .await;
             if worktree.exists() {
@@ -291,10 +346,15 @@ impl WorktreeManager {
 
         let from = worktree.display().to_string();
         let to = dest.display().to_string();
-        git_in(git, project_repo, &["worktree", "move", &from, &to])
-            .timeout(Duration::from_secs(120))
-            .run()
-            .await?;
+        git_in(
+            git,
+            project_repo,
+            &["worktree", "move", &from, &to],
+            &overlay,
+        )
+        .timeout(Duration::from_secs(120))
+        .run()
+        .await?;
         Ok(true)
     }
 
@@ -323,10 +383,15 @@ impl WorktreeManager {
 
         let from = archive.display().to_string();
         let to = target.display().to_string();
-        git_in(git, project_repo, &["worktree", "move", &from, &to])
-            .timeout(Duration::from_secs(120))
-            .run()
-            .await?;
+        git_in(
+            git,
+            project_repo,
+            &["worktree", "move", &from, &to],
+            &self.overlay_pairs(),
+        )
+        .timeout(Duration::from_secs(120))
+        .run()
+        .await?;
         Ok(())
     }
 
@@ -337,7 +402,7 @@ impl WorktreeManager {
             args.push(format!("!{pat}"));
         }
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        git_in(git, worktree, &arg_refs)
+        git_in(git, worktree, &arg_refs, &self.overlay_pairs())
             .timeout(Duration::from_secs(120))
             .run()
             .await?;
@@ -352,17 +417,18 @@ impl WorktreeManager {
         branch: &str,
         delete_branch: bool,
     ) -> Result<()> {
+        let overlay = self.overlay_pairs();
         if archive.exists() {
             let _ = std::fs::remove_dir_all(archive);
         }
-        let _ = git_in(git, project_repo, &["worktree", "prune"])
+        let _ = git_in(git, project_repo, &["worktree", "prune"], &overlay)
             .run()
             .await;
         if delete_branch {
-            let _ = git_in(git, project_repo, &["branch", "-D", branch])
+            let _ = git_in(git, project_repo, &["branch", "-D", branch], &overlay)
                 .run()
                 .await;
-            let _ = delete_remote_branch(git, project_repo, branch).await;
+            let _ = delete_remote_branch(git, project_repo, branch, &overlay).await;
         }
         Ok(())
     }
@@ -386,15 +452,16 @@ pub fn ensure_removable(worktree: &Path, base_branch: &str, branch: &str) -> Res
     Ok(())
 }
 
-fn git_in(git: &Path, repo: &Path, args: &[&str]) -> Exec {
+fn git_in(git: &Path, repo: &Path, args: &[&str], overlay: &[(String, String)]) -> Exec {
     let repo_arg: OsString = repo.as_os_str().to_os_string();
     Exec::new(git)
         .arg("-C")
         .arg(repo_arg)
         .args(args.iter().copied())
+        .envs(overlay.iter().cloned())
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PullOutcome {
@@ -403,10 +470,15 @@ pub enum PullOutcome {
     Conflicts { files: Vec<String> },
 }
 
-pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOutcome> {
+pub async fn pull_base(
+    git: &Path,
+    worktree: &Path,
+    base: &str,
+    overlay: &[(String, String)],
+) -> Result<PullOutcome> {
     let branch = base.strip_prefix("origin/").unwrap_or(base);
 
-    let _ = git_in(git, worktree, &["fetch", "origin", branch])
+    let _ = git_in(git, worktree, &["fetch", "origin", branch], overlay)
         .timeout(Duration::from_secs(60))
         .run()
         .await;
@@ -416,6 +488,7 @@ pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOu
         git,
         worktree,
         &["rev-parse", "--verify", "--quiet", &remote_ref],
+        overlay,
     )
     .run()
     .await
@@ -426,7 +499,7 @@ pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOu
         base.to_string()
     };
 
-    let out = git_in(git, worktree, &["merge", "--no-edit", &merge_ref])
+    let out = git_in(git, worktree, &["merge", "--no-edit", &merge_ref], overlay)
         .timeout(Duration::from_secs(120))
         .run_unchecked()
         .await?;
@@ -439,7 +512,7 @@ pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOu
         });
     }
 
-    let files = unmerged_files(git, worktree).await;
+    let files = unmerged_files(git, worktree, overlay).await;
     if !files.is_empty() {
         return Ok(PullOutcome::Conflicts { files });
     }
@@ -450,8 +523,8 @@ pub async fn pull_base(git: &Path, worktree: &Path, base: &str) -> Result<PullOu
     })
 }
 
-pub async fn fetch_remote(git: &Path, worktree: &Path) -> Result<()> {
-    git_in(git, worktree, &["fetch", "--prune", "origin"])
+pub async fn fetch_remote(git: &Path, worktree: &Path, overlay: &[(String, String)]) -> Result<()> {
+    git_in(git, worktree, &["fetch", "--prune", "origin"], overlay)
         .timeout(Duration::from_secs(60))
         .run()
         .await?;
@@ -463,26 +536,42 @@ pub async fn create_tracking_branch(
     repo: &Path,
     local: &str,
     remote_ref: &str,
+    overlay: &[(String, String)],
 ) -> Result<()> {
-    git_in(git, repo, &["branch", "--track", local, remote_ref])
+    git_in(
+        git,
+        repo,
+        &["branch", "--track", local, remote_ref],
+        overlay,
+    )
+    .timeout(Duration::from_secs(60))
+    .run()
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_remote_branch(
+    git: &Path,
+    repo: &Path,
+    branch: &str,
+    overlay: &[(String, String)],
+) -> Result<()> {
+    git_in(git, repo, &["push", "origin", "--delete", branch], overlay)
         .timeout(Duration::from_secs(60))
         .run()
         .await?;
     Ok(())
 }
 
-pub async fn delete_remote_branch(git: &Path, repo: &Path, branch: &str) -> Result<()> {
-    git_in(git, repo, &["push", "origin", "--delete", branch])
-        .timeout(Duration::from_secs(60))
-        .run()
-        .await?;
-    Ok(())
-}
-
-async fn unmerged_files(git: &Path, worktree: &Path) -> Vec<String> {
-    match git_in(git, worktree, &["diff", "--name-only", "--diff-filter=U"])
-        .run()
-        .await
+async fn unmerged_files(git: &Path, worktree: &Path, overlay: &[(String, String)]) -> Vec<String> {
+    match git_in(
+        git,
+        worktree,
+        &["diff", "--name-only", "--diff-filter=U"],
+        overlay,
+    )
+    .run()
+    .await
     {
         Ok(out) => out
             .stdout
@@ -495,10 +584,19 @@ async fn unmerged_files(git: &Path, worktree: &Path) -> Vec<String> {
     }
 }
 
-pub async fn detect_base_branch(git: &Path, repo: &Path) -> Result<String> {
-    if let Ok(out) = git_in(git, repo, &["symbolic-ref", "refs/remotes/origin/HEAD"])
-        .run()
-        .await
+pub async fn detect_base_branch(
+    git: &Path,
+    repo: &Path,
+    overlay: &[(String, String)],
+) -> Result<String> {
+    if let Ok(out) = git_in(
+        git,
+        repo,
+        &["symbolic-ref", "refs/remotes/origin/HEAD"],
+        overlay,
+    )
+    .run()
+    .await
     {
         let full = out.stdout.trim();
         if let Some(short) = full.strip_prefix("refs/remotes/") {
@@ -517,6 +615,7 @@ pub async fn detect_base_branch(git: &Path, repo: &Path) -> Result<String> {
                 "--quiet",
                 &format!("{candidate}^{{commit}}"),
             ],
+            overlay,
         )
         .run_unchecked()
         .await?;
@@ -727,9 +826,15 @@ mod tests {
             .unwrap()
             .contains(&"linux-support".to_string()));
 
-        create_tracking_branch(&git, &repo, "linux-support", "origin/linux-support")
-            .await
-            .unwrap();
+        create_tracking_branch(
+            &git,
+            &repo,
+            "linux-support",
+            "origin/linux-support",
+            NO_OVERLAY,
+        )
+        .await
+        .unwrap();
 
         let upstream = std::process::Command::new(&git)
             .arg("-C")
@@ -768,11 +873,15 @@ mod tests {
             Some("linux-support")
         );
 
-        assert!(
-            create_tracking_branch(&git, &repo, "linux-support", "origin/linux-support")
-                .await
-                .is_err()
-        );
+        assert!(create_tracking_branch(
+            &git,
+            &repo,
+            "linux-support",
+            "origin/linux-support",
+            NO_OVERLAY,
+        )
+        .await
+        .is_err());
     }
 
     #[test]
@@ -1129,7 +1238,10 @@ mod tests {
     async fn base_detection_falls_back_to_local_main() {
         let (_guard, repo) = fixture_repo();
         let git = which::which("git").unwrap();
-        assert_eq!(detect_base_branch(&git, &repo).await.unwrap(), "main");
+        assert_eq!(
+            detect_base_branch(&git, &repo, NO_OVERLAY).await.unwrap(),
+            "main"
+        );
     }
 
     #[tokio::test]
@@ -1333,5 +1445,37 @@ mod tests {
             .await
             .unwrap();
         assert!(!wt.exists(), "husk directory must be cleaned up");
+    }
+
+    /// A fake `git` that only ever echoes an env var, standing in for the
+    /// real binary so the assertion is about the overlay reaching the child
+    /// process, not about git itself.
+    #[cfg(unix)]
+    fn fake_git_echoing_ssh_auth_sock(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = dir.join("fake-git");
+        std::fs::write(&path, "#!/bin/sh\nprintf '%s' \"$SSH_AUTH_SOCK\"\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_overlay_reaches_a_real_git_child_through_git_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake_git = fake_git_echoing_ssh_auth_sock(dir.path());
+        // A value no ambient test-runner environment would already have,
+        // so a pass can only mean the overlay itself made the trip.
+        let overlay = vec![(
+            "SSH_AUTH_SOCK".to_string(),
+            "/tmp/git-in-overlay-probe.sock".to_string(),
+        )];
+
+        let out = git_in(&fake_git, dir.path(), &["status"], &overlay)
+            .run()
+            .await
+            .unwrap();
+        assert_eq!(out.stdout, "/tmp/git-in-overlay-probe.sock");
     }
 }

@@ -63,9 +63,9 @@ pub trait CredentialLookup: Send + Sync {
     ) -> std::result::Result<CredentialLookupResult, CredentialLookupError>;
 }
 
-/// The production-safe default: headless callers get no platform credential
-/// storage, so a missing key falls through to the next source in
-/// `capability`'s precedence rather than a compile-time-impossible one.
+/// The default off macOS, and what hermetic embedders install explicitly: no
+/// platform credential storage, so a missing key falls through to the next
+/// source in `capability`'s precedence rather than a compile-time-impossible one.
 pub struct NoCredentialLookup;
 
 impl CredentialLookup for NoCredentialLookup {

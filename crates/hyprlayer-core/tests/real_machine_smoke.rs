@@ -13,6 +13,7 @@ fn real_environment() -> RuntimeEnvironment {
         home_dir: dirs::home_dir().unwrap_or_default(),
         process_cwd: std::env::current_dir().unwrap_or_default(),
         process_env: std::env::vars_os().collect(),
+        env_overlay: Default::default(),
     }
 }
 
@@ -348,7 +349,7 @@ async fn github_owners_lists_the_signed_in_account_then_orgs() {
         .path
         .expect("gh should resolve");
 
-    let owners = hyprlayer_core::repos::github_owners(std::path::Path::new(&gh))
+    let owners = hyprlayer_core::repos::github_owners(std::path::Path::new(&gh), &[])
         .await
         .expect("gh api user / user/orgs should answer");
     println!("owners: {owners:?}");
@@ -388,7 +389,7 @@ async fn push_upstream_sets_tracking_against_a_local_remote() {
         .output()
         .expect("bare remote");
 
-    init_repo(&git, &repo, "main").await.expect("init");
+    init_repo(&git, &repo, "main", &[]).await.expect("init");
     let written = hyprlayer_core::repos::write_scaffold(
         &repo,
         "aurora-api",
@@ -398,8 +399,10 @@ async fn push_upstream_sets_tracking_against_a_local_remote() {
         },
     )
     .expect("scaffold");
-    stage_all(&git, &repo).await.expect("add -A");
-    commit_empty_initial(&git, &repo).await.expect("commit");
+    stage_all(&git, &repo, &[]).await.expect("add -A");
+    commit_empty_initial(&git, &repo, &[])
+        .await
+        .expect("commit");
 
     // `gh repo create --remote origin` is what wires this up for real.
     std::process::Command::new(&git)
@@ -410,7 +413,9 @@ async fn push_upstream_sets_tracking_against_a_local_remote() {
         .output()
         .expect("remote add");
 
-    push_upstream(&git, &repo, "main").await.expect("push -u");
+    push_upstream(&git, &repo, "main", &[])
+        .await
+        .expect("push -u");
 
     let out = std::process::Command::new(&git)
         .arg("-C")
@@ -462,7 +467,7 @@ async fn create_github_repo_then_push_lands_the_first_commit() {
     let dir = tempfile::tempdir().expect("temp dir");
     let repo = dir.path().join(&name);
 
-    init_repo(&git, &repo, "main").await.expect("init");
+    init_repo(&git, &repo, "main", &[]).await.expect("init");
     let written = write_scaffold(
         &repo,
         &name,
@@ -472,15 +477,19 @@ async fn create_github_repo_then_push_lands_the_first_commit() {
         },
     )
     .expect("scaffold");
-    stage_all(&git, &repo).await.expect("add -A");
-    commit_empty_initial(&git, &repo).await.expect("commit");
+    stage_all(&git, &repo, &[]).await.expect("add -A");
+    commit_empty_initial(&git, &repo, &[])
+        .await
+        .expect("commit");
 
-    let url = create_github_repo(&gh, &repo, &owner, &name, true)
+    let url = create_github_repo(&gh, &repo, &owner, &name, true, &[])
         .await
         .expect("gh repo create");
     println!("created {url} (scaffold: {written:?})");
 
-    push_upstream(&git, &repo, "main").await.expect("push -u");
+    push_upstream(&git, &repo, "main", &[])
+        .await
+        .expect("push -u");
 
     let field = |q: &str| {
         let out = std::process::Command::new(&gh)
@@ -535,12 +544,12 @@ async fn a_taken_name_is_reported_as_taken() {
 
     let dir = tempfile::tempdir().expect("temp dir");
     let repo = dir.path().join("probe");
-    init_repo(&git, &repo, "main").await.expect("init");
-    hyprlayer_core::repos::commit_empty_initial(&git, &repo)
+    init_repo(&git, &repo, "main", &[]).await.expect("init");
+    hyprlayer_core::repos::commit_empty_initial(&git, &repo, &[])
         .await
         .expect("commit");
 
-    let err = create_github_repo(&gh, &repo, owner, name, true)
+    let err = create_github_repo(&gh, &repo, owner, name, true, &[])
         .await
         .expect_err("the name is already taken");
     let stderr = match &err {
@@ -556,7 +565,7 @@ async fn a_taken_name_is_reported_as_taken() {
     assert!(failure.remedy.is_some());
 
     assert!(
-        hyprlayer_core::repos::origin_url(&git, &repo)
+        hyprlayer_core::repos::origin_url(&git, &repo, &[])
             .await
             .is_none(),
         "a failed create leaves no origin behind, so a retry is a clean create"
@@ -586,7 +595,7 @@ async fn an_existing_remote_is_pushed_to_rather_than_recreated() {
         .expect("clone");
     assert!(cloned.status.success(), "clone the existing repo");
 
-    let origin = origin_url(&git, &repo).await;
+    let origin = origin_url(&git, &repo, &[]).await;
     println!("origin: {origin:?}");
     let plan = plan_publish(origin.as_deref(), owner, name);
     println!("plan: {plan:?}");
@@ -608,7 +617,7 @@ async fn an_existing_remote_is_pushed_to_rather_than_recreated() {
         ])
         .output()
         .expect("commit");
-    push_upstream(&git, &repo, "main")
+    push_upstream(&git, &repo, "main", &[])
         .await
         .expect("the retry push lands");
     println!("pushed to {slug}");

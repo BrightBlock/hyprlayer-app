@@ -17,7 +17,7 @@ fi
 if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
   echo "→ Verification gate (cargo test, library targets, typecheck, lint, vitest)…"
   cargo test --workspace --quiet
-  cargo check -p hyprlayer-models -p hyprlayer-core   # specta-less: the app enables it, embedders don't
+  cargo check -p hyprlayer-models -p hyprlayer-core -p hyprlayer-proto   # specta-less: the app enables it, embedders don't
   pnpm typecheck && pnpm lint && pnpm test
   if [[ -n "$(git status --porcelain -- src/lib/bindings.ts)" ]]; then
     echo "✗ src/lib/bindings.ts drifted — cargo test regenerated it. Commit the diff first."

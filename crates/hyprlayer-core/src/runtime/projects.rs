@@ -17,6 +17,7 @@ use crate::store::{NewProject, ProjectRecord, ProjectSource};
 use crate::thoughts_repo::{self, classify_root, RootState};
 use crate::worktree::seed::{self, SeedReport};
 use crate::worktree::thoughts_links;
+use serde::{Deserialize, Serialize};
 
 use super::HyprlayerRuntime;
 
@@ -92,7 +93,7 @@ struct ThoughtsTarget<'a> {
     profile: Option<&'a str>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectView {
     pub path: String,
     pub mapped_name: String,
@@ -104,7 +105,7 @@ pub struct ProjectView {
     pub source: ProjectSource,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConfigSummary {
     Missing {
         path: String,
@@ -123,7 +124,7 @@ pub enum ConfigSummary {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BootstrapResult {
     pub config: ConfigSummary,
     pub projects: Vec<ProjectView>,
@@ -131,7 +132,7 @@ pub struct BootstrapResult {
     pub settings: AppSettings,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectInspection {
     pub project: ProjectView,
     pub storage: Option<StorageInfo>,
@@ -164,14 +165,14 @@ pub struct CloneProjectRequest {
     pub bootstrap_user: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GithubTarget {
     pub owner: String,
     pub name: String,
     pub private: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateProjectRequest {
     pub op_id: String,
     pub name: String,
@@ -200,20 +201,20 @@ pub struct PublishProjectRequest {
     pub is_private: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GithubOwnersOutcome {
     SignedOut,
     Unavailable { message: String },
     Ready { owners: Vec<repos::GithubOwner> },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HealthStatus {
     Pass,
     Fail,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendHealthCheck {
     pub id: String,
     pub label: String,
@@ -222,7 +223,7 @@ pub struct BackendHealthCheck {
     pub remedy: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendHealth {
     pub checks: Vec<BackendHealthCheck>,
 }
@@ -233,19 +234,19 @@ pub struct SyncThoughtsRequest {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncThoughtsResult {
     pub output: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThoughtsProbe {
     pub default_path: String,
     pub exists: bool,
     pub is_git_repo: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ThoughtsSource {
     Clone {
         url: String,
@@ -263,6 +264,56 @@ pub enum ThoughtsSource {
 pub struct RunOnboardingRequest {
     pub user: String,
     pub source: ThoughtsSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct DirBrowseEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub is_repo: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct DirListing {
+    pub path: String,
+    pub parent: Option<String>,
+    pub entries: Vec<DirBrowseEntry>,
+}
+
+/// Excludes `.git` the way `gitops::list_dir` does — nobody browsing for a
+/// project to import wants it offered as a candidate.
+fn list_directory(dir: &Path) -> DirListing {
+    let mut entries = Vec::new();
+    if let Ok(read) = std::fs::read_dir(dir) {
+        for ent in read.flatten() {
+            let name = ent.file_name().to_string_lossy().into_owned();
+            if name == ".git" {
+                continue;
+            }
+            let is_dir = ent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let is_repo = is_dir && repos::is_git_repo(&ent.path());
+            entries.push(DirBrowseEntry {
+                name,
+                is_dir,
+                is_repo,
+            });
+        }
+    }
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    DirListing {
+        path: dir.display().to_string(),
+        parent: dir.parent().map(|p| p.display().to_string()),
+        entries,
+    }
 }
 
 fn pass_if(ok: bool) -> HealthStatus {
@@ -452,6 +503,24 @@ impl ProjectService<'_> {
         repos::classify_repo_path(Path::new(path))
     }
 
+    /// Lists a directory on the server's filesystem — the read half a future
+    /// remote picker needs, since a client-side file dialog has nothing to
+    /// pick from on a machine it isn't running on. `path` defaults to the
+    /// server's home directory; a missing or unreadable one falls back to it
+    /// too, rather than erroring, since there is nothing a client browsing
+    /// blind can do about a bad path except try another one.
+    pub fn browse(&self, path: Option<String>) -> DirListing {
+        let home = &self.runtime.environment.home_dir;
+        let requested = path.map(PathBuf::from).unwrap_or_else(|| home.clone());
+        let dir = if requested.is_dir() {
+            requested
+        } else {
+            home.clone()
+        };
+        let dir = dunce::canonicalize(&dir).unwrap_or(dir);
+        list_directory(&dir)
+    }
+
     pub async fn inspect(&self, path: &str) -> Result<Option<ProjectInspection>> {
         let Some(project) = self.find(path).await? else {
             return Ok(None);
@@ -498,7 +567,7 @@ impl ProjectService<'_> {
             });
         }
 
-        let origin = repos::origin_url(git, repo).await;
+        let origin = repos::origin_url(git, repo, &self.runtime.environment.overlay_env()).await;
         let path = repo.display().to_string();
         let row = NewProject {
             path: path.clone(),
@@ -591,9 +660,18 @@ impl ProjectService<'_> {
                     .map(str::trim)
                     .filter(|b| !b.is_empty())
                     .unwrap_or("main");
-                repos::init_repo_with_commit(&git, repo, branch).await
+                repos::init_repo_with_commit(
+                    &git,
+                    repo,
+                    branch,
+                    &self.runtime.environment.overlay_env(),
+                )
+                .await
             }
-            repos::RepoPathStatus::Unborn => repos::commit_empty_initial(&git, repo).await,
+            repos::RepoPathStatus::Unborn => {
+                repos::commit_empty_initial(&git, repo, &self.runtime.environment.overlay_env())
+                    .await
+            }
             _ => Ok(()),
         };
 
@@ -683,7 +761,7 @@ impl ProjectService<'_> {
             });
         }
 
-        repos::clone_repo(&git, source, &dest).await?;
+        repos::clone_repo(&git, source, &dest, &self.runtime.environment.overlay_env()).await?;
 
         self.register_repo(&git, &dest, name, thoughts, kind, true)
             .await
@@ -736,7 +814,7 @@ impl ProjectService<'_> {
         let Some(record) = record else {
             return Ok(None);
         };
-        let origin = repos::origin_url(git, repo).await;
+        let origin = repos::origin_url(git, repo, &self.runtime.environment.overlay_env()).await;
         if origin == record.origin_url {
             return Ok(None);
         }
@@ -779,38 +857,48 @@ impl ProjectService<'_> {
 
         progress.emit(CreateStep::GithubRepo, StepStatus::Running, None);
 
-        let origin = repos::origin_url(git, repo).await;
-        let url = match repos::plan_publish(origin.as_deref(), &owner, &name) {
-            repos::PublishPlan::PushOnly { url } => url,
-            repos::PublishPlan::Conflict { origin } => {
-                fail(CreateStep::GithubRepo);
-                return Err(CoreError::GithubOriginExists { origin });
-            }
-            repos::PublishPlan::Create => {
-                let gh = match self.runtime.binaries.require(BinaryKind::Gh).await {
-                    Ok(gh) => gh,
-                    Err(e) => {
-                        fail(CreateStep::GithubRepo);
-                        return Err(e);
-                    }
-                };
-                match repos::create_github_repo(&gh, repo, &owner, &name, target.private).await {
-                    Ok(url) => url,
-                    Err(e) => {
-                        fail(CreateStep::GithubRepo);
-                        return Err(CoreError::GithubOperation(repos::classify_github_failure(
-                            &exec_stderr(&e),
-                            &owner,
-                            &name,
-                        )));
+        let origin = repos::origin_url(git, repo, &self.runtime.environment.overlay_env()).await;
+        let url =
+            match repos::plan_publish(origin.as_deref(), &owner, &name) {
+                repos::PublishPlan::PushOnly { url } => url,
+                repos::PublishPlan::Conflict { origin } => {
+                    fail(CreateStep::GithubRepo);
+                    return Err(CoreError::GithubOriginExists { origin });
+                }
+                repos::PublishPlan::Create => {
+                    let gh = match self.runtime.binaries.require(BinaryKind::Gh).await {
+                        Ok(gh) => gh,
+                        Err(e) => {
+                            fail(CreateStep::GithubRepo);
+                            return Err(e);
+                        }
+                    };
+                    match repos::create_github_repo(
+                        &gh,
+                        repo,
+                        &owner,
+                        &name,
+                        target.private,
+                        &self.runtime.environment.overlay_env(),
+                    )
+                    .await
+                    {
+                        Ok(url) => url,
+                        Err(e) => {
+                            fail(CreateStep::GithubRepo);
+                            return Err(CoreError::GithubOperation(
+                                repos::classify_github_failure(&exec_stderr(&e), &owner, &name),
+                            ));
+                        }
                     }
                 }
-            }
-        };
+            };
         progress.emit(CreateStep::GithubRepo, StepStatus::Done, Some(&url));
 
         progress.emit(CreateStep::Push, StepStatus::Running, None);
-        if let Err(e) = repos::push_upstream(git, repo, branch).await {
+        if let Err(e) =
+            repos::push_upstream(git, repo, branch, &self.runtime.environment.overlay_env()).await
+        {
             fail(CreateStep::Push);
             return Err(CoreError::GithubOperation(repos::classify_push_failure(
                 &exec_stderr(&e),
@@ -884,7 +972,14 @@ impl ProjectService<'_> {
         );
 
         progress.emit(CreateStep::Repository, StepStatus::Running, None);
-        if let Err(e) = repos::init_repo(&git, &dest, &branch).await {
+        if let Err(e) = repos::init_repo(
+            &git,
+            &dest,
+            &branch,
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+        {
             progress.emit(CreateStep::Repository, StepStatus::Failed, None);
             return Err(rollback_dir(&dest, e).await);
         }
@@ -898,8 +993,9 @@ impl ProjectService<'_> {
                 move || repos::write_scaffold(&dest, &name, &scaffold)
             })
             .await?;
-            repos::stage_all(&git, &dest).await?;
-            repos::commit_empty_initial(&git, &dest).await?;
+            repos::stage_all(&git, &dest, &self.runtime.environment.overlay_env()).await?;
+            repos::commit_empty_initial(&git, &dest, &self.runtime.environment.overlay_env())
+                .await?;
             Ok(written)
         }
         .await;
@@ -977,7 +1073,7 @@ impl ProjectService<'_> {
         let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
             return Ok(GithubOwnersOutcome::SignedOut);
         };
-        match repos::github_owners(&gh).await {
+        match repos::github_owners(&gh, &self.runtime.environment.overlay_env()).await {
             Ok(owners) => Ok(GithubOwnersOutcome::Ready { owners }),
             Err(e) => {
                 let detail = exec_stderr(&e);
@@ -1040,7 +1136,7 @@ impl ProjectService<'_> {
         let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
             return Ok(Vec::new());
         };
-        match repos::github_repos(&gh, 100).await {
+        match repos::github_repos(&gh, 100, &self.runtime.environment.overlay_env()).await {
             Ok(list) => Ok(list),
             Err(e) => {
                 tracing::debug!("gh repo list unavailable: {e}");
@@ -1360,7 +1456,8 @@ impl ProjectService<'_> {
                     None => self.runtime.environment.home_dir.join("thoughts"),
                 };
                 let git = self.runtime.binaries.require(BinaryKind::Git).await?;
-                repos::clone_repo(&git, url, &dest).await?;
+                repos::clone_repo(&git, url, &dest, &self.runtime.environment.overlay_env())
+                    .await?;
                 dest
             }
             ThoughtsSource::Disk { path } => {
@@ -1468,6 +1565,8 @@ impl ProjectService<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn canonicalized_project_path_has_no_verbatim_prefix() {
         let here = dunce::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
@@ -1476,5 +1575,37 @@ mod tests {
             "registered project path must not carry the \\\\?\\ prefix: {}",
             here.display(),
         );
+    }
+
+    #[test]
+    fn browse_lists_a_directory_and_flags_a_git_repo() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("plain")).unwrap();
+        std::fs::create_dir_all(root.path().join("repo/.git")).unwrap();
+        std::fs::create_dir_all(root.path().join(".git")).unwrap();
+        std::fs::write(root.path().join("readme.md"), "hi").unwrap();
+
+        let listing = list_directory(root.path());
+
+        // list_directory itself does not canonicalize — browse() does that
+        // before calling it — so this is the raw path handed in.
+        assert_eq!(listing.path, root.path().display().to_string());
+        assert_eq!(
+            listing.parent.as_deref(),
+            root.path()
+                .parent()
+                .map(|p| p.display().to_string())
+                .as_deref()
+        );
+        // The top level's own .git is excluded, so three entries, not four.
+        assert_eq!(listing.entries.len(), 3);
+
+        let by_name = |name: &str| listing.entries.iter().find(|e| e.name == name).unwrap();
+        assert!(by_name("plain").is_dir);
+        assert!(!by_name("plain").is_repo);
+        assert!(by_name("repo").is_dir);
+        assert!(by_name("repo").is_repo);
+        assert!(!by_name("readme.md").is_dir);
+        assert!(!by_name("readme.md").is_repo);
     }
 }

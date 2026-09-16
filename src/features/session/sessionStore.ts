@@ -856,7 +856,12 @@ export async function restoreSessionIfNeeded(
   if (entryOf(sessionId) || channels.has(sessionId) || restoring.has(sessionId)) return;
   restoring.add(sessionId);
   try {
-    const log = await unwrap(commands.getSessionLog(sessionId));
+    const [log, active] = await Promise.all([
+      unwrap(commands.getSessionLog(sessionId)),
+      // The server outlives the app (ADR-0009): a session it still reports
+      // live is attached to below rather than shown as a frozen transcript.
+      unwrap(commands.listActiveSessions()).catch(() => []),
+    ]);
     if (entryOf(sessionId) || channels.has(sessionId)) return;
 
     let view = initialSessionView("starting");
@@ -882,6 +887,7 @@ export async function restoreSessionIfNeeded(
       taskStartedAt: {},
       queued: [],
     });
+    if (active.some((a) => a.session.id === sessionId)) await resumeSession(sessionId);
   } catch (error) {
     console.error(`failed to restore session ${sessionId}`, error);
   } finally {

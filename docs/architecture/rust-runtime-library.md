@@ -15,6 +15,45 @@ This document describes the surface **as it exists**, which in several places is
 not the surface ADR-0008's outline table or the implementation plan sketched. The
 tree is right and this document follows the tree.
 
+## The second consumer
+
+`crates/hyprlayer-server` is the first real embedder besides the desktop, and the
+reason this facade had to be a facade (ADR-0009). It opens one runtime, holds the
+profile lock, and serves it over a Unix socket — a named pipe on Windows — so the
+desktop became an RPC client rather than a host. The same binary is reached
+remotely as `ssh <host> hyprlayer-server relay`.
+
+What that consumer needed, and therefore what this surface gained:
+
+- **`RuntimeEnvironment::detect` and `RuntimePaths::detect`** (`env.rs`). A server
+  has no Tauri to hand it paths, so the desktop's resolution moved into core. It is
+  the one place core may read `dirs::`/`env::var_os` for those paths, and only an
+  embedder at construction time may call it — see ADR-0009 on why that does not
+  breach ADR-0008's hermeticity contract, whose subject is what core reads *during
+  operations*.
+- **An environment overlay.** `RuntimeEnvironment` stopped being fixed at `open()`
+  and became a base plus a mutable overlay (`set_env_overlay`/`overlay_env`,
+  mirrored by `HyprlayerRuntime::set_env_overlay`). A daemonised server has no
+  `SSH_AUTH_SOCK`, so each attaching client sends one and the server merges it over
+  `process_env` at every child spawn. Nothing else in core reads the overlay.
+- **Four accessors removed, and the methods that replaced them.** `SettingsService`
+  no longer exposes `binaries()` or `config()`, `SessionService::launch` returns
+  `()` rather than an `Arc<dyn AgentDriver>`, and `opencode_server_if_running` is
+  `pub(crate)`. A resolved `PathBuf` or a trait object means nothing to a caller in
+  another process, so each leak became a method that does the work where the
+  runtime is: `SessionService::{send, respond_permission, answer, interrupt, kill,
+  set_model, set_effort, is_live}`, `SettingsService::{set_binary_override,
+  redetect_binaries, github_username, default_username, effective_config_for}`, and
+  the `WorkstreamService` methods that absorbed `commands/workstreams.rs`'s nine
+  `require(BinaryKind::Git|Gh)` bodies.
+- **`ProjectService::browse`** — a directory listing on the server's filesystem,
+  for a client that cannot open a file dialog on a machine it is not running on.
+
+The rule this produces for anything added later: **a facade method may not hand back
+a value that only means something inside the runtime's own process.** A path, a file
+descriptor, a trait object and a live handle are all the same mistake. If a caller
+in another process could not act on it, the work belongs behind the method.
+
 ## Constructing a runtime
 
 Everything the runtime reads is supplied: no `dirs::` fallback, no ambient

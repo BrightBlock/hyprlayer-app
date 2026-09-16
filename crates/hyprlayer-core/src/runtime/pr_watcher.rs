@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, Mutex as AsyncMutex, Notify};
@@ -40,6 +40,7 @@ pub struct PrWatcherContext {
     pub focused: Arc<AtomicBool>,
     pub focus_changed: Arc<Notify>,
     pub events: broadcast::Sender<RuntimeEvent>,
+    pub env_overlay: Arc<RwLock<BTreeMap<String, String>>>,
 }
 
 struct Tracked {
@@ -142,7 +143,14 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
         .map(|item| (item.id.clone(), item.project_path.clone()))
         .collect();
 
-    let results = poll_all(&gh, to_poll).await;
+    let overlay: Vec<(String, String)> = ctx
+        .env_overlay
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let results = poll_all(&gh, to_poll, &overlay).await;
     let polled_at = Instant::now();
     let mut rate_limited = false;
 
@@ -221,7 +229,11 @@ async fn promote_record(ctx: &PrWatcherContext, project_path: &str, number: u32)
     }
 }
 
-async fn poll_all(gh: &Path, items: Vec<Workstream>) -> Vec<(String, Result<Option<PrStatus>>)> {
+async fn poll_all(
+    gh: &Path,
+    items: Vec<Workstream>,
+    overlay: &[(String, String)],
+) -> Vec<(String, Result<Option<PrStatus>>)> {
     use tokio::task::JoinSet;
 
     let mut set: JoinSet<(String, Result<Option<PrStatus>>)> = JoinSet::new();
@@ -233,8 +245,15 @@ async fn poll_all(gh: &Path, items: Vec<Workstream>) -> Vec<(String, Result<Opti
             }
         }
         let gh = gh.to_path_buf();
+        let overlay = overlay.to_vec();
         set.spawn(async move {
-            let res = pr::pr_status(&gh, Path::new(&item.worktree_path), &item.pr_ref()).await;
+            let res = pr::pr_status(
+                &gh,
+                Path::new(&item.worktree_path),
+                &item.pr_ref(),
+                &overlay,
+            )
+            .await;
             (item.id, res)
         });
     }

@@ -64,6 +64,9 @@ pub enum CoreError {
     #[error("session {session_id} has no user turn #{user_turn}")]
     UserTurnNotFound { session_id: String, user_turn: u32 },
 
+    #[error("No live session with id {session_id}")]
+    SessionNotFound { session_id: String },
+
     #[error("another Hyprlayer runtime is already using the profile at {path}")]
     RuntimeInUse { path: PathBuf },
 
@@ -267,6 +270,29 @@ pub enum CoreError {
     #[error("The prompt file changed on disk after it was previewed.")]
     PromptsSourceChanged,
 
+    #[error("Node.js (npm) isn't installed, so OpenCode can't be installed automatically.")]
+    NpmMissing,
+
+    #[error("Couldn't install OpenCode via npm. {detail}")]
+    OpencodeInstallFailed { detail: String },
+
+    #[error("That install method isn't available on this platform.")]
+    CliInstallUnsupported,
+
+    #[error("{action} is not available while connected to the remote host {host}.")]
+    RemoteUnsupported { action: String, host: String },
+
+    #[error("This workstream runs in a plain folder, so it has no branches or PRs.")]
+    WorkstreamFolderNoGit,
+
+    #[error(fmt = fmt_pr_not_found)]
+    PrNotFound { pr_number: u32, detail: String },
+
+    // Keeps the legacy `internal` code (v0.7 envelope, pinned by the workstreams
+    // fixture), like TerminalCommandEmpty below.
+    #[error("base branch cannot be empty")]
+    WorkstreamBaseBranchEmpty,
+
     // Keeps the legacy `internal` code (v0.7 envelope, pinned by the terminals
     // fixture): commands/terminal.rs's agent_open guard predates a domain-specific
     // code and this reproduces it exactly rather than inventing a new one.
@@ -317,6 +343,18 @@ fn fmt_script_empty(kind: &ScriptKind, f: &mut std::fmt::Formatter<'_>) -> std::
         "No {} script is configured for this project.",
         kind.as_str()
     )
+}
+
+fn fmt_pr_not_found(
+    pr_number: &u32,
+    detail: &str,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    if detail.is_empty() {
+        write!(f, "No pull request #{pr_number} found in this repository")
+    } else {
+        f.write_str(detail)
+    }
 }
 
 impl CoreError {
@@ -396,6 +434,25 @@ impl CoreError {
             CoreError::OpencodeModelUnavailable { .. } => Some(
                 "Refresh the model list in Settings → OpenCode and pick a current model.".into(),
             ),
+            CoreError::SessionNotFound { .. } => {
+                Some("The session may have ended; start a new one.".into())
+            }
+            CoreError::NpmMissing => Some(
+                "Install Node.js (it includes npm) and click Refresh, or install OpenCode with \
+                 Scoop (scoop install opencode), Chocolatey (choco install opencode), or WSL. \
+                 You can also use Locate… to point at an existing opencode.exe."
+                    .into(),
+            ),
+            CoreError::OpencodeInstallFailed { .. } => Some(
+                "Install Node.js/npm, or install OpenCode with Scoop \
+                 (scoop install opencode), Chocolatey (choco install opencode), or WSL. \
+                 then click Refresh. You can also use Locate… to point at an existing \
+                 opencode.exe."
+                    .into(),
+            ),
+            CoreError::RemoteUnsupported { host, .. } => Some(format!(
+                "Do this on {host} directly, or connect to the local server."
+            )),
             CoreError::BootstrapUserRequired => Some(
                 "Enter the username your thought documents should be attributed to.".into(),
             ),
@@ -525,6 +582,7 @@ impl CoreError {
             CoreError::OpencodeProviderUnsupported => "opencode_provider_unsupported",
             CoreError::OpencodeModelUnavailable { .. } => "opencode_model_unavailable",
             CoreError::UserTurnNotFound { .. } => "user_turn_not_found",
+            CoreError::SessionNotFound { .. } => "session_not_found",
             CoreError::RuntimeInUse { .. } => "runtime_in_use",
             CoreError::RuntimeAlreadyStarted => "runtime_already_started",
             CoreError::RuntimeStopped => "runtime_stopped",
@@ -594,6 +652,13 @@ impl CoreError {
             CoreError::PromptsFileUnreadable { .. } => "prompts_file_unreadable",
             CoreError::PromptsFileInvalid { .. } => "prompts_file_invalid",
             CoreError::PromptsSourceChanged => "prompts_source_changed",
+            CoreError::NpmMissing => "npm_missing",
+            CoreError::OpencodeInstallFailed { .. } => "opencode_install_failed",
+            CoreError::CliInstallUnsupported => "cli_install_unsupported",
+            CoreError::RemoteUnsupported { .. } => "remote_unsupported",
+            CoreError::WorkstreamFolderNoGit => "folder_no_git",
+            CoreError::PrNotFound { .. } => "pr_not_found",
+            CoreError::WorkstreamBaseBranchEmpty => "internal",
             CoreError::TerminalCommandEmpty => "internal",
             CoreError::RollbackFailed { original, .. } => original.code(),
             CoreError::Frontmatter(_) => "frontmatter_patch",

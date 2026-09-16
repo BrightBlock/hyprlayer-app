@@ -9,7 +9,7 @@ use hyprlayer_core::settings::PromptSettings;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum PromptConflictKind {
     Builtin,
@@ -25,7 +25,7 @@ impl From<core_prompts::PromptConflictKind> for PromptConflictKind {
     }
 }
 
-#[derive(Debug, Serialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptImportCandidate {
     pub key: String,
@@ -36,14 +36,14 @@ pub struct PromptImportCandidate {
     pub unknown_projects: Vec<String>,
 }
 
-#[derive(Debug, Serialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptImportConflict {
     pub key: String,
     pub kind: PromptConflictKind,
 }
 
-#[derive(Debug, Serialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptImportPreview {
     pub source_sha256: String,
@@ -83,14 +83,14 @@ impl From<core_prompts::PromptImportPreview> for PromptImportPreview {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum PromptImportMode {
     Merge,
     Replace,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum PromptConflictAction {
     KeepBoth,
@@ -98,7 +98,7 @@ pub enum PromptConflictAction {
     Skip,
 }
 
-#[derive(Debug, Deserialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptImportDecision {
     pub path: String,
@@ -140,7 +140,7 @@ impl From<PromptImportDecision> for core_prompts::PromptImportDecision {
     }
 }
 
-#[derive(Debug, Serialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptImportResult {
     pub settings: PromptSettings,
@@ -164,7 +164,7 @@ impl From<core_prompts::PromptImportResult> for PromptImportResult {
     }
 }
 
-#[derive(Debug, Deserialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptExportEntry {
     pub name: String,
@@ -173,7 +173,7 @@ pub struct PromptExportEntry {
     pub overrides: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptExportRequest {
     pub path: String,
@@ -206,7 +206,7 @@ impl From<PromptExportRequest> for core_prompts::PromptExportRequest {
     }
 }
 
-#[derive(Debug, Serialize, specta::Type)]
+#[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptExportResult {
     pub path: String,
@@ -229,10 +229,12 @@ pub async fn preview_prompt_import(
     path: String,
     taken_chords: Vec<String>,
 ) -> CmdResult<PromptImportPreview> {
+    if let Some(err) = state.remote_unsupported("Importing prompts from a local file") {
+        return Err(err);
+    }
     state
-        .runtime
-        .prompts()
-        .preview_import(core_prompts::PromptImportRequest { path, taken_chords })
+        .client
+        .preview_prompt_import(path, taken_chords)
         .await
         .map(PromptImportPreview::from)
         .map_err(AppError::from)
@@ -245,9 +247,8 @@ pub async fn apply_prompt_import(
     decision: PromptImportDecision,
 ) -> CmdResult<PromptImportResult> {
     state
-        .runtime
-        .prompts()
-        .apply_import(decision.into())
+        .client
+        .apply_prompt_import(decision.into())
         .await
         .map(PromptImportResult::from)
         .map_err(AppError::from)
@@ -259,10 +260,12 @@ pub async fn export_prompts(
     state: State<'_, AppState>,
     request: PromptExportRequest,
 ) -> CmdResult<PromptExportResult> {
+    if let Some(err) = state.remote_unsupported("Exporting prompts to a local file") {
+        return Err(err);
+    }
     state
-        .runtime
-        .prompts()
-        .export(request.into())
+        .client
+        .export_prompts(request.into())
         .await
         .map(PromptExportResult::from)
         .map_err(AppError::from)

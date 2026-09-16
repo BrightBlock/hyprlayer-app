@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 
 use crate::error::{CoreError, Result};
 use crate::process::binaries::BinaryKind;
@@ -157,7 +157,8 @@ impl TerminalService<'_> {
         ensure_running(self.runtime)?;
         let ws = self.find_workstream(&req.workstream_id).await?;
         let path = self.runtime.binaries.augmented_path().await;
-        let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+        let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+        env.extend(self.runtime.environment.overlay_env());
         let session = PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
             args: vec!["-l".to_string()],
@@ -218,13 +219,15 @@ impl TerminalService<'_> {
         ensure_running(self.runtime)?;
         let bin = self.runtime.binaries.require(BinaryKind::Hyprlayer).await?;
         let path = self.runtime.binaries.augmented_path().await;
+        let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+        env.extend(self.runtime.environment.overlay_env());
         let session = PtySession::spawn(SpawnTerminal {
             shell: bin,
             args: req.args,
             cwd: self.home(),
             cols: req.cols,
             rows: req.rows,
-            env: vec![("PATH".into(), path.to_string_lossy().into_owned())],
+            env,
             workstream_id: "onboarding".into(),
         })
         .map_err(|e| io_context("open pty", e))?;
@@ -235,13 +238,15 @@ impl TerminalService<'_> {
         ensure_running(self.runtime)?;
         let path = self.runtime.binaries.augmented_path().await;
         let args = login_shell_args(&req.command);
+        let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+        env.extend(self.runtime.environment.overlay_env());
         let session = PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
             args,
             cwd: self.home(),
             cols: req.cols,
             rows: req.rows,
-            env: vec![("PATH".into(), path.to_string_lossy().into_owned())],
+            env,
             workstream_id: "harness".into(),
         })
         .map_err(|e| io_context("open pty", e))?;
@@ -255,7 +260,8 @@ impl TerminalService<'_> {
         }
         let ws = self.find_workstream(&req.workstream_id).await?;
         let path = self.runtime.binaries.augmented_path().await;
-        let env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+        let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
+        env.extend(self.runtime.environment.overlay_env());
         let session = PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
             args: login_shell_args(&agent_command_line(&req.command, &req.args)),
@@ -354,31 +360,17 @@ fn spawn_forward(
     registry: Arc<TerminalRegistry>,
 ) -> mpsc::Receiver<TerminalEvent> {
     let (tx, rx) = mpsc::channel(ATTACH_CHANNEL_CAPACITY);
-    let (mut live, scrollback) = session.subscribe_with_scrollback();
+    let mut live = session.subscribe();
     tokio::spawn(async move {
-        if !scrollback.is_empty()
-            && tx
-                .send(TerminalEvent::Output { data: scrollback })
-                .await
-                .is_err()
-        {
-            return;
-        }
-        loop {
-            match live.recv().await {
-                Ok(ev) => {
-                    let exited = matches!(ev, TerminalEvent::Exited { .. });
-                    let closed = tx.send(ev).await.is_err();
-                    if exited {
-                        registry.remove(&terminal_id).await;
-                        break;
-                    }
-                    if closed {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
+        while let Some(ev) = live.recv().await {
+            let exited = matches!(ev, TerminalEvent::Exited { .. });
+            let closed = tx.send(ev).await.is_err();
+            if exited {
+                registry.remove(&terminal_id).await;
+                break;
+            }
+            if closed {
+                break;
             }
         }
     });

@@ -12,7 +12,7 @@ use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 use hyprlayer_core::settings::AppSettings;
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     pub path: String,
@@ -40,7 +40,7 @@ impl From<core_projects::ProjectView> for Project {
     }
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -94,7 +94,7 @@ impl From<core_projects::ConfigSummary> for ConfigSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptDefaults {
     pub commit: String,
@@ -110,7 +110,7 @@ impl Default for PromptDefaults {
     }
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Bootstrap {
     pub config: ConfigSummary,
@@ -132,7 +132,7 @@ impl From<core_projects::BootstrapResult> for Bootstrap {
     }
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDetail {
     pub project: Project,
@@ -150,7 +150,7 @@ impl From<core_projects::ProjectInspection> for ProjectDetail {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum CheckStatus {
     Pass,
@@ -168,7 +168,7 @@ impl From<core_projects::HealthStatus> for CheckStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HealthCheck {
     pub id: String,
@@ -190,7 +190,7 @@ impl From<core_projects::BackendHealthCheck> for HealthCheck {
     }
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HealthReport {
     pub checks: Vec<HealthCheck>,
@@ -204,7 +204,7 @@ impl From<core_projects::BackendHealth> for HealthReport {
     }
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncReport {
     pub output: String,
@@ -219,12 +219,7 @@ impl From<core_projects::SyncThoughtsResult> for SyncReport {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_bootstrap(state: State<'_, AppState>) -> CmdResult<Bootstrap> {
-    let result = state
-        .runtime
-        .projects()
-        .bootstrap()
-        .await
-        .map_err(AppError::from)?;
+    let result = state.client.get_bootstrap().await.map_err(AppError::from)?;
     Ok(Bootstrap::from(result))
 }
 
@@ -232,9 +227,8 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> CmdResult<Bootstrap> {
 #[specta::specta]
 pub async fn get_project(state: State<'_, AppState>, path: String) -> CmdResult<ProjectDetail> {
     let inspection = state
-        .runtime
-        .projects()
-        .inspect(&path)
+        .client
+        .get_project(path.clone())
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::project_not_found(&path))?;
@@ -243,11 +237,34 @@ pub async fn get_project(state: State<'_, AppState>, path: String) -> CmdResult<
 
 #[tauri::command]
 #[specta::specta]
-pub fn inspect_repo_path(
+pub async fn inspect_repo_path(
     state: State<'_, AppState>,
     path: String,
 ) -> CmdResult<repos::RepoPathStatus> {
-    Ok(state.runtime.projects().inspect_repo_path(&path))
+    if let Some(err) = state.remote_unsupported("Inspecting a local path") {
+        return Err(err);
+    }
+    state
+        .client
+        .inspect_repo_path(path)
+        .await
+        .map_err(AppError::from)
+}
+
+// The server-side read half of a future remote directory picker (plan Phase
+// 5 §3) — works the same whether the server is local or remote, unlike the
+// import commands below, since it never claims a client-side path is valid.
+#[tauri::command]
+#[specta::specta]
+pub async fn browse_directory(
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> CmdResult<core_projects::DirListing> {
+    state
+        .client
+        .browse_directory(path)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -263,17 +280,19 @@ pub async fn import_project(
     profile: Option<String>,
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
+    if let Some(err) = state.remote_unsupported("Importing a repository from a local path") {
+        return Err(err);
+    }
     let view = state
-        .runtime
-        .projects()
-        .import_repository(core_projects::ImportRepositoryRequest {
+        .client
+        .import_project(
             path,
             branch,
             directory_name,
             thoughts_dir,
             profile,
             bootstrap_user,
-        })
+        )
         .await
         .map_err(AppError::from)?;
     let _ = crate::events::ConfigChanged.emit(&app);
@@ -287,13 +306,12 @@ pub async fn import_local_folder(
     path: String,
     directory_name: Option<String>,
 ) -> CmdResult<Project> {
+    if let Some(err) = state.remote_unsupported("Importing a local folder") {
+        return Err(err);
+    }
     let view = state
-        .runtime
-        .projects()
-        .import_folder(core_projects::ImportFolderRequest {
-            path,
-            directory_name,
-        })
+        .client
+        .import_local_folder(path, directory_name)
         .await
         .map_err(AppError::from)?;
     Ok(Project::from(view))
@@ -313,23 +331,15 @@ pub async fn clone_project(
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
     let view = state
-        .runtime
-        .projects()
-        .clone(core_projects::CloneProjectRequest {
-            url,
-            location,
-            name,
-            thoughts_dir,
-            profile,
-            bootstrap_user,
-        })
+        .client
+        .clone_project(url, location, name, thoughts_dir, profile, bootstrap_user)
         .await
         .map_err(AppError::from)?;
     let _ = crate::events::ConfigChanged.emit(&app);
     Ok(Project::from(view))
 }
 
-#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubTarget {
     pub owner: String,
@@ -347,7 +357,7 @@ impl From<GithubTarget> for core_projects::GithubTarget {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProjectRequest {
     pub op_id: String,
@@ -377,7 +387,7 @@ impl From<CreateProjectRequest> for core_projects::CreateProjectRequest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProjectOutcome {
     pub project: Project,
@@ -387,7 +397,7 @@ pub struct CreateProjectOutcome {
 
 // Three answers, not two: conflating "gh failed" with "you are not signed in"
 // is what silently drops the GitHub half of a create and then caches the lie.
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -420,9 +430,8 @@ pub async fn create_project(
     req: CreateProjectRequest,
 ) -> CmdResult<CreateProjectOutcome> {
     let result = state
-        .runtime
-        .projects()
-        .create(req.into())
+        .client
+        .create_project(req.into())
         .await
         .map_err(AppError::from)?;
     let _ = crate::events::ConfigChanged.emit(&app);
@@ -437,9 +446,8 @@ pub async fn create_project(
 #[specta::specta]
 pub async fn list_github_owners(state: State<'_, AppState>) -> CmdResult<GithubOwners> {
     let outcome = state
-        .runtime
-        .projects()
-        .github_owners()
+        .client
+        .list_github_owners()
         .await
         .map_err(AppError::from)?;
     Ok(GithubOwners::from(outcome))
@@ -456,9 +464,8 @@ pub async fn publish_project_to_github(
     is_private: bool,
 ) -> CmdResult<String> {
     if state
-        .runtime
-        .projects()
-        .find(&path)
+        .client
+        .find_project(path.clone())
         .await
         .map_err(AppError::from)?
         .is_none()
@@ -466,15 +473,8 @@ pub async fn publish_project_to_github(
         return Err(AppError::project_not_found(&path));
     }
     state
-        .runtime
-        .projects()
-        .publish(core_projects::PublishProjectRequest {
-            op_id,
-            path,
-            owner,
-            name,
-            is_private,
-        })
+        .client
+        .publish_project_to_github(op_id, path, owner, name, is_private)
         .await
         .map_err(AppError::from)
 }
@@ -487,11 +487,15 @@ pub async fn remove_project(
     path: String,
     delete_files: bool,
 ) -> CmdResult<()> {
-    let git_backed = state.runtime.projects().source_of(&path).await.is_git();
+    let git_backed = state
+        .client
+        .project_source_of(path.clone())
+        .await
+        .map_err(AppError::from)?
+        .is_git();
     state
-        .runtime
-        .projects()
-        .remove(&path, delete_files)
+        .client
+        .remove_project(path, delete_files)
         .await
         .map_err(AppError::from)?;
     if git_backed {
@@ -504,9 +508,8 @@ pub async fn remove_project(
 #[specta::specta]
 pub async fn reorder_projects(state: State<'_, AppState>, paths: Vec<String>) -> CmdResult<()> {
     state
-        .runtime
-        .projects()
-        .reorder(paths)
+        .client
+        .reorder_projects(paths)
         .await
         .map_err(AppError::from)
 }
@@ -515,9 +518,8 @@ pub async fn reorder_projects(state: State<'_, AppState>, paths: Vec<String>) ->
 #[specta::specta]
 pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repos::GithubRepo>> {
     state
-        .runtime
-        .projects()
-        .recent_repos()
+        .client
+        .list_recent_repos()
         .await
         .map_err(AppError::from)
 }
@@ -526,9 +528,8 @@ pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repo
 #[specta::specta]
 pub async fn list_thoughts_profiles(state: State<'_, AppState>) -> CmdResult<Vec<ThoughtsProfile>> {
     state
-        .runtime
-        .projects()
-        .profiles()
+        .client
+        .list_thoughts_profiles()
         .await
         .map_err(AppError::from)
 }
@@ -542,9 +543,8 @@ pub async fn create_thoughts_profile(
     thoughts_repo: Option<String>,
 ) -> CmdResult<ThoughtsProfile> {
     let profile = state
-        .runtime
-        .projects()
-        .create_profile(&name, thoughts_repo)
+        .client
+        .create_thoughts_profile(name, thoughts_repo)
         .await
         .map_err(AppError::from)?;
     let _ = crate::events::ConfigChanged.emit(&app);
@@ -559,9 +559,8 @@ pub async fn sync_thoughts(
     message: Option<String>,
 ) -> CmdResult<SyncReport> {
     let result = state
-        .runtime
-        .projects()
-        .sync_thoughts(core_projects::SyncThoughtsRequest { path, message })
+        .client
+        .sync_thoughts(path, message)
         .await
         .map_err(AppError::from)?;
     Ok(SyncReport::from(result))
@@ -574,9 +573,8 @@ pub async fn run_backend_health(
     path: String,
 ) -> CmdResult<HealthReport> {
     let result = state
-        .runtime
-        .projects()
-        .backend_health(&path)
+        .client
+        .run_backend_health(path)
         .await
         .map_err(AppError::from)?;
     Ok(HealthReport::from(result))
@@ -589,9 +587,8 @@ pub async fn get_worktree_files(
     path: String,
 ) -> CmdResult<Vec<String>> {
     state
-        .runtime
-        .projects()
-        .worktree_files(&path)
+        .client
+        .get_worktree_files(path)
         .await
         .map_err(AppError::from)
 }
@@ -604,9 +601,8 @@ pub async fn set_worktree_files(
     patterns: Vec<String>,
 ) -> CmdResult<Vec<String>> {
     state
-        .runtime
-        .projects()
-        .set_worktree_files(&path, patterns)
+        .client
+        .set_worktree_files(path, patterns)
         .await
         .map_err(AppError::from)
 }
@@ -618,9 +614,8 @@ pub async fn check_worktree_files(
     path: String,
 ) -> CmdResult<hyprlayer_core::worktree::seed::SeedReport> {
     state
-        .runtime
-        .projects()
-        .check_worktree_files(&path)
+        .client
+        .check_worktree_files(path)
         .await
         .map_err(AppError::from)
 }

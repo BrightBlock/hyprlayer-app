@@ -8,7 +8,10 @@ reference, and it, not this ADR's outline table, describes what actually exists)
 amended 2026-08-31 (Linux ARM64 dropped as a support target — no consumer, and its
 cross/Docker gate blocked the Linux release path) · amended 2026-08-31 (the boundary
 rules are recorded here as review rules; `check-rust-boundaries.mjs` and
-`rust-boundaries.json` are deleted)
+`rust-boundaries.json` are deleted) · amended 2026-09-03 (the "no remote daemon" third
+of the daemon/`Host`/remote-terminal bullet under "What we're not doing" is superseded
+by ADR-0009 — the one runtime moves into a `hyprlayer-server` process; the other two
+thirds stand)
 
 ## Decision
 
@@ -370,7 +373,12 @@ rebuilding all of that, not adding a triple back to this list.
 - No foreign-language ABI, C API, UniFFI, Swift, Kotlin, or JNI layer.
 - No separate core repository.
 - No crates.io publishing.
-- No remote daemon, broad `Host`, or remote-terminal abstraction.
+- No broad `Host` or remote-terminal abstraction. This bullet read "No remote daemon,
+  broad `Host`, or remote-terminal abstraction" until 2026-09-03, when ADR-0009
+  superseded its first third: the one runtime moves into a `hyprlayer-server` process
+  reached over a local socket or SSH. The other two stand — the shell is always a
+  client, so there is no local/remote branch to abstract, and terminals are not
+  abstracted, they are simply on the server.
 - No provider or store microcrates.
 - No database replacement.
 - No `ProjectKey` migration or project-identity redesign.

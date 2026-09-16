@@ -1999,6 +1999,8 @@ dependencies = [
  "dirs 5.0.1",
  "gtk",
  "hyprlayer-core",
+ "hyprlayer-proto",
+ "hyprlayer-server",
  "log",
  "serde",
  "serde_json",
@@ -2072,6 +2074,30 @@ dependencies = [
  "serde",
  "serde_json",
  "specta",
+]
+
+[[package]]
+name = "hyprlayer-proto"
+version = "0.7.5"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hyprlayer-server"
+version = "0.7.5"
+dependencies = [
+ "base64 0.22.1",
+ "dirs 5.0.1",
+ "hyprlayer-core",
+ "hyprlayer-models",
+ "hyprlayer-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

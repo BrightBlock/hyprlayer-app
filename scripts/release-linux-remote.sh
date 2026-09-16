@@ -65,7 +65,12 @@ fi
 (cd "$AUR_DIR" && makepkg --printsrcinfo > .SRCINFO)
 [[ -s "$AUR_DIR/.SRCINFO" ]] || die "makepkg produced an empty .SRCINFO"
 
+SERVER_BIN="$BUILD_DIR/src-tauri/binaries/hyprlayer-server-x86_64-unknown-linux-gnu"
+# Staged by beforeBuildCommand during `tauri build`; absent on an older tree.
+[[ -f "$SERVER_BIN" ]] || SERVER_BIN=""
+
 echo ""
+echo "SERVER_BIN=$SERVER_BIN"
 echo "DEB=$DEB"
 echo "RPM=$RPM"
 echo "AUR_DIR=$AUR_DIR"

@@ -1,6 +1,8 @@
 pub mod agents;
 pub mod attachments;
 pub mod builder;
+#[cfg(target_os = "macos")]
+pub mod keychain;
 pub mod library;
 pub mod migrations;
 mod operation_locks;
@@ -43,8 +45,7 @@ use crate::worktree::WorktreeManager;
 
 use operation_locks::WorkstreamLocks;
 use ports::{
-    CliConfigCli, ConfigCli, CredentialLookup, LifecycleRunner, NoCredentialLookup, ProviderHttp,
-    ReqwestProviderHttp,
+    CliConfigCli, ConfigCli, CredentialLookup, LifecycleRunner, ProviderHttp, ReqwestProviderHttp,
 };
 use pr_watcher::{PrWatcherContext, WorktreeWatch};
 use profile_lock::ProfileLock;
@@ -69,7 +70,7 @@ impl RuntimeOptions {
         Self {
             environment,
             paths,
-            credential_lookup: Arc::new(NoCredentialLookup),
+            credential_lookup: default_credential_lookup(),
         }
     }
 
@@ -80,6 +81,18 @@ impl RuntimeOptions {
         self.credential_lookup = credential_lookup;
         self
     }
+}
+
+// The Keychain adapter rides with the runtime (ADR-0009); embedders that must
+// stay hermetic pass `NoCredentialLookup` through `with_credential_lookup`.
+#[cfg(target_os = "macos")]
+fn default_credential_lookup() -> Arc<dyn CredentialLookup + Send + Sync> {
+    Arc::new(keychain::KeychainCredentialLookup)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn default_credential_lookup() -> Arc<dyn CredentialLookup + Send + Sync> {
+    Arc::new(ports::NoCredentialLookup)
 }
 
 struct Watchers {
@@ -191,7 +204,10 @@ impl HyprlayerRuntime {
             binaries,
             settings,
             db,
-            worktrees: Arc::new(WorktreeManager::new(worktree_root)),
+            worktrees: Arc::new(
+                WorktreeManager::new(worktree_root)
+                    .with_env_overlay(environment.env_overlay.clone()),
+            ),
             index: Arc::new(ThoughtsIndex::new()),
             session_registry: Arc::new(SessionRegistry::new()),
             session_actors,
@@ -275,6 +291,7 @@ impl HyprlayerRuntime {
             focused: self.focused.clone(),
             focus_changed: self.focus_changed.clone(),
             events: self.events.clone(),
+            env_overlay: self.environment.env_overlay.clone(),
         });
 
         self.tasks
@@ -288,6 +305,12 @@ impl HyprlayerRuntime {
     pub fn set_foreground(&self, foreground: bool) {
         self.focused.store(foreground, Ordering::Relaxed);
         self.focus_changed.notify_waiters();
+    }
+
+    /// Replaces the per-attach environment overlay (`SSH_AUTH_SOCK` and
+    /// friends) merged over every child spawn — last attach wins (ADR-0009).
+    pub fn set_env_overlay(&self, overlay: std::collections::BTreeMap<String, String>) {
+        self.environment.set_env_overlay(overlay);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<RuntimeEvent> {
@@ -425,5 +448,24 @@ impl HyprlayerRuntime {
     #[doc(hidden)]
     pub fn test_terminals(&self) -> Arc<TerminalRegistry> {
         self.terminals.clone()
+    }
+
+    /// Test-only raw ingress into a session's actor, for forcing an
+    /// attachment past its lag threshold without a real harness process. Not
+    /// part of the supported facade.
+    #[doc(hidden)]
+    pub async fn test_session_ingress(
+        &self,
+        session_id: &str,
+    ) -> tokio::sync::mpsc::Sender<crate::claude::SessionEvent> {
+        self.session_actors.ingress(session_id).await
+    }
+
+    /// Test-only database access, for seeding a session row directly rather
+    /// than paying for a real git-backed workstream. Not part of the
+    /// supported facade.
+    #[doc(hidden)]
+    pub fn test_db(&self) -> Arc<Db> {
+        self.db.clone()
     }
 }

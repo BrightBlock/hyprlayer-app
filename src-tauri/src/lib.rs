@@ -1,16 +1,19 @@
+mod client;
 pub mod commands;
 mod editors;
 pub mod error;
 mod events;
+mod hosts;
 mod runtime_events;
 mod state;
+mod supervisor;
 mod webview_gestures;
 mod window_geometry;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use hyprlayer_core::env::{RuntimeEnvironment, RuntimePaths};
-use hyprlayer_core::runtime::{HyprlayerRuntime, RuntimeOptions};
+use hyprlayer_core::env::RuntimeEnvironment;
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::Manager;
@@ -41,6 +44,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::projects::get_worktree_files,
             commands::projects::set_worktree_files,
             commands::projects::check_worktree_files,
+            commands::projects::browse_directory,
             commands::library::query_docs,
             commands::library::get_doc,
             commands::library::save_doc,
@@ -195,86 +199,34 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::WorkstreamBranchChanged,
             events::SessionLifecycle,
             events::ScriptRunChanged,
-            events::QuitRequested
+            events::QuitRequested,
+            events::ServerDisconnected
         ])
 }
 
-fn hyprlayer_config_file() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hyprlayer")
-        .join("config.json")
-}
-
 pub(crate) fn opencode_auth_file() -> PathBuf {
-    if let Some(p) = std::env::var_os("OPENCODE_AUTH_JSON") {
-        return PathBuf::from(p);
-    }
-    std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("share")))
-        .map(|base| base.join("opencode").join("auth.json"))
-        .unwrap_or_else(|| PathBuf::from(".").join("opencode-auth.json"))
+    hyprlayer_core::env::opencode_auth_file(&RuntimeEnvironment::detect())
 }
 
 pub(crate) fn opencode_config_file() -> PathBuf {
-    if let Some(p) = std::env::var_os("OPENCODE_CONFIG") {
-        return PathBuf::from(p);
+    hyprlayer_core::env::opencode_config_file(&RuntimeEnvironment::detect())
+}
+
+/// The vars a daemonized server has none of on its own (ADR-0009 §7):
+/// `SSH_AUTH_SOCK`, `DISPLAY`, `TERM`, `LANG`, and any `LC_*`.
+fn env_overlay_from_desktop() -> BTreeMap<String, String> {
+    let mut overlay = BTreeMap::new();
+    for key in ["SSH_AUTH_SOCK", "DISPLAY", "TERM", "LANG"] {
+        if let Ok(value) = std::env::var(key) {
+            overlay.insert(key.to_string(), value);
+        }
     }
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
-        .map(|base| base.join("opencode").join("opencode.json"))
-        .unwrap_or_else(|| PathBuf::from(".").join("opencode.json"))
-}
-
-fn claude_config_dir(home: &std::path::Path) -> PathBuf {
-    std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".claude"))
-}
-
-fn claude_managed_settings_files() -> Vec<PathBuf> {
-    vec![PathBuf::from(if cfg!(target_os = "windows") {
-        r"C:\Program Files\ClaudeCode\managed-settings.json"
-    } else if cfg!(target_os = "macos") {
-        "/Library/Application Support/ClaudeCode/managed-settings.json"
-    } else {
-        "/etc/claude-code/managed-settings.json"
-    })]
-}
-
-fn resolve_paths(app: &tauri::App) -> tauri::Result<RuntimePaths> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let app_config_dir = app.path().app_config_dir()?;
-    let app_data_dir = app.path().app_data_dir()?;
-    Ok(RuntimePaths {
-        hyprlayer_config_file: hyprlayer_config_file(),
-        app_config_dir,
-        app_data_dir,
-        default_worktree_root: home.join("hyprlayer").join("worktrees"),
-        default_repos_root: home.join("hyprlayer").join("repos"),
-        opencode_config_file: opencode_config_file(),
-        opencode_auth_file: opencode_auth_file(),
-        opencode_data_dir: dirs::data_dir()
-            .unwrap_or_else(|| home.join(".local").join("share"))
-            .join("opencode"),
-        claude_config_dir: claude_config_dir(&home),
-        claude_managed_settings_files: claude_managed_settings_files(),
-        codex_home: std::env::var_os("CODEX_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".codex")),
-        agent_roots: vec![home.join(".claude").join("agents")],
-        download_dir: dirs::download_dir().unwrap_or_else(|| home.clone()),
-    })
-}
-
-fn resolve_environment() -> RuntimeEnvironment {
-    RuntimeEnvironment {
-        home_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
-        process_cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        process_env: std::env::vars_os().collect(),
+    for (key, value) in std::env::vars() {
+        if key.starts_with("LC_") {
+            overlay.insert(key, value);
+        }
     }
+    overlay
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -335,58 +287,87 @@ pub fn run() {
                 webview_gestures::disable_pinch_zoom(&window);
             }
 
-            let paths = resolve_paths(app)?;
-            let environment = resolve_environment();
-            let options = RuntimeOptions::new(environment, paths);
-            #[cfg(target_os = "macos")]
-            let options = options.with_credential_lookup(std::sync::Arc::new(
-                commands::models::KeychainCredentialLookup,
-            ));
+            let app_config_dir = app.path().app_config_dir()?;
+            let app_data_dir = app.path().app_data_dir()?;
 
-            let runtime = match tauri::async_runtime::block_on(HyprlayerRuntime::open(options)) {
-                Ok(runtime) => runtime,
-                Err(hyprlayer_core::CoreError::RuntimeInUse { path }) => {
+            // hosts.json is read before connecting anything, because it's the
+            // one thing that has to be decided locally: there is no server to
+            // ask which server to reach (ADR-0009, plan Phase 5 §2).
+            let remote_host = hosts::active_host(&app_config_dir);
+            let outcome = match &remote_host {
+                Some(host) => tauri::async_runtime::block_on(supervisor::connect_remote(host)),
+                None => tauri::async_runtime::block_on(supervisor::connect_or_spawn(
+                    &app_config_dir,
+                    &app_data_dir,
+                )),
+            };
+            let client = match outcome {
+                supervisor::Outcome::Connected(client) => client,
+                supervisor::Outcome::Blocked { title, detail } => {
                     app.dialog()
-                        .message(format!(
-                            "Another Hyprlayer window or process is already using the profile at {}.",
-                            path.display()
-                        ))
-                        .title("Hyprlayer is already running")
+                        .message(detail)
+                        .title(title)
                         .kind(tauri_plugin_dialog::MessageDialogKind::Error)
                         .blocking_show();
                     std::process::exit(1);
                 }
-                Err(e @ hyprlayer_core::CoreError::RuntimeMigrationLedgerInvalid { .. })
-                | Err(e @ hyprlayer_core::CoreError::RuntimeMigrationLedgerTooNew { .. }) => {
-                    let detail = match e.remedy() {
-                        Some(remedy) => format!("{e}\n\n{remedy}"),
-                        None => e.to_string(),
-                    };
+            };
+
+            match tauri::async_runtime::block_on(client.worktree_root()) {
+                Ok(worktree_root) => {
+                    if let Err(e) = app
+                        .asset_protocol_scope()
+                        .allow_directory(worktree_root, true)
+                    {
+                        log::warn!("could not register worktree root with the asset scope: {e}");
+                    }
+                }
+                // The handshake passed but the first request did not: the
+                // server is a build this app cannot talk to. Say so instead
+                // of running on a dead client.
+                Err(e) if e.code == "server_disconnected" => {
                     app.dialog()
-                        .message(detail)
+                        .message(supervisor::incompatible_server_detail())
                         .title("Hyprlayer cannot start")
                         .kind(tauri_plugin_dialog::MessageDialogKind::Error)
                         .blocking_show();
                     std::process::exit(1);
                 }
-                Err(e) => return Err(e.into()),
-            };
-
-            if let Err(e) = app
-                .asset_protocol_scope()
-                .allow_directory(runtime.worktree_root(), true)
-            {
-                log::warn!("could not register worktree root with the asset scope: {e}");
+                Err(e) => log::warn!(
+                    "could not fetch the worktree root from the server: {}",
+                    e.message
+                ),
             }
 
-            runtime_events::spawn(app.handle().clone(), runtime.clone());
+            // Re-injected on every connect (ADR-0009 §7): a daemonized server
+            // has none of these on its own, and without SSH_AUTH_SOCK every
+            // `git push`/`gh` call would fail exactly as ADR-0005 predicts.
+            if let Err(e) =
+                tauri::async_runtime::block_on(client.set_env_overlay(env_overlay_from_desktop()))
+            {
+                log::warn!(
+                    "could not send the environment overlay to the server: {}",
+                    e.message
+                );
+            }
+
+            runtime_events::spawn(
+                app.handle().clone(),
+                client
+                    .take_events()
+                    .expect("a fresh client still holds its event stream"),
+            );
 
             if let Some(window) = app.get_webview_window("main") {
-                let runtime = runtime.clone();
+                let client = client.clone();
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::Focused(is_focused) => {
-                        runtime.set_foreground(*is_focused);
+                        let client = client.clone();
+                        let is_focused = *is_focused;
+                        tauri::async_runtime::spawn(async move {
+                            let _ = client.set_foreground(is_focused).await;
+                        });
                     }
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
@@ -396,13 +377,7 @@ pub fn run() {
                 });
             }
 
-            app.manage(AppState::new(runtime.clone()));
-
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = runtime.start().await {
-                    log::warn!("runtime failed to start: {e}");
-                }
-            });
+            app.manage(AppState::new(client, remote_host));
 
             if let Some(omarchy_dir) = hyprlayer_core::omarchy::current_dir(
                 dirs::state_dir().as_deref(),
@@ -453,23 +428,21 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if matches!(
-                event,
-                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
-            ) {
-                use tauri::Manager;
-                let state = app.state::<AppState>();
-                state.runtime.shutdown_now();
-            }
-        });
+        // Sessions and terminals live on the server now: quitting the app
+        // must not touch the runtime, so there is nothing left to do here.
+        .run(|_app, _event| {});
 }
 
 fn request_quit(handle: &tauri::AppHandle) {
     let handle = handle.clone();
     tauri::async_runtime::spawn(async move {
         let confirm = match handle.try_state::<AppState>() {
-            Some(state) => state.runtime.settings().get().await.quit.confirm,
+            Some(state) => state
+                .client
+                .get_app_settings()
+                .await
+                .map(|settings| settings.quit.confirm)
+                .unwrap_or(false),
             None => false,
         };
         let Some(window) = handle.get_webview_window("main").filter(|_| confirm) else {

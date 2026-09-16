@@ -11,6 +11,7 @@ use crate::gitops::{self, ThoughtsRepoStatus};
 use crate::index::{
     thoughts_roots, unindexed_meta, DocMeta, QueryResult, ThoughtQuery, ThoughtsRoot,
 };
+use serde::{Deserialize, Serialize};
 
 use super::HyprlayerRuntime;
 
@@ -50,14 +51,14 @@ fn ensure_not_stale(abs: &Path, base_mtime_ms: f64) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     pub meta: DocMeta,
     pub content: String,
     pub mtime_ms: f64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateDocumentRequest {
     pub project_repo_path: Option<String>,
     pub scope: String,

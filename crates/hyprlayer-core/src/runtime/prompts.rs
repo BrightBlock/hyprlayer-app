@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, Result};
 use crate::settings::{CustomPrompt, PromptSettings};
+use serde::{Deserialize, Serialize};
 
 use super::HyprlayerRuntime;
 
@@ -167,13 +168,13 @@ pub struct PromptImportRequest {
     pub taken_chords: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PromptConflictKind {
     Builtin,
     Custom,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptImportCandidate {
     pub key: String,
     pub name: String,
@@ -183,13 +184,13 @@ pub struct PromptImportCandidate {
     pub unknown_projects: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptImportConflict {
     pub key: String,
     pub kind: PromptConflictKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptImportPreview {
     pub source_sha256: String,
     pub source_version: u32,
@@ -198,20 +199,20 @@ pub struct PromptImportPreview {
     pub conflicts: Vec<PromptImportConflict>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PromptImportMode {
     Merge,
     Replace,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PromptConflictAction {
     KeepBoth,
     Replace,
     Skip,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptImportDecision {
     pub path: String,
     pub expected_source_sha256: String,
@@ -220,7 +221,7 @@ pub struct PromptImportDecision {
     pub taken_chords: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptImportResult {
     pub settings: PromptSettings,
     pub added: u32,
@@ -230,7 +231,7 @@ pub struct PromptImportResult {
     pub first_id: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptExportEntry {
     pub name: String,
     pub body: String,
@@ -238,7 +239,7 @@ pub struct PromptExportEntry {
     pub overrides: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptExportSelection {
     pub entries: Vec<PromptExportEntry>,
     pub include_chords: bool,
@@ -246,13 +247,13 @@ pub struct PromptExportSelection {
     pub source: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptExportRequest {
     pub path: String,
     pub selection: PromptExportSelection,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptExportResult {
     pub path: String,
     pub prompt_count: u32,

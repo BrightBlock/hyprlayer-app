@@ -68,3 +68,8 @@ pub struct ProjectCreateProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct QuitRequested;
+
+/// The RPC connection to the server ended. Nothing respawns the server
+/// (ADR-0009), so the frontend offers a relaunch.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+pub struct ServerDisconnected;

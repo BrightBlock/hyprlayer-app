@@ -1,4 +1,3 @@
-use hyprlayer_core::runtime::attachments as core_attachments;
 use tauri::State;
 
 use crate::error::{AppError, CmdResult};
@@ -11,15 +10,13 @@ pub async fn import_attachment(
     workstream_id: String,
     src_path: String,
 ) -> CmdResult<String> {
+    if let Some(err) = state.remote_unsupported("Importing an attachment from a local path") {
+        return Err(err);
+    }
     state
-        .runtime
-        .attachments()
-        .import(core_attachments::ImportAttachmentRequest {
-            workstream_id,
-            src_path,
-        })
+        .client
+        .import_attachment(workstream_id, src_path)
         .await
-        .map(|path| path.to_string_lossy().into_owned())
         .map_err(AppError::from)
 }
 
@@ -32,14 +29,8 @@ pub async fn save_attachment(
     data: Vec<u8>,
 ) -> CmdResult<String> {
     state
-        .runtime
-        .attachments()
-        .save(core_attachments::SaveAttachmentRequest {
-            workstream_id,
-            file_name,
-            data,
-        })
+        .client
+        .save_attachment(workstream_id, file_name, data)
         .await
-        .map(|path| path.to_string_lossy().into_owned())
         .map_err(AppError::from)
 }

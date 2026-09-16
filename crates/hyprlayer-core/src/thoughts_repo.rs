@@ -139,7 +139,8 @@ pub async fn scaffold(
             .timeout(Duration::from_secs(30))
             .run()
             .await?;
-        commit_empty_initial(git, root).await?;
+        // Local commit only, no remote touched — nothing in the overlay applies.
+        commit_empty_initial(git, root, &[]).await?;
     }
 
     Ok(())

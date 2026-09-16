@@ -1,50 +1,38 @@
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-
-use serde::{Deserialize, Serialize};
-
 use hyprlayer_core::branch_prefix;
-use hyprlayer_core::hyprcli::{CliUpdateCheck, HyprCli};
+use hyprlayer_core::hyprcli::CliUpdateCheck;
 use hyprlayer_core::omarchy;
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
-use hyprlayer_core::process::Exec;
 use hyprlayer_core::system::FullDiskAccess;
-use tauri::State;
-use tauri_specta::Event;
+use tauri::{Manager, State};
 
 use crate::editors::{self, EditorTarget};
 use crate::error::{AppError, CmdResult};
-use crate::events::BinariesChanged;
 use crate::state::AppState;
 use hyprlayer_core::settings::AppSettings;
+
+pub use hyprlayer_core::runtime::settings_service::{
+    CliInstallMethod, CliInstallMethodId, CliUpdateResult,
+};
 
 #[tauri::command]
 #[specta::specta]
 pub async fn set_binary_override(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     kind: BinaryKind,
     path: Option<String>,
 ) -> CmdResult<Vec<BinaryStatus>> {
+    // Only setting one: the path names a binary the *server* has to run, and
+    // Locate… picks it on the client. Clearing (`None`) is valid either way.
+    if path.is_some() {
+        if let Some(err) = state.remote_unsupported("Choosing a binary on this machine") {
+            return Err(err);
+        }
+    }
     state
-        .runtime
-        .settings()
-        .update(|s| match &path {
-            Some(p) => {
-                s.binary_overrides.insert(kind, p.clone());
-            }
-            None => {
-                s.binary_overrides.remove(&kind);
-            }
-        })
-        .await?;
-
-    let binaries = state.runtime.settings().binaries();
-    binaries.set_override(kind, path.map(PathBuf::from)).await;
-
-    let statuses = binaries.status_all().await;
-    let _ = BinariesChanged.emit(&app);
-    Ok(statuses)
+        .client
+        .set_binary_override(kind, path)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -93,43 +81,35 @@ pub async fn quit_app(
 ) -> CmdResult<()> {
     if dont_ask_again {
         state
-            .runtime
-            .settings()
-            .update(|s| s.quit.confirm = false)
-            .await?;
+            .client
+            .set_quit_confirm(false)
+            .await
+            .map_err(AppError::from)?;
     }
-    let report = state.runtime.shutdown().await;
-    if report.forced_process_count > 0 || !report.task_failures.is_empty() {
-        log::warn!(
-            "quit: forced {} process(es), task failures: {:?}",
-            report.forced_process_count,
-            report.task_failures
-        );
-    }
+    // The server outlives the app on purpose (ADR-0009) — quitting never
+    // shuts down the runtime, so there is nothing to await here.
     app.exit(0);
     Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn redetect_binaries(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> CmdResult<Vec<BinaryStatus>> {
-    let binaries = state.runtime.settings().binaries();
-    binaries.redetect().await;
-    let statuses = binaries.status_all().await;
-    let _ = BinariesChanged.emit(&app);
-    if state.runtime.migrate_config_if_needed().await {
-        let _ = crate::events::ConfigChanged.emit(&app);
-    }
-    Ok(statuses)
+pub async fn redetect_binaries(state: State<'_, AppState>) -> CmdResult<Vec<BinaryStatus>> {
+    state
+        .client
+        .redetect_binaries()
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn get_app_settings(state: State<'_, AppState>) -> CmdResult<AppSettings> {
-    Ok(state.runtime.settings().get().await)
+    state
+        .client
+        .get_app_settings()
+        .await
+        .map_err(AppError::from)
 }
 
 fn branch_prefix_changed(incoming: Option<&str>, current: Option<&str>) -> bool {
@@ -148,7 +128,11 @@ pub async fn set_app_settings(
         .prefixes
         .map(hyprlayer_core::branch_prefix::normalize_prefixes);
 
-    let current = state.runtime.settings().get().await;
+    let current = state
+        .client
+        .get_app_settings()
+        .await
+        .map_err(AppError::from)?;
     if branch_prefix_changed(
         settings.git.branch_prefix.as_deref(),
         current.git.branch_prefix.as_deref(),
@@ -162,8 +146,11 @@ pub async fn set_app_settings(
             .map_err(AppError::from)?;
     }
 
-    state.runtime.settings().set(settings).await?;
-    Ok(state.runtime.settings().get().await)
+    state
+        .client
+        .set_app_settings(settings)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -174,26 +161,23 @@ pub async fn claude_sync_models(
     seen: Vec<String>,
 ) -> CmdResult<AppSettings> {
     state
-        .runtime
-        .settings()
-        .update(|s| {
-            let claude = &mut s.providers.claude;
-            if let Some(visible) = claude.visible_models.as_mut() {
-                for key in &add {
-                    if !visible.contains(key) {
-                        visible.push(key.clone());
-                    }
-                }
-            }
-            claude.seen_model_keys = Some(seen);
-        })
+        .client
+        .claude_sync_models(add, seen)
         .await
         .map_err(AppError::from)
 }
 
+// Every candidate this returns is on the desktop's own machine, which is
+// meaningless as an "open with" target once its path comes from a remote
+// server (plan Phase 5 §5) — so this is where editor launching, which has no
+// command of its own (it calls `tauri-plugin-opener` straight from the
+// frontend), actually gets disabled: no editors, nothing to launch with.
 #[tauri::command]
 #[specta::specta]
-pub async fn detect_editors() -> CmdResult<Vec<EditorTarget>> {
+pub async fn detect_editors(state: State<'_, AppState>) -> CmdResult<Vec<EditorTarget>> {
+    if let Some(err) = state.remote_unsupported("Opening a path with a local editor") {
+        return Err(err);
+    }
     tokio::task::spawn_blocking(editors::detect)
         .await
         .map_err(|e| AppError::internal(format!("editor detection failed: {e}")))
@@ -202,74 +186,27 @@ pub async fn detect_editors() -> CmdResult<Vec<EditorTarget>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn github_username(state: State<'_, AppState>) -> CmdResult<Option<String>> {
-    let Ok(gh) = state
-        .runtime
-        .settings()
-        .binaries()
-        .require(BinaryKind::Gh)
-        .await
-    else {
-        return Ok(None);
-    };
-    Ok(hyprlayer_core::pr::github_login(&gh).await)
+    state.client.github_username().await.map_err(AppError::from)
 }
 
+// The server's own `USER`, not the client's (ADR-0009, plan Phase 5 §5): a
+// branch is created by the server's git, so a name from whichever laptop
+// happened to be attached would be wrong the moment a second one attaches.
+// Stays infallible so its signature, and so `bindings.ts`, are unchanged —
+// takes `AppHandle` rather than `State` because an async command with a
+// borrowed `State` argument must return a `Result` (a Tauri constraint, not
+// a choice here).
 #[tauri::command]
 #[specta::specta]
-pub fn default_username() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
+pub async fn default_username(app: tauri::AppHandle) -> String {
+    let Some(state) = app.try_state::<AppState>() else {
+        return "user".to_string();
+    };
+    state
+        .client
+        .default_username()
+        .await
         .unwrap_or_else(|_| "user".to_string())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub enum CliInstallMethodId {
-    Homebrew,
-    Winget,
-    Scoop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct CliInstallMethod {
-    pub id: CliInstallMethodId,
-    pub label: String,
-    pub command: String,
-    pub available: bool,
-}
-
-struct CliCandidate {
-    id: CliInstallMethodId,
-    label: &'static str,
-    command: &'static str,
-    probe: &'static str,
-}
-
-fn cli_install_candidates() -> &'static [CliCandidate] {
-    #[cfg(not(target_os = "windows"))]
-    let candidates: &[CliCandidate] = &[CliCandidate {
-        id: CliInstallMethodId::Homebrew,
-        label: "Homebrew",
-        command: "brew install brightblock/tap/hyprlayer",
-        probe: "brew",
-    }];
-    #[cfg(target_os = "windows")]
-    let candidates: &[CliCandidate] = &[
-        CliCandidate {
-            id: CliInstallMethodId::Winget,
-            label: "winget",
-            command: "winget install BrightBlock.Hyprlayer --force --accept-source-agreements --accept-package-agreements",
-            probe: "winget",
-        },
-        CliCandidate {
-            id: CliInstallMethodId::Scoop,
-            label: "Scoop",
-            command: "scoop install hyprlayer",
-            probe: "scoop",
-        },
-    ];
-    candidates
 }
 
 #[tauri::command]
@@ -277,108 +214,44 @@ fn cli_install_candidates() -> &'static [CliCandidate] {
 pub async fn detect_cli_install_methods(
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<CliInstallMethod>> {
-    let path = state.runtime.settings().binaries().augmented_path().await;
-    let shell = super::terminal::default_shell();
-
-    let mut methods = Vec::new();
-    for c in cli_install_candidates() {
-        methods.push(CliInstallMethod {
-            id: c.id,
-            label: c.label.to_string(),
-            command: c.command.to_string(),
-            available: package_manager_available(&shell, &path, c.probe).await,
-        });
-    }
-    Ok(methods)
+    state
+        .client
+        .detect_cli_install_methods()
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn install_hyprlayer_cli(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     method: CliInstallMethodId,
 ) -> CmdResult<()> {
-    let command = cli_install_candidates()
-        .iter()
-        .find(|c| c.id == method)
-        .map(|c| c.command)
-        .ok_or_else(|| AppError {
-            code: "cli_install_unsupported".into(),
-            message: "That install method isn't available on this platform.".into(),
-            remedy: None,
-        })?;
-
-    let path = state.runtime.settings().binaries().augmented_path().await;
-    let shell = super::terminal::default_shell();
-
-    Exec::new(&shell)
-        .args(super::terminal::login_shell_args(command))
-        .env("PATH", path)
-        .timeout(Duration::from_secs(300))
-        .run()
+    state
+        .client
+        .install_hyprlayer_cli(method)
         .await
-        .map_err(AppError::from)?;
-
-    state.runtime.settings().binaries().redetect().await;
-    let _ = BinariesChanged.emit(&app);
-    Ok(())
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn hyprlayer_cli_update_check(state: State<'_, AppState>) -> CmdResult<CliUpdateCheck> {
-    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let binaries = state.runtime.settings().binaries();
-    HyprCli::new(&binaries)
-        .self_update_check(&cwd)
+    state
+        .client
+        .hyprlayer_cli_update_check()
         .await
         .map_err(AppError::from)
 }
 
-#[derive(Debug, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct CliUpdateResult {
-    pub ok: bool,
-    pub exit_code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
-}
-
 #[tauri::command]
 #[specta::specta]
-pub async fn update_hyprlayer_cli(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> CmdResult<CliUpdateResult> {
-    let cwd = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let binaries = state.runtime.settings().binaries();
-    let output = HyprCli::new(&binaries)
-        .self_update(&cwd)
+pub async fn update_hyprlayer_cli(state: State<'_, AppState>) -> CmdResult<CliUpdateResult> {
+    state
+        .client
+        .update_hyprlayer_cli()
         .await
-        .map_err(AppError::from)?;
-
-    binaries.redetect().await;
-    let _ = BinariesChanged.emit(&app);
-
-    Ok(CliUpdateResult {
-        ok: output.exit_code == Some(0),
-        exit_code: output.exit_code,
-        stdout: output.stdout,
-        stderr: output.stderr,
-    })
-}
-
-async fn package_manager_available(shell: &Path, path: &std::ffi::OsStr, manager: &str) -> bool {
-    Exec::new(shell)
-        .args(super::terminal::login_shell_args(&format!(
-            "{manager} --version"
-        )))
-        .env("PATH", path)
-        .timeout(Duration::from_secs(15))
-        .run()
-        .await
-        .is_ok()
+        .map_err(AppError::from)
 }
 
 #[cfg(test)]

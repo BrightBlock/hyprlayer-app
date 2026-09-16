@@ -5,9 +5,9 @@
   "version": "0.7.5",
   "identifier": "ai.brightblock.hyprlayer",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "node scripts/build-server-sidecar.mjs --debug && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build && node scripts/build-server-sidecar.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -59,6 +59,7 @@
     "targets": "all",
     "category": "DeveloperTool",
     "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/hyprlayer-server"],
     "windows": {
       "nsis": {
         "installerHooks": "./windows/hooks.nsh"

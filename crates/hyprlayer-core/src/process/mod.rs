@@ -71,6 +71,19 @@ impl Exec {
         self
     }
 
+    /// Bulk form of `env`, for merging a caller-resolved set (e.g. the
+    /// per-attach overlay, ADR-0009 §7) over whatever this builder already has.
+    pub fn envs<I, K, V>(mut self, vars: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<OsString>,
+        V: Into<OsString>,
+    {
+        self.env
+            .extend(vars.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self
+    }
+
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self

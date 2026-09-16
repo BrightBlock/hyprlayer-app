@@ -1,7 +1,8 @@
 use hyprlayer_core::CoreError;
-use serde::Serialize;
+use hyprlayer_proto::WireError;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AppError {
     pub code: String,
@@ -15,6 +16,26 @@ impl From<CoreError> for AppError {
             code: err.code().to_string(),
             message: err.to_string(),
             remedy: err.remedy(),
+        }
+    }
+}
+
+impl From<WireError> for AppError {
+    fn from(err: WireError) -> Self {
+        Self {
+            code: err.code,
+            message: err.message,
+            remedy: err.remedy,
+        }
+    }
+}
+
+impl From<AppError> for WireError {
+    fn from(err: AppError) -> Self {
+        Self {
+            code: err.code,
+            message: err.message,
+            remedy: err.remedy,
         }
     }
 }
@@ -93,5 +114,25 @@ mod tests {
     #[test]
     fn internal_carries_no_remedy() {
         assert_eq!(AppError::internal("boom").remedy, None);
+    }
+
+    #[test]
+    fn wire_error_round_trips_through_app_error() {
+        let (code, message, remedy) = pinned("providersSessions");
+        let wire = WireError {
+            code: code.clone(),
+            message: message.clone(),
+            remedy: remedy.clone(),
+        };
+        let app = AppError::from(wire);
+        assert_eq!(
+            (app.code.clone(), app.message.clone(), app.remedy.clone()),
+            (code.clone(), message.clone(), remedy.clone())
+        );
+        let back = WireError::from(app);
+        assert_eq!(
+            (back.code, back.message, back.remedy),
+            (code, message, remedy)
+        );
     }
 }

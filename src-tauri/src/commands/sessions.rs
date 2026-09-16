@@ -1,50 +1,20 @@
+use std::sync::Arc;
+
 use hyprlayer_core::agent::Harness;
 use hyprlayer_core::claude::{ExitOutcome, PermissionMode, SessionEvent};
 use hyprlayer_core::models::session::{QuestionAnswers, SessionLogEntry};
-use hyprlayer_core::opencode::support::opencode_model_is_supported;
-use hyprlayer_core::pipeline::{self, Stage};
-use hyprlayer_core::runtime::sessions::{
-    LaunchSessionParams, RewindSessionRequest, SessionStreamError, StartStageSessionRequest,
-};
-use hyprlayer_core::store::{Session, Workstream};
-use hyprlayer_core::CoreError;
-use serde::Serialize;
+use hyprlayer_core::pipeline::Stage;
+use hyprlayer_core::store::Session;
+use hyprlayer_server::client::{EventStream, RpcClient};
+use hyprlayer_server::streams::StreamStartOpts;
+use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
-use tauri::Manager;
 use tauri::State;
-use tokio::sync::mpsc;
 
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-pub fn session_not_found(id: &str) -> AppError {
-    AppError {
-        code: "session_not_found".into(),
-        message: format!("No live session with id {id}"),
-        remedy: Some("The session may have ended; start a new one.".into()),
-    }
-}
-
-async fn load_session(state: &AppState, id: &str) -> CmdResult<Session> {
-    state
-        .runtime
-        .sessions()
-        .get(id)
-        .await
-        .map_err(AppError::from)?
-        .ok_or_else(|| session_not_found(id))
-}
-
-async fn load_workstream(state: &AppState, id: &str) -> CmdResult<Workstream> {
-    state
-        .runtime
-        .workstreams()
-        .find(id)
-        .await
-        .map_err(AppError::from)
-}
-
-#[derive(Debug, Default, serde::Deserialize, specta::Type)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct StartOpts {
     pub harness: Option<Harness>,
@@ -54,69 +24,44 @@ pub struct StartOpts {
     pub prompt_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+impl From<StartOpts> for StreamStartOpts {
+    fn from(opts: StartOpts) -> Self {
+        Self {
+            harness: opts.harness,
+            model: opts.model,
+            effort: opts.effort,
+            permission_mode: opts.permission_mode,
+            prompt_name: opts.prompt_name,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct StartedSession {
     pub session: Session,
     pub prompt: String,
 }
 
+/// Pumps one server-side session stream into the Tauri channel the frontend
+/// holds. Lag recovery now happens inside the server's own stream forwarder
+/// (`hyprlayer-server::streams::run_stream`), so this is just `pump`'s shape
+/// with an early return on the terminal `Exited` event.
 fn spawn_live_pump(
-    app: tauri::AppHandle,
-    session_id: String,
-    mut live: mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
+    client: Arc<RpcClient>,
+    stream_id: u64,
+    mut events: EventStream<SessionEvent>,
     on_event: Channel<SessionEvent>,
 ) {
     tauri::async_runtime::spawn(async move {
-        loop {
-            match live.recv().await {
-                Some(Ok(event)) => {
-                    let terminal = matches!(event, SessionEvent::Exited { .. });
-                    if on_event.send(event).is_err() {
-                        return;
-                    }
-                    if terminal {
-                        return;
-                    }
-                }
-                Some(Err(SessionStreamError::Lagged {
-                    epoch,
-                    last_persisted_seq,
-                })) => {
-                    let state = app.state::<AppState>();
-                    let sessions = state.runtime.sessions();
-                    let recovered = sessions
-                        .log_after(&session_id, epoch, last_persisted_seq)
-                        .await;
-                    let entries = match recovered {
-                        Ok(entries) => entries,
-                        Err(e) => {
-                            log::warn!("session {session_id}: lag recovery failed: {e}");
-                            let _ = on_event.send(SessionEvent::ProtocolError {
-                                detail: format!("could not recover from a lagged stream: {e}"),
-                                raw: String::new(),
-                            });
-                            return;
-                        }
-                    };
-                    for entry in entries {
-                        if on_event.send(entry.event).is_err() {
-                            return;
-                        }
-                    }
-                    match sessions.attach(&session_id).await {
-                        Ok(attachment) => live = attachment.live,
-                        Err(e) => {
-                            log::warn!("session {session_id}: reattach after lag failed: {e}");
-                            let _ = on_event.send(SessionEvent::ProtocolError {
-                                detail: format!("could not reattach after a lagged stream: {e}"),
-                                raw: String::new(),
-                            });
-                            return;
-                        }
-                    }
-                }
-                None => return,
+        while let Some(event) = events.recv().await {
+            let terminal = matches!(event, SessionEvent::Exited { .. });
+            if on_event.send(event).is_err() {
+                let _ = client.cancel_stream(stream_id).await;
+                return;
+            }
+            if terminal {
+                return;
             }
         }
     });
@@ -126,7 +71,6 @@ fn spawn_live_pump(
 #[specta::specta]
 #[allow(clippy::too_many_arguments)]
 pub async fn start_stage_session(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     workstream_id: String,
     stage: Stage,
@@ -135,52 +79,22 @@ pub async fn start_stage_session(
     opts: StartOpts,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<StartedSession> {
-    let StartOpts {
-        harness,
-        model,
-        effort,
-        permission_mode,
-        prompt_name,
-    } = opts;
-    let workstream = load_workstream(&state, &workstream_id).await?;
-
-    let prepared = state
-        .runtime
-        .sessions()
-        .prepare_start(StartStageSessionRequest {
-            workstream,
-            stage,
-            input,
-            attached_docs,
-            harness,
-            model,
-            effort,
-            permission_mode,
-            prompt_name,
-        })
+    let (session, prompt, stream_id, events) = state
+        .client
+        .start_stage_session_stream(workstream_id, stage, input, attached_docs, opts.into())
         .await
         .map_err(AppError::from)?;
-
-    let session = prepared.session.clone();
-    let prompt = prepared.prompt.clone();
     let session_id = session.id.clone();
+    spawn_live_pump(state.client.clone(), stream_id, events, on_event.clone());
 
-    let attachment = state
-        .runtime
-        .sessions()
-        .attach(&session_id)
-        .await
-        .map_err(AppError::from)?;
-    spawn_live_pump(app.clone(), session_id, attachment.live, on_event.clone());
-
+    // The launch is fire-and-forget, exactly as before: the command returns
+    // as soon as the stream is open, and this task's only job is to surface
+    // a launch failure onto that same channel. Unlike the streaming commands
+    // above, this has no server-side counterpart — the server ran
+    // `prepare_start` synchronously; only `launch_and_converse` is deferred.
+    let client = state.client.clone();
     tauri::async_runtime::spawn(async move {
-        let state = app.state::<AppState>();
-        if let Err(e) = state
-            .runtime
-            .sessions()
-            .launch_and_converse(prepared.launch)
-            .await
-        {
+        if let Err(e) = client.launch_and_converse(session_id).await {
             emit_start_failure(&on_event, &AppError::from(e).message);
         }
     });
@@ -203,9 +117,7 @@ fn emit_start_failure(channel: &Channel<SessionEvent>, reason: &str) {
 
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 pub async fn resume_session(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     model: Option<String>,
@@ -213,46 +125,18 @@ pub async fn resume_session(
     permission_mode: Option<PermissionMode>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
-    let session = load_session(&state, &session_id).await?;
-    let sessions = state.runtime.sessions();
-
-    if sessions.live_driver(&session_id).await.is_some() {
-        let requested = permission_mode;
-        let running = sessions.permission_mode(&session_id).await;
-        if requested.is_none() || requested == running {
-            let attachment = sessions.attach(&session_id).await.map_err(AppError::from)?;
-            spawn_live_pump(app, session_id, attachment.live, on_event);
-            return Ok(session);
-        }
-        sessions.kill_and_await_exit(&session_id).await;
-    }
-
-    let ws = load_workstream(&state, &session.workstream_id).await?;
-
-    let attachment = sessions.attach(&session_id).await.map_err(AppError::from)?;
-    spawn_live_pump(app, session_id, attachment.live, on_event);
-
-    sessions
-        .launch(LaunchSessionParams {
-            session: session.clone(),
-            project_path: ws.project_path,
-            model,
-            effort,
-            permission_mode,
-            resume: true,
-            boundary_on_relaunch: true,
-        })
+    let (session, stream_id, events) = state
+        .client
+        .resume_session_stream(session_id, model, effort, permission_mode)
         .await
         .map_err(AppError::from)?;
-
+    spawn_live_pump(state.client.clone(), stream_id, events, on_event);
     Ok(session)
 }
 
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 pub async fn restart_session(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     model: Option<String>,
@@ -260,33 +144,16 @@ pub async fn restart_session(
     permission_mode: Option<PermissionMode>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
-    let session = load_session(&state, &session_id).await?;
-    let sessions = state.runtime.sessions();
-
-    sessions.kill_and_await_exit(&session_id).await;
-
-    let ws = load_workstream(&state, &session.workstream_id).await?;
-
-    let attachment = sessions.attach(&session_id).await.map_err(AppError::from)?;
-    spawn_live_pump(app, session_id, attachment.live, on_event);
-
-    sessions
-        .launch(LaunchSessionParams {
-            session: session.clone(),
-            project_path: ws.project_path,
-            model,
-            effort,
-            permission_mode,
-            resume: true,
-            boundary_on_relaunch: true,
-        })
+    let (session, stream_id, events) = state
+        .client
+        .restart_session_stream(session_id, model, effort, permission_mode)
         .await
         .map_err(AppError::from)?;
-
+    spawn_live_pump(state.client.clone(), stream_id, events, on_event);
     Ok(session)
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RewindResult {
     pub session: Session,
@@ -296,33 +163,21 @@ pub struct RewindResult {
 #[tauri::command]
 #[specta::specta]
 pub async fn rewind_session(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     user_turn: u32,
     permission_mode: Option<PermissionMode>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<RewindResult> {
-    let session = load_session(&state, &session_id).await?;
-    let workstream = load_workstream(&state, &session.workstream_id).await?;
-    let sessions = state.runtime.sessions();
-
-    let attachment = sessions.attach(&session_id).await.map_err(AppError::from)?;
-    spawn_live_pump(app, session_id, attachment.live, on_event);
-
-    let outcome = sessions
-        .rewind(RewindSessionRequest {
-            session,
-            workstream,
-            user_turn,
-            permission_mode,
-        })
+    let (session, live_rewound, stream_id, events) = state
+        .client
+        .rewind_session_stream(session_id, user_turn, permission_mode)
         .await
         .map_err(AppError::from)?;
-
+    spawn_live_pump(state.client.clone(), stream_id, events, on_event);
     Ok(RewindResult {
-        session: outcome.session,
-        live_rewound: outcome.live_rewound,
+        session,
+        live_rewound,
     })
 }
 
@@ -335,16 +190,10 @@ pub async fn send_user_message(
     attached_docs: Vec<String>,
     prompt_name: Option<String>,
 ) -> CmdResult<()> {
-    let sessions = state.runtime.sessions();
-    let op = sessions.op_lock(&session_id).await;
-    let _op_guard = op.lock().await;
-
-    let prompt = pipeline::append_docs(text, &attached_docs);
-    sessions
-        .live_driver(&session_id)
+    state
+        .client
+        .send_user_message(session_id, text, attached_docs, prompt_name)
         .await
-        .ok_or_else(|| session_not_found(&session_id))?
-        .send_user_turn(&prompt, None, prompt_name.as_deref())
         .map_err(AppError::from)
 }
 
@@ -358,12 +207,9 @@ pub async fn respond_permission(
     message: Option<String>,
 ) -> CmdResult<()> {
     state
-        .runtime
-        .sessions()
-        .live_driver(&session_id)
+        .client
+        .respond_permission(session_id, request_id, allow, message)
         .await
-        .ok_or_else(|| session_not_found(&session_id))?
-        .respond_permission(&request_id, allow, message.as_deref())
         .map_err(AppError::from)
 }
 
@@ -376,12 +222,9 @@ pub async fn answer_question(
     answers: QuestionAnswers,
 ) -> CmdResult<()> {
     state
-        .runtime
-        .sessions()
-        .live_driver(&session_id)
+        .client
+        .answer_question(session_id, request_id, answers)
         .await
-        .ok_or_else(|| session_not_found(&session_id))?
-        .answer_question(&request_id, answers)
         .map_err(AppError::from)
 }
 
@@ -389,12 +232,9 @@ pub async fn answer_question(
 #[specta::specta]
 pub async fn interrupt_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
     state
-        .runtime
-        .sessions()
-        .live_driver(&session_id)
+        .client
+        .interrupt_session(session_id)
         .await
-        .ok_or_else(|| session_not_found(&session_id))?
-        .interrupt()
         .map_err(AppError::from)
 }
 
@@ -402,13 +242,10 @@ pub async fn interrupt_session(state: State<'_, AppState>, session_id: String) -
 #[specta::specta]
 pub async fn kill_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
     state
-        .runtime
-        .sessions()
-        .live_driver(&session_id)
+        .client
+        .kill_session(session_id)
         .await
-        .ok_or_else(|| session_not_found(&session_id))?
-        .kill();
-    Ok(())
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -418,24 +255,11 @@ pub async fn set_session_model(
     session_id: String,
     model: Option<String>,
 ) -> CmdResult<()> {
-    if let Some(model_id) = model.as_deref() {
-        if load_session(&state, &session_id).await?.harness == Harness::Opencode {
-            if !opencode_model_is_supported(model_id) {
-                return Err(AppError::from(CoreError::OpencodeProviderUnsupported));
-            }
-            if let Some(server) = state.runtime.providers().opencode_server_if_running().await {
-                if server.knows_model(model_id).await == Some(false) {
-                    return Err(AppError::from(CoreError::OpencodeModelUnavailable {
-                        model: model_id.to_string(),
-                    }));
-                }
-            }
-        }
-    }
-    if let Some(driver) = state.runtime.sessions().live_driver(&session_id).await {
-        driver.set_model(model);
-    }
-    Ok(())
+    state
+        .client
+        .set_session_model(session_id, model)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -445,10 +269,11 @@ pub async fn set_session_effort(
     session_id: String,
     effort: Option<String>,
 ) -> CmdResult<()> {
-    if let Some(driver) = state.runtime.sessions().live_driver(&session_id).await {
-        driver.set_effort(effort);
-    }
-    Ok(())
+    state
+        .client
+        .set_session_effort(session_id, effort)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -458,14 +283,13 @@ pub async fn list_sessions(
     workstream_id: String,
 ) -> CmdResult<Vec<Session>> {
     state
-        .runtime
-        .sessions()
-        .list(&workstream_id)
+        .client
+        .list_sessions(workstream_id)
         .await
         .map_err(AppError::from)
 }
 
-#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionLogEntryDto {
     pub seq: f64,
@@ -492,9 +316,8 @@ pub async fn get_session_log(
     session_id: String,
 ) -> CmdResult<Vec<SessionLogEntryDto>> {
     let entries = state
-        .runtime
-        .sessions()
-        .log(&session_id)
+        .client
+        .get_session_log(session_id)
         .await
         .map_err(AppError::from)?;
     Ok(entries.into_iter().map(SessionLogEntryDto::from).collect())
@@ -503,25 +326,20 @@ pub async fn get_session_log(
 #[tauri::command]
 #[specta::specta]
 pub async fn attach_session(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<()> {
-    let attachment = state
-        .runtime
-        .sessions()
-        .attach(&session_id)
+    let (stream_id, events) = state
+        .client
+        .attach_session_stream(session_id)
         .await
         .map_err(AppError::from)?;
-    for entry in attachment.replay {
-        let _ = on_event.send(entry.event);
-    }
-    spawn_live_pump(app, session_id, attachment.live, on_event);
+    spawn_live_pump(state.client.clone(), stream_id, events, on_event);
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveSessionView {
     pub session: Session,
@@ -533,9 +351,8 @@ pub struct ActiveSessionView {
 #[specta::specta]
 pub async fn list_active_sessions(state: State<'_, AppState>) -> CmdResult<Vec<ActiveSessionView>> {
     let active = state
-        .runtime
-        .sessions()
-        .list_active()
+        .client
+        .list_active_sessions()
         .await
         .map_err(AppError::from)?;
     Ok(active

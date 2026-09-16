@@ -5,19 +5,13 @@ use tauri_specta::Event;
 
 use crate::events;
 
-pub fn spawn(
-    handle: AppHandle,
-    runtime: std::sync::Arc<hyprlayer_core::runtime::HyprlayerRuntime>,
-) {
-    let mut rx = runtime.subscribe();
+pub fn spawn(handle: AppHandle, mut events: tokio::sync::mpsc::UnboundedReceiver<RuntimeEvent>) {
     tauri::async_runtime::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(event) => map(&handle, event),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+        while let Some(event) = events.recv().await {
+            map(&handle, event);
         }
+        // The stream ends only with the connection.
+        let _ = events::ServerDisconnected.emit(&handle);
     });
 }
 

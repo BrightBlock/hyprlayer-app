@@ -23,6 +23,7 @@ fn test_environment(home: &Path) -> RuntimeEnvironment {
         home_dir: home.to_path_buf(),
         process_cwd: home.to_path_buf(),
         process_env: std::collections::BTreeMap::new(),
+        env_overlay: Default::default(),
     }
 }
 
@@ -270,8 +271,8 @@ async fn open_reaps_an_opencode_server_orphaned_by_a_previous_run() {
 
     if !exited {
         let _ = child.kill();
-        let _ = child.wait();
     }
+    let _ = child.wait();
     assert!(
         exited,
         "open() must kill an opencode server left behind by a prior run"

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CoreError, Result};
 use crate::process::Exec;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum PrState {
@@ -15,7 +15,7 @@ pub enum PrState {
     Closed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ChecksState {
@@ -25,7 +25,7 @@ pub enum ChecksState {
     Failing,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum MergeableState {
@@ -44,7 +44,7 @@ impl MergeableState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ReviewDecision {
@@ -85,7 +85,7 @@ impl MergeMethod {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PrCheck {
@@ -94,7 +94,7 @@ pub struct PrCheck {
     pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PrSummary {
@@ -105,7 +105,7 @@ pub struct PrSummary {
     pub is_draft: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PrStatus {
@@ -261,7 +261,12 @@ fn parse_pr(stdout: &str) -> Result<PrStatus> {
     })
 }
 
-pub async fn pr_status(gh: &Path, worktree: &Path, pr_ref: &str) -> Result<Option<PrStatus>> {
+pub async fn pr_status(
+    gh: &Path,
+    worktree: &Path,
+    pr_ref: &str,
+    overlay: &[(String, String)],
+) -> Result<Option<PrStatus>> {
     let out = Exec::new(gh)
         .cwd(worktree)
         .args([
@@ -271,6 +276,7 @@ pub async fn pr_status(gh: &Path, worktree: &Path, pr_ref: &str) -> Result<Optio
             "--json",
             "number,url,title,state,mergeable,reviewDecision,statusCheckRollup",
         ])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run_unchecked()
         .await?;
@@ -316,6 +322,7 @@ pub async fn list_open_prs(
     dir: &Path,
     query: &str,
     limit: u32,
+    overlay: &[(String, String)],
 ) -> Result<Vec<PrSummary>> {
     let limit = limit.to_string();
     let mut args = vec![
@@ -336,6 +343,7 @@ pub async fn list_open_prs(
     let out = Exec::new(gh)
         .cwd(dir)
         .args(args)
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run()
         .await?;
@@ -351,7 +359,12 @@ fn parse_pr_list(stdout: &str) -> Result<Vec<PrSummary>> {
     Ok(raw.into_iter().map(PrSummary::from).collect())
 }
 
-pub async fn pr_summary(gh: &Path, dir: &Path, pr_ref: &str) -> Result<Option<PrSummary>> {
+pub async fn pr_summary(
+    gh: &Path,
+    dir: &Path,
+    pr_ref: &str,
+    overlay: &[(String, String)],
+) -> Result<Option<PrSummary>> {
     let out = Exec::new(gh)
         .cwd(dir)
         .args([
@@ -361,6 +374,7 @@ pub async fn pr_summary(gh: &Path, dir: &Path, pr_ref: &str) -> Result<Option<Pr
             "--json",
             "number,title,headRefName,url,isDraft",
         ])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run_unchecked()
         .await?;
@@ -390,6 +404,7 @@ pub async fn merge_pr(
     pr_ref: &str,
     method: MergeMethod,
     auto: bool,
+    overlay: &[(String, String)],
 ) -> Result<()> {
     let mut args = vec!["pr", "merge", pr_ref, method.flag()];
     if auto {
@@ -398,26 +413,35 @@ pub async fn merge_pr(
     Exec::new(gh)
         .cwd(worktree)
         .args(args)
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(60))
         .run()
         .await?;
     Ok(())
 }
 
-pub async fn edit_pr_base(gh: &Path, worktree: &Path, pr_ref: &str, base: &str) -> Result<()> {
+pub async fn edit_pr_base(
+    gh: &Path,
+    worktree: &Path,
+    pr_ref: &str,
+    base: &str,
+    overlay: &[(String, String)],
+) -> Result<()> {
     let base = base.strip_prefix("origin/").unwrap_or(base);
     Exec::new(gh)
         .cwd(worktree)
         .args(["pr", "edit", pr_ref, "--base", base])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(30))
         .run()
         .await?;
     Ok(())
 }
 
-pub async fn github_login(gh: &Path) -> Option<String> {
+pub async fn github_login(gh: &Path, overlay: &[(String, String)]) -> Option<String> {
     let out = Exec::new(gh)
         .args(["api", "user", "--jq", ".login"])
+        .envs(overlay.iter().cloned())
         .timeout(Duration::from_secs(20))
         .run_unchecked()
         .await

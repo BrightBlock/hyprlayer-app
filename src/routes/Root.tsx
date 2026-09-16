@@ -96,6 +96,7 @@ import { commands, type EditorTarget } from "@/lib/bindings";
 import { SearchPalette } from "@/features/search/SearchPalette";
 import { toggleSearch } from "@/features/search/searchStore";
 import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
+import { ServerDisconnectedNotice } from "@/features/system/ServerDisconnectedNotice";
 import { ConfirmQuitDialog } from "@/features/system/ConfirmQuitDialog";
 import { PromptPalette } from "@/features/prompts/PromptPalette";
 import { PromptArgsDialog } from "@/features/prompts/PromptArgsDialog";
@@ -1824,6 +1825,7 @@ export function Root() {
       <PromptArgsDialog />
       <Toast />
       <FullDiskAccessNotice />
+      <ServerDisconnectedNotice />
       <ConfirmQuitDialog />
       <ResizeGrips />
     </div>

@@ -9,7 +9,7 @@ use tauri::State;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DocContent {
     pub meta: DocMeta,
@@ -27,7 +27,7 @@ impl From<Document> for DocContent {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -39,14 +39,14 @@ pub enum FmValueDto {
     Null,
 }
 
-#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FmSetEntry {
     pub key: String,
     pub value: FmValueDto,
 }
 
-#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FmPatchDto {
     #[serde(default)]
@@ -75,7 +75,7 @@ impl From<FmPatchDto> for FmPatch {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDocInput {
     pub project_repo_path: Option<String>,
@@ -105,21 +105,15 @@ impl From<CreateDocInput> for CreateDocumentRequest {
 #[tauri::command]
 #[specta::specta]
 pub async fn query_docs(state: State<'_, AppState>, query: ThoughtQuery) -> CmdResult<QueryResult> {
-    state
-        .runtime
-        .library()
-        .query(query)
-        .await
-        .map_err(AppError::from)
+    state.client.query_docs(query).await.map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn get_doc(state: State<'_, AppState>, id: String) -> CmdResult<DocContent> {
     state
-        .runtime
-        .library()
-        .get(&id)
+        .client
+        .get_doc(id)
         .await
         .map(DocContent::from)
         .map_err(AppError::from)
@@ -134,9 +128,8 @@ pub async fn save_doc(
     base_mtime_ms: f64,
 ) -> CmdResult<DocMeta> {
     state
-        .runtime
-        .library()
-        .save(&id, content, base_mtime_ms)
+        .client
+        .save_doc(id, content, base_mtime_ms)
         .await
         .map_err(AppError::from)
 }
@@ -150,9 +143,8 @@ pub async fn patch_doc_frontmatter(
     base_mtime_ms: f64,
 ) -> CmdResult<DocMeta> {
     state
-        .runtime
-        .library()
-        .patch_frontmatter(&id, patch.into(), base_mtime_ms)
+        .client
+        .patch_doc_frontmatter(id, patch.into(), base_mtime_ms)
         .await
         .map_err(AppError::from)
 }
@@ -161,9 +153,8 @@ pub async fn patch_doc_frontmatter(
 #[specta::specta]
 pub async fn create_doc(state: State<'_, AppState>, input: CreateDocInput) -> CmdResult<DocMeta> {
     state
-        .runtime
-        .library()
-        .create(input.into())
+        .client
+        .create_doc(input.into())
         .await
         .map_err(AppError::from)
 }
@@ -171,7 +162,14 @@ pub async fn create_doc(state: State<'_, AppState>, input: CreateDocInput) -> Cm
 #[tauri::command]
 #[specta::specta]
 pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    let path = state.runtime.library().resolve_path(&id)?;
+    if let Some(err) = state.remote_unsupported("Reveal in file manager") {
+        return Err(err);
+    }
+    let path = state
+        .client
+        .resolve_doc_path(id)
+        .await
+        .map_err(AppError::from)?;
     tauri_plugin_opener::reveal_item_in_dir(path)
         .map_err(|e| AppError::internal(format!("reveal: {e}")))
 }
@@ -179,15 +177,7 @@ pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()>
 #[tauri::command]
 #[specta::specta]
 pub async fn doc_web_url(state: State<'_, AppState>, id: String) -> CmdResult<Option<String>> {
-    let Ok(abs) = state.runtime.library().resolve_path(&id) else {
-        return Ok(None);
-    };
-    let url =
-        tauri::async_runtime::spawn_blocking(move || hyprlayer_core::gitops::file_web_url(&abs))
-            .await
-            .ok()
-            .flatten();
-    Ok(url)
+    state.client.doc_web_url(id).await.map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -197,9 +187,8 @@ pub async fn get_thoughts_git_status(
     project_path: String,
 ) -> CmdResult<ThoughtsRepoStatus> {
     state
-        .runtime
-        .library()
-        .thoughts_git_status(&project_path)
+        .client
+        .get_thoughts_git_status(project_path)
         .await
         .map_err(AppError::from)
 }

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use hyprlayer_models::session::QuestionAnswers;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::agent::{AgentDriver, Harness};
@@ -16,6 +17,7 @@ use crate::process::binaries::BinaryKind;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
 use crate::store::{NewSession, Session, SessionLogEntry, Workstream};
+use serde::{Deserialize, Serialize};
 
 use super::followup::{self, Followup};
 use super::workflow_bridge::{self, WorkflowChannel};
@@ -90,14 +92,111 @@ pub struct RewindSessionOutcome {
     pub live_rewound: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveSession {
     pub session: Session,
     pub workstream: Workstream,
 }
 
 impl SessionService<'_> {
-    pub async fn live_driver(&self, session_id: &str) -> Option<Arc<dyn AgentDriver>> {
+    pub(crate) async fn live_driver(&self, session_id: &str) -> Option<Arc<dyn AgentDriver>> {
         self.runtime.session_registry.get(session_id).await
+    }
+
+    async fn require_live(&self, session_id: &str) -> Result<Arc<dyn AgentDriver>> {
+        self.live_driver(session_id)
+            .await
+            .ok_or_else(|| CoreError::SessionNotFound {
+                session_id: session_id.to_string(),
+            })
+    }
+
+    pub async fn is_live(&self, session_id: &str) -> bool {
+        self.live_driver(session_id).await.is_some()
+    }
+
+    pub async fn send(
+        &self,
+        session_id: &str,
+        text: &str,
+        attached_docs: &[String],
+        prompt_name: Option<&str>,
+    ) -> Result<()> {
+        let op = self.op_lock(session_id).await;
+        let _op_guard = op.lock().await;
+
+        let prompt = pipeline::append_docs(text.to_string(), attached_docs);
+        self.require_live(session_id)
+            .await?
+            .send_user_turn(&prompt, None, prompt_name)
+    }
+
+    pub async fn respond_permission(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        allow: bool,
+        message: Option<&str>,
+    ) -> Result<()> {
+        self.require_live(session_id)
+            .await?
+            .respond_permission(request_id, allow, message)
+    }
+
+    pub async fn answer(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        answers: QuestionAnswers,
+    ) -> Result<()> {
+        self.require_live(session_id)
+            .await?
+            .answer_question(request_id, answers)
+    }
+
+    pub async fn interrupt(&self, session_id: &str) -> Result<()> {
+        self.require_live(session_id).await?.interrupt()
+    }
+
+    pub async fn kill(&self, session_id: &str) -> Result<()> {
+        self.require_live(session_id).await?.kill();
+        Ok(())
+    }
+
+    /// The OpenCode check folded in from the shell (ADR-0009): a running
+    /// server's own registry decides which models exist.
+    pub async fn set_model(&self, session_id: &str, model: Option<String>) -> Result<()> {
+        if let Some(model_id) = model.as_deref() {
+            let session =
+                self.get(session_id)
+                    .await?
+                    .ok_or_else(|| CoreError::SessionNotFound {
+                        session_id: session_id.to_string(),
+                    })?;
+            if session.harness == Harness::Opencode {
+                if !opencode_model_is_supported(model_id) {
+                    return Err(CoreError::OpencodeProviderUnsupported);
+                }
+                if let Some(server) = self.runtime.providers().opencode_server_if_running().await {
+                    if server.knows_model(model_id).await == Some(false) {
+                        return Err(CoreError::OpencodeModelUnavailable {
+                            model: model_id.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        if let Some(driver) = self.live_driver(session_id).await {
+            driver.set_model(model);
+        }
+        Ok(())
+    }
+
+    pub async fn set_effort(&self, session_id: &str, effort: Option<String>) -> Result<()> {
+        if let Some(driver) = self.live_driver(session_id).await {
+            driver.set_effort(effort);
+        }
+        Ok(())
     }
 
     pub async fn permission_mode(&self, session_id: &str) -> Option<PermissionMode> {
@@ -347,7 +446,7 @@ impl SessionService<'_> {
         let session_id = session.id.clone();
 
         let driver = self
-            .launch(LaunchSessionParams {
+            .launch_driver(LaunchSessionParams {
                 session,
                 project_path,
                 model,
@@ -374,7 +473,11 @@ impl SessionService<'_> {
         Ok(())
     }
 
-    pub async fn launch(&self, params: LaunchSessionParams) -> Result<Arc<dyn AgentDriver>> {
+    pub async fn launch(&self, params: LaunchSessionParams) -> Result<()> {
+        self.launch_driver(params).await.map(|_| ())
+    }
+
+    async fn launch_driver(&self, params: LaunchSessionParams) -> Result<Arc<dyn AgentDriver>> {
         let LaunchSessionParams {
             session,
             project_path,

@@ -468,6 +468,7 @@ mod tests {
             home_dir: dirs::home_dir().unwrap_or_default(),
             process_cwd: std::env::current_dir().unwrap_or_default(),
             process_env: std::env::vars_os().collect(),
+            env_overlay: Default::default(),
         }
     }
 

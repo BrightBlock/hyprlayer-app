@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use hyprlayer_models::RuntimeEvent;
+use serde::{Deserialize, Serialize};
 
 use crate::branch_prefix;
 use crate::config::EffectiveConfig;
 use crate::error::{CoreError, Result};
 use crate::hyprcli::HyprCli;
 use crate::pipeline::Stage;
-use crate::pr::{self, PrStatus};
+use crate::pr::{self, MergeMethod, PrStatus, PrSummary};
 use crate::process::binaries::BinaryKind;
 use crate::repo_settings;
 use crate::runtime::script_registry::RunPhase;
@@ -89,6 +90,7 @@ pub struct CleanupArchivedRequest {
     pub before_ms: Option<f64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArchiveCleanupReport {
     pub deleted: u32,
     pub failed: u32,
@@ -123,6 +125,17 @@ pub struct HeadBranchObservation {
 pub struct BranchAdoption {
     pub workstream_id: String,
     pub branch: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct WorkstreamBases {
+    pub branches: Vec<String>,
+    pub local_branches: Vec<String>,
+    pub remote_branches: Vec<String>,
+    pub default_base: String,
+    pub current_branch: Option<String>,
 }
 
 pub struct WorkstreamService<'a> {
@@ -219,8 +232,35 @@ impl WorkstreamService<'_> {
 
     pub async fn set_base_branch(&self, id: &str, base: &str) -> Result<()> {
         ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let base = base.trim().to_string();
+        if base.is_empty() {
+            return Err(CoreError::WorkstreamBaseBranchEmpty);
+        }
+        if let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await {
+            let dir = pr_dir(&item);
+            if let Ok(Some(status)) = pr::pr_status(
+                &gh,
+                dir,
+                &item.pr_ref(),
+                &self.runtime.environment.overlay_env(),
+            )
+            .await
+            {
+                if status.state == pr::PrState::Open {
+                    pr::edit_pr_base(
+                        &gh,
+                        dir,
+                        &item.pr_ref(),
+                        &base,
+                        &self.runtime.environment.overlay_env(),
+                    )
+                    .await?;
+                }
+            }
+        }
         let db = self.runtime.db.clone();
-        let (id, base) = (id.to_string(), base.to_string());
+        let id = id.to_string();
         blocking(move || db.update_workstream_base_branch(&id, &base)).await
     }
 
@@ -358,13 +398,171 @@ impl WorkstreamService<'_> {
             return Ok(None);
         };
         let dir = pr_dir(&item);
-        match pr::pr_status(&gh, dir, &item.pr_ref()).await {
+        match pr::pr_status(
+            &gh,
+            dir,
+            &item.pr_ref(),
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+        {
             Ok(status) => Ok(status),
             Err(e) => {
                 tracing::debug!("gh pr status unavailable for {}: {e}", item.pr_ref());
                 Ok(None)
             }
         }
+    }
+
+    pub async fn list_bases(&self, project_path: &str) -> Result<WorkstreamBases> {
+        ensure_running(self.runtime)?;
+        let git = self.runtime.binaries.require(BinaryKind::Git).await?;
+        let repo = PathBuf::from(project_path);
+        let overlay = self.runtime.environment.overlay_env();
+        let default_base = worktree::detect_base_branch(&git, &repo, &overlay)
+            .await
+            .unwrap_or_default();
+        let (branches, local_branches, remote_branches, current_branch) = blocking(move || {
+            let branches = crate::gitops::list_branches(&repo)?;
+            let local_branches = crate::gitops::list_local_branches(&repo)?;
+            let remote_branches = crate::gitops::list_remote_branches(&repo)?
+                .into_iter()
+                .filter(|r| match crate::gitops::local_name_for_remote(r) {
+                    Some(local) => !local_branches.iter().any(|l| l == local),
+                    None => false,
+                })
+                .collect();
+            let current_branch = crate::gitops::current_branch(&repo);
+            Ok((branches, local_branches, remote_branches, current_branch))
+        })
+        .await?;
+        Ok(WorkstreamBases {
+            branches,
+            local_branches,
+            remote_branches,
+            default_base,
+            current_branch,
+        })
+    }
+
+    pub async fn fetch_project_remote(&self, project_path: &str) -> Result<()> {
+        ensure_running(self.runtime)?;
+        let git = self.runtime.binaries.require(BinaryKind::Git).await?;
+        worktree::fetch_remote(
+            &git,
+            Path::new(project_path),
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+    }
+
+    pub async fn update_from_base(&self, id: &str) -> Result<worktree::PullOutcome> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let git = self.runtime.binaries.require(BinaryKind::Git).await?;
+        worktree::pull_base(
+            &git,
+            Path::new(&item.worktree_path),
+            &item.base_branch,
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+    }
+
+    pub async fn fetch_remote(&self, id: &str) -> Result<()> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let git = self.runtime.binaries.require(BinaryKind::Git).await?;
+        worktree::fetch_remote(
+            &git,
+            Path::new(&item.worktree_path),
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+    }
+
+    pub async fn list_open_prs(&self, id: &str, query: &str) -> Result<Vec<PrSummary>> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
+            return Ok(Vec::new());
+        };
+        match pr::list_open_prs(
+            &gh,
+            pr_dir(&item),
+            query,
+            50,
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+        {
+            Ok(prs) => Ok(prs),
+            Err(e) => {
+                tracing::debug!("gh pr list unavailable for {}: {e}", item.project_path);
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    pub async fn preview_pr(&self, id: &str, pr_number: u32) -> Result<Option<PrSummary>> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
+            return Ok(None);
+        };
+        match pr::pr_summary(
+            &gh,
+            pr_dir(&item),
+            &pr_number.to_string(),
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+        {
+            Ok(summary) => Ok(summary),
+            Err(e) => {
+                tracing::debug!("gh pr preview unavailable for #{pr_number}: {e}");
+                Ok(None)
+            }
+        }
+    }
+
+    pub async fn attach_pr(&self, id: &str, pr_number: u32) -> Result<Option<PrStatus>> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        if item.is_folder() {
+            return Err(CoreError::WorkstreamFolderNoGit);
+        }
+        let gh = self.runtime.binaries.require(BinaryKind::Gh).await?;
+        let status = match pr::pr_status(
+            &gh,
+            pr_dir(&item),
+            &pr_number.to_string(),
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+        {
+            Ok(Some(status)) => status,
+            Ok(None) => return Err(pr_not_found(pr_number, None)),
+            Err(e) => return Err(pr_not_found(pr_number, Some(e))),
+        };
+        self.set_pr(id, Some(pr_number)).await?;
+        Ok(Some(status))
+    }
+
+    pub async fn merge_pr(&self, id: &str, method: MergeMethod) -> Result<()> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let gh = self.runtime.binaries.require(BinaryKind::Gh).await?;
+        let auto = self.runtime.settings.get().await.git.automerge;
+        pr::merge_pr(
+            &gh,
+            Path::new(&item.worktree_path),
+            &item.pr_ref(),
+            method,
+            auto,
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
     }
 
     pub async fn rename(&self, req: RenameWorkstreamRequest) -> Result<Workstream> {
@@ -437,8 +635,9 @@ impl WorkstreamService<'_> {
                 return Ok((local, false));
             }
             let git = self.runtime.binaries.require(BinaryKind::Git).await?;
-            let _ = worktree::fetch_remote(&git, &repo).await;
-            worktree::create_tracking_branch(&git, &repo, &local, &branch).await?;
+            let overlay = self.runtime.environment.overlay_env();
+            let _ = worktree::fetch_remote(&git, &repo, &overlay).await;
+            worktree::create_tracking_branch(&git, &repo, &local, &branch, &overlay).await?;
             return Ok((local, true));
         }
 
@@ -706,10 +905,22 @@ impl WorkstreamService<'_> {
             && item.app_owns_branch()
         {
             if let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await {
-                if let Ok(Some(status)) = pr::pr_status(&gh, pr_dir(&item), &item.pr_ref()).await {
+                if let Ok(Some(status)) = pr::pr_status(
+                    &gh,
+                    pr_dir(&item),
+                    &item.pr_ref(),
+                    &self.runtime.environment.overlay_env(),
+                )
+                .await
+                {
                     if status.state == pr::PrState::Merged {
-                        if let Err(e) =
-                            worktree::delete_remote_branch(&git, project_path, &item.branch).await
+                        if let Err(e) = worktree::delete_remote_branch(
+                            &git,
+                            project_path,
+                            &item.branch,
+                            &self.runtime.environment.overlay_env(),
+                        )
+                        .await
                         {
                             tracing::warn!(
                                 "delete remote branch {} on archive failed: {e}",
@@ -994,5 +1205,64 @@ fn pr_dir(item: &Workstream) -> &Path {
         worktree
     } else {
         Path::new(&item.project_path)
+    }
+}
+
+fn pr_not_found(pr_number: u32, err: Option<CoreError>) -> CoreError {
+    let detail = match err {
+        Some(CoreError::Exec { stderr_tail, .. }) => clean_gh_stderr(&stderr_tail),
+        _ => String::new(),
+    };
+    CoreError::PrNotFound { pr_number, detail }
+}
+
+fn clean_gh_stderr(stderr: &str) -> String {
+    let mut s = stderr.trim();
+    s = s.strip_prefix("GraphQL: ").unwrap_or(s);
+    if let Some(open) = s.rfind(" (") {
+        if s.ends_with(')') && !s[open + 2..s.len() - 1].contains(' ') {
+            s = s[..open].trim_end();
+        }
+    }
+    s.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_gh_stderr_strips_graphql_decoration() {
+        assert_eq!(
+            clean_gh_stderr(
+                "GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)"
+            ),
+            "Could not resolve to a PullRequest with the number of 999."
+        );
+        assert_eq!(clean_gh_stderr("  not found  "), "not found");
+        assert_eq!(
+            clean_gh_stderr("failed (try again later)"),
+            "failed (try again later)"
+        );
+    }
+
+    #[test]
+    fn pr_not_found_uses_gh_message_then_falls_back() {
+        let err = CoreError::Exec {
+            program: "gh pr view".into(),
+            exit: Some(1),
+            stderr_tail: "GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)".into(),
+        };
+        let not_found = pr_not_found(999, Some(err));
+        assert_eq!(
+            not_found.to_string(),
+            "Could not resolve to a PullRequest with the number of 999."
+        );
+        assert!(!not_found.to_string().contains("gh"));
+        assert_eq!(not_found.code(), "pr_not_found");
+        assert_eq!(
+            pr_not_found(7, None).to_string(),
+            "No pull request #7 found in this repository"
+        );
     }
 }

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.brightblock.hyprlayer.server</string>
+
+  <!-- A LaunchAgent in ~/Library/LaunchAgents, never a LaunchDaemon: the
+       relocated Keychain lookup shells `security find-generic-password`, which
+       needs an unlocked login keychain that only a user session has (ADR-0009). -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/hyprlayer-server</string>
+    <string>serve</string>
+  </array>
+
+  <!-- Restart on a crash, but let `hyprlayer-server stop` stay stopped —
+       the launchd equivalent of Restart=on-failure. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/hyprlayer-server.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/hyprlayer-server.err.log</string>
+</dict>
+</plist>

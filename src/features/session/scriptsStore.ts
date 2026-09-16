@@ -44,7 +44,7 @@ const DEFAULT_DOCK: DockState = {
 type PersistedScriptsState = {
   dockPosition: DockPosition;
   dockHeight: number;
-  dock: Record<string, Pick<DockState, "collapsed">>;
+  dock: Record<string, Partial<DockState>>;
 };
 
 export const useScriptsStore = create<ScriptsState>()(
@@ -64,10 +64,21 @@ export const useScriptsStore = create<ScriptsState>()(
       partialize: (s) => ({
         dockPosition: s.dockPosition,
         dockHeight: s.dockHeight,
+        // Terminal ids persist so a relaunch reattaches to terminals the server
+        // kept alive (ADR-0009); TerminalTab opens a fresh one when an id no
+        // longer attaches.
         dock: Object.fromEntries(
-          Object.entries(s.dock)
-            .filter(([, d]) => d.collapsed)
-            .map(([id]) => [id, { collapsed: true }]),
+          Object.entries(s.dock).map(([id, d]) => [
+            id,
+            {
+              open: d.open,
+              tab: d.tab,
+              terminals: d.terminals,
+              nextTerm: d.nextTerm,
+              termIds: d.termIds,
+              collapsed: d.collapsed,
+            },
+          ]),
         ),
       }),
       merge: (persisted, current) => {

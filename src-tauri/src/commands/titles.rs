@@ -8,7 +8,11 @@ use crate::state::AppState;
 #[tauri::command]
 #[specta::specta]
 pub async fn suggest_tab_title(state: State<'_, AppState>, text: String) -> CmdResult<String> {
-    let settings = state.runtime.settings().get().await;
+    let settings = state
+        .client
+        .get_app_settings()
+        .await
+        .map_err(AppError::from)?;
     if !settings.tab_titles.enabled {
         return Err(AppError {
             code: "tab_titles_disabled".into(),
@@ -21,25 +25,28 @@ pub async fn suggest_tab_title(state: State<'_, AppState>, text: String) -> CmdR
         .effective_model(&settings.providers)
         .to_string();
     let prompt = providers::build_title_prompt(&text);
-    let providers_service = state.runtime.providers();
 
     let raw = match providers::parse_model_tag(&model_tag) {
         TitleModel::Claude(flag) => {
-            providers_service
-                .generate_title_claude(flag, &prompt)
-                .await?
+            state
+                .client
+                .generate_title_claude(flag.to_string(), prompt)
+                .await
         }
         TitleModel::OpenCode(model) => {
-            providers_service
-                .generate_title_opencode(model, &prompt)
-                .await?
+            state
+                .client
+                .generate_title_opencode(model.to_string(), prompt)
+                .await
         }
         TitleModel::Codex(model) => {
-            providers_service
-                .generate_title_codex(model, &prompt)
-                .await?
+            state
+                .client
+                .generate_title_codex(model.to_string(), prompt)
+                .await
         }
-    };
+    }
+    .map_err(AppError::from)?;
 
     let title = providers::sanitize_title(&raw);
     if title.is_empty() {

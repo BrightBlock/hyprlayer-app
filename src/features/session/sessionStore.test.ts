@@ -27,6 +27,7 @@ const h = vi.hoisted(() => {
   const respondPermission = vi.fn(async () => ({ status: "ok", data: null }));
   const answerQuestion = vi.fn(async () => ({ status: "ok", data: null }));
   const getSessionLog = vi.fn(async () => ({ status: "ok", data: [] as unknown[] }));
+  const listActiveSessions = vi.fn(async () => ({ status: "ok", data: [] as unknown[] }));
   const restartSession = vi.fn(async (...args: unknown[]) => {
     state.lastChannel = args[args.length - 1] as FakeChannel;
     return { status: "ok", data: null };
@@ -42,6 +43,7 @@ const h = vi.hoisted(() => {
     respondPermission,
     answerQuestion,
     getSessionLog,
+    listActiveSessions,
     restartSession,
   };
 });
@@ -57,6 +59,7 @@ vi.mock("../../lib/bindings", () => ({
     respondPermission: h.respondPermission,
     answerQuestion: h.answerQuestion,
     getSessionLog: h.getSessionLog,
+    listActiveSessions: h.listActiveSessions,
     restartSession: h.restartSession,
   },
 }));
@@ -79,7 +82,7 @@ const {
   useWorkstreamArtifacts,
   useMostRecentDoc,
 } = await import("./sessionStore");
-const { isBusy, isWorking } = await import("./transcript");
+const { isBusy, isTerminal, isWorking } = await import("./transcript");
 
 const INIT: SessionEvent = { kind: "init", claudeSessionId: "c1", model: "m" };
 const TURN_DONE: SessionEvent = {
@@ -857,6 +860,26 @@ describe("restoring a stored session log", () => {
     await restoreSessionIfNeeded("stored-1", "ws1", "general");
     return entryOf("stored-1");
   }
+
+  it("attaches to a restored session the server still reports live", async () => {
+    // Its own id: the resume registers a channel that outlives the store reset.
+    h.getSessionLog.mockResolvedValueOnce({ status: "ok", data: [entry(0, INIT)] });
+    h.listActiveSessions.mockResolvedValueOnce({
+      status: "ok",
+      data: [{ session: { id: "live-1" }, workstreamTitle: "Test", projectPath: "/p" }],
+    });
+    await restoreSessionIfNeeded("live-1", "ws1", "general");
+    const restored = entryOf("live-1");
+    expect(h.resumeSession).toHaveBeenCalledWith("live-1", null, null, null, expect.anything());
+    expect(restored.live).toBe(true);
+    expect(isTerminal(restored.state)).toBe(false);
+  });
+
+  it("leaves a restored session parked when the server does not report it live", async () => {
+    const restored = await restoreLog([entry(0, INIT)]);
+    expect(h.resumeSession).not.toHaveBeenCalled();
+    expect(restored.live).toBe(false);
+  });
 
   it("replays a typed question array straight into the pending question", async () => {
     const restored = await restoreLog([

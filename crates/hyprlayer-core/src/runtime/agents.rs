@@ -6,6 +6,7 @@ use crate::agents::{AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay};
 use crate::error::{CoreError, Result};
 use crate::hyprcli::{AiVersions, BundleSelection, HyprCli};
 use crate::skills::AgentSkill;
+use serde::{Deserialize, Serialize};
 
 use super::ports::ProviderHttpRequest;
 use super::HyprlayerRuntime;
@@ -37,7 +38,7 @@ async fn require_manageable(cli: &HyprCli<'_>, cwd: &Path) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleStatus {
     pub manageable: bool,
     pub installed_sha: Option<String>,
@@ -48,13 +49,13 @@ pub struct BundleStatus {
     pub update_available: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleReport {
     pub source: BundleSource,
     pub stdout: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleInstall {
     pub ok: bool,
     pub exit_code: Option<i32>,
