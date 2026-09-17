@@ -12,6 +12,17 @@ import {
 } from "@/lib/domain/harnessing";
 import type { StageKey } from "@/lib/domain/stages";
 
+import {
+  leaf,
+  leaves,
+  newPaneId,
+  removeLeaf,
+  splitLeaf,
+  type LayoutNode,
+  type PaneId,
+  type SplitDir,
+} from "./paneTree";
+
 export type AttachedDoc = {
   path: string;
   role: string;
@@ -47,15 +58,14 @@ export type ShellTab = {
     sessionId?: string;
     started?: boolean;
   };
-  panel?: "main" | "right";
+  paneId: PaneId;
 };
 
 export type WsTabState = {
   shells: ShellTab[];
-  activeId: number;
-  rightSplit?: boolean;
-  rightActiveId?: number;
-  activePane?: "main" | "right";
+  layout: LayoutNode;
+  panes: Record<PaneId, { activeId: number }>;
+  activePaneId: PaneId;
   archived?: ArchivedShell[];
   archiveOpen?: boolean;
 };
@@ -70,74 +80,160 @@ export type ArchivedShell = {
 
 export const defaultTabState = (): WsTabState => ({
   shells: [
-    { id: 1, title: "Agent", mode: "general", draft: "", docs: [], attachments: [], panel: "main" },
+    { id: 1, title: "Agent", mode: "general", draft: "", docs: [], attachments: [], paneId: "p1" },
   ],
-  activeId: 1,
+  layout: leaf("p1"),
+  panes: { p1: { activeId: 1 } },
+  activePaneId: "p1",
 });
 
 export const nextShellId = (shells: ShellTab[], archived: ArchivedShell[] = []): number =>
   Math.max(0, ...shells.map((s) => s.id), ...archived.map((a) => a.shell.id)) + 1;
 
-const paneOf = (s: ShellTab): "main" | "right" => (s.panel === "right" ? "right" : "main");
-
-function focusedPane(state: WsTabState): { pane: "main" | "right"; members: ShellTab[] } {
-  const pane = state.activePane ?? "main";
-  return { pane, members: state.shells.filter((s) => paneOf(s) === pane) };
+export function paneOf(state: WsTabState, shell: ShellTab): PaneId {
+  const ids = leaves(state.layout);
+  return ids.includes(shell.paneId) ? shell.paneId : ids[0];
 }
 
-function focusShell(state: WsTabState, pane: "main" | "right", id: number): WsTabState {
-  return pane === "right"
-    ? { ...state, rightActiveId: id, activePane: "right" }
-    : { ...state, activeId: id, activePane: "main" };
+export function focusedPaneId(state: WsTabState): PaneId {
+  const ids = leaves(state.layout);
+  return ids.includes(state.activePaneId) ? state.activePaneId : ids[0];
+}
+
+export const paneShells = (state: WsTabState, paneId: PaneId): ShellTab[] =>
+  state.shells.filter((s) => paneOf(state, s) === paneId);
+
+export function activeShellIn(state: WsTabState, paneId: PaneId): ShellTab | null {
+  const members = paneShells(state, paneId);
+  return members.find((s) => s.id === state.panes[paneId]?.activeId) ?? members[0] ?? null;
+}
+
+export const visibleShells = (state: WsTabState): ShellTab[] =>
+  leaves(state.layout).flatMap((paneId) => activeShellIn(state, paneId) ?? []);
+
+export function isLastTab(state: WsTabState, shellId: number): boolean {
+  const shell = state.shells.find((s) => s.id === shellId);
+  return (
+    !!shell &&
+    leaves(state.layout).length === 1 &&
+    paneShells(state, paneOf(state, shell)).length === 1
+  );
+}
+
+export function focusShell(state: WsTabState, shellId: number): WsTabState {
+  const shell = state.shells.find((s) => s.id === shellId);
+  if (!shell) return state;
+  const paneId = paneOf(state, shell);
+  return {
+    ...state,
+    panes: { ...state.panes, [paneId]: { activeId: shellId } },
+    activePaneId: paneId,
+  };
+}
+
+export function setFocusedPane(state: WsTabState, paneId: PaneId): WsTabState {
+  if (state.activePaneId === paneId || !leaves(state.layout).includes(paneId)) return state;
+  return { ...state, activePaneId: paneId };
+}
+
+export const appendShell = (state: WsTabState, shell: ShellTab): WsTabState =>
+  focusShell({ ...state, shells: [...state.shells, shell] }, shell.id);
+
+function dropLeaf(state: WsTabState, paneId: PaneId): WsTabState {
+  const removed = removeLeaf(state.layout, paneId);
+  if (!removed) return state;
+  const panes = { ...state.panes };
+  delete panes[paneId];
+  return {
+    ...state,
+    layout: removed.layout,
+    panes,
+    activePaneId: focusedPaneId(state) === paneId ? removed.heir : state.activePaneId,
+  };
+}
+
+function vacatePane(
+  prev: WsTabState,
+  next: WsTabState,
+  shellId: number,
+  paneId: PaneId,
+): WsTabState {
+  const before = paneShells(prev, paneId);
+  const after = before.filter((s) => s.id !== shellId);
+  if (after.length === 0) return dropLeaf(next, paneId);
+  if (prev.panes[paneId]?.activeId !== shellId) return next;
+  const successor = after[Math.min(before.findIndex((s) => s.id === shellId), after.length - 1)];
+  return { ...next, panes: { ...next.panes, [paneId]: { activeId: successor.id } } };
+}
+
+export function moveShellState(state: WsTabState, shellId: number, toPaneId: PaneId): WsTabState {
+  const shell = state.shells.find((s) => s.id === shellId);
+  if (!shell || !leaves(state.layout).includes(toPaneId)) return state;
+  const fromPaneId = paneOf(state, shell);
+  if (fromPaneId === toPaneId) return state;
+  const moved = {
+    ...state,
+    shells: state.shells.map((s) => (s.id === shellId ? { ...s, paneId: toPaneId } : s)),
+  };
+  return focusShell(vacatePane(state, moved, shellId, fromPaneId), shellId);
+}
+
+export function splitPaneState(
+  state: WsTabState,
+  targetPaneId: PaneId,
+  dir: SplitDir,
+  place: "before" | "after",
+  shellId: number,
+): WsTabState {
+  const shell = state.shells.find((s) => s.id === shellId);
+  if (!shell) return state;
+  if (paneOf(state, shell) === targetPaneId && paneShells(state, targetPaneId).length === 1) {
+    return state;
+  }
+  const newId = newPaneId(state.layout);
+  const layout = splitLeaf(state.layout, targetPaneId, dir, place, newId);
+  return layout === state.layout ? state : moveShellState({ ...state, layout }, shellId, newId);
+}
+
+export function mergePaneState(state: WsTabState, paneId: PaneId): WsTabState {
+  const removed = removeLeaf(state.layout, paneId);
+  if (!removed) return state;
+  const inPane = (s: ShellTab) => paneOf(state, s) === paneId;
+  const merged = state.shells.filter(inPane).map((s) => ({ ...s, paneId: removed.heir }));
+  const shells = [...state.shells.filter((s) => !inPane(s)), ...merged];
+  return dropLeaf({ ...state, shells }, paneId);
+}
+
+export function closePaneState(state: WsTabState, paneId: PaneId): WsTabState {
+  const next = dropLeaf(state, paneId);
+  if (next === state) return state;
+  return { ...next, shells: state.shells.filter((s) => paneOf(state, s) !== paneId) };
 }
 
 export function cycleActiveTab(state: WsTabState, dir: 1 | -1): WsTabState {
-  const { pane, members } = focusedPane(state);
+  const paneId = focusedPaneId(state);
+  const members = paneShells(state, paneId);
   if (members.length < 2) return state;
-  const activeId = pane === "right" ? state.rightActiveId : state.activeId;
-  const from = Math.max(0, members.findIndex((s) => s.id === activeId));
-  return focusShell(state, pane, members[(from + dir + members.length) % members.length].id);
+  const from = Math.max(0, members.findIndex((s) => s.id === state.panes[paneId]?.activeId));
+  return focusShell(state, members[(from + dir + members.length) % members.length].id);
 }
 
 export function selectTabAt(state: WsTabState, index: number): WsTabState {
-  const { pane, members } = focusedPane(state);
-  const target = members[index];
-  return target ? focusShell(state, pane, target.id) : state;
+  const target = paneShells(state, focusedPaneId(state))[index];
+  return target ? focusShell(state, target.id) : state;
 }
 
 export function selectLastTab(state: WsTabState): WsTabState {
-  const { pane, members } = focusedPane(state);
+  const members = paneShells(state, focusedPaneId(state));
   const target = members[members.length - 1];
-  return target ? focusShell(state, pane, target.id) : state;
+  return target ? focusShell(state, target.id) : state;
 }
 
 export function removeShellState(state: WsTabState, shellId: number): WsTabState {
   const shell = state.shells.find((s) => s.id === shellId);
-  if (!shell) return state;
-  const pane = paneOf(shell);
-  const onRight = pane === "right";
-  if (!onRight && state.shells.filter((s) => paneOf(s) === "main").length <= 1) return state;
-
-  const before = state.shells.filter((s) => paneOf(s) === pane);
-  const closedIndex = before.findIndex((s) => s.id === shellId);
-  const after = before.filter((s) => s.id !== shellId);
-  const successor = after[Math.min(closedIndex, after.length - 1)]?.id;
-
-  const remaining = state.shells.filter((s) => s.id !== shellId);
-  if (onRight) {
-    return {
-      ...state,
-      shells: remaining,
-      rightActiveId: state.rightActiveId === shellId ? successor : state.rightActiveId,
-      rightSplit: after.length > 0 ? state.rightSplit : false,
-      activePane: after.length > 0 ? state.activePane : "main",
-    };
-  }
-  return {
-    ...state,
-    shells: remaining,
-    activeId: state.activeId === shellId ? (successor ?? state.activeId) : state.activeId,
-  };
+  if (!shell || isLastTab(state, shellId)) return state;
+  const remaining = { ...state, shells: state.shells.filter((s) => s.id !== shellId) };
+  return vacatePane(state, remaining, shellId, paneOf(state, shell));
 }
 
 export function archiveShellState(
@@ -157,22 +253,18 @@ export function unarchiveShellState(state: WsTabState, shellId: number): WsTabSt
   const archived = state.archived ?? [];
   const entry = archived.find((a) => a.shell.id === shellId);
   if (!entry) return state;
-  const restored: ShellTab = { ...entry.shell, panel: "main" };
-  return {
-    ...state,
-    shells: [...state.shells, restored],
-    archived: archived.filter((a) => a.shell.id !== shellId),
-    activeId: restored.id,
-    activePane: "main",
-  };
+  return appendShell(
+    { ...state, archived: archived.filter((a) => a.shell.id !== shellId) },
+    { ...entry.shell, paneId: focusedPaneId(state) },
+  );
 }
 
 export function clearArchiveOnRefocus(prev: WsTabState, next: WsTabState): WsTabState {
+  const paneIds = new Set([...Object.keys(prev.panes), ...Object.keys(next.panes)]);
   const refocused =
     next.shells.length >= prev.shells.length &&
-    (next.activeId !== prev.activeId ||
-      next.activePane !== prev.activePane ||
-      next.rightActiveId !== prev.rightActiveId);
+    (next.activePaneId !== prev.activePaneId ||
+      [...paneIds].some((id) => prev.panes[id]?.activeId !== next.panes[id]?.activeId));
   return refocused && next.archiveOpen ? { ...next, archiveOpen: false } : next;
 }
 
@@ -192,15 +284,73 @@ function normalizePersistedShell(shell: ShellTab): ShellTab {
   };
 }
 
+type LegacyShell = ShellTab & { panel?: "main" | "right" };
+type LegacyWs = Partial<WsTabState> & {
+  shells: LegacyShell[];
+  activeId?: number;
+  rightSplit?: boolean;
+  rightActiveId?: number;
+  activePane?: "main" | "right";
+};
+
+function migrateWorkstream(ws: LegacyWs): void {
+  const shells: LegacyShell[] = (ws.shells ?? [])
+    .filter((shell) => !!shell)
+    .map(normalizePersistedShell);
+  const archived = (ws.archived ?? [])
+    .filter((entry) => !!entry?.shell)
+    .map((entry) => ({ ...entry, shell: normalizePersistedShell(entry.shell) }));
+  ws.shells = shells;
+  ws.archived = archived;
+
+  if (!ws.layout) {
+    const rightShells = shells.filter((s) => s.panel === "right");
+    const split = ws.rightSplit === true && rightShells.length > 0;
+    ws.layout = split
+      ? { type: "split", dir: "row", ratio: 0.5, a: leaf("p1"), b: leaf("p2") }
+      : leaf("p1");
+    ws.panes = {
+      p1: { activeId: ws.activeId ?? 0 },
+      ...(split ? { p2: { activeId: ws.rightActiveId ?? rightShells[0].id } } : {}),
+    };
+    ws.activePaneId = split && ws.activePane === "right" ? "p2" : "p1";
+    for (const s of shells) s.paneId = split && s.panel === "right" ? "p2" : "p1";
+  }
+
+  ws.panes ??= {};
+  const ids = leaves(ws.layout);
+  for (const s of shells) if (!ids.includes(s.paneId)) s.paneId = ids[0];
+  for (const paneId of ids) {
+    if (shells.some((s) => s.paneId === paneId)) continue;
+    const removed = removeLeaf(ws.layout, paneId);
+    if (!removed) break;
+    ws.layout = removed.layout;
+    delete ws.panes[paneId];
+  }
+  const kept = leaves(ws.layout);
+  for (const paneId of kept) {
+    const members = shells.filter((s) => s.paneId === paneId);
+    const active = ws.panes[paneId]?.activeId;
+    if (members.length > 0 && !members.some((s) => s.id === active)) {
+      ws.panes[paneId] = { activeId: members[0].id };
+    }
+  }
+  for (const a of archived) if (!kept.includes(a.shell.paneId)) a.shell.paneId = kept[0];
+  if (!ws.activePaneId || !kept.includes(ws.activePaneId)) ws.activePaneId = kept[0];
+
+  delete ws.activeId;
+  delete ws.rightSplit;
+  delete ws.rightActiveId;
+  delete ws.activePane;
+  for (const s of shells) delete s.panel;
+  for (const a of archived) delete (a.shell as LegacyShell).panel;
+}
+
 export function migratePersistedWorkstreamTabs(persisted: unknown): TabsStore {
   const state = persisted as TabsStore | undefined;
   if (!state?.byWs) return { byWs: {} };
   for (const ws of Object.values(state.byWs)) {
-    if (!ws) continue;
-    ws.shells = (ws.shells ?? []).filter((shell) => !!shell).map(normalizePersistedShell);
-    ws.archived = (ws.archived ?? [])
-      .filter((entry) => !!entry?.shell)
-      .map((entry) => ({ ...entry, shell: normalizePersistedShell(entry.shell) }));
+    if (ws) migrateWorkstream(ws);
   }
   return state;
 }
@@ -209,7 +359,7 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
     name: scopedKey("hyprlayer:workstream-tabs"),
     storage: debouncedJSONStorage(),
-    version: 6,
+    version: 7,
     migrate: migratePersistedWorkstreamTabs,
   }),
 );
@@ -241,49 +391,31 @@ export function bindSessionToShell(
 ): void {
   updateWorkstreamTabs((all) => {
     const current = all[workstreamId] ?? defaultTabState();
-    const shell = current.shells.find((s) => s.id === shellId);
-    if (!shell) return all;
-    const inRightPane = shell.panel === "right";
-    return {
-      ...all,
-      [workstreamId]: {
-        ...current,
-        shells: current.shells.map((s) => (s.id === shellId ? { ...s, sessionId } : s)),
-        activeId: inRightPane ? current.activeId : shellId,
-        rightActiveId: inRightPane ? shellId : current.rightActiveId,
-        rightSplit: inRightPane ? true : current.rightSplit,
-        activePane: inRightPane ? "right" : "main",
-        archiveOpen: false,
-      },
+    if (!current.shells.some((s) => s.id === shellId)) return all;
+    const bound = {
+      ...current,
+      shells: current.shells.map((s) => (s.id === shellId ? { ...s, sessionId } : s)),
     };
+    return { ...all, [workstreamId]: { ...focusShell(bound, shellId), archiveOpen: false } };
   });
 }
 
 export function openPromptTab(workstreamId: string, sessionId: string, title: string): void {
   updateWorkstreamTabs((all) => {
     const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };
-    const nextId = nextShellId(current.shells, current.archived);
     return {
       ...all,
-      [workstreamId]: {
-        ...current,
-        shells: [
-          ...current.shells,
-          {
-            id: nextId,
-            title,
-            mode: "general",
-            draft: "",
-            docs: [],
-            attachments: [],
-            sessionId,
-            panel: "main",
-            titleLocked: true,
-          },
-        ],
-        activeId: nextId,
-        activePane: "main",
-      },
+      [workstreamId]: appendShell(current, {
+        id: nextShellId(current.shells, current.archived),
+        title,
+        mode: "general",
+        draft: "",
+        docs: [],
+        attachments: [],
+        sessionId,
+        paneId: focusedPaneId(current),
+        titleLocked: true,
+      }),
     };
   });
 }
@@ -292,40 +424,20 @@ export function openDocPreviewTab(workstreamId: string, path: string, title: str
   updateWorkstreamTabs((all) => {
     const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };
     const existing = current.shells.find((s) => s.docPreviewPath === path);
-    if (existing) {
-      const inRightPane = existing.panel === "right";
-      return {
-        ...all,
-        [workstreamId]: {
-          ...current,
-          ...(inRightPane
-            ? { rightActiveId: existing.id, rightSplit: true }
-            : { activeId: existing.id }),
-          activePane: inRightPane ? "right" : "main",
-        },
-      };
-    }
-    const nextId = nextShellId(current.shells, current.archived);
     return {
       ...all,
-      [workstreamId]: {
-        ...current,
-        shells: [
-          ...current.shells,
-          {
-            id: nextId,
+      [workstreamId]: existing
+        ? focusShell(current, existing.id)
+        : appendShell(current, {
+            id: nextShellId(current.shells, current.archived),
             title,
             mode: "general",
             draft: "",
             docs: [],
             attachments: [],
             docPreviewPath: path,
-            panel: "main",
-          },
-        ],
-        activeId: nextId,
-        activePane: "main",
-      },
+            paneId: focusedPaneId(current),
+          }),
     };
   });
 }
@@ -386,43 +498,27 @@ function openDedicatedTab(
     const current = all[workstreamId] ?? defaultTabState();
     const existing = current.shells.find((s) => s.mode === mode);
     if (existing) {
-      const inRightPane = existing.panel === "right";
-      return {
-        ...all,
-        [workstreamId]: {
-          ...current,
-          shells: current.shells.map((s) =>
-            s.id === existing.id ? { ...s, sessionId, ...seed } : s,
-          ),
-          activeId: inRightPane ? current.activeId : existing.id,
-          rightActiveId: inRightPane ? existing.id : current.rightActiveId,
-          rightSplit: inRightPane ? true : current.rightSplit,
-          activePane: inRightPane ? "right" : "main",
-        },
+      const reseeded = {
+        ...current,
+        shells: current.shells.map((s) =>
+          s.id === existing.id ? { ...s, sessionId, ...seed } : s,
+        ),
       };
+      return { ...all, [workstreamId]: focusShell(reseeded, existing.id) };
     }
-    const nextId = nextShellId(current.shells, current.archived);
     return {
       ...all,
-      [workstreamId]: {
-        ...current,
-        shells: [
-          ...current.shells,
-          {
-            id: nextId,
-            title,
-            mode,
-            draft: "",
-            docs: [],
-            attachments: [],
-            sessionId,
-            panel: "main",
-            ...seed,
-          },
-        ],
-        activeId: nextId,
-        activePane: "main",
-      },
+      [workstreamId]: appendShell(current, {
+        id: nextShellId(current.shells, current.archived),
+        title,
+        mode,
+        draft: "",
+        docs: [],
+        attachments: [],
+        sessionId,
+        paneId: focusedPaneId(current),
+        ...seed,
+      }),
     };
   });
 }

@@ -25,8 +25,14 @@ export function drawerWidth(preferred: number, available: number): number {
   return Math.min(preferred, Math.max(0, available - DRAWER_PEEK));
 }
 
-export function splitPaneFloor(rowWidth: number): number {
-  return Math.min(SPLIT_PANE_MIN, Math.floor((rowWidth - SPLIT_HANDLE_WIDTH) / 2));
+export function splitPaneFloor(size: number, minA = SPLIT_PANE_MIN, minB = SPLIT_PANE_MIN): number {
+  return Math.min(minA, Math.floor(((size - SPLIT_HANDLE_WIDTH) * minA) / (minA + minB)));
+}
+
+export const SPLIT_PANE_HARD_MIN = 160;
+
+export function canSplitExtent(extent: number): boolean {
+  return Math.floor((extent - SPLIT_HANDLE_WIDTH) / 2) >= SPLIT_PANE_HARD_MIN;
 }
 
 export const TREE_INDENT_STEP = 14;

@@ -80,15 +80,27 @@ import {
 import { isGitProject } from "@/lib/domain/projects";
 import { nextModeStage, stageLabel, type StageKey } from "@/lib/domain/stages";
 import {
+  activeShellIn,
+  appendShell,
   archiveShellState,
   clearArchiveOnRefocus,
+  closePaneState,
   cycleActiveTab,
   defaultTabState,
+  focusedPaneId,
+  focusShell,
+  isLastTab,
+  mergePaneState,
+  moveShellState,
   nextShellId,
+  paneOf,
+  paneShells,
   removeShellState,
   requestComposerFocus,
   selectLastTab,
   selectTabAt,
+  setFocusedPane,
+  splitPaneState,
   unarchiveShellState,
   updateWorkstreamTabs,
   useWorkstreamTabsStore,
@@ -96,6 +108,22 @@ import {
   type ShellTab,
   type WsTabState,
 } from "@/features/session/workstreamTabs";
+import {
+  leaves,
+  minExtent,
+  neighborPane,
+  nodeAt,
+  paneRects,
+  setRatio,
+  splitRects,
+  type Direction,
+  type Edge,
+  type PaneId,
+  type Rect,
+  type SplitDir,
+  type SplitNode,
+  type SplitPath,
+} from "@/features/session/paneTree";
 import { WorkstreamDocsPanel } from "@/features/workstreams/WorkstreamDocsPanel";
 import { chipLabel } from "@/features/workstreams/WorkstreamDocChips";
 import { ProjectBoard } from "@/features/board/ProjectBoard";
@@ -103,7 +131,7 @@ import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import { useBootstrap, useDetachPr, useSetWorkstreamStage, useWorkstreams } from "@/lib/queries";
 import { basename } from "@/lib/path";
 import { shortSha } from "@/lib/format";
-import { drawerWidth, splitPaneFloor } from "@/lib/layout";
+import { canSplitExtent, drawerWidth, splitPaneFloor } from "@/lib/layout";
 import { clamp, startEdgeDrag } from "@/lib/resize";
 import { useElementWidth } from "@/lib/useElementWidth";
 import { useViewport } from "@/lib/useViewport";
@@ -136,6 +164,27 @@ function isAgentShell(shell: ShellTab): boolean {
 }
 
 const AGENT_BUSY_HINT = "Agent is still working. Stop it first.";
+
+const FULL_RECT: Rect = { x: 0, y: 0, w: 1, h: 1 };
+
+const pct = (fraction: number) => `${fraction * 100}%`;
+
+// Panes render in creation order, not tree order, so a split never moves an existing pane's DOM node.
+const byPaneIdSuffix = (a: PaneId, b: PaneId) => Number(a.slice(1)) - Number(b.slice(1));
+
+const EDGE_SPLIT: Record<Edge, { dir: SplitDir; place: "before" | "after" }> = {
+  left: { dir: "row", place: "before" },
+  right: { dir: "row", place: "after" },
+  top: { dir: "col", place: "before" },
+  bottom: { dir: "col", place: "after" },
+};
+
+const EDGE_OVERLAY_CLASS: Record<Edge, string> = {
+  left: "inset-y-0 left-0 w-1/2",
+  right: "inset-y-0 right-0 w-1/2",
+  top: "inset-x-0 top-0 h-1/2",
+  bottom: "inset-x-0 bottom-0 h-1/2",
+};
 
 function classifyArchivedStatus(state: SessionState | undefined): ArchivedStatus {
   if (!state) return "idle";
@@ -208,6 +257,9 @@ function ProjectCommands(props: {
   onSelectTab: (index: number) => void;
   onSelectLastTab: () => void;
   onToggleSplit: () => void;
+  onSplitDown: () => void;
+  onClosePane: (() => void) | null;
+  onFocusPane: ((dir: Direction) => void) | null;
   onNextTab: () => void;
   onPrevTab: () => void;
   onNewWorkstream: () => void;
@@ -224,6 +276,13 @@ function ProjectCommands(props: {
   useCommand("tab.reopen", props.onReopenTab);
   useCommand("tab.selectLast", props.onSelectLastTab);
   useCommand("tab.toggleSplit", props.onToggleSplit);
+  useCommand("pane.splitDown", props.onSplitDown);
+  useCommand("pane.close", props.onClosePane);
+  const focusPane = props.onFocusPane;
+  useCommand("pane.focusLeft", focusPane ? () => focusPane("left") : null);
+  useCommand("pane.focusRight", focusPane ? () => focusPane("right") : null);
+  useCommand("pane.focusUp", focusPane ? () => focusPane("up") : null);
+  useCommand("pane.focusDown", focusPane ? () => focusPane("down") : null);
   useCommand("tab.next", props.onNextTab);
   useCommand("tab.prev", props.onPrevTab);
   useCommand("ws.new", props.onNewWorkstream);
@@ -263,8 +322,11 @@ export function ProjectPage() {
   const [newAgentMenu, setNewAgentMenu] = useState<{
     x: number;
     y: number;
-    pane: "main" | "right";
+    pane: PaneId;
   } | null>(null);
+  const [splitMenu, setSplitMenu] = useState<{ x: number; y: number; paneId: PaneId } | null>(
+    null,
+  );
   const [createOpen, setCreateOpen] = useState(false);
   const [cardMenu, setCardMenu] = useState<{ x: number; y: number; view: WorkstreamView } | null>(
     null,
@@ -280,13 +342,20 @@ export function ProjectPage() {
   const diffHidden = useUiStore((state) => state.diffHidden);
   const diffWidth = useUiStore((state) => state.diffWidth);
   const setDiffWidth = useUiStore((state) => state.setDiffWidth);
-  const [rightRatio, setRightRatio] = useState(0.5);
-  const [maximized, setMaximized] = useState<{ wsId: string; pane: "main" | "right" } | null>(
-    null,
-  );
+  const [maximized, setMaximized] = useState<{ wsId: string; paneId: PaneId } | null>(null);
+  const [dragRatio, setDragRatio] = useState<{
+    path: SplitPath;
+    node: SplitNode;
+    ratio: number;
+  } | null>(null);
   const splitRowRef = useRef<HTMLDivElement>(null);
-  const dragHandlersRef = useRef<TabDragHandlers>({ reorder: () => {}, move: () => {} });
-  const { drag, dropPane, suppressClickRef, startDrag } = useTabDrag(dragHandlersRef);
+  const dragHandlersRef = useRef<TabDragHandlers>({
+    reorder: () => {},
+    move: () => {},
+    split: () => {},
+    canEdgeSplit: () => false,
+  });
+  const { drag, dropTarget, suppressClickRef, startDrag } = useTabDrag(dragHandlersRef);
 
   useEffect(() => {
     if (search.create) {
@@ -361,15 +430,17 @@ export function ProjectPage() {
   useEffect(() => {
     if (!wsId) return;
     const tabs = tabsByWs[wsId] ?? defaultTabState();
-    const pane = tabs.activePane ?? "main";
-    const inPane = (s: ShellTab) =>
-      pane === "right" ? s.panel === "right" : (s.panel ?? "main") !== "right";
-    const members = tabs.shells.filter(inPane);
-    const activeId = pane === "right" ? tabs.rightActiveId : tabs.activeId;
-    const focused = members.find((s) => s.id === activeId) ?? members[0] ?? null;
+    const focused = activeShellIn(tabs, focusedPaneId(tabs));
     if (focused && isAgentShell(focused)) requestComposerFocus(focused.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId]);
+
+  useEffect(() => {
+    if (!wsId || !maximized || maximized.wsId !== wsId) return;
+    const tabs = tabsByWs[wsId] ?? defaultTabState();
+    if (focusedPaneId(tabs) !== maximized.paneId) setMaximized(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsId, wsId ? tabsByWs[wsId]?.activePaneId : undefined]);
 
   const updateTabs = useCallback(
     (updater: (current: WsTabState) => WsTabState) => {
@@ -385,24 +456,17 @@ export function ProjectPage() {
     (match: (shell: ShellTab) => boolean, title: string, fields: Partial<ShellTab>) => {
       updateTabs((current) => {
         const existing = current.shells.find(match);
-        if (existing) return { ...current, activeId: existing.id, activePane: "main" };
-        const nextId = nextShellId(current.shells, current.archived);
-        const shell: ShellTab = {
-          id: nextId,
+        if (existing) return focusShell(current, existing.id);
+        return appendShell(current, {
+          id: nextShellId(current.shells, current.archived),
           title,
           mode: "general",
           draft: "",
           docs: [],
           attachments: [],
-          panel: "main",
+          paneId: focusedPaneId(current),
           ...fields,
-        };
-        return {
-          ...current,
-          shells: [...current.shells, shell],
-          activeId: nextId,
-          activePane: "main",
-        };
+        });
       });
     },
     [updateTabs],
@@ -447,22 +511,20 @@ export function ProjectPage() {
 
   const tabs = wsId ? (tabsByWs[wsId] ?? defaultTabState()) : null;
   const shells = tabs?.shells ?? [];
-  const isMainShell = (s: ShellTab) => (s.panel ?? "main") !== "right";
-  const isRightShell = (s: ShellTab) => s.panel === "right";
-  const mainShells = shells.filter(isMainShell);
-  const rightShells = shells.filter(isRightShell);
-  const rightSplit = (tabs?.rightSplit ?? false) && rightShells.length > 0;
-  const activePane: "main" | "right" = tabs?.activePane ?? "main";
-  const maxPane = maximized && maximized.wsId === wsId ? maximized.pane : null;
-  const maxMain = maxPane === "main" && rightSplit;
-  const maxRight = maxPane === "right" && rightSplit;
-  const maximizedView = maxMain || maxRight;
-  const activeShell = tabs
-    ? (mainShells.find((s) => s.id === tabs.activeId) ?? mainShells[0] ?? null)
-    : null;
-  const rightActiveShell =
-    rightShells.find((s) => s.id === tabs?.rightActiveId) ?? rightShells[0] ?? null;
-  const focusedShell = activePane === "right" ? rightActiveShell : activeShell;
+  const paneIds = tabs ? leaves(tabs.layout) : [];
+  const focusedShell = tabs ? activeShellIn(tabs, focusedPaneId(tabs)) : null;
+  const zoomedPaneId =
+    maximized && maximized.wsId === wsId && paneIds.length > 1 && paneIds.includes(maximized.paneId)
+      ? maximized.paneId
+      : null;
+  const layout =
+    tabs && dragRatio && nodeAt(tabs.layout, dragRatio.path) === dragRatio.node
+      ? setRatio(tabs.layout, dragRatio.path, dragRatio.ratio)
+      : tabs?.layout;
+  const rects: Record<PaneId, Rect> = layout
+    ? Object.fromEntries(paneRects(layout, 1, 1).map((p) => [p.paneId, p.rect]))
+    : {};
+  const splits = layout ? splitRects(layout, 1, 1) : [];
   const docsModalShell =
     docsModalShellId !== null ? (shells.find((s) => s.id === docsModalShellId) ?? null) : null;
   const contextShell = shellMenu ? shells.find((s) => s.id === shellMenu.shellId) : null;
@@ -474,14 +536,14 @@ export function ProjectPage() {
   const toggleArchived = wsId
     ? () => updateTabs((c) => ({ ...c, archiveOpen: !c.archiveOpen }))
     : null;
-  const contextIsLastMain = !!contextShell && isMainShell(contextShell) && mainShells.length === 1;
+  const contextIsLast = !!tabs && !!contextShell && isLastTab(tabs, contextShell.id);
   const contextEntry = contextShell?.sessionId
     ? useSessionStore.getState().sessions[contextShell.sessionId]
     : undefined;
   const archiveBlockedReason =
     contextEntry && isBusy(contextEntry)
       ? AGENT_BUSY_HINT
-      : contextIsLastMain
+      : contextIsLast
         ? "Keep at least one agent in the strip."
         : null;
   const shellBeingRenamed = renameShellId
@@ -535,135 +597,124 @@ export function ProjectPage() {
         ? { ...s, ptyAgent: { ...s.ptyAgent, sessionId } }
         : s,
     );
-  const selectShell = (shellId: number) => {
-    updateTabs((current) => ({ ...current, activeId: shellId, activePane: "main" }));
-  };
-  const selectRightShell = (shellId: number) => {
-    updateTabs((current) => ({ ...current, rightActiveId: shellId, activePane: "right" }));
-  };
-  const setActivePane = (pane: "main" | "right") => {
-    updateTabs((current) => (current.activePane === pane ? current : { ...current, activePane: pane }));
-  };
+  const selectShell = (shellId: number) => updateTabs((current) => focusShell(current, shellId));
   const cycleTab = (dir: 1 | -1) => updateTabs((current) => cycleActiveTab(current, dir));
-  const makeShell = (id: number, panel: "main" | "right", ptyEngineId?: string): ShellTab => ({
+  const makeShell = (id: number, paneId: PaneId, ptyEngineId?: string): ShellTab => ({
     id,
     title: `Agent ${id}`,
     mode: "general",
     draft: "",
     docs: [],
     attachments: [],
-    panel,
+    paneId,
     ...(ptyEngineId
       ? {
           ptyAgent: { engineId: ptyEngineId, sessionId: mintPtySessionId(ptyEngineId), started: false },
         }
       : {}),
   });
-  const spawnRightShell = (current: WsTabState, ptyEngineId?: string): WsTabState => {
-    const id = nextShellId(current.shells, current.archived);
-    return {
-      ...current,
-      shells: [...current.shells, makeShell(id, "right", ptyEngineId)],
-      rightActiveId: id,
-      rightSplit: true,
-      activePane: "right",
-    };
+  const addShellToPane = (paneId: PaneId, ptyEngineId?: string) => {
+    updateTabs((current) => {
+      const id = nextShellId(current.shells, current.archived);
+      const target = leaves(current.layout).includes(paneId) ? paneId : focusedPaneId(current);
+      return appendShell(current, makeShell(id, target, ptyEngineId));
+    });
   };
   const addShell = (ptyEngineId?: string) => {
     updateTabs((current) => {
       const id = nextShellId(current.shells, current.archived);
-      return {
-        ...current,
-        shells: [...current.shells, makeShell(id, "main", ptyEngineId)],
-        activeId: id,
-        activePane: "main",
-      };
+      return appendShell(current, makeShell(id, focusedPaneId(current), ptyEngineId));
     });
   };
-  const addRightShell = (ptyEngineId?: string) => updateTabs((c) => spawnRightShell(c, ptyEngineId));
   const onNewTabDefault = () => {
     if (!multiplexer.enabled) return addShell();
     addShell(defaultEngine(multiplexer)?.id);
   };
-  const openNewAgentMenu = (e: ReactMouseEvent, pane: "main" | "right") => {
+  const openNewAgentMenu = (e: ReactMouseEvent, pane: PaneId) => {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
     setNewAgentMenu({ x: r.left, y: r.bottom + 4, pane });
   };
-  const onPlus = (e: ReactMouseEvent, pane: "main" | "right") => {
-    if (!multiplexer.enabled) return pane === "main" ? addShell() : addRightShell();
-    openNewAgentMenu(e, pane);
+  const openSplitMenu = (e: ReactMouseEvent, paneId: PaneId) => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    setSplitMenu({ x: r.left, y: r.bottom + 4, paneId });
+  };
+  const onPlus = (e: ReactMouseEvent, paneId: PaneId) => {
+    if (!multiplexer.enabled) return addShellToPane(paneId);
+    openNewAgentMenu(e, paneId);
   };
   const ptyEngineFor = (engineId: string): ResolvedEngine => engineOrFallback(multiplexer, engineId);
   const isLivePty = (shell: ShellTab): boolean => multiplexer.enabled && !!shell.ptyAgent;
-  const toggleRightSplit = () => {
-    setMaximized(null);
-    updateTabs((current) => {
-      if (current.rightSplit) return { ...current, rightSplit: false, activePane: "main" };
-      if (current.shells.some(isRightShell)) {
-        return { ...current, rightSplit: true, activePane: "right" };
-      }
-      return spawnRightShell(current);
-    });
+  const canSplit = (paneId: PaneId, dir: SplitDir): boolean => {
+    const box = splitRowRef.current?.getBoundingClientRect();
+    const rect = rects[paneId];
+    if (!box || !rect) return false;
+    return canSplitExtent(dir === "row" ? rect.w * box.width : rect.h * box.height);
   };
-  const closeRightSplit = () => {
+  const canEdgeSplit = (id: number, paneId: PaneId, edge: Edge): boolean => {
+    if (!tabs) return false;
+    const shell = tabs.shells.find((s) => s.id === id);
+    if (shell && paneOf(tabs, shell) === paneId && paneShells(tabs, paneId).length === 1) {
+      return false;
+    }
+    return canSplit(paneId, EDGE_SPLIT[edge].dir);
+  };
+  const splitAtEdge = (id: number, paneId: PaneId, edge: Edge) => {
+    const { dir, place } = EDGE_SPLIT[edge];
+    updateTabs((current) => splitPaneState(current, paneId, dir, place, id));
     setMaximized(null);
-    for (const s of rightShells) {
+  };
+  const splitPane = (paneId: PaneId, dir: SplitDir) => {
+    if (!canSplit(paneId, dir)) return;
+    updateTabs((current) => {
+      const id = nextShellId(current.shells, current.archived);
+      const withShell = { ...current, shells: [...current.shells, makeShell(id, paneId)] };
+      return splitPaneState(withShell, paneId, dir, "after", id);
+    });
+    setMaximized(null);
+  };
+  const splitFocused = (dir: SplitDir) => {
+    if (tabs) splitPane(focusedPaneId(tabs), dir);
+  };
+  const focusPane = (dir: Direction) => {
+    if (!tabs) return;
+    const target = neighborPane(tabs.layout, focusedPaneId(tabs), dir);
+    if (!target) return;
+    updateTabs((current) => setFocusedPane(current, target));
+    const shell = activeShellIn(tabs, target);
+    if (shell && isAgentShell(shell)) {
+      requestComposerFocus(shell.id);
+      return;
+    }
+    const inPane = `[data-pane="${target}"] [data-pane-content] `;
+    const focusable = document.querySelector<HTMLElement>(
+      `${inPane}textarea, ${inPane}[contenteditable="true"]`,
+    );
+    if (focusable) focusable.focus();
+    else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  };
+  const mergePane = (paneId: PaneId) => {
+    updateTabs((current) => mergePaneState(current, paneId));
+    setMaximized(null);
+  };
+  const closePane = (paneId: PaneId) => {
+    if (!tabs || paneIds.length < 2) return;
+    setMaximized(null);
+    const closing = paneShells(tabs, paneId);
+    for (const s of closing) {
       if (s.sessionId) void killSession(s.sessionId);
       if (s.terminalView?.terminalId) void commands.terminalClose(s.terminalView.terminalId);
       if (s.ptyAgent && wsId) closeAgent(wsId, s.id);
     }
-    updateTabs((current) => ({
-      ...current,
-      shells: current.shells.filter(isMainShell),
-      rightSplit: false,
-      rightActiveId: undefined,
-      activePane: "main",
-    }));
-    for (const s of rightShells) if (s.sessionId) dropSession(s.sessionId);
+    updateTabs((current) => closePaneState(current, paneId));
+    for (const s of closing) if (s.sessionId) dropSession(s.sessionId);
   };
-  const moveShellToPane = (shellId: number, toPane: "main" | "right") => {
+  const moveShellToPane = (shellId: number, toPaneId: PaneId) =>
+    updateTabs((current) => moveShellState(current, shellId, toPaneId));
+  const reorderShellInPane = (shellId: number, paneId: PaneId, toIndex: number) => {
     updateTabs((current) => {
-      const shell = current.shells.find((s) => s.id === shellId);
-      if (!shell || (shell.panel ?? "main") === toPane) return current;
-      if (toPane === "right") {
-        const mains = current.shells.filter(isMainShell);
-        if (mains.length <= 1) return current;
-        return {
-          ...current,
-          shells: current.shells.map((s) =>
-            s.id === shellId ? { ...s, panel: "right" as const } : s,
-          ),
-          activeId:
-            current.activeId === shellId
-              ? (mains.find((m) => m.id !== shellId)?.id ?? current.activeId)
-              : current.activeId,
-          rightSplit: true,
-          rightActiveId: shellId,
-          activePane: "right",
-        };
-      }
-      const shellsNext = current.shells.map((s) =>
-        s.id === shellId ? { ...s, panel: "main" as const } : s,
-      );
-      const stillRight = shellsNext.some(isRightShell);
-      return {
-        ...current,
-        shells: shellsNext,
-        activeId: shellId,
-        activePane: "main",
-        rightSplit: stillRight ? current.rightSplit : false,
-        rightActiveId:
-          current.rightActiveId === shellId
-            ? shellsNext.find(isRightShell)?.id
-            : current.rightActiveId,
-      };
-    });
-  };
-  const reorderShellInPane = (shellId: number, pane: "main" | "right", toIndex: number) => {
-    updateTabs((current) => {
-      const inPane = (s: ShellTab) =>
-        pane === "right" ? s.panel === "right" : (s.panel ?? "main") !== "right";
+      const inPane = (s: ShellTab) => paneOf(current, s) === paneId;
       const members = current.shells.filter(inPane);
       const from = members.findIndex((s) => s.id === shellId);
       if (from < 0) return current;
@@ -675,12 +726,17 @@ export function ProjectPage() {
       return { ...current, shells: current.shells.map((s) => (inPane(s) ? reordered[i++] : s)) };
     });
   };
-  dragHandlersRef.current = { reorder: reorderShellInPane, move: moveShellToPane };
+  dragHandlersRef.current = {
+    reorder: reorderShellInPane,
+    move: moveShellToPane,
+    split: splitAtEdge,
+    canEdgeSplit,
+  };
   const closeShell = (shellId: number) => {
     if (!tabs) return;
     const shell = tabs.shells.find((s) => s.id === shellId);
     if (!shell) return;
-    if (isMainShell(shell) && tabs.shells.filter(isMainShell).length === 1) return;
+    if (isLastTab(tabs, shellId)) return;
     if (shell.sessionId) void killSession(shell.sessionId);
     if (shell.terminalView?.terminalId) void commands.terminalClose(shell.terminalView.terminalId);
     if (shell.ptyAgent && wsId) closeAgent(wsId, shellId);
@@ -883,15 +939,37 @@ export function ProjectPage() {
     ].join("\n");
     void navigator.clipboard.writeText(transcript);
   };
-  const startSplitResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const rowW = splitRowRef.current?.clientWidth ?? 800;
-    const floor = splitPaneFloor(rowW);
+  const startSplitResize = (
+    split: { path: SplitPath; node: SplitNode; rect: Rect },
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const box = splitRowRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const row = split.node.dir === "row";
+    const axis: "x" | "y" = row ? "x" : "y";
+    const size = row ? split.rect.w * box.width : split.rect.h * box.height;
+    const floorA = splitPaneFloor(size, minExtent(split.node.a, axis), minExtent(split.node.b, axis));
+    const floorB = splitPaneFloor(size, minExtent(split.node.b, axis), minExtent(split.node.a, axis));
+    const startPx = split.node.ratio * size;
+    let last = split.node.ratio;
     startEdgeDrag(event, {
-      startWidth: rightRatio * rowW,
-      min: floor,
-      max: Math.max(floor, rowW - floor),
-      direction: -1,
-      onResize: (paneWidth) => setRightRatio(clamp(paneWidth / rowW, 0.2, 0.8)),
+      startWidth: startPx,
+      min: Math.min(floorA, startPx),
+      max: Math.max(Math.max(floorA, size - floorB), startPx),
+      direction: 1,
+      axis,
+      onResize: (px) => {
+        last = clamp(px / size, 0.2, 0.8);
+        setDragRatio({ path: split.path, node: split.node, ratio: last });
+      },
+      onEnd: () => {
+        updateTabs((current) =>
+          nodeAt(current.layout, split.path) === split.node
+            ? { ...current, layout: setRatio(current.layout, split.path, last) }
+            : current,
+        );
+        setDragRatio(null);
+      },
     });
   };
   const startDiffResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -909,7 +987,7 @@ export function ProjectPage() {
     opts: {
       active: boolean;
       paneFocused: boolean;
-      pane: "main" | "right";
+      pane: PaneId;
       onSelect: () => void;
       closable: boolean;
     },
@@ -940,7 +1018,7 @@ export function ProjectPage() {
           : "text-ink-dim hover:bg-panel-2 hover:text-ink"
       }`}
     >
-      <span className="flex min-w-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium">
+      <span className="flex min-w-0 items-center gap-1.5 px-3 py-1 text-sm font-medium">
         {shell.diffView ? (
           <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
             <DiffIcon size={13} />
@@ -985,6 +1063,83 @@ export function ProjectPage() {
       )}
     </div>
   );
+
+  const renderLeafStrip = (paneId: PaneId) => {
+    if (!tabs) return null;
+    const first = paneId === paneIds[0];
+    const multiPane = paneIds.length > 1;
+    const active = activeShellIn(tabs, paneId);
+    const paneFocused = !multiPane || focusedPaneId(tabs) === paneId;
+    return (
+      <div
+        data-glass
+        data-pane={paneId}
+        className={`relative z-10 flex h-8 items-center justify-between gap-3 border-b border-edge ${GLASS_BAND} ${
+          first ? "pl-5 pr-2.5" : "px-3"
+        } ${dropTarget?.paneId === paneId && dropTarget.edge === null ? "bg-accent/10" : ""}`}
+      >
+        <ScrollableTabStrip
+          activeId={active?.id ?? null}
+          trailing={
+            <IconButton
+              onClick={(e) => onPlus(e, paneId)}
+              title="New agent"
+              aria-label="New agent"
+            >
+              <PlusIcon />
+            </IconButton>
+          }
+        >
+          {paneShells(tabs, paneId).map((shell) =>
+            renderTabPill(shell, {
+              active: shell.id === active?.id,
+              paneFocused,
+              pane: paneId,
+              onSelect: () => selectShell(shell.id),
+              closable: !isLastTab(tabs, shell.id),
+            }),
+          )}
+        </ScrollableTabStrip>
+        <div className="flex shrink-0 items-center gap-1">
+          {first && (
+            <button
+              type="button"
+              onClick={() => toggleArchived?.()}
+              title="Archived agents"
+              aria-label="Archived agents"
+              aria-pressed={archiveViewOpen}
+              className={`inline-flex h-8 items-center gap-1 rounded-md px-2 transition-colors hover:bg-panel-2 hover:text-ink ${
+                archiveViewOpen ? "bg-panel-2 text-ink" : "text-ink-dim"
+              }`}
+            >
+              <ArchiveIcon size={15} />
+              {archivedShells.length > 0 && (
+                <span className="font-mono text-[11px] leading-none">
+                  {archivedShells.length}
+                </span>
+              )}
+            </button>
+          )}
+          <IconButton
+            onClick={(e) => openSplitMenu(e, paneId)}
+            title="Split pane"
+            aria-label="Split pane"
+          >
+            <SplitIcon />
+          </IconButton>
+          {multiPane && (
+            <IconButton
+              onClick={() => closePane(paneId)}
+              title="Close pane and end its agents"
+              aria-label="Close pane and end its agents"
+            >
+              <XIcon />
+            </IconButton>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderPaneContent = (shell: ShellTab | null) => {
     if (!activeView || !shell) {
@@ -1120,7 +1275,10 @@ export function ProjectPage() {
         onReopenTab={tabs?.archived?.length ? reopenLastClosedShell : null}
         onSelectTab={(index) => updateTabs((current) => selectTabAt(current, index))}
         onSelectLastTab={() => updateTabs(selectLastTab)}
-        onToggleSplit={toggleRightSplit}
+        onToggleSplit={() => splitFocused("row")}
+        onSplitDown={() => splitFocused("col")}
+        onClosePane={tabs && paneIds.length > 1 ? () => mergePane(focusedPaneId(tabs)) : null}
+        onFocusPane={paneIds.length > 1 && zoomedPaneId === null ? focusPane : null}
         onNextTab={() => cycleTab(1)}
         onPrevTab={() => cycleTab(-1)}
         onNewWorkstream={() => setCreateOpen(true)}
@@ -1143,199 +1301,158 @@ export function ProjectPage() {
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
           <main className="flex min-w-0 flex-1 flex-col">
-            <div
-              data-glass
-              className={`relative z-10 flex h-9 items-stretch border-b border-edge ${GLASS_BAND}`}
-            >
-              <div
-                data-pane="main"
-                className={`flex min-w-0 flex-1 items-center justify-between gap-3 pl-5 pr-2.5 ${
-                  maxRight ? "hidden" : ""
-                } ${dropPane === "main" ? "bg-accent/10" : ""}`}
-              >
-                <ScrollableTabStrip
-                  activeId={activeShell?.id ?? null}
-                  trailing={
-                    activeView ? (
-                      <IconButton
-                        onClick={(e) => onPlus(e, "main")}
-                        title="New agent"
-                        aria-label="New agent"
-                      >
-                        <PlusIcon />
-                      </IconButton>
-                    ) : null
-                  }
-                >
-                  {activeView &&
-                    mainShells.map((shell) =>
-                      renderTabPill(shell, {
-                        active: shell.id === activeShell?.id,
-                        paneFocused: !rightSplit || activePane === "main",
-                        pane: "main",
-                        onSelect: () => selectShell(shell.id),
-                        closable: mainShells.length > 1,
-                      }),
-                    )}
-                </ScrollableTabStrip>
-                {activeView && (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => toggleArchived?.()}
-                      title="Archived agents"
-                      aria-label="Archived agents"
-                      aria-pressed={archiveViewOpen}
-                      className={`inline-flex h-8 items-center gap-1 rounded-md px-2 transition-colors hover:bg-panel-2 hover:text-ink ${
-                        archiveViewOpen ? "bg-panel-2 text-ink" : "text-ink-dim"
-                      }`}
-                    >
-                      <ArchiveIcon size={15} />
-                      {archivedShells.length > 0 && (
-                        <span className="font-mono text-[11px] leading-none">
-                          {archivedShells.length}
-                        </span>
-                      )}
-                    </button>
-                    <IconButton
-                      onClick={toggleRightSplit}
-                      active={rightSplit}
-                      title={rightSplit ? "Close split" : "Split agent right"}
-                      aria-label={rightSplit ? "Close split" : "Split agent right"}
-                    >
-                      <SplitIcon className={rightSplit ? "text-accent" : undefined} />
-                    </IconButton>
-                  </div>
-                )}
-              </div>
-              {activeView && rightSplit && !archiveViewOpen && (
-                <div
-                  data-pane="right"
-                  className={`flex shrink-0 items-center gap-1 border-l border-edge px-3 ${
-                    maxMain ? "hidden" : ""
-                  } ${dropPane === "right" ? "bg-accent/10" : ""}`}
-                  style={{ width: maxRight ? "100%" : `${rightRatio * 100}%` }}
-                >
-                  <ScrollableTabStrip
-                    grow
-                    activeId={rightActiveShell?.id ?? null}
-                    trailing={
-                      <IconButton
-                        onClick={(e) => onPlus(e, "right")}
-                        title="New agent"
-                        aria-label="New agent"
-                      >
-                        <PlusIcon />
-                      </IconButton>
-                    }
-                  >
-                    {rightShells.map((shell) =>
-                      renderTabPill(shell, {
-                        active: shell.id === rightActiveShell?.id,
-                        paneFocused: activePane === "right",
-                        pane: "right",
-                        onSelect: () => selectRightShell(shell.id),
-                        closable: true,
-                      }),
-                    )}
-                  </ScrollableTabStrip>
-                  <IconButton onClick={closeRightSplit} title="Close split" aria-label="Close split">
-                    <XIcon />
-                  </IconButton>
-                </div>
-              )}
-            </div>
-            {shellMenu && contextShell && (
-              <ContextMenu position={shellMenu} onClose={() => setShellMenu(null)}>
-                <ContextMenuItem
-                  onClick={() => {
-                    openRenameShell(contextShell);
-                    setShellMenu(null);
-                  }}
-                >
-                  Rename tab
-                </ContextMenuItem>
-                <ContextMenuItem
-                  onClick={() => {
-                    copyShellTranscript(contextShell);
-                    setShellMenu(null);
-                  }}
-                >
-                  Copy transcript
-                </ContextMenuItem>
-                {contextShell.panel === "right" ? (
-                  <ContextMenuItem
-                    onClick={() => {
-                      moveShellToPane(contextShell.id, "main");
-                      setShellMenu(null);
-                    }}
-                  >
-                    Move to main pane
-                  </ContextMenuItem>
-                ) : (
-                  <ContextMenuItem
-                    disabled={mainShells.length <= 1}
-                    onClick={() => {
-                      moveShellToPane(contextShell.id, "right");
-                      setShellMenu(null);
-                    }}
-                  >
-                    Move to right split
-                  </ContextMenuItem>
-                )}
-                {rightSplit &&
-                  (maxPane === (contextShell.panel ?? "main") ? (
+            {shellMenu &&
+              contextShell &&
+              tabs &&
+              (() => {
+                const pane = paneOf(tabs, contextShell);
+                const onlyTab = paneShells(tabs, pane).length === 1;
+                const canRow = canSplit(pane, "row");
+                const canCol = canSplit(pane, "col");
+                const nextPane = paneIds[(paneIds.indexOf(pane) + 1) % paneIds.length];
+                return (
+                  <ContextMenu position={shellMenu} onClose={() => setShellMenu(null)}>
                     <ContextMenuItem
                       onClick={() => {
-                        setMaximized(null);
+                        openRenameShell(contextShell);
                         setShellMenu(null);
                       }}
                     >
-                      Restore split view
+                      Rename tab
                     </ContextMenuItem>
-                  ) : isTerminalShell(contextShell) ? (
                     <ContextMenuItem
                       onClick={() => {
-                        const pane = contextShell.panel ?? "main";
-                        if (pane === "right") selectRightShell(contextShell.id);
-                        else selectShell(contextShell.id);
-                        if (wsId) setMaximized({ wsId, pane });
+                        copyShellTranscript(contextShell);
                         setShellMenu(null);
                       }}
                     >
-                      Expand to full view
+                      Copy transcript
                     </ContextMenuItem>
-                  ) : null)}
-                {isArchivable(contextShell) && (
-                  <ContextMenuItem
-                    disabled={archiveBlockedReason !== null}
-                    hint={archiveBlockedReason ?? undefined}
-                    onClick={() => {
-                      archiveShell(contextShell.id);
-                      setShellMenu(null);
-                    }}
-                  >
-                    Archive agent
-                  </ContextMenuItem>
-                )}
-                <ContextMenuItem
-                  danger={isArchivable(contextShell)}
-                  disabled={contextIsLastMain}
-                  onClick={() => {
-                    closeShell(contextShell.id);
-                    setShellMenu(null);
-                  }}
-                >
-                  {isArchivable(contextShell) ? "Close agent" : "Close tab"}
-                </ContextMenuItem>
-              </ContextMenu>
-            )}
+                    <ContextMenuItem
+                      disabled={onlyTab || !canRow}
+                      hint={!canRow ? "Not enough room" : undefined}
+                      onClick={() => {
+                        updateTabs((current) =>
+                          splitPaneState(current, paneOf(current, contextShell), "row", "after", contextShell.id),
+                        );
+                        setShellMenu(null);
+                      }}
+                    >
+                      Split right with this tab
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      disabled={onlyTab || !canCol}
+                      hint={!canCol ? "Not enough room" : undefined}
+                      onClick={() => {
+                        updateTabs((current) =>
+                          splitPaneState(current, paneOf(current, contextShell), "col", "after", contextShell.id),
+                        );
+                        setShellMenu(null);
+                      }}
+                    >
+                      Split down with this tab
+                    </ContextMenuItem>
+                    {paneIds.length > 1 && (
+                      <ContextMenuItem
+                        onClick={() => {
+                          moveShellToPane(contextShell.id, nextPane);
+                          setShellMenu(null);
+                        }}
+                      >
+                        Move to next pane
+                      </ContextMenuItem>
+                    )}
+                    {paneIds.length > 1 &&
+                      (zoomedPaneId === pane ? (
+                        <ContextMenuItem
+                          onClick={() => {
+                            setMaximized(null);
+                            setShellMenu(null);
+                          }}
+                        >
+                          Restore split view
+                        </ContextMenuItem>
+                      ) : (
+                        <ContextMenuItem
+                          onClick={() => {
+                            selectShell(contextShell.id);
+                            if (wsId) setMaximized({ wsId, paneId: pane });
+                            setShellMenu(null);
+                          }}
+                        >
+                          Expand pane
+                        </ContextMenuItem>
+                      ))}
+                    {isArchivable(contextShell) && (
+                      <ContextMenuItem
+                        disabled={archiveBlockedReason !== null}
+                        hint={archiveBlockedReason ?? undefined}
+                        onClick={() => {
+                          archiveShell(contextShell.id);
+                          setShellMenu(null);
+                        }}
+                      >
+                        Archive agent
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuItem
+                      danger={isArchivable(contextShell)}
+                      disabled={contextIsLast}
+                      onClick={() => {
+                        closeShell(contextShell.id);
+                        setShellMenu(null);
+                      }}
+                    >
+                      {isArchivable(contextShell) ? "Close agent" : "Close tab"}
+                    </ContextMenuItem>
+                  </ContextMenu>
+                );
+              })()}
+            {splitMenu &&
+              (() => {
+                const menu = splitMenu;
+                const canRow = canSplit(menu.paneId, "row");
+                const canCol = canSplit(menu.paneId, "col");
+                return (
+                  <ContextMenu position={menu} onClose={() => setSplitMenu(null)}>
+                    <ContextMenuItem
+                      disabled={!canRow}
+                      hint={!canRow ? "Not enough room" : undefined}
+                      onClick={() => {
+                        splitPane(menu.paneId, "row");
+                        setSplitMenu(null);
+                      }}
+                    >
+                      Split right
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      disabled={!canCol}
+                      hint={!canCol ? "Not enough room" : undefined}
+                      onClick={() => {
+                        splitPane(menu.paneId, "col");
+                        setSplitMenu(null);
+                      }}
+                    >
+                      Split down
+                    </ContextMenuItem>
+                    <MenuSeparator />
+                    <ContextMenuItem
+                      disabled={paneIds.length === 1}
+                      onClick={() => {
+                        mergePane(menu.paneId);
+                        setSplitMenu(null);
+                      }}
+                    >
+                      Close pane (keep tabs)
+                    </ContextMenuItem>
+                  </ContextMenu>
+                );
+              })()}
             {newAgentMenu &&
               (() => {
                 const menu = newAgentMenu;
                 const def = defaultEngine(multiplexer);
-                const spawn = (engineId?: string) =>
-                  menu.pane === "main" ? addShell(engineId) : addRightShell(engineId);
+                const spawn = (engineId?: string) => addShellToPane(menu.pane, engineId);
                 return (
                   <ContextMenu position={menu} onClose={() => setNewAgentMenu(null)}>
                     <div className="px-2 pb-1 pt-0.5 text-xs text-ink-dim">
@@ -1417,55 +1534,90 @@ export function ProjectPage() {
               onCreated={(view) => selectItem(view.item.id)}
             />
 
-            {activeView ? (
+            {activeView && tabs ? (
               archiveViewOpen ? (
-                <ArchivedAgentsView
-                  workstreamTitle={activeView.item.title}
-                  branch={activeView.item.branch}
-                  archived={archivedShells}
-                  onUnarchive={unarchiveShell}
-                  onRemove={removeArchivedShell}
-                />
+                <>
+                  {renderLeafStrip(paneIds[0])}
+                  <ArchivedAgentsView
+                    workstreamTitle={activeView.item.title}
+                    branch={activeView.item.branch}
+                    archived={archivedShells}
+                    onUnarchive={unarchiveShell}
+                    onRemove={removeArchivedShell}
+                  />
+                </>
               ) : (
-                <div ref={splitRowRef} className="flex min-h-0 flex-1">
-                  <div
-                    data-pane="main"
-                    className={`relative flex min-h-0 min-w-0 flex-col ${
-                      maxRight ? "hidden" : "flex-1"
-                    } ${dropPane === "main" ? "ring-2 ring-inset ring-accent/60" : ""}`}
-                    onPointerDownCapture={() => {
-                      if (rightSplit && activePane !== "main") setActivePane("main");
-                    }}
-                  >
-                    {renderPaneContent(activeShell)}
-                  </div>
-                  {rightSplit && (
-                    <>
+                <div ref={splitRowRef} className="relative min-h-0 flex-1">
+                  {[...paneIds].sort(byPaneIdSuffix).map((paneId) => {
+                    const zoomedAway = zoomedPaneId !== null && zoomedPaneId !== paneId;
+                    const r = zoomedPaneId === paneId ? FULL_RECT : rects[paneId];
+                    return (
                       <div
-                        role="separator"
-                        aria-orientation="vertical"
-                        aria-label="Resize agent split"
-                        className={`relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60 ${
-                          maximizedView ? "hidden" : ""
-                        }`}
-                        onPointerDown={startSplitResize}
-                      />
-                      <div
-                        data-pane="right"
-                        className={`relative flex min-h-0 flex-col border-l border-edge ${
-                          maxMain ? "hidden" : ""
-                        } ${maxRight ? "flex-1" : ""} ${
-                          dropPane === "right" ? "ring-2 ring-inset ring-accent/60" : ""
-                        }`}
-                        style={maxRight ? undefined : { width: `${rightRatio * 100}%` }}
+                        key={paneId}
+                        data-pane={paneId}
+                        className={`absolute flex min-h-0 min-w-0 flex-col overflow-hidden ${zoomedAway ? "hidden" : ""} ${
+                          r.x > 1e-6 ? "border-l border-edge" : ""
+                        } ${r.y > 1e-6 ? "border-t border-edge" : ""}`}
+                        style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
                         onPointerDownCapture={() => {
-                          if (activePane !== "right") setActivePane("right");
+                          if (paneIds.length > 1 && focusedPaneId(tabs) !== paneId) {
+                            updateTabs((current) => setFocusedPane(current, paneId));
+                          }
                         }}
                       >
-                        {renderPaneContent(rightActiveShell)}
+                        {renderLeafStrip(paneId)}
+                        <div
+                          data-pane-content
+                          className={`relative flex min-h-0 flex-1 flex-col ${
+                            dropTarget?.paneId === paneId && dropTarget.edge === null
+                              ? "ring-2 ring-inset ring-accent/60"
+                              : ""
+                          }`}
+                        >
+                          {renderPaneContent(activeShellIn(tabs, paneId))}
+                          {dropTarget?.paneId === paneId && dropTarget.edge && (
+                            <div
+                              className={`pointer-events-none absolute bg-accent/15 ring-2 ring-inset ring-accent/60 ${
+                                EDGE_OVERLAY_CLASS[dropTarget.edge]
+                              }`}
+                            />
+                          )}
+                        </div>
                       </div>
-                    </>
-                  )}
+                    );
+                  })}
+                  {zoomedPaneId === null &&
+                    splits.map((split) => {
+                      const { rect, node } = split;
+                      const row = node.dir === "row";
+                      return (
+                        <div
+                          key={split.path.join("") || "root"}
+                          role="separator"
+                          aria-orientation={row ? "vertical" : "horizontal"}
+                          aria-label="Resize agent split"
+                          className={`absolute z-10 bg-transparent transition-colors hover:bg-edge/60 ${
+                            row
+                              ? "w-2 -translate-x-1/2 cursor-col-resize"
+                              : "h-2 -translate-y-1/2 cursor-row-resize"
+                          }`}
+                          style={
+                            row
+                              ? {
+                                  left: pct(rect.x + rect.w * node.ratio),
+                                  top: pct(rect.y),
+                                  height: pct(rect.h),
+                                }
+                              : {
+                                  left: pct(rect.x),
+                                  top: pct(rect.y + rect.h * node.ratio),
+                                  width: pct(rect.w),
+                                }
+                          }
+                          onPointerDown={(e) => startSplitResize(split, e)}
+                        />
+                      );
+                    })}
                 </div>
               )
             ) : (

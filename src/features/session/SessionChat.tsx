@@ -58,7 +58,7 @@ import {
 } from "@/features/prompts/prompts";
 import { resolveCustomPrompt, runCustomPrompt } from "@/features/prompts/runPrompt";
 import { AttachmentCards } from "./AttachmentCard";
-import { fitComposerHeight } from "./composerAutosize";
+import { fitComposerHeight, MAX_COMPOSER_HEIGHT } from "./composerAutosize";
 import {
   importDroppedPaths,
   saveClipboardImage,
@@ -143,17 +143,6 @@ import {
   type HistoryNav,
   type NavResult,
 } from "./promptHistory";
-
-const STAGE_INTRO: Record<StageKey, string> = {
-  general: "Chat with the project agent in this worktree. Pick a stage below to run a spec-driven step.",
-  research: "Runs /research_codebase to investigate the code and write a research doc into the library.",
-  plan: "Runs /create_plan to turn research into a concrete, reviewable implementation plan.",
-  implement: "Runs /implement_plan to make the changes in this worktree, committing as it goes.",
-  validate: "Runs /validate_plan to check the work against the plan and the project's tests.",
-  commit: "Runs /commit to commit this worktree's changes, then asks whether to push them, never a pull request. Use Ship when you're ready to open a PR.",
-  ship: "Commits any remaining changes via /commit, then pushes the branch and opens a pull request.",
-  revise: "Addresses PR feedback (failing CI or requested changes), then pushes fixes to the branch.",
-};
 
 export function SessionStatusBadge({ sessionId }: { sessionId?: string }) {
   const session = useSession(sessionId);
@@ -1450,21 +1439,40 @@ export function SessionChat({
 
   const autosizeComposer = useCallback(() => {
     const ta = textareaRef.current;
-    if (ta) fitComposerHeight(ta);
+    if (!ta) return;
+    const paneHeight = ta.closest<HTMLElement>("[data-pane-content]")?.clientHeight;
+    fitComposerHeight(
+      ta,
+      paneHeight ? Math.min(MAX_COMPOSER_HEIGHT, Math.floor(paneHeight * 0.4)) : MAX_COMPOSER_HEIGHT,
+    );
   }, []);
   useLayoutEffect(autosizeComposer, [autosizeComposer, draft]);
   const composerBoxRef = useRef<HTMLDivElement>(null);
   const composerWidthRef = useRef(0);
+  const paneHeightRef = useRef(0);
   useLayoutEffect(() => {
     const box = composerBoxRef.current;
     if (!box) return;
+    const pane = box.closest<HTMLElement>("[data-pane-content]");
     const ro = new ResizeObserver((entries) => {
-      const w = entries[0].contentRect.width;
-      if (w === composerWidthRef.current) return;
-      composerWidthRef.current = w;
-      autosizeComposer();
+      let changed = false;
+      for (const entry of entries) {
+        if (entry.target === box) {
+          const w = entry.contentRect.width;
+          if (w === composerWidthRef.current) continue;
+          composerWidthRef.current = w;
+          changed = true;
+        } else if (entry.target === pane) {
+          const h = entry.contentRect.height;
+          if (h === paneHeightRef.current) continue;
+          paneHeightRef.current = h;
+          changed = true;
+        }
+      }
+      if (changed) autosizeComposer();
     });
     ro.observe(box);
+    if (pane) ro.observe(pane);
     return () => ro.disconnect();
   }, [autosizeComposer]);
 
@@ -1701,19 +1709,7 @@ export function SessionChat({
           prompt={prompt}
         />
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          <div className="mx-auto w-[90%]">
-            <div className="rounded-lg border border-edge bg-panel p-4">
-              <div className="mb-2 flex items-center gap-2">
-                <span className={`rounded p-0.5 ${MODE_STYLES[mode].badge}`}>
-                  <ModeIcon mode={mode} />
-                </span>
-                <span className="text-sm font-medium text-ink">{stageLabel(mode)} agent</span>
-              </div>
-              <p className="text-sm leading-relaxed text-ink-dim">{STAGE_INTRO[mode]}</p>
-            </div>
-          </div>
-        </div>
+        <div className="min-h-0 flex-1" />
       )}
 
       <div className="p-4">
@@ -1846,18 +1842,7 @@ export function SessionChat({
                     onScroll={(e) => setComposerScroll(e.currentTarget.scrollTop)}
                     rows={1}
                     disabled={Boolean(pendingQuestion)}
-                    placeholder={
-                      pendingQuestion
-                        ? "Answer the question above to continue…"
-                        : !started
-                          ? mode === "general"
-                            ? "Ask the project agent…  (Enter to start, Shift+Enter for a newline)"
-                            : `Brief the ${stageLabel(mode).toLowerCase()} agent…  (Enter to start)`
-                          : busy
-                            ? "Send a follow-up. It'll queue until the turn finishes…"
-                            : "Reply to the agent…  (Enter to send)"
-                    }
-                    className="selectable relative block w-full resize-none bg-transparent px-3.5 py-4 text-sm text-ink placeholder:text-ink-dim/60 focus:outline-none disabled:cursor-not-allowed"
+                    className="selectable relative block w-full resize-none bg-transparent px-3.5 py-4 text-sm text-ink focus:outline-none disabled:cursor-not-allowed"
                   />
                 </div>
                 <div ref={toolbarRef} className="flex items-center gap-0.5 overflow-x-clip px-2 pb-2">

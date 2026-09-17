@@ -17,6 +17,8 @@ import { codeBase, useLangForPath } from "./codeView";
 const MARKDOWN_RE = /\.(md|markdown|mdx)$/i;
 const NUL = String.fromCharCode(0);
 
+const buffers = new Map<string, { content: string; savedContent: string }>();
+
 const BASIC_SETUP = {
   foldGutter: true,
   lineNumbers: false,
@@ -83,7 +85,11 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
   const lang = useLangForPath(path);
   const save = useSaveWorktreeFile(id, path);
 
-  const [content, setContent] = useState(initialContent);
+  const bufferKey = `${id}:${path}`;
+  const [content, setContent] = useState(() => {
+    const stashed = buffers.get(bufferKey);
+    return stashed?.savedContent === initialContent ? stashed.content : initialContent;
+  });
   const [savedContent, setSavedContent] = useState(initialContent);
   const [baseMtimeMs, setBaseMtimeMs] = useState(initialMtimeMs);
   const [preview, setPreview] = useState(false);
@@ -102,6 +108,11 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
     },
     [],
   );
+
+  useEffect(() => {
+    if (content === savedContent) buffers.delete(bufferKey);
+    else buffers.set(bufferKey, { content, savedContent });
+  }, [bufferKey, content, savedContent]);
 
   const saveRef = useRef<() => void>(() => {});
 

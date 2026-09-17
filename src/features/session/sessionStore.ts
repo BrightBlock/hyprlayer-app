@@ -48,10 +48,13 @@ import {
 import { claudeModels, type ModelOption } from "@/lib/domain/models";
 import {
   bindSessionToShell,
+  focusedPaneId,
   openCommitTab,
   openPromptTab,
   openShipTab,
+  paneShells,
   useWorkstreamTabsStore,
+  visibleShells,
 } from "./workstreamTabs";
 import {
   addUserMessage,
@@ -270,11 +273,7 @@ async function isSessionVisible(sessionId: string, workstreamId: string): Promis
   if (search.item !== workstreamId) return false;
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
   if (!tabs) return false;
-  const main = tabs.shells.find((s) => s.id === tabs.activeId);
-  const right = tabs.rightSplit
-    ? tabs.shells.find((s) => s.id === tabs.rightActiveId)
-    : null;
-  return main?.sessionId === sessionId || right?.sessionId === sessionId;
+  return visibleShells(tabs).some((s) => s.sessionId === sessionId);
 }
 
 export async function startSession(args: {
@@ -722,9 +721,13 @@ export async function runPromptTextInWorkstream(
 ): Promise<void> {
   if (!text.trim()) return;
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
-  const pane = tabs?.activePane ?? "main";
-  const activeId = pane === "right" ? tabs?.rightActiveId : tabs?.activeId;
-  const active = tabs?.shells.find((s) => s.id === (targetShellId ?? activeId));
+  const pane = tabs ? focusedPaneId(tabs) : undefined;
+  const active =
+    targetShellId !== undefined
+      ? tabs?.shells.find((s) => s.id === targetShellId)
+      : tabs && pane
+        ? paneShells(tabs, pane).find((s) => s.id === tabs.panes[pane]?.activeId)
+        : undefined;
 
   if (active?.sessionId) {
     if (!entryOf(active.sessionId)) {

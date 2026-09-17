@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canSplitExtent,
   COMPACT_WIDTH,
   drawerWidth,
   isCompact,
@@ -73,6 +74,23 @@ describe("splitPaneFloor", () => {
 
   it("clamps to half the row (less the handle) when it can't", () => {
     expect(splitPaneFloor(473)).toBe(232);
+  });
+
+  it("weights the floor toward the larger minimum when the two panes differ", () => {
+    expect(splitPaneFloor(600, 280, 560)).toBe(197);
+    expect(splitPaneFloor(600, 560, 280)).toBe(394);
+  });
+});
+
+describe("canSplitExtent", () => {
+  it("allows a split whose halves clear the hard minimum", () => {
+    expect(canSplitExtent(452)).toBe(true);
+    expect(canSplitExtent(328)).toBe(true);
+  });
+
+  it("refuses a split whose halves would fall under the hard minimum", () => {
+    expect(canSplitExtent(327)).toBe(false);
+    expect(canSplitExtent(222)).toBe(false);
   });
 });
 
