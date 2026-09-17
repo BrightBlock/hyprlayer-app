@@ -8,10 +8,11 @@ pub mod frame;
 
 use serde::{Deserialize, Serialize};
 
-/// Strict equality on the handshake; bump on every wire-affecting change.
-/// 2: streaming (`StreamRequest`/`StreamResponse`/`Cancel`) and the Phase 4
-/// commands joined the wire.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// Strict equality on the handshake. Stays at 1 until the first release that
+/// ships `hyprlayer-server` — nothing has ever shipped with a different
+/// number, so wire changes before that release are free. Bump on every
+/// wire-affecting change from that release onward.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The v0.7 `AppError` envelope, pinned by
 /// `src-tauri/tests/fixtures/compat/v0_7/app-errors.json`.

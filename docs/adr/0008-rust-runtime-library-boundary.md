@@ -284,6 +284,26 @@ the `ProviderHttp` port. `tauri-plugin-updater` is the named exception, per the
 carve-outs above. The `models → core → app` direction needs no rule: cargo rejects
 the cycle.
 
+*(Amended 2026-09-16 — a second named exception: `src-tauri/src/provision.rs` fetches
+a remote host's `hyprlayer-server` binary by shelling out to `curl`, not through an
+HTTP client of its own. The rule's own escape hatch does not fit — `ProviderHttp` is
+GET-to-`String` (`ports.rs`) and cannot carry a binary — and the two ways to obey it
+literally are both worse: adding `reqwest` to the shell's manifest is the thing the
+rule forbids, and giving core a bytes port would grow its supported surface for a
+concern core does not own, since provisioning is SSH-to-another-machine and lives in
+the shell by construction. Shelling out for the network half is ADR-0005's shape,
+though not its reasoning: ADR-0005 is about credentials git2 cannot reach, and a
+public asset download has no credential story. It is borrowed for its shape, and that
+is worth saying rather than implying.*
+
+*The Windows floor this creates: `curl.exe` ships in `System32` from Windows 10 1803
+(April 2018) onward, so the supported `x86_64-pc-windows-msvc` target has it without
+an install step. Every spawn goes through `supervisor::hide_console`, which sets
+`CREATE_NO_WINDOW` — without it a GUI process spawning a console program flashes a
+console window, several times per connect, since provisioning probes, uploads and
+installs. The shell's `ssh` spawns were missing that flag too and gained it in the
+same change; core's spawns have always set it.)*
+
 **Core.** No `tauri::` or `tauri_specta::` imports in `hyprlayer-core` or
 `hyprlayer-models` — move the Tauri type into `src-tauri` and convert at the
 boundary. Core modules outside `runtime/` do not import `crate::runtime`; they take

@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::error::{CoreError, Result};
@@ -6,6 +7,10 @@ use crate::store::Workstream;
 use super::HyprlayerRuntime;
 
 pub type AttachmentPath = PathBuf;
+
+/// An attachment is an image, not a JSON document — cap what crosses the wire
+/// rather than streaming an arbitrarily large file into a blob.
+pub const MAX_ATTACHMENT_READ_BYTES: u64 = 20 * 1024 * 1024;
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
     if runtime.coordinator.is_stopped() {
@@ -73,6 +78,49 @@ fn reject_escaping_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// `read_attachment`'s RPC signature carries no `workstream_id`, so the caller
+/// supplies every registered worktree path and this accepts the file only if it
+/// sits exactly where `ensure_attachments_dir` puts one for one of them:
+/// `<worktree>/.hyprlayer/attachments/<file>`.
+///
+/// Deliberately not "under `worktree_root()`": an `inplace` workstream's
+/// worktree is the repo itself, which lives outside that root entirely, so that
+/// test refused every attachment belonging to one.
+fn validate_attachment_path(worktrees: &[String], path: &Path) -> Result<PathBuf> {
+    let invalid = || CoreError::InvalidPath {
+        path: path.display().to_string(),
+    };
+    let canonical = std::fs::canonicalize(path).map_err(|_| invalid())?;
+    let parent = canonical.parent();
+    let grandparent = parent.and_then(Path::parent);
+    let in_attachments_dir = parent.and_then(Path::file_name) == Some(OsStr::new("attachments"))
+        && grandparent.and_then(Path::file_name) == Some(OsStr::new(".hyprlayer"));
+    // Compare canonically on both sides: a worktree reached through a symlink
+    // would otherwise never match the canonicalized file above it.
+    let owned_by_a_workstream = || {
+        let worktree = match grandparent.and_then(Path::parent) {
+            Some(dir) => dir,
+            None => return false,
+        };
+        worktrees
+            .iter()
+            .any(|candidate| std::fs::canonicalize(candidate).is_ok_and(|known| known == worktree))
+    };
+    if !in_attachments_dir || !owned_by_a_workstream() {
+        return Err(invalid());
+    }
+    Ok(canonical)
+}
+
+fn read_attachment_bytes(worktrees: &[String], path: &Path) -> Result<Vec<u8>> {
+    let validated = validate_attachment_path(worktrees, path)?;
+    let meta = std::fs::metadata(&validated).map_err(|e| io_context("stat attachment", e))?;
+    if meta.len() > MAX_ATTACHMENT_READ_BYTES {
+        return Err(CoreError::AttachmentTooLarge);
+    }
+    std::fs::read(&validated).map_err(|e| io_context("read attachment", e))
+}
+
 fn unique_dest(dir: &Path, file_name: &str) -> Result<PathBuf> {
     reject_escaping_name(file_name)?;
     let id = uuid::Uuid::new_v4().simple().to_string();
@@ -138,6 +186,19 @@ impl AttachmentService<'_> {
         })
         .await
     }
+
+    /// Carries an attachment's bytes back across the wire — the
+    /// remote-rendering counterpart to `save`. No `workstream_id`: the caller
+    /// is a webview resolving a stored path, so the path itself is the only
+    /// identifier, and `validate_attachment_path` is what keeps it honest —
+    /// against every registered worktree, since an `inplace` workstream's lives
+    /// outside `worktree_root()`.
+    pub async fn read(&self, path: String) -> Result<Vec<u8>> {
+        ensure_running(self.runtime)?;
+        let db = self.runtime.db.clone();
+        let worktrees = blocking(move || db.list_worktree_paths()).await?;
+        blocking(move || read_attachment_bytes(&worktrees, &PathBuf::from(&path))).await
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +236,88 @@ mod tests {
         assert!(matches!(
             unique_dest(dir, "/etc/passwd"),
             Err(CoreError::InvalidPath { .. })
+        ));
+    }
+
+    #[test]
+    fn read_attachment_bytes_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let worktree = dir.path().join("worktree");
+        let attachments_dir = ensure_attachments_dir(&worktree).unwrap();
+        let dest = attachments_dir.join("photo.png");
+        std::fs::write(&dest, b"some bytes").unwrap();
+
+        let known = vec![worktree.display().to_string()];
+        let bytes = read_attachment_bytes(&known, &dest).unwrap();
+        assert_eq!(bytes, b"some bytes");
+    }
+
+    /// An `inplace` workstream's worktree is the repo itself, which never lives
+    /// under `worktree_root()`. The first cut of this guard tested against that
+    /// root and so refused every attachment belonging to one — write-only
+    /// against a remote host, which is the exact bug the read half exists to fix.
+    #[test]
+    fn read_attachment_bytes_accepts_an_inplace_worktree_outside_the_worktree_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let worktree_root = dir.path().join("worktrees");
+        std::fs::create_dir_all(&worktree_root).unwrap();
+        let inplace = dir.path().join("repos").join("hyprlayer-app");
+        let attachments_dir = ensure_attachments_dir(&inplace).unwrap();
+        let dest = attachments_dir.join("shot.png");
+        std::fs::write(&dest, b"in-place bytes").unwrap();
+        assert!(!dest.starts_with(&worktree_root));
+
+        let known = vec![inplace.display().to_string()];
+        assert_eq!(
+            read_attachment_bytes(&known, &dest).unwrap(),
+            b"in-place bytes"
+        );
+    }
+
+    #[test]
+    fn read_attachment_bytes_refuses_a_worktree_no_workstream_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        let known_worktree = dir.path().join("known");
+        ensure_attachments_dir(&known_worktree).unwrap();
+        let stranger = dir.path().join("stranger");
+        let attachments_dir = ensure_attachments_dir(&stranger).unwrap();
+        let dest = attachments_dir.join("secret.png");
+        std::fs::write(&dest, b"not yours").unwrap();
+
+        let known = vec![known_worktree.display().to_string()];
+        assert!(matches!(
+            read_attachment_bytes(&known, &dest),
+            Err(CoreError::InvalidPath { .. })
+        ));
+    }
+
+    #[test]
+    fn read_attachment_bytes_refuses_a_path_outside_the_attachments_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let worktree = dir.path().join("worktree");
+        ensure_attachments_dir(&worktree).unwrap();
+        let outside = worktree.join("not-an-attachment.png");
+        std::fs::write(&outside, b"nope").unwrap();
+
+        let known = vec![worktree.display().to_string()];
+        assert!(matches!(
+            read_attachment_bytes(&known, &outside),
+            Err(CoreError::InvalidPath { .. })
+        ));
+    }
+
+    #[test]
+    fn read_attachment_bytes_refuses_a_file_over_the_size_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let worktree = dir.path().join("worktree");
+        let attachments_dir = ensure_attachments_dir(&worktree).unwrap();
+        let dest = attachments_dir.join("huge.png");
+        std::fs::write(&dest, vec![0u8; (MAX_ATTACHMENT_READ_BYTES + 1) as usize]).unwrap();
+
+        let known = vec![worktree.display().to_string()];
+        assert!(matches!(
+            read_attachment_bytes(&known, &dest),
+            Err(CoreError::AttachmentTooLarge)
         ));
     }
 }

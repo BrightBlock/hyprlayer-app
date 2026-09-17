@@ -1,8 +1,10 @@
 
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
 
 import { commands } from "@/lib/bindings";
-import { unwrap } from "@/lib/ipc";
+import { errorMessage, unwrap } from "@/lib/ipc";
+import { useConnectionStatus } from "@/lib/queries";
 import { baseName } from "./toolDisplay";
 
 export type AttachmentKind = "image" | "file";
@@ -30,13 +32,77 @@ export const IMAGE_EXTENSIONS = [
 
 const IMAGE_EXT = new Set(IMAGE_EXTENSIONS);
 
-export function isImagePath(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  return IMAGE_EXT.has(ext);
+function extOf(path: string): string {
+  return path.split(".").pop()?.toLowerCase() ?? "";
 }
 
-export function attachmentSrc(path: string): string {
-  return convertFileSrc(path);
+export function isImagePath(path: string): boolean {
+  return IMAGE_EXT.has(extOf(path));
+}
+
+/** A blob carries its own Content-Type, and `<img>` never sniffs SVG. */
+const MIME_FOR_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+  heic: "image/heic",
+  heif: "image/heif",
+  tiff: "image/tiff",
+  tif: "image/tiff",
+  avif: "image/avif",
+};
+
+/**
+ * The image `src` for a stored attachment, resolved on the machine the
+ * bytes live on. Local server: `convertFileSrc` synchronously — no copy,
+ * nothing held in memory. Remote server: the path means nothing to this
+ * webview's filesystem, so the bytes are fetched over RPC and turned into a
+ * revocable `blob:` URL.
+ *
+ * Reports a failure rather than swallowing it: an oversized or refused
+ * attachment used to leave the card on its loading fallback forever, which
+ * looks identical to a slow fetch and says nothing about why.
+ */
+export function useAttachmentSrc(path: string): { src?: string; error?: string } {
+  const status = useConnectionStatus();
+  const remote = status.data?.host != null;
+  const [state, setState] = useState<{ src?: string; error?: string }>({});
+
+  useEffect(() => {
+    if (!remote) return;
+    let cancelled = false;
+    let url: string | undefined;
+    setState({});
+    unwrap(commands.readAttachment(path))
+      .then((bytes) => {
+        if (cancelled) return;
+        const type = MIME_FOR_EXT[extOf(path)] ?? "";
+        url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type }));
+        setState({ src: url });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setState({ error: errorMessage(e) });
+      });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [remote, path]);
+
+  return remote ? state : { src: convertFileSrc(path) };
+}
+
+/**
+ * Whether the app can open this attachment with the OS. A remote server's path
+ * does not exist on this machine, so `openPath` there resolves nothing and
+ * fails silently — better to say so than to offer a button that does nothing.
+ */
+export function useCanOpenAttachment(): boolean {
+  return useConnectionStatus().data?.host == null;
 }
 
 const EXT_FOR_MIME: Record<string, string> = {

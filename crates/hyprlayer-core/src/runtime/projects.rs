@@ -130,6 +130,20 @@ pub struct BootstrapResult {
     pub projects: Vec<ProjectView>,
     pub binaries: Vec<BinaryStatus>,
     pub settings: AppSettings,
+    /// Where a clone lands when the user names no location — `settings.repos_root`
+    /// if set, else this machine's default. Sent because the client cannot work
+    /// it out: against a remote host its own home directory is the wrong
+    /// machine's, and prefilling one sent `/Users/...` to a Linux server.
+    ///
+    /// `default` because `PROTOCOL_VERSION` is deliberately pinned at 1 until
+    /// the server ships, so a client and a server built at different times are
+    /// the normal case during development rather than an error. Without it,
+    /// adding this field made an older server fail *bootstrap* deserialization
+    /// — the whole app, not one feature — with a raw serde error the strict
+    /// handshake had already waved through. New response fields stay tolerant
+    /// while the version is pinned.
+    #[serde(default)]
+    pub default_repos_root: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,6 +287,10 @@ pub struct DirBrowseEntry {
     pub name: String,
     pub is_dir: bool,
     pub is_repo: bool,
+    /// The server's own join of `name` onto the listed directory — the
+    /// client never guesses a separator for a server whose OS it does not
+    /// know (plan Phase 1 §8).
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -296,10 +314,12 @@ fn list_directory(dir: &Path) -> DirListing {
             }
             let is_dir = ent.file_type().map(|t| t.is_dir()).unwrap_or(false);
             let is_repo = is_dir && repos::is_git_repo(&ent.path());
+            let path = ent.path().display().to_string();
             entries.push(DirBrowseEntry {
                 name,
                 is_dir,
                 is_repo,
+                path,
             });
         }
     }
@@ -473,6 +493,7 @@ impl ProjectService<'_> {
             projects: self.list_enriched().await,
             binaries: self.runtime.binaries.status_all().await,
             settings: self.runtime.settings.get().await,
+            default_repos_root: self.repos_root(None).await.display().to_string(),
         })
     }
 
@@ -946,10 +967,23 @@ impl ProjectService<'_> {
         let claimed = blocking({
             let dest = dest.clone();
             move || {
+                // Both name their path: the caller still matches `AlreadyExists`
+                // on `kind`, but a bare io error here says only "Permission
+                // denied" about a directory it declines to identify.
                 if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent).map_err(CoreError::Io)?;
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        CoreError::Io(std::io::Error::new(
+                            e.kind(),
+                            format!("could not create {}: {e}", parent.display()),
+                        ))
+                    })?;
                 }
-                std::fs::create_dir(&dest).map_err(CoreError::Io)
+                std::fs::create_dir(&dest).map_err(|e| {
+                    CoreError::Io(std::io::Error::new(
+                        e.kind(),
+                        format!("could not create {}: {e}", dest.display()),
+                    ))
+                })
             }
         })
         .await;

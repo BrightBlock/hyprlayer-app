@@ -650,6 +650,18 @@ export function IconButton({ active, className, ...rest }: IconButtonProps) {
   );
 }
 
+// Rail tier (`Root.tsx`'s icon rail): `h-8 w-8 rounded-[10px]`. Selected state
+// is a left `::before` bar, not a background fill — see ADR-0006.
+export const RAIL_ICON_BASE =
+  "relative flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors";
+export const RAIL_ACTIVE_BAR =
+  "before:absolute before:-left-2 before:top-1/2 before:h-8 before:w-[2px] " +
+  "before:-translate-y-1/2 before:rounded-r-full before:bg-accent before:content-['']";
+export const railNavClass = (active: boolean): string =>
+  `${RAIL_ICON_BASE} ${
+    active ? `text-ink ${RAIL_ACTIVE_BAR}` : "text-ink-dim hover:bg-edge/60 hover:text-ink"
+  }`;
+
 type RefreshButtonProps = {
   onClick: () => void;
   busy?: boolean;

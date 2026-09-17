@@ -2,6 +2,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { scopedKey } from "@/lib/hostScope";
+
 type ProjectTreeStore = {
   collapsedPaths: string[];
   toggleCollapsed: (path: string) => void;
@@ -18,6 +20,6 @@ export const useProjectTreeStore = create<ProjectTreeStore>()(
       toggleCollapsed: (path) =>
         set((s) => ({ collapsedPaths: toggleCollapsedPath(s.collapsedPaths, path) })),
     }),
-    { name: "hyprlayer:project-tree", version: 1 },
+    { name: scopedKey("hyprlayer:project-tree"), version: 1 },
   ),
 );

@@ -33,14 +33,41 @@ vi.mock("../../lib/queries", () => ({
   }),
 }));
 
+const saveDialog = vi.fn(async () => "/Users/jt/Desktop/share" as string | null);
+const openDialog = vi.fn(async () => "/Users/jt/Desktop/share.hlprompts" as string | null);
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   confirm: (...args: unknown[]) => confirmMock(...args),
+  save: (...args: unknown[]) => saveDialog(...(args as [])),
+  open: (...args: unknown[]) => openDialog(...(args as [])),
 }));
+
+// Phase 6 moved the file I/O to the client and the prompts themselves over the
+// wire, so the flow is now five calls across two machines. Nothing here covered
+// it — an audit on 2026-09-16 found this file never mocked `commands` at all and
+// never reached the import/export code, so it passed without exercising it.
+const ipc = vi.hoisted(() => ({
+  exportPrompts: vi.fn(),
+  writePromptExport: vi.fn(),
+  readPromptImport: vi.fn(),
+  previewPromptImport: vi.fn(),
+  applyPromptImport: vi.fn(),
+}));
+
+vi.mock("@/lib/bindings", () => ({ commands: ipc }));
+
+const PROMPTS_JSON = JSON.stringify({
+  hlprompts: 1,
+  prompts: [{ name: "Imported", body: "b" }],
+});
 
 afterEach(() => {
   cleanup();
   mutate.mockReset();
   confirmMock.mockClear();
+  saveDialog.mockClear();
+  openDialog.mockClear();
+  for (const fn of Object.values(ipc)) fn.mockReset();
 });
 
 const EMPTY: AppSettings = {};
@@ -190,5 +217,80 @@ describe("PromptLibrary", () => {
     await vi.waitFor(() => expect(mutate).toHaveBeenCalled());
     const saved = mutate.mock.calls[mutate.mock.calls.length - 1][0] as AppSettings;
     expect(saved.prompts?.custom).toHaveLength(0);
+  });
+
+  it("exports by asking the server for content and writing it on the client", async () => {
+    ipc.exportPrompts.mockResolvedValue({
+      status: "ok",
+      data: { content: PROMPTS_JSON, promptCount: 1 },
+    });
+    ipc.writePromptExport.mockResolvedValue({
+      status: "ok",
+      data: "/Users/jt/Desktop/share.hlprompts",
+    });
+    render(<Harness settings={EMPTY} />);
+
+    // Opens the export dialog; its own confirm button is the one that fires.
+    fireEvent.click(screen.getByRole("button", { name: "Export prompts" }));
+    const confirmExport = await vi.waitFor(() => {
+      const hit = screen
+        .getAllByRole("button", { name: /^Export( \d+)?$/ })
+        .filter((b) => b.getAttribute("aria-label") !== "Export prompts");
+      if (hit.length !== 1) throw new Error(`expected one confirm button, saw ${hit.length}`);
+      return hit[0];
+    });
+    fireEvent.click(confirmExport);
+
+    await vi.waitFor(() => expect(ipc.writePromptExport).toHaveBeenCalled());
+    // The server builds the bytes and never sees a path; the client writes them.
+    expect(ipc.exportPrompts.mock.calls[0][0]).not.toHaveProperty("path");
+    expect(ipc.writePromptExport).toHaveBeenCalledWith(
+      "/Users/jt/Desktop/share",
+      PROMPTS_JSON,
+    );
+  });
+
+  it("imports by reading the file on the client and sending its text, not its path", async () => {
+    ipc.readPromptImport.mockResolvedValue({ status: "ok", data: PROMPTS_JSON });
+    ipc.previewPromptImport.mockResolvedValue({
+      status: "ok",
+      data: {
+        sourceSha256: "abc",
+        sourceVersion: 1,
+        source: null,
+        prompts: [
+          {
+            key: "0",
+            name: "Imported",
+            body: "b",
+            chord: null,
+            chordTaken: false,
+            unknownProjects: [],
+          },
+        ],
+        conflicts: [],
+      },
+    });
+    render(<Harness settings={EMPTY} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Import prompts" }));
+
+    await vi.waitFor(() => expect(ipc.previewPromptImport).toHaveBeenCalled());
+    expect(ipc.readPromptImport).toHaveBeenCalledWith("/Users/jt/Desktop/share.hlprompts");
+    // The path stops at the client boundary: the server is handed the contents.
+    expect(ipc.previewPromptImport.mock.calls[0][0]).toBe(PROMPTS_JSON);
+  });
+
+  it("surfaces a client-side read failure instead of previewing nothing", async () => {
+    ipc.readPromptImport.mockResolvedValue({
+      status: "error",
+      error: { code: "prompts_file_too_large", message: "That file is too large.", remedy: null },
+    });
+    render(<Harness settings={EMPTY} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Import prompts" }));
+
+    await vi.waitFor(() => expect(ipc.readPromptImport).toHaveBeenCalled());
+    expect(ipc.previewPromptImport).not.toHaveBeenCalled();
   });
 });

@@ -36,6 +36,10 @@ type UiStore = {
   setDocWide: (wide: boolean) => void;
   narrowDrawer: "project" | "diff" | null;
   setNarrowDrawer: (panel: "project" | "diff" | null) => void;
+  // Remote folder picker; a display preference of the person, not the server,
+  // which is why it sits here and not in a host-scoped store.
+  showDotFiles: boolean;
+  setShowDotFiles: (show: boolean) => void;
 };
 
 export const useUiStore = create<UiStore>()(
@@ -67,6 +71,8 @@ export const useUiStore = create<UiStore>()(
       setDocWide: (wide) => set({ docWide: wide }),
       narrowDrawer: null,
       setNarrowDrawer: (panel) => set({ narrowDrawer: panel }),
+      showDotFiles: false,
+      setShowDotFiles: (show) => set({ showDotFiles: show }),
     }),
     {
       name: "hyprlayer:ui",
@@ -80,6 +86,7 @@ export const useUiStore = create<UiStore>()(
         projectSidebarCollapsed: s.projectSidebarCollapsed,
         docWide: s.docWide,
         agentsWidth: s.agentsWidth,
+        showDotFiles: s.showDotFiles,
       }),
     },
   ),

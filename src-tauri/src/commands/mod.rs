@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod attachments;
 pub mod harnesses;
+pub mod hosts;
 pub mod library;
 pub mod models;
 pub mod ollama;
@@ -22,7 +23,7 @@ pub(crate) async fn ensure_registered_project(
     project_path: &str,
 ) -> CmdResult<()> {
     let known = state
-        .client
+        .client()?
         .find_project(project_path.to_string())
         .await
         .map_err(AppError::from)?;

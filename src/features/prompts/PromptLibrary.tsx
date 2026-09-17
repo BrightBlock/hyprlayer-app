@@ -209,8 +209,9 @@ export function PromptLibrary({
   const [filter, setFilter] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [importFile, setImportFile] = useState<{
-    path: string;
     fileName: string;
+    /** The file's own contents, carried back to `applyPromptImport`. */
+    contents: string;
     sourceSha256: string;
     source: string | null;
     rows: ImportRow[];
@@ -486,14 +487,23 @@ export function PromptLibrary({
       filters: [{ name: "Hyprlayer prompts", extensions: [PROMPTS_FILE_EXT] }],
     });
     if (!chosen) return null;
-    const res = await commands.exportPrompts(buildExportRequest(chosen, entries, opts));
+    const res = await commands.exportPrompts(buildExportRequest(entries, opts));
     if (res.status === "error") {
       useToast.getState().show("Export failed", res.error.message || "Couldn't write the file.", {
         tone: "bad",
       });
       return null;
     }
-    return basename(res.data.path);
+    const written = await commands.writePromptExport(chosen, res.data.content);
+    if (written.status === "error") {
+      useToast
+        .getState()
+        .show("Export failed", written.error.message || "Couldn't write the file.", {
+          tone: "bad",
+        });
+      return null;
+    }
+    return basename(written.data);
   };
 
   const openImportDialog = async () => {
@@ -506,7 +516,16 @@ export function PromptLibrary({
     });
     const path = Array.isArray(selected) ? selected[0] : selected;
     if (!path) return;
-    const res = await commands.previewPromptImport(path, takenChords);
+    const read = await commands.readPromptImport(path);
+    if (read.status === "error") {
+      useToast
+        .getState()
+        .show("Import failed", read.error.message || "Couldn't read that file.", {
+          tone: "bad",
+        });
+      return;
+    }
+    const res = await commands.previewPromptImport(read.data, takenChords);
     if (res.status === "error") {
       useToast.getState().show("Import failed", res.error.message || "Couldn't read that file.", {
         tone: "bad",
@@ -514,8 +533,8 @@ export function PromptLibrary({
       return;
     }
     setImportFile({
-      path,
       fileName: basename(path),
+      contents: read.data,
       sourceSha256: res.data.sourceSha256,
       source: res.data.source,
       rows: importRows(res.data),
@@ -526,7 +545,7 @@ export function PromptLibrary({
     if (!importFile) return;
     const from = importFile.fileName;
     const res = await commands.applyPromptImport({
-      path: importFile.path,
+      source: importFile.contents,
       expectedSourceSha256: importFile.sourceSha256,
       mode: "merge",
       conflictActions: conflictActions(importFile.rows, decisions),

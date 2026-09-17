@@ -261,6 +261,9 @@ pub enum CoreError {
     #[error("That file is too large to be a prompt export.")]
     PromptsFileTooLarge,
 
+    #[error("That attachment is too large to read.")]
+    AttachmentTooLarge,
+
     #[error("Couldn't read {path}: {detail}")]
     PromptsFileUnreadable { path: String, detail: String },
 
@@ -649,6 +652,7 @@ impl CoreError {
             CoreError::AgentBundleNotManageable => "agent_bundle_not_manageable",
             CoreError::AgentBundleVersionUnavailable { .. } => "agent_bundle_version_unavailable",
             CoreError::PromptsFileTooLarge => "prompts_file_too_large",
+            CoreError::AttachmentTooLarge => "attachment_too_large",
             CoreError::PromptsFileUnreadable { .. } => "prompts_file_unreadable",
             CoreError::PromptsFileInvalid { .. } => "prompts_file_invalid",
             CoreError::PromptsSourceChanged => "prompts_source_changed",

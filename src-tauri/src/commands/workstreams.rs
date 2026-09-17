@@ -65,7 +65,7 @@ pub async fn list_workstreams(
     include_archived: bool,
 ) -> CmdResult<Vec<WorkstreamView>> {
     state
-        .client
+        .client()?
         .list_workstreams(project_path, include_archived)
         .await
         .map(views)
@@ -76,7 +76,7 @@ pub async fn list_workstreams(
 #[specta::specta]
 pub async fn list_all_workstreams(state: State<'_, AppState>) -> CmdResult<Vec<WorkstreamView>> {
     state
-        .client
+        .client()?
         .list_all_workstreams()
         .await
         .map(views)
@@ -90,7 +90,7 @@ pub async fn watch_worktree(
     workstream_id: Option<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .watch_worktree(workstream_id)
         .await
         .map_err(AppError::from)
@@ -103,7 +103,7 @@ pub async fn list_workstream_bases(
     project_path: String,
 ) -> CmdResult<WorkstreamBases> {
     state
-        .client
+        .client()?
         .list_workstream_bases(project_path)
         .await
         .map_err(AppError::from)
@@ -116,7 +116,7 @@ pub async fn fetch_project_remote(
     project_path: String,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .fetch_project_remote(project_path)
         .await
         .map_err(AppError::from)
@@ -129,7 +129,7 @@ pub async fn discard_project_changes(
     project_path: String,
 ) -> CmdResult<u32> {
     state
-        .client
+        .client()?
         .discard_project_changes(project_path)
         .await
         .map_err(AppError::from)
@@ -148,7 +148,7 @@ pub async fn create_workstream(
     branch_prefix: Option<String>,
 ) -> CmdResult<WorkstreamView> {
     state
-        .client
+        .client()?
         .create_workstream(project_path, title, base, mode, branch, branch_prefix)
         .await
         .map(WorkstreamView::from)
@@ -163,7 +163,7 @@ pub async fn get_branch_prefixes(
 ) -> CmdResult<ResolvedBranchPrefixes> {
     super::ensure_registered_project(&state, &project_path).await?;
     state
-        .client
+        .client()?
         .get_branch_prefixes(project_path)
         .await
         .map(ResolvedBranchPrefixes::from)
@@ -179,7 +179,7 @@ pub async fn set_branch_prefixes(
 ) -> CmdResult<Vec<BranchPrefix>> {
     super::ensure_registered_project(&state, &project_path).await?;
     state
-        .client
+        .client()?
         .set_branch_prefixes(project_path, prefixes)
         .await
         .map_err(AppError::from)
@@ -193,7 +193,7 @@ pub async fn rename_workstream(
     title: String,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .rename_workstream(id, title)
         .await
         .map_err(AppError::from)
@@ -207,7 +207,7 @@ pub async fn set_workstream_base_branch(
     base: String,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .set_workstream_base_branch(id, base)
         .await
         .map_err(AppError::from)
@@ -220,7 +220,7 @@ pub async fn update_workstream_from_base(
     id: String,
 ) -> CmdResult<PullOutcome> {
     state
-        .client
+        .client()?
         .update_workstream_from_base(id)
         .await
         .map_err(AppError::from)
@@ -230,7 +230,7 @@ pub async fn update_workstream_from_base(
 #[specta::specta]
 pub async fn fetch_workstream_remote(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .fetch_workstream_remote(id)
         .await
         .map_err(AppError::from)
@@ -244,7 +244,7 @@ pub async fn set_workstream_stage(
     stage: Stage,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .set_workstream_stage(id, stage)
         .await
         .map_err(AppError::from)
@@ -259,7 +259,7 @@ pub async fn attach_workstream_doc(
     role: String,
 ) -> CmdResult<Vec<WorkstreamDoc>> {
     state
-        .client
+        .client()?
         .attach_workstream_doc(id, doc_path, role)
         .await
         .map_err(AppError::from)
@@ -273,7 +273,7 @@ pub async fn detach_workstream_doc(
     doc_path: String,
 ) -> CmdResult<Vec<WorkstreamDoc>> {
     state
-        .client
+        .client()?
         .detach_workstream_doc(id, doc_path)
         .await
         .map_err(AppError::from)
@@ -286,7 +286,7 @@ pub async fn list_workstream_docs(
     id: String,
 ) -> CmdResult<Vec<WorkstreamDoc>> {
     state
-        .client
+        .client()?
         .list_workstream_docs(id)
         .await
         .map_err(AppError::from)
@@ -300,7 +300,7 @@ pub async fn archive_workstream(
     skip_scripts: bool,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .archive_workstream(id, skip_scripts)
         .await
         .map_err(AppError::from)
@@ -330,7 +330,7 @@ pub async fn list_archived_workstreams(
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<ArchivedWorkstreamView>> {
     state
-        .client
+        .client()?
         .list_archived_workstreams()
         .await
         .map(|items| {
@@ -349,7 +349,7 @@ pub async fn restore_workstream(
     id: String,
 ) -> CmdResult<WorkstreamView> {
     state
-        .client
+        .client()?
         .restore_workstream(id)
         .await
         .map(WorkstreamView::from)
@@ -360,7 +360,7 @@ pub async fn restore_workstream(
 #[specta::specta]
 pub async fn delete_archived_workstream(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .delete_archived_workstream(id)
         .await
         .map_err(AppError::from)
@@ -389,7 +389,7 @@ pub async fn cleanup_archived_workstreams(
     before_ms: Option<f64>,
 ) -> CmdResult<ArchiveCleanupReport> {
     state
-        .client
+        .client()?
         .cleanup_archived_workstreams(before_ms)
         .await
         .map(ArchiveCleanupReport::from)
@@ -403,7 +403,7 @@ pub async fn reprovision_workstream(
     id: String,
 ) -> CmdResult<WorkstreamView> {
     state
-        .client
+        .client()?
         .reprovision_workstream(id)
         .await
         .map(WorkstreamView::from)
@@ -417,7 +417,7 @@ pub async fn worktree_git_status(
     id: String,
 ) -> CmdResult<WorktreeGitStatus> {
     state
-        .client
+        .client()?
         .worktree_git_status(id)
         .await
         .map_err(AppError::from)
@@ -452,7 +452,7 @@ pub async fn workstream_prompt_context(
     id: String,
 ) -> CmdResult<PromptContext> {
     state
-        .client
+        .client()?
         .workstream_prompt_context(id)
         .await
         .map(PromptContext::from)
@@ -467,7 +467,7 @@ pub async fn worktree_stage(
     paths: Vec<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .worktree_stage(id, paths)
         .await
         .map_err(AppError::from)
@@ -481,7 +481,7 @@ pub async fn worktree_unstage(
     paths: Vec<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .worktree_unstage(id, paths)
         .await
         .map_err(AppError::from)
@@ -495,7 +495,7 @@ pub async fn worktree_discard(
     paths: Vec<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .worktree_discard(id, paths)
         .await
         .map_err(AppError::from)
@@ -510,7 +510,7 @@ pub async fn worktree_file_sides(
     staged: bool,
 ) -> CmdResult<FileSides> {
     state
-        .client
+        .client()?
         .worktree_file_sides(id, path, staged)
         .await
         .map_err(AppError::from)
@@ -523,7 +523,7 @@ pub async fn list_workstream_commits(
     id: String,
 ) -> CmdResult<Vec<CommitEntry>> {
     state
-        .client
+        .client()?
         .list_workstream_commits(id)
         .await
         .map_err(AppError::from)
@@ -537,7 +537,7 @@ pub async fn worktree_commit_files(
     sha: String,
 ) -> CmdResult<Vec<GitFileEntry>> {
     state
-        .client
+        .client()?
         .worktree_commit_files(id, sha)
         .await
         .map_err(AppError::from)
@@ -552,7 +552,7 @@ pub async fn worktree_commit_file_sides(
     path: String,
 ) -> CmdResult<FileSides> {
     state
-        .client
+        .client()?
         .worktree_commit_file_sides(id, sha, path)
         .await
         .map_err(AppError::from)
@@ -566,7 +566,7 @@ pub async fn worktree_list_dir(
     path: String,
 ) -> CmdResult<Vec<DirEntry>> {
     state
-        .client
+        .client()?
         .worktree_list_dir(id, path)
         .await
         .map_err(AppError::from)
@@ -596,7 +596,7 @@ pub async fn worktree_read_file(
     path: String,
 ) -> CmdResult<WorktreeFile> {
     state
-        .client
+        .client()?
         .worktree_read_file(id, path)
         .await
         .map(WorktreeFile::from)
@@ -613,7 +613,7 @@ pub async fn worktree_write_file(
     base_mtime_ms: f64,
 ) -> CmdResult<f64> {
     state
-        .client
+        .client()?
         .worktree_write_file(id, path, content, base_mtime_ms)
         .await
         .map_err(AppError::from)
@@ -626,7 +626,7 @@ pub async fn list_slash_commands(
     id: String,
 ) -> CmdResult<Vec<SlashCommand>> {
     state
-        .client
+        .client()?
         .list_slash_commands(id)
         .await
         .map_err(AppError::from)
@@ -641,7 +641,7 @@ pub async fn worktree_search_files(
     limit: u32,
 ) -> CmdResult<Vec<String>> {
     state
-        .client
+        .client()?
         .worktree_search_files(id, query, limit)
         .await
         .map_err(AppError::from)
@@ -654,7 +654,7 @@ pub async fn workstream_pr_status(
     id: String,
 ) -> CmdResult<Option<PrStatus>> {
     state
-        .client
+        .client()?
         .workstream_pr_status(id)
         .await
         .map_err(AppError::from)
@@ -668,7 +668,7 @@ pub async fn list_workstream_open_prs(
     query: String,
 ) -> CmdResult<Vec<PrSummary>> {
     state
-        .client
+        .client()?
         .list_workstream_open_prs(id, query)
         .await
         .map_err(AppError::from)
@@ -682,7 +682,7 @@ pub async fn preview_workstream_pr(
     pr_number: u32,
 ) -> CmdResult<Option<PrSummary>> {
     state
-        .client
+        .client()?
         .preview_workstream_pr(id, pr_number)
         .await
         .map_err(AppError::from)
@@ -696,7 +696,7 @@ pub async fn attach_workstream_pr(
     pr_number: u32,
 ) -> CmdResult<Option<PrStatus>> {
     state
-        .client
+        .client()?
         .attach_workstream_pr(id, pr_number)
         .await
         .map_err(AppError::from)
@@ -706,7 +706,7 @@ pub async fn attach_workstream_pr(
 #[specta::specta]
 pub async fn detach_workstream_pr(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .detach_workstream_pr(id)
         .await
         .map_err(AppError::from)
@@ -720,7 +720,7 @@ pub async fn merge_workstream_pr(
     method: MergeMethod,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .merge_workstream_pr(id, method)
         .await
         .map_err(AppError::from)

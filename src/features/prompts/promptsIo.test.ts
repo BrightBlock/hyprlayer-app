@@ -59,13 +59,12 @@ describe("exportFileName", () => {
 
 describe("buildExportRequest", () => {
   it("maps the dialog's entries and options onto the command payload", () => {
-    const request = buildExportRequest("/tmp/out", [entry], {
+    const request = buildExportRequest([entry], {
       includeChords: true,
       includeOverrides: false,
       source: "jon",
     });
     expect(request).toEqual({
-      path: "/tmp/out",
       entries: [
         {
           name: "Backfill tests",
@@ -81,7 +80,7 @@ describe("buildExportRequest", () => {
   });
 
   it("sends a null source when the caller omits one", () => {
-    const request = buildExportRequest("/tmp/out", [entry], {
+    const request = buildExportRequest([entry], {
       includeChords: false,
       includeOverrides: true,
     });

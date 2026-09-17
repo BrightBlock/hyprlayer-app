@@ -2,6 +2,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { scopedKey } from "@/lib/hostScope";
+
 import type { WorkstreamView } from "@/lib/bindings";
 
 type PinStore = {
@@ -36,6 +38,6 @@ export const usePinStore = create<PinStore>()(
       togglePin: (id) => set((s) => ({ pinnedIds: togglePinId(s.pinnedIds, id) })),
       toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
     }),
-    { name: "hyprlayer:pinned-workstreams", version: 1 },
+    { name: scopedKey("hyprlayer:pinned-workstreams"), version: 1 },
   ),
 );

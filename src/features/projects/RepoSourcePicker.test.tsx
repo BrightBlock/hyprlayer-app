@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RepoSourcePicker } from "./RepoSourcePicker";
 
-const q = vi.hoisted(() => ({ useRecentRepos: vi.fn() }));
+const q = vi.hoisted(() => ({
+  useRecentRepos: vi.fn(),
+  useConnectionStatus: vi.fn(() => ({ data: { host: null } })),
+}));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 

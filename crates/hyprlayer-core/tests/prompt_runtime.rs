@@ -83,10 +83,10 @@ async fn fixture_with(prompts: serde_json::Value) -> Fixture {
 }
 
 impl Fixture {
-    fn write_source(&self, doc: serde_json::Value) -> String {
-        let path = self.root.join("import.hlprompts");
-        std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
-        path.display().to_string()
+    /// The file's would-be contents — carried as a string now, never written
+    /// to disk, since core no longer reads a prompts file from a path.
+    fn source_text(&self, doc: serde_json::Value) -> String {
+        serde_json::to_string_pretty(&doc).unwrap()
     }
 
     async fn register_project(&self, name: &str) -> String {
@@ -103,11 +103,11 @@ impl Fixture {
             .path
     }
 
-    async fn preview(&self, path: &str, taken: &[&str]) -> PromptImportPreview {
+    async fn preview(&self, source: &str, taken: &[&str]) -> PromptImportPreview {
         self.runtime
             .prompts()
             .preview_import(PromptImportRequest {
-                path: path.to_string(),
+                source: source.to_string(),
                 taken_chords: taken.iter().map(|c| c.to_string()).collect(),
             })
             .await
@@ -116,7 +116,7 @@ impl Fixture {
 
     async fn apply(
         &self,
-        path: &str,
+        source: &str,
         preview: &PromptImportPreview,
         taken: &[&str],
         actions: &[(&str, PromptConflictAction)],
@@ -124,7 +124,7 @@ impl Fixture {
         self.runtime
             .prompts()
             .apply_import(PromptImportDecision {
-                path: path.to_string(),
+                source: source.to_string(),
                 expected_source_sha256: preview.source_sha256.clone(),
                 mode: PromptImportMode::Merge,
                 conflict_actions: actions
@@ -152,17 +152,13 @@ fn export_entry() -> PromptExportEntry {
 }
 
 async fn exported(fx: &Fixture, selection: PromptExportSelection) -> serde_json::Value {
-    let target = fx.root.join("out.hlprompts");
     let result = fx
         .runtime
         .prompts()
-        .export(PromptExportRequest {
-            path: target.display().to_string(),
-            selection,
-        })
+        .export(PromptExportRequest { selection })
         .await
         .unwrap();
-    serde_json::from_str(&std::fs::read_to_string(&result.path).unwrap()).unwrap()
+    serde_json::from_str(&result.content).unwrap()
 }
 
 // ---------------------------------------------------------------- export
@@ -276,14 +272,12 @@ async fn export_writes_the_version_and_an_optional_source() {
 }
 
 #[tokio::test]
-async fn export_appends_the_extension_and_reports_the_count() {
+async fn export_reports_the_prompt_count() {
     let fx = fixture().await;
-    let target = fx.root.join("share");
     let result = fx
         .runtime
         .prompts()
         .export(PromptExportRequest {
-            path: target.display().to_string(),
             selection: PromptExportSelection {
                 entries: vec![export_entry(), export_entry()],
                 include_chords: true,
@@ -294,9 +288,8 @@ async fn export_appends_the_extension_and_reports_the_count() {
         .await
         .unwrap();
 
-    assert!(result.path.ends_with(".hlprompts"), "{}", result.path);
     assert_eq!(result.prompt_count, 2);
-    assert!(Path::new(&result.path).is_file());
+    assert!(result.content.ends_with('\n'));
 
     fx.runtime.shutdown().await;
 }
@@ -353,16 +346,18 @@ fn parse_errors_when_there_is_nothing_importable() {
 }
 
 #[tokio::test]
-async fn preview_rejects_a_file_over_the_size_cap() {
+async fn preview_rejects_a_source_over_the_size_cap() {
     let fx = fixture().await;
-    let path = fx.root.join("huge.hlprompts");
-    std::fs::write(&path, vec![b'x'; 4 * 1024 * 1024 + 1]).unwrap();
+    // Once `read_source`'s `fs::metadata` check, now a plain length check on
+    // the incoming string — the client holds the bytes, there's no file to
+    // stat.
+    let huge = "x".repeat(4 * 1024 * 1024 + 1);
 
     let err = fx
         .runtime
         .prompts()
         .preview_import(PromptImportRequest {
-            path: path.display().to_string(),
+            source: huge,
             taken_chords: Vec::new(),
         })
         .await
@@ -393,8 +388,8 @@ async fn planning_fixture() -> Fixture {
 #[tokio::test]
 async fn preview_flags_builtin_and_custom_name_conflicts_else_new() {
     let fx = planning_fixture().await;
-    let path = fx.write_source(planning_file());
-    let preview = fx.preview(&path, &["mod+shift+t"]).await;
+    let source = fx.source_text(planning_file());
+    let preview = fx.preview(&source, &["mod+shift+t"]).await;
 
     let kinds: BTreeMap<&str, PromptConflictKind> = preview
         .conflicts
@@ -412,8 +407,8 @@ async fn preview_flags_builtin_and_custom_name_conflicts_else_new() {
 async fn preview_detects_a_taken_chord_and_unknown_override_projects() {
     let fx = planning_fixture().await;
     fx.register_project("app").await;
-    let path = fx.write_source(planning_file());
-    let preview = fx.preview(&path, &["mod+shift+t"]).await;
+    let source = fx.source_text(planning_file());
+    let preview = fx.preview(&source, &["mod+shift+t"]).await;
 
     assert!(preview.prompts[2].chord_taken);
     assert!(!preview.prompts[0].chord_taken);
@@ -436,11 +431,11 @@ async fn persisted(fx: &Fixture) -> PromptSettings {
 #[tokio::test]
 async fn apply_adds_a_brand_new_prompt_with_a_free_chord() {
     let fx = fixture().await;
-    let path = fx.write_source(file(
+    let source = fx.source_text(file(
         serde_json::json!([{ "name": "Fresh", "body": "b", "chord": "mod+j" }]),
     ));
-    let preview = fx.preview(&path, &[]).await;
-    let result = fx.apply(&path, &preview, &[], &[]).await;
+    let preview = fx.preview(&source, &[]).await;
+    let result = fx.apply(&source, &preview, &[], &[]).await;
 
     assert_eq!((result.added, result.replaced, result.renamed), (1, 0, 0));
     assert_eq!(result.settings.custom.len(), 1);
@@ -459,11 +454,11 @@ async fn apply_adds_a_brand_new_prompt_with_a_free_chord() {
 #[tokio::test]
 async fn apply_drops_a_chord_that_is_already_taken() {
     let fx = fixture().await;
-    let path = fx.write_source(file(
+    let source = fx.source_text(file(
         serde_json::json!([{ "name": "Fresh", "body": "b", "chord": "mod+shift+t" }]),
     ));
-    let preview = fx.preview(&path, &["mod+shift+t"]).await;
-    let result = fx.apply(&path, &preview, &["mod+shift+t"], &[]).await;
+    let preview = fx.preview(&source, &["mod+shift+t"]).await;
+    let result = fx.apply(&source, &preview, &["mod+shift+t"], &[]).await;
 
     assert_eq!(result.settings.custom[0].chord, None);
 
@@ -473,12 +468,12 @@ async fn apply_drops_a_chord_that_is_already_taken() {
 #[tokio::test]
 async fn apply_gives_two_imports_competing_for_one_free_chord_to_the_first_only() {
     let fx = fixture().await;
-    let path = fx.write_source(file(serde_json::json!([
+    let source = fx.source_text(file(serde_json::json!([
         { "name": "A", "body": "a", "chord": "mod+k" },
         { "name": "B", "body": "b", "chord": "mod+k" },
     ])));
-    let preview = fx.preview(&path, &[]).await;
-    let result = fx.apply(&path, &preview, &[], &[]).await;
+    let preview = fx.preview(&source, &[]).await;
+    let result = fx.apply(&source, &preview, &[], &[]).await;
 
     assert_eq!(result.settings.custom[0].chord.as_deref(), Some("mod+k"));
     assert_eq!(result.settings.custom[1].chord, None);
@@ -492,13 +487,13 @@ async fn apply_keep_both_suffixes_a_name_that_collides() {
         "custom": [{ "id": "c1", "name": "Mine", "body": "existing" }],
     }))
     .await;
-    let path = fx.write_source(file(
+    let source = fx.source_text(file(
         serde_json::json!([{ "name": "Mine", "body": "incoming" }]),
     ));
-    let preview = fx.preview(&path, &[]).await;
+    let preview = fx.preview(&source, &[]).await;
     let result = fx
         .apply(
-            &path,
+            &source,
             &preview,
             &[],
             &[("0", PromptConflictAction::KeepBoth)],
@@ -519,13 +514,13 @@ async fn apply_replace_overwrites_a_custom_prompts_body_in_place() {
         "custom": [{ "id": "c1", "name": "Mine", "body": "old", "chord": null }],
     }))
     .await;
-    let path = fx.write_source(file(
+    let source = fx.source_text(file(
         serde_json::json!([{ "name": "Mine", "body": "incoming", "chord": "mod+m" }]),
     ));
-    let preview = fx.preview(&path, &[]).await;
+    let preview = fx.preview(&source, &[]).await;
     let result = fx
         .apply(
-            &path,
+            &source,
             &preview,
             &[],
             &[("0", PromptConflictAction::Replace)],
@@ -545,13 +540,13 @@ async fn apply_replace_overwrites_a_custom_prompts_body_in_place() {
 #[tokio::test]
 async fn apply_replace_of_a_builtin_writes_its_builtin_body_not_a_custom() {
     let fx = fixture().await;
-    let path = fx.write_source(file(
+    let source = fx.source_text(file(
         serde_json::json!([{ "name": "Commit", "body": "my commit rules" }]),
     ));
-    let preview = fx.preview(&path, &[]).await;
+    let preview = fx.preview(&source, &[]).await;
     let result = fx
         .apply(
-            &path,
+            &source,
             &preview,
             &[],
             &[("0", PromptConflictAction::Replace)],
@@ -575,10 +570,10 @@ async fn apply_replace_of_a_builtin_writes_its_builtin_body_not_a_custom() {
 #[tokio::test]
 async fn apply_skip_drops_a_conflicting_entry_entirely() {
     let fx = fixture().await;
-    let path = fx.write_source(file(serde_json::json!([{ "name": "Commit", "body": "x" }])));
-    let preview = fx.preview(&path, &[]).await;
+    let source = fx.source_text(file(serde_json::json!([{ "name": "Commit", "body": "x" }])));
+    let preview = fx.preview(&source, &[]).await;
     let result = fx
-        .apply(&path, &preview, &[], &[("0", PromptConflictAction::Skip)])
+        .apply(&source, &preview, &[], &[("0", PromptConflictAction::Skip)])
         .await;
 
     assert_eq!(
@@ -600,13 +595,13 @@ async fn apply_skip_drops_a_conflicting_entry_entirely() {
 async fn apply_rehomes_known_overrides_by_name_and_drops_unknown_ones() {
     let fx = fixture().await;
     let project = fx.register_project("app").await;
-    let path = fx.write_source(file(serde_json::json!([{
+    let source = fx.source_text(file(serde_json::json!([{
         "name": "P",
         "body": "b",
         "overrides": { "app": "for app", "ghost": "dropped" },
     }])));
-    let preview = fx.preview(&path, &[]).await;
-    let result = fx.apply(&path, &preview, &[], &[]).await;
+    let preview = fx.preview(&source, &[]).await;
+    let result = fx.apply(&source, &preview, &[], &[]).await;
 
     let overrides = &result.settings.custom[0].overrides;
     assert_eq!(overrides.len(), 1);
@@ -618,13 +613,13 @@ async fn apply_rehomes_known_overrides_by_name_and_drops_unknown_ones() {
 #[tokio::test]
 async fn apply_skips_unchecked_candidates() {
     let fx = fixture().await;
-    let path = fx.write_source(file(serde_json::json!([
+    let source = fx.source_text(file(serde_json::json!([
         { "name": "A", "body": "a" },
         { "name": "B", "body": "b" },
     ])));
-    let preview = fx.preview(&path, &[]).await;
+    let preview = fx.preview(&source, &[]).await;
     let result = fx
-        .apply(&path, &preview, &[], &[("0", PromptConflictAction::Skip)])
+        .apply(&source, &preview, &[], &[("0", PromptConflictAction::Skip)])
         .await;
 
     assert_eq!((result.added, result.skipped), (1, 1));
@@ -635,12 +630,16 @@ async fn apply_skips_unchecked_candidates() {
 }
 
 #[tokio::test]
-async fn apply_rejects_a_source_that_changed_since_the_preview() {
+async fn apply_rejects_a_source_whose_hash_does_not_match_the_preview() {
     let fx = fixture().await;
-    let path = fx.write_source(file(serde_json::json!([{ "name": "Fresh", "body": "b" }])));
-    let preview = fx.preview(&path, &[]).await;
+    let source = fx.source_text(file(serde_json::json!([{ "name": "Fresh", "body": "b" }])));
+    let preview = fx.preview(&source, &[]).await;
 
-    fx.write_source(file(
+    // With the client holding the exact bytes it previewed, this can no
+    // longer fire from a concurrent disk edit — there's no shared file. It's
+    // a corruption/round-trip check now: the source handed to `apply_import`
+    // must be the same one `preview_import` hashed.
+    let swapped = fx.source_text(file(
         serde_json::json!([{ "name": "Swapped", "body": "different" }]),
     ));
 
@@ -648,7 +647,7 @@ async fn apply_rejects_a_source_that_changed_since_the_preview() {
         .runtime
         .prompts()
         .apply_import(PromptImportDecision {
-            path: path.clone(),
+            source: swapped,
             expected_source_sha256: preview.source_sha256.clone(),
             mode: PromptImportMode::Merge,
             conflict_actions: BTreeMap::new(),
@@ -670,16 +669,16 @@ async fn apply_defaults_absent_keys_to_the_requested_mode() {
         "custom": [{ "id": "c1", "name": "Mine", "body": "old" }],
     }))
     .await;
-    let path = fx.write_source(file(
+    let source = fx.source_text(file(
         serde_json::json!([{ "name": "Mine", "body": "incoming" }]),
     ));
-    let preview = fx.preview(&path, &[]).await;
+    let preview = fx.preview(&source, &[]).await;
 
     let result = fx
         .runtime
         .prompts()
         .apply_import(PromptImportDecision {
-            path: path.clone(),
+            source: source.clone(),
             expected_source_sha256: preview.source_sha256.clone(),
             mode: PromptImportMode::Replace,
             conflict_actions: BTreeMap::new(),

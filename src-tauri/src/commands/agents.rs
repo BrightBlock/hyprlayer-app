@@ -17,7 +17,7 @@ pub async fn list_agent_files(
     project_path: Option<String>,
 ) -> CmdResult<Vec<AgentFile>> {
     state
-        .client
+        .client()?
         .list_agent_files(project_path)
         .await
         .map_err(AppError::from)
@@ -27,7 +27,7 @@ pub async fn list_agent_files(
 #[specta::specta]
 pub async fn save_agent_file(state: State<'_, AppState>, agent: AgentFile) -> CmdResult<AgentFile> {
     state
-        .client
+        .client()?
         .save_agent_file(agent)
         .await
         .map_err(AppError::from)
@@ -37,7 +37,7 @@ pub async fn save_agent_file(state: State<'_, AppState>, agent: AgentFile) -> Cm
 #[specta::specta]
 pub async fn delete_agent_file(state: State<'_, AppState>, path: String) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .delete_agent_file(path)
         .await
         .map_err(AppError::from)
@@ -52,7 +52,7 @@ pub async fn new_agent_file_path(
     project_path: Option<String>,
 ) -> CmdResult<Option<String>> {
     state
-        .client
+        .client()?
         .new_agent_file_path(name, source, project_path)
         .await
         .map_err(AppError::from)
@@ -65,7 +65,7 @@ pub async fn agent_context_files(
     project_path: Option<String>,
 ) -> CmdResult<Vec<AgentContextFile>> {
     state
-        .client
+        .client()?
         .agent_context_files(project_path)
         .await
         .map_err(AppError::from)
@@ -78,7 +78,7 @@ pub async fn agent_mcp_servers(
     project_path: Option<String>,
 ) -> CmdResult<Vec<AgentMcpServer>> {
     state
-        .client
+        .client()?
         .agent_mcp_servers(project_path)
         .await
         .map_err(AppError::from)
@@ -91,7 +91,7 @@ pub async fn agent_skills(
     project_path: Option<String>,
 ) -> CmdResult<Vec<AgentSkill>> {
     state
-        .client
+        .client()?
         .agent_skills(project_path)
         .await
         .map_err(AppError::from)
@@ -105,7 +105,7 @@ pub async fn export_agent_file(
     overlay: AgentOverlay,
 ) -> CmdResult<String> {
     state
-        .client
+        .client()?
         .export_agent_file(agent, overlay)
         .await
         .map_err(AppError::from)
@@ -141,7 +141,7 @@ impl From<BundleStatus> for AgentBundleStatus {
 #[specta::specta]
 pub async fn agent_bundle_status(state: State<'_, AppState>) -> CmdResult<AgentBundleStatus> {
     state
-        .client
+        .client()?
         .agent_bundle_status()
         .await
         .map(AgentBundleStatus::from)
@@ -168,7 +168,7 @@ impl From<BundleReport> for AgentBundleReport {
 #[specta::specta]
 pub async fn update_agent_bundle(state: State<'_, AppState>) -> CmdResult<AgentBundleReport> {
     state
-        .client
+        .client()?
         .update_agent_bundle()
         .await
         .map(AgentBundleReport::from)
@@ -179,7 +179,7 @@ pub async fn update_agent_bundle(state: State<'_, AppState>) -> CmdResult<AgentB
 #[specta::specta]
 pub async fn agent_bundle_versions(state: State<'_, AppState>) -> CmdResult<AiVersions> {
     state
-        .client
+        .client()?
         .agent_bundle_versions()
         .await
         .map_err(AppError::from)
@@ -214,7 +214,7 @@ impl From<BundleInstall> for AgentBundleInstall {
 #[specta::specta]
 pub async fn repair_agent_bundle(state: State<'_, AppState>) -> CmdResult<AgentBundleInstall> {
     state
-        .client
+        .client()?
         .repair_agent_bundle()
         .await
         .map(AgentBundleInstall::from)
@@ -228,7 +228,7 @@ pub async fn install_agent_bundle_version(
     version: Option<String>,
 ) -> CmdResult<AgentBundleInstall> {
     state
-        .client
+        .client()?
         .install_agent_bundle_version(version)
         .await
         .map(AgentBundleInstall::from)

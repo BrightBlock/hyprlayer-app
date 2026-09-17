@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use hyprlayer_core::runtime::prompts as core_prompts;
 use hyprlayer_core::settings::PromptSettings;
+use hyprlayer_core::CoreError;
 
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
@@ -101,7 +103,7 @@ pub enum PromptConflictAction {
 #[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptImportDecision {
-    pub path: String,
+    pub source: String,
     pub expected_source_sha256: String,
     pub mode: PromptImportMode,
     pub conflict_actions: BTreeMap<String, PromptConflictAction>,
@@ -111,7 +113,7 @@ pub struct PromptImportDecision {
 impl From<PromptImportDecision> for core_prompts::PromptImportDecision {
     fn from(decision: PromptImportDecision) -> Self {
         Self {
-            path: decision.path,
+            source: decision.source,
             expected_source_sha256: decision.expected_source_sha256,
             mode: match decision.mode {
                 PromptImportMode::Merge => core_prompts::PromptImportMode::Merge,
@@ -176,7 +178,6 @@ pub struct PromptExportEntry {
 #[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptExportRequest {
-    pub path: String,
     pub entries: Vec<PromptExportEntry>,
     pub include_chords: bool,
     pub include_overrides: bool,
@@ -186,7 +187,6 @@ pub struct PromptExportRequest {
 impl From<PromptExportRequest> for core_prompts::PromptExportRequest {
     fn from(req: PromptExportRequest) -> Self {
         Self {
-            path: req.path,
             selection: core_prompts::PromptExportSelection {
                 entries: req
                     .entries
@@ -209,14 +209,14 @@ impl From<PromptExportRequest> for core_prompts::PromptExportRequest {
 #[derive(Debug, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptExportResult {
-    pub path: String,
+    pub content: String,
     pub prompt_count: u32,
 }
 
 impl From<core_prompts::PromptExportResult> for PromptExportResult {
     fn from(result: core_prompts::PromptExportResult) -> Self {
         Self {
-            path: result.path,
+            content: result.content,
             prompt_count: result.prompt_count,
         }
     }
@@ -226,15 +226,12 @@ impl From<core_prompts::PromptExportResult> for PromptExportResult {
 #[specta::specta]
 pub async fn preview_prompt_import(
     state: State<'_, AppState>,
-    path: String,
+    source: String,
     taken_chords: Vec<String>,
 ) -> CmdResult<PromptImportPreview> {
-    if let Some(err) = state.remote_unsupported("Importing prompts from a local file") {
-        return Err(err);
-    }
     state
-        .client
-        .preview_prompt_import(path, taken_chords)
+        .client()?
+        .preview_prompt_import(source, taken_chords)
         .await
         .map(PromptImportPreview::from)
         .map_err(AppError::from)
@@ -247,7 +244,7 @@ pub async fn apply_prompt_import(
     decision: PromptImportDecision,
 ) -> CmdResult<PromptImportResult> {
     state
-        .client
+        .client()?
         .apply_prompt_import(decision.into())
         .await
         .map(PromptImportResult::from)
@@ -260,13 +257,82 @@ pub async fn export_prompts(
     state: State<'_, AppState>,
     request: PromptExportRequest,
 ) -> CmdResult<PromptExportResult> {
-    if let Some(err) = state.remote_unsupported("Exporting prompts to a local file") {
-        return Err(err);
-    }
     state
-        .client
+        .client()?
         .export_prompts(request.into())
         .await
         .map(PromptExportResult::from)
         .map_err(AppError::from)
+}
+
+/// A client-side file write, in the same class as `reveal_doc`
+/// (`commands/library.rs`) — it acts on the machine the user picked the path
+/// on, which is always the client, so it needs no remote guard.
+#[tauri::command]
+#[specta::specta]
+pub async fn write_prompt_export(path: String, contents: String) -> CmdResult<String> {
+    if contents.len() as u64 > core_prompts::MAX_PROMPTS_FILE_BYTES {
+        return Err(AppError::from(CoreError::PromptsFileTooLarge));
+    }
+    let ext = format!(".{}", core_prompts::PROMPTS_FILE_EXT);
+    let final_path = if path.ends_with(&ext) {
+        path
+    } else if Path::new(&path).extension().is_some() {
+        return Err(AppError::from(CoreError::PromptsFileInvalid {
+            detail: format!(
+                "Prompt exports must use the .{} extension.",
+                core_prompts::PROMPTS_FILE_EXT
+            ),
+        }));
+    } else {
+        format!("{path}{ext}")
+    };
+    tokio::fs::write(&final_path, contents.as_bytes())
+        .await
+        .map_err(|e| AppError::internal(format!("write {final_path}: {e}")))?;
+    Ok(final_path)
+}
+
+/// The read half of `write_prompt_export`: also client-side, also unguarded.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_prompt_import(path: String) -> CmdResult<String> {
+    let meta = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| AppError::internal(format!("read {path}: {e}")))?;
+    if meta.len() > core_prompts::MAX_PROMPTS_FILE_BYTES {
+        return Err(AppError::from(CoreError::PromptsFileTooLarge));
+    }
+    tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| AppError::internal(format!("read {path}: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn write_prompt_export_appends_the_extension_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("share");
+        let path = write_prompt_export(target.display().to_string(), "{}".into())
+            .await
+            .unwrap();
+
+        assert!(path.ends_with(".hlprompts"), "{path}");
+        assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), "{}");
+    }
+
+    #[tokio::test]
+    async fn write_prompt_export_refuses_a_different_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("share.txt");
+        let err = write_prompt_export(target.display().to_string(), "{}".into())
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code, "prompts_file_invalid");
+        assert!(!target.exists());
+    }
 }

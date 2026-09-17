@@ -204,7 +204,7 @@ Two trees deliberately stay off the helper:
 
 ### Icon buttons
 
-Two tiers:
+Three tiers:
 
 - **Chrome — `h-8 w-8 rounded-md`.** `IconButton` (`ui.tsx:741-755`), for a
   control that sits in a toolbar or header.
@@ -214,6 +214,13 @@ Two tiers:
   named under "Hover and selection" above. No exported component — just the
   class pair, applied at each site (documented on `IconButton` itself,
   `:735-740`).
+- **Rail — `h-8 w-8 rounded-[10px]`.** `RAIL_ICON_BASE` and `railNavClass`
+  (`ui.tsx:655-662`, graduated out of `Root.tsx` by the remote-host-UI plan's
+  Phase 3 so a feature component could reach them without a `routes/`
+  import), for the left icon rail's Projects/Library/Prompts/Agents/Archive/
+  host indicator/Scripts/Settings buttons. Selected state is `RAIL_ACTIVE_BAR`
+  (`ui.tsx:657-659`), a left `::before` bar, not a background fill — the one
+  place this vocabulary marks "active" without a fill.
 
 Two off-scale sizes the app used to carry are gone: `h-6.5 w-6.5` (the Agents
 row kebab, `AgentList.tsx:599` — that file, and the per-row kebab it drew, no

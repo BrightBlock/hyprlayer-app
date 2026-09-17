@@ -1,6 +1,4 @@
 import { useEffect, useState } from "react";
-import { homeDir, join } from "@tauri-apps/api/path";
-import { open } from "@tauri-apps/plugin-dialog";
 
 import type { CreateProjectOutcome, Project } from "@/lib/bindings";
 import { events } from "@/lib/bindings";
@@ -16,6 +14,7 @@ import {
   Toggle,
 } from "@/components/ui";
 import { HyprlayerMark } from "@/components/Logo";
+import { PathField } from "@/components/PathField";
 import { UploadCloudIcon } from "@/components/icons";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { githubRepoRef } from "@/lib/github";
@@ -174,23 +173,15 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
       setSource((cur) => (cur.mode === "clone" && !cur.location ? { ...cur, location: root } : cur));
       setSpec((cur) => (cur.location ? cur : { ...cur, location: root }));
     };
-    const configured = bootstrap.data?.settings.reposRoot;
-    if (configured) {
-      apply(configured);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const def = await join(await homeDir(), "hyprlayer", "repos");
-        if (!cancelled) apply(def);
-      } catch {
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [bootstrap.data?.settings.reposRoot]);
+    // The server answers this, because only it can: it resolves the configured
+    // `repos_root` or its own default, on the machine the clone actually lands
+    // on. This used to be `join(homeDir(), "hyprlayer", "repos")` — *this*
+    // machine's home — which against a remote host prefilled a macOS path into
+    // a Linux server and failed at its unwritable root with a bare
+    // "Permission denied (os error 13)" naming no path.
+    const root = bootstrap.data?.defaultReposRoot;
+    if (root) apply(root);
+  }, [bootstrap.data?.defaultReposRoot]);
 
   useEffect(() => {
     if (!isCreate || !opId) return;
@@ -402,18 +393,6 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
       },
       { onSuccess: () => succeed(stalled.project) },
     );
-  };
-
-  const browseNpRepo = async () => {
-    try {
-      const picked = await open({
-        directory: true,
-        multiple: false,
-        title: "Choose the thoughts repository",
-      });
-      if (typeof picked === "string") setNpRepo(picked);
-    } catch {
-    }
   };
 
   return (
@@ -639,23 +618,13 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                       />
                     </Field>
                     <Field label="Thoughts repository path">
-                      <div className="flex gap-2">
-                        <TextInput
-                          value={npRepo}
-                          onChange={(e) => setNpRepo(e.target.value)}
-                          placeholder={`~/${npName.trim() || "work"}-thoughts`}
-                          spellCheck={false}
-                          className="font-mono text-xs"
-                          disabled={createProfile.isPending}
-                        />
-                        <Button
-                          type="button"
-                          onClick={() => void browseNpRepo()}
-                          disabled={createProfile.isPending}
-                        >
-                          Browse
-                        </Button>
-                      </div>
+                      <PathField
+                        value={npRepo}
+                        onChange={setNpRepo}
+                        placeholder={`~/${npName.trim() || "work"}-thoughts`}
+                        disabled={createProfile.isPending}
+                        browseTitle="Choose the thoughts repository"
+                      />
                     </Field>
                     <p className="font-mono text-xs text-ink-dim/80">
                       repos dir: repos · global dir: global

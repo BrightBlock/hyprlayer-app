@@ -2,6 +2,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { scopedKey } from "@/lib/hostScope";
+
 import type { LibrarySearch } from "./librarySearch";
 
 type LibraryScopeStore = {
@@ -26,6 +28,6 @@ export const useLibraryScope = create<LibraryScopeStore>()(
           lastSearchByProject: { ...s.lastSearchByProject, [project]: search },
         })),
     }),
-    { name: "hyprlayer:library-scope", version: 1 },
+    { name: scopedKey("hyprlayer:library-scope"), version: 1 },
   ),
 );

@@ -68,7 +68,17 @@ import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "@/lib/keybindings/registry";
 import { useKeybindings } from "@/lib/keybindings/useKeybindings";
 import type { Overrides } from "@/lib/keybindings/resolve";
-import { ContextMenu, ContextMenuItem, MenuItem, Popover, rowClass, RowSpine, Spinner } from "@/components/ui";
+import {
+  ContextMenu,
+  ContextMenuItem,
+  MenuItem,
+  Popover,
+  RAIL_ICON_BASE,
+  railNavClass,
+  rowClass,
+  RowSpine,
+  Spinner,
+} from "@/components/ui";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { HyprlayerMark } from "@/components/Logo";
 import { WindowControls } from "@/components/WindowControls";
@@ -97,6 +107,8 @@ import { SearchPalette } from "@/features/search/SearchPalette";
 import { toggleSearch } from "@/features/search/searchStore";
 import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
 import { ServerDisconnectedNotice } from "@/features/system/ServerDisconnectedNotice";
+import { HostIndicator } from "@/features/hosts/HostIndicator";
+import { HostsDialog } from "@/features/hosts/HostsDialog";
 import { ConfirmQuitDialog } from "@/features/system/ConfirmQuitDialog";
 import { PromptPalette } from "@/features/prompts/PromptPalette";
 import { PromptArgsDialog } from "@/features/prompts/PromptArgsDialog";
@@ -378,18 +390,7 @@ function routeSection(pathname: string): string {
 const topIconClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink";
 
-const RAIL_ICON_BASE =
-  "relative flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors";
 const railHomeClass = `${RAIL_ICON_BASE} bg-accent text-white shadow-sm`;
-const RAIL_ACTIVE_BAR =
-  "before:absolute before:-left-2 before:top-1/2 before:h-8 before:w-[2px] " +
-  "before:-translate-y-1/2 before:rounded-r-full before:bg-accent before:content-['']";
-const railNavClass = (active: boolean): string =>
-  `${RAIL_ICON_BASE} ${
-    active
-      ? `text-ink ${RAIL_ACTIVE_BAR}`
-      : "text-ink-dim hover:bg-edge/60 hover:text-ink"
-  }`;
 
 function headerAppIcon(app: EditorTarget | undefined): ReactNode {
   if (!app) return <EditorGlyph />;
@@ -1252,6 +1253,7 @@ export function Root() {
             >
               <ArchiveIcon size={16} />
             </button>
+            <HostIndicator />
             <button
               type="button"
               onClick={toggleScriptsDock}
@@ -1826,6 +1828,7 @@ export function Root() {
       <Toast />
       <FullDiskAccessNotice />
       <ServerDisconnectedNotice />
+      <HostsDialog />
       <ConfirmQuitDialog />
       <ResizeGrips />
     </div>

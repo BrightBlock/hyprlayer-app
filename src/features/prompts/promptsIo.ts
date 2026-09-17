@@ -33,12 +33,10 @@ export function exportFileName(name: string): string {
 }
 
 export function buildExportRequest(
-  path: string,
   entries: ExportEntry[],
   opts: ExportOptions & { source?: string | null },
 ): PromptExportRequest {
   return {
-    path,
     entries: entries.map((e) => ({
       name: e.name,
       body: e.body,

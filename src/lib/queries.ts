@@ -12,6 +12,8 @@ import {
   type CreateDocInput,
   type FmPatchDto,
   type CreateProjectRequest,
+  type Host,
+  type HostsFile,
   type MergeMethod,
   type Project,
   type ScriptKind,
@@ -38,6 +40,50 @@ export function useBootstrap() {
   return useQuery({
     queryKey: ["bootstrap"],
     queryFn: () => unwrap(commands.getBootstrap()),
+  });
+}
+
+// The level read behind the connect/recovery surface: asked at mount, on window
+// focus, and when `serverDisconnected` fires. Nothing polls.
+export function useConnectionStatus() {
+  return useQuery({
+    queryKey: ["connection-status"],
+    queryFn: () => unwrap(commands.connectionStatus()),
+    staleTime: 0,
+  });
+}
+
+export function useHosts() {
+  return useQuery({
+    queryKey: ["hosts"],
+    queryFn: () => unwrap(commands.listHosts()),
+    staleTime: Infinity,
+  });
+}
+
+export function useSaveHosts() {
+  return useMutation({
+    mutationFn: (file: HostsFile) => unwrap(commands.saveHosts(file)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["hosts"] });
+    },
+  });
+}
+
+export function useTestHostConnection() {
+  return useMutation({
+    mutationFn: (host: Host) => unwrap(commands.testHostConnection(host)),
+  });
+}
+
+// One SSH round trip, asked only while the install offer is on screen — which
+// is why it is not cached past the component that mounts it.
+export function useHostProvisioning(host: Host) {
+  return useQuery({
+    queryKey: ["host-provisioning", host.destination],
+    queryFn: () => unwrap(commands.inspectHostProvisioning(host)),
+    staleTime: 0,
+    gcTime: 0,
   });
 }
 

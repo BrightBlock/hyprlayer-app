@@ -1205,6 +1205,10 @@ impl Dispatch for Server {
             .wire()
     }
 
+    async fn read_attachment(&self, path: String) -> Result<Vec<u8>, WireError> {
+        self.runtime.attachments().read(path).await.wire()
+    }
+
     async fn set_binary_override(
         &self,
         kind: BinaryKind,
@@ -1633,12 +1637,15 @@ impl Dispatch for Server {
 
     async fn preview_prompt_import(
         &self,
-        path: String,
+        source: String,
         taken_chords: Vec<String>,
     ) -> Result<PromptImportPreview, WireError> {
         self.runtime
             .prompts()
-            .preview_import(PromptImportRequest { path, taken_chords })
+            .preview_import(PromptImportRequest {
+                source,
+                taken_chords,
+            })
             .await
             .wire()
     }

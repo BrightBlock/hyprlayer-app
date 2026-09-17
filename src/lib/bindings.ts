@@ -125,6 +125,14 @@ export const commands = {
 	listActiveSessions: () => typedError<ActiveSessionView[], AppError>(__TAURI_INVOKE("list_active_sessions")),
 	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
 	saveAttachment: (workstreamId: string, fileName: string, data: number[]) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
+	/**
+	 *  The read half of `save_attachment` — carries an attachment's bytes back
+	 *  across the wire, so the client can render one that lives on a remote
+	 *  server. Works identically whether the server is local or remote, since it
+	 *  always goes through `state.client()`; the frontend decides when to call it
+	 *  based on connection state. No remote guard.
+	 */
+	readAttachment: (path: string) => typedError<number[], AppError>(__TAURI_INVOKE("read_attachment", { path })),
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
 	detectCliInstallMethods: () => typedError<CliInstallMethod[], AppError>(__TAURI_INVOKE("detect_cli_install_methods")),
@@ -183,9 +191,17 @@ export const commands = {
 	getAiStatus: () => typedError<AiStatus, AppError>(__TAURI_INVOKE("get_ai_status")),
 	probeDefaultThoughts: () => __TAURI_INVOKE<ThoughtsProbe>("probe_default_thoughts"),
 	initThoughtsRepo: (user: string, source: ThoughtsSource) => typedError<Bootstrap, AppError>(__TAURI_INVOKE("init_thoughts_repo", { user, source })),
-	previewPromptImport: (path: string, takenChords: string[]) => typedError<PromptImportPreview, AppError>(__TAURI_INVOKE("preview_prompt_import", { path, takenChords })),
+	previewPromptImport: (source: string, takenChords: string[]) => typedError<PromptImportPreview, AppError>(__TAURI_INVOKE("preview_prompt_import", { source, takenChords })),
 	applyPromptImport: (decision: PromptImportDecision) => typedError<PromptImportResult, AppError>(__TAURI_INVOKE("apply_prompt_import", { decision })),
 	exportPrompts: (request: PromptExportRequest) => typedError<PromptExportResult, AppError>(__TAURI_INVOKE("export_prompts", { request })),
+	/**
+	 *  A client-side file write, in the same class as `reveal_doc`
+	 *  (`commands/library.rs`) — it acts on the machine the user picked the path
+	 *  on, which is always the client, so it needs no remote guard.
+	 */
+	writePromptExport: (path: string, contents: string) => typedError<string, AppError>(__TAURI_INVOKE("write_prompt_export", { path, contents })),
+	/**  The read half of `write_prompt_export`: also client-side, also unguarded. */
+	readPromptImport: (path: string) => typedError<string, AppError>(__TAURI_INVOKE("read_prompt_import", { path })),
 	listAgentFiles: (projectPath: string | null) => typedError<AgentFile[], AppError>(__TAURI_INVOKE("list_agent_files", { projectPath })),
 	saveAgentFile: (agent: AgentFile) => typedError<AgentFile, AppError>(__TAURI_INVOKE("save_agent_file", { agent })),
 	deleteAgentFile: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_agent_file", { path })),
@@ -199,6 +215,40 @@ export const commands = {
 	agentBundleVersions: () => typedError<AiVersions, AppError>(__TAURI_INVOKE("agent_bundle_versions")),
 	installAgentBundleVersion: (version: string | null) => typedError<AgentBundleInstall, AppError>(__TAURI_INVOKE("install_agent_bundle_version", { version })),
 	repairAgentBundle: () => typedError<AgentBundleInstall, AppError>(__TAURI_INVOKE("repair_agent_bundle")),
+	/**
+	 *  Reads `hosts.json` directly — deciding which server to reach is
+	 *  necessarily local, since there is no server yet to ask (plan Phase 1 §7).
+	 */
+	listHosts: () => typedError<HostsFile, AppError>(__TAURI_INVOKE("list_hosts")),
+	/**
+	 *  Writes the whole file. There is one window and one writer, so there is
+	 *  nothing to merge (`BranchPrefixEditor`'s shape, plan Phase 1 §7).
+	 */
+	saveHosts: (file: HostsFile) => typedError<null, AppError>(__TAURI_INVOKE("save_hosts", { file })),
+	/**
+	 *  JetBrains Gateway's explicit "Test Connection" (plan Phase 1 §3): probes
+	 *  the host without touching `AppState` or leaving a relay behind.
+	 */
+	testHostConnection: (host: Host) => typedError<HostProbe, AppError>(__TAURI_INVOKE("test_host_connection", { host })),
+	/**  The level read `useConnectionStatus` polls at mount and on focus. */
+	connectionStatus: () => typedError<ConnectionStatus, AppError>(__TAURI_INVOKE("connection_status")),
+	/**
+	 *  Reconnects in place after a drop, so a rebuilt server or a slept laptop
+	 *  costs no relaunch (plan Phase 8 §4). Same host only: the connect sequence is
+	 *  re-runnable, the profile is not.
+	 */
+	reconnectServer: () => typedError<ConnectionStatus, AppError>(__TAURI_INVOKE("reconnect_server")),
+	/**
+	 *  What the connect surface needs before it can offer an install: the host's
+	 *  platform, whether this version is already there, and what else this client
+	 *  family has put there (plan Phase 7 §4).
+	 */
+	inspectHostProvisioning: (host: Host) => typedError<HostProvisioning, AppError>(__TAURI_INVOKE("inspect_host_provisioning", { host })),
+	/**
+	 *  Installs this client's server on the host. A fresh `Channel` per invoke —
+	 *  one is single-use, and reusing it silently drops the second call's steps.
+	 */
+	provisionHost: (host: Host, onStep: Channel<ProvisionStep>) => typedError<null, AppError>(__TAURI_INVOKE("provision_host", { host, onStep })),
 };
 
 /** Events */
@@ -396,6 +446,12 @@ export type BinariesChanged = null;
 
 export type BinaryKind = "hyprlayer" | "claude" | "opencode" | "codex" | "gh" | "git" | "ollama";
 
+/**
+ *  Where a local binary for another platform came from. The UI reports one
+ *  fewer step for `Cache`/`Beside` — there is nothing to download or verify.
+ */
+export type BinarySource = "cache" | "beside" | "download";
+
 export type BinaryState = { state: "ok" } | { state: "missing" } | { state: "tooOld"; min: string };
 
 export type BinaryStatus = {
@@ -414,6 +470,7 @@ export type Bootstrap = {
 	binaries: BinaryStatus[],
 	settings: AppSettings,
 	promptDefaults: PromptDefaults,
+	defaultReposRoot: string,
 };
 
 export type BranchPrefix = {
@@ -549,6 +606,24 @@ export type ConfigChanged = null;
 
 export type ConfigSummary = { state: "missing"; path: string } | { state: "error"; path: string; code: string; message: string; remedy: string | null } | { state: "ready"; path: string; user: string; backendKind: string; configured: boolean };
 
+export type ConnectionState = "connected" | 
+/**  Never established this launch. */
+"failed" | 
+/**
+ *  Was connected and the stream ended — the only state that can still
+ *  promise sessions and terminals are running on the far side.
+ */
+"lost";
+
+export type ConnectionStatus = {
+	state: ConnectionState,
+	/**  `None` for the local server. */
+	host: Host | null,
+	serverVersion: number | null,
+	/**  `Some` for `Failed` and `Lost`. */
+	error: AppError | null,
+};
+
 export type CreateDocInput = {
 	projectRepoPath: string | null,
 	scope: string,
@@ -592,6 +667,12 @@ export type DirBrowseEntry = {
 	name: string,
 	isDir: boolean,
 	isRepo: boolean,
+	/**
+	 *  The server's own join of `name` onto the listed directory — the
+	 *  client never guesses a separator for a server whose OS it does not
+	 *  know (plan Phase 1 §8).
+	 */
+	path: string,
 };
 
 export type DirEntry = {
@@ -737,6 +818,51 @@ export type HealthCheck = {
 
 export type HealthReport = {
 	checks: HealthCheck[],
+};
+
+export type Host = {
+	/**  The `ssh` destination, e.g. `nexus` or `jt@nexus.local`. */
+	destination: string,
+	label: string,
+};
+
+export type HostProbe = {
+	ok: boolean,
+	serverVersion: number | null,
+	error: AppError | null,
+};
+
+export type HostProvisioning = {
+	version: string,
+	triple: string,
+	state: HostServerState,
+	/**
+	 *  Every version directory under `~/.hyprlayer/server`. A non-empty list is
+	 *  what separates "offer the install" from "a version bump on a host the
+	 *  user already accepted" (plan Phase 7 §4) — derived from the host's own
+	 *  state rather than a flag this side would have to keep in step with it.
+	 */
+	installedVersions: string[],
+	source: BinarySource,
+};
+
+/**  Whether the host already holds the binary this client is about to run. */
+export type HostServerState = 
+/**  Same path, and the same bytes wherever we could compare them. */
+"ready" | 
+/**  Nothing at the version-keyed path. */
+"missing" | 
+/**
+ *  Present at the version-keyed path, different bytes. An unreleased build
+ *  and the release it descends from share a version, so they share a
+ *  directory name (plan Phase 7 §3.2).
+ */
+"stale";
+
+export type HostsFile = {
+	hosts?: Host[],
+	/**  The active host's `destination`, or `None` for the local server. */
+	active?: string | null,
 };
 
 export type KeybindingSettings = {
@@ -912,7 +1038,6 @@ export type PromptExportEntry = {
 };
 
 export type PromptExportRequest = {
-	path: string,
 	entries: PromptExportEntry[],
 	includeChords: boolean,
 	includeOverrides: boolean,
@@ -920,7 +1045,7 @@ export type PromptExportRequest = {
 };
 
 export type PromptExportResult = {
-	path: string,
+	content: string,
 	promptCount: number,
 };
 
@@ -939,7 +1064,7 @@ export type PromptImportConflict = {
 };
 
 export type PromptImportDecision = {
-	path: string,
+	source: string,
 	expectedSourceSha256: string,
 	mode: PromptImportMode,
 	conflictActions: { [key in string]: PromptConflictAction },
@@ -977,6 +1102,8 @@ export type ProviderSettings = {
 	ollama?: OllamaSettings,
 	codex?: CodexSettings,
 };
+
+export type ProvisionStep = "probe" | "download" | "verify" | "upload" | "install" | "done";
 
 export type PullOutcome = { kind: "upToDate" } | { kind: "merged" } | { kind: "conflicts"; files: string[] };
 

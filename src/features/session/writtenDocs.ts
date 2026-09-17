@@ -2,10 +2,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { scopedKey } from "@/lib/hostScope";
+
 import { events } from "@/lib/bindings";
 import type { EventBridge } from "@/lib/events";
 
-import { debouncedJSONStorage } from "./persistedStorage";
+import { debouncedJSONStorage } from "@/lib/persistedStorage";
 import { baseName, docKindForPath } from "./toolDisplay";
 
 export type WrittenDocs = Record<string, string>;
@@ -20,7 +22,7 @@ export function migrateWrittenDocs(): WrittenDocsState {
 
 export const useWrittenDocsStore = create<WrittenDocsState>()(
   persist<WrittenDocsState>(() => ({ byWorkstream: {} }), {
-    name: "hyprlayer:written-docs",
+    name: scopedKey("hyprlayer:written-docs"),
     storage: debouncedJSONStorage<WrittenDocsState>(),
     version: 2,
     migrate: migrateWrittenDocs,

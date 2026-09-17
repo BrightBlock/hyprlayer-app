@@ -16,11 +16,11 @@ pub async fn terminal_open(
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
     let (terminal_id, stream_id, events) = state
-        .client
+        .client()?
         .terminal_open_stream(workstream_id, cols, rows)
         .await
         .map_err(AppError::from)?;
-    pump(state.client.clone(), stream_id, events, on_event);
+    pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(terminal_id)
 }
 
@@ -32,13 +32,13 @@ pub async fn terminal_attach(
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<bool> {
     match state
-        .client
+        .client()?
         .terminal_attach_stream(terminal_id)
         .await
         .map_err(AppError::from)?
     {
         Some((stream_id, events)) => {
-            pump(state.client.clone(), stream_id, events, on_event);
+            pump(state.client()?.clone(), stream_id, events, on_event);
             Ok(true)
         }
         None => Ok(false),
@@ -53,7 +53,7 @@ pub async fn terminal_write(
     data: String,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .terminal_write(terminal_id, data)
         .await
         .map_err(AppError::from)
@@ -68,7 +68,7 @@ pub async fn terminal_resize(
     rows: u16,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .terminal_resize(terminal_id, cols, rows)
         .await
         .map_err(AppError::from)
@@ -78,7 +78,7 @@ pub async fn terminal_resize(
 #[specta::specta]
 pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .terminal_close(terminal_id)
         .await
         .map_err(AppError::from)
@@ -94,11 +94,11 @@ pub async fn spawn_cli_terminal(
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
     let (terminal_id, stream_id, events) = state
-        .client
+        .client()?
         .spawn_cli_terminal_stream(args, cols, rows)
         .await
         .map_err(AppError::from)?;
-    pump(state.client.clone(), stream_id, events, on_event);
+    pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(terminal_id)
 }
 
@@ -112,11 +112,11 @@ pub async fn spawn_shell_terminal(
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
     let (terminal_id, stream_id, events) = state
-        .client
+        .client()?
         .spawn_shell_terminal_stream(command, cols, rows)
         .await
         .map_err(AppError::from)?;
-    pump(state.client.clone(), stream_id, events, on_event);
+    pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(terminal_id)
 }
 
@@ -132,11 +132,11 @@ pub async fn agent_open(
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
     let (terminal_id, stream_id, events) = state
-        .client
+        .client()?
         .agent_open_stream(workstream_id, command, args, cols, rows)
         .await
         .map_err(AppError::from)?;
-    pump(state.client.clone(), stream_id, events, on_event);
+    pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(terminal_id)
 }
 
@@ -149,7 +149,7 @@ pub async fn agent_resize(
     rows: u16,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .agent_resize(terminal_id, cols, rows)
         .await
         .map_err(AppError::from)
@@ -165,7 +165,7 @@ pub async fn capture_agent_session(
     exclude: Vec<String>,
 ) -> CmdResult<Option<String>> {
     state
-        .client
+        .client()?
         .capture_agent_session(workstream_id, engine_id, after_ms, exclude)
         .await
         .map_err(AppError::from)
@@ -179,7 +179,7 @@ pub async fn mint_codex_session(
     command: String,
 ) -> CmdResult<Option<String>> {
     state
-        .client
+        .client()?
         .mint_codex_session(workstream_id, command)
         .await
         .map_err(AppError::from)
@@ -194,7 +194,7 @@ pub async fn agent_session_exists(
     session_id: String,
 ) -> CmdResult<bool> {
     state
-        .client
+        .client()?
         .agent_session_exists(workstream_id, engine_id, session_id)
         .await
         .map_err(AppError::from)
@@ -224,7 +224,7 @@ pub(crate) fn pump(
 #[specta::specta]
 pub async fn default_shell_name(state: State<'_, AppState>) -> CmdResult<String> {
     state
-        .client
+        .client()?
         .default_shell_name()
         .await
         .map_err(AppError::from)

@@ -9,7 +9,7 @@ pub use hyprlayer_core::runtime::providers::ModelWindow;
 #[specta::specta]
 pub async fn claude_model_windows(state: State<'_, AppState>) -> CmdResult<Vec<ModelWindow>> {
     state
-        .client
+        .client()?
         .claude_model_windows()
         .await
         .map_err(AppError::from)

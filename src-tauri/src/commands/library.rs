@@ -105,14 +105,18 @@ impl From<CreateDocInput> for CreateDocumentRequest {
 #[tauri::command]
 #[specta::specta]
 pub async fn query_docs(state: State<'_, AppState>, query: ThoughtQuery) -> CmdResult<QueryResult> {
-    state.client.query_docs(query).await.map_err(AppError::from)
+    state
+        .client()?
+        .query_docs(query)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn get_doc(state: State<'_, AppState>, id: String) -> CmdResult<DocContent> {
     state
-        .client
+        .client()?
         .get_doc(id)
         .await
         .map(DocContent::from)
@@ -128,7 +132,7 @@ pub async fn save_doc(
     base_mtime_ms: f64,
 ) -> CmdResult<DocMeta> {
     state
-        .client
+        .client()?
         .save_doc(id, content, base_mtime_ms)
         .await
         .map_err(AppError::from)
@@ -143,7 +147,7 @@ pub async fn patch_doc_frontmatter(
     base_mtime_ms: f64,
 ) -> CmdResult<DocMeta> {
     state
-        .client
+        .client()?
         .patch_doc_frontmatter(id, patch.into(), base_mtime_ms)
         .await
         .map_err(AppError::from)
@@ -153,7 +157,7 @@ pub async fn patch_doc_frontmatter(
 #[specta::specta]
 pub async fn create_doc(state: State<'_, AppState>, input: CreateDocInput) -> CmdResult<DocMeta> {
     state
-        .client
+        .client()?
         .create_doc(input.into())
         .await
         .map_err(AppError::from)
@@ -166,7 +170,7 @@ pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()>
         return Err(err);
     }
     let path = state
-        .client
+        .client()?
         .resolve_doc_path(id)
         .await
         .map_err(AppError::from)?;
@@ -177,7 +181,11 @@ pub async fn reveal_doc(state: State<'_, AppState>, id: String) -> CmdResult<()>
 #[tauri::command]
 #[specta::specta]
 pub async fn doc_web_url(state: State<'_, AppState>, id: String) -> CmdResult<Option<String>> {
-    state.client.doc_web_url(id).await.map_err(AppError::from)
+    state
+        .client()?
+        .doc_web_url(id)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -187,7 +195,7 @@ pub async fn get_thoughts_git_status(
     project_path: String,
 ) -> CmdResult<ThoughtsRepoStatus> {
     state
-        .client
+        .client()?
         .get_thoughts_git_status(project_path)
         .await
         .map_err(AppError::from)

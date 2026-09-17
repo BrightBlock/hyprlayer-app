@@ -19,7 +19,7 @@ pub async fn get_scripts(
 ) -> CmdResult<ScriptSettings> {
     ensure_registered_project(&state, &project_path).await?;
     state
-        .client
+        .client()?
         .get_scripts(project_path)
         .await
         .map_err(AppError::from)
@@ -34,7 +34,7 @@ pub async fn set_scripts(
 ) -> CmdResult<()> {
     ensure_registered_project(&state, &project_path).await?;
     state
-        .client
+        .client()?
         .set_scripts(project_path, scripts)
         .await
         .map_err(AppError::from)
@@ -47,7 +47,7 @@ pub async fn get_script_runtime(
     workstream_id: String,
 ) -> CmdResult<ScriptRuntime> {
     state
-        .client
+        .client()?
         .get_script_runtime(workstream_id)
         .await
         .map_err(AppError::from)
@@ -57,7 +57,7 @@ pub async fn get_script_runtime(
 #[specta::specta]
 pub async fn list_running_scripts(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
     state
-        .client
+        .client()?
         .list_running_scripts()
         .await
         .map_err(AppError::from)
@@ -71,7 +71,7 @@ pub async fn get_script_output(
     kind: ScriptKind,
 ) -> CmdResult<Option<String>> {
     state
-        .client
+        .client()?
         .get_script_output(workstream_id, kind)
         .await
         .map_err(AppError::from)
@@ -86,7 +86,7 @@ pub async fn script_clear_output(
     terminal_id: Option<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .script_clear_output(workstream_id, kind, terminal_id)
         .await
         .map_err(AppError::from)
@@ -107,11 +107,11 @@ pub async fn script_run(
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<String> {
     let (terminal_id, stream_id, events) = state
-        .client
+        .client()?
         .script_run_stream(workstream_id, kind, cols, rows)
         .await
         .map_err(AppError::from)?;
-    pump(state.client.clone(), stream_id, events, on_event);
+    pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(terminal_id)
 }
 
@@ -119,7 +119,7 @@ pub async fn script_run(
 #[specta::specta]
 pub async fn script_stop(state: State<'_, AppState>, workstream_id: String) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .script_stop(workstream_id)
         .await
         .map_err(AppError::from)

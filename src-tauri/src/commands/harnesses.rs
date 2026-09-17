@@ -19,7 +19,7 @@ pub async fn opencode_catalog(
     force: bool,
 ) -> CmdResult<OpencodeCatalog> {
     state
-        .client
+        .client()?
         .opencode_catalog(force)
         .await
         .map_err(AppError::from)
@@ -48,7 +48,7 @@ pub async fn opencode_set_provider_key(
     let auth_path = crate::opencode_auth_file();
     oc::set_provider_key(&auth_path, &provider, &key).map_err(AppError::from)?;
     state
-        .client
+        .client()?
         .invalidate_opencode_server()
         .await
         .map_err(AppError::from)?;
@@ -64,7 +64,7 @@ pub async fn opencode_remove_provider(
     let auth_path = crate::opencode_auth_file();
     oc::remove_provider(&auth_path, &provider).map_err(AppError::from)?;
     state
-        .client
+        .client()?
         .invalidate_opencode_server()
         .await
         .map_err(AppError::from)?;
@@ -89,7 +89,7 @@ pub async fn opencode_set_default_model(
         });
     }
     state
-        .client
+        .client()?
         .set_opencode_default_model(normalized.clone())
         .await
         .map_err(AppError::from)?;
@@ -103,7 +103,7 @@ pub use hyprlayer_core::runtime::providers::ClaudeAuthStatus;
 #[specta::specta]
 pub async fn claude_auth_status(state: State<'_, AppState>) -> CmdResult<ClaudeAuthStatus> {
     state
-        .client
+        .client()?
         .claude_auth_status()
         .await
         .map_err(AppError::from)
@@ -112,13 +112,13 @@ pub async fn claude_auth_status(state: State<'_, AppState>) -> CmdResult<ClaudeA
 #[tauri::command]
 #[specta::specta]
 pub async fn claude_probe(state: State<'_, AppState>) -> CmdResult<ClaudeProbe> {
-    state.client.claude_probe().await.map_err(AppError::from)
+    state.client()?.claude_probe().await.map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn codex_probe(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
-    state.client.codex_probe().await.map_err(AppError::from)
+    state.client()?.codex_probe().await.map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -128,7 +128,7 @@ pub async fn codex_login_with_api_key(
     api_key: String,
 ) -> CmdResult<CodexProbe> {
     state
-        .client
+        .client()?
         .codex_login_with_api_key(api_key)
         .await
         .map_err(AppError::from)
@@ -137,14 +137,14 @@ pub async fn codex_login_with_api_key(
 #[tauri::command]
 #[specta::specta]
 pub async fn codex_logout(state: State<'_, AppState>) -> CmdResult<CodexProbe> {
-    state.client.codex_logout().await.map_err(AppError::from)
+    state.client()?.codex_logout().await.map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn install_opencode(state: State<'_, AppState>) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .install_opencode()
         .await
         .map_err(AppError::from)

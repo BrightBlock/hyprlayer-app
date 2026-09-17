@@ -18,6 +18,11 @@ const q = vi.hoisted(() => ({
   useCreateProject: vi.fn(),
   usePublishProjectToGithub: vi.fn(),
   useGithubOwners: vi.fn(),
+  useConnectionStatus: vi.fn(
+    (): { data: { host: { destination: string; label: string } | null } } => ({
+      data: { host: null },
+    }),
+  ),
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/useDebounced", () => ({ useDebounced: (v: unknown) => v }));
@@ -58,7 +63,11 @@ function setupHooks(
   const createProject = mutation();
   const publish = mutation();
   q.useBootstrap.mockReturnValue({
-    data: { config: { state: configState }, settings: { reposRoot: "/repos" } },
+    data: {
+      config: { state: configState },
+      settings: { reposRoot: "/repos" },
+      defaultReposRoot: "/repos",
+    },
   });
   q.useCloneProject.mockReturnValue(clone);
   q.useImportProject.mockReturnValue(importProject);
@@ -474,5 +483,44 @@ describe("AddProjectDialog · create new", () => {
       expect.objectContaining({ github: null }),
       expect.anything(),
     );
+  });
+});
+
+describe("AddProjectDialog clone location default", () => {
+  function setupCloneReporting(defaultReposRoot: string | undefined) {
+    const hooks = setupHooks();
+    // Must precede the render: the prefill runs in an effect keyed on this.
+    q.useBootstrap.mockReturnValue({
+      data: { config: { state: "ready" }, settings: {}, defaultReposRoot },
+    });
+    render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("https://github.com/user/thoughts.git"), {
+      target: { value: "https://github.com/acme/widgets.git" },
+    });
+    return hooks;
+  }
+
+  const values = () => screen.getAllByRole("textbox").map((i) => (i as HTMLInputElement).value);
+
+  it("prefills the location the server reports, whichever machine that is", async () => {
+    // A Linux root while this client runs on macOS: the point is that the
+    // answer comes from the machine the clone lands on. This used to be
+    // `join(homeDir(), "hyprlayer", "repos")` — *this* machine's home — which
+    // against a remote host prefilled `/Users/...` into a Linux server and
+    // failed at its unwritable root with a bare "Permission denied (os error
+    // 13)" naming no path.
+    q.useConnectionStatus.mockReturnValue({
+      data: { host: { destination: "nexus", label: "Nexus" } },
+    });
+    setupCloneReporting("/home/jt/hyprlayer/repos");
+    await vi.waitFor(() => expect(values()).toContain("/home/jt/hyprlayer/repos"));
+    expect(values().some((v) => v.startsWith("/Users/"))).toBe(false);
+  });
+
+  it("offers nothing rather than a guess when the server reports no root", async () => {
+    q.useConnectionStatus.mockReturnValue({ data: { host: null } });
+    setupCloneReporting(undefined);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(values().every((v) => !v.includes("hyprlayer/repos"))).toBe(true);
   });
 });

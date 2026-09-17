@@ -7,8 +7,16 @@
 The whole `HyprlayerRuntime` moves out of the Tauri process into a supervised child
 process, `hyprlayer-server`, that the desktop spawns if none is listening and talks to
 over a Unix socket (a named pipe on Windows). The same binary runs standalone on any
-machine you own, reached over `ssh <host> hyprlayer-server relay`. Sessions, terminals,
+machine you own, reached over `ssh <host> … hyprlayer-server relay`. Sessions, terminals,
 and scripts survive quitting the app. ADR-0008's graph gains one node:
+
+*(Amended 2026-09-16 — the elision in that command is load-bearing. Until
+`thoughts/shared/plans/2026-09-09-hyprlayer-server-remote-host-ui.md`'s Phase 7 the client
+ran the bare name and took whatever the host's `PATH` resolved; it now invokes a
+version-keyed absolute path, `~/.hyprlayer/server/<version>/hyprlayer-server relay`, and
+installs that binary itself when it is absent. `PATH` is consulted nowhere on the remote
+side. A packaged `/usr/bin/hyprlayer-server` still serves headless and manual operation and
+is what a systemd unit runs — the two paths coexist and never collide.)*
 
 ```text
 hyprlayer-models
@@ -140,6 +148,48 @@ machine. Against a local server they work unchanged; against a remote server the
 return `CoreError::RemoteUnsupported { action, host }` rather than acting on a path
 that does not exist where the user is looking (plan Phase 5).
 
+A *path-taking* command is not in that set by virtue of taking a path. Six
+`remote_unsupported` guards remain, and each names a reason of its own. Four are
+permanent: `import_attachment` (`src-tauri/src/commands/attachments.rs`), whose bytes
+have to cross the wire — `save_attachment` is the byte-carrying form; `reveal_doc` and
+`detect_editors` (`src-tauri/src/commands/system.rs`), which act on the client's own
+machine; and `set_binary_override` with `Some(path)` (same file), a pick-only flow with
+no text field. The remaining two, `preview_prompt_import` and `export_prompts`
+(`src-tauri/src/commands/prompts.rs`), survive until the plan's Phase 6 gives them
+byte-carrying forms.
+
+*(Amended 2026-09-16 —
+`thoughts/shared/plans/2026-09-09-hyprlayer-server-remote-host-ui.md`'s Phase 5 took
+three guards out, so this section no longer reads as though every path-taking command
+is disabled remotely. `inspect_repo_path`, `import_project`, and `import_local_folder`
+(`src-tauri/src/commands/projects.rs`) were guarded for the path's **provenance**, not
+for what they do with it: the string came from the client's own native file dialog. One
+component owns provenance now — `src/components/PathField.tsx` browses the machine the
+path will be used on, the native dialog locally and `browse_directory`'s server-side
+picker remotely — so the premise is gone. `inspect_repo_path` is in any case a pure
+read whose worst answer for an absent path is `RepoPathStatus::Missing`, which is the
+correct one and the one Add-Project's "a new git repository will be initialised" and
+bare-repo messaging already handles. The removal also fixes `clone_project` and
+`create_project`, which were never guarded and so quietly resolved a client-picked path
+on the server.)*
+
+*(Amended 2026-09-16 — Phase 6 took the remaining two guards out, so four
+`remote_unsupported` guards remain, all permanent: `import_attachment`, `reveal_doc`,
+`detect_editors`, and `set_binary_override` with `Some(path)`. `preview_prompt_import`
+and `export_prompts` no longer take a server-side path at all — import reads a file's
+contents (`source: String`) instead of a path, and export returns content for the
+caller to write, so there is no longer a server-side path whose provenance the guard
+would need to police. Two new commands join this carve-out list for the same reason
+`reveal_doc` is here: `write_prompt_export` and `read_prompt_import`
+(`src-tauri/src/commands/prompts.rs`) are plain client-side file I/O — they act on
+the machine the user picked the path on, which is always the client, so neither takes
+a guard. `read_attachment` (`src-tauri/src/commands/attachments.rs`) is different in
+kind: it is the byte-carrying fix for attachment *rendering*, mirroring
+`save_attachment`'s existing byte-carrying write, and it is an ordinary RPC call that
+works identically whether the server is local or remote — it needs no guard either,
+but for the opposite reason: it always crosses the wire, so there is no client-only
+path to distinguish.)*
+
 ### The memory baseline
 
 Phase 1 of the plan collapsed the PTY layer's two copies of every byte — a 256 KiB
@@ -211,6 +261,59 @@ frontend leak figure and is not comparable.
   with its `ServerDisconnected` type (Phase 4's follow-up, recorded below).
   *(Corrected 2026-09-15 — this said "beyond the one command" while the same
   document already recorded the follow-up by name.)*
+  *(Amended 2026-09-16 — superseded by
+  `thoughts/shared/plans/2026-09-09-hyprlayer-server-remote-host-ui.md`'s Phase 1,
+  which is the one phase across that plan's six that touches `bindings.ts`: four
+  commands (`listHosts`, `saveHosts`, `testHostConnection`, `connectionStatus`),
+  their supporting types (`Host`, `HostsFile`, `HostProbe`, `ConnectionStatus`,
+  `ConnectionState`), and one added field, `path`, on `DirBrowseEntry` — a wire
+  change that bumps `PROTOCOL_VERSION` 2 → 3. The taxonomy grows by four `AppError`
+  codes: `remote_cli_missing`, `remote_auth_failed`, `remote_unreachable`, and
+  `server_unavailable`, classified in `supervisor::classify_ssh_failure` from ssh's
+  exit code and stderr. Two codes the 2026-07-30 plan proposed are deliberately not
+  added: `remote_protocol_mismatch` (the handshake already produces
+  `protocol_version_mismatch` with both versions and a one-sided remedy) and
+  `remote_disconnected` (a mid-session drop already produces `server_disconnected`,
+  now also the trigger for `AppState::mark_lost()`'s level-triggered
+  `connection_status`). The new rule: a remote connect failure opens the app into
+  a recovery state rather than exiting — `setup()` stops calling
+  `std::process::exit(1)` on `supervisor::Outcome::Blocked` — except when the
+  block is `runtime_in_use`: a second Hyprlayer holding this profile's lock is
+  `tauri-plugin-single-instance`'s job, not a connection to recover from, and is
+  the one arm that still shows the blocking dialog and exits.)*
+  *(Amended 2026-09-16 — reversed. This bullet's "bumps `PROTOCOL_VERSION` 2 → 3"
+  and the Phase 2 changelog entry's "`PROTOCOL_VERSION` is 2 from this phase"
+  (below) both describe a compatibility surface that never shipped: at `v0.7.5`,
+  the most recent tag, neither `hyprlayer-server` nor `hyprlayer-proto` existed —
+  both crates live entirely in the unreleased commits since that tag, so no build
+  carrying protocol version 1, 2, or 3 has ever been released. The per-version
+  bumps were ceremony protecting nothing. `PROTOCOL_VERSION` is reset to 1 and
+  stays there until the first release that ships `hyprlayer-server`; wire changes
+  before that release are free, and the constant bumps on every wire-affecting
+  change from that release onward. `remote-host-ui`'s Phase 1 (`DirBrowseEntry`
+  gaining `path`) and Phase 6 (prompts and attachments carrying bytes over the
+  wire, including the new `read_attachment` command) both landed under this
+  policy, at version 1, not 3 or 4.)*
+  *(Amended 2026-09-16 — that plan's Phase 8 adds one more command,
+  `reconnectServer`, and one more code, `host_changed`. **A dropped connection to
+  an unchanged host reconnects in place; a changed host still relaunches.** The
+  asymmetry is not caution: `window.__HYPRLAYER_PROFILE__` is injected at window
+  creation and every scoped zustand store fixes its key at store creation, so the
+  localStorage namespace is a property of the window, not of the connection —
+  reconnecting to the same destination cannot change it, and switching
+  destinations cannot avoid changing it. `AppState::reconnected` swaps the client
+  under the same lock `mark_lost` uses; the connect sequence after
+  `supervisor::Outcome` is shared between launch and reconnect, so the environment
+  overlay is re-applied to what may be a freshly respawned local server; and
+  `mark_lost` now takes the client whose bridge is retiring, so a predecessor
+  cannot declare the live connection lost. Asset-scope registration deliberately
+  does not repeat — it derives from `client.worktree_root()`, unchanged for an
+  unchanged host. This reverses "no automatic retry at all, because nothing
+  respawns the server" for the transport case it was never argued from: the
+  frontend retries at 1s, 2s, 5s, 15s and then every 30s indefinitely, plus
+  immediately on window focus, single-flight, stopping only on success or on
+  `protocol_version_mismatch`, which no amount of retrying resolves. Relaunching
+  is now the answer to exactly one situation: `host_changed`.)*
 - No change to codex's app-wide `startup_lock()`.
 
 ## Rationale
@@ -346,6 +449,10 @@ would need all of the authentication machinery this decision declines to build.
     so both dev configs build the server binary in `beforeDevCommand`; the
     cross-process lock test builds it too, because `cargo test` builds a
     package's binaries only for integration tests and this crate has none.
+    *(Amended 2026-09-16 — reversed; see the fuller amendment under "What we're
+    not doing" above. Nothing has shipped at any `PROTOCOL_VERSION`, so the
+    constant is reset to 1 and stays there until the first release that ships
+    `hyprlayer-server`.)*
     **The handshake's version-mismatch arm now stays open for one more read.**
     `serve_connection` sends `Refused` and then, only if the peer's version is
     strictly greater than `PROTOCOL_VERSION`, reads one further control frame

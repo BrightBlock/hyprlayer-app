@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { scopedKey } from "@/lib/hostScope";
+
 import { events } from "@/lib/bindings";
 import type { EventBridge } from "@/lib/events";
 
@@ -59,7 +61,7 @@ export const useScriptsStore = create<ScriptsState>()(
       dockMaximized: false,
     }),
     {
-      name: "hyprlayer:scripts-dock",
+      name: scopedKey("hyprlayer:scripts-dock"),
       version: 1,
       partialize: (s) => ({
         dockPosition: s.dockPosition,

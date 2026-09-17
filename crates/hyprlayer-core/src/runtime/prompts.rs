@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
@@ -12,7 +11,7 @@ use super::HyprlayerRuntime;
 pub const PROMPTS_FILE_VERSION: u32 = 1;
 pub const PROMPTS_FILE_EXT: &str = "hlprompts";
 
-const MAX_PROMPTS_FILE_BYTES: u64 = 4 * 1024 * 1024;
+pub const MAX_PROMPTS_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Built-in prompt ids paired with the display names an exported file collides
 /// against. The ids key `PromptSettings::builtin_bodies`.
@@ -161,7 +160,9 @@ pub fn parse_prompts_file(text: &str) -> Result<PromptsFile> {
 
 #[derive(Debug, Clone)]
 pub struct PromptImportRequest {
-    pub path: String,
+    /// The `.hlprompts` file's contents, carried by the caller rather than
+    /// read from a path — the file lives on the client, not the server.
+    pub source: String,
     /// Chords already claimed across the app. Built-in prompts resolve theirs
     /// through the frontend keybinding catalog, which core does not own, so the
     /// caller supplies the set rather than core deriving it from settings.
@@ -214,7 +215,9 @@ pub enum PromptConflictAction {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptImportDecision {
-    pub path: String,
+    /// Same contents `preview_import` was handed — the client holds the file,
+    /// not the server, so there is no path to re-read.
+    pub source: String,
     pub expected_source_sha256: String,
     pub mode: PromptImportMode,
     pub conflict_actions: BTreeMap<String, PromptConflictAction>,
@@ -249,13 +252,12 @@ pub struct PromptExportSelection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptExportRequest {
-    pub path: String,
     pub selection: PromptExportSelection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptExportResult {
-    pub path: String,
+    pub content: String,
     pub prompt_count: u32,
 }
 
@@ -277,18 +279,11 @@ struct WireFile {
     prompts: Vec<WireEntry>,
 }
 
-fn read_source(path: &Path) -> Result<String> {
-    let meta = std::fs::metadata(path).map_err(|e| CoreError::PromptsFileUnreadable {
-        path: path.display().to_string(),
-        detail: e.to_string(),
-    })?;
-    if meta.len() > MAX_PROMPTS_FILE_BYTES {
+fn check_size(text: &str) -> Result<()> {
+    if text.len() as u64 > MAX_PROMPTS_FILE_BYTES {
         return Err(CoreError::PromptsFileTooLarge);
     }
-    std::fs::read_to_string(path).map_err(|e| CoreError::PromptsFileUnreadable {
-        path: path.display().to_string(),
-        detail: e.to_string(),
-    })
+    Ok(())
 }
 
 fn sha256_hex(text: &str) -> String {
@@ -352,8 +347,8 @@ impl PromptService<'_> {
 
     pub async fn preview_import(&self, req: PromptImportRequest) -> Result<PromptImportPreview> {
         ensure_running(self.runtime)?;
-        let path = PathBuf::from(&req.path);
-        let text = blocking(move || read_source(&path)).await?;
+        check_size(&req.source)?;
+        let text = req.source;
         let source_sha256 = sha256_hex(&text);
         let file = parse_prompts_file(&text)?;
 
@@ -402,8 +397,11 @@ impl PromptService<'_> {
 
     pub async fn apply_import(&self, decision: PromptImportDecision) -> Result<PromptImportResult> {
         ensure_running(self.runtime)?;
-        let path = PathBuf::from(&decision.path);
-        let text = blocking(move || read_source(&path)).await?;
+        check_size(&decision.source)?;
+        let text = decision.source;
+        // The client now holds the exact bytes it previewed, so this can no
+        // longer catch a concurrent edit (there is no shared file on disk
+        // between the two calls) — it's a corruption/round-trip check now.
         if sha256_hex(&text) != decision.expected_source_sha256 {
             return Err(CoreError::PromptsSourceChanged);
         }
@@ -591,19 +589,10 @@ impl PromptService<'_> {
             .map_err(|e| io_context("serialize prompts", std::io::Error::other(e)))?;
         content.push('\n');
 
-        let path = if req.path.ends_with(&format!(".{PROMPTS_FILE_EXT}")) {
-            req.path
-        } else {
-            format!("{}.{PROMPTS_FILE_EXT}", req.path)
-        };
-        let target = path.clone();
-        blocking(move || {
-            std::fs::write(&target, content.as_bytes())
-                .map_err(|e| io_context(&format!("write {target}"), e))
+        Ok(PromptExportResult {
+            content,
+            prompt_count,
         })
-        .await?;
-
-        Ok(PromptExportResult { path, prompt_count })
     }
 }
 

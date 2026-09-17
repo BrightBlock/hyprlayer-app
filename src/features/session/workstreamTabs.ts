@@ -2,8 +2,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { scopedKey } from "@/lib/hostScope";
+
 import type { Attachment } from "./attachments";
-import { debouncedJSONStorage } from "./persistedStorage";
+import { debouncedJSONStorage } from "@/lib/persistedStorage";
 import {
   isSupportedOpencodeModel,
   type ActionAgentDefaults,
@@ -205,7 +207,7 @@ export function migratePersistedWorkstreamTabs(persisted: unknown): TabsStore {
 
 export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
-    name: "hyprlayer:workstream-tabs",
+    name: scopedKey("hyprlayer:workstream-tabs"),
     storage: debouncedJSONStorage(),
     version: 6,
     migrate: migratePersistedWorkstreamTabs,

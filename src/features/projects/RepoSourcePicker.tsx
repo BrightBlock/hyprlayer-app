@@ -1,8 +1,8 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, type ReactNode } from "react";
 
 import type { GithubRepo } from "@/lib/bindings";
-import { Button, Field, RefreshButton, Spinner, TextInput } from "@/components/ui";
+import { Field, RefreshButton, Spinner, TextInput } from "@/components/ui";
+import { PathField } from "@/components/PathField";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { useRecentRepos } from "@/lib/queries";
 
@@ -58,11 +58,6 @@ export function RepoSourcePicker({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const browse = async (onPick: (p: string) => void, title: string) => {
-    const picked = await open({ directory: true, multiple: false, title });
-    if (typeof picked === "string") onPick(picked);
-  };
 
   const setMode = (mode: RepoSource["mode"]) => {
     if (mode === "clone") {
@@ -120,45 +115,27 @@ export function RepoSourcePicker({
           )}
 
           <Field label="Location">
-            <div className="flex gap-2">
-              <TextInput
-                value={value.location}
-                onChange={(e) => onChange({ ...value, location: e.target.value })}
-                placeholder="~/thoughts"
-                disabled={disabled}
-                className="font-mono text-xs"
-              />
-              <Button
-                type="button"
-                onClick={() => void browse((p) => onChange({ ...value, location: p }), "Choose where to clone")}
-                disabled={disabled}
-              >
-                Browse
-              </Button>
-            </div>
+            <PathField
+              value={value.location}
+              onChange={(location) => onChange({ ...value, location })}
+              placeholder="~/thoughts"
+              disabled={disabled}
+              browseTitle="Choose where to clone"
+            />
           </Field>
         </>
       )}
 
       {value.mode === "disk" && (
         <Field label={diskLabel}>
-          <div className="flex gap-2">
-            <TextInput
-              value={value.path}
-              onChange={(e) => onChange({ ...value, path: e.target.value })}
-              placeholder={diskPlaceholder}
-              autoFocus
-              disabled={disabled}
-              className="font-mono text-xs"
-            />
-            <Button
-              type="button"
-              onClick={() => void browse((p) => onChange({ ...value, path: p }), diskBrowseTitle)}
-              disabled={disabled}
-            >
-              Browse
-            </Button>
-          </div>
+          <PathField
+            value={value.path}
+            onChange={(path) => onChange({ ...value, path })}
+            placeholder={diskPlaceholder}
+            autoFocus
+            disabled={disabled}
+            browseTitle={diskBrowseTitle}
+          />
           {diskFooter}
         </Field>
       )}
@@ -167,23 +144,14 @@ export function RepoSourcePicker({
 
       {value.mode === "create" && !createSlot && (
         <Field label="New repository location">
-          <div className="flex gap-2">
-            <TextInput
-              value={value.path}
-              onChange={(e) => onChange({ ...value, path: e.target.value })}
-              placeholder="~/thoughts"
-              autoFocus
-              disabled={disabled}
-              className="font-mono text-xs"
-            />
-            <Button
-              type="button"
-              onClick={() => void browse((p) => onChange({ ...value, path: p }), "Choose where to create the repo")}
-              disabled={disabled}
-            >
-              Browse
-            </Button>
-          </div>
+          <PathField
+            value={value.path}
+            onChange={(path) => onChange({ ...value, path })}
+            placeholder="~/thoughts"
+            autoFocus
+            disabled={disabled}
+            browseTitle="Choose where to create the repo"
+          />
           <p className="mt-1 text-xs leading-relaxed text-ink-dim">
             A new git repository will be initialised at this path.
           </p>

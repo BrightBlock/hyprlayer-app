@@ -195,6 +195,7 @@ hyprlayer_proto::commands! {
 
     ImportAttachment: import_attachment(workstream_id: String, src_path: String) -> String;
     SaveAttachment: save_attachment(workstream_id: String, file_name: String, data: Vec<u8>) -> String;
+    ReadAttachment: read_attachment(path: String) -> Vec<u8>;
 
     SetBinaryOverride: set_binary_override(kind: BinaryKind, path: Option<String>) -> Vec<BinaryStatus>;
     RedetectBinaries: redetect_binaries() -> Vec<BinaryStatus>;
@@ -251,7 +252,7 @@ hyprlayer_proto::commands! {
     ProbeDefaultThoughts: probe_default_thoughts() -> ThoughtsProbe;
     InitThoughtsRepo: init_thoughts_repo(user: String, source: ThoughtsSource) -> BootstrapResult;
 
-    PreviewPromptImport: preview_prompt_import(path: String, taken_chords: Vec<String>) -> PromptImportPreview;
+    PreviewPromptImport: preview_prompt_import(source: String, taken_chords: Vec<String>) -> PromptImportPreview;
     ApplyPromptImport: apply_prompt_import(decision: PromptImportDecision) -> PromptImportResult;
     ExportPrompts: export_prompts(request: PromptExportRequest) -> PromptExportResult;
 

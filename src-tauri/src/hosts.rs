@@ -12,15 +12,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct Host {
     /// The `ssh` destination, e.g. `nexus` or `jt@nexus.local`.
     pub destination: String,
     pub label: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(default, rename_all = "camelCase")]
 pub struct HostsFile {
     pub hosts: Vec<Host>,
     /// The active host's `destination`, or `None` for the local server.
@@ -41,11 +42,9 @@ pub fn load(app_config_dir: &Path) -> HostsFile {
 }
 
 /// Tmp-then-rename, like every other config write in this tree
-/// (`settings.rs::persist`, `config/mod.rs::write_config_atomic`). No
-/// production caller yet — the picker UI that would write a host is deferred
-/// (plan Phase 5 §3) — so this exists for the round-trip test below and for
-/// that later work to call.
-#[allow(dead_code)]
+/// (`settings.rs::persist`, `config/mod.rs::write_config_atomic`). Called by
+/// the `save_hosts` command (plan Phase 1 §7) — there is one window and one
+/// writer, so `save_hosts` always writes the whole file rather than merging.
 pub fn save(app_config_dir: &Path, file: &HostsFile) -> std::io::Result<()> {
     let path = hosts_path(app_config_dir);
     if let Some(parent) = path.parent() {
@@ -63,6 +62,18 @@ pub fn active_host(app_config_dir: &Path) -> Option<Host> {
     let file = load(app_config_dir);
     let active = file.active?;
     file.hosts.into_iter().find(|h| h.destination == active)
+}
+
+/// The local server's profile name, reserved so no host can claim it
+/// (`src/lib/domain/hosts.ts` rejects it on the way in).
+pub const LOCAL_PROFILE: &str = "local";
+
+/// The webview's localStorage namespace. The *configured* active host, not the
+/// connected one: a host that is asleep still owns its own tabs.
+pub fn profile_id(app_config_dir: &Path) -> String {
+    active_host(app_config_dir)
+        .map(|h| h.destination)
+        .unwrap_or_else(|| LOCAL_PROFILE.to_string())
 }
 
 #[cfg(test)]
@@ -98,6 +109,26 @@ mod tests {
 
         assert_eq!(load(dir.path()), file);
         assert_eq!(active_host(dir.path()), Some(file.hosts[0].clone()));
+    }
+
+    #[test]
+    fn the_profile_id_is_the_active_destination_or_local() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(profile_id(dir.path()), "local");
+
+        let host = Host {
+            destination: "nexus".into(),
+            label: "Nexus".into(),
+        };
+        save(
+            dir.path(),
+            &HostsFile {
+                hosts: vec![host],
+                active: Some("nexus".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(profile_id(dir.path()), "nexus");
     }
 
     #[test]

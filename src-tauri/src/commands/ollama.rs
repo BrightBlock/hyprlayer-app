@@ -8,7 +8,11 @@ pub use hyprlayer_core::runtime::providers::{OllamaModelInfo, OllamaStatus};
 #[tauri::command]
 #[specta::specta]
 pub async fn ollama_status(state: State<'_, AppState>) -> CmdResult<OllamaStatus> {
-    state.client.ollama_status().await.map_err(AppError::from)
+    state
+        .client()?
+        .ollama_status()
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -18,7 +22,7 @@ pub async fn ollama_set_endpoint(
     endpoint: Option<String>,
 ) -> CmdResult<OllamaStatus> {
     state
-        .client
+        .client()?
         .ollama_set_endpoint(endpoint)
         .await
         .map_err(AppError::from)
@@ -31,7 +35,7 @@ pub async fn ollama_set_selected_models(
     models: Vec<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .ollama_set_selected_models(models)
         .await
         .map_err(AppError::from)
@@ -44,7 +48,7 @@ pub async fn ollama_set_default_model(
     model: Option<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .ollama_set_default_model(model)
         .await
         .map_err(AppError::from)

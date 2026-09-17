@@ -48,7 +48,17 @@ pub async fn clone_repo(
         )));
     }
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
+        // Named, because the bare `?` here reported "Permission denied (os
+        // error 13)" with nothing to act on. A client path sent to a remote
+        // server lands exactly here — `/Users/...` on a Linux host fails at the
+        // unwritable root — and the path is the whole diagnosis. `kind` is
+        // preserved: callers match `AlreadyExists` on it.
+        std::fs::create_dir_all(parent).map_err(|e| {
+            CoreError::Io(std::io::Error::new(
+                e.kind(),
+                format!("could not create {}: {e}", parent.display()),
+            ))
+        })?;
     }
     let dest_str = dest.to_str().ok_or_else(|| CoreError::OutputParse {
         program: "git clone".into(),

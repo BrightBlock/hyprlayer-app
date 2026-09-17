@@ -7,15 +7,19 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
+use hyprlayer_core::CoreError;
 use hyprlayer_proto::{WireError, PROTOCOL_VERSION};
 use hyprlayer_server::socket;
 use hyprlayer_server::transport::{Control, FrameReader, FrameWriter};
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::process::Child;
 use tokio::task::JoinHandle;
 
 use crate::client::{self, ConnectError, RpcClient};
 use crate::error::AppError;
+use crate::hosts::Host;
+use crate::provision;
 
 const CONNECT_RETRIES: u32 = 10;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
@@ -59,18 +63,35 @@ pub fn incompatible_server_detail() -> String {
 
 pub enum Outcome {
     Connected(Arc<RpcClient>),
-    /// Nothing left to retry — show this and exit.
+    /// Nothing left to retry. `setup()` opens the window anyway on every arm
+    /// except `ALREADY_RUNNING` (plan Phase 1 §5) — `error` is what
+    /// `AppState::failed` stores and `connection_status` reports.
     Blocked {
         title: String,
-        detail: String,
+        error: AppError,
     },
 }
 
 impl Outcome {
+    /// The local-server path: every existing call site's message text moves
+    /// into `AppError::server_unavailable` unchanged.
     fn blocked(title: &str, detail: impl Into<String>) -> Self {
         Self::Blocked {
             title: title.to_string(),
-            detail: detail.into(),
+            error: AppError::server_unavailable(detail),
+        }
+    }
+
+    /// The one `Blocked` arm that is not a connect failure: another
+    /// Hyprlayer already holds this profile's lock. `setup()` matches on
+    /// `error.code == "runtime_in_use"` to keep this one exit (plan Phase 1
+    /// §5) — building it any other way makes that match silently not fire.
+    fn already_running(app_data_dir: &Path) -> Self {
+        Self::Blocked {
+            title: ALREADY_RUNNING.to_string(),
+            error: AppError::from(CoreError::RuntimeInUse {
+                path: app_data_dir.to_path_buf(),
+            }),
         }
     }
 }
@@ -110,38 +131,14 @@ pub async fn connect_or_spawn(app_config_dir: &Path, app_data_dir: &Path) -> Out
     spawn_and_connect(app_config_dir, app_data_dir).await
 }
 
-/// Reaches a remote host through `ssh <destination> hyprlayer-server relay`,
-/// joining the child's stdio as the connection (ADR-0009, plan Phase 5 §1). A
-/// failure here must never fall back to the local server — that would
-/// silently connect the app to the wrong profile's data, "the single most
-/// damaging mistake available in this plan" (plan, Migration Notes).
-pub async fn connect_remote(host: &crate::hosts::Host) -> Outcome {
-    let mut cmd = tokio::process::Command::new("ssh");
-    cmd.arg(&host.destination)
-        .arg("hyprlayer-server")
-        .arg("relay")
-        .kill_on_drop(true)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(e) => {
-            return Outcome::blocked(
-                CANNOT_START,
-                format!("Could not run ssh to reach {}: {e}", host.label),
-            );
-        }
-    };
-    let stdin = child.stdin.take().expect("stdin is piped");
-    let stdout = child.stdout.take().expect("stdout is piped");
-    let stderr = child.stderr.take().expect("stderr is piped");
-    let (tail, drained) = drain_stderr(stderr);
-
-    let joined = tokio::io::join(stdout, stdin);
-    match RpcClient::connect(joined).await {
-        Ok(client) => {
+/// Reaches a remote host through `ssh <destination> <version-keyed path> relay`,
+/// joining the child's stdio as the connection (ADR-0009, plan Phase 5 §1,
+/// Phase 7 §3). A failure here must never fall back to the local server — that
+/// would silently connect the app to the wrong profile's data, "the single
+/// most damaging mistake available in this plan" (plan, Migration Notes).
+pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
+    match ssh_relay_connect(host, app_data_dir).await {
+        Ok((client, mut child)) => {
             // The relay must live as long as the connection does. It is
             // killed on drop, unlike the local server's deliberate orphan —
             // killing this SSH connection only ends the relay (plan §1), not
@@ -151,34 +148,209 @@ pub async fn connect_remote(host: &crate::hosts::Host) -> Outcome {
             });
             Outcome::Connected(client)
         }
-        Err(e) => {
+        Err(error) => Outcome::Blocked {
+            title: CANNOT_START.to_string(),
+            error,
+        },
+    }
+}
+
+/// Spawns the relay at the version-keyed path this client installed
+/// (`provision::relay_command`) and performs the RPC handshake. The caller
+/// owns the returned child's lifetime — `connect_remote` detaches it to live
+/// as long as the connection; `probe_remote` kills it the moment the probe is
+/// done, since nothing here should outlive a test press.
+async fn ssh_relay_connect(
+    host: &Host,
+    app_data_dir: &Path,
+) -> Result<(Arc<RpcClient>, Child), AppError> {
+    // Never relay a binary this client has not confirmed is its own: the
+    // version in the path cannot tell an unreleased build from the release it
+    // descends from, and a stale one is only caught by the handshake, after
+    // connecting (plan Phase 7 §3.2).
+    if provision::readiness(host, app_data_dir).await?.state != provision::HostServerState::Ready {
+        return Err(AppError::remote_cli_missing(&host.label));
+    }
+
+    let mut cmd = tokio::process::Command::new("ssh");
+    hide_console(&mut cmd);
+    cmd.arg(&host.destination)
+        .arg(provision::relay_command())
+        .kill_on_drop(true)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| {
+        AppError::remote_unreachable(
+            &host.label,
+            format!("Could not run ssh to reach {}: {e}", host.label),
+        )
+    })?;
+    let stdin = child.stdin.take().expect("stdin is piped");
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let stderr = child.stderr.take().expect("stderr is piped");
+    let (tail, drained) = drain_stderr(stderr);
+
+    let joined = tokio::io::join(stdout, stdin);
+    match RpcClient::connect(joined).await {
+        Ok(client) => Ok((client, child)),
+        // A version skew is not an ssh failure to classify — the peer
+        // answered, just with a refusal. Its own remedy already names the
+        // fix, so it is preserved verbatim rather than folded into the
+        // remote taxonomy (plan Phase 1 §1: `remote_protocol_mismatch` is
+        // deliberately not added).
+        Err(ConnectError::Refused(e)) => {
+            let _ = tokio::time::timeout(DRAIN_TIMEOUT, drained).await;
+            let _ = child.kill().await;
+            let mut error = AppError::from(e);
+            // `WireError::version_mismatch` leaves the newer side's remedy
+            // `None` because the local case just evicts and respawns its own
+            // server. There is no such move for someone else's machine (plan
+            // Phase 1 §8), so the remote path names the actual fix.
+            if error.code == "protocol_version_mismatch" && error.remedy.is_none() {
+                error.remedy = Some(format!("Update hyprlayer-server on {}.", host.label));
+            }
+            Err(error)
+        }
+        Err(_) => {
             let _ = tokio::time::timeout(DRAIN_TIMEOUT, drained).await;
             let seen = tail.lock().unwrap_or_else(PoisonError::into_inner).clone();
-            let _ = child.kill().await;
-            // A refusal carries a remedy the message alone drops — a version
-            // skew's is the only instruction that resolves it, and the remote
-            // path must show it as the local one does.
-            let reason = match e {
-                ConnectError::Refused(e) => detail_for(&AppError::from(e)),
-                e => e.to_string(),
-            };
-            let detail = if seen.trim().is_empty() {
-                format!(
-                    "Could not reach the Hyprlayer server on {}: {reason}",
-                    host.label
-                )
-            } else {
-                format!(
-                    "Could not reach the Hyprlayer server on {}: {reason}\n\n{seen}",
-                    host.label
-                )
-            };
-            Outcome::blocked(CANNOT_START, detail)
+            let _ = child.start_kill();
+            let exit_code = child.wait().await.ok().and_then(|status| status.code());
+            Err(classify_ssh_failure(host, exit_code, &seen))
         }
     }
 }
 
-fn detail_for(err: &AppError) -> String {
+/// A parse of another program's prose: `ssh`'s own stderr, in English, is the
+/// only signal available for *why* it failed. The fallback arm is
+/// `remote_unreachable` with the raw stderr appended, never a silent
+/// `internal` (plan Phase 1 §1).
+fn classify_ssh_failure(host: &Host, exit_code: Option<i32>, stderr: &str) -> AppError {
+    let seen = stderr.trim();
+    if exit_code == Some(127)
+        || seen.contains("command not found")
+        || seen.contains("No such file or directory")
+    {
+        return AppError::remote_cli_missing(&host.label);
+    }
+    // "Too many authentication failures" is what an agent holding several keys
+    // hits before it ever reaches "Permission denied".
+    if seen.contains("Permission denied")
+        || seen.contains("Host key verification failed")
+        || seen.contains("Too many authentication failures")
+    {
+        return AppError::remote_auth_failed(&host.label, seen);
+    }
+    let unreachable = seen.contains("Could not resolve hostname")
+        || seen.contains("Connection refused")
+        || seen.contains("Connection timed out");
+    if unreachable || seen.is_empty() {
+        let detail = if seen.is_empty() {
+            "ssh closed the connection with no output.".to_string()
+        } else {
+            seen.to_string()
+        };
+        return AppError::remote_unreachable(&host.label, detail);
+    }
+    AppError::remote_unreachable(&host.label, seen)
+}
+
+/// Runs a short script on the host and returns its stdout. Separate from
+/// `ssh_relay_connect`, which goes straight into relay mode and so cannot
+/// carry a second command (plan Phase 7 §2).
+pub(crate) async fn ssh_capture(host: &Host, script: &str) -> Result<String, AppError> {
+    let output = ssh_run(host, script, Stdio::null()).await?;
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+/// Streams a local file into a script's stdin on the host — the push half of
+/// an install. `ssh` rather than `scp` so the transfer and the rename stay two
+/// round trips: an interrupted push cannot reach the rename (plan Phase 7 §3).
+pub(crate) async fn ssh_send_file(host: &Host, script: &str, file: &Path) -> Result<(), AppError> {
+    let handle = std::fs::File::open(file)
+        .map_err(|e| AppError::internal(format!("could not read {}: {e}", file.display())))?;
+    ssh_run(host, script, Stdio::from(handle)).await.map(|_| ())
+}
+
+async fn ssh_run(host: &Host, script: &str, stdin: Stdio) -> Result<Vec<u8>, AppError> {
+    let mut cmd = tokio::process::Command::new("ssh");
+    hide_console(&mut cmd);
+    let output = cmd
+        .arg(&host.destination)
+        .arg(script)
+        .kill_on_drop(true)
+        .stdin(stdin)
+        .output()
+        .await
+        .map_err(|e| {
+            AppError::remote_unreachable(
+                &host.label,
+                format!("Could not run ssh to reach {}: {e}", host.label),
+            )
+        })?;
+    if !output.status.success() {
+        return Err(classify_ssh_failure(
+            host,
+            output.status.code(),
+            &String::from_utf8_lossy(&output.stderr),
+        ));
+    }
+    Ok(output.stdout)
+}
+
+/// `uname -sm` onto one of ADR-0008's supported triples (plan Phase 7 §2).
+/// `Darwin x86_64` is deliberately unsupported — no build target covers it.
+pub(crate) fn triple_for_uname(host: &Host, uname: &str) -> Result<&'static str, AppError> {
+    match uname.split_whitespace().collect::<Vec<_>>().as_slice() {
+        ["Linux", "x86_64"] => Ok("x86_64-unknown-linux-gnu"),
+        ["Darwin", "arm64"] => Ok("aarch64-apple-darwin"),
+        _ => Err(AppError::remote_platform_unsupported(
+            &host.label,
+            uname.trim(),
+        )),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HostProbe {
+    pub ok: bool,
+    pub server_version: Option<u32>,
+    pub error: Option<AppError>,
+}
+
+/// A one-shot connection test (plan Phase 1 §3, `test_host_connection`). It
+/// cannot reuse `connect_remote`: that function deliberately detaches the ssh
+/// child to live as long as the connection, which would leak one relay per
+/// test press. This shares the same handshake through `ssh_relay_connect` but
+/// keeps the child, so it can drop the client and kill the child
+/// unconditionally on both the success and the failure path — the failure
+/// path already kills it inside `ssh_relay_connect`.
+pub async fn probe_remote(host: &Host, app_data_dir: &Path) -> HostProbe {
+    match ssh_relay_connect(host, app_data_dir).await {
+        Ok((client, mut child)) => {
+            let server_version = client.server_version();
+            drop(client);
+            let _ = child.kill().await;
+            HostProbe {
+                ok: true,
+                server_version: Some(server_version),
+                error: None,
+            }
+        }
+        Err(error) => HostProbe {
+            ok: false,
+            server_version: None,
+            error: Some(error),
+        },
+    }
+}
+
+/// The one dialog that still shows the full message-plus-remedy text as one
+/// string — the `runtime_in_use` exit (plan Phase 1 §5).
+pub(crate) fn detail_for(err: &AppError) -> String {
     match &err.remedy {
         Some(remedy) => format!("{}\n\n{remedy}", err.message),
         None => err.message.clone(),
@@ -238,6 +410,22 @@ fn spawn_detached(
 /// a full, unread pipe once this task is its only reader. The buffer is only
 /// filled at EOF, so a caller that saw the child exit must await the handle
 /// before reading it.
+/// Every other spawn in the tree sets this (`core::process`, `claude::probe`,
+/// `claude::driver`); the shell's own `ssh`/`curl` calls did not, and on Windows
+/// a GUI process spawning a console program without it flashes a console window
+/// each time — several times per connect, since provisioning probes, uploads
+/// and installs.
+pub(crate) fn hide_console(cmd: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = cmd;
+}
+
 fn drain_stderr(mut stderr: tokio::process::ChildStderr) -> (Arc<Mutex<String>>, JoinHandle<()>) {
     let tail = Arc::new(Mutex::new(String::new()));
     let sink = tail.clone();
@@ -326,11 +514,7 @@ async fn spawn_and_connect(app_config_dir: &Path, app_data_dir: &Path) -> Outcom
                         tokio::time::sleep(SPAWN_RETRY_DELAY).await;
                         continue;
                     }
-                    return Outcome::blocked(
-                        ALREADY_RUNNING,
-                        "Another Hyprlayer window or process is already using this profile. \
-                         Quit it, then relaunch.",
-                    );
+                    return Outcome::already_running(app_data_dir);
                 }
                 if let Some(fatal) = read_runtime_fatal(app_data_dir, spawned_at) {
                     return Outcome::blocked(CANNOT_START, detail_for(&fatal));
@@ -348,10 +532,7 @@ async fn spawn_and_connect(app_config_dir: &Path, app_data_dir: &Path) -> Outcom
             }
         }
     }
-    Outcome::blocked(
-        ALREADY_RUNNING,
-        "Another Hyprlayer window or process is already using this profile. Quit it, then relaunch.",
-    )
+    Outcome::already_running(app_data_dir)
 }
 
 /// Dev builds spawn the sibling binary whatever its vintage, so say so when it
@@ -444,4 +625,110 @@ async fn evict_and_respawn(app_config_dir: &Path, app_data_dir: &Path) -> Outcom
     }
 
     spawn_and_connect(app_config_dir, app_data_dir).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn host() -> Host {
+        Host {
+            destination: "nexus".into(),
+            label: "nexus".into(),
+        }
+    }
+
+    #[test]
+    fn an_exit_127_or_a_missing_command_is_cli_missing() {
+        let err = classify_ssh_failure(
+            &host(),
+            Some(127),
+            "bash: hyprlayer-server: command not found",
+        );
+        assert_eq!(err.code, "remote_cli_missing");
+    }
+
+    #[test]
+    fn a_permission_denied_stderr_is_auth_failed() {
+        let err = classify_ssh_failure(
+            &host(),
+            Some(255),
+            "jt@nexus: Permission denied (publickey,password).",
+        );
+        assert_eq!(err.code, "remote_auth_failed");
+    }
+
+    #[test]
+    fn a_host_key_verification_failure_is_auth_failed() {
+        let err = classify_ssh_failure(&host(), Some(255), "Host key verification failed.");
+        assert_eq!(err.code, "remote_auth_failed");
+    }
+
+    #[test]
+    fn too_many_authentication_failures_is_auth_failed_not_unreachable() {
+        let err = classify_ssh_failure(
+            &host(),
+            Some(255),
+            "Received disconnect from ::1 port 22:2: Too many authentication failures\n\
+             Disconnected from ::1 port 22",
+        );
+        assert_eq!(err.code, "remote_auth_failed");
+    }
+
+    #[test]
+    fn an_unresolvable_hostname_is_unreachable() {
+        let err = classify_ssh_failure(
+            &host(),
+            Some(255),
+            "ssh: Could not resolve hostname nexus: nodename nor servname provided, or not known",
+        );
+        assert_eq!(err.code, "remote_unreachable");
+    }
+
+    #[test]
+    fn a_connection_refused_is_unreachable() {
+        let err = classify_ssh_failure(
+            &host(),
+            Some(255),
+            "ssh: connect to host nexus port 22: Connection refused",
+        );
+        assert_eq!(err.code, "remote_unreachable");
+    }
+
+    #[test]
+    fn uname_maps_onto_the_supported_triples() {
+        assert_eq!(
+            triple_for_uname(&host(), "Linux x86_64\n").unwrap(),
+            "x86_64-unknown-linux-gnu"
+        );
+        assert_eq!(
+            triple_for_uname(&host(), "Darwin arm64\n").unwrap(),
+            "aarch64-apple-darwin"
+        );
+    }
+
+    #[test]
+    fn an_unsupported_uname_names_the_platform_it_saw() {
+        // Intel macOS is not a build target, so it is unsupported rather than
+        // a near miss to fall back from.
+        let err = triple_for_uname(&host(), "Darwin x86_64\n").unwrap_err();
+        assert_eq!(err.code, "remote_platform_unsupported");
+        assert!(err.message.contains("Darwin x86_64"));
+
+        let err = triple_for_uname(&host(), "SunOS i86pc").unwrap_err();
+        assert_eq!(err.code, "remote_platform_unsupported");
+    }
+
+    #[test]
+    fn an_unrecognised_stderr_falls_back_to_unreachable_with_the_raw_text() {
+        let err = classify_ssh_failure(
+            &host(),
+            Some(1),
+            "kex_exchange_identification: read: broken pipe",
+        );
+        assert_eq!(err.code, "remote_unreachable");
+        assert!(err
+            .message
+            .contains("kex_exchange_identification: read: broken pipe"));
+    }
 }

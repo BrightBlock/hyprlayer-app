@@ -118,6 +118,7 @@ pub struct Bootstrap {
     pub binaries: Vec<BinaryStatus>,
     pub settings: AppSettings,
     pub prompt_defaults: PromptDefaults,
+    pub default_repos_root: String,
 }
 
 impl From<core_projects::BootstrapResult> for Bootstrap {
@@ -128,6 +129,7 @@ impl From<core_projects::BootstrapResult> for Bootstrap {
             binaries: r.binaries,
             settings: r.settings,
             prompt_defaults: PromptDefaults::default(),
+            default_repos_root: r.default_repos_root,
         }
     }
 }
@@ -219,7 +221,11 @@ impl From<core_projects::SyncThoughtsResult> for SyncReport {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_bootstrap(state: State<'_, AppState>) -> CmdResult<Bootstrap> {
-    let result = state.client.get_bootstrap().await.map_err(AppError::from)?;
+    let result = state
+        .client()?
+        .get_bootstrap()
+        .await
+        .map_err(AppError::from)?;
     Ok(Bootstrap::from(result))
 }
 
@@ -227,7 +233,7 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> CmdResult<Bootstrap> {
 #[specta::specta]
 pub async fn get_project(state: State<'_, AppState>, path: String) -> CmdResult<ProjectDetail> {
     let inspection = state
-        .client
+        .client()?
         .get_project(path.clone())
         .await
         .map_err(AppError::from)?
@@ -241,19 +247,15 @@ pub async fn inspect_repo_path(
     state: State<'_, AppState>,
     path: String,
 ) -> CmdResult<repos::RepoPathStatus> {
-    if let Some(err) = state.remote_unsupported("Inspecting a local path") {
-        return Err(err);
-    }
     state
-        .client
+        .client()?
         .inspect_repo_path(path)
         .await
         .map_err(AppError::from)
 }
 
-// The server-side read half of a future remote directory picker (plan Phase
-// 5 §3) — works the same whether the server is local or remote, unlike the
-// import commands below, since it never claims a client-side path is valid.
+// The server-side read half of `PathField`'s remote picker; every path command
+// here now takes its path from the machine the path lives on.
 #[tauri::command]
 #[specta::specta]
 pub async fn browse_directory(
@@ -261,7 +263,7 @@ pub async fn browse_directory(
     path: Option<String>,
 ) -> CmdResult<core_projects::DirListing> {
     state
-        .client
+        .client()?
         .browse_directory(path)
         .await
         .map_err(AppError::from)
@@ -280,11 +282,8 @@ pub async fn import_project(
     profile: Option<String>,
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
-    if let Some(err) = state.remote_unsupported("Importing a repository from a local path") {
-        return Err(err);
-    }
     let view = state
-        .client
+        .client()?
         .import_project(
             path,
             branch,
@@ -306,11 +305,8 @@ pub async fn import_local_folder(
     path: String,
     directory_name: Option<String>,
 ) -> CmdResult<Project> {
-    if let Some(err) = state.remote_unsupported("Importing a local folder") {
-        return Err(err);
-    }
     let view = state
-        .client
+        .client()?
         .import_local_folder(path, directory_name)
         .await
         .map_err(AppError::from)?;
@@ -331,7 +327,7 @@ pub async fn clone_project(
     bootstrap_user: Option<String>,
 ) -> CmdResult<Project> {
     let view = state
-        .client
+        .client()?
         .clone_project(url, location, name, thoughts_dir, profile, bootstrap_user)
         .await
         .map_err(AppError::from)?;
@@ -430,7 +426,7 @@ pub async fn create_project(
     req: CreateProjectRequest,
 ) -> CmdResult<CreateProjectOutcome> {
     let result = state
-        .client
+        .client()?
         .create_project(req.into())
         .await
         .map_err(AppError::from)?;
@@ -446,7 +442,7 @@ pub async fn create_project(
 #[specta::specta]
 pub async fn list_github_owners(state: State<'_, AppState>) -> CmdResult<GithubOwners> {
     let outcome = state
-        .client
+        .client()?
         .list_github_owners()
         .await
         .map_err(AppError::from)?;
@@ -464,7 +460,7 @@ pub async fn publish_project_to_github(
     is_private: bool,
 ) -> CmdResult<String> {
     if state
-        .client
+        .client()?
         .find_project(path.clone())
         .await
         .map_err(AppError::from)?
@@ -473,7 +469,7 @@ pub async fn publish_project_to_github(
         return Err(AppError::project_not_found(&path));
     }
     state
-        .client
+        .client()?
         .publish_project_to_github(op_id, path, owner, name, is_private)
         .await
         .map_err(AppError::from)
@@ -488,13 +484,13 @@ pub async fn remove_project(
     delete_files: bool,
 ) -> CmdResult<()> {
     let git_backed = state
-        .client
+        .client()?
         .project_source_of(path.clone())
         .await
         .map_err(AppError::from)?
         .is_git();
     state
-        .client
+        .client()?
         .remove_project(path, delete_files)
         .await
         .map_err(AppError::from)?;
@@ -508,7 +504,7 @@ pub async fn remove_project(
 #[specta::specta]
 pub async fn reorder_projects(state: State<'_, AppState>, paths: Vec<String>) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .reorder_projects(paths)
         .await
         .map_err(AppError::from)
@@ -518,7 +514,7 @@ pub async fn reorder_projects(state: State<'_, AppState>, paths: Vec<String>) ->
 #[specta::specta]
 pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repos::GithubRepo>> {
     state
-        .client
+        .client()?
         .list_recent_repos()
         .await
         .map_err(AppError::from)
@@ -528,7 +524,7 @@ pub async fn list_recent_repos(state: State<'_, AppState>) -> CmdResult<Vec<repo
 #[specta::specta]
 pub async fn list_thoughts_profiles(state: State<'_, AppState>) -> CmdResult<Vec<ThoughtsProfile>> {
     state
-        .client
+        .client()?
         .list_thoughts_profiles()
         .await
         .map_err(AppError::from)
@@ -543,7 +539,7 @@ pub async fn create_thoughts_profile(
     thoughts_repo: Option<String>,
 ) -> CmdResult<ThoughtsProfile> {
     let profile = state
-        .client
+        .client()?
         .create_thoughts_profile(name, thoughts_repo)
         .await
         .map_err(AppError::from)?;
@@ -559,7 +555,7 @@ pub async fn sync_thoughts(
     message: Option<String>,
 ) -> CmdResult<SyncReport> {
     let result = state
-        .client
+        .client()?
         .sync_thoughts(path, message)
         .await
         .map_err(AppError::from)?;
@@ -573,7 +569,7 @@ pub async fn run_backend_health(
     path: String,
 ) -> CmdResult<HealthReport> {
     let result = state
-        .client
+        .client()?
         .run_backend_health(path)
         .await
         .map_err(AppError::from)?;
@@ -587,7 +583,7 @@ pub async fn get_worktree_files(
     path: String,
 ) -> CmdResult<Vec<String>> {
     state
-        .client
+        .client()?
         .get_worktree_files(path)
         .await
         .map_err(AppError::from)
@@ -601,7 +597,7 @@ pub async fn set_worktree_files(
     patterns: Vec<String>,
 ) -> CmdResult<Vec<String>> {
     state
-        .client
+        .client()?
         .set_worktree_files(path, patterns)
         .await
         .map_err(AppError::from)
@@ -614,7 +610,7 @@ pub async fn check_worktree_files(
     path: String,
 ) -> CmdResult<hyprlayer_core::worktree::seed::SeedReport> {
     state
-        .client
+        .client()?
         .check_worktree_files(path)
         .await
         .map_err(AppError::from)

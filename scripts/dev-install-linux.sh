@@ -169,6 +169,24 @@ APP_NAME="$APP_NAME" APP_ID="$APP_ID" BUILD_VERSION="$BUILD_VERSION" \
       app: { windows: [{ ...w, title: process.env.APP_NAME }, ...windows.slice(1)] },
       bundle: { createUpdaterArtifacts: false },
     }, null, 2) + "\n");
+
+    // hyprlayer-server reports env!("CARGO_PKG_VERSION"), which Phase 7 keys the
+    // remote install directory and its content check on. Without this a dev
+    // build claims to be the release it descends from.
+    const manifest = fs.readFileSync("Cargo.toml", "utf8");
+    // Exactly one, not at least one: `replace` without /g rewrites the *first*
+    // match, so a second `version = "..."` at column 0 — a future dependency
+    // block, say — would silently send this to the wrong line.
+    const hits = manifest.match(/^version = ".*"$/gm) ?? [];
+    if (hits.length !== 1) {
+      throw new Error(
+        `expected exactly one workspace version line in Cargo.toml, found ${hits.length}`,
+      );
+    }
+    fs.writeFileSync(
+      "Cargo.toml",
+      manifest.replace(/^version = ".*"$/m, `version = "${process.env.BUILD_VERSION}"`),
+    );
   '
 
 step "pnpm install (frozen lockfile)"

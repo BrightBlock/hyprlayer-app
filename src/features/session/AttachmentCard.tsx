@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 
 import { DocIcon, ImageIcon, XIcon } from "@/components/icons";
-import { attachmentSrc, type Attachment } from "./attachments";
+import { useAttachmentSrc, useCanOpenAttachment, type Attachment } from "./attachments";
 
 function Glyph({ children }: { children: ReactNode }) {
   return (
@@ -14,10 +14,21 @@ function Glyph({ children }: { children: ReactNode }) {
 
 function ImageThumb({ path, name }: { path: string; name: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return <Glyph><ImageIcon size={12} /></Glyph>;
+  const { src, error } = useAttachmentSrc(path);
+  // A fetch that failed is not a fetch still running: say which, on hover,
+  // rather than sitting on the loading glyph forever.
+  if (failed || error || !src) {
+    return (
+      <span title={error ?? (failed ? `Could not display ${name}` : undefined)}>
+        <Glyph>
+          <ImageIcon size={12} />
+        </Glyph>
+      </span>
+    );
+  }
   return (
     <img
-      src={attachmentSrc(path)}
+      src={src}
       alt={name}
       onError={() => setFailed(true)}
       className="h-[22px] w-[22px] shrink-0 rounded object-cover"
@@ -33,6 +44,9 @@ export function AttachmentCard({
   onRemove?: () => void;
 }) {
   const { path, name, kind } = attachment;
+  // `openPath` resolves on *this* machine, so a remote server's path opens
+  // nothing and fails silently. Offering a dead button is worse than saying so.
+  const canOpen = useCanOpenAttachment();
   const open = () => void openPath(path).catch(() => {});
 
   return (
@@ -49,9 +63,10 @@ export function AttachmentCard({
       )}
       <button
         type="button"
-        onClick={open}
-        className="min-w-0 truncate px-0.5 text-left font-medium hover:text-accent"
-        title={`Open ${name}`}
+        onClick={canOpen ? open : undefined}
+        disabled={!canOpen}
+        className="min-w-0 truncate px-0.5 text-left font-medium enabled:hover:text-accent disabled:cursor-default"
+        title={canOpen ? `Open ${name}` : `${name} — on the server, so it cannot be opened here`}
       >
         {name}
       </button>

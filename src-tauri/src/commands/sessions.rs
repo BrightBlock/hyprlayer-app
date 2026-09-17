@@ -80,19 +80,19 @@ pub async fn start_stage_session(
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<StartedSession> {
     let (session, prompt, stream_id, events) = state
-        .client
+        .client()?
         .start_stage_session_stream(workstream_id, stage, input, attached_docs, opts.into())
         .await
         .map_err(AppError::from)?;
     let session_id = session.id.clone();
-    spawn_live_pump(state.client.clone(), stream_id, events, on_event.clone());
+    spawn_live_pump(state.client()?.clone(), stream_id, events, on_event.clone());
 
     // The launch is fire-and-forget, exactly as before: the command returns
     // as soon as the stream is open, and this task's only job is to surface
     // a launch failure onto that same channel. Unlike the streaming commands
     // above, this has no server-side counterpart — the server ran
     // `prepare_start` synchronously; only `launch_and_converse` is deferred.
-    let client = state.client.clone();
+    let client = state.client()?.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(e) = client.launch_and_converse(session_id).await {
             emit_start_failure(&on_event, &AppError::from(e).message);
@@ -126,11 +126,11 @@ pub async fn resume_session(
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
     let (session, stream_id, events) = state
-        .client
+        .client()?
         .resume_session_stream(session_id, model, effort, permission_mode)
         .await
         .map_err(AppError::from)?;
-    spawn_live_pump(state.client.clone(), stream_id, events, on_event);
+    spawn_live_pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(session)
 }
 
@@ -145,11 +145,11 @@ pub async fn restart_session(
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
     let (session, stream_id, events) = state
-        .client
+        .client()?
         .restart_session_stream(session_id, model, effort, permission_mode)
         .await
         .map_err(AppError::from)?;
-    spawn_live_pump(state.client.clone(), stream_id, events, on_event);
+    spawn_live_pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(session)
 }
 
@@ -170,11 +170,11 @@ pub async fn rewind_session(
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<RewindResult> {
     let (session, live_rewound, stream_id, events) = state
-        .client
+        .client()?
         .rewind_session_stream(session_id, user_turn, permission_mode)
         .await
         .map_err(AppError::from)?;
-    spawn_live_pump(state.client.clone(), stream_id, events, on_event);
+    spawn_live_pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(RewindResult {
         session,
         live_rewound,
@@ -191,7 +191,7 @@ pub async fn send_user_message(
     prompt_name: Option<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .send_user_message(session_id, text, attached_docs, prompt_name)
         .await
         .map_err(AppError::from)
@@ -207,7 +207,7 @@ pub async fn respond_permission(
     message: Option<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .respond_permission(session_id, request_id, allow, message)
         .await
         .map_err(AppError::from)
@@ -222,7 +222,7 @@ pub async fn answer_question(
     answers: QuestionAnswers,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .answer_question(session_id, request_id, answers)
         .await
         .map_err(AppError::from)
@@ -232,7 +232,7 @@ pub async fn answer_question(
 #[specta::specta]
 pub async fn interrupt_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .interrupt_session(session_id)
         .await
         .map_err(AppError::from)
@@ -242,7 +242,7 @@ pub async fn interrupt_session(state: State<'_, AppState>, session_id: String) -
 #[specta::specta]
 pub async fn kill_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .kill_session(session_id)
         .await
         .map_err(AppError::from)
@@ -256,7 +256,7 @@ pub async fn set_session_model(
     model: Option<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .set_session_model(session_id, model)
         .await
         .map_err(AppError::from)
@@ -270,7 +270,7 @@ pub async fn set_session_effort(
     effort: Option<String>,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .set_session_effort(session_id, effort)
         .await
         .map_err(AppError::from)
@@ -283,7 +283,7 @@ pub async fn list_sessions(
     workstream_id: String,
 ) -> CmdResult<Vec<Session>> {
     state
-        .client
+        .client()?
         .list_sessions(workstream_id)
         .await
         .map_err(AppError::from)
@@ -316,7 +316,7 @@ pub async fn get_session_log(
     session_id: String,
 ) -> CmdResult<Vec<SessionLogEntryDto>> {
     let entries = state
-        .client
+        .client()?
         .get_session_log(session_id)
         .await
         .map_err(AppError::from)?;
@@ -331,11 +331,11 @@ pub async fn attach_session(
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<()> {
     let (stream_id, events) = state
-        .client
+        .client()?
         .attach_session_stream(session_id)
         .await
         .map_err(AppError::from)?;
-    spawn_live_pump(state.client.clone(), stream_id, events, on_event);
+    spawn_live_pump(state.client()?.clone(), stream_id, events, on_event);
     Ok(())
 }
 
@@ -351,7 +351,7 @@ pub struct ActiveSessionView {
 #[specta::specta]
 pub async fn list_active_sessions(state: State<'_, AppState>) -> CmdResult<Vec<ActiveSessionView>> {
     let active = state
-        .client
+        .client()?
         .list_active_sessions()
         .await
         .map_err(AppError::from)?;

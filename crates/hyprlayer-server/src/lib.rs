@@ -37,7 +37,7 @@ use transport::{
 /// standalone server must land on the same profile (ADR-0009).
 pub const APP_IDENTIFIER: &str = "ai.brightblock.hyprlayer";
 
-const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop]";
+const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop|--version]";
 const STOP_POLLS: u32 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +46,9 @@ pub enum Command {
     Relay,
     Status,
     Stop,
+    /// The client provisions a version-keyed server on a remote host and needs
+    /// to read back what it installed (plan Phase 7 §3).
+    Version,
 }
 
 impl Command {
@@ -57,6 +60,7 @@ impl Command {
             Some("relay") => Command::Relay,
             Some("status") => Command::Status,
             Some("stop") => Command::Stop,
+            Some("--version" | "-V") => Command::Version,
             Some(other) => return Err(format!("unknown command `{other}`\n{USAGE}")),
         };
         if let Some(extra) = args.next() {
@@ -73,6 +77,10 @@ pub async fn run(command: Command) -> i32 {
         Command::Relay => relay().await,
         Command::Status => status().await,
         Command::Stop => stop().await,
+        Command::Version => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            0
+        }
     }
 }
 
@@ -518,6 +526,8 @@ mod tests {
         assert_eq!(parse(&["relay"]), Ok(Command::Relay));
         assert_eq!(parse(&["status"]), Ok(Command::Status));
         assert_eq!(parse(&["stop"]), Ok(Command::Stop));
+        assert_eq!(parse(&["--version"]), Ok(Command::Version));
+        assert_eq!(parse(&["-V"]), Ok(Command::Version));
         assert!(parse(&["restart"]).unwrap_err().contains(USAGE));
         assert!(parse(&["stop", "now"]).unwrap_err().contains(USAGE));
     }

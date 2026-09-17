@@ -2,6 +2,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { scopedKey } from "@/lib/hostScope";
+
 type LastRouteStore = {
   href: string | null;
   remember: (href: string) => void;
@@ -13,6 +15,6 @@ export const useLastRoute = create<LastRouteStore>()(
       href: null,
       remember: (href) => set({ href }),
     }),
-    { name: "hyprlayer:last-route", version: 1 },
+    { name: scopedKey("hyprlayer:last-route"), version: 1 },
   ),
 );

@@ -72,6 +72,20 @@ struct Fixture {
     workstream_folder_no_git: Pinned,
     #[serde(rename = "prNotFound")]
     pr_not_found: Pinned,
+    #[serde(rename = "remoteCliMissing")]
+    remote_cli_missing: Pinned,
+    #[serde(rename = "remotePlatformUnsupported")]
+    remote_platform_unsupported: Pinned,
+    #[serde(rename = "serverDownloadFailed")]
+    server_download_failed: Pinned,
+    #[serde(rename = "remoteAuthFailed")]
+    remote_auth_failed: Pinned,
+    #[serde(rename = "remoteUnreachable")]
+    remote_unreachable: Pinned,
+    #[serde(rename = "hostChanged")]
+    host_changed: Pinned,
+    #[serde(rename = "serverUnavailable")]
+    server_unavailable: Pinned,
 }
 
 fn fixture() -> Fixture {
@@ -492,4 +506,107 @@ fn pr_not_found_failure() -> AppError {
 #[test]
 fn pr_not_found_failure_matches_the_pinned_fixture() {
     assert_eq!(Pinned::from(pr_not_found_failure()), fixture().pr_not_found);
+}
+
+// The host has no server this build can run: `provision::readiness` saw
+// nothing (or foreign bytes) at the version-keyed path, or ssh exited 127.
+fn remote_cli_missing_failure() -> AppError {
+    AppError::remote_cli_missing("nexus")
+}
+
+#[test]
+fn remote_cli_missing_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(remote_cli_missing_failure()),
+        fixture().remote_cli_missing
+    );
+}
+
+// supervisor::triple_for_uname's unsupported arm — a host running none of
+// ADR-0008's three targets (plan Phase 7 §2).
+fn remote_platform_unsupported_failure() -> AppError {
+    AppError::remote_platform_unsupported("nexus", "SunOS i86pc")
+}
+
+#[test]
+fn remote_platform_unsupported_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(remote_platform_unsupported_failure()),
+        fixture().remote_platform_unsupported
+    );
+}
+
+// provision::download_error — no published asset for this version, or the
+// network refused. An expected condition, so it carries its own code and a
+// remedy rather than `internal` (plan Phase 7, manual verification 2026-09-16).
+fn server_download_failed_failure() -> AppError {
+    AppError::server_download_failed(
+        "0.7.5",
+        "x86_64-unknown-linux-gnu",
+        "curl: (56) The requested URL returned error: 404",
+    )
+}
+
+#[test]
+fn server_download_failed_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(server_download_failed_failure()),
+        fixture().server_download_failed
+    );
+}
+
+// supervisor::classify_ssh_failure's remote_auth_failed arm — stderr matched
+// "Permission denied" or "Host key verification failed".
+fn remote_auth_failed_failure() -> AppError {
+    AppError::remote_auth_failed("nexus", "Permission denied (publickey).")
+}
+
+#[test]
+fn remote_auth_failed_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(remote_auth_failed_failure()),
+        fixture().remote_auth_failed
+    );
+}
+
+// supervisor::classify_ssh_failure's fallback arm, and its named cases
+// (host unresolvable, connection refused/timed out).
+fn remote_unreachable_failure() -> AppError {
+    AppError::remote_unreachable(
+        "nexus",
+        "Could not resolve hostname nexus: nodename nor servname provided, or not known",
+    )
+}
+
+#[test]
+fn remote_unreachable_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(remote_unreachable_failure()),
+        fixture().remote_unreachable
+    );
+}
+
+// commands::hosts::reconnect_server's guard — hosts.json names another server
+// than the one this window connected to (plan Phase 8 §4).
+fn host_changed_failure() -> AppError {
+    AppError::host_changed("Nexus")
+}
+
+#[test]
+fn host_changed_matches_the_pinned_fixture() {
+    assert_eq!(Pinned::from(host_changed_failure()), fixture().host_changed);
+}
+
+// supervisor's local-server `Outcome::Blocked` path once `setup()` stops
+// exiting on it (plan Phase 1 §5) — the detail text carried over verbatim.
+fn server_unavailable_failure() -> AppError {
+    AppError::server_unavailable("The Hyprlayer server did not start listening in time.")
+}
+
+#[test]
+fn server_unavailable_failure_matches_the_pinned_fixture() {
+    assert_eq!(
+        Pinned::from(server_unavailable_failure()),
+        fixture().server_unavailable
+    );
 }

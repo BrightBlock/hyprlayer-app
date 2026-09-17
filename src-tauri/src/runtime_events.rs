@@ -1,17 +1,31 @@
+use std::sync::Arc;
+
 use hyprlayer_core::models::runtime::ThoughtsIndexUpdateKind;
 use hyprlayer_core::models::RuntimeEvent;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 
+use crate::client::RpcClient;
 use crate::events;
+use crate::state::AppState;
 
-pub fn spawn(handle: AppHandle, mut events: tokio::sync::mpsc::UnboundedReceiver<RuntimeEvent>) {
+/// One bridge per client, retiring with it: `take_events()` is one-shot per
+/// client, so a reconnect's fresh client simply gets a fresh bridge.
+pub fn spawn(handle: AppHandle, client: Arc<RpcClient>) {
+    let mut events = client
+        .take_events()
+        .expect("a fresh client still holds its event stream");
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             map(&handle, event);
         }
-        // The stream ends only with the connection.
-        let _ = events::ServerDisconnected.emit(&handle);
+        // The stream ends only with the connection. Mark the level state
+        // lost before emitting the edge, so a listener that queries
+        // `connection_status` on the event already sees it (plan Phase 1 §6) —
+        // and stay quiet if a reconnect has already moved on (Phase 8 §2).
+        if handle.state::<AppState>().mark_lost(&client) {
+            let _ = events::ServerDisconnected.emit(&handle);
+        }
     });
 }
 

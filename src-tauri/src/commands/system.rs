@@ -29,7 +29,7 @@ pub async fn set_binary_override(
         }
     }
     state
-        .client
+        .client()?
         .set_binary_override(kind, path)
         .await
         .map_err(AppError::from)
@@ -81,7 +81,7 @@ pub async fn quit_app(
 ) -> CmdResult<()> {
     if dont_ask_again {
         state
-            .client
+            .client()?
             .set_quit_confirm(false)
             .await
             .map_err(AppError::from)?;
@@ -96,7 +96,7 @@ pub async fn quit_app(
 #[specta::specta]
 pub async fn redetect_binaries(state: State<'_, AppState>) -> CmdResult<Vec<BinaryStatus>> {
     state
-        .client
+        .client()?
         .redetect_binaries()
         .await
         .map_err(AppError::from)
@@ -106,7 +106,7 @@ pub async fn redetect_binaries(state: State<'_, AppState>) -> CmdResult<Vec<Bina
 #[specta::specta]
 pub async fn get_app_settings(state: State<'_, AppState>) -> CmdResult<AppSettings> {
     state
-        .client
+        .client()?
         .get_app_settings()
         .await
         .map_err(AppError::from)
@@ -129,7 +129,7 @@ pub async fn set_app_settings(
         .map(hyprlayer_core::branch_prefix::normalize_prefixes);
 
     let current = state
-        .client
+        .client()?
         .get_app_settings()
         .await
         .map_err(AppError::from)?;
@@ -147,7 +147,7 @@ pub async fn set_app_settings(
     }
 
     state
-        .client
+        .client()?
         .set_app_settings(settings)
         .await
         .map_err(AppError::from)
@@ -161,7 +161,7 @@ pub async fn claude_sync_models(
     seen: Vec<String>,
 ) -> CmdResult<AppSettings> {
     state
-        .client
+        .client()?
         .claude_sync_models(add, seen)
         .await
         .map_err(AppError::from)
@@ -186,7 +186,11 @@ pub async fn detect_editors(state: State<'_, AppState>) -> CmdResult<Vec<EditorT
 #[tauri::command]
 #[specta::specta]
 pub async fn github_username(state: State<'_, AppState>) -> CmdResult<Option<String>> {
-    state.client.github_username().await.map_err(AppError::from)
+    state
+        .client()?
+        .github_username()
+        .await
+        .map_err(AppError::from)
 }
 
 // The server's own `USER`, not the client's (ADR-0009, plan Phase 5 §5): a
@@ -202,8 +206,10 @@ pub async fn default_username(app: tauri::AppHandle) -> String {
     let Some(state) = app.try_state::<AppState>() else {
         return "user".to_string();
     };
-    state
-        .client
+    let Ok(client) = state.client() else {
+        return "user".to_string();
+    };
+    client
         .default_username()
         .await
         .unwrap_or_else(|_| "user".to_string())
@@ -215,7 +221,7 @@ pub async fn detect_cli_install_methods(
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<CliInstallMethod>> {
     state
-        .client
+        .client()?
         .detect_cli_install_methods()
         .await
         .map_err(AppError::from)
@@ -228,7 +234,7 @@ pub async fn install_hyprlayer_cli(
     method: CliInstallMethodId,
 ) -> CmdResult<()> {
     state
-        .client
+        .client()?
         .install_hyprlayer_cli(method)
         .await
         .map_err(AppError::from)
@@ -238,7 +244,7 @@ pub async fn install_hyprlayer_cli(
 #[specta::specta]
 pub async fn hyprlayer_cli_update_check(state: State<'_, AppState>) -> CmdResult<CliUpdateCheck> {
     state
-        .client
+        .client()?
         .hyprlayer_cli_update_check()
         .await
         .map_err(AppError::from)
@@ -248,7 +254,7 @@ pub async fn hyprlayer_cli_update_check(state: State<'_, AppState>) -> CmdResult
 #[specta::specta]
 pub async fn update_hyprlayer_cli(state: State<'_, AppState>) -> CmdResult<CliUpdateResult> {
     state
-        .client
+        .client()?
         .update_hyprlayer_cli()
         .await
         .map_err(AppError::from)

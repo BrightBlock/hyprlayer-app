@@ -5,6 +5,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 
+import { flushPersistedWrites } from "./persistedStorage";
 import { IS_LINUX } from "./platform";
 import { useToast } from "./toast";
 
@@ -162,6 +163,7 @@ export const useUpdate = create<UpdateState>()(
         try {
           await pendingUpdate.downloadAndInstall();
           set({ installing: "installing" });
+          flushPersistedWrites();
           await relaunch();
         } catch (e) {
           console.error("[updater] install failed:", e);

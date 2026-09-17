@@ -288,6 +288,23 @@ export function PencilIcon({ size = 12, strokeWidth = 1.8, className }: IconProp
   );
 }
 
+export function MoreIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+    >
+      <circle cx="12" cy="5" r="1.4" />
+      <circle cx="12" cy="12" r="1.4" />
+      <circle cx="12" cy="19" r="1.4" />
+    </svg>
+  );
+}
+
 export function SearchIcon({ size = 14, strokeWidth = 1.9, className }: IconProps) {
   return (
     <svg

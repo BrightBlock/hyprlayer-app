@@ -36,7 +36,11 @@ impl From<ThoughtsSource> for core_projects::ThoughtsSource {
 #[tauri::command]
 #[specta::specta]
 pub async fn get_ai_status(state: State<'_, AppState>) -> CmdResult<AiStatus> {
-    state.client.get_ai_status().await.map_err(AppError::from)
+    state
+        .client()?
+        .get_ai_status()
+        .await
+        .map_err(AppError::from)
 }
 
 #[derive(Debug, Serialize, Deserialize, specta::Type)]
@@ -62,16 +66,20 @@ impl From<core_projects::ThoughtsProbe> for ThoughtsProbe {
 #[tauri::command]
 #[specta::specta]
 pub async fn probe_default_thoughts(app: tauri::AppHandle) -> ThoughtsProbe {
+    let empty = || ThoughtsProbe {
+        default_path: String::new(),
+        exists: false,
+        is_git_repo: false,
+    };
     let state = app.state::<AppState>();
-    match state.client.probe_default_thoughts().await {
+    let Ok(client) = state.client() else {
+        return empty();
+    };
+    match client.probe_default_thoughts().await {
         Ok(probe) => probe.into(),
         Err(e) => {
             log::error!("probe_default_thoughts: {}", e.message);
-            ThoughtsProbe {
-                default_path: String::new(),
-                exists: false,
-                is_git_repo: false,
-            }
+            empty()
         }
     }
 }
@@ -85,7 +93,7 @@ pub async fn init_thoughts_repo(
     source: ThoughtsSource,
 ) -> CmdResult<Bootstrap> {
     let result = state
-        .client
+        .client()?
         .init_thoughts_repo(user, source.into())
         .await
         .map_err(AppError::from)?;

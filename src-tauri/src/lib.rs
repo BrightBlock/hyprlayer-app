@@ -4,6 +4,7 @@ mod editors;
 pub mod error;
 mod events;
 mod hosts;
+mod provision;
 mod runtime_events;
 mod state;
 mod supervisor;
@@ -12,6 +13,7 @@ mod window_geometry;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use hyprlayer_core::env::RuntimeEnvironment;
 #[cfg(target_os = "macos")]
@@ -20,6 +22,7 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
+use crate::error::AppError;
 use crate::state::AppState;
 
 fn specta_builder() -> Builder<tauri::Wry> {
@@ -113,6 +116,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::list_active_sessions,
             commands::attachments::import_attachment,
             commands::attachments::save_attachment,
+            commands::attachments::read_attachment,
             commands::system::set_binary_override,
             commands::system::redetect_binaries,
             commands::system::detect_cli_install_methods,
@@ -174,6 +178,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::prompts::preview_prompt_import,
             commands::prompts::apply_prompt_import,
             commands::prompts::export_prompts,
+            commands::prompts::write_prompt_export,
+            commands::prompts::read_prompt_import,
             commands::agents::list_agent_files,
             commands::agents::save_agent_file,
             commands::agents::delete_agent_file,
@@ -187,6 +193,13 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::agents::agent_bundle_versions,
             commands::agents::install_agent_bundle_version,
             commands::agents::repair_agent_bundle,
+            commands::hosts::list_hosts,
+            commands::hosts::save_hosts,
+            commands::hosts::test_host_connection,
+            commands::hosts::connection_status,
+            commands::hosts::reconnect_server,
+            commands::hosts::inspect_host_provisioning,
+            commands::hosts::provision_host,
         ])
         .events(collect_events![
             events::ConfigChanged,
@@ -229,9 +242,33 @@ fn env_overlay_from_desktop() -> BTreeMap<String, String> {
     overlay
 }
 
+/// Everything a live client needs wired up, on launch and again after a
+/// reconnect (plan Phase 8 §2). Asset-scope registration deliberately does not
+/// repeat: it derives from `client.worktree_root()`, and a host that has not
+/// changed has an unchanged root.
+pub(crate) async fn attach_client(handle: &tauri::AppHandle, client: Arc<client::RpcClient>) {
+    // Re-injected on every connect (ADR-0009 §7): a daemonized server has none
+    // of these on its own — a respawned local server least of all — and without
+    // SSH_AUTH_SOCK every `git push`/`gh` call would fail as ADR-0005 predicts.
+    if let Err(e) = client.set_env_overlay(env_overlay_from_desktop()).await {
+        log::warn!(
+            "could not send the environment overlay to the server: {}",
+            e.message
+        );
+    }
+    runtime_events::spawn(handle.clone(), client);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = specta_builder();
+    // Bound before the builder so the identifier is readable: the profile id
+    // has to be injected into the webview before any script runs.
+    let context = tauri::generate_context!();
+    let profile = dirs::config_dir()
+        .map(|d| d.join(&context.config().identifier))
+        .map(|dir| hosts::profile_id(&dir))
+        .unwrap_or_else(|| hosts::LOCAL_PROFILE.to_string());
 
     #[cfg(debug_assertions)]
     if let Err(e) = builder.export(
@@ -268,7 +305,18 @@ pub fn run() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        // zustand's `persist` fixes its key at store creation, during the
+        // import graph — so the namespace has to exist before any script runs,
+        // which only an init script guarantees.
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("hyprlayer-profile")
+                .js_init_script(format!(
+                    "window.__HYPRLAYER_PROFILE__ = {};",
+                    serde_json::to_string(&profile).expect("a string serializes")
+                ))
+                .build(),
+        );
 
     #[cfg(debug_assertions)]
     let tauri_builder = tauri_builder.plugin(tauri_plugin_mcp_bridge::init());
@@ -295,79 +343,93 @@ pub fn run() {
             // ask which server to reach (ADR-0009, plan Phase 5 §2).
             let remote_host = hosts::active_host(&app_config_dir);
             let outcome = match &remote_host {
-                Some(host) => tauri::async_runtime::block_on(supervisor::connect_remote(host)),
+                Some(host) => {
+                    tauri::async_runtime::block_on(supervisor::connect_remote(host, &app_data_dir))
+                }
                 None => tauri::async_runtime::block_on(supervisor::connect_or_spawn(
                     &app_config_dir,
                     &app_data_dir,
                 )),
             };
-            let client = match outcome {
-                supervisor::Outcome::Connected(client) => client,
-                supervisor::Outcome::Blocked { title, detail } => {
+            // VS Code Remote-SSH's rule (plan Phase 1 §5): open the window
+            // regardless of whether the connection succeeded. The one
+            // exception is `runtime_in_use` — another Hyprlayer already holds
+            // this profile's lock, which is `tauri-plugin-single-instance`'s
+            // job, not a recoverable connection state.
+            // `app.manage(AppState::new(..))` moves above `runtime_events::spawn`
+            // (plan Phase 1 §5): the spawned task now needs `handle.state::<AppState>()`.
+            let mut client = match outcome {
+                supervisor::Outcome::Connected(client) => {
+                    app.manage(AppState::new(client.clone(), remote_host.clone()));
+                    Some(client)
+                }
+                supervisor::Outcome::Blocked { title, error } => {
+                    let detail = supervisor::detail_for(&error);
                     // Also to stderr: the dialog is all a packaged user sees, but it
                     // renders nothing from a terminal launch, which left `tauri dev`
                     // exiting 1 with no reason anywhere.
                     eprintln!("{title}: {detail}");
-                    app.dialog()
-                        .message(detail)
-                        .title(title)
-                        .kind(tauri_plugin_dialog::MessageDialogKind::Error)
-                        .blocking_show();
-                    std::process::exit(1);
+                    if error.code == "runtime_in_use" {
+                        app.dialog()
+                            .message(detail)
+                            .title(title)
+                            .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                            .blocking_show();
+                        std::process::exit(1);
+                    }
+                    app.manage(AppState::failed(remote_host.clone(), error));
+                    None
                 }
             };
 
-            match tauri::async_runtime::block_on(client.worktree_root()) {
-                Ok(worktree_root) => {
-                    if let Err(e) = app
-                        .asset_protocol_scope()
-                        .allow_directory(worktree_root, true)
-                    {
-                        log::warn!("could not register worktree root with the asset scope: {e}");
+            if let Some(live) = &client {
+                match tauri::async_runtime::block_on(live.worktree_root()) {
+                    Ok(worktree_root) => {
+                        if let Err(e) = app
+                            .asset_protocol_scope()
+                            .allow_directory(worktree_root, true)
+                        {
+                            log::warn!(
+                                "could not register worktree root with the asset scope: {e}"
+                            );
+                        }
                     }
+                    // The handshake passed but the first request did not: the
+                    // server is a build this app cannot talk to. Downgrade to
+                    // `Failed` rather than exit — a version-skewed server is
+                    // still a state the recovery screen can show and act on.
+                    Err(e) if e.code == "server_disconnected" => {
+                        app.state::<AppState>()
+                            .mark_failed(AppError::server_unavailable(
+                                supervisor::incompatible_server_detail(),
+                            ));
+                        client = None;
+                    }
+                    Err(e) => log::warn!(
+                        "could not fetch the worktree root from the server: {}",
+                        e.message
+                    ),
                 }
-                // The handshake passed but the first request did not: the
-                // server is a build this app cannot talk to. Say so instead
-                // of running on a dead client.
-                Err(e) if e.code == "server_disconnected" => {
-                    app.dialog()
-                        .message(supervisor::incompatible_server_detail())
-                        .title("Hyprlayer cannot start")
-                        .kind(tauri_plugin_dialog::MessageDialogKind::Error)
-                        .blocking_show();
-                    std::process::exit(1);
-                }
-                Err(e) => log::warn!(
-                    "could not fetch the worktree root from the server: {}",
-                    e.message
-                ),
             }
 
-            // Re-injected on every connect (ADR-0009 §7): a daemonized server
-            // has none of these on its own, and without SSH_AUTH_SOCK every
-            // `git push`/`gh` call would fail exactly as ADR-0005 predicts.
-            if let Err(e) =
-                tauri::async_runtime::block_on(client.set_env_overlay(env_overlay_from_desktop()))
-            {
-                log::warn!(
-                    "could not send the environment overlay to the server: {}",
-                    e.message
-                );
+            if let Some(live) = client.clone() {
+                tauri::async_runtime::block_on(attach_client(app.handle(), live));
             }
-
-            runtime_events::spawn(
-                app.handle().clone(),
-                client
-                    .take_events()
-                    .expect("a fresh client still holds its event stream"),
-            );
 
             if let Some(window) = app.get_webview_window("main") {
-                let client = client.clone();
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::Focused(is_focused) => {
-                        let client = client.clone();
+                        // Read the live client rather than capturing one: a
+                        // reconnect swaps it, and a captured clone would leave
+                        // the PR watcher's foreground state stale with no error
+                        // anywhere (plan Phase 8 §3).
+                        let Some(client) = handle
+                            .try_state::<AppState>()
+                            .and_then(|state| state.client().ok())
+                        else {
+                            return;
+                        };
                         let is_focused = *is_focused;
                         tauri::async_runtime::spawn(async move {
                             let _ = client.set_foreground(is_focused).await;
@@ -380,8 +442,6 @@ pub fn run() {
                     _ => {}
                 });
             }
-
-            app.manage(AppState::new(client, remote_host));
 
             if let Some(omarchy_dir) = hyprlayer_core::omarchy::current_dir(
                 dirs::state_dir().as_deref(),
@@ -430,7 +490,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         // Sessions and terminals live on the server now: quitting the app
         // must not touch the runtime, so there is nothing left to do here.
@@ -440,9 +500,8 @@ pub fn run() {
 fn request_quit(handle: &tauri::AppHandle) {
     let handle = handle.clone();
     tauri::async_runtime::spawn(async move {
-        let confirm = match handle.try_state::<AppState>() {
-            Some(state) => state
-                .client
+        let confirm = match handle.try_state::<AppState>().and_then(|s| s.client().ok()) {
+            Some(client) => client
                 .get_app_settings()
                 .await
                 .map(|settings| settings.quit.confirm)

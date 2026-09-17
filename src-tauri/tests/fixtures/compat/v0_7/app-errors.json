@@ -133,5 +133,40 @@
     "code": "pr_not_found",
     "message": "No pull request #7 found in this repository",
     "remedy": null
+  },
+  "remoteCliMissing": {
+    "code": "remote_cli_missing",
+    "message": "nexus does not have the Hyprlayer server this build needs.",
+    "remedy": "Install it from the Hyprlayer server panel."
+  },
+  "remotePlatformUnsupported": {
+    "code": "remote_platform_unsupported",
+    "message": "nexus reports an unsupported platform: SunOS i86pc.",
+    "remedy": "Hyprlayer's server ships for Linux x86_64, macOS arm64, and Windows x86_64."
+  },
+  "serverDownloadFailed": {
+    "code": "server_download_failed",
+    "message": "Could not download hyprlayer-server 0.7.5 for x86_64-unknown-linux-gnu: curl: (56) The requested URL returned error: 404",
+    "remedy": "No release publishes this version's server yet — stage one with scripts/stage-server-binary.sh."
+  },
+  "remoteAuthFailed": {
+    "code": "remote_auth_failed",
+    "message": "Could not authenticate to nexus: Permission denied (publickey).",
+    "remedy": "Check your SSH credentials."
+  },
+  "remoteUnreachable": {
+    "code": "remote_unreachable",
+    "message": "Could not reach nexus: Could not resolve hostname nexus: nodename nor servname provided, or not known",
+    "remedy": null
+  },
+  "hostChanged": {
+    "code": "host_changed",
+    "message": "The active Hyprlayer server is now Nexus.",
+    "remedy": "Relaunch Hyprlayer to connect to it."
+  },
+  "serverUnavailable": {
+    "code": "server_unavailable",
+    "message": "The Hyprlayer server did not start listening in time.",
+    "remedy": null
   }
 }

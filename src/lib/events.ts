@@ -33,6 +33,10 @@ export function attachEventListeners(): () => void {
       void queryClient.invalidateQueries({ queryKey: ["project"] });
       invalidateCliBundleState();
     }),
+    // The edge event tells the UI to re-read the level state.
+    events.serverDisconnected.listen(() => {
+      void queryClient.invalidateQueries({ queryKey: ["connection-status"] });
+    }),
     events.omarchyThemeChanged.listen(() => {
       void refreshOmarchyTheme();
     }),

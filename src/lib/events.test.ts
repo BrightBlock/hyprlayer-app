@@ -24,6 +24,7 @@ vi.mock("./bindings", () => ({
     sessionLifecycle: stub("sessionLifecycle"),
     scriptRunChanged: stub("scriptRunChanged"),
     thoughtsIndexUpdated: stub("thoughtsIndexUpdated"),
+    serverDisconnected: stub("serverDisconnected"),
   },
 }));
 
@@ -57,5 +58,16 @@ describe("binariesChanged", () => {
     const keys = invalidate.mock.calls.map(([arg]) => (arg?.queryKey as string[])?.[0]);
     expect(keys).not.toContain("agent-files");
     expect(keys).not.toContain("agent-skills");
+  });
+});
+
+describe("serverDisconnected", () => {
+  it("re-reads the level connection state the edge event announces", () => {
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    attachEventListeners();
+    listeners.get("serverDisconnected")?.({});
+
+    const keys = invalidate.mock.calls.map(([arg]) => (arg?.queryKey as string[])?.[0]);
+    expect(keys).toContain("connection-status");
   });
 });

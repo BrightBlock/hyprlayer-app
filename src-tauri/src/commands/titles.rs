@@ -9,7 +9,7 @@ use crate::state::AppState;
 #[specta::specta]
 pub async fn suggest_tab_title(state: State<'_, AppState>, text: String) -> CmdResult<String> {
     let settings = state
-        .client
+        .client()?
         .get_app_settings()
         .await
         .map_err(AppError::from)?;
@@ -29,19 +29,19 @@ pub async fn suggest_tab_title(state: State<'_, AppState>, text: String) -> CmdR
     let raw = match providers::parse_model_tag(&model_tag) {
         TitleModel::Claude(flag) => {
             state
-                .client
+                .client()?
                 .generate_title_claude(flag.to_string(), prompt)
                 .await
         }
         TitleModel::OpenCode(model) => {
             state
-                .client
+                .client()?
                 .generate_title_opencode(model.to_string(), prompt)
                 .await
         }
         TitleModel::Codex(model) => {
             state
-                .client
+                .client()?
                 .generate_title_codex(model.to_string(), prompt)
                 .await
         }

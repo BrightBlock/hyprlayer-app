@@ -1,16 +1,8 @@
 import { type ReactNode } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 
 import type { GithubOwner, GitignoreTemplate } from "@/lib/bindings";
-import {
-  Button,
-  DropdownSelect,
-  Field,
-  Spinner,
-  TextInput,
-  Toggle,
-  cx,
-} from "@/components/ui";
+import { DropdownSelect, Field, Spinner, TextInput, Toggle, cx } from "@/components/ui";
+import { PathField } from "@/components/PathField";
 import { CheckIcon, GlobeIcon, LockIcon, UploadCloudIcon } from "@/components/icons";
 
 export type CreateSpec = {
@@ -92,15 +84,6 @@ export function CreateProjectFields({
   const remoteNameOk = !isReservedRepoName(remoteName);
   const owner = effectiveOwner;
 
-  const browse = async () => {
-    const picked = await open({
-      directory: true,
-      multiple: false,
-      title: "Choose where to create the project",
-    });
-    if (typeof picked === "string") set({ location: picked });
-  };
-
   return (
     <>
       <Field label="Project name">
@@ -119,18 +102,13 @@ export function CreateProjectFields({
       </Field>
 
       <Field label="Location">
-        <div className="flex gap-2">
-          <TextInput
-            value={value.location}
-            onChange={(e) => set({ location: e.target.value })}
-            placeholder="~/hyprlayer/repos"
-            disabled={disabled}
-            className="font-mono text-xs"
-          />
-          <Button type="button" onClick={() => void browse()} disabled={disabled}>
-            Browse
-          </Button>
-        </div>
+        <PathField
+          value={value.location}
+          onChange={(location) => set({ location })}
+          placeholder="~/hyprlayer/repos"
+          disabled={disabled}
+          browseTitle="Choose where to create the project"
+        />
       </Field>
 
       <Field label="Initial branch">
