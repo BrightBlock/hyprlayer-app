@@ -7,12 +7,14 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-import type { Host, HostsFile } from "@/lib/bindings";
+import type { Host, HostsFile, ProvisionStep } from "@/lib/bindings";
 import { validateDestination, validateHostList } from "@/lib/domain/hosts";
 import { errorMessage } from "@/lib/ipc";
 import { useTestHostConnection } from "@/lib/queries";
-import { cx, IconButton, MenuItem, Popover, Spinner, TextInput } from "@/components/ui";
+import { cx, MenuItem, Popover, Spinner, TextInput } from "@/components/ui";
 import { CheckIcon, MoreIcon, PlusIcon, XIcon, ZapIcon } from "@/components/icons";
+import { retryConnection } from "./reconnect";
+import { NO_SERVER, runProvision, STEP_LABEL } from "./serverInstall";
 
 type Props = {
   value: HostsFile;
@@ -26,8 +28,9 @@ type DraftRow = { label: string; destination: string };
 
 // The status column carries the outcome in two or three words; the ssh text it
 // came from is the row's tooltip, since a full failure is a sentence or two and
-// would set the width of the whole list.
-type Probe = { ok: true } | { ok: false; short: string; detail: string };
+// would set the width of the whole list. The code is kept because one of them —
+// a missing server — is a failure this row can act on rather than only report.
+type Probe = { ok: true } | { ok: false; code?: string; short: string; detail: string };
 
 // Codes come from `supervisor::classify_ssh_failure`; anything unrecognised
 // still lands here rather than rendering a code at the user.
@@ -61,7 +64,7 @@ const ROW_BUTTON =
 // The bordered-row anatomy the Prompts sidebar uses (ADR-0006, "Agents: sidebar
 // shell"), not rowClass — these rows carry several controls.
 // Every control is in flow now, so the row needs no reserved gutter; the header
-// shares the inset so its `+` lands in the same trailing column.
+// shares this inset, and `ROW_BUTTON`, so its `+` lands in the kebab's column.
 const ROW_INSET_RIGHT = "pr-1.5";
 const ROW_BASE = `flex items-center gap-2 rounded-md border pl-2.5 ${ROW_INSET_RIGHT} py-1 transition-colors`;
 const ROW_SELECTED = "border-accent/30 bg-accent/10 text-ink";
@@ -81,6 +84,11 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
   const [editing, setEditing] = useState<Set<number>>(new Set());
   const [probes, setProbes] = useState<Record<string, Probe>>({});
   const [testing, setTesting] = useState<string | null>(null);
+  // One at a time, like `testing`: this pushes 16MB over ssh, and a second
+  // concurrent push is a way to saturate a link, not a feature.
+  const [installing, setInstalling] = useState<{ destination: string; step: ProvisionStep } | null>(
+    null,
+  );
   const [dragging, setDragging] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -238,10 +246,16 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
     const record = (probe: Probe) => setProbes((prev) => ({ ...prev, [host.destination]: probe }));
     try {
       const probe = await test.mutateAsync(host);
-      if (probe.ok) record({ ok: true });
-      else {
+      if (probe.ok) {
+        record({ ok: true });
+        // The connection surface above is still reporting the failure this host
+        // just disproved. Reconnecting is what makes the two agree — and it is
+        // the same work a relaunch would do, without the relaunch.
+        if (host.destination === active) void retryConnection();
+      } else {
         record({
           ok: false,
+          code: probe.error?.code,
           short: shortFailure(probe.error?.code),
           detail: errorMessage(probe.error ?? "Could not connect."),
         });
@@ -250,6 +264,35 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
       record({ ok: false, short: "Failed", detail: errorMessage(e) });
     } finally {
       setTesting(null);
+    }
+  }
+
+  // Provisioning a host it has not switched to yet is the point: the probe above
+  // already knows the server is missing, and learning that only after a restart
+  // into a blocked window cost a second one to get out of.
+  async function runInstall(row: DraftRow) {
+    const host = { destination: row.destination.trim(), label: row.label.trim() };
+    setInstalling({ destination: host.destination, step: "probe" });
+    try {
+      await runProvision(host, (step) =>
+        setInstalling((cur) => (cur?.destination === host.destination ? { ...cur, step } : cur)),
+      );
+      setInstalling(null);
+      // The row's own probe is what says it worked; nothing here claims it.
+      await runTest(row);
+    } catch (e) {
+      setInstalling(null);
+      setProbes((prev) => ({
+        ...prev,
+        // Still the code that offers the action: a failed push leaves the server
+        // as missing as it was, so retrying stays one click rather than two.
+        [host.destination]: {
+          ok: false,
+          code: NO_SERVER,
+          short: "Install failed",
+          detail: errorMessage(e),
+        },
+      }));
     }
   }
 
@@ -280,20 +323,24 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
 
   return (
     <div>
-      {/* Same right inset *and* border box as a row, so `+` lands exactly in the
-          Edit icon's column rather than a border's width off it. */}
+      {/* Same right inset, border box *and* control geometry as a row, so `+`
+          lands in the kebab's column. A shared right edge alone does not do it:
+          a wider button centres its icon further left, which is the 5px the
+          32px `IconButton` used to sit off by. */}
       <div
         className={`flex items-center justify-between gap-3 border border-transparent ${ROW_INSET_RIGHT}`}
       >
         <h3 className="text-2xs font-semibold uppercase tracking-wider text-ink-dim">Hosts</h3>
-        <IconButton
+        <button
+          type="button"
+          className={ROW_BUTTON}
           disabled={disabled || !!adding}
           aria-label="Add host"
           title="Add host"
           onClick={() => setAdding(BLANK_ADD)}
         >
-          <PlusIcon size={15} />
-        </IconButton>
+          <PlusIcon size={14} />
+        </button>
       </div>
       {showEmptyState && (
         <p className="mt-1 text-xs text-ink-dim">No hosts yet.</p>
@@ -307,6 +354,11 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
             const isEditing = editing.has(i);
             const isActive = !!destination && destination === active;
             const probe = probes[destination];
+            const installStep =
+              installing?.destination === destination ? installing.step : null;
+            // Only a probe can raise this, so an untested host offers nothing —
+            // the ⚡ is still the way in.
+            const canInstall = !probe?.ok && probe?.code === NO_SERVER;
             // Probe results only. The live connection is not repeated here: the
             // dialog header already carries it, and this row is already marked
             // as the active one by its check and tint — so a "Connected" chip
@@ -344,7 +396,7 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
                       <button
                         type="button"
                         className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                        disabled={disabled || !destination || isActive}
+                        disabled={disabled || !destination || isActive || installing !== null}
                         aria-current={isActive}
                         title={isActive ? `${name} is the active server` : `Use ${name}`}
                         onClick={() => {
@@ -363,21 +415,42 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
                         <span className="min-w-0 flex-1 truncate font-mono text-sm text-ink-dim">
                           {row.destination}
                         </span>
-                        {status && (
-                          <span
-                            className="flex shrink-0 items-center gap-1.5"
-                            title={status.detail ?? undefined}
-                          >
-                            <span className={cx("h-1.5 w-1.5 rounded-full", status.dot)} />
-                            <span className={cx("text-xs", status.tone)}>{status.label}</span>
+                        {installStep ? (
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            <Spinner size={11} />
+                            <span className="text-xs text-ink-dim">
+                              {STEP_LABEL[installStep]}…
+                            </span>
                           </span>
+                        ) : (
+                          status && (
+                            <span
+                              className="flex shrink-0 items-center gap-1.5"
+                              title={status.detail ?? undefined}
+                            >
+                              <span className={cx("h-1.5 w-1.5 rounded-full", status.dot)} />
+                              <span className={cx("text-xs", status.tone)}>{status.label}</span>
+                            </span>
+                          )
                         )}
                       </button>
+                      {canInstall && !installStep && (
+                        <button
+                          data-control
+                          type="button"
+                          className={`${ROW_BUTTON} text-accent`}
+                          disabled={disabled || installing !== null}
+                          onClick={() => void runInstall(row)}
+                          title={`Install the server on ${name}`}
+                        >
+                          Install
+                        </button>
+                      )}
                       <button
                         data-control
                         type="button"
                         className={ROW_BUTTON}
-                        disabled={disabled || !destination || testing === destination}
+                        disabled={disabled || !destination || testing === destination || installing !== null}
                         onClick={() => void runTest(row)}
                         title={`Test ${name}`}
                         aria-label={`Test ${name}`}
@@ -388,7 +461,7 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
                         data-control
                         type="button"
                         className={ROW_BUTTON}
-                        disabled={disabled}
+                        disabled={disabled || installStep !== null}
                         title={`More actions for ${name}`}
                         aria-label={`More actions for ${name}`}
                         onClick={(e) => {

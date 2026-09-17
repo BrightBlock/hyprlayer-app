@@ -34,6 +34,9 @@ const h = vi.hoisted(() => {
   return { FakeChannel, provisionHost };
 });
 vi.mock("@tauri-apps/api/core", () => ({ Channel: h.FakeChannel }));
+
+const reconnect = vi.hoisted(() => ({ retryConnection: vi.fn() }));
+vi.mock("./reconnect", () => reconnect);
 vi.mock("@/lib/bindings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/bindings")>();
   return { ...actual, commands: { ...actual.commands, provisionHost: h.provisionHost } };
@@ -244,10 +247,25 @@ describe("HostsDialog", () => {
 
     expect(h.provisionHost).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: /Install server/ })).toBeNull();
-    // The one consequence worth a line: sessions on the old server end.
-    expect(
-      screen.getByText("Agents and terminals on 0.7.4 end when 0.7.5 takes over."),
-    ).toBeTruthy();
+    // A version change says nothing here; the switch confirm is where the user
+    // chooses to end those sessions.
+    expect(screen.queryByText(/Agents and terminals/)).toBeNull();
+  });
+
+  it("reconnects once the install lands, rather than leaving the stale failure up", async () => {
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, error: NO_SERVER });
+    mockHosts({ hosts: [NEXUS], active: "nexus" });
+    b.useHostProvisioning.mockReturnValue({ data: PROVISIONING });
+    render(<HostsDialog />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Install server 0.7.5" }));
+    });
+
+    // The header's message is the one this install just fixed, so the app
+    // re-dials rather than asking for a relaunch to find that out.
+    expect(reconnect.retryConnection).toHaveBeenCalledTimes(1);
+    expect(b.relaunch).not.toHaveBeenCalled();
   });
 
   it("reinstalls a same-version binary whose bytes are not ours, without asking", () => {

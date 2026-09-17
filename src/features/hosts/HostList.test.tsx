@@ -1,19 +1,37 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Host, HostsFile } from "@/lib/bindings";
+import type { Host, HostsFile, ProvisionStep } from "@/lib/bindings";
 import { HostList } from "./HostList";
 
 const q = vi.hoisted(() => ({ useTestHostConnection: vi.fn(), useConnectionStatus: vi.fn() }));
 vi.mock("@/lib/queries", () => q);
 
+// Only the IPC call is stubbed; the step labels and the failure code stay real,
+// so a rename in that module fails these rather than passing against a copy.
+const install = vi.hoisted(() => ({ runProvision: vi.fn() }));
+vi.mock("./serverInstall", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./serverInstall")>()),
+  runProvision: install.runProvision,
+}));
+
+const reconnect = vi.hoisted(() => ({ retryConnection: vi.fn() }));
+vi.mock("./reconnect", () => reconnect);
+
 const mutateAsync = vi.fn();
+
+const NO_SERVER_PROBE = {
+  ok: false,
+  serverVersion: null,
+  error: { code: "remote_cli_missing", message: "hyprlayer-server is not installed on nexus." },
+};
 
 beforeEach(() => {
   q.useTestHostConnection.mockReturnValue({ mutateAsync });
   // Not connected by default: the status column then reflects probes alone.
   q.useConnectionStatus.mockReturnValue({ data: { state: "failed", host: null } });
+  install.runProvision.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -329,11 +347,7 @@ describe("HostList", () => {
   });
 
   it("summarises a failure in the column and keeps the ssh text as the tooltip", async () => {
-    mutateAsync.mockResolvedValue({
-      ok: false,
-      serverVersion: null,
-      error: { code: "remote_cli_missing", message: "hyprlayer-server is not installed on nexus." },
-    });
+    mutateAsync.mockResolvedValue(NO_SERVER_PROBE);
     renderList(file([NEXUS]));
 
     fireEvent.click(screen.getByRole("button", { name: "Test Nexus" }));
@@ -357,6 +371,111 @@ describe("HostList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Test Nexus" }));
 
     expect(await screen.findByText("Failed")).toBeTruthy();
+  });
+
+  it("offers an install only on the failure a host can be provisioned out of", async () => {
+    mutateAsync.mockResolvedValue({
+      ok: false,
+      serverVersion: null,
+      error: { code: "remote_auth_failed", message: "Permission denied (publickey)." },
+    });
+    renderList(file([NEXUS]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Nexus" }));
+
+    expect(await screen.findByText("Auth failed")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Install" })).toBeNull();
+  });
+
+  it("installs the server from the row, without switching to the host", async () => {
+    mutateAsync
+      .mockResolvedValueOnce(NO_SERVER_PROBE)
+      .mockResolvedValueOnce({ ok: true, serverVersion: 3, error: null });
+    const { onChange, onSelect } = renderList(file([NEXUS]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Nexus" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    await waitFor(() =>
+      expect(install.runProvision).toHaveBeenCalledWith(NEXUS, expect.any(Function)),
+    );
+    // Preparing a host is not choosing it: nothing is written and nothing
+    // restarts, which is the whole point of doing it from here.
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    // The re-probe, not the install, is what says the host is ready now.
+    expect(await screen.findByText("Answered")).toBeTruthy();
+  });
+
+  it("carries the live step in the row's own status column", async () => {
+    mutateAsync.mockResolvedValue(NO_SERVER_PROBE);
+    let emit!: (step: ProvisionStep) => void;
+    // Never settles, so the row stays mid-install for the assertions.
+    install.runProvision.mockImplementation((_host: Host, onStep: (s: ProvisionStep) => void) => {
+      emit = onStep;
+      return new Promise<void>(() => {});
+    });
+    renderList(file([NEXUS]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Nexus" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    expect(await screen.findByText(/Checking the host/)).toBeTruthy();
+    act(() => emit("upload"));
+    expect(await screen.findByText(/Copying to the host/)).toBeTruthy();
+    // A second push cannot start while one is in flight.
+    expect(screen.queryByRole("button", { name: "Install" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Test Nexus" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("keeps the install offered when the push fails, and the ssh text as the tooltip", async () => {
+    mutateAsync.mockResolvedValue(NO_SERVER_PROBE);
+    install.runProvision.mockRejectedValue(new Error("ssh: connection closed by remote host"));
+    renderList(file([NEXUS]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Nexus" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    const short = await screen.findByText("Install failed");
+    expect(short.closest("[title]")?.getAttribute("title")).toContain("ssh: connection closed");
+    // The server is as missing as it was, so retrying stays one click.
+    expect(screen.getByRole("button", { name: "Install" })).toBeTruthy();
+  });
+
+  it("reconnects when the active host answers, so the header stops contradicting the row", async () => {
+    mutateAsync.mockResolvedValue({ ok: true, serverVersion: 3, error: null });
+    renderList(file([NEXUS], "nexus"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Nexus" }));
+
+    expect(await screen.findByText("Answered")).toBeTruthy();
+    await waitFor(() => expect(reconnect.retryConnection).toHaveBeenCalledTimes(1));
+  });
+
+  it("leaves the connection alone when the host that answered is not the active one", async () => {
+    mutateAsync.mockResolvedValue({ ok: true, serverVersion: 3, error: null });
+    renderList(file([NEXUS, LAPTOP], "nexus"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Laptop" }));
+
+    // Laptop answering says nothing about the connection to Nexus.
+    expect(await screen.findByText("Answered")).toBeTruthy();
+    expect(reconnect.retryConnection).not.toHaveBeenCalled();
+  });
+
+  it("reconnects after installing onto the active host, via the probe that follows", async () => {
+    mutateAsync
+      .mockResolvedValueOnce(NO_SERVER_PROBE)
+      .mockResolvedValueOnce({ ok: true, serverVersion: 3, error: null });
+    renderList(file([NEXUS], "nexus"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Nexus" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    expect(await screen.findByText("Answered")).toBeTruthy();
+    await waitFor(() => expect(reconnect.retryConnection).toHaveBeenCalledTimes(1));
   });
 
   it("leaves the live connection to the dialog header, marking the active row only", () => {

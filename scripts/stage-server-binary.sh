@@ -36,6 +36,11 @@ BUILDER="${HYPRLAYER_LINUX_SSH_HOST:-nexus}"
 REMOTE_DIR="hyprlayer-server-stage"
 FORCE=0
 FROM_HEAD=0
+VERSION_OVERRIDE=""
+# dev-install-*.sh all build out of this clone, rewriting its Cargo.toml to
+# `<version>+dev.<sha>` first — so it records what the installed app asks for.
+DEV_CLONE="${HYPRLAYER_DEV_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/hyprlayer-dev}/src"
+DEV_IDENTIFIER="ai.brightblock.hyprlayer.main"
 
 say() { printf '\033[1;36m→ %s\033[0m\n' "$*"; }
 ok()  { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
@@ -53,17 +58,24 @@ usage() {
     '                        Default: all three — the bytes are identical, and' \
     '                        staging only one means the build you actually run' \
     '                        may read an empty cache.' \
+    '  --version <v>         key the cache at this version for every identifier' \
+    '                        instead of the one each app reports. Default: the' \
+    "                        tree's Cargo.toml version, except for" \
+    '                        ai.brightblock.hyprlayer.main, which is read from' \
+    '                        the dev-install build clone.' \
     '  --force               rebuild even when the cache already holds it' \
     '  --from-head           build the committed HEAD instead of the working tree' \
     '' \
     "  HYPRLAYER_LINUX_SSH_HOST  builder for $LINUX_TRIPLE (default: nexus)" \
-    '  HYPRLAYER_APP_DATA_DIR    override the resolved app data dir'
+    '  HYPRLAYER_APP_DATA_DIR    override the resolved app data dir' \
+    '  HYPRLAYER_DEV_CACHE       dev-install build clone (default: ~/.cache/hyprlayer-dev)'
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --triple)     TRIPLE="${2:?--triple needs a value}"; shift 2 ;;
     --identifier) IDENTIFIER="${2:?--identifier needs a value}"; shift 2 ;;
+    --version)    VERSION_OVERRIDE="${2:?--version needs a value}"; shift 2 ;;
     --force)      FORCE=1; shift ;;
     --from-head)  FROM_HEAD=1; shift ;;
     -h|--help)    usage; exit 0 ;;
@@ -75,10 +87,34 @@ for tool in cargo rustc shasum; do
   command -v "$tool" >/dev/null || die "missing required tool: $tool"
 done
 
-# The same string `env!("CARGO_PKG_VERSION")` resolves to in provision.rs, which
-# is what keys both the cache and the host's install directory.
-VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+manifest_version() { sed -n 's/^version = "\(.*\)"$/\1/p' "$1" | head -n1; }
+
+# What this tree builds, so what the builder's binary must report.
+VERSION="$(manifest_version Cargo.toml)"
 [[ -n "$VERSION" ]] || die "could not read the workspace version from Cargo.toml"
+
+# What the app asks for, which is a different question: a dev-install build
+# carries `+dev.<sha>`, so it reads a cache directory this tree's version never
+# names — the version half of the trap above, and the half that reads as a 404.
+cache_version_for() {
+  local built
+  if [[ -n "$VERSION_OVERRIDE" ]]; then
+    printf '%s' "$VERSION_OVERRIDE"
+  elif [[ "$1" == "$DEV_IDENTIFIER" && -f "$DEV_CLONE/Cargo.toml" ]] \
+    && built="$(manifest_version "$DEV_CLONE/Cargo.toml")" && [[ -n "$built" ]]; then
+    # Only the build metadata may differ: a clone left on another release builds
+    # a server whose protocol this tree's bytes need not speak.
+    if [[ "${built%%+*}" == "${VERSION%%+*}" ]]; then
+      printf '%s' "$built"
+    else
+      printf '! %s is installed from %s, not this tree (%s) — staging it as %s; rerun dev-install, or pass --version\n' \
+        "$1" "$built" "$VERSION" "$VERSION" >&2
+      printf '%s' "$VERSION"
+    fi
+  else
+    printf '%s' "$VERSION"
+  fi
+}
 
 data_dir_for() {
   case "$(uname -s)" in
@@ -104,7 +140,7 @@ for id in "${TARGET_IDENTIFIERS[@]}"; do
   else
     DATA_DIR="$(data_dir_for "$id")"
   fi
-  CACHES+=("$DATA_DIR/server-cache/$VERSION/hyprlayer-server-$TRIPLE")
+  CACHES+=("$DATA_DIR/server-cache/$(cache_version_for "$id")/hyprlayer-server-$TRIPLE")
 done
 
 MISSING=()
@@ -208,5 +244,5 @@ for c in "${CACHES[@]}"; do
   install -m 755 "$BUILT" "$c.tmp"
   mv -f "$c.tmp" "$c"
 done
-ok "Staged hyprlayer-server $VERSION ($TRIPLE) for ${#CACHES[@]} identifier(s):"
+ok "Staged hyprlayer-server $VERSION ($TRIPLE) into ${#CACHES[@]} cache(s):"
 printf '    %s\n' "${CACHES[@]}"

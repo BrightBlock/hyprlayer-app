@@ -115,6 +115,17 @@ impl AppError {
         }
     }
 
+    /// A command ran on the host and failed. Its stderr belongs to that remote
+    /// program, not to ssh, so it is reported verbatim rather than read as a
+    /// credential problem or a reachability one.
+    pub fn remote_command_failed(host: &str, detail: impl Into<String>) -> Self {
+        Self {
+            code: "remote_command_failed".into(),
+            message: format!("A command failed on {host}: {}", detail.into()),
+            remedy: None,
+        }
+    }
+
     /// The server binary for this version could not be fetched — no published
     /// asset, or the network refused. An expected condition rather than a
     /// fault, so it gets a code that can be switched on and a remedy naming the

@@ -218,35 +218,50 @@ async fn ssh_relay_connect(
             let seen = tail.lock().unwrap_or_else(PoisonError::into_inner).clone();
             let _ = child.start_kill();
             let exit_code = child.wait().await.ok().and_then(|status| status.code());
-            Err(classify_ssh_failure(host, exit_code, &seen))
+            Err(classify_ssh_failure(
+                host,
+                RemoteCall::Server,
+                exit_code,
+                &seen,
+            ))
         }
     }
 }
 
+/// What was on the far end of the pipe. ssh reports its own failures as 255 and
+/// otherwise hands back the remote command's status, so the same stderr means
+/// opposite things either side of that line: `Permission denied` from ssh is a
+/// credential, from a script we wrote it is a file mode.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RemoteCall {
+    /// The server binary. A shell that cannot find it is the one failure
+    /// provisioning can answer.
+    Server,
+    /// A script this client wrote; its stderr is that script's, never ssh's.
+    Script,
+}
+
 /// A parse of another program's prose: `ssh`'s own stderr, in English, is the
-/// only signal available for *why* it failed. The fallback arm is
-/// `remote_unreachable` with the raw stderr appended, never a silent
-/// `internal` (plan Phase 1 §1).
-fn classify_ssh_failure(host: &Host, exit_code: Option<i32>, stderr: &str) -> AppError {
+/// only signal available for *why* it failed. The fallback arm keeps the raw
+/// stderr, never a silent `internal` (plan Phase 1 §1).
+fn classify_ssh_failure(
+    host: &Host,
+    call: RemoteCall,
+    exit_code: Option<i32>,
+    stderr: &str,
+) -> AppError {
     let seen = stderr.trim();
-    if exit_code == Some(127)
-        || seen.contains("command not found")
-        || seen.contains("No such file or directory")
-    {
-        return AppError::remote_cli_missing(&host.label);
-    }
-    // "Too many authentication failures" is what an agent holding several keys
-    // hits before it ever reaches "Permission denied".
-    if seen.contains("Permission denied")
-        || seen.contains("Host key verification failed")
-        || seen.contains("Too many authentication failures")
-    {
-        return AppError::remote_auth_failed(&host.label, seen);
-    }
-    let unreachable = seen.contains("Could not resolve hostname")
-        || seen.contains("Connection refused")
-        || seen.contains("Connection timed out");
-    if unreachable || seen.is_empty() {
+    // 255, or no status at all, is ssh failing to deliver the command; only
+    // then is the stderr ssh's own to read.
+    if exit_code == Some(255) || exit_code.is_none() {
+        // "Too many authentication failures" is what an agent holding several
+        // keys hits before it ever reaches "Permission denied".
+        if seen.contains("Permission denied")
+            || seen.contains("Host key verification failed")
+            || seen.contains("Too many authentication failures")
+        {
+            return AppError::remote_auth_failed(&host.label, seen);
+        }
         let detail = if seen.is_empty() {
             "ssh closed the connection with no output.".to_string()
         } else {
@@ -254,7 +269,26 @@ fn classify_ssh_failure(host: &Host, exit_code: Option<i32>, stderr: &str) -> Ap
         };
         return AppError::remote_unreachable(&host.label, detail);
     }
-    AppError::remote_unreachable(&host.label, seen)
+    // The command ran. Only when it *was* the server does a missing path mean
+    // the server is missing — a script hitting one is just a broken script,
+    // and reporting that as `remote_cli_missing` would offer to install a
+    // server that is already there.
+    if call == RemoteCall::Server
+        && (exit_code == Some(127)
+            || seen.contains("command not found")
+            || seen.contains("No such file or directory"))
+    {
+        return AppError::remote_cli_missing(&host.label);
+    }
+    let detail = if seen.is_empty() {
+        match exit_code {
+            Some(code) => format!("it exited {code} with no output."),
+            None => "it exited with no output.".to_string(),
+        }
+    } else {
+        seen.to_string()
+    };
+    AppError::remote_command_failed(&host.label, detail)
 }
 
 /// Runs a short script on the host and returns its stdout. Separate from
@@ -293,6 +327,7 @@ async fn ssh_run(host: &Host, script: &str, stdin: Stdio) -> Result<Vec<u8>, App
     if !output.status.success() {
         return Err(classify_ssh_failure(
             host,
+            RemoteCall::Script,
             output.status.code(),
             &String::from_utf8_lossy(&output.stderr),
         ));
@@ -639,9 +674,57 @@ mod tests {
     }
 
     #[test]
+    fn a_remote_file_mode_is_not_read_as_an_ssh_credential() {
+        // The install script's own mkdir, not ssh's auth: reporting this as
+        // `remote_auth_failed` sent the user to their SSH keys for a chmod.
+        let err = classify_ssh_failure(
+            &host(),
+            RemoteCall::Script,
+            Some(1),
+            "mkdir: cannot create directory '/home/jt/.hyprlayer/server': Permission denied",
+        );
+        assert_eq!(err.code, "remote_command_failed");
+        assert!(err.message.contains("mkdir: cannot create directory"));
+    }
+
+    #[test]
+    fn a_script_that_cannot_find_a_path_is_not_a_missing_server() {
+        // `remote_cli_missing` is what offers to install a server, so a script
+        // tripping over a path must never raise it — the server is already
+        // there, and the offer would loop.
+        let err = classify_ssh_failure(
+            &host(),
+            RemoteCall::Script,
+            Some(1),
+            "cat: /home/jt/.hyprlayer/server/0.7.5.tmp/hyprlayer-server: No such file or directory",
+        );
+        assert_eq!(err.code, "remote_command_failed");
+    }
+
+    #[test]
+    fn ssh_itself_still_owns_the_255_stderr_whatever_ran() {
+        // The same words, from ssh rather than the remote command.
+        let err = classify_ssh_failure(
+            &host(),
+            RemoteCall::Script,
+            Some(255),
+            "jt@nexus: Permission denied (publickey).",
+        );
+        assert_eq!(err.code, "remote_auth_failed");
+    }
+
+    #[test]
+    fn a_remote_failure_with_no_output_still_names_its_status() {
+        let err = classify_ssh_failure(&host(), RemoteCall::Script, Some(3), "   ");
+        assert_eq!(err.code, "remote_command_failed");
+        assert!(err.message.contains("exited 3"));
+    }
+
+    #[test]
     fn an_exit_127_or_a_missing_command_is_cli_missing() {
         let err = classify_ssh_failure(
             &host(),
+            RemoteCall::Server,
             Some(127),
             "bash: hyprlayer-server: command not found",
         );
@@ -652,6 +735,7 @@ mod tests {
     fn a_permission_denied_stderr_is_auth_failed() {
         let err = classify_ssh_failure(
             &host(),
+            RemoteCall::Server,
             Some(255),
             "jt@nexus: Permission denied (publickey,password).",
         );
@@ -660,7 +744,12 @@ mod tests {
 
     #[test]
     fn a_host_key_verification_failure_is_auth_failed() {
-        let err = classify_ssh_failure(&host(), Some(255), "Host key verification failed.");
+        let err = classify_ssh_failure(
+            &host(),
+            RemoteCall::Server,
+            Some(255),
+            "Host key verification failed.",
+        );
         assert_eq!(err.code, "remote_auth_failed");
     }
 
@@ -668,6 +757,7 @@ mod tests {
     fn too_many_authentication_failures_is_auth_failed_not_unreachable() {
         let err = classify_ssh_failure(
             &host(),
+            RemoteCall::Server,
             Some(255),
             "Received disconnect from ::1 port 22:2: Too many authentication failures\n\
              Disconnected from ::1 port 22",
@@ -679,6 +769,7 @@ mod tests {
     fn an_unresolvable_hostname_is_unreachable() {
         let err = classify_ssh_failure(
             &host(),
+            RemoteCall::Server,
             Some(255),
             "ssh: Could not resolve hostname nexus: nodename nor servname provided, or not known",
         );
@@ -689,6 +780,7 @@ mod tests {
     fn a_connection_refused_is_unreachable() {
         let err = classify_ssh_failure(
             &host(),
+            RemoteCall::Server,
             Some(255),
             "ssh: connect to host nexus port 22: Connection refused",
         );
@@ -721,14 +813,25 @@ mod tests {
 
     #[test]
     fn an_unrecognised_stderr_falls_back_to_unreachable_with_the_raw_text() {
+        // 255 because this is ssh's own diagnostic; it reports its own failures
+        // with that status and the remote command's status otherwise.
         let err = classify_ssh_failure(
             &host(),
-            Some(1),
+            RemoteCall::Server,
+            Some(255),
             "kex_exchange_identification: read: broken pipe",
         );
         assert_eq!(err.code, "remote_unreachable");
         assert!(err
             .message
             .contains("kex_exchange_identification: read: broken pipe"));
+    }
+
+    #[test]
+    fn a_killed_relay_with_no_status_is_still_read_as_ssh_failing() {
+        // `probe_remote` kills the child, so the status is gone; that is ssh
+        // not delivering the command, not a remote program's exit.
+        let err = classify_ssh_failure(&host(), RemoteCall::Server, None, "");
+        assert_eq!(err.code, "remote_unreachable");
     }
 }

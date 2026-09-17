@@ -151,4 +151,42 @@ describe("reconnect", () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(b.reconnectServer).toHaveBeenCalledTimes(1);
   });
+
+  it("adopts a connection that works now, rather than leaving a stale failure up", async () => {
+    b.reconnectServer.mockResolvedValue(ok());
+
+    await driver.retryConnection();
+
+    expect(b.reconnectServer).toHaveBeenCalledTimes(1);
+    expect(q.invalidateQueries).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the reported status alone when the retry does not connect", async () => {
+    b.reconnectServer.mockResolvedValue(fails(DOWN));
+
+    // Swallowed: the caller is a probe or an install, neither of which owns the
+    // connection surface's error.
+    await expect(driver.retryConnection()).resolves.toBeUndefined();
+    expect(q.invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("wakes the retry loop instead of dialling beside it", async () => {
+    b.reconnectServer.mockResolvedValue(fails(DOWN));
+    driver.startReconnecting();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(b.reconnectServer).toHaveBeenCalledTimes(1);
+
+    // Mid-loop: this must jump the loop's timer, not open a second connection
+    // race beside it. Both spellings dial straight away, so the tell is what
+    // happens next — a woken loop has moved on to its 5s step, while a second
+    // dialler would leave the untouched 2s timer to fire a third attempt.
+    await driver.retryConnection();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.reconnectServer).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(b.reconnectServer).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(b.reconnectServer).toHaveBeenCalledTimes(3);
+  });
 });

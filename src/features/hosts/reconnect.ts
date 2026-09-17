@@ -34,6 +34,27 @@ export function reconnectNow(): void {
   wake?.();
 }
 
+/**
+ * One attempt, for when something the user just did disproves the failure the
+ * connection surface is still reporting — a probe that answered, an install
+ * that landed. Shares the loop's flag rather than dialling beside it.
+ */
+export async function retryConnection(): Promise<void> {
+  if (running) {
+    reconnectNow();
+    return;
+  }
+  running = true;
+  try {
+    await unwrap(commands.reconnectServer());
+    await queryClient.invalidateQueries();
+  } catch {
+    // Nothing to say: the status already on screen is still the best answer.
+  } finally {
+    running = false;
+  }
+}
+
 export function startReconnecting(): void {
   void reconnectLoop();
 }

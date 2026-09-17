@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Channel } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 
-import {
-  commands,
-  type ConnectionState,
-  type Host,
-  type HostsFile,
-  type ProvisionStep,
-} from "@/lib/bindings";
-import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
+import { type ConnectionState, type Host, type HostsFile, type ProvisionStep } from "@/lib/bindings";
+import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { flushPersistedWrites } from "@/lib/persistedStorage";
 import { useConnectionStatus, useHostProvisioning, useHosts, useSaveHosts } from "@/lib/queries";
 import {
@@ -23,6 +16,8 @@ import {
 } from "@/components/ui";
 import { closeHostsUi, useHostsUiStore } from "./hostsUi";
 import { HostList } from "./HostList";
+import { retryConnection } from "./reconnect";
+import { runProvision, STEP_LABEL } from "./serverInstall";
 
 const EMPTY: HostsFile = { hosts: [], active: null };
 
@@ -43,15 +38,6 @@ function relaunchNow(): void {
   void relaunch();
 }
 
-const STEP_LABEL: Record<ProvisionStep, string> = {
-  probe: "Checking the host",
-  download: "Downloading the server",
-  verify: "Verifying the download",
-  upload: "Copying to the host",
-  install: "Installing",
-  done: "Installed",
-};
-
 /**
  * Installing an executable on someone else's machine is a real action, so it
  * names the version and the step it is on (plan Phase 7 §4). The host is named
@@ -70,13 +56,13 @@ function ServerInstall({ host }: { host: Host }) {
     started.current = true;
     setError(null);
     setStep("probe");
-    // Channels are single-use, so a retry mints its own.
-    const channel = new Channel<ProvisionStep>();
-    channel.onmessage = setStep;
     void (async () => {
       try {
-        await unwrap(commands.provisionHost(host, channel));
+        await runProvision(host, setStep);
         setDone(true);
+        // The failure the header is showing is the one this install just fixed;
+        // adopting that costs a reconnect, not a relaunch.
+        void retryConnection();
       } catch (e) {
         setError(e);
         setStep(null);
@@ -93,22 +79,17 @@ function ServerInstall({ host }: { host: Host }) {
 
   if (!data || data.state === "ready") return null;
 
-  const older = data.installedVersions.filter((v) => v !== data.version).pop() ?? null;
-
-  // One line, and only when it says something the button does not: that a
-  // same-version binary is being replaced, or that sessions on an older server
-  // die. The install path, the triple and the source are mechanism — the step
-  // spinner reports the download as live state rather than pre-announcing it.
+  // Only when it says something the button does not: that a same-version binary
+  // is being replaced. Which sessions a version change ends belongs to the
+  // switch confirm, which is where the user chooses to end them.
   const note =
     data.state === "stale"
       ? `A different build of ${data.version} is installed; it will be replaced.`
-      : older
-        ? `Agents and terminals on ${older} end when ${data.version} takes over.`
-        : null;
+      : null;
 
   return (
-    <div className="rounded-md border border-edge/60 p-3">
-      {note && <p className="mb-2 text-sm text-ink-dim">{note}</p>}
+    <div className="space-y-3">
+      {note && <p className="text-sm text-ink-dim">{note}</p>}
       {done ? (
         <p className="text-sm text-ink">Installed. Relaunch to connect.</p>
       ) : step ? (
