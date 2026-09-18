@@ -1,6 +1,21 @@
 {
   "versions": [
     {
+      "version": "0.8.0",
+      "date": "2026-09-18",
+      "summary": "Sessions keep running after you quit, remote hosts over SSH, and split panes.",
+      "notes": [
+        "Sessions, terminals and scripts now keep running when you quit Hyprlayer. The app's backend moved into a background process, hyprlayer-server, which the app starts on launch and reconnects to when reopened: a session mid-turn keeps streaming and terminals reattach. It ships inside the app. To stop it, run `hyprlayer-server stop`; the binary sits next to the Hyprlayer executable (Hyprlayer.app/Contents/MacOS on macOS, /usr/bin on Linux).",
+        "Updating works differently from here on. After an update, the server the previous version started keeps your sessions running, and the globe icon in the left rail shows a warning until you choose Restart server in its dialog, which ends every running session and terminal. An update that changes how the app and server talk replaces the old server on launch instead, ending them too. This update has no server to replace. To go back to 0.7, run `hyprlayer-server stop` first.",
+        "Hyprlayer can run sessions on another machine over SSH. Add the host in the Hyprlayer server dialog (the globe icon) using any destination ssh accepts, and the app offers to install a matching server there. Supported hosts are Apple Silicon Macs and x86_64 Linux with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40). Folder pickers browse the host, and a dropped connection reconnects on its own. git on the host uses that machine's credentials.",
+        "The server is also packaged on its own, for a machine you leave running: `paru -S hyprlayer-server-bin` on Arch, `brew install brightblock/tap/hyprlayer-server` on macOS and Linuxbrew. Installing starts nothing; run `hyprlayer-server serve`, or enable the systemd unit (Arch) or launchd agent (macOS) it ships. On Arch it conflicts with the desktop package, which already contains the server.",
+        "Sessions split into any number of panes, side by side or stacked. Split right with Cmd+\\ or down with Cmd+Shift+\\, or drag a tab onto a pane's edge, and move between panes with Cmd+Option+arrow keys (Ctrl and Alt on Windows and Linux). Each pane has its own tabs and can be resized, closed or maximized. Existing two-pane layouts carry over, and unsaved edits in a file tab survive switching away.",
+        "Claude Code's project memory is visible from the workstream panel: the lightbulb button lists the repository's memory files, MEMORY.md first, and opens them for viewing and editing. A save is refused if the file changed on disk since you started editing. Codex tabs on codex-cli 0.152.0 or newer start with the memory index as reference notes, unless you set your own developer instructions.",
+        "The context-window meter now reads the window size claude reports each turn, so Hyprlayer no longer reads your Claude login from the macOS Keychain.",
+        "Tab and document changes made in the second before an update or relaunch are no longer lost."
+      ]
+    },
+    {
       "version": "0.7.5",
       "date": "2026-09-01",
       "summary": "Model pickers show the live Claude catalog, with reasons for unavailable models.",
