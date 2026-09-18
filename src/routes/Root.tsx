@@ -1825,11 +1825,13 @@ export function Root() {
       <SearchPalette />
       <PromptPalette activeWorkstream={activeWorkstream ?? null} />
       <PromptArgsDialog />
-      <Toast />
       <FullDiskAccessNotice />
       <ServerDisconnectedNotice />
       <HostsDialog />
       <ConfirmQuitDialog />
+      {/* After HostsDialog: when the server cannot start, its blocking overlay
+          must not cover the update toast, the one way out of a broken build. */}
+      <Toast />
       <ResizeGrips />
     </div>
   );
