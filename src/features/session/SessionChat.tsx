@@ -511,7 +511,7 @@ function AttachMenu({
         onClick={() => setOpen((v) => !v)}
         title="Attach context"
         aria-label="Attach context"
-        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/50 hover:text-ink"
+        className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
       >
         <PlusIcon />
       </button>
@@ -579,7 +579,7 @@ function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: numb
         onClick={() => setOpen((v) => !v)}
         title={`Context ${formatTokens(tokens)} / ${formatTokens(windowSize)}`}
         aria-label="Context usage"
-        className="flex h-8 items-center gap-1.5 rounded-md px-2 text-ink-dim hover:bg-edge/50 hover:text-ink"
+        className="flex h-6 items-center gap-1.5 rounded px-1.5 text-ink-dim hover:bg-edge/60 hover:text-ink"
       >
         <ContextRing pct={pct} />
         <span className="font-mono text-[11px]">{formatTokens(tokens)}</span>
@@ -1706,7 +1706,7 @@ export function SessionChat({
         <div className="min-h-0 flex-1" />
       )}
 
-      <div className="p-4">
+      <div className="px-4 pb-2 pt-2">
         <div className="mx-auto w-[90%]">
           {error && (
             <div className="mb-2">
@@ -1783,21 +1783,13 @@ export function SessionChat({
                   />
                 )}
               </div>
-              <div
-                className={`relative rounded-xl bg-panel-2 ${
-                  pinnedPrompts.length > 0 ? "mt-12" : ""
-                }`}
-              >
-                {pinnedPrompts.length > 0 && (
-                  <PromptChips
-                    view={view}
-                    onPick={pickPrompt}
-                    className="absolute bottom-full right-3 z-20 mb-1.5 max-w-[70%]"
-                  />
-                )}
+              {pinnedPrompts.length > 0 && (
+                <PromptChips view={view} onPick={pickPrompt} className="mb-1.5 ml-auto max-w-[70%]" />
+              )}
+              <div className="relative rounded-lg border border-edge bg-panel-2 transition-colors focus-within:border-accent/50">
                 <AutocompleteDropdown state={autocomplete} />
                 {(attachments.length > 0 || (!started && shell.docs.length > 0)) && (
-                  <div className="space-y-1.5 px-3.5 pt-3">
+                  <div className="space-y-1.5 px-3 pt-2.5">
                     {!started && (
                       <WorkstreamDocChips
                         docs={shell.docs}
@@ -1808,157 +1800,39 @@ export function SessionChat({
                     <AttachmentCards attachments={attachments} onRemove={onRemoveAttachment} />
                   </div>
                 )}
-                <div ref={composerBoxRef} className="relative">
-                  <HighlightBackdrop
-                    value={draft}
-                    commandNames={autocomplete.commandNames}
-                    sigil={autocomplete.skillSigil}
-                    scrollTop={composerScroll}
-                    argHint={pendingArg && promptInputLabel(pendingArg)}
-                  />
-                  <textarea
-                    ref={textareaRef}
-                    value={draft}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (historyNav.index !== null && val !== recalledValueRef.current) {
-                        setHistoryNav(IDLE_NAV);
-                      }
-                      recalledValueRef.current = null;
-                      onDraftChange(val);
-                      autocomplete.syncCaret();
-                    }}
-                    onFocus={() => setComposerFocused(true)}
-                    onBlur={() => setComposerFocused(false)}
-                    onKeyDown={onKeyDown}
-                    onPaste={onPaste}
-                    onSelect={autocomplete.syncCaret}
-                    onScroll={(e) => setComposerScroll(e.currentTarget.scrollTop)}
-                    rows={1}
-                    disabled={Boolean(pendingQuestion)}
-                    className="selectable relative block w-full resize-none bg-transparent px-3.5 py-4 text-sm text-ink focus:outline-none disabled:cursor-not-allowed"
-                  />
-                </div>
-                <div ref={toolbarRef} className="flex items-center gap-0.5 overflow-x-clip px-2 pb-2">
-                  {started ? (
-                    <span
-                      title={compactComposer ? stageLabel(mode) : undefined}
-                      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${MODE_STYLES[mode].badge}`}
-                    >
-                      <ModeIcon mode={mode} size={13} />
-                      {!compactComposer && stageLabel(mode)}
-                    </span>
-                  ) : (
-                    <ComposerMenu
-                      title="Agent mode"
-                      leading={<ModeIcon mode={mode} size={13} />}
-                      label={stageLabel(mode)}
-                      items={MODE_STAGES.map((s) => ({
-                        key: s.key,
-                        label: s.label,
-                        icon: <ModeIcon mode={s.key} size={13} />,
-                      }))}
-                      activeKey={mode}
-                      onSelect={(k) => onModeChange(k as StageKey)}
-                      compact={compactComposer}
+                <div className="flex items-end gap-1 pr-1">
+                  <div ref={composerBoxRef} className="relative min-w-0 flex-1">
+                    <HighlightBackdrop
+                      value={draft}
+                      commandNames={autocomplete.commandNames}
+                      sigil={autocomplete.skillSigil}
+                      scrollTop={composerScroll}
+                      argHint={pendingArg && promptInputLabel(pendingArg)}
                     />
-                  )}
-                  <ComposerMenu
-                    title="Model"
-                    leading={composerMark(harness.key, 14)}
-                    label={composerModelLabel}
-                    hint={composerModelHint}
-                    groups={modelGroups}
-                    activeKey={composerModelActiveKey}
-                    onSelect={onPickModel}
-                    footer={{
-                      label: "Harnesses",
-                      icon: <ChevronRightIcon size={14} />,
-                      onClick: onOpenHarnessSettings,
-                    }}
-                    compact={compactComposer}
-                  />
-                  {usingCodex && (
-                    <ComposerMenu
-                      title="Reasoning effort"
-                      leading={<EffortIcon size={14} />}
-                      label={codexEffort.label}
-                      items={codexEffortItems.map((e) => ({ key: e.key, label: e.label }))}
-                      activeKey={codexEffort.key}
-                      onSelect={onCodexEffortChange}
-                      compact={compactComposer}
-                    />
-                  )}
-                  {!usingOpencode && !usingCodex && claudeEffortItems.length > 0 && (
-                    <ComposerMenu
-                      title="Reasoning effort"
-                      leading={<EffortIcon size={14} />}
-                      label={effort?.label ?? "Default"}
-                      items={claudeEffortItems.map((e) => {
-                        const blocked = e.key === "ultracode" && !modelSupportsUltracode(model);
-                        return {
-                          key: e.key,
-                          label: e.label,
-                          hint: blocked ? "needs an xhigh-capable model" : undefined,
-                          disabled: blocked,
-                          accent: e.key === "ultracode",
-                        };
-                      })}
-                      activeKey={effort?.key ?? ""}
-                      onSelect={onEffortChange}
-                      compact={compactComposer}
-                    />
-                  )}
-                  {!usingOpencode && (
-                    <ComposerMenu
-                      title="Permission mode"
-                      leading={<ShieldIcon size={14} />}
-                      label={permissionMode.label}
-                      hint={permissionMode.hint}
-                      items={PERMISSION_MODES.map((p) => ({
-                        key: p.key,
-                        label: p.label,
-                        hint: p.hint,
-                        danger: p.danger,
-                      }))}
-                      activeKey={permissionMode.key}
-                      onSelect={(k) => void handlePermissionModeChange(k)}
-                      compact={compactComposer}
-                    />
-                  )}
-
-                  <div className="ml-auto flex items-center gap-1">
-                    <AttachMenu
-                      onLibrary={onBrowseDocs}
-                      onFiles={onAddFiles}
-                      onScreenshots={onAddScreenshots}
-                    />
-                    {started && (
-                      <button
-                        type="button"
-                        onClick={() => void handleClear()}
-                        title={
-                          showHandoffReady
-                            ? "Clear context and resume from the handoff doc"
-                            : "Clear context, ending this conversation to start fresh"
+                    <textarea
+                      ref={textareaRef}
+                      value={draft}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (historyNav.index !== null && val !== recalledValueRef.current) {
+                          setHistoryNav(IDLE_NAV);
                         }
-                        aria-label="Clear context"
-                        className={
-                          showHandoffReady
-                            ? "flex h-8 w-8 animate-pulse items-center justify-center rounded-md text-warn ring-1 ring-warn/50 hover:bg-warn/10"
-                            : "flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/50 hover:text-ink"
-                        }
-                      >
-                        <EraserIcon />
-                      </button>
-                    )}
-                    <BackgroundTasksIndicator
-                      tasks={backgroundTasks}
-                      onJumpTo={(toolUseId) => transcriptRef.current?.scrollToTool(toolUseId)}
+                        recalledValueRef.current = null;
+                        onDraftChange(val);
+                        autocomplete.syncCaret();
+                      }}
+                      onFocus={() => setComposerFocused(true)}
+                      onBlur={() => setComposerFocused(false)}
+                      onKeyDown={onKeyDown}
+                      onPaste={onPaste}
+                      onSelect={autocomplete.syncCaret}
+                      onScroll={(e) => setComposerScroll(e.currentTarget.scrollTop)}
+                      rows={1}
+                      disabled={Boolean(pendingQuestion)}
+                      className="selectable relative block w-full resize-none bg-transparent px-3 py-2.5 text-sm text-ink focus:outline-none disabled:cursor-not-allowed"
                     />
-                    {session?.contextTokens != null && (
-                      <ContextMeter tokens={session.contextTokens} windowSize={contextWindow} />
-                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1 pb-1">
                     {busy && started && (
                       <button
                         type="button"
@@ -1986,10 +1860,136 @@ export function SessionChat({
                               : "Send"
                       }
                       aria-label={!started ? "Start" : busy ? "Queue message" : "Send"}
-                      className="flex h-8 w-8 items-center justify-center rounded-md border border-edge bg-edge/70 text-ink hover:bg-edge disabled:opacity-40 disabled:hover:bg-edge/70"
+                      className="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-accent-ink hover:bg-accent/90 disabled:bg-edge/70 disabled:text-ink-dim disabled:hover:bg-edge/70"
                     >
                       {starting ? <Spinner size={14} /> : <SendIcon size={15} />}
                     </button>
+                  </div>
+                </div>
+              </div>
+              <div ref={toolbarRef} className="mt-1 flex items-center gap-0.5 overflow-x-clip">
+                {started ? (
+                  <span
+                    title={compactComposer ? stageLabel(mode) : undefined}
+                    className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${MODE_STYLES[mode].badge}`}
+                  >
+                    <ModeIcon mode={mode} size={13} />
+                    {!compactComposer && stageLabel(mode)}
+                  </span>
+                ) : (
+                  <ComposerMenu
+                    title="Agent mode"
+                    leading={<ModeIcon mode={mode} size={13} />}
+                    label={stageLabel(mode)}
+                    items={MODE_STAGES.map((s) => ({
+                      key: s.key,
+                      label: s.label,
+                      icon: <ModeIcon mode={s.key} size={13} />,
+                    }))}
+                    activeKey={mode}
+                    onSelect={(k) => onModeChange(k as StageKey)}
+                    compact={compactComposer}
+                  />
+                )}
+                <ComposerMenu
+                  title="Model"
+                  leading={composerMark(harness.key, 14)}
+                  label={composerModelLabel}
+                  hint={composerModelHint}
+                  groups={modelGroups}
+                  activeKey={composerModelActiveKey}
+                  onSelect={onPickModel}
+                  footer={{
+                    label: "Harnesses",
+                    icon: <ChevronRightIcon size={14} />,
+                    onClick: onOpenHarnessSettings,
+                  }}
+                  compact={compactComposer}
+                />
+                {usingCodex && (
+                  <ComposerMenu
+                    title="Reasoning effort"
+                    leading={<EffortIcon size={14} />}
+                    label={codexEffort.label}
+                    items={codexEffortItems.map((e) => ({ key: e.key, label: e.label }))}
+                    activeKey={codexEffort.key}
+                    onSelect={onCodexEffortChange}
+                    compact={compactComposer}
+                  />
+                )}
+                {!usingOpencode && !usingCodex && claudeEffortItems.length > 0 && (
+                  <ComposerMenu
+                    title="Reasoning effort"
+                    leading={<EffortIcon size={14} />}
+                    label={effort?.label ?? "Default"}
+                    items={claudeEffortItems.map((e) => {
+                      const blocked = e.key === "ultracode" && !modelSupportsUltracode(model);
+                      return {
+                        key: e.key,
+                        label: e.label,
+                        hint: blocked ? "needs an xhigh-capable model" : undefined,
+                        disabled: blocked,
+                        accent: e.key === "ultracode",
+                      };
+                    })}
+                    activeKey={effort?.key ?? ""}
+                    onSelect={onEffortChange}
+                    compact={compactComposer}
+                  />
+                )}
+                {!usingOpencode && (
+                  <ComposerMenu
+                    title="Permission mode"
+                    leading={<ShieldIcon size={14} />}
+                    label={permissionMode.label}
+                    hint={permissionMode.hint}
+                    items={PERMISSION_MODES.map((p) => ({
+                      key: p.key,
+                      label: p.label,
+                      hint: p.hint,
+                      danger: p.danger,
+                    }))}
+                    activeKey={permissionMode.key}
+                    onSelect={(k) => void handlePermissionModeChange(k)}
+                    compact={compactComposer}
+                  />
+                )}
+
+                {/* Right inset = the box's 1px border + its pr-1, so the w-8 column
+                    below centres Attach under Send. */}
+                <div className="ml-auto flex items-center gap-1 pr-[5px]">
+                  {started && (
+                    <button
+                      type="button"
+                      onClick={() => void handleClear()}
+                      title={
+                        showHandoffReady
+                          ? "Clear context and resume from the handoff doc"
+                          : "Clear context, ending this conversation to start fresh"
+                      }
+                      aria-label="Clear context"
+                      className={
+                        showHandoffReady
+                          ? "flex h-6 w-6 animate-pulse items-center justify-center rounded text-warn ring-1 ring-warn/50 hover:bg-warn/10"
+                          : "flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+                      }
+                    >
+                      <EraserIcon />
+                    </button>
+                  )}
+                  <BackgroundTasksIndicator
+                    tasks={backgroundTasks}
+                    onJumpTo={(toolUseId) => transcriptRef.current?.scrollToTool(toolUseId)}
+                  />
+                  {session?.contextTokens != null && (
+                    <ContextMeter tokens={session.contextTokens} windowSize={contextWindow} />
+                  )}
+                  <div className="flex w-8 justify-center">
+                    <AttachMenu
+                      onLibrary={onBrowseDocs}
+                      onFiles={onAddFiles}
+                      onScreenshots={onAddScreenshots}
+                    />
                   </div>
                 </div>
               </div>

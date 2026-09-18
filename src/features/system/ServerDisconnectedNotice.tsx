@@ -3,16 +3,29 @@ import { relaunch } from "@tauri-apps/plugin-process";
 
 import { events } from "@/lib/bindings";
 import { flushPersistedWrites } from "@/lib/persistedStorage";
+import { useConnectionStatus } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
 
 // Nothing respawns the server (ADR-0009); relaunching the app takes the
 // supervisor's connect-or-spawn path. A toast with an action stays until acted
 // on or dismissed.
+const TITLE = "Lost connection to the Hyprlayer server";
+
 export function ServerDisconnectedNotice() {
+  const status = useConnectionStatus();
+  const connected = status.data?.state === "connected";
+
+  // Keyed on every refetch, not just the flag: a reconnect quick enough that no
+  // refetch saw the drop still has to take the toast down.
+  useEffect(() => {
+    const toast = useToast.getState();
+    if (connected && toast.visible && toast.title === TITLE) toast.hide();
+  }, [connected, status.dataUpdatedAt]);
+
   useEffect(() => {
     const unlisten = events.serverDisconnected.listen(() => {
       useToast.getState().show(
-        "Lost connection to the Hyprlayer server",
+        TITLE,
         "Sessions and terminals keep running on it. Relaunch to reconnect.",
         {
           tone: "warn",

@@ -23,9 +23,16 @@ const b = vi.hoisted(() => {
   };
 });
 vi.mock("@/lib/bindings", () => ({ events: b.events }));
+const q = vi.hoisted(() => ({ useConnectionStatus: vi.fn() }));
+vi.mock("@/lib/queries", () => q);
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: b.relaunch }));
 
+function mockState(state: "connected" | "lost", dataUpdatedAt: number) {
+  q.useConnectionStatus.mockReturnValue({ data: { state }, dataUpdatedAt });
+}
+
 beforeEach(() => {
+  mockState("connected", 0);
   useToast.getState().hide();
 });
 
@@ -50,5 +57,25 @@ describe("ServerDisconnectedNotice", () => {
     expect(toast.action?.label).toBe("Relaunch");
     await toast.action?.onClick();
     expect(b.relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes the toast down once the connection is back", () => {
+    const { rerender } = render(<ServerDisconnectedNotice />);
+    act(() => b.disconnect());
+    mockState("lost", 1);
+    rerender(<ServerDisconnectedNotice />);
+    expect(useToast.getState().visible).toBe(true);
+
+    mockState("connected", 2);
+    rerender(<ServerDisconnectedNotice />);
+    expect(useToast.getState().visible).toBe(false);
+  });
+
+  it("leaves an unrelated toast alone", () => {
+    const { rerender } = render(<ServerDisconnectedNotice />);
+    act(() => useToast.getState().show("Something else", ""));
+    mockState("connected", 1);
+    rerender(<ServerDisconnectedNotice />);
+    expect(useToast.getState().visible).toBe(true);
   });
 });

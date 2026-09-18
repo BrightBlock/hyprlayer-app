@@ -6,7 +6,6 @@ import {
   type ConnectionState,
   type Host,
   type HostsFile,
-  type ProvisionStep,
 } from "@/lib/bindings";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { flushPersistedWrites } from "@/lib/persistedStorage";
@@ -23,11 +22,10 @@ import {
   ConfirmDialog,
   Dialog,
   ErrorNote,
-  Spinner,
   type BadgeTone,
 } from "@/components/ui";
 import { closeHostsUi, useHostsUiStore } from "./hostsUi";
-import { HostList, LocalServerList } from "./HostList";
+import { HostList, LocalServerList, WorkStatus } from "./HostList";
 import { retryConnection } from "./reconnect";
 import { runProvision, STEP_LABEL } from "./serverInstall";
 
@@ -55,9 +53,9 @@ function relaunchNow(): void {
  * names the version and the step it is on (plan Phase 7 §4). The host is named
  * once, in the dialog header above — not again on every line here.
  */
-function ServerInstall({ host }: { host: Host }) {
+function ServerInstall({ host, onWork }: { host: Host; onWork: (work: string | null) => void }) {
   const info = useHostProvisioning(host);
-  const [step, setStep] = useState<ProvisionStep | null>(null);
+  const [running, setRunning] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState(false);
   const started = useRef(false);
@@ -67,20 +65,24 @@ function ServerInstall({ host }: { host: Host }) {
   const start = useCallback(() => {
     started.current = true;
     setError(null);
-    setStep("probe");
+    setRunning(true);
+    onWork(STEP_LABEL.probe);
     void (async () => {
       try {
-        await runProvision(host, setStep);
+        await runProvision(host, (step) => onWork(STEP_LABEL[step]));
         setDone(true);
+        onWork("Connecting");
         // The failure the header is showing is the one this install just fixed;
         // adopting that costs a reconnect, not a relaunch.
-        void retryConnection();
+        await retryConnection();
       } catch (e) {
         setError(e);
-        setStep(null);
+      } finally {
+        setRunning(false);
+        onWork(null);
       }
     })();
-  }, [host]);
+  }, [host, onWork]);
 
   // The first install is a trust decision; a reinstall, or a version bump on a
   // host that already carries one of our servers, is not — those proceed.
@@ -104,11 +106,7 @@ function ServerInstall({ host }: { host: Host }) {
       {note && <p className="text-sm text-ink-dim">{note}</p>}
       {done ? (
         <p className="text-sm text-ink">Installed. Relaunch to connect.</p>
-      ) : step ? (
-        <p className="flex items-center gap-2 text-sm text-ink-dim">
-          <Spinner /> {STEP_LABEL[step]}…
-        </p>
-      ) : (
+      ) : running ? null : (
         <Button variant="primary" onClick={start}>
           Install server {data.version}
         </Button>
@@ -123,7 +121,7 @@ function ServerInstall({ host }: { host: Host }) {
  * host by provisioning — so updating is only a restart. It is offered, never
  * done on connect, because it ends every agent and terminal on that server.
  */
-function ServerUpdate({ where }: { where: string }) {
+function ServerUpdate({ where, onRestart }: { where: string; onRestart: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -133,6 +131,7 @@ function ServerUpdate({ where }: { where: string }) {
     setError(null);
     try {
       await unwrap(commands.restartServer());
+      onRestart();
       setConfirming(false);
     } catch (e) {
       setError(e);
@@ -176,6 +175,16 @@ export function HostsDialog() {
   const uiOpen = useHostsUiStore((s) => s.open);
   // The file a confirmed switch would write; null while nothing is pending.
   const [pending, setPending] = useState<HostsFile | null>(null);
+  const [installWork, setInstallWork] = useState<string | null>(null);
+  // A restart is done once the connection has dropped and come back.
+  const [restart, setRestart] = useState<"requested" | "dropped" | null>(null);
+  const state = status.data?.state;
+  useEffect(() => {
+    if (restart === "requested" && state !== "connected") setRestart("dropped");
+    else if (restart === "dropped" && state === "connected") setRestart(null);
+  }, [restart, state]);
+  const work = installWork ?? (restart ? "Restarting" : null);
+  const requestRestart = useCallback(() => setRestart("requested"), []);
 
   // There is no initialData, so `data` is undefined on the first render of every
   // launch; gating on `isSuccess` is what keeps a reasonless "Not connected"
@@ -257,15 +266,16 @@ export function HostsDialog() {
             <div className="flex items-center gap-2">
               <Badge tone={badge.tone}>{badge.label}</Badge>
               <span className="min-w-0 truncate text-sm text-ink">{where}</span>
+              {work && !connection?.host && <WorkStatus label={work} />}
             </div>
             {message && <p className="mt-2 text-sm text-ink-dim">{message}</p>}
             {remedy && <p className="mt-1 text-sm text-ink-dim">{remedy}</p>}
           </div>
 
-          {showInstall && connection?.host && <ServerInstall host={connection.host} />}
+          {showInstall && connection?.host && <ServerInstall host={connection.host} onWork={setInstallWork} />}
 
           {connection?.state === "connected" && connection.serverOutdated && (
-            <ServerUpdate where={where} />
+            <ServerUpdate where={where} onRestart={requestRestart} />
           )}
 
           <LocalServerList
@@ -279,6 +289,7 @@ export function HostsDialog() {
             value={file}
             onChange={(next) => save.mutate(next)}
             onSelect={setPending}
+            activeWork={connection?.host ? work : null}
             disabled={save.isPending}
           />
 

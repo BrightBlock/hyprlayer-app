@@ -228,11 +228,13 @@ describe("HostsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Install server 0.7.5" }));
 
     expect(h.provisionHost).toHaveBeenCalledWith(NEXUS, expect.anything());
-    expect(screen.getByText(/Checking the host/)).toBeTruthy();
+    // On the host's own row, not in a panel beside the list.
+    expect(screen.getByText(/Checking the host/).closest("li")?.textContent).toContain("Nexus");
   });
 
   it("reports the download as live state rather than pre-announcing it", () => {
     mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: NO_SERVER });
+    mockHosts({ hosts: [NEXUS], active: "nexus" });
     b.useHostProvisioning.mockReturnValue({ data: { ...PROVISIONING, source: "download" } });
     render(<HostsDialog />);
 
@@ -311,5 +313,37 @@ describe("HostsDialog", () => {
     expect(b.flushPersistedWrites.mock.invocationCallOrder[0]).toBeLessThan(
       b.relaunch.mock.invocationCallOrder[0],
     );
+  });
+
+  it("shows the restart on the header line until the server comes back", async () => {
+    const connected: ConnectionStatus = {
+      state: "connected",
+      host: null,
+      serverVersion: 3,
+      serverOutdated: true,
+      error: null,
+    };
+    mockStatus(connected);
+    useHostsUiStore.setState({ open: true });
+    const restartServer = vi.fn(async () => ({ status: "ok", data: null }));
+    const bindings = await import("@/lib/bindings");
+    vi.spyOn(bindings.commands, "restartServer").mockImplementation(restartServer as never);
+    const { rerender } = render(<HostsDialog />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart server" }));
+    const [, confirm] = screen.getAllByRole("button", { name: "Restart server" });
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(restartServer).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("This machine").parentElement?.textContent).toContain("Restarting…");
+
+    mockStatus({ ...connected, state: "lost", serverOutdated: false });
+    rerender(<HostsDialog />);
+    expect(screen.getByText(/Restarting…/)).toBeTruthy();
+
+    mockStatus({ ...connected, serverOutdated: false });
+    rerender(<HostsDialog />);
+    expect(screen.queryByText(/Restarting…/)).toBeNull();
   });
 });

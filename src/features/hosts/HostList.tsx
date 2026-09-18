@@ -21,6 +21,7 @@ type Props = {
   onChange: (next: HostsFile) => void;
   /** A switch, not an edit: the caller confirms, writes, and relaunches. */
   onSelect: (next: HostsFile) => void;
+  activeWork?: string | null;
   disabled?: boolean;
 };
 
@@ -78,7 +79,16 @@ const BLANK_ADD: DraftRow = { label: "", destination: "" };
 // webview sees it. `index.css` also disables -webkit-user-drag app-wide.
 const DRAG_THRESHOLD_PX = 4;
 
-export function HostList({ value, onChange, onSelect, disabled }: Props) {
+export function WorkStatus({ label }: { label: string }) {
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <Spinner size={11} />
+      <span className="text-xs text-ink-dim">{label}…</span>
+    </span>
+  );
+}
+
+export function HostList({ value, onChange, onSelect, activeWork, disabled }: Props) {
   const [draft, setDraft] = useState<DraftRow[]>(() => toDraft(value));
   const lastSent = useRef(JSON.stringify(value));
   const [editing, setEditing] = useState<Set<number>>(new Set());
@@ -358,6 +368,7 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
             const probe = probes[destination];
             const installStep =
               installing?.destination === destination ? installing.step : null;
+            const work = installStep ? STEP_LABEL[installStep] : isActive ? activeWork : null;
             // Only a probe can raise this, so an untested host offers nothing —
             // the ⚡ is still the way in.
             const canInstall = !probe?.ok && probe?.code === NO_SERVER;
@@ -417,13 +428,8 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
                         <span className="min-w-0 flex-1 truncate font-mono text-sm text-ink-dim">
                           {row.destination}
                         </span>
-                        {installStep ? (
-                          <span className="flex shrink-0 items-center gap-1.5">
-                            <Spinner size={11} />
-                            <span className="text-xs text-ink-dim">
-                              {STEP_LABEL[installStep]}…
-                            </span>
-                          </span>
+                        {work ? (
+                          <WorkStatus label={work} />
                         ) : (
                           status && (
                             <span
@@ -478,7 +484,7 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
                     <>
                       <TextInput
                         aria-label="Label"
-                        placeholder="Nexus"
+                        placeholder="Devbox"
                         className={cx("w-36 shrink-0", COMPACT_FIELD, rowError?.label && INVALID_FIELD)}
                         value={row.label}
                         disabled={disabled}
@@ -488,7 +494,7 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
                       <div className="min-w-0 flex-1">
                         <TextInput
                           aria-label="Destination"
-                          placeholder="jt@nexus.local"
+                          placeholder="you@devbox.local"
                           className={cx("font-mono", COMPACT_FIELD, rowError?.destination && INVALID_FIELD)}
                           value={row.destination}
                           disabled={disabled}
@@ -544,7 +550,7 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
               <div className="flex items-center gap-2">
                 <TextInput
                   aria-label="Label"
-                  placeholder="Nexus"
+                  placeholder="Devbox"
                   className={cx("w-36 shrink-0", COMPACT_FIELD)}
                   value={adding.label}
                   disabled={disabled}
@@ -555,7 +561,7 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
                 <div className="min-w-0 flex-1">
                   <TextInput
                     aria-label="Destination"
-                    placeholder="jt@nexus.local"
+                    placeholder="you@devbox.local"
                     className={cx("font-mono", COMPACT_FIELD, addError && INVALID_FIELD)}
                     value={adding.destination}
                     disabled={disabled}
