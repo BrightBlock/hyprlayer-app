@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.8.1",
+      "date": "2026-09-18",
+      "summary": "Composer controls move below the input; host status shows on its own row.",
+      "notes": [
+        "The composer's agent mode, model, reasoning effort and permission pickers now sit in a row below the input box instead of inside it.",
+        "Installing or restarting a server in the Hyprlayer server dialog now shows its progress on that host's row, including \"Restarting…\" while a restart is in flight, so it's clear which host is doing the work.",
+        "The server-disconnected notice now closes on its own once the server reconnects, instead of staying up until you relaunch."
+      ]
+    },
+    {
       "version": "0.8.0",
       "date": "2026-09-18",
       "summary": "Sessions keep running after you quit, remote hosts over SSH, and split panes.",
