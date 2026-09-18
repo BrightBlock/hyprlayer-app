@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-import type { Host, HostsFile, ProvisionStep } from "@/lib/bindings";
+import type { Host, HostsFile, LocalServer, ProvisionStep } from "@/lib/bindings";
 import { validateDestination, validateHostList } from "@/lib/domain/hosts";
 import { errorMessage } from "@/lib/ipc";
 import { useTestHostConnection } from "@/lib/queries";
@@ -114,9 +114,11 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
   function buildFile(rows: DraftRow[], nextActive: string | null): HostsFile | null {
     if (validateHostList(rows).size > 0) return null;
     const hosts = toRecords(rows);
+    const nextHost = hosts.some((h) => h.destination === nextActive) ? nextActive : null;
     return {
       hosts,
-      active: hosts.some((h) => h.destination === nextActive) ? nextActive : null,
+      active: nextHost,
+      localProfile: nextHost ? null : (value.localProfile ?? null),
     };
   }
 
@@ -615,6 +617,56 @@ export function HostList({ value, onChange, onSelect, disabled }: Props) {
           Remove
         </MenuItem>
       </Popover>
+    </div>
+  );
+}
+
+type LocalServerListProps = {
+  servers: LocalServer[];
+  active: string | null;
+  onSelect: (dataDir: string) => void;
+  disabled?: boolean;
+};
+
+export function LocalServerList({ servers, active, onSelect, disabled }: LocalServerListProps) {
+  if (servers.length === 0) return null;
+
+  return (
+    <div>
+      <div className={`border border-transparent ${ROW_INSET_RIGHT}`}>
+        <h3 className="text-2xs font-semibold uppercase tracking-wider text-ink-dim">
+          On this machine
+        </h3>
+      </div>
+      <ul className="mt-1.5 space-y-0.5">
+        {servers.map((server) => {
+          const isActive = server.dataDir === active;
+          const problem = server.error ? errorMessage(server.error) : null;
+          return (
+            <li key={server.dataDir}>
+              <button
+                type="button"
+                className={cx(ROW_BASE, "w-full text-left", isActive ? ROW_SELECTED : ROW_IDLE)}
+                disabled={disabled || isActive || problem !== null}
+                aria-current={isActive}
+                title={problem ?? server.dataDir}
+                onClick={() => onSelect(server.dataDir)}
+              >
+                <span className="w-4 shrink-0 text-accent">
+                  {isActive && <CheckIcon size={13} />}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-ink">{server.name}</span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <span className={cx("h-1.5 w-1.5 rounded-full", problem ? "bg-bad" : "bg-ok")} />
+                  <span className={cx("text-xs", problem ? "text-bad" : "text-ink-dim")}>
+                    {problem ? "Version mismatch" : "Running"}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

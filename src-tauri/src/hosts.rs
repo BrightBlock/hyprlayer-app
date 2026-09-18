@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
+use hyprlayer_server::socket::profile_hash;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -26,6 +27,57 @@ pub struct HostsFile {
     pub hosts: Vec<Host>,
     /// The active host's `destination`, or `None` for the local server.
     pub active: Option<String>,
+    /// With no active host, another profile's data dir on this machine whose
+    /// running server to attach to in place of this app's own.
+    pub local_profile: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    Own,
+    /// Never spawned or evicted: it belongs to whoever started it.
+    LocalProfile(PathBuf),
+    Remote(Host),
+}
+
+impl Target {
+    pub fn profile_id(&self) -> String {
+        match self {
+            Target::Own => LOCAL_PROFILE.to_string(),
+            Target::LocalProfile(dir) => dir.display().to_string(),
+            Target::Remote(host) => host.destination.clone(),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            Target::Own => "this machine".to_string(),
+            Target::LocalProfile(dir) => server_name(dir),
+            Target::Remote(host) if !host.label.is_empty() => host.label.clone(),
+            Target::Remote(host) => host.destination.clone(),
+        }
+    }
+}
+
+const ADJECTIVES: &[&str] = &[
+    "amber", "bold", "brave", "bright", "calm", "clever", "cosmic", "crisp", "dapper", "eager",
+    "frosty", "gentle", "golden", "happy", "jolly", "keen", "lively", "lucky", "mellow", "merry",
+    "nimble", "noble", "plucky", "quiet", "rapid", "rustic", "silver", "snappy", "sunny", "swift",
+    "tidy", "witty",
+];
+
+const ANIMALS: &[&str] = &[
+    "badger", "beaver", "bison", "cougar", "crane", "dingo", "falcon", "ferret", "gecko", "heron",
+    "ibis", "jackal", "koala", "lemur", "lynx", "marten", "moose", "narwhal", "ocelot", "otter",
+    "owl", "panda", "puffin", "quokka", "raven", "seal", "sloth", "stoat", "tapir", "toucan",
+    "walrus", "wombat",
+];
+
+pub fn server_name(data_dir: &Path) -> String {
+    let hash = usize::from_str_radix(&profile_hash(data_dir), 16).unwrap_or_default();
+    let adjective = ADJECTIVES[hash % ADJECTIVES.len()];
+    let animal = ANIMALS[hash / ADJECTIVES.len() % ANIMALS.len()];
+    format!("{adjective}-{animal}")
 }
 
 fn hosts_path(app_config_dir: &Path) -> PathBuf {
@@ -56,12 +108,20 @@ pub fn save(app_config_dir: &Path, file: &HostsFile) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
-/// The active host, or `None` when the file names no host (the local server)
-/// or names one that isn't in the list.
-pub fn active_host(app_config_dir: &Path) -> Option<Host> {
+/// An active destination that names no listed host counts as no host.
+pub fn target(app_config_dir: &Path) -> Target {
     let file = load(app_config_dir);
-    let active = file.active?;
-    file.hosts.into_iter().find(|h| h.destination == active)
+    let active = file.active;
+    match file
+        .hosts
+        .into_iter()
+        .find(|h| Some(&h.destination) == active.as_ref())
+    {
+        Some(host) => Target::Remote(host),
+        None => file
+            .local_profile
+            .map_or(Target::Own, |dir| Target::LocalProfile(PathBuf::from(dir))),
+    }
 }
 
 /// The local server's profile name, reserved so no host can claim it
@@ -71,9 +131,7 @@ pub const LOCAL_PROFILE: &str = "local";
 /// The webview's localStorage namespace. The *configured* active host, not the
 /// connected one: a host that is asleep still owns its own tabs.
 pub fn profile_id(app_config_dir: &Path) -> String {
-    active_host(app_config_dir)
-        .map(|h| h.destination)
-        .unwrap_or_else(|| LOCAL_PROFILE.to_string())
+    target(app_config_dir).profile_id()
 }
 
 #[cfg(test)]
@@ -86,7 +144,7 @@ mod tests {
         let file = load(dir.path());
         assert!(file.hosts.is_empty());
         assert!(file.active.is_none());
-        assert!(active_host(dir.path()).is_none());
+        assert_eq!(target(dir.path()), Target::Own);
     }
 
     #[test]
@@ -104,11 +162,12 @@ mod tests {
                 },
             ],
             active: Some("nexus".into()),
+            ..Default::default()
         };
         save(dir.path(), &file).unwrap();
 
         assert_eq!(load(dir.path()), file);
-        assert_eq!(active_host(dir.path()), Some(file.hosts[0].clone()));
+        assert_eq!(target(dir.path()), Target::Remote(file.hosts[0].clone()));
     }
 
     #[test]
@@ -125,6 +184,7 @@ mod tests {
             &HostsFile {
                 hosts: vec![host],
                 active: Some("nexus".into()),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -139,9 +199,10 @@ mod tests {
             &HostsFile {
                 hosts: vec![],
                 active: Some("gone".into()),
+                ..Default::default()
             },
         )
         .unwrap();
-        assert!(active_host(dir.path()).is_none());
+        assert_eq!(target(dir.path()), Target::Own);
     }
 }

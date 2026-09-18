@@ -29,7 +29,9 @@ const TONE_SHADOW: Record<Tone, string> = {
 export function HostIndicator() {
   const status = useConnectionStatus();
   const connection = status.isSuccess ? status.data : null;
-  const label = connection?.host ? connection.host.label || connection.host.destination : null;
+  const label = connection?.host
+    ? connection.host.label || connection.host.destination
+    : (connection?.localServerName ?? null);
 
   let tone: Tone | null = null;
   let title = "Server: this machine";
@@ -40,7 +42,7 @@ export function HostIndicator() {
   } else if (connection?.state === "lost") {
     tone = "warn";
     title = `Connection to ${label ?? "this machine"} lost`;
-  } else if (connection?.host) {
+  } else if (label) {
     tone = "accent";
     title = `Server: ${label}`;
   }

@@ -6,13 +6,13 @@ use hyprlayer_proto::WireError;
 use crate::client::RpcClient;
 use crate::commands::hosts::{ConnectionState, ConnectionStatus};
 use crate::error::{AppError, CmdResult};
-use crate::hosts::Host;
+use crate::hosts::Target;
 
 struct Connection {
     client: Option<Arc<RpcClient>>,
-    /// `Some` when the active server (per `hosts.json`) is reached over SSH;
-    /// `None` for the local profile (ADR-0009, plan Phase 5).
-    host: Option<Host>,
+    /// The server `hosts.json` named when this connection was opened
+    /// (ADR-0009, plan Phase 5).
+    target: Target,
     failure: Option<AppError>,
     /// Set only by `mark_lost()`. Distinguishes "never connected this
     /// launch" (`Failed`) from "was connected and the stream ended"
@@ -26,11 +26,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(client: Arc<RpcClient>, host: Option<Host>) -> Self {
+    pub fn new(client: Arc<RpcClient>, target: Target) -> Self {
         Self {
             connection: RwLock::new(Connection {
                 client: Some(client),
-                host,
+                target,
                 failure: None,
                 lost: false,
             }),
@@ -39,11 +39,11 @@ impl AppState {
 
     /// A connection that never established this launch (`setup()`'s
     /// `Outcome::Blocked` path, plan Phase 1 §5): no client, a named reason.
-    pub fn failed(host: Option<Host>, error: AppError) -> Self {
+    pub fn failed(target: Target, error: AppError) -> Self {
         Self {
             connection: RwLock::new(Connection {
                 client: None,
-                host,
+                target,
                 failure: Some(error),
                 lost: false,
             }),
@@ -69,23 +69,23 @@ impl AppState {
         }
     }
 
-    /// The host this connection was opened against, or `None` for the local
-    /// server. Read by `reconnect_server` to refuse a host that changed under
-    /// it (plan Phase 8 §4).
-    pub fn host(&self) -> Option<Host> {
-        self.read().host.clone()
+    /// Read by `reconnect_server` to refuse a server that changed under it
+    /// (plan Phase 8 §4).
+    pub fn target(&self) -> Target {
+        self.read().target.clone()
     }
 
     /// `Some` when connected to a remote host, for a command whose action
     /// only makes sense against the machine the desktop itself is running on
     /// (editor launching, revealing a file, a client-supplied import path).
     pub fn remote_unsupported(&self, action: &str) -> Option<AppError> {
-        self.read().host.as_ref().map(|host| {
-            AppError::from(CoreError::RemoteUnsupported {
+        match &self.read().target {
+            Target::Remote(host) => Some(AppError::from(CoreError::RemoteUnsupported {
                 action: action.to_string(),
                 host: host.label.clone(),
-            })
-        })
+            })),
+            Target::Own | Target::LocalProfile(_) => None,
+        }
     }
 
     /// The level read: what the frontend polls to know whether it can trust
@@ -99,9 +99,15 @@ impl AppState {
         } else {
             ConnectionState::Failed
         };
+        let (host, local_server_name) = match &guard.target {
+            Target::Own => (None, None),
+            Target::LocalProfile(_) => (None, Some(guard.target.name())),
+            Target::Remote(host) => (Some(host.clone()), None),
+        };
         ConnectionStatus {
             state,
-            host: guard.host.clone(),
+            host,
+            local_server_name,
             server_version: guard.client.as_ref().map(|c| c.server_version()),
             error: guard.failure.clone(),
         }
@@ -191,7 +197,7 @@ mod tests {
 
     #[test]
     fn client_on_a_failed_connection_returns_the_stored_errors_code() {
-        let state = AppState::failed(None, AppError::server_unavailable("could not start"));
+        let state = AppState::failed(Target::Own, AppError::server_unavailable("could not start"));
         let Err(err) = state.client() else {
             panic!("no client is connected");
         };
@@ -200,14 +206,14 @@ mod tests {
 
     #[test]
     fn status_on_a_failed_connection_is_failed_not_lost() {
-        let state = AppState::failed(None, AppError::server_unavailable("could not start"));
+        let state = AppState::failed(Target::Own, AppError::server_unavailable("could not start"));
         assert_eq!(state.status().state, ConnectionState::Failed);
     }
 
     #[tokio::test]
     async fn status_after_mark_lost_is_lost() {
         let client = connected_client().await;
-        let state = AppState::new(client.clone(), None);
+        let state = AppState::new(client.clone(), Target::Own);
         assert!(state.mark_lost(&client));
         assert_eq!(state.status().state, ConnectionState::Lost);
         let Err(err) = state.client() else {
@@ -219,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn reconnected_clears_the_failure_and_the_lost_flag() {
         let old = connected_client().await;
-        let state = AppState::new(old.clone(), None);
+        let state = AppState::new(old.clone(), Target::Own);
         assert!(state.mark_lost(&old));
 
         state.reconnected(connected_client().await);
@@ -235,7 +241,7 @@ mod tests {
     #[tokio::test]
     async fn a_retired_clients_bridge_cannot_mark_the_new_connection_lost() {
         let old = connected_client().await;
-        let state = AppState::new(old.clone(), None);
+        let state = AppState::new(old.clone(), Target::Own);
         state.reconnected(connected_client().await);
 
         assert!(!state.mark_lost(&old));

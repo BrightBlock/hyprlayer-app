@@ -4,7 +4,13 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { type ConnectionState, type Host, type HostsFile, type ProvisionStep } from "@/lib/bindings";
 import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { flushPersistedWrites } from "@/lib/persistedStorage";
-import { useConnectionStatus, useHostProvisioning, useHosts, useSaveHosts } from "@/lib/queries";
+import {
+  useConnectionStatus,
+  useHostProvisioning,
+  useHosts,
+  useLocalServers,
+  useSaveHosts,
+} from "@/lib/queries";
 import {
   Badge,
   Button,
@@ -15,7 +21,7 @@ import {
   type BadgeTone,
 } from "@/components/ui";
 import { closeHostsUi, useHostsUiStore } from "./hostsUi";
-import { HostList } from "./HostList";
+import { HostList, LocalServerList } from "./HostList";
 import { retryConnection } from "./reconnect";
 import { runProvision, STEP_LABEL } from "./serverInstall";
 
@@ -118,6 +124,7 @@ export function HostsDialog() {
   // launch; gating on `isSuccess` is what keeps a reasonless "Not connected"
   // modal from flashing before the first connection_status resolves.
   const blocking = status.isSuccess && status.data.state !== "connected";
+  const localServers = useLocalServers(blocking || uiOpen).data ?? [];
   // Deliberate mode (opened from the rail indicator while connected) is
   // dismissible; blocking mode never is, regardless of how it got opened.
   if (!blocking && !uiOpen) return null;
@@ -125,7 +132,9 @@ export function HostsDialog() {
   const connection = status.data ?? null;
   const file = hosts.data ?? EMPTY;
   const badge = connection ? STATE_BADGE[connection.state] : STATE_BADGE.connected;
-  const hostName = connection?.host ? connection.host.label || connection.host.destination : null;
+  const hostName = connection?.host
+    ? connection.host.label || connection.host.destination
+    : (connection?.localServerName ?? null);
   const where = hostName ?? "This machine";
   const message = connection?.error ? errorMessage(connection.error) : null;
   // `remote_cli_missing` is the one failure provisioning answers — Phase 1 named
@@ -134,13 +143,19 @@ export function HostsDialog() {
   // Its remedy reads "Install it from the Hyprlayer server panel", which is the
   // panel rendered directly below — a call to action pointing at itself.
   const remedy = connection?.error && !showInstall ? errorRemedy(connection.error) : null;
-  const localFailed = blocking && connection?.host === null;
-  const usingLocal = (file.active ?? null) === null;
+  const localFailed = blocking && connection?.host === null && !connection?.localServerName;
+  const localProfile = file.active ? null : (file.localProfile ?? null);
+  const usingLocal = (file.active ?? null) === null && localProfile === null;
   const leaving = hostName ?? "this machine";
   const target = pending?.active
     ? ((pending.hosts ?? []).find((h) => h.destination === pending.active) ?? null)
     : null;
-  const joining = target ? target.label || target.destination : "this machine";
+  const joining = target
+    ? target.label || target.destination
+    : pending?.localProfile
+      ? (localServers.find((s) => s.dataDir === pending.localProfile)?.name ??
+        "another server on this machine")
+      : "this machine";
 
   async function confirmSwitch() {
     const next = pending;
@@ -169,7 +184,7 @@ export function HostsDialog() {
         footer={
           <div className="flex items-center justify-between gap-3">
             <Button
-              onClick={() => setPending({ ...file, active: null })}
+              onClick={() => setPending({ ...file, active: null, localProfile: null })}
               disabled={localFailed || usingLocal || save.isPending}
             >
               Use this machine
@@ -191,6 +206,13 @@ export function HostsDialog() {
           </div>
 
           {showInstall && connection?.host && <ServerInstall host={connection.host} />}
+
+          <LocalServerList
+            servers={localServers}
+            active={localProfile}
+            onSelect={(dataDir) => setPending({ ...file, active: null, localProfile: dataDir })}
+            disabled={save.isPending}
+          />
 
           <HostList
             value={file}

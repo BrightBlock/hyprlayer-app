@@ -126,7 +126,7 @@ describe("HostList", () => {
     type(destinations()[0], "jt@laptop.local");
     fireEvent.click(confirmAdd());
 
-    expect(onChange).toHaveBeenCalledWith({ hosts: [NEXUS, LAPTOP], active: "nexus" });
+    expect(onChange).toHaveBeenCalledWith({ hosts: [NEXUS, LAPTOP], active: "nexus", localProfile: null });
   });
 
   it("does not clobber an in-flight edit when a refetch delivers the same file", () => {
@@ -151,7 +151,7 @@ describe("HostList", () => {
     openRowMenu("Nexus");
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
 
-    expect(onChange).toHaveBeenCalledWith({ hosts: [LAPTOP], active: "jt@laptop.local" });
+    expect(onChange).toHaveBeenCalledWith({ hosts: [LAPTOP], active: "jt@laptop.local", localProfile: null });
   });
 
   it("falls back to this machine when the active host is the one removed", () => {
@@ -160,7 +160,7 @@ describe("HostList", () => {
     openRowMenu("Nexus");
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
 
-    expect(onChange).toHaveBeenCalledWith({ hosts: [LAPTOP], active: null });
+    expect(onChange).toHaveBeenCalledWith({ hosts: [LAPTOP], active: null, localProfile: null });
   });
 
   // Reordering runs on pointer events, so the rows need real geometry: jsdom
@@ -188,7 +188,7 @@ describe("HostList", () => {
 
     dragRow(0, 60); // into the second row's band
 
-    expect(onChange).toHaveBeenCalledWith({ hosts: [LAPTOP, NEXUS], active: null });
+    expect(onChange).toHaveBeenCalledWith({ hosts: [LAPTOP, NEXUS], active: null, localProfile: null });
   });
 
   it("treats a press that never moves as a click, not a reorder", () => {
@@ -230,7 +230,11 @@ describe("HostList", () => {
     fireEvent.click(screen.getByTitle("Use Laptop"));
 
     // A switch is confirmed and relaunched by the caller; the list writes nothing.
-    expect(onSelect).toHaveBeenCalledWith({ hosts: [NEXUS, LAPTOP], active: "jt@laptop.local" });
+    expect(onSelect).toHaveBeenCalledWith({
+      hosts: [NEXUS, LAPTOP],
+      active: "jt@laptop.local",
+      localProfile: null,
+    });
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -251,7 +255,11 @@ describe("HostList", () => {
     fireEvent.click(select);
 
     expect(captured).toEqual([]);
-    expect(onSelect).toHaveBeenCalledWith({ hosts: [NEXUS, LAPTOP], active: "jt@laptop.local" });
+    expect(onSelect).toHaveBeenCalledWith({
+      hosts: [NEXUS, LAPTOP],
+      active: "jt@laptop.local",
+      localProfile: null,
+    });
   });
 
   it("does not select the row a reorder was dragged from", () => {
@@ -276,6 +284,7 @@ describe("HostList", () => {
     expect(onChange).toHaveBeenCalledWith({
       hosts: [{ destination: "jt@nexus.local", label: "Nexus" }],
       active: null,
+      localProfile: null,
     });
   });
 
@@ -331,6 +340,7 @@ describe("HostList", () => {
     expect(onChange).toHaveBeenCalledWith({
       hosts: [{ destination: "jt@nexus.local", label: "Nexus" }],
       active: null,
+      localProfile: null,
     });
     expect(editingRows()).toHaveLength(0);
   });

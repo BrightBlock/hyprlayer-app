@@ -249,6 +249,7 @@ export const commands = {
 	 *  one is single-use, and reusing it silently drops the second call's steps.
 	 */
 	provisionHost: (host: Host, onStep: Channel<ProvisionStep>) => typedError<null, AppError>(__TAURI_INVOKE("provision_host", { host, onStep })),
+	listLocalServers: () => typedError<LocalServer[], AppError>(__TAURI_INVOKE("list_local_servers")),
 };
 
 /** Events */
@@ -619,6 +620,8 @@ export type ConnectionStatus = {
 	state: ConnectionState,
 	/**  `None` for the local server. */
 	host: Host | null,
+	/**  Set when attached to another profile's server on this machine. */
+	localServerName?: string | null,
 	serverVersion: number | null,
 	/**  `Some` for `Failed` and `Lost`. */
 	error: AppError | null,
@@ -863,6 +866,11 @@ export type HostsFile = {
 	hosts?: Host[],
 	/**  The active host's `destination`, or `None` for the local server. */
 	active?: string | null,
+	/**
+	 *  With no active host, another profile's data dir on this machine whose
+	 *  running server to attach to in place of this app's own.
+	 */
+	localProfile?: string | null,
 };
 
 export type KeybindingSettings = {
@@ -870,6 +878,14 @@ export type KeybindingSettings = {
 };
 
 export type LinkStatus = "ok" | "unsupported" | "broken";
+
+export type LocalServer = {
+	dataDir: string,
+	name: string,
+	serverVersion: number,
+	/**  Set when this app cannot talk to it. */
+	error: AppError | null,
+};
 
 export type MergeMethod = "squash" | "merge" | "rebase";
 

@@ -9,10 +9,10 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::error::{AppError, CmdResult};
-use crate::hosts::{self, Host, HostsFile};
+use crate::hosts::{self, Host, HostsFile, Target};
 use crate::provision::{self, HostProvisioning, ProvisionStep};
 use crate::state::AppState;
-use crate::supervisor::{self, HostProbe};
+use crate::supervisor::{self, HostProbe, LocalServer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +31,9 @@ pub struct ConnectionStatus {
     pub state: ConnectionState,
     /// `None` for the local server.
     pub host: Option<Host>,
+    /// Set when attached to another profile's server on this machine.
+    #[specta(optional)]
+    pub local_server_name: Option<String>,
     pub server_version: Option<u32>,
     /// `Some` for `Failed` and `Lost`.
     pub error: Option<AppError>,
@@ -82,20 +85,20 @@ pub fn connection_status(state: State<'_, AppState>) -> CmdResult<ConnectionStat
     Ok(state.status())
 }
 
-/// Refuses a reconnect whose destination moved. The localStorage namespace is
-/// baked into the window at creation (plan Phase 4 §2), so a changed host needs
-/// a new window — attaching here would pair this window's tabs, pins and last
-/// route with another server's data (plan Phase 8 §4).
-fn host_change(connected: Option<&Host>, configured: Option<&Host>) -> Option<AppError> {
-    if connected.map(|h| &h.destination) == configured.map(|h| &h.destination) {
-        return None;
-    }
-    let name = match configured {
-        Some(host) if !host.label.is_empty() => host.label.as_str(),
-        Some(host) => host.destination.as_str(),
-        None => "this machine",
-    };
-    Some(AppError::host_changed(name))
+/// Refuses a reconnect whose server moved. The localStorage namespace is
+/// baked into the window at creation (plan Phase 4 §2), so a changed server
+/// needs a new window — attaching here would pair this window's tabs, pins and
+/// last route with another server's data (plan Phase 8 §4).
+fn server_change(connected: &Target, configured: &Target) -> Option<AppError> {
+    (connected.profile_id() != configured.profile_id())
+        .then(|| AppError::host_changed(&configured.name()))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_local_servers(app: AppHandle) -> CmdResult<Vec<LocalServer>> {
+    let data_dir = app_data_dir(&app)?;
+    Ok(supervisor::list_local_servers(&data_dir).await)
 }
 
 /// Reconnects in place after a drop, so a rebuilt server or a slept laptop
@@ -109,8 +112,8 @@ pub async fn reconnect_server(
 ) -> CmdResult<ConnectionStatus> {
     let config_dir = app_config_dir(&app)?;
     let data_dir = app_data_dir(&app)?;
-    let configured = hosts::active_host(&config_dir);
-    if let Some(refusal) = host_change(state.host().as_ref(), configured.as_ref()) {
+    let configured = hosts::target(&config_dir);
+    if let Some(refusal) = server_change(&state.target(), &configured) {
         return Err(refusal);
     }
     // Already live: a second connection would leave the first one's bridge
@@ -119,11 +122,7 @@ pub async fn reconnect_server(
         return Ok(state.status());
     }
 
-    let outcome = match &configured {
-        Some(host) => supervisor::connect_remote(host, &data_dir).await,
-        None => supervisor::connect_or_spawn(&config_dir, &data_dir).await,
-    };
-    match outcome {
+    match supervisor::connect(&configured, &config_dir, &data_dir).await {
         supervisor::Outcome::Connected(client) => {
             // Swapped before the bridge is spawned: a connection that dies in
             // between then retires against the client the state holds, so it
@@ -166,11 +165,11 @@ pub async fn provision_host(
 mod tests {
     use super::*;
 
-    fn host(destination: &str, label: &str) -> Host {
-        Host {
+    fn host(destination: &str, label: &str) -> Target {
+        Target::Remote(Host {
             destination: destination.into(),
             label: label.into(),
-        }
+        })
     }
 
     #[test]
@@ -179,17 +178,14 @@ mod tests {
         // The label is editable and free to change; the destination is the
         // profile namespace, so only it decides.
         let configured = host("nexus", "Nexus (linux)");
-        assert!(host_change(Some(&connected), Some(&configured)).is_none());
-        assert!(host_change(None, None).is_none());
+        assert!(server_change(&connected, &configured).is_none());
+        assert!(server_change(&Target::Own, &Target::Own).is_none());
     }
 
     #[test]
     fn a_changed_host_is_refused_and_names_relaunching() {
-        let err = host_change(
-            Some(&host("nexus", "Nexus")),
-            Some(&host("office", "Office")),
-        )
-        .expect("a different destination is refused");
+        let err = server_change(&host("nexus", "Nexus"), &host("office", "Office"))
+            .expect("a different destination is refused");
         assert_eq!(err.code, "host_changed");
         assert!(err.message.contains("Office"));
         assert!(err.remedy.unwrap().contains("Relaunch"));
@@ -197,12 +193,12 @@ mod tests {
 
     #[test]
     fn switching_to_or_from_the_local_server_is_refused_too() {
-        let err = host_change(Some(&host("nexus", "Nexus")), None)
+        let err = server_change(&host("nexus", "Nexus"), &Target::Own)
             .expect("the local server is a different profile");
         assert_eq!(err.code, "host_changed");
         assert!(err.message.contains("this machine"));
         assert_eq!(
-            host_change(None, Some(&host("nexus", "Nexus")))
+            server_change(&Target::Own, &host("nexus", "Nexus"))
                 .expect("a remote host is a different profile")
                 .code,
             "host_changed"

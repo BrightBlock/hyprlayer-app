@@ -13,6 +13,7 @@ const b = vi.hoisted(() => ({
   useSaveHosts: vi.fn(),
   useTestHostConnection: vi.fn(),
   useHostProvisioning: vi.fn(),
+  useLocalServers: vi.fn(),
   relaunch: vi.fn(() => Promise.resolve()),
   flushPersistedWrites: vi.fn(),
 }));
@@ -22,6 +23,7 @@ vi.mock("@/lib/queries", () => ({
   useSaveHosts: b.useSaveHosts,
   useTestHostConnection: b.useTestHostConnection,
   useHostProvisioning: b.useHostProvisioning,
+  useLocalServers: b.useLocalServers,
 }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: b.relaunch }));
 vi.mock("@/lib/persistedStorage", () => ({ flushPersistedWrites: b.flushPersistedWrites }));
@@ -96,6 +98,7 @@ beforeEach(() => {
   });
   b.useTestHostConnection.mockReturnValue({ mutateAsync: vi.fn() });
   b.useHostProvisioning.mockReturnValue({ data: undefined });
+  b.useLocalServers.mockReturnValue({ data: [] });
   mockHosts({ hosts: [], active: null });
 });
 
@@ -184,7 +187,7 @@ describe("HostsDialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "Switch and restart" }));
     });
 
-    expect(saveAsync).toHaveBeenCalledWith({ hosts: [NEXUS], active: null });
+    expect(saveAsync).toHaveBeenCalledWith({ hosts: [NEXUS], active: null, localProfile: null });
     expect(b.flushPersistedWrites).toHaveBeenCalledTimes(1);
     expect(b.relaunch).toHaveBeenCalledTimes(1);
   });

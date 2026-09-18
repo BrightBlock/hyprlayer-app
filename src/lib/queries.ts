@@ -87,6 +87,15 @@ export function useHostProvisioning(host: Host) {
   });
 }
 
+export function useLocalServers(enabled = true) {
+  return useQuery({
+    queryKey: ["local-servers"],
+    queryFn: () => unwrap(commands.listLocalServers()),
+    enabled,
+    staleTime: 0,
+  });
+}
+
 export function useShellName() {
   return useQuery({
     queryKey: ["shell-name"],

@@ -200,6 +200,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::reconnect_server,
             commands::hosts::inspect_host_provisioning,
             commands::hosts::provision_host,
+            commands::hosts::list_local_servers,
         ])
         .events(collect_events![
             events::ConfigChanged,
@@ -341,16 +342,12 @@ pub fn run() {
             // hosts.json is read before connecting anything, because it's the
             // one thing that has to be decided locally: there is no server to
             // ask which server to reach (ADR-0009, plan Phase 5 §2).
-            let remote_host = hosts::active_host(&app_config_dir);
-            let outcome = match &remote_host {
-                Some(host) => {
-                    tauri::async_runtime::block_on(supervisor::connect_remote(host, &app_data_dir))
-                }
-                None => tauri::async_runtime::block_on(supervisor::connect_or_spawn(
-                    &app_config_dir,
-                    &app_data_dir,
-                )),
-            };
+            let target = hosts::target(&app_config_dir);
+            let outcome = tauri::async_runtime::block_on(supervisor::connect(
+                &target,
+                &app_config_dir,
+                &app_data_dir,
+            ));
             // VS Code Remote-SSH's rule (plan Phase 1 §5): open the window
             // regardless of whether the connection succeeded. The one
             // exception is `runtime_in_use` — another Hyprlayer already holds
@@ -360,7 +357,7 @@ pub fn run() {
             // (plan Phase 1 §5): the spawned task now needs `handle.state::<AppState>()`.
             let mut client = match outcome {
                 supervisor::Outcome::Connected(client) => {
-                    app.manage(AppState::new(client.clone(), remote_host.clone()));
+                    app.manage(AppState::new(client.clone(), target.clone()));
                     Some(client)
                 }
                 supervisor::Outcome::Blocked { title, error } => {
@@ -377,7 +374,7 @@ pub fn run() {
                             .blocking_show();
                         std::process::exit(1);
                     }
-                    app.manage(AppState::failed(remote_host.clone(), error));
+                    app.manage(AppState::failed(target.clone(), error));
                     None
                 }
             };

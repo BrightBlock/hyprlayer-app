@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use hyprlayer_core::CoreError;
-use hyprlayer_proto::{WireError, PROTOCOL_VERSION};
-use hyprlayer_server::socket;
+use hyprlayer_proto::{check_version, WireError, PROTOCOL_VERSION};
 use hyprlayer_server::transport::{Control, FrameReader, FrameWriter};
+use hyprlayer_server::{socket, APP_IDENTIFIER};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::process::Child;
@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 
 use crate::client::{self, ConnectError, RpcClient};
 use crate::error::AppError;
-use crate::hosts::Host;
+use crate::hosts::{self, Host, Target};
 use crate::provision;
 
 const CONNECT_RETRIES: u32 = 10;
@@ -32,6 +32,7 @@ const SPAWN_LISTEN_RETRIES: u32 = 300;
 const SPAWN_RETRIES: u32 = 5;
 const SPAWN_RETRY_DELAY: Duration = Duration::from_secs(1);
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 const CANNOT_START: &str = "Hyprlayer cannot start";
 const ALREADY_RUNNING: &str = "Hyprlayer is already running";
@@ -93,6 +94,101 @@ impl Outcome {
                 path: app_data_dir.to_path_buf(),
             }),
         }
+    }
+}
+
+pub async fn connect(target: &Target, app_config_dir: &Path, app_data_dir: &Path) -> Outcome {
+    match target {
+        Target::Own => connect_or_spawn(app_config_dir, app_data_dir).await,
+        Target::LocalProfile(dir) => connect_local_profile(dir, &target.name()).await,
+        Target::Remote(host) => connect_remote(host, app_data_dir).await,
+    }
+}
+
+async fn connect_local_profile(data_dir: &Path, name: &str) -> Outcome {
+    let mut error = match client::connect(data_dir).await {
+        Ok(client) => return Outcome::Connected(client),
+        Err(ConnectError::Refused(e)) => AppError::from(e),
+        Err(e) => AppError::server_unavailable(format!(
+            "Could not reach the Hyprlayer server for {name}: {e}"
+        )),
+    };
+    if error.remedy.is_none() {
+        error.remedy = Some(
+            "This app does not start or replace another profile's server. Start it where it came \
+             from, or choose Use this machine."
+                .into(),
+        );
+    }
+    Outcome::Blocked {
+        title: CANNOT_START.to_string(),
+        error,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalServer {
+    pub data_dir: String,
+    pub name: String,
+    pub server_version: u32,
+    /// Set when this app cannot talk to it.
+    pub error: Option<AppError>,
+}
+
+/// Other profiles' servers listening on this machine. Only siblings named for
+/// `APP_IDENTIFIER` are tried: macOS prompts before a process looks inside
+/// some other apps' data directories.
+pub async fn list_local_servers(app_data_dir: &Path) -> Vec<LocalServer> {
+    let Some(entries) = app_data_dir
+        .parent()
+        .and_then(|root| std::fs::read_dir(root).ok())
+    else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for dir in entries.flatten().map(|entry| entry.path()) {
+        let in_family = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| {
+                name == APP_IDENTIFIER
+                    || name
+                        .strip_prefix(APP_IDENTIFIER)
+                        .is_some_and(|rest| rest.starts_with('.'))
+            });
+        if !in_family || dir == app_data_dir {
+            continue;
+        }
+        let probe =
+            tokio::time::timeout(PROBE_TIMEOUT, peer_version(&socket::socket_path(&dir))).await;
+        if let Ok(Some(version)) = probe {
+            found.push(LocalServer {
+                data_dir: dir.display().to_string(),
+                name: hosts::server_name(&dir),
+                server_version: version,
+                error: check_version(version).err().map(AppError::from),
+            });
+        }
+    }
+    found.sort_by(|a, b| a.data_dir.cmp(&b.data_dir));
+    found
+}
+
+/// Raw frames rather than `RpcClient`, whose reader task keeps the socket open
+/// after the client is dropped — a probe would leave an idle connection behind
+/// on every server it looked at.
+async fn peer_version(socket_path: &Path) -> Option<u32> {
+    let (rd, wr) = tokio::io::split(socket::connect(socket_path).await.ok()?);
+    FrameWriter::new(wr)
+        .write_control(&Control::Hello {
+            protocol_version: PROTOCOL_VERSION,
+        })
+        .await
+        .ok()?;
+    match FrameReader::new(rd).next_control().await {
+        Ok(Some(Control::Hello { protocol_version })) => Some(protocol_version),
+        _ => None,
     }
 }
 
