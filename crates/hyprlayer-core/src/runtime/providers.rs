@@ -497,6 +497,7 @@ impl ProviderService<'_> {
             effort: None,
             ephemeral: true,
             env: vec![("PATH".to_string(), path.to_string_lossy().into_owned())],
+            developer_instructions: None,
         })
         .await?;
 

@@ -7,8 +7,13 @@ use tokio::sync::{broadcast, mpsc};
 use crate::agent::{AgentDriver, Harness};
 use crate::agents;
 use crate::capability::{launch_policy, LaunchPolicy};
-use crate::claude::{ClaudeDriver, PermissionMode, SessionEvent, SessionState, SpawnConfig};
-use crate::codex::{CodexDriver, CollabMode, SpawnConfig as CodexSpawnConfig};
+use crate::claude::{
+    memory, ClaudeDriver, PermissionMode, SessionEvent, SessionState, SpawnConfig,
+};
+use crate::codex::{
+    accepts_developer_instructions, config_sets_developer_instructions, CodexDriver, CollabMode,
+    SpawnConfig as CodexSpawnConfig,
+};
 use crate::error::{CoreError, Result};
 use crate::opencode::runtime::OpenCodeDriver;
 use crate::opencode::support::opencode_model_is_supported;
@@ -314,6 +319,35 @@ impl SessionService<'_> {
         Ok(effective.backend.thoughts_root().into_iter().collect())
     }
 
+    async fn memory_instructions(&self, workstream_id: &str) -> Option<String> {
+        let listing = self
+            .runtime
+            .workstreams()
+            .project_memory(workstream_id)
+            .await
+            .ok()?;
+        if listing.key_check == memory::MemoryKeyCheck::Mismatch {
+            return None;
+        }
+        let dir = PathBuf::from(listing.dir);
+        let codex_config = self.runtime.paths.codex_home.join("config.toml");
+        blocking(move || {
+            // A thread's developerInstructions replaces a configured
+            // developer_instructions rather than merging (observed on codex
+            // 0.154.0), so a user who keeps their own gets no memory instead
+            // of silently losing their rules.
+            let user_has_own = std::fs::read_to_string(&codex_config)
+                .is_ok_and(|text| config_sets_developer_instructions(&text));
+            if user_has_own {
+                return Ok(None);
+            }
+            Ok(memory::read_index(&dir).map(|index| memory::developer_instructions(&dir, &index)))
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
     async fn prompt_vars_for(&self, ws: &Workstream, template: &str) -> pipeline::PromptVars {
         let want_changed = template.contains("{{changed_files}}");
         let want_diff = template.contains("{{diff}}");
@@ -604,6 +638,19 @@ impl SessionService<'_> {
                 let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
                 env.extend(self.runtime.environment.overlay_env());
 
+                let codex_version = self
+                    .runtime
+                    .binaries
+                    .status(BinaryKind::Codex)
+                    .await
+                    .version;
+                let developer_instructions =
+                    if accepts_developer_instructions(codex_version.as_deref()) {
+                        self.memory_instructions(&session.workstream_id).await
+                    } else {
+                        None
+                    };
+
                 let resume_thread = resume
                     .then(|| session.provider_session_id.clone())
                     .flatten();
@@ -638,6 +685,7 @@ impl SessionService<'_> {
                     effort,
                     ephemeral: false,
                     env,
+                    developer_instructions,
                 })
                 .await?;
                 let driver: Arc<dyn AgentDriver> = Arc::new(driver);

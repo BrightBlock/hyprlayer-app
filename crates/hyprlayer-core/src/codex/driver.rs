@@ -59,6 +59,7 @@ pub struct SpawnConfig {
     pub effort: Option<String>,
     pub ephemeral: bool,
     pub env: Vec<(String, String)>,
+    pub developer_instructions: Option<String>,
 }
 
 type PendingReplies =
@@ -195,45 +196,7 @@ impl CodexDriver {
                 .await;
         }
 
-        let CodexPosture {
-            approval_policy,
-            sandbox,
-            network_access,
-        } = config.posture;
-        let mut params = json!({
-            "cwd": config.cwd.to_string_lossy(),
-            "approvalPolicy": approval_policy,
-            "sandbox": sandbox,
-        });
-        if let Some(model) = &config.model {
-            params["model"] = json!(model);
-        }
-        if sandbox == "workspace-write" {
-            let roots: Vec<String> = config
-                .add_dirs
-                .iter()
-                .map(|d| d.to_string_lossy().into_owned())
-                .collect();
-            params["config"] = json!({
-                "sandbox_workspace_write": {
-                    "network_access": network_access,
-                    "writable_roots": roots,
-                }
-            });
-        }
-
-        let (method, params) = match &config.resume {
-            Some(thread_id) => {
-                params["threadId"] = json!(thread_id);
-                ("thread/resume", params)
-            }
-            None => {
-                if config.ephemeral {
-                    params["ephemeral"] = json!(true);
-                }
-                ("thread/start", params)
-            }
-        };
+        let (method, params) = thread_params(config);
 
         let rpc_id = self.next_rpc_id();
         self.state
@@ -517,6 +480,68 @@ impl CodexDriver {
     }
 }
 
+fn thread_params(config: &SpawnConfig) -> (&'static str, Value) {
+    let CodexPosture {
+        approval_policy,
+        sandbox,
+        network_access,
+    } = config.posture;
+    let mut params = json!({
+        "cwd": config.cwd.to_string_lossy(),
+        "approvalPolicy": approval_policy,
+        "sandbox": sandbox,
+    });
+    if let Some(model) = &config.model {
+        params["model"] = json!(model);
+    }
+    if let Some(instructions) = &config.developer_instructions {
+        params["developerInstructions"] = json!(instructions);
+    }
+    if sandbox == "workspace-write" {
+        let roots: Vec<String> = config
+            .add_dirs
+            .iter()
+            .map(|d| d.to_string_lossy().into_owned())
+            .collect();
+        params["config"] = json!({
+            "sandbox_workspace_write": {
+                "network_access": network_access,
+                "writable_roots": roots,
+            }
+        });
+    }
+    match &config.resume {
+        Some(thread_id) => {
+            params["threadId"] = json!(thread_id);
+            ("thread/resume", params)
+        }
+        None => {
+            if config.ephemeral {
+                params["ephemeral"] = json!(true);
+            }
+            ("thread/start", params)
+        }
+    }
+}
+
+// The oldest installed codex whose generated app-server schema was checked for
+// developerInstructions (0.152.0 and 0.154.0); 0.149.x-0.151.x are unverified.
+const DEVELOPER_INSTRUCTIONS_SINCE: [u64; 3] = [0, 152, 0];
+
+pub fn accepts_developer_instructions(version: Option<&str>) -> bool {
+    version
+        .and_then(crate::process::binaries::parse_semver)
+        .is_some_and(|v| v >= DEVELOPER_INSTRUCTIONS_SINCE)
+}
+
+pub fn config_sets_developer_instructions(config_toml: &str) -> bool {
+    toml::from_str::<toml::Table>(config_toml).is_ok_and(|config| {
+        config
+            .get("developer_instructions")
+            .is_some_and(toml::Value::is_str)
+    })
+}
+
 fn turn_params(
     thread_id: &str,
     text: &str,
@@ -727,6 +752,7 @@ use std::os::windows::process::CommandExt as _;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::claude::PermissionMode;
 
     #[test]
     fn rollback_count_maps_ordinal_to_turns_dropped() {
@@ -794,6 +820,95 @@ mod tests {
         let params = initialize_params();
         assert_eq!(params["capabilities"]["experimentalApi"], json!(true));
         assert_eq!(params["clientInfo"]["name"], json!("hyprlayer"));
+    }
+
+    fn spawn_config(
+        mode: PermissionMode,
+        resume: Option<&str>,
+        developer_instructions: Option<&str>,
+    ) -> SpawnConfig {
+        SpawnConfig {
+            codex_bin: PathBuf::from("codex"),
+            cwd: PathBuf::from("/w"),
+            posture: CodexPosture::from_permission_mode(mode),
+            add_dirs: vec![PathBuf::from("/t")],
+            skill_roots: Vec::new(),
+            resume: resume.map(str::to_string),
+            prior_user_turns: 0,
+            model: None,
+            effort: None,
+            ephemeral: false,
+            env: Vec::new(),
+            developer_instructions: developer_instructions.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn thread_params_start_carries_developer_instructions() {
+        let (method, params) =
+            thread_params(&spawn_config(PermissionMode::Default, None, Some("notes")));
+        assert_eq!(method, "thread/start");
+        assert_eq!(params["developerInstructions"], json!("notes"));
+        assert!(params.get("threadId").is_none());
+    }
+
+    #[test]
+    fn thread_params_resume_carries_developer_instructions() {
+        let config = spawn_config(PermissionMode::Default, Some("t1"), Some("notes"));
+        let (method, params) = thread_params(&config);
+        assert_eq!(method, "thread/resume");
+        assert_eq!(params["threadId"], json!("t1"));
+        assert_eq!(params["developerInstructions"], json!("notes"));
+    }
+
+    #[test]
+    fn thread_params_omit_absent_developer_instructions() {
+        for resume in [None, Some("t1")] {
+            let (_, params) = thread_params(&spawn_config(PermissionMode::Default, resume, None));
+            assert!(params.get("developerInstructions").is_none());
+        }
+    }
+
+    #[test]
+    fn thread_params_keep_the_sandbox_shape() {
+        let (_, params) = thread_params(&spawn_config(PermissionMode::Default, None, None));
+        assert_eq!(
+            params["config"]["sandbox_workspace_write"]["writable_roots"],
+            json!(["/t"])
+        );
+
+        let (_, params) = thread_params(&spawn_config(PermissionMode::Plan, None, None));
+        assert!(params.get("config").is_none());
+
+        let start = SpawnConfig {
+            ephemeral: true,
+            ..spawn_config(PermissionMode::Plan, None, None)
+        };
+        assert_eq!(thread_params(&start).1["ephemeral"], json!(true));
+        let resume = SpawnConfig {
+            ephemeral: true,
+            ..spawn_config(PermissionMode::Plan, Some("t1"), None)
+        };
+        assert!(thread_params(&resume).1.get("ephemeral").is_none());
+    }
+
+    #[test]
+    fn accepts_developer_instructions_from_0_152() {
+        for version in ["0.152.0", "0.154.0"] {
+            assert!(accepts_developer_instructions(Some(version)), "{version}");
+        }
+        for version in [Some("0.151.9"), Some("0.149.1"), None, Some("garbage")] {
+            assert!(!accepts_developer_instructions(version), "{version:?}");
+        }
+    }
+
+    #[test]
+    fn config_sets_developer_instructions_for_a_top_level_string() {
+        let trust = "[projects.\"/w\"]\ntrust_level = \"trusted\"\n";
+        assert!(config_sets_developer_instructions(&format!(
+            "developer_instructions = \"Be terse.\"\n{trust}"
+        )));
+        assert!(!config_sets_developer_instructions(trust));
     }
 
     #[test]

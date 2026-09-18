@@ -14,6 +14,7 @@ const q = vi.hoisted(() => ({
   useDiscardFiles: vi.fn(),
   useWorkstreamCommits: vi.fn(),
   useCommitFiles: vi.fn(),
+  useProjectMemory: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/queryClient", () => ({ queryClient: { invalidateQueries: vi.fn() } }));
@@ -75,6 +76,12 @@ function setup() {
     error: null,
     refetch: vi.fn(),
   });
+  q.useProjectMemory.mockReturnValue({
+    data: { dir: "/c/projects/-r/memory", keyCheck: "verified", files: [] },
+    isLoading: false,
+    isError: false,
+    error: null,
+  });
 }
 
 beforeEach(() => {
@@ -121,5 +128,47 @@ describe("ChangesPanel Documents section, real attribution", () => {
     expect(screen.getByText("Documents")).toBeDefined();
     expect(screen.getByLabelText("Show documents, 1")).toBeDefined();
     expect(useUiStore.getState().docsCollapsed).toBe(true);
+  });
+});
+
+describe("ChangesPanel memory view", () => {
+  const DIR = "/c/projects/-r/memory";
+  const file = (name: string) => ({ name, path: `${DIR}/${name}`, sizeBytes: 10, mtimeMs: 0 });
+
+  function renderWithMemory(keyCheck: string, files: ReturnType<typeof file>[]) {
+    setup();
+    q.useProjectMemory.mockReturnValue({
+      data: { dir: DIR, keyCheck, files },
+      isLoading: false,
+      isError: false,
+      error: null,
+    });
+    const onOpenDoc = vi.fn();
+    render(
+      <ChangesPanel workstreamId="wsA" onOpenDoc={onOpenDoc} onOpenDiff={vi.fn()} onOpenFile={vi.fn()} baseBranch="main" />,
+    );
+    return onOpenDoc;
+  }
+
+  it("opens a memory file in the document preview", () => {
+    const onOpenDoc = renderWithMemory("verified", [file("MEMORY.md"), file("topic.md")]);
+    fireEvent.click(screen.getByRole("button", { name: "Project memory" }));
+    expect(screen.getByText("2")).toBeDefined();
+    fireEvent.click(screen.getByText("topic.md"));
+    expect(onOpenDoc).toHaveBeenCalledWith(`${DIR}/topic.md`, "topic.md");
+  });
+
+  it("names the directory Claude Code writes to when there is no memory yet", () => {
+    renderWithMemory("verified", []);
+    fireEvent.click(screen.getByRole("button", { name: "Project memory" }));
+    expect(screen.getByText(DIR)).toBeDefined();
+  });
+
+  it("warns instead of listing files when the key check fails", () => {
+    renderWithMemory("mismatch", [file("MEMORY.md")]);
+    fireEvent.click(screen.getByRole("button", { name: "Project memory" }));
+    expect(screen.getByText("!")).toBeDefined();
+    expect(screen.getByText(/somewhere hyprlayer does not compute/)).toBeDefined();
+    expect(screen.queryByText("MEMORY.md")).toBeNull();
   });
 });

@@ -25,6 +25,7 @@ fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) ->
         effort: None,
         ephemeral: false,
         env: std::env::vars().collect(),
+        developer_instructions: None,
     }
 }
 

@@ -522,13 +522,9 @@ fn claude_session_exists(home: &Path, worktree: Option<&str>, session_id: &str) 
     let Some(worktree) = worktree else {
         return false;
     };
-    let slug: String = worktree
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
     home.join(".claude")
         .join("projects")
-        .join(slug)
+        .join(crate::claude::memory::project_key(worktree))
         .join(format!("{session_id}.jsonl"))
         .exists()
 }

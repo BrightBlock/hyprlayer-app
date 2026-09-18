@@ -12,13 +12,22 @@ import {
   rowClass,
   Spinner,
 } from "@/components/ui";
-import { ChevronDownIcon, ChevronRightIcon, DocIcon, FolderIcon, GlobeIcon } from "@/components/icons";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  DocIcon,
+  FolderIcon,
+  GlobeIcon,
+  LightbulbIcon,
+} from "@/components/icons";
 import { FileTypeIcon } from "@/components/fileIcon";
+import { formatCompactAge } from "@/lib/format";
 import { treeIndent } from "@/lib/layout";
 import { basename } from "@/lib/path";
 import { queryClient } from "@/lib/queryClient";
 import {
   useDiscardFiles,
+  useProjectMemory,
   useStageFiles,
   useUnstageFiles,
   useWorkstreamCommits,
@@ -391,6 +400,64 @@ function ArtifactsSection({ workstreamId }: { workstreamId: string }) {
   );
 }
 
+function MemoryList({
+  memory,
+  onOpenDoc,
+}: {
+  memory: ReturnType<typeof useProjectMemory>;
+  onOpenDoc: (path: string, title: string) => void;
+}) {
+  if (memory.isError) return <ErrorNote error={memory.error} />;
+  if (!memory.data) {
+    return (
+      <div className="flex justify-center p-6">
+        <Spinner />
+      </div>
+    );
+  }
+  const { dir, keyCheck, files } = memory.data;
+  if (keyCheck === "mismatch") {
+    return (
+      <div className="rounded-lg border border-edge bg-panel-2 p-3">
+        <p className="text-sm font-medium text-warn">Memory unavailable</p>
+        <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+          This Claude Code version keeps project files somewhere hyprlayer does not compute, so
+          memory is hidden here and codex tabs get none. Claude tabs still read and write it.
+        </p>
+      </div>
+    );
+  }
+  if (files.length === 0) {
+    return (
+      <div className="rounded-lg border border-edge bg-panel-2 p-3">
+        <p className="text-sm font-medium">No memory yet</p>
+        <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+          When auto-memory is on, Claude Code writes notes to{" "}
+          <span className="break-all font-mono">{dir}</span>, and codex tabs (codex 0.152.0 or
+          newer) read the index when they start.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      {files.map((file) => (
+        <button
+          key={file.path}
+          type="button"
+          onClick={() => onOpenDoc(file.path, file.name)}
+          title={file.path}
+          className={rowClass({ tier: "compact", className: "flex w-full gap-2 px-2 text-left" })}
+        >
+          <DocIcon size={13} />
+          <span className="min-w-0 flex-1 truncate text-xs text-ink">{file.name}</span>
+          <span className="shrink-0 text-2xs text-ink-dim">{formatCompactAge(file.mtimeMs)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 
 function FilesTree({ id, onOpenFile }: { id: string; onOpenFile: (path: string) => void }) {
   return <DirLevel id={id} relPath="" depth={0} onOpenFile={onOpenFile} />;
@@ -494,8 +561,9 @@ export const ChangesPanel = memo(function ChangesPanel({
   filesOnly = false,
   baseBranch,
 }: Props) {
-  const [rawTab, setTab] = useState<"changes" | "commits" | "files">("changes");
-  const tab = filesOnly ? "files" : rawTab;
+  const [rawTab, setTab] = useState<"changes" | "commits" | "files" | "memory">("changes");
+  const tab = filesOnly && rawTab !== "memory" ? "files" : rawTab;
+  const tabs = filesOnly ? (["files"] as const) : (["changes", "commits", "files"] as const);
   const [view, setView] = useState<"list" | "tree">("list");
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState<GitFileEntry | null>(null);
@@ -507,6 +575,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   const unstage = useUnstageFiles(id);
   const discard = useDiscardFiles(id);
   const commits = useWorkstreamCommits(id, workstreamId !== null && !filesOnly && tab === "commits");
+  const memory = useProjectMemory(id, workstreamId !== null && tab === "memory");
+  const memoryMismatch = memory.data?.keyCheck === "mismatch";
 
   const staged = status.data?.staged ?? [];
   const unstaged = status.data?.unstaged ?? [];
@@ -519,44 +589,58 @@ export const ChangesPanel = memo(function ChangesPanel({
     <>
       <div className="flex h-9 items-center justify-between gap-2 border-b border-edge px-3">
         <div className="flex items-center gap-1">
-          {filesOnly ? (
-            <span className="px-2 py-1 text-xs font-medium text-ink">Files</span>
-          ) : (
-            (["changes", "commits", "files"] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className={`rounded-md px-2 py-1 text-xs font-medium capitalize ${
-                  tab === t ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink"
-                }`}
-              >
-                {t}
-              </button>
-            ))
-          )}
-        </div>
-        <div className="flex items-center gap-1.5">
-          {tab === "changes" && <Badge tone="dim">{changedCount}</Badge>}
-          {workstreamId !== null && (
-            <IconButton
-              onClick={() => {
-                if (tab === "changes") {
-                  setRefreshing(true);
-                  void status.refetch().finally(() => setRefreshing(false));
-                } else if (tab === "commits") {
-                  setRefreshing(true);
-                  void commits.refetch().finally(() => setRefreshing(false));
-                } else {
-                  void queryClient.invalidateQueries({ queryKey: ["workstream", id, "dir"] });
-                }
-              }}
-              disabled={refreshing}
-              title="Refresh"
-              aria-label="Refresh"
+          {tabs.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`rounded-md px-2 py-1 text-xs font-medium capitalize ${
+                tab === t ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink"
+              }`}
             >
-              {refreshing ? <Spinner size={14} /> : <RefreshIcon />}
-            </IconButton>
+              {t}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2.5">
+          {tab === "changes" && <Badge tone="dim">{changedCount}</Badge>}
+          {tab === "memory" && memory.data && (
+            <Badge tone={memoryMismatch ? "warn" : "dim"}>
+              {memoryMismatch ? "!" : memory.data.files.length}
+            </Badge>
+          )}
+          {workstreamId !== null && (
+            <div className="flex items-center">
+              <IconButton
+                active={tab === "memory"}
+                onClick={() => setTab("memory")}
+                title="Project memory"
+                aria-label="Project memory"
+              >
+                <LightbulbIcon />
+              </IconButton>
+              <IconButton
+                onClick={() => {
+                  if (tab === "changes") {
+                    setRefreshing(true);
+                    void status.refetch().finally(() => setRefreshing(false));
+                  } else if (tab === "commits") {
+                    setRefreshing(true);
+                    void commits.refetch().finally(() => setRefreshing(false));
+                  } else if (tab === "memory") {
+                    setRefreshing(true);
+                    void memory.refetch().finally(() => setRefreshing(false));
+                  } else {
+                    void queryClient.invalidateQueries({ queryKey: ["workstream", id, "dir"] });
+                  }
+                }}
+                disabled={refreshing}
+                title="Refresh"
+                aria-label="Refresh"
+              >
+                {refreshing ? <Spinner size={14} /> : <RefreshIcon />}
+              </IconButton>
+            </div>
           )}
         </div>
       </div>
@@ -587,6 +671,8 @@ export const ChangesPanel = memo(function ChangesPanel({
           ) : (
             <CommitsPanel id={id} commits={commits.data ?? []} onOpenDiff={onOpenDiff} />
           )
+        ) : tab === "memory" ? (
+          <MemoryList memory={memory} onOpenDoc={onOpenDoc} />
         ) : tab === "files" ? (
           <FilesTree id={id} onOpenFile={onOpenFile} />
         ) : (

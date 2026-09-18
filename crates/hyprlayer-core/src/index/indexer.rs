@@ -404,7 +404,7 @@ fn read_body_for_search(abs: &Path) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-fn mtime_ms_from(meta: &std::fs::Metadata) -> f64 {
+pub(crate) fn mtime_ms_from(meta: &std::fs::Metadata) -> f64 {
     meta.modified()
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())

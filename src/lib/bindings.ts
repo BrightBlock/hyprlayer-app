@@ -49,6 +49,8 @@ export const commands = {
 	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
 	detachWorkstreamDoc: (id: string, docPath: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("detach_workstream_doc", { id, docPath })),
 	listWorkstreamDocs: (id: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("list_workstream_docs", { id })),
+	listProjectMemory: (id: string) => typedError<ProjectMemory, AppError>(__TAURI_INVOKE("list_project_memory", { id })),
+	saveProjectMemoryFile: (id: string, name: string, content: string, baseMtimeMs: number | null) => typedError<null, AppError>(__TAURI_INVOKE("save_project_memory_file", { id, name, content, baseMtimeMs })),
 	archiveWorkstream: (id: string, skipScripts: boolean) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id, skipScripts })),
 	listArchivedWorkstreams: () => typedError<ArchivedWorkstreamView[], AppError>(__TAURI_INVOKE("list_archived_workstreams")),
 	restoreWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("restore_workstream", { id })),
@@ -886,6 +888,15 @@ export type LocalServer = {
 	error: AppError | null,
 };
 
+export type MemoryFile = {
+	name: string,
+	path: string,
+	sizeBytes: number | null,
+	mtimeMs: number | null,
+};
+
+export type MemoryKeyCheck = "verified" | "unverified" | "mismatch";
+
 export type MergeMethod = "squash" | "merge" | "rebase";
 
 export type MergeableState = "mergeable" | "conflicting" | "unknown";
@@ -1019,6 +1030,12 @@ export type ProjectDetail = {
 	project: Project,
 	storage: StorageInfo | null,
 	thoughtsRoot: string | null,
+};
+
+export type ProjectMemory = {
+	dir: string,
+	keyCheck: MemoryKeyCheck,
+	files: MemoryFile[],
 };
 
 export type ProjectSource = "clone" | "disk" | "folder";

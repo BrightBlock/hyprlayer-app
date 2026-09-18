@@ -1,14 +1,37 @@
+import CodeMirror from "@uiw/react-codemirror";
+import { markdown } from "@codemirror/lang-markdown";
+import { EditorView } from "@codemirror/view";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
-import { commands } from "@/lib/bindings";
-import { unwrap } from "@/lib/ipc";
-import { ErrorNote, Spinner } from "@/components/ui";
-import { DocIcon } from "@/components/icons";
+import { commands, type DocContent } from "@/lib/bindings";
+import { isAppError, unwrap } from "@/lib/ipc";
+import { useProjectMemory, useSaveProjectMemoryFile } from "@/lib/queries";
+import { Button, ErrorNote, IconButton, Spinner } from "@/components/ui";
+import { DocIcon, PencilIcon } from "@/components/icons";
 import { FrontmatterCard } from "@/features/library/FrontmatterCard";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { splitFrontmatter } from "@/features/library/text";
+import { codeBase } from "@/features/workstreams/codeView";
 
-export function DocPreviewTab({ path, title }: { path: string; title: string }) {
+const editorExtensions = [...codeBase, EditorView.lineWrapping, markdown()];
+
+type Draft = { seed: string; content: string; baseMtimeMs: number };
+const drafts = new Map<string, Draft>();
+
+function draftOf(doc: DocContent): Draft {
+  return { seed: doc.content, content: doc.content, baseMtimeMs: doc.mtimeMs ?? 0 };
+}
+
+export function DocPreviewTab({
+  workstreamId,
+  path,
+  title,
+}: {
+  workstreamId: string;
+  path: string;
+  title: string;
+}) {
   const doc = useQuery({
     queryKey: ["doc", path],
     queryFn: () => unwrap(commands.getDoc(path)),
@@ -16,6 +39,39 @@ export function DocPreviewTab({ path, title }: { path: string; title: string }) 
     retry: 4,
     retryDelay: (attempt) => Math.min(1500, 300 * 2 ** attempt),
   });
+  const memory = useProjectMemory(workstreamId);
+  const memoryFile = memory.data?.files.find((f) => f.path === path) ?? null;
+  const save = useSaveProjectMemoryFile(workstreamId, path);
+
+  const draftKey = `${workstreamId}:${path}`;
+  const [draft, setDraft] = useState<Draft | null>(() => drafts.get(draftKey) ?? null);
+  useEffect(() => {
+    if (draft) drafts.set(draftKey, draft);
+    else drafts.delete(draftKey);
+  }, [draftKey, draft]);
+
+  function startEdit() {
+    if (doc.data) setDraft(draftOf(doc.data));
+  }
+  function cancel() {
+    setDraft(null);
+    save.reset();
+  }
+  function commit() {
+    if (!draft || !memoryFile) return;
+    save.mutate(
+      { name: memoryFile.name, content: draft.content, baseMtimeMs: draft.baseMtimeMs },
+      { onSuccess: () => setDraft(null) },
+    );
+  }
+  function reload() {
+    void doc.refetch().then(({ data }) => {
+      save.reset();
+      setDraft(data ? draftOf(data) : null);
+    });
+  }
+
+  const conflict = isAppError(save.error) && save.error.code === "doc_conflict";
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -25,8 +81,48 @@ export function DocPreviewTab({ path, title }: { path: string; title: string }) 
           <span className="truncate text-sm font-medium text-ink" title={path}>
             {doc.data?.meta.relPath ?? title}
           </span>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {draft ? (
+              <>
+                <Button onClick={cancel}>Cancel</Button>
+                <Button
+                  variant="primary"
+                  busy={save.isPending}
+                  disabled={!memoryFile || draft.content === draft.seed}
+                  onClick={commit}
+                >
+                  Save
+                </Button>
+              </>
+            ) : (
+              memoryFile &&
+              doc.data && (
+                <IconButton aria-label="Edit memory file" title="Edit memory file" onClick={startEdit}>
+                  <PencilIcon size={14} />
+                </IconButton>
+              )
+            )}
+          </div>
         </div>
-        {doc.isLoading ? (
+        {draft ? (
+          <div className="space-y-3">
+            <ErrorNote error={save.error} />
+            {conflict && <Button onClick={reload}>Reload from disk</Button>}
+            <CodeMirror
+              value={draft.content}
+              minHeight="60vh"
+              theme="none"
+              extensions={editorExtensions}
+              basicSetup={{
+                foldGutter: true,
+                lineNumbers: false,
+                syntaxHighlighting: false,
+                highlightActiveLine: true,
+              }}
+              onChange={(content) => setDraft((d) => (d ? { ...d, content } : d))}
+            />
+          </div>
+        ) : doc.isLoading ? (
           <div className="flex items-center gap-2 text-sm text-ink-dim">
             <Spinner size={14} />
             Loading document…

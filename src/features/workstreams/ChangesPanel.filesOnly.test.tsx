@@ -12,6 +12,7 @@ const q = vi.hoisted(() => ({
   useDiscardFiles: vi.fn(),
   useWorkstreamCommits: vi.fn(),
   useCommitFiles: vi.fn(),
+  useProjectMemory: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/queryClient", () => ({ queryClient: { invalidateQueries: vi.fn() } }));
@@ -48,6 +49,12 @@ function setup(filesOnly: boolean) {
     error: null,
     refetch: vi.fn(),
   });
+  q.useProjectMemory.mockReturnValue({
+    data: { dir: "/c/projects/-r/memory", keyCheck: "verified", files: [] },
+    isLoading: false,
+    isError: false,
+    error: null,
+  });
 
   render(
     <ChangesPanel
@@ -65,17 +72,18 @@ describe("ChangesPanel filesOnly (folder projects)", () => {
   it("shows the file tree and never asks git for status", () => {
     setup(true);
     expect(screen.getByText("todo.md")).toBeDefined();
-    expect(screen.getByText("Files")).toBeDefined();
+    expect(screen.getByRole("button", { name: "files" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "changes" })).toBeNull();
     expect(screen.queryByRole("button", { name: "commits" })).toBeNull();
     expect(q.useWorktreeGitStatus).toHaveBeenCalledWith("ws1", false);
   });
 
-  it("keeps all three tabs and the live status query for a git project", () => {
+  it("keeps all three tabs, the memory button and the live status query for a git project", () => {
     setup(false);
     expect(screen.getByRole("button", { name: "changes" })).toBeDefined();
     expect(screen.getByRole("button", { name: "commits" })).toBeDefined();
     expect(screen.getByRole("button", { name: "files" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Project memory" })).toBeDefined();
     expect(q.useWorktreeGitStatus).toHaveBeenCalledWith("ws1", true);
   });
 
@@ -84,5 +92,16 @@ describe("ChangesPanel filesOnly (folder projects)", () => {
     fireEvent.click(screen.getByRole("button", { name: "commits" }));
     expect(screen.getByText("No commits yet")).toBeDefined();
     expect(screen.getByText("main")).toBeDefined();
+  });
+
+  it("gives folder projects a memory button that fetches only once opened", () => {
+    setup(true);
+    expect(screen.getByText("todo.md")).toBeDefined();
+    expect(q.useProjectMemory).toHaveBeenLastCalledWith("ws1", false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Project memory" }));
+    expect(q.useProjectMemory).toHaveBeenLastCalledWith("ws1", true);
+    expect(screen.getByText("/c/projects/-r/memory")).toBeDefined();
+    expect(screen.queryByText("todo.md")).toBeNull();
   });
 });

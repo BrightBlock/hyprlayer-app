@@ -6,13 +6,16 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, UNIX_EPOCH};
 
+use hyprlayer_core::claude::memory::{project_key, MemoryKeyCheck};
 use hyprlayer_core::env::{RuntimeEnvironment, RuntimePaths};
 use hyprlayer_core::repo_settings::ScriptSettings;
 use hyprlayer_core::runtime::builder::RuntimeBuilder;
 use hyprlayer_core::runtime::ports::LifecycleRunner;
 use hyprlayer_core::runtime::script_registry::RunPhase;
 use hyprlayer_core::runtime::scripts::{RunLifecycleRequest, ScriptSettingsRequest};
+use hyprlayer_core::runtime::sessions::StartStageSessionRequest;
 use hyprlayer_core::runtime::workstreams::{
     ArchiveWorkstreamRequest, CreateWorkstreamRequest, HeadBranchObservation,
     ListWorkstreamsRequest, PurgeWorkstreamRequest, ReprovisionWorkstreamRequest,
@@ -23,7 +26,7 @@ use hyprlayer_core::scripts::ScriptKind;
 use hyprlayer_core::store::{Workstream, WorkstreamStatus, WorktreeMode};
 use hyprlayer_core::terminal::{PtySession, SpawnTerminal};
 use hyprlayer_core::worktree::archive_dir_for;
-use hyprlayer_core::CoreError;
+use hyprlayer_core::{CoreError, Harness, Stage};
 use hyprlayer_models::RuntimeEvent;
 
 fn test_environment(home: &Path) -> RuntimeEnvironment {
@@ -777,6 +780,225 @@ async fn the_attach_overlay_reaches_a_lifecycle_script() {
     assert_eq!(
         seen, "/tmp/overlay-probe.sock",
         "a lifecycle script must inherit the attaching client's SSH_AUTH_SOCK"
+    );
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn project_memory_lists_the_projects_claude_memory() {
+    let (f, repo) = fixture(Some(0)).await;
+    let created = f
+        .runtime
+        .workstreams()
+        .create(inplace_request(&repo, "Memory"))
+        .await
+        .unwrap();
+
+    let key = project_key(&dunce::canonicalize(&repo).unwrap().to_string_lossy());
+    let dir = f
+        .paths
+        .claude_config_dir
+        .join("projects")
+        .join(&key)
+        .join("memory");
+
+    let listing = f
+        .runtime
+        .workstreams()
+        .project_memory(&created.item.id)
+        .await
+        .unwrap();
+    assert_eq!(listing.dir, dir.to_string_lossy().into_owned());
+    assert_eq!(listing.key_check, MemoryKeyCheck::Unverified);
+    assert!(listing.files.is_empty());
+
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("topic.md"), "topic").unwrap();
+    std::fs::write(dir.join("MEMORY.md"), "index").unwrap();
+
+    let listing = f
+        .runtime
+        .workstreams()
+        .project_memory(&created.item.id)
+        .await
+        .unwrap();
+    let names: Vec<&str> = listing
+        .files
+        .iter()
+        .map(|file| file.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["MEMORY.md", "topic.md"]);
+
+    let started = f
+        .runtime
+        .sessions()
+        .prepare_start(StartStageSessionRequest {
+            workstream: created.item.clone(),
+            stage: Stage::General,
+            input: String::new(),
+            attached_docs: Vec::new(),
+            harness: Some(Harness::Claude),
+            model: None,
+            effort: None,
+            permission_mode: None,
+            prompt_name: None,
+        })
+        .await
+        .unwrap();
+    let session_id = started.session.id.clone();
+
+    let transcript_dir = f.paths.claude_config_dir.join("projects").join(&key);
+    std::fs::create_dir_all(&transcript_dir).unwrap();
+    std::fs::write(transcript_dir.join(format!("{session_id}.jsonl")), "").unwrap();
+
+    let listing = f
+        .runtime
+        .workstreams()
+        .project_memory(&created.item.id)
+        .await
+        .unwrap();
+    assert_eq!(listing.key_check, MemoryKeyCheck::Verified);
+
+    let moved_dir = f.paths.claude_config_dir.join("projects").join("-moved");
+    std::fs::create_dir_all(&moved_dir).unwrap();
+    std::fs::rename(
+        transcript_dir.join(format!("{session_id}.jsonl")),
+        moved_dir.join(format!("{session_id}.jsonl")),
+    )
+    .unwrap();
+
+    let listing = f
+        .runtime
+        .workstreams()
+        .project_memory(&created.item.id)
+        .await
+        .unwrap();
+    assert_eq!(listing.key_check, MemoryKeyCheck::Mismatch);
+    assert!(listing.files.is_empty());
+
+    let missing = f.runtime.workstreams().project_memory("missing").await;
+    assert!(matches!(missing, Err(CoreError::WorkstreamNotFound { .. })));
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn saving_project_memory_guards_names_mtimes_and_links() {
+    let (f, repo) = fixture(Some(0)).await;
+    let id = f
+        .runtime
+        .workstreams()
+        .create(inplace_request(&repo, "Memory"))
+        .await
+        .unwrap()
+        .item
+        .id;
+    let key = project_key(&dunce::canonicalize(&repo).unwrap().to_string_lossy());
+    let dir = f
+        .paths
+        .claude_config_dir
+        .join("projects")
+        .join(&key)
+        .join("memory");
+    std::fs::create_dir_all(&dir).unwrap();
+    let index = dir.join("MEMORY.md");
+    std::fs::write(&index, "old").unwrap();
+    std::fs::File::open(&index)
+        .unwrap()
+        .set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000))
+        .unwrap();
+    let workstreams = f.runtime.workstreams();
+    let base = workstreams
+        .project_memory(&id)
+        .await
+        .unwrap()
+        .files
+        .into_iter()
+        .find(|file| file.name == "MEMORY.md")
+        .unwrap()
+        .mtime_ms;
+
+    workstreams
+        .save_project_memory_file(&id, "MEMORY.md", "new".into(), base)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&index).unwrap(), "new");
+
+    let stale = workstreams
+        .save_project_memory_file(&id, "MEMORY.md", "newer".into(), base)
+        .await;
+    assert!(matches!(stale, Err(CoreError::DocConflict)));
+    assert_eq!(std::fs::read_to_string(&index).unwrap(), "new");
+
+    let escape = workstreams
+        .save_project_memory_file(&id, "../escape.md", "x".into(), base)
+        .await;
+    assert!(matches!(escape, Err(CoreError::InvalidPath { .. })));
+    assert!(!dir.parent().unwrap().join("escape.md").exists());
+
+    let absent = workstreams
+        .save_project_memory_file(&id, "absent.md", "x".into(), base)
+        .await;
+    assert!(matches!(absent, Err(CoreError::Io(_))));
+    assert!(!dir.join("absent.md").exists());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+
+        let outside = repo.parent().unwrap().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let victim = outside.join("victim.txt");
+        std::fs::write(&victim, "victim").unwrap();
+        let planted = dir.join("MEMORY.md.tmp");
+        symlink(&victim, &planted).unwrap();
+        let listing = workstreams.project_memory(&id).await.unwrap().files;
+        let current = listing
+            .iter()
+            .find(|file| file.name == "MEMORY.md")
+            .unwrap();
+        workstreams
+            .save_project_memory_file(&id, "MEMORY.md", "past the plant".into(), current.mtime_ms)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "victim");
+        assert!(std::fs::symlink_metadata(&index)
+            .unwrap()
+            .file_type()
+            .is_file());
+        assert_eq!(std::fs::read_to_string(&index).unwrap(), "past the plant");
+        assert_eq!(std::fs::read_link(&planted).unwrap(), victim);
+
+        let shared = outside.join("shared.md");
+        std::fs::write(&shared, "shared").unwrap();
+        let linked = dir.join("linked.md");
+        symlink(&shared, &linked).unwrap();
+        let listing = workstreams.project_memory(&id).await.unwrap().files;
+        let linked_base = listing
+            .iter()
+            .find(|file| file.name == "linked.md")
+            .unwrap();
+        let refused = workstreams
+            .save_project_memory_file(&id, "linked.md", "replaced".into(), linked_base.mtime_ms)
+            .await;
+        assert!(matches!(refused, Err(CoreError::InvalidPath { .. })));
+        assert_eq!(std::fs::read_to_string(&shared).unwrap(), "shared");
+        assert!(std::fs::symlink_metadata(&linked)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    let leftovers: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with('.'))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "temp files left behind: {leftovers:?}"
     );
 
     f.runtime.shutdown().await;

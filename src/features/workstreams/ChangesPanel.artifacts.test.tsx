@@ -13,6 +13,7 @@ const q = vi.hoisted(() => ({
   useDiscardFiles: vi.fn(),
   useWorkstreamCommits: vi.fn(),
   useCommitFiles: vi.fn(),
+  useProjectMemory: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/queryClient", () => ({ queryClient: { invalidateQueries: vi.fn() } }));
@@ -58,6 +59,12 @@ function setup() {
     isError: false,
     error: null,
     refetch: vi.fn(),
+  });
+  q.useProjectMemory.mockReturnValue({
+    data: { dir: "/c/projects/-r/memory", keyCheck: "verified", files: [] },
+    isLoading: false,
+    isError: false,
+    error: null,
   });
 
   render(

@@ -1,22 +1,27 @@
 # Diagram sources
 
-The three SVGs one directory up are generated, not hand-drawn. Regenerate them
-after editing any generator here:
+The SVGs one directory up are generated, not hand-drawn. Regenerate them after
+editing any generator here:
 
 ```bash
 cd docs/architecture/diagrams/src
 python3 gen_sequence.py && python3 gen_main.py && python3 gen_threads.py
+python3 gen_memory.py
 ```
 
-Each generator writes a `.dc.html` beside itself; the committed `.svg` is that
-file's `<svg>` element with an XML declaration in front of it:
+Each generator writes its `.dc.html` beside itself, and `gen_memory.py` writes the
+three project-memory boards. The committed `.svg` is that file's `<svg>` element
+with an XML declaration in front of it:
 
 ```bash
 python3 - <<'PY'
 import re, pathlib
 for src, dst in [("Sequence.dc.html", "../sequence.svg"),
                  ("Main.dc.html", "../architecture.svg"),
-                 ("Threads.dc.html", "../terminal-threads.svg")]:
+                 ("Threads.dc.html", "../terminal-threads.svg"),
+                 ("MemorySequence.dc.html", "../memory-sequence.svg"),
+                 ("MemoryMain.dc.html", "../memory-architecture.svg"),
+                 ("MemoryCoverage.dc.html", "../memory-coverage.svg")]:
     svg = re.search(r"(<svg\b.*?</svg>)", pathlib.Path(src).read_text(), re.S).group(1)
     pathlib.Path(dst).write_text('<?xml version="1.0" encoding="UTF-8"?>\n' + svg + "\n")
 PY

@@ -114,9 +114,12 @@ from Settings is passed to it as an environment variable.
 **It promises:** `HyprlayerRuntime::open` and every core operation read and
 write only under the supplied `RuntimePaths`, the supplied
 `RuntimeEnvironment`, and the project/thoughts/worktree roots read back out of
-those supplied files. Core does not call `dirs::home_dir`, does not read
-`HOME`/`XDG`/`PATH` from the process, and does not call
-`std::env::current_dir`.
+those supplied files, and, for a project's Claude Code memory, a directory
+named by an `autoMemoryDirectory` in `claude_managed_settings_files` or
+`claude_config_dir/settings.json`, which `WorkstreamService::project_memory`
+reads and `save_project_memory_file` writes. Core does not call
+`dirs::home_dir`, does not read `HOME`/`XDG`/`PATH` from the process, and does
+not call `std::env::current_dir`.
 
 **It does not promise anything about child processes.** Hermeticity constrains
 core's *own* reads, never what a child inherits. PTY terminals, provider CLIs,
@@ -350,11 +353,32 @@ decision resolves them.
 `update(UpdateWorkstreamRequest)`, `create(CreateWorkstreamRequest)`,
 `archive(ArchiveWorkstreamRequest)`, `restore(RestoreWorkstreamRequest)`,
 `purge(PurgeWorkstreamRequest)`, `cleanup_archived(CleanupArchivedRequest)`,
-`reprovision(ReprovisionWorkstreamRequest)`.
+`reprovision(ReprovisionWorkstreamRequest)`, `project_memory(&str)`,
+`save_project_memory_file(&str, &str, String, base_mtime_ms: f64)`.
 
 `find` returns `CoreError::WorkstreamNotFound` rather than `Ok(None)` — unlike
 `ProjectService::find`. Create/archive/restore/purge run under a per-project
 lock and roll back on failure.
+
+`project_memory` resolves the workstream's project to Claude Code's auto-memory
+directory. That is `claude_config_dir/projects/<key>/memory`, or an
+`autoMemoryDirectory` read from `claude_managed_settings_files` and then
+`claude_config_dir/settings.json`. It lists the directory's `*.md` files with
+`MEMORY.md` first and returns an empty listing when the directory is missing.
+
+The key encoding and the index bounds are ported from Claude Code. They were
+verified against 2.1.252, 2.1.258, 2.1.270, 2.1.273 and 2.1.274, whose builds
+carry the same logic but not byte-identical code. There is no runtime version
+gate.
+
+`keyCheck` compares the key against where the workstream's latest Claude
+session wrote its transcript. It is `mismatch`, with no files, when a Claude
+Code release has moved its project directories.
+
+`save_project_memory_file` takes a file name, not a path. It only overwrites an
+existing regular `*.md` file in the project's memory directory and refuses a
+symlink, and `base_mtime_ms` is the same optimistic-concurrency token as
+`LibraryService::save`.
 
 ### `AttachmentService`
 

@@ -42,7 +42,7 @@ use hyprlayer_core::runtime::sessions::ActiveSession;
 use hyprlayer_core::runtime::settings_service::{
     CliInstallMethod, CliInstallMethodId, CliUpdateResult,
 };
-use hyprlayer_core::runtime::workstreams::{ArchiveCleanupReport, WorkstreamBases};
+use hyprlayer_core::runtime::workstreams::{ArchiveCleanupReport, ProjectMemory, WorkstreamBases};
 use hyprlayer_core::settings::AppSettings;
 use hyprlayer_core::skills::{AgentSkill, SlashCommand};
 use hyprlayer_core::worktree::seed::SeedReport;
@@ -153,6 +153,8 @@ hyprlayer_proto::commands! {
     AttachWorkstreamDoc: attach_workstream_doc(id: String, doc_path: String, role: String) -> Vec<WorkstreamDoc>;
     DetachWorkstreamDoc: detach_workstream_doc(id: String, doc_path: String) -> Vec<WorkstreamDoc>;
     ListWorkstreamDocs: list_workstream_docs(id: String) -> Vec<WorkstreamDoc>;
+    ListProjectMemory: list_project_memory(id: String) -> ProjectMemory;
+    SaveProjectMemoryFile: save_project_memory_file(id: String, name: String, content: String, base_mtime_ms: f64) -> ();
     ArchiveWorkstream: archive_workstream(id: String, skip_scripts: bool) -> ();
     ListArchivedWorkstreams: list_archived_workstreams() -> Vec<ArchivedWorkstreamView>;
     RestoreWorkstream: restore_workstream(id: String) -> WorkstreamView;

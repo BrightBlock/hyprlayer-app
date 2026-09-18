@@ -13,7 +13,7 @@ use tauri::State;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-pub use hyprlayer_core::runtime::workstreams::WorkstreamBases;
+pub use hyprlayer_core::runtime::workstreams::{ProjectMemory, WorkstreamBases};
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -288,6 +288,35 @@ pub async fn list_workstream_docs(
     state
         .client()?
         .list_workstream_docs(id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_project_memory(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<ProjectMemory> {
+    state
+        .client()?
+        .list_project_memory(id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_project_memory_file(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    content: String,
+    base_mtime_ms: f64,
+) -> CmdResult<()> {
+    state
+        .client()?
+        .save_project_memory_file(id, name, content, base_mtime_ms)
         .await
         .map_err(AppError::from)
 }

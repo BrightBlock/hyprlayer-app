@@ -44,7 +44,7 @@ fn file_mtime_ms(path: &Path) -> f64 {
 
 // The tolerance absorbs the round trip through an f64 millisecond wire value;
 // anything larger is a real external edit.
-fn ensure_not_stale(abs: &Path, base_mtime_ms: f64) -> Result<()> {
+pub(super) fn ensure_not_stale(abs: &Path, base_mtime_ms: f64) -> Result<()> {
     if (file_mtime_ms(abs) - base_mtime_ms).abs() > 0.5 {
         return Err(CoreError::DocConflict);
     }

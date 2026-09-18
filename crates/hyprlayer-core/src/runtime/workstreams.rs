@@ -1,9 +1,12 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use hyprlayer_models::RuntimeEvent;
 use serde::{Deserialize, Serialize};
 
+use crate::agent::Harness;
 use crate::branch_prefix;
+use crate::claude::memory;
 use crate::config::EffectiveConfig;
 use crate::error::{CoreError, Result};
 use crate::hyprcli::HyprCli;
@@ -23,6 +26,7 @@ use super::HyprlayerRuntime;
 
 pub type WorkstreamGitStatus = worktree::WorktreeStatus;
 pub type WorkstreamPrStatus = Option<PrStatus>;
+pub use crate::claude::memory::{MemoryFile, MemoryKeyCheck};
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
     if runtime.coordinator.is_stopped() {
@@ -136,6 +140,15 @@ pub struct WorkstreamBases {
     pub remote_branches: Vec<String>,
     pub default_base: String,
     pub current_branch: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMemory {
+    pub dir: String,
+    pub key_check: MemoryKeyCheck,
+    pub files: Vec<MemoryFile>,
 }
 
 pub struct WorkstreamService<'a> {
@@ -387,6 +400,94 @@ impl WorkstreamService<'_> {
             } else {
                 worktree::status(&dir, &item.base_branch, link)
             })
+        })
+        .await
+    }
+
+    pub async fn project_memory(&self, id: &str) -> Result<ProjectMemory> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let managed = self.runtime.paths.claude_managed_settings_files.clone();
+        let config_dir = self.runtime.paths.claude_config_dir.clone();
+        let home = self.runtime.environment.home_dir.clone();
+        let db = self.runtime.db.clone();
+        blocking(move || {
+            let latest = db
+                .list_sessions(&item.id)?
+                .into_iter()
+                .rev()
+                .find(|s| matches!(s.harness, Harness::Claude));
+            let (dir, key_check) = memory::resolve(
+                &managed,
+                &config_dir,
+                &home,
+                Path::new(&item.project_path),
+                latest.as_ref().map(|s| (s.id.as_str(), Path::new(&s.cwd))),
+            );
+            let files = match key_check {
+                MemoryKeyCheck::Mismatch => Vec::new(),
+                _ => memory::list_files(&dir),
+            };
+            Ok(ProjectMemory {
+                dir: dir.to_string_lossy().into_owned(),
+                key_check,
+                files,
+            })
+        })
+        .await
+    }
+
+    pub async fn save_project_memory_file(
+        &self,
+        id: &str,
+        name: &str,
+        content: String,
+        base_mtime_ms: f64,
+    ) -> Result<()> {
+        ensure_running(self.runtime)?;
+        if !memory::is_memory_file_name(name) {
+            return Err(CoreError::InvalidPath {
+                path: name.to_string(),
+            });
+        }
+        let item = self.find(id).await?;
+        let managed = self.runtime.paths.claude_managed_settings_files.clone();
+        let config_dir = self.runtime.paths.claude_config_dir.clone();
+        let home = self.runtime.environment.home_dir.clone();
+        let name = name.to_string();
+        blocking(move || {
+            let (dir, _) = memory::resolve(
+                &managed,
+                &config_dir,
+                &home,
+                Path::new(&item.project_path),
+                None,
+            );
+            let target = dir.join(&name);
+            match std::fs::symlink_metadata(&target) {
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    return Err(CoreError::InvalidPath { path: name })
+                }
+                Ok(meta) if meta.is_file() => {}
+                _ => {
+                    return Err(CoreError::Io(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("{name} is no longer in project memory"),
+                    )))
+                }
+            }
+            super::library::ensure_not_stale(&target, base_mtime_ms)?;
+            let tmp = dir.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4()));
+            let written = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+                .and_then(|mut file| file.write_all(content.as_bytes()))
+                .and_then(|()| std::fs::rename(&tmp, &target));
+            if written.is_err() {
+                let _ = std::fs::remove_file(&tmp);
+            }
+            written.map_err(CoreError::Io)
         })
         .await
     }

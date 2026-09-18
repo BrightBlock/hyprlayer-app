@@ -172,6 +172,26 @@ export function BookIcon({ size = 15, strokeWidth = 1.8 }: IconProps) {
   );
 }
 
+export function LightbulbIcon({ size = 12, strokeWidth = 2.1, className }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M9.2 15.6C9 14.4 8.3 13.5 7.5 12.7A6 6 0 1 1 16.5 12.7C15.7 13.5 15 14.4 14.8 15.6" />
+      <path d="M9 18.5h6M10.5 21.5h3" />
+    </svg>
+  );
+}
+
 export function ChevronRightIcon({ size = 16, strokeWidth = 2, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>

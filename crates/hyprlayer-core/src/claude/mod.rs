@@ -1,5 +1,6 @@
 pub mod driver;
 pub mod events;
+pub mod memory;
 pub mod probe;
 pub mod protocol;
 pub mod workflow;

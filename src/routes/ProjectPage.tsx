@@ -1153,6 +1153,7 @@ export function ProjectPage() {
       return (
         <DocPreviewTab
           key={`${activeView.item.id}:${shell.id}`}
+          workstreamId={activeView.item.id}
           path={shell.docPreviewPath}
           title={shell.title}
         />

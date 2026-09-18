@@ -828,6 +828,25 @@ export function useSaveWorktreeFile(id: string, path: string) {
   });
 }
 
+export function useProjectMemory(workstreamId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", workstreamId, "memory"],
+    queryFn: () => unwrap(commands.listProjectMemory(workstreamId)),
+    enabled: enabled && workstreamId.length > 0,
+  });
+}
+
+export function useSaveProjectMemoryFile(workstreamId: string, path: string) {
+  return useMutation({
+    mutationFn: ({ name, content, baseMtimeMs }: { name: string; content: string; baseMtimeMs: number }) =>
+      unwrap(commands.saveProjectMemoryFile(workstreamId, name, content, baseMtimeMs)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["doc", path] });
+      void queryClient.invalidateQueries({ queryKey: ["workstream", workstreamId, "memory"] });
+    },
+  });
+}
+
 export function useStageFiles(id: string) {
   return useMutation({
     mutationFn: (paths: string[]) => unwrap(commands.worktreeStage(id, paths)),

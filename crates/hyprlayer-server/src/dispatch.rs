@@ -52,9 +52,9 @@ use hyprlayer_core::runtime::terminals::{
 };
 use hyprlayer_core::runtime::workstreams::{
     ArchiveCleanupReport, ArchiveWorkstreamRequest, CleanupArchivedRequest,
-    CreateWorkstreamRequest, HeadBranchObservation, ListWorkstreamsRequest, PurgeWorkstreamRequest,
-    RenameWorkstreamRequest, ReprovisionWorkstreamRequest, RestoreWorkstreamRequest,
-    UpdateWorkstreamRequest, WorkstreamBases, WorkstreamDocumentsRequest,
+    CreateWorkstreamRequest, HeadBranchObservation, ListWorkstreamsRequest, ProjectMemory,
+    PurgeWorkstreamRequest, RenameWorkstreamRequest, ReprovisionWorkstreamRequest,
+    RestoreWorkstreamRequest, UpdateWorkstreamRequest, WorkstreamBases, WorkstreamDocumentsRequest,
     WorkstreamPrStatusRequest,
 };
 use hyprlayer_core::settings::AppSettings;
@@ -791,6 +791,24 @@ impl Dispatch for Server {
         self.runtime
             .workstreams()
             .documents(WorkstreamDocumentsRequest { id })
+            .await
+            .wire()
+    }
+
+    async fn list_project_memory(&self, id: String) -> Result<ProjectMemory, WireError> {
+        self.runtime.workstreams().project_memory(&id).await.wire()
+    }
+
+    async fn save_project_memory_file(
+        &self,
+        id: String,
+        name: String,
+        content: String,
+        base_mtime_ms: f64,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .workstreams()
+            .save_project_memory_file(&id, &name, content, base_mtime_ms)
             .await
             .wire()
     }

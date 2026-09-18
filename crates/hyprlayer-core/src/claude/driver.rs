@@ -662,7 +662,10 @@ fn rewind_local_start(ordinal: usize, len: usize) -> std::result::Result<usize, 
     Ok(idx)
 }
 
-fn transcript_path(session_id: &str, claude_config_dir: Option<&Path>) -> Option<PathBuf> {
+pub(super) fn transcript_path(
+    session_id: &str,
+    claude_config_dir: Option<&Path>,
+) -> Option<PathBuf> {
     let projects = claude_config_dir?.join("projects");
     let filename = format!("{session_id}.jsonl");
     for entry in std::fs::read_dir(&projects).ok()?.flatten() {
