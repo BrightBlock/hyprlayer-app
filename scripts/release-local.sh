@@ -29,7 +29,6 @@ AUR_SSH="${HYPRLAYER_AUR_SSH:-aur@aur.archlinux.org}"
 AUR_REPO="ssh://${AUR_SSH}/${AUR_PKGNAME}.git"
 AUR_SERVER_REPO="ssh://${AUR_SSH}/${AUR_SERVER_PKGNAME}.git"
 FORMULA_PATH="Formula/hyprlayer-server.rb"
-MAC_SERVER_BIN="src-tauri/binaries/hyprlayer-server-aarch64-apple-darwin"
 LAUNCHD_PLIST="packaging/launchd/ai.brightblock.hyprlayer.server.plist"
 AUR_AUTHOR_NAME="${HYPRLAYER_AUR_AUTHOR_NAME:-Jon Tsiros}"
 AUR_AUTHOR_EMAIL="${HYPRLAYER_AUR_AUTHOR_EMAIL:-jon@brightblock.ai}"
@@ -71,6 +70,8 @@ REQUIRED_TOOLS=(gh cargo pnpm shasum node rustup curl)
 if [[ "$INCLUDE_LINUX" == "1" || ( "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" ) ]]; then
   REQUIRED_TOOLS+=(ssh scp git)
 fi
+# The formula is rendered and syntax-checked after the release is already live.
+[[ "$INCLUDE_LINUX" == "1" ]] && REQUIRED_TOOLS+=(python3 ruby)
 for tool in "${REQUIRED_TOOLS[@]}"; do
   command -v "$tool" >/dev/null || die "missing required tool: $tool"
 done
@@ -256,6 +257,12 @@ if [[ "$MAC_CACHED" == "1" ]]; then
 else
   ok "Built $DMG_NAME (sha256 $DMG_SHA)"
 fi
+# The Developer ID-signed copy inside the notarized app, byte-identical to what
+# the desktop runs. The staged sidecar under src-tauri/binaries/ is unsigned,
+# and `tauri dev` restages a debug build over it.
+MAC_SERVER_BIN="$TMP/hyprlayer-server-aarch64-apple-darwin"
+cp "$BUNDLE/macos/Hyprlayer.app/Contents/MacOS/hyprlayer-server" "$MAC_SERVER_BIN" \
+  || die "no hyprlayer-server inside $BUNDLE/macos/Hyprlayer.app — re-run with --rebuild"
 
 SETUP_NAME=""; WIN_SIG=""
 if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" == "1" ]]; then
@@ -574,10 +581,11 @@ if [[ "$INCLUDE_AUR" == "1" ]]; then
   git clone -q "$AUR_REPO" "$AUR" \
     || die "could not clone $AUR_REPO — check AUR SSH access, or re-run with --no-aur"
   git -C "$AUR" checkout -q -B master
-  cp "$LINUX_OUT/aur/PKGBUILD" "$LINUX_OUT/aur/.SRCINFO" "$AUR/"
+  cp "$LINUX_OUT/aur/PKGBUILD" "$LINUX_OUT/aur/.SRCINFO" \
+     "$LINUX_OUT/aur/hyprlayer-server.service" "$AUR/"
   git -C "$AUR" config user.name "$AUR_AUTHOR_NAME"
   git -C "$AUR" config user.email "$AUR_AUTHOR_EMAIL"
-  git -C "$AUR" add PKGBUILD .SRCINFO
+  git -C "$AUR" add PKGBUILD .SRCINFO hyprlayer-server.service
   if git -C "$AUR" diff --cached --quiet; then
     say "AUR package already at $VERSION — nothing to commit"
   else

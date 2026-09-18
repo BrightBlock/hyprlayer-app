@@ -16,6 +16,9 @@ fi
 
 if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
   echo "→ Verification gate (cargo test, library targets, typecheck, lint, vitest)…"
+  # tauri-build refuses to compile the app without the externalBin sidecar, and
+  # src-tauri/binaries/ is gitignored, so a clean checkout has none.
+  node scripts/build-server-sidecar.mjs --debug
   cargo test --workspace --quiet
   cargo check -p hyprlayer-models -p hyprlayer-core -p hyprlayer-proto   # specta-less: the app enables it, embedders don't
   pnpm typecheck && pnpm lint && pnpm test
