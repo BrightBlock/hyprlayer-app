@@ -69,9 +69,7 @@ mod tests {
     use std::ffi::OsString;
     use std::sync::Arc;
 
-    use hyprlayer_core::{
-        HyprlayerRuntime, NoCredentialLookup, RuntimeEnvironment, RuntimeOptions, RuntimePaths,
-    };
+    use hyprlayer_core::{HyprlayerRuntime, RuntimeEnvironment, RuntimeOptions, RuntimePaths};
 
     use super::*;
     use crate::client::RpcClient;
@@ -129,8 +127,7 @@ mod tests {
     async fn open_runtime(root: &Path) -> Arc<HyprlayerRuntime> {
         let paths = paths(root);
         write_inputs(&paths);
-        let options = RuntimeOptions::new(environment(&root.join("home")), paths)
-            .with_credential_lookup(Arc::new(NoCredentialLookup));
+        let options = RuntimeOptions::new(environment(&root.join("home")), paths);
         let runtime = HyprlayerRuntime::open(options).await.expect("open");
         runtime.start().await.expect("start");
         runtime

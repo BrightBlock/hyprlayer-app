@@ -14,11 +14,10 @@ use crate::process::binaries::BinaryKind;
 use crate::process::Exec;
 use crate::settings::ClaudeSettings;
 
-use super::ports::{CredentialLookupRequest, CredentialLookupResult, ProviderHttpRequest};
+use super::ports::ProviderHttpRequest;
 use super::HyprlayerRuntime;
 
 const TITLE_TIMEOUT: Duration = Duration::from_secs(20);
-const MODEL_FETCH_TIMEOUT: Duration = Duration::from_secs(8);
 const OLLAMA_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
@@ -52,18 +51,6 @@ pub fn claude_auth_env(cfg: &ClaudeSettings) -> Vec<(String, String)> {
     env
 }
 
-/// Extracts the OAuth access token the `claude` CLI stores after `claude
-/// login`, from either its `.credentials.json` file or a macOS Keychain
-/// item — both hold the identical JSON shape.
-pub fn extract_claude_oauth_token(raw: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(raw)
-        .ok()?
-        .get("claudeAiOauth")?
-        .get("accessToken")?
-        .as_str()
-        .map(str::to_string)
-}
-
 fn title_case(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
@@ -81,83 +68,6 @@ pub struct ClaudeAuthStatus {
     pub plan: Option<String>,
     pub org: Option<String>,
     pub account: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
-pub struct ModelWindow {
-    pub id: String,
-    pub context_window: u32,
-}
-
-#[derive(Deserialize)]
-struct RawModels {
-    #[serde(default)]
-    data: Vec<RawModel>,
-}
-#[derive(Deserialize)]
-struct RawModel {
-    id: String,
-    max_input_tokens: Option<u32>,
-}
-
-enum ClaudeApiCredential {
-    ApiKey {
-        key: String,
-        base_url: Option<String>,
-    },
-    OAuth(String),
-}
-
-async fn resolve_claude_api_credential(
-    runtime: &HyprlayerRuntime,
-    cfg: &ClaudeSettings,
-) -> Result<Option<ClaudeApiCredential>> {
-    if cfg.auth_mode.as_deref() == Some("apiKey") {
-        if let Some(key) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
-            return Ok(Some(ClaudeApiCredential::ApiKey {
-                key: key.to_string(),
-                base_url: cfg.base_url.clone(),
-            }));
-        }
-    }
-
-    // `CredentialLookup::lookup` is synchronous and a real adapter reaches platform
-    // credential storage through a blocking syscall or subprocess (macOS shells out
-    // to `security`), so it cannot run on a runtime worker.
-    let lookup = Arc::clone(&runtime.credential_lookup);
-    let lookup_result = tokio::task::spawn_blocking(move || {
-        lookup.lookup(&CredentialLookupRequest {
-            provider: "claude".to_string(),
-            account: None,
-        })
-    })
-    .await
-    .map_err(|e| CoreError::CredentialLookup {
-        detail: format!("credential lookup task failed: {e}"),
-    })?;
-
-    match lookup_result {
-        Ok(CredentialLookupResult::Found(value)) => {
-            return Ok(Some(ClaudeApiCredential::OAuth(value.expose().to_string())));
-        }
-        Ok(CredentialLookupResult::NotFound) => {}
-        Err(e) => {
-            return Err(CoreError::CredentialLookup {
-                detail: e.to_string(),
-            })
-        }
-    }
-
-    let credentials_file = runtime.paths.claude_config_dir.join(".credentials.json");
-    if let Ok(raw) = tokio::fs::read_to_string(&credentials_file).await {
-        if let Some(token) = extract_claude_oauth_token(&raw) {
-            return Ok(Some(ClaudeApiCredential::OAuth(token)));
-        }
-    }
-
-    Ok(None)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,64 +305,6 @@ impl ProviderService<'_> {
             .run_unchecked()
             .await;
         Ok(codex::probe::probe(&bin, &path).await.unwrap_or_default())
-    }
-
-    pub async fn claude_model_windows(&self) -> Result<Vec<ModelWindow>> {
-        ensure_running(self.runtime)?;
-        let cfg = self.runtime.settings.get().await.providers.claude;
-        let credential = resolve_claude_api_credential(self.runtime, &cfg)
-            .await?
-            .ok_or_else(|| CoreError::ProviderCredentialsMissing {
-                provider: "Claude".into(),
-            })?;
-
-        let base = match &credential {
-            ClaudeApiCredential::ApiKey {
-                base_url: Some(b), ..
-            } if !b.is_empty() => b.trim_end_matches('/').to_string(),
-            _ => "https://api.anthropic.com".to_string(),
-        };
-        let url = format!("{base}/v1/models?limit=1000");
-
-        let mut request = ProviderHttpRequest::new(url)
-            .header("anthropic-version", "2023-06-01")
-            .timeout(MODEL_FETCH_TIMEOUT);
-        request = match &credential {
-            ClaudeApiCredential::ApiKey { key, .. } => request.header("x-api-key", key.clone()),
-            ClaudeApiCredential::OAuth(token) => request
-                .header("authorization", format!("Bearer {token}"))
-                .header("anthropic-beta", "oauth-2025-04-20"),
-        };
-
-        let response = self.runtime.provider_http.get(request).await.map_err(|e| {
-            CoreError::ProviderRequestFailed {
-                provider: "Claude".into(),
-                detail: e.to_string(),
-            }
-        })?;
-        if response.status >= 400 {
-            return Err(CoreError::ProviderRequestFailed {
-                provider: "Claude".into(),
-                detail: format!("HTTP {}", response.status),
-            });
-        }
-
-        let parsed: RawModels =
-            serde_json::from_str(&response.body).map_err(|e| CoreError::OutputParse {
-                program: "claude models".into(),
-                detail: e.to_string(),
-            })?;
-
-        Ok(parsed
-            .data
-            .into_iter()
-            .filter_map(|m| {
-                m.max_input_tokens.map(|context_window| ModelWindow {
-                    id: m.id,
-                    context_window,
-                })
-            })
-            .collect())
     }
 
     async fn ollama_probe(&self, endpoint: &str) -> OllamaStatus {
@@ -759,22 +611,6 @@ impl ProviderService<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extracts_access_token_from_credentials_json() {
-        let raw = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-abc","refreshToken":"x","expiresAt":1,"scopes":["user:inference"]}}"#;
-        assert_eq!(
-            extract_claude_oauth_token(raw).as_deref(),
-            Some("sk-ant-oat01-abc")
-        );
-    }
-
-    #[test]
-    fn missing_or_malformed_credentials_yield_none() {
-        assert_eq!(extract_claude_oauth_token("not json"), None);
-        assert_eq!(extract_claude_oauth_token("{}"), None);
-        assert_eq!(extract_claude_oauth_token(r#"{"claudeAiOauth":{}}"#), None);
-    }
 
     #[test]
     fn strips_quotes_and_collapses_whitespace() {

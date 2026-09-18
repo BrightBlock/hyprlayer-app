@@ -37,7 +37,7 @@ use hyprlayer_core::runtime::prompts::{
     PromptExportRequest, PromptExportResult, PromptImportDecision, PromptImportPreview,
     PromptImportResult,
 };
-use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, ModelWindow, OllamaStatus};
+use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, OllamaStatus};
 use hyprlayer_core::runtime::sessions::ActiveSession;
 use hyprlayer_core::runtime::settings_service::{
     CliInstallMethod, CliInstallMethodId, CliUpdateResult,
@@ -223,7 +223,6 @@ hyprlayer_proto::commands! {
     CodexProbe: codex_probe() -> CodexProbe;
     CodexLoginWithApiKey: codex_login_with_api_key(api_key: String) -> CodexProbe;
     CodexLogout: codex_logout() -> CodexProbe;
-    ClaudeModelWindows: claude_model_windows() -> Vec<ModelWindow>;
     OllamaStatus: ollama_status() -> OllamaStatus;
     OllamaSetEndpoint: ollama_set_endpoint(endpoint: Option<String>) -> OllamaStatus;
     OllamaSetSelectedModels: ollama_set_selected_models(models: Vec<String>) -> ();

@@ -70,7 +70,6 @@ import { generateTabTitle } from "./tabTitles";
 import type { ShellTab } from "./workstreamTabs";
 import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "@/lib/domain/stages";
 import {
-  apiContextWindow,
   claudeModels,
   codexEfforts,
   effectiveEffort,
@@ -83,7 +82,6 @@ import {
   visibleModels,
   type ModelOption,
 } from "@/lib/domain/models";
-import { useModelWindowMap } from "./modelWindowsStore";
 import {
   effectiveHarnessKey,
   firstSupportedOpencodeModel,
@@ -1055,7 +1053,6 @@ export function SessionChat({
   const model = modelOption(shell.model ?? claudeDefaults?.defaultModel ?? undefined, claudeCatalog);
   const effort = effectiveEffort(shell.effort ?? claudeDefaults?.defaultEffort ?? undefined, model);
   const claudeEffortItems = effortsForModel(model);
-  const modelWindows = useModelWindowMap();
   const permissionMode = permissionModeOption(
     shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
   );
@@ -1397,10 +1394,7 @@ export function SessionChat({
   const transcriptRef = useRef<TranscriptHandle | null>(null);
 
   const HANDOFF_NUDGE_THRESHOLD = 0.6;
-  const contextWindow =
-    session?.contextWindow ??
-    apiContextWindow(session?.model, modelWindows) ??
-    model.contextWindow;
+  const contextWindow = session?.contextWindow ?? model.contextWindow;
   const contextPct =
     session?.contextTokens != null ? session.contextTokens / contextWindow : 0;
   const handoffDoc = shell.docs.find((d) => d.role === "handoff") ?? null;

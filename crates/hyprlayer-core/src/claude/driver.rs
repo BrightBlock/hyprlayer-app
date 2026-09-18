@@ -429,6 +429,8 @@ async fn read_and_wait(
 ) {
     let mut saw_result = false;
     let mut saw_error_result = false;
+    let mut model: Option<String> = None;
+    let mut sent_window: Option<u32> = None;
     let mut lines = BufReader::new(stdout).lines();
 
     loop {
@@ -436,9 +438,23 @@ async fn read_and_wait(
             Ok(Some(line)) => {
                 let parsed = protocol::parse_line(&line);
                 match &parsed {
-                    ParsedLine::Result { is_error, .. } => {
+                    ParsedLine::Init { model: m, .. } => model = m.clone(),
+                    ParsedLine::Result {
+                        is_error,
+                        context_windows,
+                        ..
+                    } => {
                         saw_result = true;
                         saw_error_result |= *is_error;
+                        if let Some(tokens) = context_windows
+                            .iter()
+                            .find(|(m, _)| Some(m) == model.as_ref())
+                            .map(|(_, w)| *w)
+                            .filter(|w| Some(*w) != sent_window)
+                        {
+                            sent_window = Some(tokens);
+                            let _ = events.send(SessionEvent::ContextWindow { tokens });
+                        }
                     }
                     ParsedLine::CanUseTool {
                         request_id, input, ..

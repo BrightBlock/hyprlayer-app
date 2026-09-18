@@ -161,7 +161,6 @@ export const commands = {
 	codexProbe: () => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_probe")),
 	codexLoginWithApiKey: (apiKey: string) => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_login_with_api_key", { apiKey })),
 	codexLogout: () => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_logout")),
-	claudeModelWindows: () => typedError<ModelWindow[], AppError>(__TAURI_INVOKE("claude_model_windows")),
 	ollamaStatus: () => typedError<OllamaStatus, AppError>(__TAURI_INVOKE("ollama_status")),
 	ollamaSetEndpoint: (endpoint: string | null) => typedError<OllamaStatus, AppError>(__TAURI_INVOKE("ollama_set_endpoint", { endpoint })),
 	ollamaSetSelectedModels: (models: string[]) => typedError<null, AppError>(__TAURI_INVOKE("ollama_set_selected_models", { models })),
@@ -890,11 +889,6 @@ export type LocalServer = {
 export type MergeMethod = "squash" | "merge" | "rebase";
 
 export type MergeableState = "mergeable" | "conflicting" | "unknown";
-
-export type ModelWindow = {
-	id: string,
-	contextWindow: number,
-};
 
 export type MultiplexerSettings = {
 	enabled?: boolean,

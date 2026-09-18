@@ -67,10 +67,6 @@ pub use models::{
     SessionEvent, SessionLogEntry, SessionState, Stage, Workstream, WorkstreamDoc,
     WorkstreamStatus, WorktreeMode,
 };
-pub use runtime::ports::{
-    CredentialLookup, CredentialLookupError, CredentialLookupRequest, CredentialLookupResult,
-    CredentialValue, NoCredentialLookup,
-};
 pub use runtime::shutdown::ShutdownReport;
 pub use runtime::{HyprlayerRuntime, RuntimeOptions};
 

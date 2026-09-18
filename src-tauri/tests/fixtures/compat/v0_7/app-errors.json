@@ -59,16 +59,6 @@
     "message": "hyprlayer config is schema version 2 and needs migration to 4",
     "remedy": "Run any hyprlayer command in a terminal (e.g. `hyprlayer storage info`) to upgrade the config file. The app picks it up on the next launch."
   },
-  "providerAuth": {
-    "code": "provider_credentials_missing",
-    "message": "no Claude credentials found",
-    "remedy": "Log in with the Claude CLI, or set an API key in Settings."
-  },
-  "credentialLookup": {
-    "code": "credential_lookup",
-    "message": "credential lookup failed: keychain is locked",
-    "remedy": null
-  },
   "migrationLedgerInvalid": {
     "code": "runtime_migration_ledger_invalid",
     "message": "runtime migration ledger at /tmp/example-profile/runtime-migrations.json is not valid JSON: missing or non-numeric \"version\"",

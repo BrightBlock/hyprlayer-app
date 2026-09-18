@@ -63,13 +63,9 @@ reads `PATH` as a fallback when resolving a binary, and `runtime/terminals.rs`
 reads `SHELL` to pick a default shell.
 
 ```rust
-use std::sync::Arc;
-use hyprlayer_core::{
-    HyprlayerRuntime, NoCredentialLookup, RuntimeEnvironment, RuntimeOptions, RuntimePaths,
-};
+use hyprlayer_core::{HyprlayerRuntime, RuntimeEnvironment, RuntimeOptions, RuntimePaths};
 
-let options = RuntimeOptions::new(environment, paths)
-    .with_credential_lookup(Arc::new(NoCredentialLookup));
+let options = RuntimeOptions::new(environment, paths);
 
 let runtime = HyprlayerRuntime::open(options).await?;
 runtime.start().await?;
@@ -106,19 +102,12 @@ All thirteen fields are required; there are no defaults.
 
 ```rust
 RuntimeOptions::new(environment: RuntimeEnvironment, paths: RuntimePaths) -> Self
-    .with_credential_lookup(Arc<dyn CredentialLookup + Send + Sync>) -> Self
 ```
 
-`new` installs the production-safe `NoCredentialLookup`, which reports every
-credential as not-found without touching platform credential storage. The
-desktop shell replaces it with its macOS Keychain adapter; a headless embedder
-leaves it alone. It is the only port with production injection — every other
-port is fixed at `open`, and the test-only `RuntimeBuilder` replaces them.
-
-To implement `CredentialLookup` you also need `CredentialLookupRequest`,
-`CredentialLookupResult`, `CredentialValue`, and `CredentialLookupError` — all
-re-exported at the crate root. `CredentialValue` redacts itself in both `Debug`
-and `Display`; `expose()` is the only way out.
+No port is injectable in production; every one is fixed at `open`, and the
+test-only `RuntimeBuilder` replaces them. The runtime reads no provider
+credentials: each provider CLI resolves its own login, and an explicit API key
+from Settings is passed to it as an environment variable.
 
 ### What hermeticity does and does not promise
 
@@ -262,7 +251,7 @@ an internal type, and they are supported for that reason.
 ### `ProviderService`
 
 `claude_auth_status()`, `claude_probe()`, `codex_probe()`,
-`codex_login_with_api_key(String)`, `codex_logout()`, `claude_model_windows()`,
+`codex_login_with_api_key(String)`, `codex_logout()`,
 `ollama_status()`, `ollama_set_endpoint(Option<String>)`,
 `ollama_set_selected_models(Vec<String>)`, `ollama_set_default_model(Option<String>)`,
 `generate_title_claude(&str, &str)`, `generate_title_codex(&str, &str)`,
@@ -443,8 +432,7 @@ and no pre-refactor path carries a compatibility guarantee.
 `runtime::builder::RuntimeBuilder` is `#[doc(hidden)]` and compiled only under
 `cfg(test)` or the non-default `test-support` feature. It is a failure-injection
 seam for core's own tests and is not part of the facade; a headless embedder
-uses `HyprlayerRuntime::open` and, where it needs to replace behavior,
-`RuntimeOptions::with_credential_lookup`.
+uses `HyprlayerRuntime::open`.
 
 Adding a method to the supported surface requires an update to this document and
 a headless integration test.

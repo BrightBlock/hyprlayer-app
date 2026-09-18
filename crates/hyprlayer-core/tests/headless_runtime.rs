@@ -5,13 +5,11 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use hyprlayer_core::runtime::projects::ImportFolderRequest;
 use hyprlayer_core::{
-    HyprlayerRuntime, NoCredentialLookup, RuntimeEnvironment, RuntimeEvent, RuntimeOptions,
-    RuntimePaths,
+    HyprlayerRuntime, RuntimeEnvironment, RuntimeEvent, RuntimeOptions, RuntimePaths,
 };
 
 /// The login-shell PATH probe `start()` runs takes its shell from
@@ -95,8 +93,7 @@ async fn a_headless_consumer_can_open_import_observe_and_shut_down() {
     let options = RuntimeOptions::new(
         environment(&decoy_home.path().join("not-the-real-home")),
         paths.clone(),
-    )
-    .with_credential_lookup(Arc::new(NoCredentialLookup));
+    );
 
     let runtime = HyprlayerRuntime::open(options).await.expect("open");
     let mut events = runtime.subscribe();

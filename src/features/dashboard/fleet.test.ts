@@ -164,7 +164,6 @@ describe("selectFleetKeys", () => {
 });
 
 describe("foldFleetItem", () => {
-  const windows = new Map<string, number>();
   const picked = (over: Partial<Picked>): Picked => ({
     activity: "working",
     sessionId: "s1",
@@ -178,7 +177,7 @@ describe("foldFleetItem", () => {
   });
 
   it("returns null when every source is idle", () => {
-    expect(foldFleetItem(view("ws1"), undefined, "idle", undefined, windows)).toBeNull();
+    expect(foldFleetItem(view("ws1"), undefined, "idle", undefined)).toBeNull();
   });
 
   it("computes the meter with the 200k fallback window", () => {
@@ -187,7 +186,6 @@ describe("foldFleetItem", () => {
       picked({ tokens: 100_000, model: "claude-sonnet-5", since: 7 }),
       "idle",
       undefined,
-      windows,
     );
     expect(item?.meter).toEqual({ tokens: 100_000, fraction: 0.5 });
     expect(item?.since).toBe(7);
@@ -199,7 +197,6 @@ describe("foldFleetItem", () => {
       picked({ tokens: 100_000, model: "claude-opus-4-8[1m]" }),
       "idle",
       undefined,
-      windows,
     );
     expect(item?.meter?.fraction).toBe(0.1);
   });
@@ -210,7 +207,6 @@ describe("foldFleetItem", () => {
       picked({ activity: "review" }),
       "needs-you",
       undefined,
-      windows,
     );
     expect(item?.activity).toBe("needs-you");
     expect(item?.sessionId).toBeNull();
@@ -222,7 +218,6 @@ describe("foldFleetItem", () => {
       picked({ activity: "review" }),
       "idle",
       { activity: "needs-you", sessionId: "s9", since: 123 },
-      windows,
     );
     expect(item?.activity).toBe("needs-you");
     expect(item?.sessionId).toBe("s9");

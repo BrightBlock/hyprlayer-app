@@ -37,7 +37,7 @@ use hyprlayer_core::runtime::prompts::{
     PromptExportRequest, PromptExportResult, PromptImportDecision, PromptImportPreview,
     PromptImportRequest, PromptImportResult,
 };
-use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, ModelWindow, OllamaStatus};
+use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, OllamaStatus};
 use hyprlayer_core::runtime::scripts::{
     RunLifecycleRequest, ScriptOutputRequest, ScriptRuntimeRequest, ScriptSettingsRequest,
     StopScriptRequest,
@@ -1355,10 +1355,6 @@ impl Dispatch for Server {
         self.runtime.providers().codex_logout().await.wire()
     }
 
-    async fn claude_model_windows(&self) -> Result<Vec<ModelWindow>, WireError> {
-        self.runtime.providers().claude_model_windows().await.wire()
-    }
-
     async fn ollama_status(&self) -> Result<OllamaStatus, WireError> {
         self.runtime.providers().ollama_status().await.wire()
     }
@@ -1790,9 +1786,7 @@ mod tests {
     use hyprlayer_core::claude::SessionEvent;
     use hyprlayer_core::store::{Db, NewSession, NewWorkstream};
     use hyprlayer_core::terminal::TerminalEvent;
-    use hyprlayer_core::{
-        Harness, NoCredentialLookup, RuntimeEnvironment, RuntimeEvent, RuntimeOptions, RuntimePaths,
-    };
+    use hyprlayer_core::{Harness, RuntimeEnvironment, RuntimeEvent, RuntimeOptions, RuntimePaths};
     use tokio::sync::mpsc;
 
     use super::*;
@@ -1852,8 +1846,7 @@ mod tests {
     async fn open_runtime(root: &Path) -> Arc<HyprlayerRuntime> {
         let paths = paths(root);
         write_inputs(&paths);
-        let options = RuntimeOptions::new(environment(&root.join("home")), paths)
-            .with_credential_lookup(Arc::new(NoCredentialLookup));
+        let options = RuntimeOptions::new(environment(&root.join("home")), paths);
         let runtime = HyprlayerRuntime::open(options).await.expect("open");
         runtime.start().await.expect("start");
         runtime

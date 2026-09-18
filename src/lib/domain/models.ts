@@ -140,14 +140,6 @@ export function modelOption(
   };
 }
 
-export function apiContextWindow(
-  resolvedModelId: string | null | undefined,
-  windows: ReadonlyMap<string, number>,
-): number | undefined {
-  if (!resolvedModelId) return undefined;
-  return windows.get(resolvedModelId.replace(/\[[^\]]*\]$/, ""));
-}
-
 export function resumeModelFlag(model: ModelOption): string {
   return model.flag ?? model.resolvedModel ?? "claude-opus-5";
 }

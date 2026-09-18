@@ -145,7 +145,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::harnesses::codex_probe,
             commands::harnesses::codex_login_with_api_key,
             commands::harnesses::codex_logout,
-            commands::models::claude_model_windows,
             commands::ollama::ollama_status,
             commands::ollama::ollama_set_endpoint,
             commands::ollama::ollama_set_selected_models,

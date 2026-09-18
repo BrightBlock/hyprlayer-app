@@ -42,10 +42,6 @@ struct Fixture {
     profile_lock: Pinned,
     #[serde(rename = "configMigration")]
     config_migration: Pinned,
-    #[serde(rename = "providerAuth")]
-    provider_auth: Pinned,
-    #[serde(rename = "credentialLookup")]
-    credential_lookup: Pinned,
     #[serde(rename = "migrationLedgerInvalid")]
     migration_ledger_invalid: Pinned,
     #[serde(rename = "migrationLedgerTooNew")]
@@ -267,24 +263,6 @@ async fn config_migration_failure_matches_the_pinned_v0_7_fixture() {
     );
 }
 
-// runtime::providers::ProviderService::claude_model_windows's real failure once
-// no credential source (explicit key, adapter, or credentials file) produces one.
-fn provider_auth_failure() -> AppError {
-    AppError::from(CoreError::ProviderCredentialsMissing {
-        provider: "Claude".into(),
-    })
-}
-
-// runtime::providers's real failure once the `CredentialLookup` adapter itself
-// errors rather than reporting `NotFound` — constructed directly (matching
-// binaries_failure's own reasoning) so the message does not depend on a real
-// platform credential store being present or locked.
-fn credential_lookup_failure() -> AppError {
-    AppError::from(CoreError::CredentialLookup {
-        detail: "keychain is locked".into(),
-    })
-}
-
 // runtime::migrations's real failure once runtime-migrations.json fails to
 // parse; constructed directly so the pinned message does not depend on an
 // unpredictable tempdir path (matching profile_lock_failure's reasoning).
@@ -303,22 +281,6 @@ fn migration_ledger_too_new_failure() -> AppError {
         found: 2,
         max: 1,
     })
-}
-
-#[test]
-fn provider_auth_failure_matches_the_pinned_v0_7_fixture() {
-    assert_eq!(
-        Pinned::from(provider_auth_failure()),
-        fixture().provider_auth
-    );
-}
-
-#[test]
-fn credential_lookup_failure_matches_the_pinned_v0_7_fixture() {
-    assert_eq!(
-        Pinned::from(credential_lookup_failure()),
-        fixture().credential_lookup
-    );
 }
 
 #[test]

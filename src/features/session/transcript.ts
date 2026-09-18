@@ -419,6 +419,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
         state: "running",
         claudeSessionId: event.claudeSessionId || view.claudeSessionId,
         model: event.model ?? view.model,
+        contextWindow: event.model && event.model !== view.model ? null : view.contextWindow,
       };
 
     case "userMessage":

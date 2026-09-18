@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { ClaudeModel } from "@/lib/bindings";
 
 import {
-  apiContextWindow,
   claudeModels,
   CODEX_EFFORTS,
   codexEfforts,
@@ -494,28 +493,5 @@ describe("effectiveEffort against a live tier list", () => {
     expect(effectiveEffort("ultracode", liveRow(["low", "medium", "high", "xhigh"]))?.key).toBe(
       "ultracode",
     );
-  });
-});
-
-describe("apiContextWindow", () => {
-  const windows = new Map([
-    ["claude-fable-5", 1_000_000],
-    ["claude-opus-4-8", 1_000_000],
-    ["claude-haiku-4-5-20251001", 200_000],
-  ]);
-
-  it("returns the API window for a resolved bare id", () => {
-    expect(apiContextWindow("claude-fable-5", windows)).toBe(1_000_000);
-  });
-
-  it("strips a [1m] variant suffix before lookup (API keys on bare ids)", () => {
-    expect(apiContextWindow("claude-opus-4-8[1m]", windows)).toBe(1_000_000);
-  });
-
-  it("returns undefined for ids the catalog doesn't cover, so the caller falls back", () => {
-    expect(apiContextWindow("claude-opus-4-7", windows)).toBeUndefined();
-    expect(apiContextWindow("ollama/qwen2.5-coder", windows)).toBeUndefined();
-    expect(apiContextWindow(null, windows)).toBeUndefined();
-    expect(apiContextWindow(undefined, windows)).toBeUndefined();
   });
 });

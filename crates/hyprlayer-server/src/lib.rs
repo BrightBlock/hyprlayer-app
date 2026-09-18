@@ -511,7 +511,6 @@ mod tests {
 
     use base64::Engine as _;
     use hyprlayer_core::terminal::TerminalEvent;
-    use hyprlayer_core::NoCredentialLookup;
 
     use super::*;
 
@@ -587,8 +586,7 @@ mod tests {
     ) -> Arc<HyprlayerRuntime> {
         let paths = paths(root);
         write_inputs(&paths);
-        let options = RuntimeOptions::new(environment, paths)
-            .with_credential_lookup(Arc::new(NoCredentialLookup));
+        let options = RuntimeOptions::new(environment, paths);
         let runtime = HyprlayerRuntime::open(options).await.expect("open");
         runtime.start().await.expect("start");
         runtime

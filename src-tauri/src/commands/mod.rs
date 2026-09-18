@@ -3,7 +3,6 @@ pub mod attachments;
 pub mod harnesses;
 pub mod hosts;
 pub mod library;
-pub mod models;
 pub mod ollama;
 pub mod onboarding;
 pub mod projects;

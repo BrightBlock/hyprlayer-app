@@ -1,6 +1,7 @@
 # ADR 0009: The runtime lives in a `hyprlayer-server` process; the desktop is a client
 
-**Status:** accepted · 2026-09-03
+**Status:** accepted · 2026-09-03 · amended 2026-09-18 (the Keychain lookup is
+deleted — the runtime reads no provider credentials)
 
 ## Decision
 
@@ -130,7 +131,11 @@ Two of ADR-0008's Tauri carve-outs no longer describe the machine that matters:
   binaries the runtime spawns, and the runtime is on the server; installing a CLI on
   the laptop does not help a server on another machine. Moving them deletes the
   shell's need for `augmented_path()`, so this is less code, not more.
-- **macOS Keychain retrieval.** `KeychainCredentialLookup`
+- **macOS Keychain retrieval.** *(Deleted 2026-09-18, with `CredentialLookup` and
+  `claude_model_windows`, its only consumer: the context-window size now comes from
+  the `contextWindow` field `claude` reports in each turn's `result.modelUsage`. The
+  user-agent packaging stands — the spawned `claude` still reads the login keychain.)*
+  `KeychainCredentialLookup`
   (`src-tauri/src/commands/models.rs`) reads the credential the runtime consumes, so it
   belongs where the runtime is. `security find-generic-password` needs an unlocked
   login keychain, which a launchd *user agent* has and a system daemon does not — so

@@ -5,8 +5,6 @@ import type { ActiveSessionView, WorkstreamView } from "@/lib/bindings";
 import { useActiveSessions } from "@/lib/queries";
 import type { AgentState } from "@/features/multiplexer/engineState";
 import { rollupForWorkstream, useMultiplexerStore } from "@/features/multiplexer/multiplexerStore";
-import { apiContextWindow } from "@/lib/domain/models";
-import { useModelWindowMap } from "@/features/session/modelWindowsStore";
 import {
   classifyEntry,
   useSessionStore,
@@ -196,7 +194,6 @@ export function foldFleetItem(
   picked: Picked | undefined,
   pty: WorkstreamActivity,
   reg: { activity: FleetActivity; sessionId: string; since: number | null } | undefined,
-  windows: ReadonlyMap<string, number>,
 ): FleetItem | null {
   let activity: WorkstreamActivity = picked?.activity ?? "idle";
   let source: "store" | "pty" | "reg" = "store";
@@ -225,9 +222,7 @@ export function foldFleetItem(
   let meter: FleetItem["meter"] = null;
   if (picked.tokens !== null) {
     const window =
-      picked.window ??
-      apiContextWindow(picked.model, windows) ??
-      (picked.model?.includes("[1m]") ? 1_000_000 : 200_000);
+      picked.window ?? (picked.model?.includes("[1m]") ? 1_000_000 : 200_000);
     meter = { tokens: picked.tokens, fraction: Math.min(1, picked.tokens / window) };
   }
   return {
@@ -247,7 +242,6 @@ export function useFleet(views: WorkstreamView[]): Fleet {
     useShallow((s) => wsIds.map((id) => rollupForWorkstream(s.agents, id) ?? "idle")),
   );
   const registry = useActiveSessions(views.length > 0);
-  const windows = useModelWindowMap();
 
   return useMemo(() => {
     const reg = registryFold(registry.data ?? []);
@@ -256,7 +250,7 @@ export function useFleet(views: WorkstreamView[]): Fleet {
     let queued = 0;
     views.forEach((view, i) => {
       const pty = PTY_TO_ACTIVITY[(ptyKeys[i] ?? "idle") as AgentState] ?? "idle";
-      const item = foldFleetItem(view, picked.get(view.item.id), pty, reg.get(view.item.id), windows);
+      const item = foldFleetItem(view, picked.get(view.item.id), pty, reg.get(view.item.id));
       queued += item?.queued ?? picked.get(view.item.id)?.queued ?? 0;
       if (item) live.push(item);
       else idle.push(view);
@@ -274,5 +268,5 @@ export function useFleet(views: WorkstreamView[]): Fleet {
         queued,
       },
     };
-  }, [views, picked, ptyKeys, registry.data, windows]);
+  }, [views, picked, ptyKeys, registry.data]);
 }

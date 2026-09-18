@@ -99,8 +99,8 @@ launchctl load ~/Library/LaunchAgents/ai.brightblock.hyprlayer.server.plist
 ```
 
 A user unit, never a system one: every path the runtime uses is home-relative,
-and on macOS the Keychain lookup needs an unlocked login keychain that only a
-user session has. On Linux the unit survives a logout only with lingering
+and on macOS the `claude` CLI it spawns reads its login from the user's
+Keychain, which only a user session has unlocked. On Linux the unit survives a logout only with lingering
 enabled (`loginctl enable-linger $USER`).
 
 Point the desktop at it by adding the host to `<app config dir>/hosts.json`:

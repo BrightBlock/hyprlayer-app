@@ -1,8 +1,6 @@
 pub mod agents;
 pub mod attachments;
 pub mod builder;
-#[cfg(target_os = "macos")]
-pub mod keychain;
 pub mod library;
 pub mod migrations;
 mod operation_locks;
@@ -44,9 +42,7 @@ use crate::store::Db;
 use crate::worktree::WorktreeManager;
 
 use operation_locks::WorkstreamLocks;
-use ports::{
-    CliConfigCli, ConfigCli, CredentialLookup, LifecycleRunner, ProviderHttp, ReqwestProviderHttp,
-};
+use ports::{CliConfigCli, ConfigCli, LifecycleRunner, ProviderHttp, ReqwestProviderHttp};
 use pr_watcher::{PrWatcherContext, WorktreeWatch};
 use profile_lock::ProfileLock;
 use script_registry::ScriptRegistry;
@@ -62,37 +58,12 @@ const PROVIDER_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 pub struct RuntimeOptions {
     pub environment: RuntimeEnvironment,
     pub paths: RuntimePaths,
-    pub credential_lookup: Arc<dyn CredentialLookup + Send + Sync>,
 }
 
 impl RuntimeOptions {
     pub fn new(environment: RuntimeEnvironment, paths: RuntimePaths) -> Self {
-        Self {
-            environment,
-            paths,
-            credential_lookup: default_credential_lookup(),
-        }
+        Self { environment, paths }
     }
-
-    pub fn with_credential_lookup(
-        mut self,
-        credential_lookup: Arc<dyn CredentialLookup + Send + Sync>,
-    ) -> Self {
-        self.credential_lookup = credential_lookup;
-        self
-    }
-}
-
-// The Keychain adapter rides with the runtime (ADR-0009); embedders that must
-// stay hermetic pass `NoCredentialLookup` through `with_credential_lookup`.
-#[cfg(target_os = "macos")]
-fn default_credential_lookup() -> Arc<dyn CredentialLookup + Send + Sync> {
-    Arc::new(keychain::KeychainCredentialLookup)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn default_credential_lookup() -> Arc<dyn CredentialLookup + Send + Sync> {
-    Arc::new(ports::NoCredentialLookup)
 }
 
 struct Watchers {
@@ -119,7 +90,6 @@ pub struct HyprlayerRuntime {
     focus_changed: Arc<Notify>,
     events: broadcast::Sender<RuntimeEvent>,
     config_cli: Arc<dyn ConfigCli>,
-    credential_lookup: Arc<dyn CredentialLookup + Send + Sync>,
     provider_http: Arc<dyn ProviderHttp + Send + Sync>,
     lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
     workstream_locks: WorkstreamLocks,
@@ -139,11 +109,7 @@ impl HyprlayerRuntime {
         provider_http: Option<Arc<dyn ProviderHttp + Send + Sync>>,
         lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
     ) -> Result<Arc<Self>> {
-        let RuntimeOptions {
-            environment,
-            paths,
-            credential_lookup,
-        } = options;
+        let RuntimeOptions { environment, paths } = options;
 
         let profile_lock = ProfileLock::acquire(&paths.app_data_dir)?;
 
@@ -196,7 +162,6 @@ impl HyprlayerRuntime {
 
         Ok(Arc::new(Self {
             config_cli,
-            credential_lookup,
             provider_http,
             lifecycle_runner,
             workstream_locks: WorkstreamLocks::new(),

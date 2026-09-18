@@ -76,15 +76,6 @@ pub enum CoreError {
     #[error("the runtime has been stopped")]
     RuntimeStopped,
 
-    #[error("credential lookup failed: {detail}")]
-    CredentialLookup { detail: String },
-
-    #[error("no {provider} credentials found")]
-    ProviderCredentialsMissing { provider: String },
-
-    #[error("{provider} request failed: {detail}")]
-    ProviderRequestFailed { provider: String, detail: String },
-
     #[error("enter an API key first")]
     ApiKeyEmpty,
 
@@ -418,9 +409,6 @@ impl CoreError {
                 "Quit any other Hyprlayer window or headless process using this profile, then try again."
                     .into(),
             ),
-            CoreError::ProviderCredentialsMissing { provider } => Some(format!(
-                "Log in with the {provider} CLI, or set an API key in Settings."
-            )),
             CoreError::RuntimeMigrationLedgerInvalid { .. } => Some(
                 "Restore runtime-migrations.json from a backup, or delete it to let migrations rerun."
                     .into(),
@@ -589,9 +577,6 @@ impl CoreError {
             CoreError::RuntimeInUse { .. } => "runtime_in_use",
             CoreError::RuntimeAlreadyStarted => "runtime_already_started",
             CoreError::RuntimeStopped => "runtime_stopped",
-            CoreError::CredentialLookup { .. } => "credential_lookup",
-            CoreError::ProviderCredentialsMissing { .. } => "provider_credentials_missing",
-            CoreError::ProviderRequestFailed { .. } => "provider_request_failed",
             CoreError::ApiKeyEmpty => "api_key_empty",
             CoreError::TitleGenerationEmpty { .. } => "title_generation_empty",
             CoreError::Opencode { .. } => "opencode",

@@ -37,6 +37,7 @@ pub enum ParsedLine {
         num_turns: Option<u32>,
         stop_reason: Option<String>,
         context_tokens: Option<u32>,
+        context_windows: Vec<(String, u32)>,
     },
     CompactBoundary {
         trigger: String,
@@ -153,6 +154,7 @@ pub fn parse_line(line: &str) -> ParsedLine {
             num_turns: v.get("num_turns").and_then(Value::as_u64).map(|n| n as u32),
             stop_reason: str_field(&v, "stop_reason"),
             context_tokens: context_tokens(v.get("usage")),
+            context_windows: context_windows(v.get("modelUsage")),
         },
         Some("control_request") => parse_control_request(&v),
         Some("control_response") => parse_control_response(&v),
@@ -334,6 +336,18 @@ fn context_tokens(usage: Option<&Value>) -> Option<u32> {
         + field("cache_read_input_tokens")
         + field("cache_creation_input_tokens");
     (total > 0).then_some(total.min(u32::MAX as u64) as u32)
+}
+
+fn context_windows(model_usage: Option<&Value>) -> Vec<(String, u32)> {
+    model_usage
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(model, usage)| {
+            let window = usage.get("contextWindow").and_then(Value::as_u64)?;
+            (window > 0).then(|| (model.clone(), window.min(u32::MAX as u64) as u32))
+        })
+        .collect()
 }
 
 fn string_list(v: Option<&Value>) -> Vec<String> {

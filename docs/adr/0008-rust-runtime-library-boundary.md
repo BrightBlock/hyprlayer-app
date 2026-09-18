@@ -11,7 +11,8 @@ rules are recorded here as review rules; `check-rust-boundaries.mjs` and
 `rust-boundaries.json` are deleted) · amended 2026-09-03 (the "no remote daemon" third
 of the daemon/`Host`/remote-terminal bullet under "What we're not doing" is superseded
 by ADR-0009 — the one runtime moves into a `hyprlayer-server` process; the other two
-thirds stand)
+thirds stand) · amended 2026-09-18 (the macOS Keychain carve-out and
+`commands/models.rs` are deleted; nothing in the workspace reads provider credentials)
 
 ## Decision
 
@@ -218,7 +219,7 @@ against:
 | `commands/sessions.rs` | `runtime::sessions` | command DTO conversion and channel pump |
 | `opencode.rs` | `core::opencode::runtime` | none |
 | `commands/harnesses.rs` | `runtime::providers` | desktop installer actions only |
-| `commands/models.rs` | `runtime::providers` | macOS Keychain adapter only |
+| `commands/models.rs` | `runtime::providers` | none — deleted 2026-09-18 |
 | `commands/ollama.rs` | `runtime::providers` | command mapping |
 | `commands/titles.rs` | `runtime::providers` | command mapping |
 | `commands/projects.rs` | `runtime::projects` | bootstrap/project view envelopes and command mapping |
@@ -245,7 +246,9 @@ architecture — not a temporary gap the runtime will eventually absorb:
 
 - Tauri app-config/app-data/resource path resolution and construction of
   `RuntimePaths`.
-- macOS Keychain credential retrieval through a narrow runtime credential adapter.
+- ~~macOS Keychain credential retrieval through a narrow runtime credential adapter.~~
+  Deleted 2026-09-18: its one consumer, the context-window lookup, reads `claude`'s own
+  `result.modelUsage` instead.
 - OpenCode and Hyprlayer CLI desktop installer/self-maintenance flows.
 - Editor discovery, editor icons, and editor launching.
 - Sound playback, Full Disk Access status/UI, and opening system settings.
