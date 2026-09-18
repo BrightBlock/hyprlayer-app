@@ -20,6 +20,7 @@ hyprlayer-models.workspace = true
 hyprlayer-proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 dirs.workspace = true

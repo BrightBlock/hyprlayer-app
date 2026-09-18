@@ -19,6 +19,7 @@ struct Connection {
     /// (`Lost`) — both leave `client: None`, but only `Lost` can promise
     /// sessions and terminals are still running on the far side.
     lost: bool,
+    outdated: bool,
 }
 
 pub struct AppState {
@@ -26,13 +27,14 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(client: Arc<RpcClient>, target: Target) -> Self {
+    pub fn new(client: Arc<RpcClient>, target: Target, outdated: bool) -> Self {
         Self {
             connection: RwLock::new(Connection {
                 client: Some(client),
                 target,
                 failure: None,
                 lost: false,
+                outdated,
             }),
         }
     }
@@ -46,6 +48,7 @@ impl AppState {
                 target,
                 failure: Some(error),
                 lost: false,
+                outdated: false,
             }),
         }
     }
@@ -109,6 +112,7 @@ impl AppState {
             host,
             local_server_name,
             server_version: guard.client.as_ref().map(|c| c.server_version()),
+            server_outdated: guard.client.is_some() && guard.outdated,
             error: guard.failure.clone(),
         }
     }
@@ -141,12 +145,13 @@ impl AppState {
 
     /// A fresh client for the same host (plan Phase 8 §1). Clearing `failure`
     /// and `lost` is what puts `status()` back on `Connected`.
-    pub fn reconnected(&self, client: Arc<RpcClient>) {
+    pub fn reconnected(&self, client: Arc<RpcClient>, outdated: bool) {
         let mut guard = self
             .connection
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         guard.client = Some(client);
+        guard.outdated = outdated;
         guard.failure = None;
         guard.lost = false;
     }
@@ -186,6 +191,7 @@ mod tests {
             let _ = writer
                 .write_control(&Control::Hello {
                     protocol_version: PROTOCOL_VERSION,
+                    build: None,
                 })
                 .await;
             // The connection must outlive the handshake; reading to EOF parks
@@ -213,7 +219,7 @@ mod tests {
     #[tokio::test]
     async fn status_after_mark_lost_is_lost() {
         let client = connected_client().await;
-        let state = AppState::new(client.clone(), Target::Own);
+        let state = AppState::new(client.clone(), Target::Own, false);
         assert!(state.mark_lost(&client));
         assert_eq!(state.status().state, ConnectionState::Lost);
         let Err(err) = state.client() else {
@@ -225,10 +231,10 @@ mod tests {
     #[tokio::test]
     async fn reconnected_clears_the_failure_and_the_lost_flag() {
         let old = connected_client().await;
-        let state = AppState::new(old.clone(), Target::Own);
+        let state = AppState::new(old.clone(), Target::Own, false);
         assert!(state.mark_lost(&old));
 
-        state.reconnected(connected_client().await);
+        state.reconnected(connected_client().await, false);
 
         let status = state.status();
         assert_eq!(status.state, ConnectionState::Connected);
@@ -241,8 +247,8 @@ mod tests {
     #[tokio::test]
     async fn a_retired_clients_bridge_cannot_mark_the_new_connection_lost() {
         let old = connected_client().await;
-        let state = AppState::new(old.clone(), Target::Own);
-        state.reconnected(connected_client().await);
+        let state = AppState::new(old.clone(), Target::Own, false);
+        state.reconnected(connected_client().await, false);
 
         assert!(!state.mark_lost(&old));
         assert_eq!(state.status().state, ConnectionState::Connected);

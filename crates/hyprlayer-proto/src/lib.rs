@@ -93,6 +93,12 @@ pub fn check_version(peer: u32) -> Result<(), WireError> {
 pub enum ControlFrame<Req, Resp, StreamReq, StreamResp, Ev> {
     Hello {
         protocol_version: u32,
+        /// SHA-256 of the server's own executable. Same-protocol builds are
+        /// wire-compatible but not behaviour-identical, so this is what lets a
+        /// client notice it is attached to an older server. Optional so that
+        /// peers from before the field ignore it and are read as unknown.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        build: Option<String>,
     },
     Refused {
         error: WireError,
@@ -177,7 +183,8 @@ mod tests {
     fn control_frames_are_externally_tagged_lines() {
         assert_eq!(
             serde_json::to_string(&Envelope::Hello {
-                protocol_version: PROTOCOL_VERSION
+                protocol_version: PROTOCOL_VERSION,
+                build: None,
             })
             .unwrap(),
             format!(r#"{{"hello":{{"protocol_version":{}}}}}"#, PROTOCOL_VERSION)
@@ -206,6 +213,7 @@ mod tests {
     fn a_client_on_the_next_protocol_version_is_refused() {
         let hello = serde_json::to_string(&Envelope::Hello {
             protocol_version: PROTOCOL_VERSION + 1,
+            build: None,
         })
         .unwrap();
         let mut decoder = Decoder::new();
@@ -213,8 +221,9 @@ mod tests {
         let Some(Frame::Control(line)) = decoder.next_frame().unwrap() else {
             panic!("the hello line decodes as one control frame");
         };
-        let ControlFrame::Hello { protocol_version } =
-            serde_json::from_str::<Envelope>(&line).unwrap()
+        let ControlFrame::Hello {
+            protocol_version, ..
+        } = serde_json::from_str::<Envelope>(&line).unwrap()
         else {
             panic!("the first line is a hello");
         };

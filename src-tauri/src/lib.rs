@@ -199,6 +199,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::test_host_connection,
             commands::hosts::connection_status,
             commands::hosts::reconnect_server,
+            commands::hosts::restart_server,
             commands::hosts::inspect_host_provisioning,
             commands::hosts::provision_host,
             commands::hosts::list_local_servers,
@@ -357,8 +358,8 @@ pub fn run() {
             // `app.manage(AppState::new(..))` moves above `runtime_events::spawn`
             // (plan Phase 1 §5): the spawned task now needs `handle.state::<AppState>()`.
             let mut client = match outcome {
-                supervisor::Outcome::Connected(client) => {
-                    app.manage(AppState::new(client.clone(), target.clone()));
+                supervisor::Outcome::Connected { client, outdated } => {
+                    app.manage(AppState::new(client.clone(), target.clone(), outdated));
                     Some(client)
                 }
                 supervisor::Outcome::Blocked { title, error } => {

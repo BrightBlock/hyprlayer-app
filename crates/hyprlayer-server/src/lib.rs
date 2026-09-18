@@ -123,7 +123,22 @@ fn write_runtime_fatal(path: &Path, error: WireError) {
     }
 }
 
+/// Set once by `serve`, before the socket binds, so a binary replaced on disk
+/// afterwards cannot change what this process reports.
+static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn executable_sha256(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    Some(format!("{:x}", Sha256::digest(std::fs::read(path).ok()?)))
+}
+
 async fn serve() -> i32 {
+    if let Some(build) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| executable_sha256(&exe))
+    {
+        let _ = BUILD.set(build);
+    }
     let environment = RuntimeEnvironment::detect();
     let (config_dir, data_dir) = app_dirs();
     let paths = RuntimePaths::detect(&environment, config_dir, data_dir);
@@ -364,10 +379,13 @@ where
     writer
         .write_control(&Control::Hello {
             protocol_version: PROTOCOL_VERSION,
+            build: BUILD.get().cloned(),
         })
         .await?;
     match reader.next_control().await? {
-        Some(Control::Hello { protocol_version }) => {
+        Some(Control::Hello {
+            protocol_version, ..
+        }) => {
             if let Err(error) = check_version(protocol_version) {
                 writer.write_control(&Control::Refused { error }).await?;
                 // A version mismatch normally ends the connection here. The one
@@ -668,6 +686,7 @@ mod tests {
         writer
             .write_control(&Control::Hello {
                 protocol_version: PROTOCOL_VERSION + 1,
+                build: None,
             })
             .await
             .unwrap();
@@ -714,6 +733,7 @@ mod tests {
         writer
             .write_control(&Control::Hello {
                 protocol_version: PROTOCOL_VERSION.saturating_sub(1),
+                build: None,
             })
             .await
             .unwrap();
@@ -733,6 +753,7 @@ mod tests {
         writer2
             .write_control(&Control::Hello {
                 protocol_version: PROTOCOL_VERSION,
+                build: None,
             })
             .await
             .unwrap();

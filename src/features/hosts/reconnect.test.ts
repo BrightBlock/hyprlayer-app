@@ -19,6 +19,7 @@ const CONNECTED: ConnectionStatus = {
   state: "connected",
   host: null,
   serverVersion: 1,
+  serverOutdated: false,
   error: null,
 };
 

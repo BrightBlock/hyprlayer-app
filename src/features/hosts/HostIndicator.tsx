@@ -1,6 +1,9 @@
+import { useEffect, useRef } from "react";
+
 import { GlobeIcon } from "@/components/icons";
 import { RAIL_ICON_BASE, railNavClass } from "@/components/ui";
 import { useConnectionStatus } from "@/lib/queries";
+import { useToast } from "@/lib/toast";
 import { openHostsUi } from "./hostsUi";
 
 type Tone = "accent" | "bad" | "warn";
@@ -42,10 +45,27 @@ export function HostIndicator() {
   } else if (connection?.state === "lost") {
     tone = "warn";
     title = `Connection to ${label ?? "this machine"} lost`;
+  } else if (connection?.serverOutdated) {
+    tone = "warn";
+    title = `Server update available on ${label ?? "this machine"}`;
   } else if (label) {
     tone = "accent";
     title = `Server: ${label}`;
   }
+
+  const outdated = connection?.state === "connected" && connection.serverOutdated;
+  const announced = useRef(false);
+  useEffect(() => {
+    if (!outdated || announced.current) return;
+    announced.current = true;
+    useToast
+      .getState()
+      .show(
+        "Server update available",
+        `The Hyprlayer server on ${label ?? "this machine"} is running an older build than this app.`,
+        { tone: "warn", action: { label: "Review", onClick: openHostsUi } },
+      );
+  }, [outdated, label]);
 
   const className = tone
     ? `${RAIL_ICON_BASE} ${TONE_CLASS[tone]}`

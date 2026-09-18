@@ -63,17 +63,26 @@ pub fn incompatible_server_detail() -> String {
 }
 
 pub enum Outcome {
-    Connected(Arc<RpcClient>),
+    /// `outdated`: the server answered with a different build from the binary
+    /// this app would start, so a restart would change what it runs.
+    Connected {
+        client: Arc<RpcClient>,
+        outdated: bool,
+    },
     /// Nothing left to retry. `setup()` opens the window anyway on every arm
     /// except `ALREADY_RUNNING` (plan Phase 1 §5) — `error` is what
     /// `AppState::failed` stores and `connection_status` reports.
-    Blocked {
-        title: String,
-        error: AppError,
-    },
+    Blocked { title: String, error: AppError },
 }
 
 impl Outcome {
+    fn connected(client: Arc<RpcClient>) -> Self {
+        Self::Connected {
+            client,
+            outdated: false,
+        }
+    }
+
     /// The local-server path: every existing call site's message text moves
     /// into `AppError::server_unavailable` unchanged.
     fn blocked(title: &str, detail: impl Into<String>) -> Self {
@@ -99,15 +108,28 @@ impl Outcome {
 
 pub async fn connect(target: &Target, app_config_dir: &Path, app_data_dir: &Path) -> Outcome {
     match target {
-        Target::Own => connect_or_spawn(app_config_dir, app_data_dir).await,
+        Target::Own => match connect_or_spawn(app_config_dir, app_data_dir).await {
+            Outcome::Connected { client, .. } => {
+                let expected = provision::sha256_file(&server_binary());
+                let outdated = is_outdated(&client, expected.as_deref());
+                Outcome::Connected { client, outdated }
+            }
+            blocked => blocked,
+        },
         Target::LocalProfile(dir) => connect_local_profile(dir, &target.name()).await,
         Target::Remote(host) => connect_remote(host, app_data_dir).await,
     }
 }
 
+/// A server from before the build field reports none, which reads as outdated
+/// whenever there is a binary to compare against.
+fn is_outdated(client: &RpcClient, expected: Option<&str>) -> bool {
+    expected.is_some_and(|expected| client.server_build() != Some(expected))
+}
+
 async fn connect_local_profile(data_dir: &Path, name: &str) -> Outcome {
     let mut error = match client::connect(data_dir).await {
-        Ok(client) => return Outcome::Connected(client),
+        Ok(client) => return Outcome::connected(client),
         Err(ConnectError::Refused(e)) => AppError::from(e),
         Err(e) => AppError::server_unavailable(format!(
             "Could not reach the Hyprlayer server for {name}: {e}"
@@ -183,18 +205,21 @@ async fn peer_version(socket_path: &Path) -> Option<u32> {
     FrameWriter::new(wr)
         .write_control(&Control::Hello {
             protocol_version: PROTOCOL_VERSION,
+            build: None,
         })
         .await
         .ok()?;
     match FrameReader::new(rd).next_control().await {
-        Ok(Some(Control::Hello { protocol_version })) => Some(protocol_version),
+        Ok(Some(Control::Hello {
+            protocol_version, ..
+        })) => Some(protocol_version),
         _ => None,
     }
 }
 
 pub async fn connect_or_spawn(app_config_dir: &Path, app_data_dir: &Path) -> Outcome {
     match client::connect(app_data_dir).await {
-        Ok(client) => return Outcome::Connected(client),
+        Ok(client) => return Outcome::connected(client),
         Err(ConnectError::Refused(e)) if e.code == "protocol_version_mismatch" => {
             return if e.remedy.is_some() {
                 // We are older than the running server — no self-upgrade path.
@@ -234,7 +259,8 @@ pub async fn connect_or_spawn(app_config_dir: &Path, app_data_dir: &Path) -> Out
 /// most damaging mistake available in this plan" (plan, Migration Notes).
 pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
     match ssh_relay_connect(host, app_data_dir).await {
-        Ok((client, mut child)) => {
+        Ok((client, mut child, expected)) => {
+            let outdated = is_outdated(&client, expected.as_deref());
             // The relay must live as long as the connection does. It is
             // killed on drop, unlike the local server's deliberate orphan —
             // killing this SSH connection only ends the relay (plan §1), not
@@ -242,7 +268,7 @@ pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
             tokio::spawn(async move {
                 let _ = child.wait().await;
             });
-            Outcome::Connected(client)
+            Outcome::Connected { client, outdated }
         }
         Err(error) => Outcome::Blocked {
             title: CANNOT_START.to_string(),
@@ -259,12 +285,13 @@ pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
 async fn ssh_relay_connect(
     host: &Host,
     app_data_dir: &Path,
-) -> Result<(Arc<RpcClient>, Child), AppError> {
+) -> Result<(Arc<RpcClient>, Child, Option<String>), AppError> {
     // Never relay a binary this client has not confirmed is its own: the
     // version in the path cannot tell an unreleased build from the release it
     // descends from, and a stale one is only caught by the handshake, after
     // connecting (plan Phase 7 §3.2).
-    if provision::readiness(host, app_data_dir).await?.state != provision::HostServerState::Ready {
+    let (provisioning, host_sha) = provision::inspect(host, app_data_dir).await?;
+    if provisioning.state != provision::HostServerState::Ready {
         return Err(AppError::remote_cli_missing(&host.label));
     }
 
@@ -290,7 +317,7 @@ async fn ssh_relay_connect(
 
     let joined = tokio::io::join(stdout, stdin);
     match RpcClient::connect(joined).await {
-        Ok(client) => Ok((client, child)),
+        Ok(client) => Ok((client, child, host_sha)),
         // A version skew is not an ssh failure to classify — the peer
         // answered, just with a refusal. Its own remedy already names the
         // fix, so it is preserved verbatim rather than folded into the
@@ -461,7 +488,7 @@ pub struct HostProbe {
 /// path already kills it inside `ssh_relay_connect`.
 pub async fn probe_remote(host: &Host, app_data_dir: &Path) -> HostProbe {
     match ssh_relay_connect(host, app_data_dir).await {
-        Ok((client, mut child)) => {
+        Ok((client, mut child, _)) => {
             let server_version = client.server_version();
             drop(client);
             let _ = child.kill().await;
@@ -621,7 +648,7 @@ async fn spawn_and_connect(app_config_dir: &Path, app_data_dir: &Path) -> Outcom
         let (tail, drained) = drain_stderr(stderr);
 
         match wait_for_spawn(&mut child, app_data_dir).await {
-            SpawnWait::Connected(client) => return Outcome::Connected(client),
+            SpawnWait::Connected(client) => return Outcome::connected(client),
             SpawnWait::Refused(e) => {
                 return Outcome::blocked(
                     CANNOT_START,
@@ -723,6 +750,7 @@ async fn request_shutdown_of_refusing_server(socket_path: &Path) -> std::io::Res
     writer
         .write_control(&Control::Hello {
             protocol_version: PROTOCOL_VERSION,
+            build: None,
         })
         .await?;
     let _ = reader.next_control().await?;

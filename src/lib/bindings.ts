@@ -240,6 +240,14 @@ export const commands = {
 	 */
 	reconnectServer: () => typedError<ConnectionStatus, AppError>(__TAURI_INVOKE("reconnect_server")),
 	/**
+	 *  Stops the connected server so the reconnect that follows starts this app's
+	 *  build in its place: the dropped stream raises `server-disconnected`, the
+	 *  frontend's reconnect loop dials again, and with nothing listening the local
+	 *  supervisor or the remote relay spawns the binary it would have run. Ends
+	 *  every session and terminal on that server.
+	 */
+	restartServer: () => typedError<null, AppError>(__TAURI_INVOKE("restart_server")),
+	/**
 	 *  What the connect surface needs before it can offer an install: the host's
 	 *  platform, whether this version is already there, and what else this client
 	 *  family has put there (plan Phase 7 §4).
@@ -624,6 +632,11 @@ export type ConnectionStatus = {
 	/**  Set when attached to another profile's server on this machine. */
 	localServerName?: string | null,
 	serverVersion: number | null,
+	/**
+	 *  Connected to a server built from different bytes than the one this app
+	 *  would start; `restart_server` swaps it.
+	 */
+	serverOutdated: boolean,
 	/**  `Some` for `Failed` and `Lost`. */
 	error: AppError | null,
 };

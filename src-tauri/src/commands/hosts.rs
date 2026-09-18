@@ -35,6 +35,9 @@ pub struct ConnectionStatus {
     #[specta(optional)]
     pub local_server_name: Option<String>,
     pub server_version: Option<u32>,
+    /// Connected to a server built from different bytes than the one this app
+    /// would start; `restart_server` swaps it.
+    pub server_outdated: bool,
     /// `Some` for `Failed` and `Lost`.
     pub error: Option<AppError>,
 }
@@ -123,16 +126,31 @@ pub async fn reconnect_server(
     }
 
     match supervisor::connect(&configured, &config_dir, &data_dir).await {
-        supervisor::Outcome::Connected(client) => {
+        supervisor::Outcome::Connected { client, outdated } => {
             // Swapped before the bridge is spawned: a connection that dies in
             // between then retires against the client the state holds, so it
             // still reports itself lost rather than sitting there as `Connected`.
-            state.reconnected(client.clone());
+            state.reconnected(client.clone(), outdated);
             crate::attach_client(&app, client).await;
             Ok(state.status())
         }
         supervisor::Outcome::Blocked { error, .. } => Err(error),
     }
+}
+
+/// Stops the connected server so the reconnect that follows starts this app's
+/// build in its place: the dropped stream raises `server-disconnected`, the
+/// frontend's reconnect loop dials again, and with nothing listening the local
+/// supervisor or the remote relay spawns the binary it would have run. Ends
+/// every session and terminal on that server.
+#[tauri::command]
+#[specta::specta]
+pub async fn restart_server(state: State<'_, AppState>) -> CmdResult<()> {
+    state
+        .client()?
+        .request_shutdown()
+        .await
+        .map_err(AppError::from)
 }
 
 /// What the connect surface needs before it can offer an install: the host's

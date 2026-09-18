@@ -232,13 +232,22 @@ fn state_for(installed: bool, host_sha: Option<&str>, local_sha: Option<&str>) -
     }
 }
 
-fn sha256_file(path: &Path) -> Option<String> {
+pub(crate) fn sha256_file(path: &Path) -> Option<String> {
     Some(format!("{:x}", Sha256::digest(std::fs::read(path).ok()?)))
 }
 
 /// What the connect path checks before it relays, and what the install offer
 /// reads. Never downloads.
 pub async fn readiness(host: &Host, app_data_dir: &Path) -> Result<HostProvisioning, AppError> {
+    Ok(inspect(host, app_data_dir).await?.0)
+}
+
+/// `readiness`, plus the hash of the binary the relay will run — what a
+/// server that relay attaches to should report as its build.
+pub async fn inspect(
+    host: &Host,
+    app_data_dir: &Path,
+) -> Result<(HostProvisioning, Option<String>), AppError> {
     let stdout = supervisor::ssh_capture(host, &inspect_script(SERVER_VERSION)).await?;
     let seen = parse_inspect(&stdout);
     let triple = supervisor::triple_for_uname(host, &seen.uname)?;
@@ -247,7 +256,7 @@ pub async fn readiness(host: &Host, app_data_dir: &Path) -> Result<HostProvision
         .as_ref()
         .filter(|_| seen.installed)
         .and_then(|found| sha256_file(&found.path));
-    Ok(HostProvisioning {
+    let provisioning = HostProvisioning {
         version: SERVER_VERSION.to_string(),
         triple: triple.to_string(),
         state: state_for(seen.installed, seen.sha.as_deref(), local_sha.as_deref()),
@@ -255,7 +264,8 @@ pub async fn readiness(host: &Host, app_data_dir: &Path) -> Result<HostProvision
         source: local
             .map(|found| found.source)
             .unwrap_or(BinarySource::Download),
-    })
+    };
+    Ok((provisioning, seen.sha))
 }
 
 /// Identify, resolve, push, install (plan Phase 7 §3). Nothing upgrades in

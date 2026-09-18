@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { relaunch } from "@tauri-apps/plugin-process";
 
-import { type ConnectionState, type Host, type HostsFile, type ProvisionStep } from "@/lib/bindings";
-import { errorMessage, errorRemedy } from "@/lib/ipc";
+import {
+  commands,
+  type ConnectionState,
+  type Host,
+  type HostsFile,
+  type ProvisionStep,
+} from "@/lib/bindings";
+import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { flushPersistedWrites } from "@/lib/persistedStorage";
 import {
   useConnectionStatus,
@@ -112,6 +118,57 @@ function ServerInstall({ host }: { host: Host }) {
   );
 }
 
+/**
+ * The binary is already in place — bundled beside the app, or pushed to the
+ * host by provisioning — so updating is only a restart. It is offered, never
+ * done on connect, because it ends every agent and terminal on that server.
+ */
+function ServerUpdate({ where }: { where: string }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  async function restart() {
+    setBusy(true);
+    setError(null);
+    try {
+      await unwrap(commands.restartServer());
+      setConfirming(false);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-ink-dim">
+        The server is running an older build than this app. Restart it to update.
+      </p>
+      <Button variant="primary" onClick={() => setConfirming(true)}>
+        Restart server
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        title="Restart the server?"
+        confirmLabel="Restart server"
+        confirmVariant="danger"
+        onConfirm={() => void restart()}
+        busy={busy}
+        error={error}
+        onDismissError={() => setError(null)}
+      >
+        <p className="text-sm leading-relaxed text-ink-dim">
+          Every agent and terminal running on <span className="text-ink">{where}</span> will stop.
+          Hyprlayer reconnects once the updated server is up.
+        </p>
+      </ConfirmDialog>
+    </div>
+  );
+}
+
 export function HostsDialog() {
   const status = useConnectionStatus();
   const hosts = useHosts();
@@ -206,6 +263,10 @@ export function HostsDialog() {
           </div>
 
           {showInstall && connection?.host && <ServerInstall host={connection.host} />}
+
+          {connection?.state === "connected" && connection.serverOutdated && (
+            <ServerUpdate where={where} />
+          )}
 
           <LocalServerList
             servers={localServers}
