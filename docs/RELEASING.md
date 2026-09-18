@@ -225,24 +225,39 @@ Windows also has a CI fallback: `HYPRLAYER_WIN_BUILDER=actions` runs
 the artifact instead of using SSH. Linux has no such fallback yet — build hosted
 if you need one, or run with `--no-linux`.
 
-**Windows builder prerequisites.** The guest is a `dockurr/windows` container on
-`nexus`, defined by `~/.config/hyprlayer-winbuilder/docker-compose.yml`. That file
-is deliberately *not* `~/.config/windows/docker-compose.yml`, which
-`omarchy-windows-vm` regenerates — an Omarchy update there would restore
-`restart: always` / `RAM_SIZE: 4G` and drop the SSH publish, surfacing later as a
-release that dies in preflight. Both files keep `container_name: omarchy-windows`
-on purpose: they mount the same disk, and the shared name is what stops two QEMU
-processes writing one image.
+**Windows builder prerequisites.** The guest is the omarchy-managed
+`dockurr/windows` container on `nexus`. There is one VM and one disk
+(`~/.windows`, bind-mounted into a root-owned anchor under
+`/var/lib/omarchy/windows/mounts/`), started with `omarchy-windows-vm launch`.
+`release-local.sh` waits for that guest and never starts or stops it: the
+container name `omarchy-windows` is shared by design — it is what stops two QEMU
+processes writing one image — so bringing up a second compose would recreate the
+guest under a different profile mid-release.
 
-Key settings: `RAM_SIZE: 10G`, `CPU_CORES: 8`, `DISK_SIZE: 256G`,
-`restart: "no"` (the release script owns the lifecycle), and ports bound to
-loopback only. `GPU: "Y"` is dropped; a headless builder needs no virtio-gpu.
+A dedicated builder compose at `~/.config/hyprlayer-winbuilder/docker-compose.yml`
+used to own the lifecycle, adding `RAM_SIZE: 10G` / `CPU_CORES: 8` and a
+`2222 -> 22` SSH publish. It is no longer used; sizing now comes from whatever
+`omarchy-windows-vm install` configured.
+
+**Reaching the guest.** The omarchy compose publishes only `8006` and `3389`,
+both on loopback, and hard-codes its port bindings — there is no SSH publish to
+add one to. The guest is reached at its docker-bridge address instead, and docker
+rotates both the bridge and its subnet on every container recreate (observed:
+`172.22.0.2` -> `172.21.0.2` across one restart), so a pinned address does not
+survive. `~/.ssh/nexus-win-proxy.sh` resolves it on the VM host per connect and
+is wired in as the `nexus-win` `ProxyCommand`; `ssh`/`scp nexus-win` therefore
+work unchanged. `Host nexus` carries `ControlMaster auto` so the extra hop the
+resolver costs is amortized.
 
 ```sh
-# start/stop by hand (release-local.sh does this itself)
-docker compose -f ~/.config/hyprlayer-winbuilder/docker-compose.yml up -d
-docker compose -f ~/.config/hyprlayer-winbuilder/docker-compose.yml down
-# interactive session, replacing `omarchy-windows-vm launch`
+# start/stop the guest (release-local.sh waits for it, never starts it)
+omarchy-windows-vm launch          # add --keep-alive to survive RDP closing
+omarchy-windows-vm stop
+
+# RDP from the Mac: tunnel first, then point Windows App at localhost:13389
+ssh -N -L 13389:127.0.0.1:3389 nexus
+
+# RDP from nexus itself
 xfreerdp3 /u:jt /p:admin /v:127.0.0.1:3389 /cert:ignore /dynamic-resolution
 ```
 

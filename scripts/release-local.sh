@@ -20,9 +20,7 @@ WIN_HELPER="scripts/release-win-remote.ps1"
 WIN_ACTIONS_REPO="${HYPRLAYER_WIN_ACTIONS_REPO:-BrightBlock/hyprlayer-app}"
 WIN_ACTIONS_WORKFLOW="windows-build.yml"
 WIN_VM_HOST="${HYPRLAYER_WIN_VM_HOST:-nexus}"
-WIN_VM_COMPOSE="${HYPRLAYER_WIN_VM_COMPOSE:-~/.config/hyprlayer-winbuilder/docker-compose.yml}"
-WIN_VM_MANAGE="${HYPRLAYER_WIN_VM_MANAGE:-1}"
-WIN_VM_STARTED=0
+WIN_VM_WAIT_TRIES="${HYPRLAYER_WIN_VM_WAIT_TRIES:-30}"
 LINUX_SSH_HOST="${HYPRLAYER_LINUX_SSH_HOST:-nexus}"
 LINUX_HELPER="scripts/release-linux-remote.sh"
 AUR_PKGNAME="hyprlayer-desktop-bin"
@@ -66,10 +64,6 @@ warn() { printf '\033[1;33m! %s\033[0m\n' "$*" >&2; }
 TMPDIRS=()
 cleanup() {
   for d in "${TMPDIRS[@]:-}"; do [[ -n "${d:-}" ]] && rm -rf "$d"; done
-  if [[ "${WIN_VM_STARTED:-0}" == "1" ]]; then
-    ssh "$WIN_VM_HOST" "bash -lc 'docker compose -f $WIN_VM_COMPOSE down'" \
-      || printf 'warning: could not stop the Windows guest on %s\n' "$WIN_VM_HOST" >&2
-  fi
 }
 trap cleanup EXIT
 
@@ -135,22 +129,21 @@ if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" != "1" ]]; then
   case "$WIN_BUILDER" in
     ssh)
       [[ -f "$WIN_HELPER" ]] || die "missing $WIN_HELPER"
-      if [[ "$WIN_VM_MANAGE" == "1" ]]; then
-        if ! ssh "$WIN_VM_HOST" "docker inspect -f '{{.State.Running}}' omarchy-windows 2>/dev/null | grep -q true"; then
-          say "Starting the Windows builder VM on $WIN_VM_HOST…"
-          ssh "$WIN_VM_HOST" "bash -lc 'docker compose -f $WIN_VM_COMPOSE up -d'" \
-            || die "could not start the Windows guest on $WIN_VM_HOST"
-          WIN_VM_STARTED=1
-        fi
-        for i in $(seq 1 30); do
-          ssh -o BatchMode=yes -o ConnectTimeout=5 "$WIN_SSH_HOST" "echo ok" >/dev/null 2>&1 && break
-          [[ $((i % 6)) -eq 0 ]] && say "  …still waiting for the guest ($((i * 10))s)"
-          sleep 5
-        done
-      fi
+      # The guest's lifecycle belongs to omarchy-windows-vm, which owns both the
+      # container name and a root-owned compose; bringing up a second compose
+      # here would recreate the container under a different profile mid-release.
       say "Checking Windows builder ($WIN_SSH_HOST) is reachable…"
-      ssh -o BatchMode=yes -o ConnectTimeout=10 "$WIN_SSH_HOST" "echo ok" >/dev/null 2>&1 \
-        || die "Windows builder '$WIN_SSH_HOST' unreachable over SSH — check the guest on $WIN_VM_HOST, set HYPRLAYER_WIN_SSH_HOST, run with HYPRLAYER_WIN_BUILDER=actions, or run with --mac-only"
+      win_ready=0
+      for i in $(seq 1 "$WIN_VM_WAIT_TRIES"); do
+        if ssh -o BatchMode=yes -o ConnectTimeout=10 "$WIN_SSH_HOST" "echo ok" >/dev/null 2>&1; then
+          win_ready=1
+          break
+        fi
+        [[ $((i % 6)) -eq 0 ]] && say "  …still waiting for the guest ($((i * 5))s)"
+        sleep 5
+      done
+      [[ "$win_ready" == "1" ]] \
+        || die "Windows builder '$WIN_SSH_HOST' unreachable over SSH — start the guest on $WIN_VM_HOST with 'omarchy-windows-vm launch', set HYPRLAYER_WIN_SSH_HOST, run with HYPRLAYER_WIN_BUILDER=actions, or run with --mac-only"
       ;;
     actions)
       say "Checking GitHub Actions Windows builder ($WIN_ACTIONS_REPO) is reachable…"
