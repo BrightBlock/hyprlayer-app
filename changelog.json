@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.8.2",
+      "date": "2026-09-19",
+      "summary": "Fixed OpenCode keys on remote hosts; added a Copy Diagnostics / Reveal Logs menu.",
+      "notes": [
+        "Fixed a bug where adding or changing an OpenCode API key in Settings didn't reach a remote host running your session; keys now update on the server that needs them.",
+        "Help > Copy Diagnostics and Reveal Logs make it easy to grab logs when something goes wrong, with secrets like API keys automatically redacted.",
+        "A crash while rendering one page no longer takes down the whole window; it now shows an error in place with a Reveal Logs action."
+      ]
+    },
+    {
       "version": "0.8.1",
       "date": "2026-09-18",
       "summary": "Composer controls move below the input; host status shows on its own row.",
