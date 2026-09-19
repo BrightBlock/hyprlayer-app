@@ -2,7 +2,8 @@
 
 **Status:** accepted · 2026-09-03 · amended 2026-09-18 (the Keychain lookup is
 deleted — the runtime reads no provider credentials) · amended 2026-09-19 (OpenCode
-config I/O moves to the server)
+config I/O moves to the server) · amended 2026-09-19 (the server writes its own log
+files; a spawned server's stderr goes to a file, not a pipe)
 
 ## Decision
 
@@ -511,6 +512,22 @@ would need all of the authentication machinery this decision declines to build.
     a failure retrying cannot fix. The stderr buffer itself is unbounded for a
     long-lived server, accepted as a diagnostic-only cost rather than built out
     into a ring buffer.
+
+    *(Amended 2026-09-19 — the pipe is gone. Its reader died with the app that
+    spawned the server, after which every `eprintln!` in the server panicked on
+    the broken pipe, and the relay's spawn sent stderr to `/dev/null`; the server
+    also installed no tracing subscriber, so everything core logged was discarded.
+    The server now writes daily files through `tracing-appender`
+    (`crates/hyprlayer-server/src/logging.rs`): `hyprlayer-server.<date>.log` and
+    `hyprlayer-relay.<date>.log`, seven days kept, filtered by `HYPRLAYER_LOG` or
+    `RUST_LOG`, in the directory Tauri's `app_log_dir` rule gives the profile —
+    the desktop passes its own as `HYPRLAYER_APP_LOG_DIR`, so a local server logs
+    beside it. Both spawners send the child's stderr to
+    `hyprlayer-stderr.log` in that directory and read back only what this
+    spawn appended, which keeps the `runtime_in_use` retry and the early-exit
+    dialog without a buffer that grows for the server's lifetime.
+    `hyprlayer-server logs` prints the tails of all three, which is how the desktop
+    fetches a remote host's logs over `ssh` with or without a running server.)*
 
     **Under `tauri dev` the server does not survive an app quit.** The Tauri
     CLI tears down the app's process tree when the app exits, and that takes

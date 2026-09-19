@@ -9,6 +9,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use hyprlayer_models::RuntimeEvent;
 use hyprlayer_proto::frame::{self, Frame};
@@ -17,6 +18,7 @@ use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::logging::RepeatGate;
 use crate::rpc::{Request, Response};
 use crate::socket;
 use crate::streams::{StreamRequest, StreamResponse};
@@ -32,6 +34,16 @@ type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Response, WireError
 type StreamOpened = (StreamResponse, Option<mpsc::UnboundedReceiver<Vec<u8>>>);
 type PendingStream = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<StreamOpened, WireError>>>>>;
 type StreamSenders = Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<Vec<u8>>>>>;
+
+/// Covers an SSH connect, a remote relay starting `serve`, and its first open.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
+/// A call still unanswered this long is logged, then left to finish: some
+/// (a workstream's Setup script, a first agent turn) legitimately take minutes.
+const STILL_PENDING: Duration = Duration::from_secs(30);
+/// How much of whatever arrived instead of a hello goes into the error.
+const STRAY_BYTES_SHOWN: usize = 160;
+
+static CALL_FAILURES: RepeatGate = RepeatGate::new(Duration::from_secs(60));
 
 #[derive(Debug)]
 pub enum ConnectError {
@@ -86,7 +98,23 @@ impl RpcClient {
                 build: None,
             })
             .await?;
-        let (server_version, server_build) = match reader.next_control().await? {
+        let hello = match tokio::time::timeout(HANDSHAKE_TIMEOUT, reader.next_control()).await {
+            Ok(Ok(hello)) => hello,
+            // A remote shell's startup files can print to stdout ahead of the
+            // relay; say what arrived, since the frame error alone cannot.
+            Ok(Err(e)) if e.kind() == io::ErrorKind::InvalidData => {
+                return Err(ConnectError::Protocol(format!("{e}{}", stray(&reader))))
+            }
+            Ok(Err(e)) => return Err(ConnectError::Io(e)),
+            Err(_) => {
+                return Err(ConnectError::Protocol(format!(
+                    "no hello from the server within {}s{}",
+                    HANDSHAKE_TIMEOUT.as_secs(),
+                    stray(&reader)
+                )))
+            }
+        };
+        let (server_version, server_build) = match hello {
             Some(Control::Hello {
                 protocol_version,
                 build,
@@ -112,7 +140,8 @@ impl RpcClient {
 
         let writer_task = tokio::spawn(async move {
             while let Some(bytes) = rx.recv().await {
-                if writer.write_bytes(&bytes).await.is_err() {
+                if let Err(e) = writer.write_bytes(&bytes).await {
+                    tracing::warn!("writing to the server failed: {e}");
                     break;
                 }
             }
@@ -164,6 +193,7 @@ impl RpcClient {
         self.lock_pending().insert(id, tx);
 
         let command = request.command();
+        let started = Instant::now();
         let line = serde_json::to_string(&Control::Request { id, body: request })
             .map_err(|e| WireError::protocol(format!("{command}: {e}")))?;
         if self
@@ -175,7 +205,11 @@ impl RpcClient {
             self.lock_pending().remove(&id);
             return Err(WireError::disconnected());
         }
-        rx.await.unwrap_or_else(|_| Err(WireError::disconnected()))
+        let reply = await_reply(command, rx).await;
+        if let Err(e) = &reply {
+            note_failure(command, e, started.elapsed());
+        }
+        reply
     }
 
     /// Opens a stream: sends the request, and returns the response value
@@ -195,6 +229,8 @@ impl RpcClient {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id, tx);
 
+        let command = request.command();
+        let started = Instant::now();
         let line = serde_json::to_string(&Control::StreamRequest { id, body: request })
             .map_err(|e| WireError::protocol(e.to_string()))?;
         if self
@@ -209,7 +245,16 @@ impl RpcClient {
                 .remove(&id);
             return Err(WireError::disconnected());
         }
-        rx.await.unwrap_or_else(|_| Err(WireError::disconnected()))
+        let reply = await_reply(command, rx).await;
+        match &reply {
+            Ok((response, _)) => tracing::debug!(
+                "{command} opened stream {:?} in {:?}",
+                response.stream_id(),
+                started.elapsed()
+            ),
+            Err(e) => note_failure(command, e, started.elapsed()),
+        }
+        reply
     }
 
     /// Tells the server to stop forwarding a stream this client no longer
@@ -242,6 +287,52 @@ impl RpcClient {
     }
 }
 
+async fn await_reply<T>(
+    command: &str,
+    mut rx: oneshot::Receiver<Result<T, WireError>>,
+) -> Result<T, WireError> {
+    let started = Instant::now();
+    match tokio::time::timeout(STILL_PENDING, &mut rx).await {
+        Ok(reply) => reply.unwrap_or_else(|_| Err(WireError::disconnected())),
+        Err(_) => {
+            tracing::warn!("{command} is still waiting on the server after {STILL_PENDING:?}");
+            let reply = rx.await.unwrap_or_else(|_| Err(WireError::disconnected()));
+            tracing::info!("{command} answered after {:?}", started.elapsed());
+            reply
+        }
+    }
+}
+
+/// Command name, code and message only: arguments carry keys, keystrokes and
+/// prompts. A lost connection is logged once, by `read_loop`, not per call.
+fn note_failure(command: &str, error: &WireError, elapsed: Duration) {
+    if error.code == WireError::disconnected().code {
+        return;
+    }
+    let Some(held) = CALL_FAILURES.admit(&format!("{command}:{}", error.code)) else {
+        return;
+    };
+    let repeats = if held > 0 {
+        format!(" ({held} more since the last report)")
+    } else {
+        String::new()
+    };
+    tracing::warn!(
+        "{command} failed after {elapsed:?}: {}: {}{repeats}",
+        error.code,
+        hyprlayer_core::redact::url_credentials(&error.message)
+    );
+}
+
+fn stray<R: AsyncRead + Unpin>(reader: &FrameReader<R>) -> String {
+    let bytes = reader.unconsumed();
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let shown = String::from_utf8_lossy(&bytes[..bytes.len().min(STRAY_BYTES_SHOWN)]);
+    format!("; it sent {shown:?} instead")
+}
+
 async fn read_loop<R: AsyncRead + Unpin>(
     mut reader: FrameReader<R>,
     pending: Pending,
@@ -250,7 +341,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
     events: mpsc::UnboundedSender<RuntimeEvent>,
     writer: tokio::task::AbortHandle,
 ) {
-    loop {
+    let reason = loop {
         match reader.next_frame().await {
             Ok(Some(Frame::Control(line))) => match parse_control(&line) {
                 Ok(Control::Response { id, outcome }) => {
@@ -296,10 +387,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     let _ = events.send(event);
                 }
                 Ok(other) => tracing::warn!("unexpected {} frame from server", label(&other)),
-                Err(e) => {
-                    tracing::warn!("unreadable control frame from server: {e}");
-                    break;
-                }
+                Err(e) => break format!("an unreadable control frame ({e})"),
             },
             Ok(Some(Frame::Data(payload))) => match frame::decode_stream_frame(&payload) {
                 Some((stream_id, event)) => {
@@ -321,13 +409,10 @@ async fn read_loop<R: AsyncRead + Unpin>(
                 }
                 None => tracing::warn!("data frame too short to carry a stream id"),
             },
-            Ok(None) => break,
-            Err(e) => {
-                tracing::warn!("server connection read failed: {e}");
-                break;
-            }
+            Ok(None) => break "the server closed it".to_string(),
+            Err(e) => break format!("reading failed ({e})"),
         }
-    }
+    };
     // Close the outbound channel before draining: a call that has not sent
     // yet then fails at `send`, instead of queueing a request nothing will
     // ever answer and awaiting it forever.
@@ -338,6 +423,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
         .drain()
         .map(|(_, tx)| tx)
         .collect();
+    let waiters_len = waiters.len();
     for tx in waiters {
         let _ = tx.send(Err(WireError::disconnected()));
     }
@@ -347,15 +433,22 @@ async fn read_loop<R: AsyncRead + Unpin>(
         .drain()
         .map(|(_, tx)| tx)
         .collect();
+    let failed_calls = waiters_len;
+    let failed_opens = stream_waiters.len();
     for tx in stream_waiters {
         let _ = tx.send(Err(WireError::disconnected()));
     }
     // Dropping every sender ends each open stream's `recv()` with `None`,
     // same as a local channel closing when its producer goes away.
-    stream_senders
+    let mut senders = stream_senders
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clear();
+        .unwrap_or_else(PoisonError::into_inner);
+    let open_streams = senders.len();
+    senders.clear();
+    tracing::warn!(
+        "server connection ended: {reason}; failed {failed_calls} pending call(s) and \
+         {failed_opens} stream open(s), closed {open_streams} stream(s)"
+    );
 }
 
 /// A typed, JSON-decoding view onto one stream's raw frames.
@@ -379,7 +472,10 @@ impl<E: DeserializeOwned> EventStream<E> {
         match serde_json::from_slice(&bytes) {
             Ok(event) => Some(event),
             Err(e) => {
-                tracing::error!("stream event did not decode: {e}");
+                tracing::error!(
+                    "{} stream event did not decode: {e}",
+                    std::any::type_name::<E>()
+                );
                 None
             }
         }

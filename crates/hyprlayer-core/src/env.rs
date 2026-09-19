@@ -18,8 +18,14 @@ impl RuntimeEnvironment {
     /// construction, never by a core operation.
     pub fn detect() -> Self {
         Self {
-            home_dir: dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
-            process_cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            home_dir: dirs::home_dir().unwrap_or_else(|| {
+                tracing::warn!("no home directory in the environment; using the working directory");
+                PathBuf::from(".")
+            }),
+            process_cwd: std::env::current_dir().unwrap_or_else(|e| {
+                tracing::warn!("no working directory ({e}); using \".\"");
+                PathBuf::from(".")
+            }),
             process_env: std::env::vars_os().collect(),
             env_overlay: Arc::default(),
         }
@@ -108,7 +114,12 @@ impl RuntimePaths {
 
 fn hyprlayer_config_file() -> PathBuf {
     dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "no config directory in the environment; looking for hyprlayer's config in \".\""
+            );
+            PathBuf::from(".")
+        })
         .join("hyprlayer")
         .join("config.json")
 }

@@ -30,6 +30,10 @@ const MIN_TICK: Duration = Duration::from_secs(4);
 
 const MAX_CONCURRENT: usize = 6;
 
+// Reported on the change, not every tick.
+static GH_MISSING_REPORTED: AtomicBool = AtomicBool::new(false);
+static SIGNED_OUT_REPORTED: AtomicBool = AtomicBool::new(false);
+
 pub type WorktreeWatch = Arc<AsyncMutex<Option<(String, WatchHandle)>>>;
 
 pub struct PrWatcherContext {
@@ -89,18 +93,24 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
     }
 
     let Ok(gh) = ctx.binaries.require(BinaryKind::Gh).await else {
+        if !GH_MISSING_REPORTED.swap(true, Ordering::Relaxed) {
+            tracing::info!(
+                "pr watch: gh was not found; PR status stays unknown until it is installed"
+            );
+        }
         return SLOW;
     };
+    GH_MISSING_REPORTED.store(false, Ordering::Relaxed);
 
     let db = ctx.db.clone();
     let items = match tokio::task::spawn_blocking(move || db.list_active_workstreams()).await {
         Ok(Ok(items)) => items,
         Ok(Err(e)) => {
-            tracing::debug!("pr watch: listing workstreams failed: {e}");
+            tracing::warn!("pr watch: listing workstreams failed: {e}");
             return SLOW;
         }
         Err(e) => {
-            tracing::debug!("pr watch: list task join error: {e}");
+            tracing::warn!("pr watch: list task join error: {e}");
             return SLOW;
         }
     };
@@ -156,9 +166,19 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
 
     for (id, res) in results {
         let status = match res {
-            Ok(status) => status,
+            Ok(status) => {
+                if SIGNED_OUT_REPORTED.swap(false, Ordering::Relaxed) {
+                    tracing::info!("pr watch: gh is signed in again");
+                }
+                status
+            }
             Err(e) => {
                 rate_limited |= is_rate_limited(&e.to_string());
+                if crate::repos::is_github_auth_failure(&e.to_string())
+                    && !SIGNED_OUT_REPORTED.swap(true, Ordering::Relaxed)
+                {
+                    tracing::warn!("pr watch: gh is not signed in; run `gh auth login`: {e}");
+                }
                 tracing::debug!("pr watch: gh status failed for {id}: {e}");
                 let is_active = active.as_deref() == Some(id.as_str());
                 let due = polled_at

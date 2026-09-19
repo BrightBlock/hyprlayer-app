@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
+import { log } from "@/lib/log";
 
 export type TerminalTheme = ITheme;
 
@@ -84,6 +85,7 @@ class XtermEngine implements TerminalEngine {
     try {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => {
+        log.info("terminal", "WebGL context lost; switching to the DOM renderer");
         const canvas = this.webglCanvas();
         try {
           webgl.dispose();
@@ -95,7 +97,8 @@ class XtermEngine implements TerminalEngine {
       });
       this.term.loadAddon(webgl);
       this.webgl = webgl;
-    } catch {
+    } catch (e) {
+      log.info("terminal", "WebGL unavailable; using the DOM renderer", e);
     }
   }
 
@@ -112,7 +115,8 @@ class XtermEngine implements TerminalEngine {
       this.rendererReady = false;
       this.fitRetries = 0;
       this.fit();
-    } catch {
+    } catch (e) {
+      log.error("terminal", "restoring the DOM renderer failed; the terminal stays blank", e);
     }
   }
 

@@ -217,6 +217,49 @@ async fn import_rollback_removes_the_git_init_it_created_for_a_new_folder() {
 }
 
 #[tokio::test]
+async fn import_refuses_a_repository_git2_cannot_open_and_leaves_it_intact() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = test_paths(&root.path().join("profile"));
+    write_hyprlayer_override(&paths, &write_fake_hyprlayer(root.path(), 1));
+
+    let runtime = RuntimeBuilder::new(test_environment(root.path()), paths)
+        .open()
+        .await
+        .unwrap();
+
+    // Shaped like a blobless clone: format v1 naming an extension libgit2 lacks.
+    let repo = fixture_repo(root.path(), "unsupported-repo");
+    sh(
+        &repo,
+        &["config", "extensions.hyprlayerunsupported", "true"],
+    );
+    sh(&repo, &["config", "core.repositoryformatversion", "1"]);
+    let head = std::fs::read_to_string(repo.join(".git/HEAD")).unwrap();
+
+    let err = runtime
+        .projects()
+        .import_repository(ImportRepositoryRequest {
+            path: repo.display().to_string(),
+            branch: None,
+            directory_name: None,
+            thoughts_dir: None,
+            profile: None,
+            bootstrap_user: Some("tester".into()),
+        })
+        .await
+        .expect_err("an unopenable repository must not import");
+
+    assert_eq!(err.code(), "repo_unreadable");
+    assert_eq!(
+        std::fs::read_to_string(repo.join(".git/HEAD")).unwrap(),
+        head,
+        "the repository must be left exactly as it was"
+    );
+
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn import_rollback_never_deletes_a_pre_existing_repository() {
     let root = tempfile::tempdir().unwrap();
     let paths = test_paths(&root.path().join("profile"));

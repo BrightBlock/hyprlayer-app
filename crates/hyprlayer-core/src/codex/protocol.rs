@@ -337,7 +337,10 @@ impl Translator {
                     .map(str::to_string);
                 Vec::new()
             }
-            _ => Vec::new(),
+            _ => {
+                note_unhandled(method);
+                Vec::new()
+            }
         }
     }
 
@@ -607,8 +610,26 @@ fn approval_request_id(p: &Value, rpc_id: &Value) -> String {
     }
 }
 
+/// Once per method per process: codex sends many kinds the app ignores.
+fn note_unhandled(method: &str) {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut seen = SEEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !seen.iter().any(|m| m == method) {
+        seen.push(method.to_string());
+        tracing::debug!("codex notification {method} is not handled");
+    }
+}
+
 fn error_text(p: &Value) -> Option<String> {
     if p.get("willRetry").and_then(Value::as_bool) == Some(true) {
+        let message = p
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("no message");
+        tracing::debug!("codex error it will retry: {message}");
         return None;
     }
     Some(

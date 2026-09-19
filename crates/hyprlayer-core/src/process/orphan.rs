@@ -80,6 +80,19 @@ fn read_record(pid_file: &Path) -> Option<Record> {
     })
 }
 
+/// The executable a live pid is running, or `None` once it has exited.
+pub fn running_program(pid: u32) -> Option<String> {
+    let cmdline = process_cmdline(pid)?;
+    let program = cmdline.split_whitespace().next()?;
+    Some(
+        std::path::Path::new(program)
+            .file_name()
+            .map_or(program.to_string(), |name| {
+                name.to_string_lossy().into_owned()
+            }),
+    )
+}
+
 #[cfg(target_os = "linux")]
 fn process_cmdline(pid: u32) -> Option<String> {
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;

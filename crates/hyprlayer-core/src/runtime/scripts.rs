@@ -313,16 +313,26 @@ impl ScriptService<'_> {
             exec = exec.env(key, value);
         }
 
+        let started = std::time::Instant::now();
         let (phase, code, output) = match exec.run_unchecked().await {
             Ok(out) => {
                 let phase = if out.exit_code == Some(0) {
+                    tracing::info!(
+                        "{} script for workstream {} passed in {:?}",
+                        kind.as_str(),
+                        item.id,
+                        started.elapsed()
+                    );
                     RunPhase::Passed
                 } else {
+                    // The full output is kept for the UI; the log gets its end.
                     tracing::warn!(
-                        "{} script exited {:?}: {}",
+                        "{} script for workstream {} exited {:?} after {:?}: {}",
                         kind.as_str(),
+                        item.id,
                         out.exit_code,
-                        out.stderr.trim()
+                        started.elapsed(),
+                        crate::redact::tail(out.stderr.trim(), 1000)
                     );
                     RunPhase::Failed
                 };
@@ -336,7 +346,12 @@ impl ScriptService<'_> {
                 (phase, out.exit_code, combined)
             }
             Err(e) => {
-                tracing::warn!("{} script failed to run: {e}", kind.as_str());
+                tracing::warn!(
+                    "{} script for workstream {} failed to run after {:?}: {e}",
+                    kind.as_str(),
+                    item.id,
+                    started.elapsed()
+                );
                 (RunPhase::Failed, None, format!("{e}"))
             }
         };

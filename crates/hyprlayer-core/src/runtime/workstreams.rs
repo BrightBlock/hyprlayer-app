@@ -508,9 +508,19 @@ impl WorkstreamService<'_> {
         .await
         {
             Ok(status) => Ok(status),
+            // An error, not "no PR": the client keeps the last known PR and
+            // backs off, where `None` made a spent GraphQL quota erase it.
             Err(e) => {
-                tracing::debug!("gh pr status unavailable for {}: {e}", item.pr_ref());
-                Ok(None)
+                let text = e.to_string().to_lowercase();
+                let cause = if text.contains("rate limit") {
+                    "the GitHub API quota is spent"
+                } else if crate::repos::is_github_auth_failure(&text) {
+                    "gh is not signed in"
+                } else {
+                    "gh failed"
+                };
+                tracing::debug!("PR status for {} unavailable: {cause}: {e}", item.pr_ref());
+                Err(e)
             }
         }
     }
@@ -737,7 +747,9 @@ impl WorkstreamService<'_> {
             }
             let git = self.runtime.binaries.require(BinaryKind::Git).await?;
             let overlay = self.runtime.environment.overlay_env();
-            let _ = worktree::fetch_remote(&git, &repo, &overlay).await;
+            if let Err(e) = worktree::fetch_remote(&git, &repo, &overlay).await {
+                tracing::warn!("fetch before tracking {branch} failed; using the local ref: {e}");
+            }
             worktree::create_tracking_branch(&git, &repo, &local, &branch, &overlay).await?;
             return Ok((local, true));
         }
@@ -746,6 +758,26 @@ impl WorkstreamService<'_> {
     }
 
     pub async fn create(&self, req: CreateWorkstreamRequest) -> Result<CreateWorkstreamResult> {
+        let started = std::time::Instant::now();
+        let what = format!(
+            "create {:?} in {} ({:?})",
+            req.title, req.project_path, req.mode
+        );
+        let result = self.create_inner(req).await;
+        match &result {
+            Ok(created) => tracing::info!(
+                "{what}: workstream {} on {} at {} in {:?}",
+                created.item.id,
+                created.item.branch,
+                created.item.worktree_path,
+                started.elapsed()
+            ),
+            Err(e) => tracing::warn!("{what} failed after {:?}: {e}", started.elapsed()),
+        }
+        result
+    }
+
+    async fn create_inner(&self, req: CreateWorkstreamRequest) -> Result<CreateWorkstreamResult> {
         ensure_running(self.runtime)?;
         let CreateWorkstreamRequest {
             project_path,
@@ -887,7 +919,8 @@ impl WorkstreamService<'_> {
             let link = match provision {
                 Ok(link) => link,
                 Err(e) => {
-                    let _ = self
+                    tracing::warn!("rolling back {} after: {e}", worktree_path.display());
+                    if let Err(rollback) = self
                         .runtime
                         .worktrees
                         .remove(
@@ -899,7 +932,13 @@ impl WorkstreamService<'_> {
                             RemovePolicy::ForceDiscard,
                             mode == WorktreeMode::Isolated || branch_is_ours,
                         )
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(
+                            "rollback left {} in place: {rollback}",
+                            worktree_path.display()
+                        );
+                    }
                     return Err(e);
                 }
             };
@@ -941,7 +980,12 @@ impl WorkstreamService<'_> {
             worktree_mode: mode,
         };
         let db = self.runtime.db.clone();
-        let item = blocking(move || db.insert_workstream(new_item)).await?;
+        let worktree_left = new_item.worktree_path.clone();
+        let item = blocking(move || db.insert_workstream(new_item))
+            .await
+            .inspect_err(|e| {
+                tracing::error!("not recorded, so {worktree_left} is left on disk untracked: {e}")
+            })?;
 
         Ok(CreateWorkstreamResult {
             item,
@@ -951,6 +995,11 @@ impl WorkstreamService<'_> {
     }
 
     pub async fn archive(&self, req: ArchiveWorkstreamRequest) -> Result<Workstream> {
+        let what = format!("archive workstream {}", req.id);
+        logged(&what, self.archive_inner(req)).await
+    }
+
+    async fn archive_inner(&self, req: ArchiveWorkstreamRequest) -> Result<Workstream> {
         ensure_running(self.runtime)?;
         let ArchiveWorkstreamRequest { id, skip_scripts } = req;
         let peek = self.find(&id).await?;
@@ -966,7 +1015,12 @@ impl WorkstreamService<'_> {
             let sid = id.clone();
             blocking(move || db.list_sessions(&sid))
                 .await
-                .unwrap_or_default()
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "archive of {id} cannot see its sessions, so none are stopped: {e}"
+                    );
+                    Vec::new()
+                })
         };
         for session in &sessions {
             self.runtime
@@ -1055,7 +1109,12 @@ impl WorkstreamService<'_> {
         {
             let keep = repo_settings::read(project_path)
                 .map(|s| s.worktree.copy)
-                .unwrap_or_default();
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "archive prunes every ignored file: .hyprlayer/settings.toml unreadable: {e}"
+                    );
+                    Vec::new()
+                });
             if let Err(e) = self
                 .runtime
                 .worktrees
@@ -1093,6 +1152,14 @@ impl WorkstreamService<'_> {
     }
 
     pub async fn restore(&self, req: RestoreWorkstreamRequest) -> Result<RestoreWorkstreamResult> {
+        let what = format!("restore workstream {}", req.id);
+        logged(&what, self.restore_inner(req)).await
+    }
+
+    async fn restore_inner(
+        &self,
+        req: RestoreWorkstreamRequest,
+    ) -> Result<RestoreWorkstreamResult> {
         ensure_running(self.runtime)?;
         let RestoreWorkstreamRequest { id } = req;
         let peek = self.find(&id).await?;
@@ -1176,6 +1243,11 @@ impl WorkstreamService<'_> {
     }
 
     pub async fn purge(&self, req: PurgeWorkstreamRequest) -> Result<()> {
+        let what = format!("purge workstream {}", req.id);
+        logged(&what, self.purge_inner(req)).await
+    }
+
+    async fn purge_inner(&self, req: PurgeWorkstreamRequest) -> Result<()> {
         ensure_running(self.runtime)?;
         let PurgeWorkstreamRequest { id } = req;
         let peek = self.find(&id).await?;
@@ -1326,6 +1398,17 @@ fn clean_gh_stderr(stderr: &str) -> String {
         }
     }
     s.to_string()
+}
+
+/// Destructive transactions leave a line with their workstream id either way.
+async fn logged<T>(what: &str, work: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    let started = std::time::Instant::now();
+    let result = work.await;
+    match &result {
+        Ok(_) => tracing::info!("{what} in {:?}", started.elapsed()),
+        Err(e) => tracing::warn!("{what} failed after {:?}: {e}", started.elapsed()),
+    }
+    result
 }
 
 #[cfg(test)]

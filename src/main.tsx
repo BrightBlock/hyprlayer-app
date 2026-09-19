@@ -11,6 +11,7 @@ import { reconnectBridge } from "./features/hosts/reconnect";
 import { registerActiveWorkstreams, writtenDocsBridge } from "./features/session/writtenDocs";
 import { activeWorkstreamIds, removeSessionsForWorkstream } from "./features/session/sessionStore";
 import { unwrap } from "./lib/ipc";
+import { installGlobalHandlers, log } from "./lib/log";
 import { onWorkstreamArchived } from "./lib/queries";
 import { queryClient } from "./lib/queryClient";
 import { setupDragRegion } from "./lib/dragRegion";
@@ -22,6 +23,7 @@ import { useUpdate } from "./lib/updater";
 import { setupNotificationActions } from "./lib/notifications";
 import "./index.css";
 
+installGlobalHandlers();
 initTheme();
 registerEventBridge(scriptRunBridge);
 registerEventBridge(writtenDocsBridge);
@@ -31,7 +33,7 @@ onWorkstreamArchived(removeSessionsForWorkstream);
 attachEventListeners();
 void unwrap(commands.listRunningScripts())
   .then(hydrateRunning)
-  .catch(() => {});
+  .catch((e) => log.warn("startup", "running scripts did not load", e));
 useUpdate.getState().init();
 setupNotificationActions();
 setupQueryFocus();
@@ -47,7 +49,13 @@ window.addEventListener("contextmenu", (e) => {
   window.getSelection()?.removeAllRanges();
 });
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
+  onCaughtError: (error, info) =>
+    log.error("render", `caught by an error boundary${info.componentStack ?? ""}`, error),
+  onUncaughtError: (error, info) =>
+    log.error("render", `uncaught${info.componentStack ?? ""}`, error),
+  onRecoverableError: (error) => log.warn("render", "recovered", error),
+}).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
@@ -60,7 +68,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   const reveal = () => {
     if (revealed) return;
     revealed = true;
-    void getCurrentWindow().show().catch(() => {});
+    // Windows and Linux start hidden: a failed show is an invisible app.
+    void getCurrentWindow()
+      .show()
+      .catch((e) => log.error("startup", "could not show the window", e));
   };
   requestAnimationFrame(() => requestAnimationFrame(reveal));
   setTimeout(reveal, 2000);

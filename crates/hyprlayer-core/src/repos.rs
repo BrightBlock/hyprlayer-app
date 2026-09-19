@@ -563,8 +563,15 @@ pub fn classify_repo_path(path: &Path) -> RepoPathStatus {
     if !path.is_dir() {
         return RepoPathStatus::Missing;
     }
-    let Ok(repo) = crate::gitops::open_repo(path) else {
-        return RepoPathStatus::NonGit;
+    let repo = match crate::gitops::open_repo(path) {
+        Ok(repo) => repo,
+        // A `.git` git2 can't open is still someone's history, never a folder
+        // to init; `unreadable_repo` says why.
+        Err(e) if is_git_repo(path) => {
+            tracing::debug!("classifying as a repository anyway: {e}");
+            return RepoPathStatus::Ready;
+        }
+        Err(_) => return RepoPathStatus::NonGit,
     };
     if repo.is_bare() {
         return RepoPathStatus::Bare;
@@ -575,6 +582,20 @@ pub fn classify_repo_path(path: &Path) -> RepoPathStatus {
     } else {
         RepoPathStatus::Ready
     }
+}
+
+/// Why a path with a `.git` can't be opened: libgit2 lacks some repository
+/// extensions (partial clones, reftable) and refuses other users' repos.
+pub fn unreadable_repo(path: &Path) -> Option<CoreError> {
+    if !is_git_repo(path) {
+        return None;
+    }
+    let e = git2::Repository::open(path).err()?;
+    Some(CoreError::RepoUnreadable {
+        path: path.display().to_string(),
+        detail: e.message().to_string(),
+        not_owned: e.code() == git2::ErrorCode::Owner,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -994,6 +1015,29 @@ mod tests {
         let git = which::which("git").unwrap();
         commit_empty_initial(&git, &repo, NO_OVERLAY).await.unwrap();
         assert_eq!(classify_repo_path(&repo), RepoPathStatus::Ready);
+    }
+
+    #[test]
+    fn a_repo_git2_cannot_open_is_never_classified_as_a_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("unsupported");
+        std::fs::create_dir(&repo).unwrap();
+        sh(&repo, &["init", "-b", "main"]);
+        // Extension first: git itself refuses to run in the repo once v1 names one it lacks.
+        sh(
+            &repo,
+            &["config", "extensions.hyprlayerunsupported", "true"],
+        );
+        sh(&repo, &["config", "core.repositoryformatversion", "1"]);
+
+        assert_eq!(classify_repo_path(&repo), RepoPathStatus::Ready);
+        let err = unreadable_repo(&repo).expect("git2 refuses the extension");
+        assert_eq!(err.code(), "repo_unreadable");
+        assert!(err.to_string().contains("hyprlayerunsupported"), "{err}");
+
+        let plain = dir.path().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        assert!(unreadable_repo(&plain).is_none());
     }
 
     #[test]

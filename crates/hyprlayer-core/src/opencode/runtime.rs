@@ -1,10 +1,12 @@
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, Mutex};
@@ -84,6 +86,10 @@ impl OpenCodeManager {
             }
         }
         if let Some(dead) = guard.take() {
+            tracing::warn!(
+                "opencode serve at {} stopped answering; replacing it",
+                dead.base_url
+            );
             dead.kill_blocking();
         }
         let server = Arc::new(OpenCodeServer::start(config).await?);
@@ -178,7 +184,7 @@ impl OpenCodeServer {
             .envs(overlay)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         if let Some(content) = std::fs::read_to_string(&auth_file)
             .ok()
             .filter(|c| !c.trim().is_empty())
@@ -199,8 +205,14 @@ impl OpenCodeServer {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let child = crate::process::spawn_supervised(&mut cmd)
+        let mut child = crate::process::spawn_supervised(&mut cmd)
             .map_err(|e| format!("spawn `opencode serve`: {e}"))?;
+        tracing::info!(
+            "started {} serve as pid {:?} on port {port}",
+            bin.display(),
+            child.id()
+        );
+        let stderr = capture_stderr(child.take_stderr());
 
         if let Some(pid) = child.id() {
             crate::process::orphan::record(&pid_file, pid, &orphan_program(&bin, &serve_args));
@@ -211,23 +223,39 @@ impl OpenCodeServer {
             .map_err(|e| e.to_string())?;
 
         let mut healthy = false;
+        let mut last_check = String::from("no answer");
         for _ in 0..60 {
-            if let Ok(resp) = client
+            // A crashed server and a slow one look alike to the health check.
+            if let Ok(Some(status)) = child.try_wait() {
+                let said = stderr_text(&stderr);
+                tracing::error!("opencode serve exited during startup ({status}): {said}");
+                return Err(format!(
+                    "`opencode serve` exited during startup ({status}): {said}"
+                ));
+            }
+            match client
                 .get(format!("{base_url}/global/health"))
                 .timeout(Duration::from_secs(2))
                 .send()
                 .await
             {
-                if let Ok(v) = resp.json::<Value>().await {
-                    if v.get("healthy").and_then(Value::as_bool) == Some(true) {
+                Ok(resp) => match resp.json::<Value>().await {
+                    Ok(v) if v.get("healthy").and_then(Value::as_bool) == Some(true) => {
                         healthy = true;
                         break;
                     }
-                }
+                    Ok(v) => last_check = format!("reported {v}"),
+                    Err(e) => last_check = e.to_string(),
+                },
+                Err(e) => last_check = e.to_string(),
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
         if !healthy {
+            tracing::error!(
+                "opencode serve on port {port} was not healthy after 15s ({last_check}); it said: {}",
+                stderr_text(&stderr)
+            );
             return Err("`opencode serve` did not become healthy in time".into());
         }
 
@@ -303,6 +331,39 @@ impl OpenCodeServer {
     }
 }
 
+const STDERR_LINES_KEPT: usize = 40;
+
+/// Keeps opencode's last stderr lines for the error when it fails to start;
+/// every line also goes to the debug log.
+fn capture_stderr(stderr: Option<tokio::process::ChildStderr>) -> Arc<StdMutex<VecDeque<String>>> {
+    let kept = Arc::new(StdMutex::new(VecDeque::new()));
+    if let Some(stderr) = stderr {
+        let sink = kept.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let line = crate::redact::url_credentials(&line);
+                tracing::debug!("opencode serve: {line}");
+                let mut kept = sink.lock().unwrap_or_else(PoisonError::into_inner);
+                if kept.len() == STDERR_LINES_KEPT {
+                    kept.pop_front();
+                }
+                kept.push_back(line);
+            }
+        });
+    }
+    kept
+}
+
+fn stderr_text(kept: &StdMutex<VecDeque<String>>) -> String {
+    let kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
+    if kept.is_empty() {
+        "nothing on stderr".into()
+    } else {
+        kept.iter().cloned().collect::<Vec<_>>().join("\n")
+    }
+}
+
 fn spawn_sse(
     tasks: &Handle,
     base_url: String,
@@ -310,8 +371,22 @@ fn spawn_sse(
     tx: broadcast::Sender<OcEvent>,
 ) {
     tasks.spawn(async move {
+        // One warning per outage: this retries every half second, forever.
+        let mut connected = true;
         loop {
-            if let Ok(mut resp) = client.get(format!("{base_url}/global/event")).send().await {
+            let response = client.get(format!("{base_url}/global/event")).send().await;
+            match &response {
+                Ok(_) if !connected => {
+                    tracing::info!("opencode event stream at {base_url} is back");
+                    connected = true;
+                }
+                Err(e) if connected => {
+                    tracing::warn!("opencode event stream at {base_url} failed; retrying: {e}");
+                    connected = false;
+                }
+                _ => {}
+            }
+            if let Ok(mut resp) = response {
                 let mut buf = String::new();
                 while let Ok(Some(bytes)) = resp.chunk().await {
                     buf.push_str(&String::from_utf8_lossy(&bytes));
@@ -649,8 +724,12 @@ impl OpenCodeDriver {
         let client = self.server.client.clone();
         let url = format!("{}{}", self.server.base_url, path);
         self.server.tasks.spawn(async move {
-            if let Err(e) = client.post(url).json(&body).send().await {
-                tracing::warn!("opencode POST failed: {e}");
+            match client.post(&url).json(&body).send().await {
+                Ok(resp) if !resp.status().is_success() => {
+                    tracing::warn!("opencode POST {url} returned {}", resp.status());
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("opencode POST {url} failed: {e}"),
             }
         });
     }

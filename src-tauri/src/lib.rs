@@ -4,6 +4,7 @@ mod editors;
 pub mod error;
 mod events;
 mod hosts;
+mod logging;
 mod provision;
 mod runtime_events;
 mod state;
@@ -201,6 +202,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::inspect_host_provisioning,
             commands::hosts::provision_host,
             commands::hosts::list_local_servers,
+            commands::diagnostics::reveal_logs,
+            commands::diagnostics::collect_diagnostics,
         ])
         .events(collect_events![
             events::ConfigChanged,
@@ -243,7 +246,17 @@ pub(crate) async fn attach_client(handle: &tauri::AppHandle, client: Arc<client:
     // Re-injected on every connect (ADR-0009 §7): a daemonized server has none
     // of these on its own — a respawned local server least of all — and without
     // SSH_AUTH_SOCK every `git push`/`gh` call would fail as ADR-0005 predicts.
-    if let Err(e) = client.set_env_overlay(env_overlay_from_desktop()).await {
+    let overlay = env_overlay_from_desktop();
+    log::info!(
+        "sending the server {} ({})",
+        overlay.keys().cloned().collect::<Vec<_>>().join(", "),
+        if overlay.contains_key("SSH_AUTH_SOCK") {
+            "with an SSH agent"
+        } else {
+            "no SSH agent: git and gh cannot authenticate over SSH"
+        }
+    );
+    if let Err(e) = client.set_env_overlay(overlay).await {
         log::warn!(
             "could not send the environment overlay to the server: {}",
             e.message
@@ -254,6 +267,7 @@ pub(crate) async fn attach_client(handle: &tauri::AppHandle, client: Arc<client:
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logging::install_panic_hook();
     let builder = specta_builder();
     // Bound before the builder so the identifier is readable: the profile id
     // has to be injected into the webview before any script runs.
@@ -291,11 +305,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(
-            tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Info)
-                .build(),
-        )
+        .plugin(logging::plugin())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
@@ -330,15 +340,35 @@ pub fn run() {
 
             let app_config_dir = app.path().app_config_dir()?;
             let app_data_dir = app.path().app_data_dir()?;
+            let app_log_dir = app.path().app_log_dir()?;
 
             // hosts.json is read before connecting anything, because it's the
             // one thing that has to be decided locally: there is no server to
             // ask which server to reach (ADR-0009, plan Phase 5 §2).
             let target = hosts::target(&app_config_dir);
+            let package = app.package_info();
+            log::info!(
+                "{} {} starting: pid {}, {}, {} build, {}/{}, protocol {}, server: {}, logs {}",
+                package.name,
+                package.version,
+                std::process::id(),
+                app.config().identifier,
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                },
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                hyprlayer_proto::PROTOCOL_VERSION,
+                target.name(),
+                app_log_dir.display(),
+            );
             let outcome = tauri::async_runtime::block_on(supervisor::connect(
                 &target,
                 &app_config_dir,
                 &app_data_dir,
+                &app_log_dir,
             ));
             // VS Code Remote-SSH's rule (plan Phase 1 §5): open the window
             // regardless of whether the connection succeeded. The one
@@ -354,10 +384,9 @@ pub fn run() {
                 }
                 supervisor::Outcome::Blocked { title, error } => {
                     let detail = supervisor::detail_for(&error);
-                    // Also to stderr: the dialog is all a packaged user sees, but it
-                    // renders nothing from a terminal launch, which left `tauri dev`
-                    // exiting 1 with no reason anywhere.
-                    eprintln!("{title}: {detail}");
+                    // Logged as well as shown: the dialog renders nothing from a
+                    // terminal launch, and the log is what a bug report carries.
+                    log::error!("{title}: {detail}");
                     if error.code == "runtime_in_use" {
                         app.dialog()
                             .message(detail)
@@ -388,6 +417,11 @@ pub fn run() {
                     // `Failed` rather than exit — a version-skewed server is
                     // still a state the recovery screen can show and act on.
                     Err(e) if e.code == "server_disconnected" => {
+                        log::error!(
+                            "the server dropped the connection on its first request ({}); \
+                             treating it as a build this app cannot talk to",
+                            e.message
+                        );
                         app.state::<AppState>()
                             .mark_failed(AppError::server_unavailable(
                                 supervisor::incompatible_server_detail(),
@@ -474,6 +508,14 @@ pub fn run() {
                     let _ = app.emit("menu:save-file", ());
                 }
                 "quit" => request_quit(app),
+                "reveal-logs" => {
+                    if let Err(e) = commands::diagnostics::reveal(app) {
+                        log::warn!("could not reveal the logs: {}", e.message);
+                    }
+                }
+                "copy-diagnostics" => {
+                    let _ = app.emit("menu:copy-diagnostics", ());
+                }
                 _ => {}
             });
 
@@ -483,18 +525,27 @@ pub fn run() {
         .expect("error while building tauri application")
         // Sessions and terminals live on the server now: quitting the app
         // must not touch the runtime, so there is nothing left to do here.
-        .run(|_app, _event| {});
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                log::info!("exiting");
+            }
+        });
 }
 
 fn request_quit(handle: &tauri::AppHandle) {
     let handle = handle.clone();
     tauri::async_runtime::spawn(async move {
         let confirm = match handle.try_state::<AppState>().and_then(|s| s.client().ok()) {
-            Some(client) => client
-                .get_app_settings()
-                .await
-                .map(|settings| settings.quit.confirm)
-                .unwrap_or(false),
+            Some(client) => match client.get_app_settings().await {
+                Ok(settings) => settings.quit.confirm,
+                Err(e) => {
+                    log::warn!(
+                        "quitting without confirmation: settings unavailable: {}",
+                        e.message
+                    );
+                    false
+                }
+            },
             None => false,
         };
         let Some(window) = handle.get_webview_window("main").filter(|_| confirm) else {
@@ -583,7 +634,19 @@ fn macos_menu(handle: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         .maximize()
         .build()?;
 
-    let help_menu = SubmenuBuilder::new(handle, "Help").build()?;
+    let reveal_logs =
+        tauri::menu::MenuItem::with_id(handle, "reveal-logs", "Reveal Logs", true, None::<&str>)?;
+    let copy_diagnostics = tauri::menu::MenuItem::with_id(
+        handle,
+        "copy-diagnostics",
+        "Copy Diagnostics",
+        true,
+        None::<&str>,
+    )?;
+    let help_menu = SubmenuBuilder::new(handle, "Help")
+        .item(&reveal_logs)
+        .item(&copy_diagnostics)
+        .build()?;
 
     MenuBuilder::new(handle)
         .items(&[

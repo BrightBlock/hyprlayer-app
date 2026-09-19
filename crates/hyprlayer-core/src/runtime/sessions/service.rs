@@ -160,10 +160,12 @@ impl SessionService<'_> {
     }
 
     pub async fn interrupt(&self, session_id: &str) -> Result<()> {
+        tracing::info!("session {session_id}: interrupt requested");
         self.require_live(session_id).await?.interrupt()
     }
 
     pub async fn kill(&self, session_id: &str) -> Result<()> {
+        tracing::info!("session {session_id}: kill requested");
         self.require_live(session_id).await?.kill();
         Ok(())
     }
@@ -290,8 +292,23 @@ impl SessionService<'_> {
             .await
     }
 
+    /// Resumes a lagged reader: everything persisted after `after_seq`, plus a
+    /// live attachment that starts exactly where that replay ends.
+    pub async fn attach_after(
+        &self,
+        session_id: &str,
+        epoch: u64,
+        after_seq: Option<i64>,
+    ) -> Result<SessionAttachment> {
+        self.runtime
+            .session_actors
+            .attach_after(session_id, epoch, after_seq)
+            .await
+    }
+
     pub async fn kill_and_await_exit(&self, session_id: &str) {
         if let Some(driver) = self.runtime.session_registry.get(session_id).await {
+            tracing::info!("session {session_id}: stopping its harness to relaunch it");
             driver.kill_detached();
             let mut waited_ms = 0u64;
             while self
@@ -304,6 +321,11 @@ impl SessionService<'_> {
             {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 waited_ms += 50;
+            }
+            if waited_ms >= 10_000 {
+                tracing::warn!(
+                    "session {session_id}: the harness had not exited after 10s; relaunching anyway"
+                );
             }
         }
     }
@@ -502,7 +524,7 @@ impl SessionService<'_> {
         };
         first_send?;
         if let (Some(rx), Some(followup)) = (turns.as_mut(), followup) {
-            followup::run_followup(driver.as_ref(), rx, followup, op_lock).await;
+            followup::run_followup(&session_id, driver.as_ref(), rx, followup, op_lock).await;
         }
         Ok(())
     }
@@ -529,7 +551,14 @@ impl SessionService<'_> {
             let _ = blocking(move || db.set_session_state(&id, SessionState::Running)).await;
         }
 
-        let (driver, rx, launched_mode) = self
+        let described = format!(
+            "{:?} {:?} (model {}, effort {}, resume {resume})",
+            session.harness,
+            session.stage,
+            model.as_deref().unwrap_or("default"),
+            effort.as_deref().unwrap_or("default"),
+        );
+        let spawned = self
             .spawn_driver(
                 &session,
                 &project_path,
@@ -538,12 +567,34 @@ impl SessionService<'_> {
                 permission_mode,
                 resume,
             )
-            .await?;
+            .await;
+        let (driver, rx, launched_mode) = match spawned {
+            Ok(spawned) => spawned,
+            Err(e) => {
+                tracing::error!("session {session_id}: {described} failed to start: {e}");
+                // Resume marked the row running before the spawn; put it back.
+                if resume {
+                    let db = self.runtime.db.clone();
+                    let id = session_id.clone();
+                    let previous = session.state;
+                    let _ = blocking(move || db.set_session_state(&id, previous)).await;
+                }
+                return Err(e);
+            }
+        };
+        tracing::info!(
+            "session {session_id} (workstream {}): {described} started as pid {:?} in {}, mode {launched_mode:?}",
+            session.workstream_id,
+            driver.pid(),
+            session.cwd
+        );
 
         if let Some(pid) = driver.pid() {
             let db = self.runtime.db.clone();
             let sid = session_id.clone();
-            let _ = blocking(move || db.record_orphan(pid as i64, &sid)).await;
+            if let Err(e) = blocking(move || db.record_orphan(pid as i64, &sid)).await {
+                tracing::warn!("session {session_id}: could not record pid {pid}: {e}");
+            }
         }
 
         self.runtime

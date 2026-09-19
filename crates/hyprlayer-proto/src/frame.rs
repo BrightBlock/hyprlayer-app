@@ -5,11 +5,22 @@
 pub const TAG_CONTROL: u8 = b'C';
 pub const TAG_DATA: u8 = b'D';
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Frame {
     /// One JSON document, without its terminating newline.
     Control(String),
     Data(Vec<u8>),
+}
+
+// A control line is a whole request or response body: print its size, not its
+// contents.
+impl std::fmt::Debug for Frame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Frame::Control(line) => write!(f, "Control({} bytes)", line.len()),
+            Frame::Data(payload) => write!(f, "Data({} bytes)", payload.len()),
+        }
+    }
 }
 
 pub fn encode(frame: &Frame) -> Vec<u8> {
@@ -96,6 +107,11 @@ impl Decoder {
     /// True when no partial frame is buffered, so an EOF here is a clean one.
     pub fn is_empty(&self) -> bool {
         self.start == self.buf.len()
+    }
+
+    /// Bytes fed but not yet taken as a frame: what arrived instead of a hello.
+    pub fn unconsumed(&self) -> &[u8] {
+        &self.buf[self.start..]
     }
 
     pub fn next_frame(&mut self) -> Result<Option<Frame>, DecodeError> {

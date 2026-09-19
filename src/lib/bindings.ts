@@ -259,6 +259,8 @@ export const commands = {
 	 */
 	provisionHost: (host: Host, onStep: Channel<ProvisionStep>) => typedError<null, AppError>(__TAURI_INVOKE("provision_host", { host, onStep })),
 	listLocalServers: () => typedError<LocalServer[], AppError>(__TAURI_INVOKE("list_local_servers")),
+	revealLogs: () => typedError<null, AppError>(__TAURI_INVOKE("reveal_logs")),
+	collectDiagnostics: () => typedError<string, AppError>(__TAURI_INVOKE("collect_diagnostics")),
 };
 
 /** Events */

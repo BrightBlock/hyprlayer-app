@@ -68,12 +68,16 @@ impl SessionRegistry {
         self.live.lock().await.keys().cloned().collect()
     }
 
-    pub fn kill_all_blocking(&self) {
-        if let Ok(live) = self.live.try_lock() {
-            for session in live.values() {
-                session.driver.kill_detached();
-            }
+    /// How many were killed, or `None` when the registry was busy and none were.
+    pub fn kill_all_blocking(&self) -> Option<usize> {
+        let Ok(live) = self.live.try_lock() else {
+            tracing::warn!("session registry busy at shutdown; its agents were not killed");
+            return None;
+        };
+        for session in live.values() {
+            session.driver.kill_detached();
         }
+        Some(live.len())
     }
 }
 

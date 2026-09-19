@@ -147,6 +147,13 @@ pub enum CoreError {
     #[error("{path} is a git repository.")]
     FolderIsGitRepo { path: String },
 
+    #[error("{path} is a git repository Hyprlayer can't open: {detail}")]
+    RepoUnreadable {
+        path: String,
+        detail: String,
+        not_owned: bool,
+    },
+
     #[error("A repository URL is required.")]
     RepoUrlRequired,
 
@@ -472,6 +479,19 @@ impl CoreError {
             CoreError::FolderIsGitRepo { .. } => Some(
                 "Add it as a repository instead, so it keeps its branches and thoughts.".into(),
             ),
+            CoreError::RepoUnreadable {
+                path,
+                not_owned: true,
+                ..
+            } => Some(format!(
+                "Git refuses repositories owned by another user. If you trust this one, run \
+                 `git config --global --add safe.directory '{path}'`, then add it again."
+            )),
+            CoreError::RepoUnreadable { .. } => Some(
+                "Hyprlayer can't read this repository's format, such as a partial (blobless) \
+                 clone or reftable refs. Add a full clone of it instead."
+                    .into(),
+            ),
             CoreError::RepoNameUndeducible { .. } => {
                 Some("Add an explicit name, or check the URL.".into())
             }
@@ -605,6 +625,7 @@ impl CoreError {
             CoreError::BareRepo { .. } => "bare_repo",
             CoreError::ProjectKindConflict { .. } => "project_kind_conflict",
             CoreError::FolderIsGitRepo { .. } => "folder_is_git_repo",
+            CoreError::RepoUnreadable { .. } => "repo_unreadable",
             CoreError::RepoUrlRequired => "invalid_url",
             CoreError::RepoNameUndeducible { .. } => "invalid_url",
             CoreError::ProjectNameRequired => "invalid_name",

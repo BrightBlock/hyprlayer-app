@@ -121,9 +121,10 @@ where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| WireError::internal(format!("{label} task: {e}")))
+    tokio::task::spawn_blocking(f).await.map_err(|e| {
+        tracing::error!("{label} task failed: {e}");
+        WireError::internal(format!("{label} task: {e}"))
+    })
 }
 
 const WORKTREE_GONE: &str = "The worktree may have been deleted; archive this workstream.";
@@ -175,11 +176,10 @@ where
         .collect();
     let mut views = Vec::with_capacity(handles.len());
     for handle in handles {
-        views.push(
-            handle
-                .await
-                .map_err(|e| WireError::internal(format!("status task: {e}")))?,
-        );
+        views.push(handle.await.map_err(|e| {
+            tracing::error!("workstream status task failed: {e}");
+            WireError::internal(format!("status task: {e}"))
+        })?);
     }
     Ok(views)
 }
@@ -233,10 +233,14 @@ impl Server {
             f(Path::new(&item.worktree_path), &item.base_branch)
         })
         .await?
-        .map_err(|e| WireError {
-            code: op.to_string(),
-            message: e.to_string(),
-            remedy: Some(remedy.into()),
+        .map_err(|e| {
+            // The client sees `op` as the code; the log keeps the real one.
+            tracing::debug!("{op} on workstream {id} failed: {}: {e}", e.code());
+            WireError {
+                code: op.to_string(),
+                message: e.to_string(),
+                remedy: Some(remedy.into()),
+            }
         })
     }
 
@@ -581,8 +585,11 @@ impl Dispatch for Server {
             .map(|item| item.project_path.clone())
             .collect::<std::collections::BTreeSet<_>>()
         {
-            if let Ok(eff) = self.runtime.settings().effective_config_for(&path).await {
-                effective.insert(path, eff);
+            match self.runtime.settings().effective_config_for(&path).await {
+                Ok(eff) => {
+                    effective.insert(path, eff);
+                }
+                Err(e) => tracing::warn!("no thoughts-link status for {path}: {e}"),
             }
         }
         let views = status_batch(items, move |item| {
@@ -661,14 +668,20 @@ impl Dispatch for Server {
 
         // TODO: Gate setup scripts on repository trust.
         if !inplace {
-            let _ = self
+            if let Err(e) = self
                 .runtime
                 .scripts()
                 .run_lifecycle(RunLifecycleRequest {
                     workstream: result.item.clone(),
                     kind: ScriptKind::Setup,
                 })
-                .await;
+                .await
+            {
+                tracing::warn!(
+                    "setup script for workstream {} did not run: {e}",
+                    result.item.id
+                );
+            }
         }
 
         let seed = result.seed;
@@ -1804,15 +1817,24 @@ impl Dispatch for Server {
 
     async fn launch_and_converse(&self, session_id: String) -> Result<(), WireError> {
         let Some(params) = crate::streams::take_pending_launch(self, &session_id) else {
+            tracing::warn!("session {session_id}: launch requested with no prepared launch");
             return Err(WireError::protocol(format!(
                 "no prepared launch for session {session_id}"
             )));
         };
-        self.runtime
-            .sessions()
-            .launch_and_converse(params)
-            .await
-            .wire()
+        let started = std::time::Instant::now();
+        let launched = self.runtime.sessions().launch_and_converse(params).await;
+        match &launched {
+            Ok(()) => tracing::debug!(
+                "session {session_id}: launch returned after {:?}",
+                started.elapsed()
+            ),
+            Err(e) => tracing::warn!(
+                "session {session_id}: launch failed after {:?}: {e}",
+                started.elapsed()
+            ),
+        }
+        launched.wire()
     }
 }
 

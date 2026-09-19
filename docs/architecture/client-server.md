@@ -493,6 +493,32 @@ Editor launching, sound, Full Disk Access, Omarchy theme polling and the updater
 stay client-side and return `CoreError::RemoteUnsupported { action, host }`
 against a remote server.
 
+## Logs
+
+Every process writes a file that outlives it, stamped in UTC to sub-second
+precision so lines from two machines interleave:
+
+| Process | File | Written by |
+|---|---|---|
+| Desktop, Rust and webview | `<app_log_dir>/<Product>.log`, 5 MiB × 5 | `src-tauri/src/logging.rs`; the webview through `src/lib/log.ts` |
+| Server | `hyprlayer-server.<date>.log`, 7 days | `crates/hyprlayer-server/src/logging.rs` |
+| Relay | `hyprlayer-relay.<date>.log`, 7 days | the same |
+| Server stderr | `hyprlayer-stderr.log` | panics that outrun the hook, and the startup line the supervisor reads back |
+
+`<app_log_dir>` is Tauri's rule for the profile: `~/Library/Logs/<identifier>` on
+macOS, `<local data>/<identifier>/logs` elsewhere. A local server logs beside the
+desktop; a remote host's server logs under its own home, and `hyprlayer-server
+logs` prints the tails there, running or not.
+
+`HYPRLAYER_LOG` sets the level (`debug`, or a filter such as
+`info,hyprlayer_core=debug`), and a server the desktop spawns inherits it. Help ▸
+Copy Diagnostics (Settings ▸ Advanced ▸ Logs on every platform) bundles the
+versions, the connection, and the tails of both machines' logs, home paths masked.
+
+Nothing logs request arguments or responses (their `Debug` prints the command name
+only), prompts, terminal input, or environment values: the overlay is logged by key
+name.
+
 ## Where things live
 
 | Concern | File |
@@ -515,3 +541,7 @@ against a remote server.
 | PTY threads and the output ring | `crates/hyprlayer-core/src/terminal/mod.rs` |
 | Terminal service and registry | `crates/hyprlayer-core/src/runtime/terminals.rs` |
 | Session actor, persist and fan-out | `crates/hyprlayer-core/src/runtime/sessions/` |
+| Server log files, stderr file, `logs` subcommand | `crates/hyprlayer-server/src/logging.rs` |
+| Desktop log file and panic hook | `src-tauri/src/logging.rs` |
+| Diagnostics report, Reveal Logs | `src-tauri/src/commands/diagnostics.rs` |
+| Webview logging and global error handlers | `src/lib/log.ts` |

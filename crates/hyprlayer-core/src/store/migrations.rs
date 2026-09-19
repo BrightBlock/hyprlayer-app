@@ -85,9 +85,16 @@ const MIGRATIONS: &[&str] = &[
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let current: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let latest = MIGRATIONS.len() as u32;
+    if current > latest {
+        tracing::warn!(
+            "database schema {current} is newer than this build's {latest}: a newer Hyprlayer wrote it"
+        );
+    }
     for (i, sql) in MIGRATIONS.iter().enumerate() {
         let version = (i + 1) as u32;
         if current < version {
+            tracing::info!("migrating the database schema to {version}");
             conn.execute_batch(sql)?;
             conn.pragma_update(None, "user_version", version)?;
         }

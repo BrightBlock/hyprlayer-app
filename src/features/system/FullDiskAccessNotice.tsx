@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { commands } from "@/lib/bindings";
+import { log } from "@/lib/log";
 import { useBootstrap, useFullDiskAccess, useSetAppSettings } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
 
@@ -38,10 +39,10 @@ export function FullDiskAccessNotice() {
             try {
               const res = await commands.openFullDiskAccessSettings();
               if (res.status === "error") {
-                console.error("open Full Disk Access settings:", res.error);
+                log.error("full-disk-access", "open System Settings failed", res.error);
               }
             } catch (e) {
-              console.error("open Full Disk Access settings:", e);
+              log.error("full-disk-access", "open System Settings failed", e);
             }
           },
         },

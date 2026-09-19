@@ -25,6 +25,7 @@ pub(crate) fn followup_for(
 }
 
 pub(crate) async fn run_followup(
+    session_id: &str,
     driver: &dyn AgentDriver,
     rx: &mut broadcast::Receiver<SessionEvent>,
     followup: Followup,
@@ -33,13 +34,28 @@ pub(crate) async fn run_followup(
     let status = loop {
         match rx.recv().await {
             Ok(SessionEvent::TurnDone { turn_status, .. }) => break turn_status,
-            Ok(SessionEvent::Exited { .. }) | Err(_) => return,
+            Ok(SessionEvent::Exited { .. }) => {
+                tracing::info!(
+                    "session {session_id}: exited before its first turn ended; no follow-up"
+                );
+                return;
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!(
+                    "session {session_id}: follow-up abandoned after missing {n} events"
+                );
+                return;
+            }
+            Err(broadcast::error::RecvError::Closed) => return,
             Ok(_) => {}
         }
     };
     match followup {
         Followup::ShipDescribe => {
-            let _ = driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None);
+            tracing::info!("session {session_id}: sending the ship describe follow-up");
+            if let Err(e) = driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None) {
+                tracing::warn!("session {session_id}: the describe follow-up was not sent: {e}");
+            }
         }
         Followup::CodexExecute(prompt) => {
             // Destructive follow-up: only after a cleanly completed review turn.
@@ -47,11 +63,24 @@ pub(crate) async fn run_followup(
             // absent or unrecognised status must fail safe too, so this requires
             // an exact Completed rather than excluding the statuses we know.
             if status.as_deref().map(TurnStatus::parse) != Some(TurnStatus::Completed) {
+                tracing::info!(
+                    "session {session_id}: phase one ended with status {status:?}; phase two skipped"
+                );
                 return;
+            }
+            let observed = driver.observed_collab_mode();
+            if observed.as_deref() != Some("plan") {
+                tracing::warn!(
+                    "session {session_id}: codex never confirmed plan mode for phase one \
+                     (observed {observed:?}); its questions had no card to answer them"
+                );
             }
             let _guard = op_lock.lock().await;
             driver.set_collab_mode(Some(CollabMode::Default));
-            let _ = driver.send_user_turn(prompt, None, None);
+            tracing::info!("session {session_id}: starting phase two");
+            if let Err(e) = driver.send_user_turn(prompt, None, None) {
+                tracing::warn!("session {session_id}: phase two was not sent: {e}");
+            }
         }
     }
 }
@@ -63,7 +92,7 @@ pub async fn run_codex_followup_for_test(
     prompt: &'static str,
     op_lock: Arc<AsyncMutex<()>>,
 ) {
-    run_followup(driver, rx, Followup::CodexExecute(prompt), op_lock).await;
+    run_followup("test", driver, rx, Followup::CodexExecute(prompt), op_lock).await;
 }
 
 #[cfg(test)]

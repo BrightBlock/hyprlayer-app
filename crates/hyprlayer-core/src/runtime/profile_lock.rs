@@ -63,8 +63,15 @@ impl ProfileLock {
         }
         let claim = Claim(key);
 
-        if FileExt::try_lock(&file).is_err() {
-            return Err(busy());
+        match FileExt::try_lock(&file) {
+            Ok(()) => {}
+            Err(fs4::TryLockError::WouldBlock) => return Err(busy()),
+            // Not contention (a filesystem without locks, say): logged, or it
+            // reads as another running Hyprlayer.
+            Err(fs4::TryLockError::Error(e)) => {
+                tracing::warn!("cannot lock {}: {e}", lock_path.display());
+                return Err(busy());
+            }
         }
 
         Ok(Self {

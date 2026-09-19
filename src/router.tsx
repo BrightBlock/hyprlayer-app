@@ -4,6 +4,7 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 import { Root } from "./routes/Root";
 import { Dashboard } from "./routes/Dashboard";
 import type { LibrarySearch } from "./features/library/librarySearch";
+import { RouteError } from "./components/RouteError";
 import { registerAppNav } from "./lib/appNav";
 import { useLastRoute } from "./lib/lastRoute";
 
@@ -143,7 +144,9 @@ if (lastHref && lastHref !== "/" && window.location.pathname === "/") {
   window.history.replaceState(null, "", lastHref);
 }
 
-export const router = createRouter({ routeTree });
+// Per-route boundaries: without one, a page's render error replaced the whole
+// app, window controls included, with the router's bare fallback.
+export const router = createRouter({ routeTree, defaultErrorComponent: RouteError });
 
 registerAppNav({
   currentLocation: () => {

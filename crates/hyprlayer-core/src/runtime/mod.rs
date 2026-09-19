@@ -20,7 +20,7 @@ pub mod terminals;
 pub mod workstreams;
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -87,6 +87,9 @@ pub struct HyprlayerRuntime {
     opencode: Arc<OpenCodeManager>,
     watchers: Watchers,
     focused: Arc<AtomicBool>,
+    /// The last full scan's document count, so a rescan that changes nothing
+    /// logs at debug.
+    indexed_docs: AtomicU32,
     focus_changed: Arc<Notify>,
     events: broadcast::Sender<RuntimeEvent>,
     config_cli: Arc<dyn ConfigCli>,
@@ -136,10 +139,22 @@ impl HyprlayerRuntime {
 
         if let Ok(orphans) = db.list_orphans() {
             if !orphans.is_empty() {
+                // A pid may since belong to something else; the program says.
+                let described: Vec<String> = orphans
+                    .iter()
+                    .map(|(pid, session)| {
+                        match crate::process::orphan::running_program(*pid as u32) {
+                            Some(program) => {
+                                format!("{pid} (session {session}) still runs {program}")
+                            }
+                            None => format!("{pid} (session {session}) has exited"),
+                        }
+                    })
+                    .collect();
                 tracing::warn!(
-                    "found {} orphan session PID(s) from a prior run: {:?}",
+                    "{} agent process(es) outlived a previous run: {}",
                     orphans.len(),
-                    orphans
+                    described.join("; ")
                 );
                 let _ = db.clear_all_orphans();
             }
@@ -151,6 +166,13 @@ impl HyprlayerRuntime {
             .as_deref()
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| paths.default_worktree_root.clone());
+
+        tracing::info!(
+            "runtime opened: data {}, worktrees {}, config {}",
+            paths.app_data_dir.display(),
+            worktree_root.display(),
+            paths.hyprlayer_config_file.display()
+        );
 
         let (events, _) = broadcast::channel(EVENT_CAP);
         let session_actors = Arc::new(SessionActors::new(db.clone(), events.clone()));
@@ -184,6 +206,7 @@ impl HyprlayerRuntime {
                 worktree_watch: Arc::new(AsyncMutex::new(None)),
             },
             focused: Arc::new(AtomicBool::new(true)),
+            indexed_docs: AtomicU32::new(u32::MAX),
             focus_changed: Arc::new(Notify::new()),
             events,
             environment,
@@ -210,6 +233,7 @@ impl HyprlayerRuntime {
                 if startup_binaries.enrich_with_login_shell().await {
                     let _ = startup_events.send(RuntimeEvent::BinariesChanged);
                 }
+                log_binaries(&startup_binaries).await;
                 let Some(runtime) = startup.upgrade() else {
                     return;
                 };
@@ -241,6 +265,7 @@ impl HyprlayerRuntime {
                 let current = key(&path);
                 if current != last {
                     last = current;
+                    tracing::info!("{} changed; reloading it", path.display());
                     config_poll.config.invalidate().await;
                     let _ = config_poll.events.send(RuntimeEvent::ConfigChanged);
                     config_poll.rebuild_thoughts_index().await;
@@ -275,6 +300,17 @@ impl HyprlayerRuntime {
     /// Replaces the per-attach environment overlay (`SSH_AUTH_SOCK` and
     /// friends) merged over every child spawn — last attach wins (ADR-0009).
     pub fn set_env_overlay(&self, overlay: std::collections::BTreeMap<String, String>) {
+        // Names only; whether an agent socket arrived decides if git and gh
+        // can authenticate over SSH (ADR-0005).
+        tracing::info!(
+            "environment overlay from a client: {} ({})",
+            overlay.keys().cloned().collect::<Vec<_>>().join(", "),
+            if overlay.contains_key("SSH_AUTH_SOCK") {
+                "with an SSH agent"
+            } else {
+                "no SSH agent"
+            }
+        );
         self.environment.set_env_overlay(overlay);
     }
 
@@ -293,9 +329,19 @@ impl HyprlayerRuntime {
                 let tasks = std::mem::take(&mut *self.tasks.lock().await);
                 let (forced_tasks, _) = shutdown::stop_tasks(tasks).await;
 
-                self.terminals.kill_all_blocking();
-                self.session_registry.kill_all_blocking();
+                let terminals = self.terminals.kill_all_blocking();
+                let sessions = self.session_registry.kill_all_blocking();
                 self.opencode.shutdown().await;
+                let count = |killed: Option<usize>| {
+                    killed.map_or("an unknown number of (registry busy)".to_string(), |n| {
+                        n.to_string()
+                    })
+                };
+                tracing::info!(
+                    "shutdown ended {} terminal(s) and {} agent session(s)",
+                    count(terminals),
+                    count(sessions)
+                );
 
                 ShutdownReport {
                     elapsed: start.elapsed(),
@@ -344,20 +390,32 @@ impl HyprlayerRuntime {
     pub async fn rebuild_thoughts_index(&self) {
         let roots = match self.config.load().await {
             Ok(loaded) => crate::index::thoughts_roots(&loaded.config),
-            Err(_) => Vec::new(),
+            Err(e) => {
+                tracing::warn!("no thoughts roots to index: {e}");
+                Vec::new()
+            }
         };
 
         let index = self.index.clone();
         let scan_roots = roots.clone();
+        let started = std::time::Instant::now();
         let stats = tokio::task::spawn_blocking(move || index.full_scan(&scan_roots)).await;
         if let Ok(stats) = &stats {
-            tracing::info!(
-                "thoughts index: {} docs ({} skipped, {} errors) across {} roots",
+            // Rescans follow every config change; only news reaches info.
+            let changed = self.indexed_docs.swap(stats.indexed, Ordering::Relaxed) != stats.indexed;
+            let summary = format!(
+                "thoughts index: {} docs ({} skipped, {} errors) across {} roots in {:?}",
                 stats.indexed,
                 stats.skipped,
                 stats.errors,
-                roots.len()
+                roots.len(),
+                started.elapsed()
             );
+            if changed || stats.errors > 0 {
+                tracing::info!("{summary}");
+            } else {
+                tracing::debug!("{summary}");
+            }
         }
 
         let watch = if roots.is_empty() {
@@ -433,4 +491,27 @@ impl HyprlayerRuntime {
     pub fn test_db(&self) -> Arc<Db> {
         self.db.clone()
     }
+}
+
+/// Which binary and version each tool resolved to: a daemon sees a different
+/// `PATH` than the user's shell, the usual cause of "works in my terminal".
+async fn log_binaries(binaries: &BinaryResolver) {
+    for status in binaries.status_all().await {
+        tracing::info!(
+            "binary {}: {:?} at {} ({}){}",
+            status.name,
+            status.state,
+            status.path.as_deref().unwrap_or("nowhere"),
+            status.version.as_deref().unwrap_or("no version"),
+            if status.overridden {
+                ", overridden"
+            } else {
+                ""
+            }
+        );
+    }
+    tracing::debug!(
+        "search PATH: {}",
+        binaries.augmented_path().await.to_string_lossy()
+    );
 }

@@ -58,6 +58,12 @@ pub trait AgentDriver: Send + Sync {
 
     fn set_collab_mode(&self, _mode: Option<CollabMode>) {}
 
+    /// The collaboration mode the harness last confirmed (codex only): the
+    /// ADR-0007 tripwire for a plan mode it silently ignored.
+    fn observed_collab_mode(&self) -> Option<String> {
+        None
+    }
+
     fn respond_permission(
         &self,
         request_id: &str,
@@ -134,6 +140,9 @@ impl AgentDriver for ClaudeDriver {
 impl AgentDriver for CodexDriver {
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
         self.subscribe()
+    }
+    fn observed_collab_mode(&self) -> Option<String> {
+        self.observed_collab_mode()
     }
     fn send_user_turn(
         &self,

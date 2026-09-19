@@ -205,7 +205,7 @@ pub struct ProviderSettings {
     pub codex: CodexSettings,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct ClaudeSettings {
@@ -227,6 +227,49 @@ pub struct ClaudeSettings {
     pub review_model: Option<String>,
     pub review_effort: Option<String>,
     pub default_fast_mode: bool,
+}
+
+// Hand-written so `{:?}` never prints the API key; the exhaustive destructure
+// makes a new field a compile error until it is listed here.
+impl std::fmt::Debug for ClaudeSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            default_model,
+            default_effort,
+            commit_model,
+            commit_effort,
+            default_plan_mode,
+            visible_models,
+            seen_model_keys,
+            auth_mode,
+            api_key,
+            base_url,
+            use_bedrock,
+            use_vertex,
+            chrome_enabled,
+            review_model,
+            review_effort,
+            default_fast_mode,
+        } = self;
+        f.debug_struct("ClaudeSettings")
+            .field("default_model", default_model)
+            .field("default_effort", default_effort)
+            .field("commit_model", commit_model)
+            .field("commit_effort", commit_effort)
+            .field("default_plan_mode", default_plan_mode)
+            .field("visible_models", visible_models)
+            .field("seen_model_keys", seen_model_keys)
+            .field("auth_mode", auth_mode)
+            .field("api_key", &api_key.as_ref().map(|_| "<redacted>"))
+            .field("base_url", base_url)
+            .field("use_bedrock", use_bedrock)
+            .field("use_vertex", use_vertex)
+            .field("chrome_enabled", chrome_enabled)
+            .field("review_model", review_model)
+            .field("review_effort", review_effort)
+            .field("default_fast_mode", default_fast_mode)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -403,10 +446,7 @@ pub struct SettingsStore {
 impl SettingsStore {
     pub fn load(dir: PathBuf) -> Self {
         let path = dir.join("settings.json");
-        let mut settings: AppSettings = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default();
+        let mut settings = read_or_move_aside(&path);
         if settings.normalize() {
             if let Err(error) = persist_sync(&path, &settings) {
                 tracing::warn!("could not persist normalized settings: {error}");
@@ -440,6 +480,33 @@ impl SettingsStore {
     pub async fn set(&self, settings: AppSettings) -> Result<()> {
         self.update(|s| *s = settings).await.map(|_| ())
     }
+}
+
+/// An unreadable file is renamed aside rather than ignored: the next `update()`
+/// would otherwise persist defaults over the user's keys and overrides.
+fn read_or_move_aside(path: &std::path::Path) -> AppSettings {
+    let failure = match std::fs::read_to_string(path) {
+        Ok(raw) => match serde_json::from_str(&raw) {
+            Ok(settings) => return settings,
+            Err(e) => e.to_string(),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AppSettings::default(),
+        Err(e) => e.to_string(),
+    };
+    let aside = path.with_extension(format!("json.unreadable-{}", crate::store::now_ms() as u64));
+    match std::fs::rename(path, &aside) {
+        Ok(()) => tracing::error!(
+            "{} is unreadable ({failure}); moved it to {} and started from defaults",
+            path.display(),
+            aside.display()
+        ),
+        Err(e) => tracing::error!(
+            "{} is unreadable ({failure}) and could not be moved aside ({e}); \
+             starting from defaults",
+            path.display()
+        ),
+    }
+    AppSettings::default()
 }
 
 fn persist_sync(path: &std::path::Path, settings: &AppSettings) -> std::io::Result<()> {
@@ -491,6 +558,28 @@ mod tests {
                 "harness {harness:?} should keep the Claude default"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn an_unparseable_settings_file_is_moved_aside_before_any_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = r#"{"providers": {"claude": {"apiKey": "sk-keep"}}, oops"#;
+        std::fs::write(dir.path().join("settings.json"), original).unwrap();
+
+        let store = SettingsStore::load(dir.path().to_path_buf());
+        store.update(|_| {}).await.unwrap();
+
+        let aside: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("settings.json.unreadable-")
+            })
+            .collect();
+        assert_eq!(aside.len(), 1);
+        assert_eq!(std::fs::read_to_string(aside[0].path()).unwrap(), original);
     }
 
     #[tokio::test]

@@ -37,7 +37,7 @@ pub struct StreamStartOpts {
     pub prompt_name: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamRequest {
     TerminalOpen {
@@ -100,7 +100,7 @@ pub enum StreamRequest {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamResponse {
     Terminal {
@@ -128,6 +128,48 @@ pub enum StreamResponse {
     AttachSession {
         stream_id: u64,
     },
+}
+
+impl StreamRequest {
+    pub fn command(&self) -> &'static str {
+        match self {
+            Self::TerminalOpen { .. } => "terminal_open",
+            Self::TerminalAttach { .. } => "terminal_attach",
+            Self::SpawnCliTerminal { .. } => "spawn_cli_terminal",
+            Self::SpawnShellTerminal { .. } => "spawn_shell_terminal",
+            Self::AgentOpen { .. } => "agent_open",
+            Self::ScriptRun { .. } => "script_run",
+            Self::StartStageSession { .. } => "start_stage_session",
+            Self::ResumeSession { .. } => "resume_session",
+            Self::RestartSession { .. } => "restart_session",
+            Self::RewindSession { .. } => "rewind_session",
+            Self::AttachSession { .. } => "attach_session",
+        }
+    }
+}
+
+// Inputs and results carry prompts and command lines, so `{:?}` names the
+// variant and nothing else.
+impl std::fmt::Debug for StreamRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(self.command()).finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for StreamResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let variant = match self {
+            Self::Terminal { .. } => "Terminal",
+            Self::TerminalAttach { .. } => "TerminalAttach",
+            Self::Session { .. } => "Session",
+            Self::StartStageSession { .. } => "StartStageSession",
+            Self::RewindSession { .. } => "RewindSession",
+            Self::AttachSession { .. } => "AttachSession",
+        };
+        f.debug_struct(variant)
+            .field("stream_id", &self.stream_id())
+            .finish_non_exhaustive()
+    }
 }
 
 impl StreamResponse {
@@ -206,7 +248,11 @@ impl StreamRegistry {
     }
 
     pub(crate) fn abort_all(&self) {
-        for (_, handle) in self.lock().drain() {
+        let open: Vec<_> = self.lock().drain().collect();
+        if !open.is_empty() {
+            tracing::debug!("aborting {} stream(s) with their connection", open.len());
+        }
+        for (_, handle) in open {
             handle.abort();
         }
     }
@@ -608,94 +654,100 @@ async fn run_stream(
     tx: mpsc::Sender<Vec<u8>>,
     registry: StreamRegistry,
 ) {
-    match source {
-        StreamSource::Terminal(mut live) => {
-            while let Some(event) = live.recv().await {
-                if !send_event(&tx, stream_id, &event).await {
-                    break;
-                }
-            }
-        }
+    let ended = match source {
+        StreamSource::Terminal(live) => forward_terminal(stream_id, live, &tx).await,
         StreamSource::Session {
             session_id,
             replay,
-            mut live,
-        } => {
-            for entry in replay {
-                if !send_event(&tx, stream_id, &entry.event).await {
-                    registry.remove(stream_id);
-                    return;
-                }
-            }
-            loop {
-                match live.recv().await {
-                    Some(Ok(event)) => {
-                        let terminal = matches!(event, SessionEvent::Exited { .. });
-                        let sent = send_event(&tx, stream_id, &event).await;
-                        if !sent || terminal {
-                            break;
-                        }
-                    }
-                    Some(Err(SessionStreamError::Lagged {
-                        epoch,
-                        last_persisted_seq,
-                    })) => {
-                        let sessions = runtime.sessions();
-                        match sessions
-                            .log_after(&session_id, epoch, last_persisted_seq)
-                            .await
-                        {
-                            Ok(entries) => {
-                                let mut delivered = true;
-                                for entry in entries {
-                                    if !send_event(&tx, stream_id, &entry.event).await {
-                                        delivered = false;
-                                        break;
-                                    }
-                                }
-                                if !delivered {
-                                    break;
-                                }
-                                match sessions.attach(&session_id).await {
-                                    Ok(attachment) => live = attachment.live,
-                                    Err(e) => {
-                                        let _ = send_event(
-                                            &tx,
-                                            stream_id,
-                                            &SessionEvent::ProtocolError {
-                                                detail: format!(
-                                                    "could not reattach after a lagged stream: {e}"
-                                                ),
-                                                raw: String::new(),
-                                            },
-                                        )
-                                        .await;
-                                        break;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let _ = send_event(
-                                    &tx,
-                                    stream_id,
-                                    &SessionEvent::ProtocolError {
-                                        detail: format!(
-                                            "could not recover from a lagged stream: {e}"
-                                        ),
-                                        raw: String::new(),
-                                    },
-                                )
-                                .await;
-                                break;
-                            }
-                        }
-                    }
-                    None => break,
-                }
-            }
+            live,
+        } => forward_session(&runtime, stream_id, &session_id, replay, live, &tx).await,
+    };
+    tracing::debug!("stream {stream_id} ended: {ended}");
+    registry.remove(stream_id);
+}
+
+/// Returns why the stream ended.
+async fn forward_terminal(
+    stream_id: u64,
+    mut live: mpsc::Receiver<TerminalEvent>,
+    tx: &mpsc::Sender<Vec<u8>>,
+) -> &'static str {
+    while let Some(event) = live.recv().await {
+        if !send_event(tx, stream_id, &event).await {
+            return "the client stopped reading";
         }
     }
-    registry.remove(stream_id);
+    "the terminal closed"
+}
+
+/// Returns why the stream ended.
+async fn forward_session(
+    runtime: &HyprlayerRuntime,
+    stream_id: u64,
+    session_id: &str,
+    replay: Vec<SessionLogEntry>,
+    mut live: mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
+    tx: &mpsc::Sender<Vec<u8>>,
+) -> &'static str {
+    for entry in replay {
+        if !send_event(tx, stream_id, &entry.event).await {
+            return "the client stopped reading during the replay";
+        }
+    }
+    loop {
+        match live.recv().await {
+            Some(Ok(event)) => {
+                let exited = matches!(event, SessionEvent::Exited { .. });
+                if !send_event(tx, stream_id, &event).await {
+                    return "the client stopped reading";
+                }
+                if exited {
+                    return "the session exited";
+                }
+            }
+            Some(Err(SessionStreamError::Lagged {
+                epoch,
+                last_persisted_seq,
+            })) => {
+                match runtime
+                    .sessions()
+                    .attach_after(session_id, epoch, last_persisted_seq)
+                    .await
+                {
+                    Ok(resumed) => {
+                        tracing::warn!(
+                            "stream {stream_id}: session {session_id} lagged after seq \
+                             {last_persisted_seq:?}; replaying {} events",
+                            resumed.replay.len()
+                        );
+                        live = resumed.live;
+                        for entry in resumed.replay {
+                            if !send_event(tx, stream_id, &entry.event).await {
+                                return "the client stopped reading during a lag replay";
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "stream {stream_id}: session {session_id} could not recover \
+                             from a lag: {e}"
+                        );
+                        let _ = send_event(
+                            tx,
+                            stream_id,
+                            &SessionEvent::ProtocolError {
+                                detail: format!("could not recover from a lagged stream: {e}"),
+                                raw: String::new(),
+                            },
+                        )
+                        .await;
+                        return "a lag could not be recovered";
+                    }
+                }
+            }
+            None => return "the session's event source closed",
+        }
+    }
 }
 
 async fn send_event(tx: &mpsc::Sender<Vec<u8>>, stream_id: u64, event: &impl Serialize) -> bool {

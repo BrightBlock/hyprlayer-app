@@ -46,6 +46,7 @@ fn exec_stderr(err: &CoreError) -> String {
 // dies on repo_exists", so it has to reach the caller attached to whatever error
 // triggered the rollback.
 async fn rollback_dir(path: &Path, err: CoreError) -> CoreError {
+    tracing::warn!("rolling back {} after: {err}", path.display());
     let owned = path.to_path_buf();
     match blocking(move || std::fs::remove_dir_all(owned).map_err(CoreError::Io)).await {
         Ok(()) => err,
@@ -653,6 +654,10 @@ impl ProjectService<'_> {
             }
             _ => {}
         }
+        if let Some(e) = repos::unreadable_repo(repo) {
+            tracing::warn!("import refused: {e}");
+            return Err(e);
+        }
 
         let canonical = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
         let key = canonical.display().to_string();
@@ -672,7 +677,8 @@ impl ProjectService<'_> {
 
         let git = self.runtime.binaries.require(BinaryKind::Git).await?;
 
-        let created = matches!(status, repos::RepoPathStatus::NonGit);
+        // Only a `.git` this call creates may be rolled back.
+        let created = matches!(status, repos::RepoPathStatus::NonGit) && !repos::is_git_repo(repo);
 
         let setup: Result<()> = match status {
             repos::RepoPathStatus::NonGit => {

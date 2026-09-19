@@ -323,19 +323,31 @@ impl ProviderService<'_> {
             .await
         {
             Ok(response) if response.status < 400 => response,
+            // Debug: an Ollama that is simply not running is the common case.
             Ok(response) => {
-                tracing::warn!("ollama probe {url} returned HTTP {}", response.status);
+                tracing::debug!(
+                    "ollama probe {} returned HTTP {}",
+                    crate::redact::url_credentials(&url),
+                    response.status
+                );
                 return unreachable();
             }
             Err(e) => {
-                tracing::warn!("ollama probe {url} failed: {e}");
+                tracing::debug!(
+                    "ollama probe {} failed: {}",
+                    crate::redact::url_credentials(&url),
+                    crate::redact::url_credentials(&e.to_string())
+                );
                 return unreachable();
             }
         };
         let tags = match serde_json::from_str::<RawTags>(&response.body) {
             Ok(t) => t,
             Err(e) => {
-                tracing::warn!("ollama probe {url} returned unparseable /api/tags: {e}");
+                tracing::warn!(
+                    "ollama probe {} returned unparseable /api/tags: {e}",
+                    crate::redact::url_credentials(&url)
+                );
                 return unreachable();
             }
         };

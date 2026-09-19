@@ -34,6 +34,8 @@ import {
   useWorktreeFilesCheck,
 } from "@/lib/queries";
 import { errorMessage } from "@/lib/ipc";
+import { log } from "@/lib/log";
+import { copyDiagnostics } from "@/lib/diagnostics";
 import { triggerActiveFileSave } from "@/lib/fileSave";
 import { docTitle } from "@/features/library/text";
 import { WorkstreamActivityDot } from "@/features/session/WorkstreamActivity";
@@ -445,7 +447,7 @@ function OpenInMenu({ dir }: { dir: string }) {
         icon: appIcon(app),
         run: (): void => {
           const p = app.openWith ? openPath(dir, app.openWith) : openPath(dir);
-          void p.catch((e) => console.error(`Open in ${app.name} failed`, e));
+          void p.catch((e) => log.error("open-in", `opening in ${app.name} failed`, e));
         },
       })),
       {
@@ -970,6 +972,9 @@ export function Root() {
       }),
       listen("menu:save-file", () => {
         triggerActiveFileSave();
+      }),
+      listen("menu:copy-diagnostics", () => {
+        void copyDiagnostics();
       }),
     ]);
     return () => {

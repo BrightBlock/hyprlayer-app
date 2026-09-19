@@ -8,6 +8,7 @@ import {
 
 import { commands, type AppSettings, type WorkstreamView } from "./bindings";
 import { unwrap } from "./ipc";
+import { log } from "./log";
 import { IS_MACOS } from "./platform";
 import { queryClient } from "./queryClient";
 import { goToWorkstream } from "./appNav";
@@ -104,7 +105,7 @@ export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
     });
     if (cfg.sound ?? DEFAULT_CONFIG.sound) void playSound();
   } catch (e) {
-    console.warn("notification dispatch failed", e);
+    log.warn("notifications", "dispatch failed", e);
   }
 }
 
@@ -122,7 +123,7 @@ export async function sendTestNotification(): Promise<{
     void playSound();
     return { sent: true };
   } catch (e) {
-    console.warn("test notification failed", e);
+    log.warn("notifications", "test notification failed", e);
     return { sent: false, reason: "error" };
   }
 }

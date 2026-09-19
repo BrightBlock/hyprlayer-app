@@ -24,6 +24,7 @@ import {
   type ResolvedEngine,
 } from "@/features/multiplexer/engines";
 import { EngineGlyph } from "@/features/multiplexer/agentStateUi";
+import { copyDiagnostics, revealLogs } from "@/lib/diagnostics";
 import { claudeModels, modelOptions } from "@/lib/domain/models";
 import { DEFAULT_HARNESS_OPTIONS } from "@/lib/domain/harnessing";
 import { invalidateNotificationSettingsCache, sendTestNotification } from "@/lib/notifications";
@@ -806,6 +807,17 @@ function AdvancedSection({ settings }: { settings: AppSettings }) {
             }
           >
             Web inspector, PTY byte log, IPC trace.
+          </SettingRow>
+          <SettingRow
+            title="Logs"
+            control={
+              <div className="flex gap-2">
+                <Button onClick={revealLogs}>Reveal logs</Button>
+                <Button onClick={() => void copyDiagnostics()}>Copy diagnostics</Button>
+              </div>
+            }
+          >
+            App and server logs. Diagnostics mask home paths.
           </SettingRow>
         </div>
       </Card>

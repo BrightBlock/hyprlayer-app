@@ -7,11 +7,11 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::socket;
+use crate::{logging, socket};
 
 const CONNECT_RETRIES: u32 = 50;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
@@ -19,36 +19,80 @@ const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// Connects to the profile's socket and splices `io` to it until either side
 /// closes. `io` is the process's own stdin/stdout in production; a test
 /// substitutes an in-memory pipe.
-pub async fn run<S>(app_config_dir: PathBuf, app_data_dir: PathBuf, mut io: S) -> io::Result<()>
+pub async fn run<S>(
+    app_config_dir: PathBuf,
+    app_data_dir: PathBuf,
+    log_dir: &Path,
+    mut io: S,
+) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let path = socket::socket_path(&app_data_dir);
     let mut stream = match socket::connect(&path).await {
-        Ok(stream) => stream,
-        Err(_) => {
-            spawn_detached(&app_config_dir, &app_data_dir)?;
-            wait_for_socket(&path).await?
+        Ok(stream) => {
+            tracing::info!("relaying to the server at {}", path.display());
+            stream
+        }
+        Err(e) => {
+            tracing::info!("no server at {} ({e}); starting one", path.display());
+            let stderr_start = spawn_detached(&app_config_dir, &app_data_dir, log_dir)?;
+            match wait_for_socket(&path).await {
+                Ok(stream) => stream,
+                // What the server said on its way out is the reason; the
+                // connect error only says it never listened.
+                Err(e) => {
+                    let said = stderr_start
+                        .map(|start| logging::stderr_since(log_dir, start))
+                        .unwrap_or_default();
+                    return Err(match said.trim() {
+                        "" => e,
+                        said => io::Error::other(format!("{e}; the server said: {said}")),
+                    });
+                }
+            }
         }
     };
-    tokio::io::copy_bidirectional(&mut stream, &mut io).await?;
-    Ok(())
+    let started = Instant::now();
+    let copied = tokio::io::copy_bidirectional(&mut stream, &mut io).await;
+    match &copied {
+        Ok((to_client, to_server)) => tracing::info!(
+            "relay ended after {:?}: {to_server} bytes to the server, {to_client} to the client",
+            started.elapsed()
+        ),
+        Err(e) => tracing::warn!("relay ended after {:?}: {e}", started.elapsed()),
+    }
+    copied.map(|_| ())
 }
 
 /// A deliberate orphan, exactly like the desktop's own local spawn
 /// (`src-tauri/src/supervisor.rs::spawn_detached`): the server must outlive
 /// this relay, which itself dies with the SSH connection that started it.
-fn spawn_detached(app_config_dir: &Path, app_data_dir: &Path) -> io::Result<()> {
+/// Returns where this spawn's stderr starts in the shared stderr file.
+fn spawn_detached(
+    app_config_dir: &Path,
+    app_data_dir: &Path,
+    log_dir: &Path,
+) -> io::Result<Option<u64>> {
     let bin = std::env::current_exe()?;
-    let mut cmd = tokio::process::Command::new(bin);
+    let (stderr, start) = match logging::stderr_file(log_dir) {
+        Ok((file, start)) => (Stdio::from(file), Some(start)),
+        Err(e) => {
+            tracing::warn!("the server's stderr will be discarded: {e}");
+            (Stdio::null(), None)
+        }
+    };
+    let mut cmd = tokio::process::Command::new(&bin);
     cmd.arg("serve")
         .env("HYPRLAYER_APP_CONFIG_DIR", app_config_dir)
         .env("HYPRLAYER_APP_DATA_DIR", app_data_dir)
+        .env(logging::LOG_DIR_ENV, log_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    hyprlayer_core::process::spawn_orphan(&mut cmd)?;
-    Ok(())
+        .stderr(stderr);
+    let child = hyprlayer_core::process::spawn_orphan(&mut cmd)?;
+    tracing::info!("started {} serve as pid {:?}", bin.display(), child.id());
+    Ok(start)
 }
 
 async fn wait_for_socket(path: &Path) -> io::Result<socket::ClientStream> {
@@ -152,7 +196,11 @@ mod tests {
         // relay_side plays the SSH child's joined stdio; client_side is what
         // an RpcClient on the desktop side of that SSH connection would hold.
         let (relay_side, client_side) = tokio::io::duplex(64 * 1024);
-        let relaying = tokio::spawn(run(app_config_dir, app_data_dir, relay_side));
+        let log_dir = root.path().join("logs");
+        let relaying =
+            tokio::spawn(
+                async move { run(app_config_dir, app_data_dir, &log_dir, relay_side).await },
+            );
 
         let client = RpcClient::connect(client_side)
             .await

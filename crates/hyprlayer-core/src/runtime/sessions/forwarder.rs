@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 use hyprlayer_models::RuntimeEvent;
 
 use crate::agent::AgentDriver;
-use crate::claude::{SessionEvent, SessionState};
+use crate::claude::{ExitOutcome, SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
 use crate::store::session_event_codec::encode_raw_event;
 use crate::store::{
@@ -32,6 +32,11 @@ pub(crate) enum Control {
         caller_epoch: u64,
         after_seq: Option<i64>,
         reply: oneshot::Sender<Result<Vec<SessionLogEntry>>>,
+    },
+    AttachAfter {
+        caller_epoch: u64,
+        after_seq: Option<i64>,
+        reply: oneshot::Sender<Result<SessionAttachment>>,
     },
     Rewind {
         cutoff: i64,
@@ -75,6 +80,22 @@ impl ActorHandle {
         let (reply, reply_rx) = oneshot::channel();
         self.control
             .send(Control::LogAfter {
+                caller_epoch,
+                after_seq,
+                reply,
+            })
+            .map_err(|_| actor_gone())?;
+        reply_rx.await.map_err(|_| actor_gone())?
+    }
+
+    pub(crate) async fn attach_after(
+        &self,
+        caller_epoch: u64,
+        after_seq: Option<i64>,
+    ) -> Result<SessionAttachment> {
+        let (reply, reply_rx) = oneshot::channel();
+        self.control
+            .send(Control::AttachAfter {
                 caller_epoch,
                 after_seq,
                 reply,
@@ -190,6 +211,9 @@ async fn run(
                     Some(Control::LogAfter { caller_epoch, after_seq, reply }) => {
                         let _ = reply.send(state.log_after(caller_epoch, after_seq).await);
                     }
+                    Some(Control::AttachAfter { caller_epoch, after_seq, reply }) => {
+                        let _ = reply.send(state.attach_after(caller_epoch, after_seq).await);
+                    }
                     Some(Control::Rewind { cutoff, live, reply }) => {
                         let _ = reply.send(state.rewind(cutoff, live).await);
                     }
@@ -292,6 +316,22 @@ impl ActorState {
         let sid = self.session_id.clone();
         let db = self.db.clone();
         blocking(move || db.session_log_after(&sid, after_seq)).await
+    }
+
+    /// The catch-up read and the new attachment in one actor turn: as two
+    /// messages, events persisted between them reached neither.
+    async fn attach_after(
+        &mut self,
+        caller_epoch: u64,
+        after_seq: Option<i64>,
+    ) -> Result<SessionAttachment> {
+        let replay = self.log_after(caller_epoch, after_seq).await?;
+        let resume_seq = replay.last().map(|entry| entry.seq).or(after_seq);
+        let (attachment, live) = LiveAttachment::resuming_after(resume_seq);
+        let id = self.next_attach_id;
+        self.next_attach_id += 1;
+        self.attachments.insert(id, attachment);
+        Ok(SessionAttachment { replay, live })
     }
 
     fn set_workflow(&mut self, workflow: WorkflowChannel) {
@@ -422,6 +462,20 @@ impl ActorState {
             matches!(&event, SessionEvent::Exited { outcome, .. } if !outcome.is_reportable());
         let ephemeral = matches!(event, SessionEvent::PartialText { .. }) || unreportable_exit;
         let suppress_live = matches!(event, SessionEvent::UserMessage { .. });
+        log_lifecycle(&self.session_id, &event);
+
+        // Nothing is persisted for a detach, so the row mutation that clears
+        // the pid never runs: the next start would report a live orphan.
+        if unreportable_exit {
+            let db = self.db.clone();
+            let sid = self.session_id.clone();
+            if let Err(e) = blocking(move || db.clear_orphans_for(&sid)).await {
+                tracing::warn!(
+                    "session {}: could not clear its orphan record: {e}",
+                    self.session_id
+                );
+            }
+        }
 
         let persisted_seq = if ephemeral {
             None
@@ -500,6 +554,33 @@ fn lifecycle_for(event: &SessionEvent) -> Option<SessionState> {
         SessionEvent::QuestionAsk { .. } => Some(SessionState::AwaitingQuestion),
         SessionEvent::Exited { outcome, .. } if outcome.is_reportable() => Some(outcome.state()),
         _ => None,
+    }
+}
+
+/// The session timeline a support log needs; payloads stay out of it.
+fn log_lifecycle(session_id: &str, event: &SessionEvent) {
+    match event {
+        SessionEvent::Exited {
+            outcome,
+            code,
+            stderr_tail,
+        } => {
+            let stderr =
+                crate::redact::url_credentials(crate::redact::tail(stderr_tail.trim(), 500));
+            match outcome {
+                ExitOutcome::Crashed | ExitOutcome::SpawnFailed => tracing::warn!(
+                    "session {session_id} exited: {outcome:?}, code {code:?}: {stderr}"
+                ),
+                _ => tracing::info!("session {session_id} exited: {outcome:?}, code {code:?}"),
+            }
+        }
+        SessionEvent::Relaunched {} => {
+            tracing::info!("session {session_id}: harness relaunched")
+        }
+        SessionEvent::ProtocolError { detail, .. } => {
+            tracing::debug!("session {session_id}: unrecognised harness output: {detail}")
+        }
+        _ => {}
     }
 }
 

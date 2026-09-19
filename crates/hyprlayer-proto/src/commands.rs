@@ -20,7 +20,7 @@ macro_rules! commands {
         // One variant per command means the largest body sizes the enum; both
         // are transient values that are never boxed into anything long-lived.
         #[allow(clippy::large_enum_variant)]
-        #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
+        #[derive(::serde::Serialize, ::serde::Deserialize)]
         #[serde(rename_all = "snake_case")]
         pub enum Request {
             $( $variant { $( $arg: $ty ),* }, )*
@@ -35,7 +35,7 @@ macro_rules! commands {
         }
 
         #[allow(clippy::large_enum_variant)]
-        #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
+        #[derive(::serde::Serialize, ::serde::Deserialize)]
         #[serde(rename_all = "snake_case")]
         pub enum Response {
             $( $variant($ret), )*
@@ -46,6 +46,20 @@ macro_rules! commands {
                 match self {
                     $( Response::$variant(_) => stringify!($method), )*
                 }
+            }
+        }
+
+        // Bodies carry API keys, keystrokes, prompts and settings, so `{:?}`
+        // names the command and nothing else.
+        impl ::core::fmt::Debug for Request {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                f.debug_struct(self.command()).finish_non_exhaustive()
+            }
+        }
+
+        impl ::core::fmt::Debug for Response {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                f.debug_struct(self.command()).finish_non_exhaustive()
             }
         }
 

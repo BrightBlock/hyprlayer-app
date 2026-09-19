@@ -89,9 +89,27 @@ fn remove_if_stale(path: &Path) -> io::Result<()> {
                 path.display()
             ),
         )),
-        Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => std::fs::remove_file(path),
+        Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {
+            tracing::info!(
+                "removing a stale socket at {}: the previous server did not exit cleanly",
+                path.display()
+            );
+            std::fs::remove_file(path)
+        }
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
+    }
+}
+
+/// Who is on the other end, for the connection log.
+#[cfg(unix)]
+pub fn peer(stream: &Stream) -> String {
+    match stream.peer_cred() {
+        Ok(cred) => match cred.pid() {
+            Some(pid) => format!("pid {pid}"),
+            None => format!("uid {}", cred.uid()),
+        },
+        Err(e) => format!("an unidentified peer ({e})"),
     }
 }
 
@@ -148,9 +166,18 @@ impl Listener {
             None => ServerOptions::new().create(&self.name)?,
         };
         server.connect().await?;
-        self.next = Some(ServerOptions::new().create(&self.name)?);
+        match ServerOptions::new().create(&self.name) {
+            Ok(next) => self.next = Some(next),
+            // This client is already connected; the next accept retries.
+            Err(e) => tracing::warn!("could not create the next pipe instance: {e}"),
+        }
         Ok(server)
     }
+}
+
+#[cfg(windows)]
+pub fn peer(_: &Stream) -> String {
+    "a local client".into()
 }
 
 #[cfg(windows)]

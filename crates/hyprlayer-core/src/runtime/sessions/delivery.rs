@@ -46,12 +46,23 @@ impl LiveAttachment {
         Self,
         mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
     ) {
+        Self::resuming_after(None)
+    }
+
+    /// Starts from the last seq the reader already holds, so lagging again
+    /// before any persisted delivery resumes there instead of replaying the log.
+    pub(crate) fn resuming_after(
+        last_persisted_seq: Option<i64>,
+    ) -> (
+        Self,
+        mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
+    ) {
         let (sender, receiver) = mpsc::channel(ATTACH_QUEUE_CAPACITY + 1);
         (
             Self {
                 sender,
                 pending_partial: None,
-                last_persisted_seq: None,
+                last_persisted_seq,
                 detached: false,
             },
             receiver,
@@ -118,5 +129,43 @@ impl LiveAttachment {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unpersisted_turn() -> SessionDelivery {
+        SessionDelivery {
+            epoch: 0,
+            delivery_ordinal: 0,
+            persisted_seq: None,
+            event: SessionEvent::TurnDone {
+                cost_usd: None,
+                num_turns: None,
+                context_tokens: None,
+                turn_status: None,
+            },
+        }
+    }
+
+    #[test]
+    fn a_resumed_attachment_that_lags_before_any_persisted_delivery_keeps_its_resume_point() {
+        let (mut attachment, mut rx) = LiveAttachment::resuming_after(Some(41));
+        for _ in 0..=ATTACH_QUEUE_CAPACITY {
+            attachment.deliver(unpersisted_turn());
+        }
+        let mut last = None;
+        while let Ok(item) = rx.try_recv() {
+            last = Some(item);
+        }
+        assert_eq!(
+            last,
+            Some(Err(SessionStreamError::Lagged {
+                epoch: 0,
+                last_persisted_seq: Some(41),
+            }))
+        );
     }
 }

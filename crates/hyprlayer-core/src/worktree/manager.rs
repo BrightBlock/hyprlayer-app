@@ -132,7 +132,8 @@ impl WorktreeManager {
         let slug = unique_slug(&spec.title);
         let overlay = self.overlay_pairs();
 
-        let _ = git_in(
+        // Best effort: offline still creates, from whatever refs are local.
+        if let Err(e) = git_in(
             git,
             &spec.project_repo,
             &["fetch", "--prune", "origin"],
@@ -140,7 +141,13 @@ impl WorktreeManager {
         )
         .timeout(Duration::from_secs(30))
         .run()
-        .await;
+        .await
+        {
+            tracing::warn!(
+                "fetch in {} failed; creating from local refs: {e}",
+                spec.project_repo.display()
+            );
+        }
 
         match &spec.mode {
             CreateMode::Isolated => {
@@ -277,11 +284,16 @@ impl WorktreeManager {
             .run()
             .await?;
         } else {
-            let _ = git_in(git, project_repo, &["worktree", "prune"], &overlay)
+            if let Err(e) = git_in(git, project_repo, &["worktree", "prune"], &overlay)
                 .run()
-                .await;
+                .await
+            {
+                tracing::warn!("worktree prune in {} failed: {e}", project_repo.display());
+            }
             if worktree.exists() {
-                let _ = std::fs::remove_dir_all(worktree);
+                if let Err(e) = std::fs::remove_dir_all(worktree) {
+                    tracing::warn!("could not remove {}: {e}", worktree.display());
+                }
             }
         }
 
@@ -291,14 +303,18 @@ impl WorktreeManager {
             } else {
                 "-d"
             };
-            let _ = git_in(
+            // `-d` refuses an unmerged branch by design; the branch stays.
+            if let Err(e) = git_in(
                 git,
                 project_repo,
                 &["branch", delete_flag, branch],
                 &overlay,
             )
             .run()
-            .await;
+            .await
+            {
+                tracing::info!("kept branch {branch}: {e}");
+            }
         }
 
         Ok(())
@@ -418,17 +434,28 @@ impl WorktreeManager {
         delete_branch: bool,
     ) -> Result<()> {
         let overlay = self.overlay_pairs();
+        // Each step is best effort; the log is the only record of what was left.
         if archive.exists() {
-            let _ = std::fs::remove_dir_all(archive);
+            if let Err(e) = std::fs::remove_dir_all(archive) {
+                tracing::warn!("purge left {}: {e}", archive.display());
+            }
         }
-        let _ = git_in(git, project_repo, &["worktree", "prune"], &overlay)
+        if let Err(e) = git_in(git, project_repo, &["worktree", "prune"], &overlay)
             .run()
-            .await;
+            .await
+        {
+            tracing::warn!("worktree prune in {} failed: {e}", project_repo.display());
+        }
         if delete_branch {
-            let _ = git_in(git, project_repo, &["branch", "-D", branch], &overlay)
+            if let Err(e) = git_in(git, project_repo, &["branch", "-D", branch], &overlay)
                 .run()
-                .await;
-            let _ = delete_remote_branch(git, project_repo, branch, &overlay).await;
+                .await
+            {
+                tracing::warn!("purge kept local branch {branch}: {e}");
+            }
+            if let Err(e) = delete_remote_branch(git, project_repo, branch, &overlay).await {
+                tracing::warn!("purge kept remote branch {branch}: {e}");
+            }
         }
         Ok(())
     }
@@ -478,10 +505,13 @@ pub async fn pull_base(
 ) -> Result<PullOutcome> {
     let branch = base.strip_prefix("origin/").unwrap_or(base);
 
-    let _ = git_in(git, worktree, &["fetch", "origin", branch], overlay)
+    if let Err(e) = git_in(git, worktree, &["fetch", "origin", branch], overlay)
         .timeout(Duration::from_secs(60))
         .run()
-        .await;
+        .await
+    {
+        tracing::warn!("fetching {branch} failed; merging the local origin/{branch}: {e}");
+    }
 
     let remote_ref = format!("origin/{branch}");
     let merge_ref = if git_in(

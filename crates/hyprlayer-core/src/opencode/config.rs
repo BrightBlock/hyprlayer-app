@@ -188,7 +188,7 @@ fn read_object(path: &Path, label: &str) -> Result<Map<String, Value>> {
             Ok(_) => Ok(Map::new()),
             Err(e) => Err(CoreError::OutputParse {
                 program: label.to_string(),
-                detail: e.to_string(),
+                detail: format!("{}: {e}", path.display()),
             }),
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Map::new()),
@@ -211,7 +211,9 @@ fn write_json_atomic(path: &Path, value: &Value, mode: u32) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
+        if let Err(e) = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode)) {
+            tracing::warn!("could not set mode {mode:o} on {}: {e}", path.display());
+        }
     }
     let _ = mode;
     std::fs::rename(&tmp, path)?;

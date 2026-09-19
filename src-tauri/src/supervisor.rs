@@ -5,10 +5,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use hyprlayer_core::CoreError;
 use hyprlayer_proto::{check_version, WireError, PROTOCOL_VERSION};
+use hyprlayer_server::logging::{self as server_logging, RepeatGate};
 use hyprlayer_server::transport::{Control, FrameReader, FrameWriter};
 use hyprlayer_server::{socket, APP_IDENTIFIER};
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,9 @@ const SPAWN_RETRIES: u32 = 5;
 const SPAWN_RETRY_DELAY: Duration = Duration::from_secs(1);
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The reconnect loop retries every 30s forever; one report per window.
+static CONNECT_FAILURES: RepeatGate = RepeatGate::new(Duration::from_secs(600));
 
 const CANNOT_START: &str = "Hyprlayer cannot start";
 const ALREADY_RUNNING: &str = "Hyprlayer is already running";
@@ -106,9 +110,15 @@ impl Outcome {
     }
 }
 
-pub async fn connect(target: &Target, app_config_dir: &Path, app_data_dir: &Path) -> Outcome {
-    match target {
-        Target::Own => match connect_or_spawn(app_config_dir, app_data_dir).await {
+pub async fn connect(
+    target: &Target,
+    app_config_dir: &Path,
+    app_data_dir: &Path,
+    app_log_dir: &Path,
+) -> Outcome {
+    let started = Instant::now();
+    let outcome = match target {
+        Target::Own => match connect_or_spawn(app_config_dir, app_data_dir, app_log_dir).await {
             Outcome::Connected { client, .. } => {
                 let expected = provision::sha256_file(&server_binary());
                 let outdated = is_outdated(&client, expected.as_deref());
@@ -118,6 +128,43 @@ pub async fn connect(target: &Target, app_config_dir: &Path, app_data_dir: &Path
         },
         Target::LocalProfile(dir) => connect_local_profile(dir, &target.name()).await,
         Target::Remote(host) => connect_remote(host, app_data_dir).await,
+    };
+    log_outcome(target, started.elapsed(), &outcome);
+    outcome
+}
+
+fn log_outcome(target: &Target, elapsed: Duration, outcome: &Outcome) {
+    match outcome {
+        Outcome::Connected { client, outdated } => log::info!(
+            "connected to {} in {elapsed:?}: server protocol {}, build {}{}",
+            target.name(),
+            client.server_version(),
+            client
+                .server_build()
+                .map_or("unknown", |build| &build[..build.len().min(12)]),
+            if *outdated {
+                ", not the build this app ships"
+            } else {
+                ""
+            }
+        ),
+        Outcome::Blocked { title, error } => {
+            let key = format!("{}:{}", error.code, error.message);
+            let Some(held) = CONNECT_FAILURES.admit(&key) else {
+                return;
+            };
+            let repeats = if held > 0 {
+                format!(" ({held} more attempts failed the same way)")
+            } else {
+                String::new()
+            };
+            log::error!(
+                "could not connect to {} ({title}): {}: {}{repeats}",
+                target.name(),
+                error.code,
+                hyprlayer_core::redact::url_credentials(&error.message)
+            );
+        }
     }
 }
 
@@ -217,7 +264,11 @@ async fn peer_version(socket_path: &Path) -> Option<u32> {
     }
 }
 
-pub async fn connect_or_spawn(app_config_dir: &Path, app_data_dir: &Path) -> Outcome {
+pub async fn connect_or_spawn(
+    app_config_dir: &Path,
+    app_data_dir: &Path,
+    app_log_dir: &Path,
+) -> Outcome {
     match client::connect(app_data_dir).await {
         Ok(client) => return Outcome::connected(client),
         Err(ConnectError::Refused(e)) if e.code == "protocol_version_mismatch" => {
@@ -227,7 +278,8 @@ pub async fn connect_or_spawn(app_config_dir: &Path, app_data_dir: &Path) -> Out
             } else {
                 // We are newer: this is the normal path for every release
                 // after Phase 4. Evict the old server, then start our own.
-                evict_and_respawn(app_config_dir, app_data_dir).await
+                log::warn!("replacing the running server: {}", e.message);
+                evict_and_respawn(app_config_dir, app_data_dir, app_log_dir).await
             };
         }
         Err(ConnectError::Refused(e)) => {
@@ -240,7 +292,10 @@ pub async fn connect_or_spawn(app_config_dir: &Path, app_data_dir: &Path) -> Out
             if matches!(
                 e.kind(),
                 std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-            ) => {}
+            ) =>
+        {
+            log::info!("no server is listening ({e}); starting one");
+        }
         Err(e) => {
             return Outcome::blocked(
                 CANNOT_START,
@@ -249,7 +304,7 @@ pub async fn connect_or_spawn(app_config_dir: &Path, app_data_dir: &Path) -> Out
         }
     }
 
-    spawn_and_connect(app_config_dir, app_data_dir).await
+    spawn_and_connect(app_config_dir, app_data_dir, app_log_dir).await
 }
 
 /// Reaches a remote host through `ssh <destination> <version-keyed path> relay`,
@@ -259,15 +314,13 @@ pub async fn connect_or_spawn(app_config_dir: &Path, app_data_dir: &Path) -> Out
 /// most damaging mistake available in this plan" (plan, Migration Notes).
 pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
     match ssh_relay_connect(host, app_data_dir).await {
-        Ok((client, mut child, expected)) => {
+        Ok((client, relay, expected)) => {
             let outdated = is_outdated(&client, expected.as_deref());
             // The relay must live as long as the connection does. It is
             // killed on drop, unlike the local server's deliberate orphan —
             // killing this SSH connection only ends the relay (plan §1), not
             // the persistent daemon on the far end.
-            tokio::spawn(async move {
-                let _ = child.wait().await;
-            });
+            tokio::spawn(relay.watch(host_name(host)));
             Outcome::Connected { client, outdated }
         }
         Err(error) => Outcome::Blocked {
@@ -282,16 +335,58 @@ pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
 /// owns the returned child's lifetime — `connect_remote` detaches it to live
 /// as long as the connection; `probe_remote` kills it the moment the probe is
 /// done, since nothing here should outlive a test press.
+/// The `ssh … relay` child and what it has written to stderr, which is where
+/// both ssh and the remote relay say why a connection ended.
+struct Relay {
+    child: Child,
+    stderr: Arc<Mutex<String>>,
+    drained: JoinHandle<()>,
+}
+
+impl Relay {
+    async fn watch(mut self, host: String) {
+        let status = self.child.wait().await;
+        let _ = tokio::time::timeout(DRAIN_TIMEOUT, self.drained).await;
+        let said = self
+            .stderr
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let status = match status {
+            Ok(status) => status.to_string(),
+            Err(e) => format!("unknown status: {e}"),
+        };
+        log::warn!(
+            "the ssh relay to {host} exited ({status}): {}",
+            hyprlayer_core::redact::tail(said.trim(), 2000)
+        );
+    }
+}
+
+fn host_name(host: &Host) -> String {
+    Target::Remote(host.clone()).name()
+}
+
 async fn ssh_relay_connect(
     host: &Host,
     app_data_dir: &Path,
-) -> Result<(Arc<RpcClient>, Child, Option<String>), AppError> {
+) -> Result<(Arc<RpcClient>, Relay, Option<String>), AppError> {
     // Never relay a binary this client has not confirmed is its own: the
     // version in the path cannot tell an unreleased build from the release it
     // descends from, and a stale one is only caught by the handshake, after
     // connecting (plan Phase 7 §3.2).
     let (provisioning, host_sha) = provision::inspect(host, app_data_dir).await?;
     if provisioning.state != provision::HostServerState::Ready {
+        let key = format!("{}:{:?}", host.destination, provisioning.state);
+        if CONNECT_FAILURES.admit(&key).is_some() {
+            log::warn!(
+                "{} has no usable hyprlayer-server {}: {:?}; installed: [{}]",
+                host_name(host),
+                provisioning.version,
+                provisioning.state,
+                provisioning.installed_versions.join(", ")
+            );
+        }
         return Err(AppError::remote_cli_missing(&host.label));
     }
 
@@ -317,7 +412,15 @@ async fn ssh_relay_connect(
 
     let joined = tokio::io::join(stdout, stdin);
     match RpcClient::connect(joined).await {
-        Ok(client) => Ok((client, child, host_sha)),
+        Ok(client) => Ok((
+            client,
+            Relay {
+                child,
+                stderr: tail,
+                drained,
+            },
+            host_sha,
+        )),
         // A version skew is not an ssh failure to classify — the peer
         // answered, just with a refusal. Its own remedy already names the
         // fix, so it is preserved verbatim rather than folded into the
@@ -336,11 +439,35 @@ async fn ssh_relay_connect(
             }
             Err(error)
         }
-        Err(_) => {
+        // Something answered, but not with a hello: output from the host's
+        // shell startup files, or nothing within the handshake timeout.
+        Err(ConnectError::Protocol(detail)) => {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(DRAIN_TIMEOUT, drained).await;
+            let seen = tail.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            log::warn!(
+                "the handshake with {} over ssh failed: {detail}; ssh said: {}",
+                host_name(host),
+                seen.trim()
+            );
+            Err(AppError::remote_command_failed(
+                &host.label,
+                format!(
+                    "{detail}. Anything the host's shell startup files print to stdout \
+                     breaks the connection."
+                ),
+            ))
+        }
+        Err(e) => {
             let _ = tokio::time::timeout(DRAIN_TIMEOUT, drained).await;
             let seen = tail.lock().unwrap_or_else(PoisonError::into_inner).clone();
             let _ = child.start_kill();
             let exit_code = child.wait().await.ok().and_then(|status| status.code());
+            log::warn!(
+                "the handshake with {} over ssh failed ({e}), ssh exit {exit_code:?}: {}",
+                host_name(host),
+                seen.trim()
+            );
             Err(classify_ssh_failure(
                 host,
                 RemoteCall::Server,
@@ -488,10 +615,10 @@ pub struct HostProbe {
 /// path already kills it inside `ssh_relay_connect`.
 pub async fn probe_remote(host: &Host, app_data_dir: &Path) -> HostProbe {
     match ssh_relay_connect(host, app_data_dir).await {
-        Ok((client, mut child, _)) => {
+        Ok((client, mut relay, _)) => {
             let server_version = client.server_version();
             drop(client);
-            let _ = child.kill().await;
+            let _ = relay.child.kill().await;
             HostProbe {
                 ok: true,
                 server_version: Some(server_version),
@@ -545,22 +672,56 @@ fn server_binary() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
+/// Where a spawned server's stderr file is, and where this spawn starts in it.
+struct StderrFile {
+    dir: PathBuf,
+    start: u64,
+}
+
+impl StderrFile {
+    fn written(&self) -> String {
+        server_logging::stderr_since(&self.dir, self.start)
+    }
+}
+
 /// Spawns the server as a deliberate orphan — the opposite of every other
 /// child this codebase spawns (`process/mod.rs`'s `Exec`/`spawn_supervised`
 /// both set `kill_on_drop(true)` on purpose; this one must outlive us).
+/// Its stderr goes to a file, not a pipe: a pipe's reader dies with this app,
+/// and the server outlives it.
 fn spawn_detached(
     bin: &Path,
     app_config_dir: &Path,
     app_data_dir: &Path,
-) -> std::io::Result<Child> {
+    app_log_dir: &Path,
+) -> std::io::Result<(Child, Option<StderrFile>)> {
+    let stderr = [app_log_dir, app_data_dir].into_iter().find_map(|dir| {
+        match server_logging::stderr_file(dir) {
+            Ok((file, start)) => Some((file, dir.to_path_buf(), start)),
+            Err(e) => {
+                log::warn!("cannot keep the server's stderr in {}: {e}", dir.display());
+                None
+            }
+        }
+    });
     let mut cmd = tokio::process::Command::new(bin);
     cmd.env("HYPRLAYER_APP_CONFIG_DIR", app_config_dir)
         .env("HYPRLAYER_APP_DATA_DIR", app_data_dir)
+        .env(server_logging::LOG_DIR_ENV, app_log_dir)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-
-    hyprlayer_core::process::spawn_orphan(&mut cmd)
+        .stdout(Stdio::null());
+    let written = match stderr {
+        Some((file, dir, start)) => {
+            cmd.stderr(Stdio::from(file));
+            Some(StderrFile { dir, start })
+        }
+        None => {
+            cmd.stderr(Stdio::null());
+            None
+        }
+    };
+    let child = hyprlayer_core::process::spawn_orphan(&mut cmd)?;
+    Ok((child, written))
 }
 
 /// Drains a spawned child's stderr into a shared buffer, both to recognise a
@@ -600,52 +761,58 @@ enum SpawnWait {
     Connected(Arc<RpcClient>),
     /// The binary we just started speaks another protocol version.
     Refused(WireError),
-    ExitedEarly,
-    TimedOut,
+    ExitedEarly(std::process::ExitStatus),
+    /// Carries the last connect error.
+    TimedOut(String),
 }
 
 async fn wait_for_spawn(child: &mut Child, app_data_dir: &Path) -> SpawnWait {
+    let mut last_error = String::new();
     for _ in 0..SPAWN_LISTEN_RETRIES {
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            return SpawnWait::ExitedEarly;
+        if let Ok(Some(status)) = child.try_wait() {
+            return SpawnWait::ExitedEarly(status);
         }
         match client::connect(app_data_dir).await {
             Ok(client) => return SpawnWait::Connected(client),
             Err(ConnectError::Refused(e)) => return SpawnWait::Refused(e),
-            Err(_) => {}
+            Err(e) => last_error = e.to_string(),
         }
         tokio::time::sleep(CONNECT_RETRY_DELAY).await;
     }
-    if matches!(child.try_wait(), Ok(Some(_))) {
-        return SpawnWait::ExitedEarly;
+    if let Ok(Some(status)) = child.try_wait() {
+        return SpawnWait::ExitedEarly(status);
     }
-    SpawnWait::TimedOut
+    SpawnWait::TimedOut(last_error)
 }
 
 /// Spawns the server and waits for it to start listening, retrying the
 /// *spawn* — not the connect — on a `runtime_in_use` exit: a pre-Phase-4
 /// desktop may still hold the lock in-process with no socket yet to reach.
-async fn spawn_and_connect(app_config_dir: &Path, app_data_dir: &Path) -> Outcome {
+async fn spawn_and_connect(
+    app_config_dir: &Path,
+    app_data_dir: &Path,
+    app_log_dir: &Path,
+) -> Outcome {
     let bin = server_binary();
     #[cfg(debug_assertions)]
     warn_if_server_predates_sources(&bin);
     // Two seconds of slack for coarse filesystem timestamps.
     let spawned_at = SystemTime::now() - Duration::from_secs(2);
     for attempt in 0..SPAWN_RETRIES {
-        let mut child = match spawn_detached(&bin, app_config_dir, app_data_dir) {
-            Ok(child) => child,
-            Err(e) => {
-                return Outcome::blocked(
-                    CANNOT_START,
-                    format!(
-                        "Could not start the Hyprlayer server ({}): {e}",
-                        bin.display()
-                    ),
-                );
-            }
-        };
-        let stderr = child.stderr.take().expect("stderr is piped");
-        let (tail, drained) = drain_stderr(stderr);
+        let (mut child, stderr) =
+            match spawn_detached(&bin, app_config_dir, app_data_dir, app_log_dir) {
+                Ok(spawned) => spawned,
+                Err(e) => {
+                    return Outcome::blocked(
+                        CANNOT_START,
+                        format!(
+                            "Could not start the Hyprlayer server ({}): {e}",
+                            bin.display()
+                        ),
+                    );
+                }
+            };
+        log::info!("started {} as pid {:?}", bin.display(), child.id());
 
         match wait_for_spawn(&mut child, app_data_dir).await {
             SpawnWait::Connected(client) => return Outcome::connected(client),
@@ -661,12 +828,12 @@ async fn spawn_and_connect(app_config_dir: &Path, app_data_dir: &Path) -> Outcom
                     ),
                 );
             }
-            SpawnWait::ExitedEarly => {
-                // The exit is observed before the drain task has necessarily
-                // stored what the child wrote; an empty read here would miss
-                // `runtime_in_use` and skip the spawn retry.
-                let _ = tokio::time::timeout(DRAIN_TIMEOUT, drained).await;
-                let seen = tail.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            SpawnWait::ExitedEarly(status) => {
+                let seen = stderr.as_ref().map(StderrFile::written).unwrap_or_default();
+                log::warn!(
+                    "the server exited during startup ({status}): {}",
+                    seen.trim()
+                );
                 if seen.contains("runtime_in_use") {
                     if attempt + 1 < SPAWN_RETRIES {
                         tokio::time::sleep(SPAWN_RETRY_DELAY).await;
@@ -682,7 +849,12 @@ async fn spawn_and_connect(app_config_dir: &Path, app_data_dir: &Path) -> Outcom
                     format!("The Hyprlayer server exited unexpectedly.\n\n{seen}"),
                 );
             }
-            SpawnWait::TimedOut => {
+            SpawnWait::TimedOut(last_error) => {
+                log::error!(
+                    "the server (pid {:?}) did not start listening in time; last connect \
+                     error: {last_error}",
+                    child.id()
+                );
                 return Outcome::blocked(
                     CANNOT_START,
                     "The Hyprlayer server did not start listening in time.",
@@ -770,8 +942,13 @@ async fn wait_for_socket_gone(socket_path: &Path, attempts: u32, delay: Duration
 /// The normal path for every release from here on: shut down the older
 /// server, wait for its lock to free, spawn our own matching binary. Ends
 /// every live session on the profile — quitting is free, updating is not.
-async fn evict_and_respawn(app_config_dir: &Path, app_data_dir: &Path) -> Outcome {
+async fn evict_and_respawn(
+    app_config_dir: &Path,
+    app_data_dir: &Path,
+    app_log_dir: &Path,
+) -> Outcome {
     let socket_path = socket::socket_path(app_data_dir);
+    log::warn!("asking the running server to stop; its sessions and terminals end");
     if let Err(e) = request_shutdown_of_refusing_server(&socket_path).await {
         return Outcome::blocked(
             CANNOT_START,
@@ -780,10 +957,11 @@ async fn evict_and_respawn(app_config_dir: &Path, app_data_dir: &Path) -> Outcom
     }
 
     if !wait_for_socket_gone(&socket_path, CONNECT_RETRIES, CONNECT_RETRY_DELAY).await {
+        log::error!("the old server did not stop");
         return Outcome::blocked(CANNOT_START, STOP_THE_SERVER_REMEDY);
     }
 
-    spawn_and_connect(app_config_dir, app_data_dir).await
+    spawn_and_connect(app_config_dir, app_data_dir, app_log_dir).await
 }
 
 #[cfg(test)]

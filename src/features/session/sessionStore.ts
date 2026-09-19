@@ -17,6 +17,7 @@ import {
 } from "@/lib/bindings";
 import type { WorkstreamActivity } from "@/lib/domain/activity";
 import { unwrap } from "@/lib/ipc";
+import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
 import { invalidateWorkstreamPr, invalidateWorktreeGit } from "@/lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notifications";
@@ -634,19 +635,23 @@ export async function stopSession(sessionId: string): Promise<void> {
         const requestId = openPermissionRequestId(parked);
         if (requestId) await unwrap(commands.respondPermission(sessionId, requestId, false, null));
       }
-    } catch {
+    } catch (e) {
+      log.warn("session", `declining ${sessionId}'s open prompt failed`, e);
     }
   }
 
   try {
     await interruptSession(sessionId);
-  } catch {
+  } catch (e) {
+    log.warn("session", `interrupting ${sessionId} failed`, e);
   }
   const settled = await waitForView(sessionId, (v) => !isWorking(v), STOP_ESCALATION_MS);
   if (settled) return;
+  log.info("session", `${sessionId} did not stop after an interrupt; killing it`);
   try {
     await killSession(sessionId);
-  } catch {
+  } catch (e) {
+    log.warn("session", `killing ${sessionId} failed`, e);
   }
 }
 
@@ -859,23 +864,27 @@ export async function restoreSessionIfNeeded(
   if (entryOf(sessionId) || channels.has(sessionId) || restoring.has(sessionId)) return;
   restoring.add(sessionId);
   try {
-    const [log, active] = await Promise.all([
+    const [entries, active] = await Promise.all([
       unwrap(commands.getSessionLog(sessionId)),
       // The server outlives the app (ADR-0009): a session it still reports
       // live is attached to below rather than shown as a frozen transcript.
-      unwrap(commands.listActiveSessions()).catch(() => []),
+      unwrap(commands.listActiveSessions()).catch((e) => {
+        log.warn("session", "listing live sessions failed; restoring as if none were live", e);
+        return [];
+      }),
     ]);
     if (entryOf(sessionId) || channels.has(sessionId)) return;
 
     let view = initialSessionView("starting");
-    for (const stored of log) {
+    for (const stored of entries) {
       try {
         view = reduceEvent(view, stored.event);
         const last = view.items[view.items.length - 1];
         if (stored.kind === "userMessage" && last?.kind === "user" && last.createdAt === null) {
           view = { ...view, items: [...view.items.slice(0, -1), { ...last, createdAt: stored.createdAt }] };
         }
-      } catch {
+      } catch (e) {
+        log.warn("session", `restoring ${sessionId} skipped a ${stored.kind} event`, e);
       }
     }
     view = restoredView(view);
@@ -892,7 +901,7 @@ export async function restoreSessionIfNeeded(
     });
     if (active.some((a) => a.session.id === sessionId)) await resumeSession(sessionId);
   } catch (error) {
-    console.error(`failed to restore session ${sessionId}`, error);
+    log.error("session", `restoring ${sessionId} failed`, error);
   } finally {
     restoring.delete(sessionId);
   }

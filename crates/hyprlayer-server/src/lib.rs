@@ -4,6 +4,7 @@
 pub mod client;
 pub mod dispatch;
 pub mod events;
+pub mod logging;
 mod relay;
 pub mod rpc;
 pub mod socket;
@@ -12,8 +13,9 @@ pub mod transport;
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use hyprlayer_core::{
     CoreError, HyprlayerRuntime, RuntimeEnvironment, RuntimeOptions, RuntimePaths,
@@ -27,6 +29,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use client::{ConnectError, RpcClient};
 use dispatch::Server;
 use events::Clients;
+use logging::RepeatGate;
 use rpc::Dispatch;
 use streams::StreamRegistry;
 use transport::{
@@ -37,8 +40,14 @@ use transport::{
 /// standalone server must land on the same profile (ADR-0009).
 pub const APP_IDENTIFIER: &str = "ai.brightblock.hyprlayer";
 
-const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop|--version]";
+const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop|logs|--version]";
 const STOP_POLLS: u32 = 100;
+/// How much of each log file `logs` prints.
+const LOGS_TAIL_BYTES: u64 = 64 * 1024;
+const SLOW_REQUEST: Duration = Duration::from_secs(5);
+
+static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
+static REQUEST_FAILURES: RepeatGate = RepeatGate::new(Duration::from_secs(60));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -46,6 +55,9 @@ pub enum Command {
     Relay,
     Status,
     Stop,
+    /// Prints the tails of this profile's log files: how a client fetches a
+    /// remote host's logs over `ssh`, with or without a running server.
+    Logs,
     /// The client provisions a version-keyed server on a remote host and needs
     /// to read back what it installed (plan Phase 7 §3).
     Version,
@@ -60,6 +72,7 @@ impl Command {
             Some("relay") => Command::Relay,
             Some("status") => Command::Status,
             Some("stop") => Command::Stop,
+            Some("logs") => Command::Logs,
             Some("--version" | "-V") => Command::Version,
             Some(other) => return Err(format!("unknown command `{other}`\n{USAGE}")),
         };
@@ -77,6 +90,14 @@ pub async fn run(command: Command) -> i32 {
         Command::Relay => relay().await,
         Command::Status => status().await,
         Command::Stop => stop().await,
+        Command::Logs => {
+            let (_, data_dir) = app_dirs();
+            print!(
+                "{}",
+                logging::tail_logs(&logging::log_dir(&data_dir), LOGS_TAIL_BYTES)
+            );
+            0
+        }
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             0
@@ -116,10 +137,10 @@ fn write_runtime_fatal(path: &Path, error: WireError) {
     match serde_json::to_vec_pretty(&error) {
         Ok(bytes) => {
             if let Err(e) = std::fs::write(path, bytes) {
-                eprintln!("could not write {}: {e}", path.display());
+                tracing::error!("could not write {}: {e}", path.display());
             }
         }
-        Err(e) => eprintln!("could not encode the fatal-error report: {e}"),
+        Err(e) => tracing::error!("could not encode the fatal-error report: {e}"),
     }
 }
 
@@ -133,14 +154,30 @@ pub fn executable_sha256(path: &Path) -> Option<String> {
 }
 
 async fn serve() -> i32 {
+    let (config_dir, data_dir) = app_dirs();
+    let log_dir = logging::log_dir(&data_dir);
+    let _log = logging::init(logging::Process::Serve, &log_dir);
     if let Some(build) = std::env::current_exe()
         .ok()
         .and_then(|exe| executable_sha256(&exe))
     {
         let _ = BUILD.set(build);
     }
+    tracing::info!(
+        "hyprlayer-server {} starting: pid {}, protocol {PROTOCOL_VERSION}, build {}, {}/{}, \
+         config {}, data {}, logs {}",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id(),
+        BUILD
+            .get()
+            .map_or("unknown", |build| &build[..build.len().min(12)]),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        config_dir.display(),
+        data_dir.display(),
+        log_dir.display(),
+    );
     let environment = RuntimeEnvironment::detect();
-    let (config_dir, data_dir) = app_dirs();
     let paths = RuntimePaths::detect(&environment, config_dir, data_dir);
     let app_data_dir = paths.app_data_dir.clone();
     let fatal_path = runtime_fatal_path(&app_data_dir);
@@ -156,6 +193,8 @@ async fn serve() -> i32 {
                 CoreError::RuntimeMigrationLedgerInvalid { .. }
                     | CoreError::RuntimeMigrationLedgerTooNew { .. }
             );
+            tracing::error!("runtime failed to open: {}: {e}", e.code());
+            // The supervisor reads this line back to recognise `runtime_in_use`.
             eprintln!("{}: {e}", e.code());
             if fatal {
                 write_runtime_fatal(&fatal_path, dispatch::wire_error(e));
@@ -165,34 +204,43 @@ async fn serve() -> i32 {
     };
     let _ = std::fs::remove_file(&fatal_path);
     if let Err(e) = runtime.start().await {
-        eprintln!("runtime failed to start: {e}");
+        tracing::error!("runtime failed to start: {e}");
     }
 
     let server = match SocketServer::bind(runtime.clone(), &app_data_dir).await {
         Ok(server) => server,
         Err(e) => {
-            eprintln!(
-                "cannot bind {}: {e}",
-                socket::socket_path(&app_data_dir).display()
-            );
+            let socket = socket::socket_path(&app_data_dir);
+            tracing::error!("cannot bind {}: {e}", socket.display());
+            eprintln!("cannot bind {}: {e}", socket.display());
             runtime.shutdown().await;
             return 1;
         }
     };
-    eprintln!(
-        "hyprlayer-server listening on {}",
-        server.socket_path().display()
-    );
+    tracing::info!("listening on {}", server.socket_path().display());
 
+    let started = Instant::now();
     let stop = server.stop_handle();
     tokio::spawn(async move {
-        wait_for_signal().await;
+        let signal = wait_for_signal().await;
+        tracing::info!("received {signal}; stopping");
         stop.stop();
     });
     if let Err(e) = server.run().await {
-        eprintln!("server loop failed: {e}");
+        tracing::error!("server loop failed: {e}");
     }
-    runtime.shutdown().await;
+    let report = runtime.shutdown().await;
+    let failures = if report.task_failures.is_empty() {
+        String::new()
+    } else {
+        format!("; task failures: {}", report.task_failures.join("; "))
+    };
+    tracing::info!(
+        "stopped after {:?} up; shutdown took {:?} and forced {} task(s){failures}",
+        started.elapsed(),
+        report.elapsed,
+        report.forced_process_count,
+    );
     0
 }
 
@@ -200,36 +248,46 @@ async fn serve() -> i32 {
 /// this process's stdin/stdout as the connection (ADR-0009, plan Phase 5 §1).
 async fn relay() -> i32 {
     let (config_dir, data_dir) = app_dirs();
+    let log_dir = logging::log_dir(&data_dir);
+    let _log = logging::init(logging::Process::Relay, &log_dir);
+    tracing::info!(
+        "relay {} starting: pid {}",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id()
+    );
     let io = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
-    match relay::run(config_dir, data_dir, io).await {
+    match relay::run(config_dir, data_dir, &log_dir, io).await {
         Ok(()) => 0,
         Err(e) => {
+            tracing::error!("relay failed: {e}");
+            // Reaches the desktop as ssh's stderr.
             eprintln!("relay failed: {e}");
             1
         }
     }
 }
 
-async fn wait_for_signal() {
+async fn wait_for_signal() -> &'static str {
     #[cfg(unix)]
     {
         let mut term =
             match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
                 Ok(term) => term,
                 Err(e) => {
-                    eprintln!("cannot listen for SIGTERM: {e}");
+                    tracing::warn!("cannot listen for SIGTERM: {e}");
                     let _ = tokio::signal::ctrl_c().await;
-                    return;
+                    return "ctrl-c";
                 }
             };
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = term.recv() => {}
+            _ = tokio::signal::ctrl_c() => "ctrl-c",
+            _ = term.recv() => "SIGTERM",
         }
     }
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+        "ctrl-c"
     }
 }
 
@@ -243,6 +301,7 @@ async fn status() -> i32 {
                 path.display(),
                 client.server_version()
             );
+            println!("logs in {}", logging::log_dir(&data_dir).display());
             0
         }
         Err(ConnectError::Refused(e)) => {
@@ -333,8 +392,10 @@ impl SocketServer {
             tokio::select! {
                 accepted = self.listener.accept() => match accepted {
                     Ok(stream) => {
+                        let peer = socket::peer(&stream);
                         connections.spawn(handle_connection(
                             stream,
+                            peer,
                             self.server.clone(),
                             self.clients.clone(),
                             self.stop.clone(),
@@ -348,27 +409,43 @@ impl SocketServer {
                 _ = self.stop.notified() => break,
             }
         }
+        tracing::info!("closing {} connection(s)", connections.len());
         connections.shutdown().await;
         self.forwarder.abort();
         Ok(())
     }
 }
 
-async fn handle_connection<S>(stream: S, server: Arc<Server>, clients: Clients, stop: Arc<Notify>)
-where
-    S: AsyncRead + AsyncWrite + Send + 'static,
-{
-    if let Err(e) = serve_connection(stream, server, clients, stop).await {
-        tracing::debug!("connection ended: {e}");
-    }
-}
-
-async fn serve_connection<S>(
+async fn handle_connection<S>(
     stream: S,
+    peer: String,
     server: Arc<Server>,
     clients: Clients,
     stop: Arc<Notify>,
-) -> io::Result<()>
+) where
+    S: AsyncRead + AsyncWrite + Send + 'static,
+{
+    let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
+    let started = Instant::now();
+    match serve_connection(conn, stream, &peer, server, clients, stop).await {
+        Ok(Some(requests)) => tracing::info!(
+            "conn {conn}: closed after {:?}, {requests} request(s)",
+            started.elapsed()
+        ),
+        Ok(None) => {}
+        Err(e) => tracing::info!("conn {conn}: dropped after {:?}: {e}", started.elapsed()),
+    }
+}
+
+/// `Ok(None)` when the peer never got past the handshake.
+async fn serve_connection<S>(
+    conn: u64,
+    stream: S,
+    peer: &str,
+    server: Arc<Server>,
+    clients: Clients,
+    stop: Arc<Notify>,
+) -> io::Result<Option<u64>>
 where
     S: AsyncRead + AsyncWrite + Send + 'static,
 {
@@ -376,6 +453,47 @@ where
     let mut reader = FrameReader::new(rd);
     let mut writer = FrameWriter::new(wr);
 
+    match handshake(conn, &mut reader, &mut writer, &stop).await {
+        Ok(true) => {}
+        Ok(false) => return Ok(None),
+        Err(e) => {
+            tracing::debug!("conn {conn}: closed during the handshake: {e}");
+            return Ok(None);
+        }
+    }
+    tracing::info!("conn {conn}: client connected ({peer})");
+
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_QUEUE_FRAMES);
+    clients.register(conn, tx.clone());
+    let writer_task = tokio::spawn(async move {
+        while let Some(bytes) = rx.recv().await {
+            if let Err(e) = writer.write_bytes(&bytes).await {
+                tracing::debug!("conn {conn}: write failed: {e}");
+                break;
+            }
+        }
+    });
+
+    let streams = StreamRegistry::default();
+    let result = read_requests(conn, &mut reader, &server, &tx, &stop, &streams).await;
+    // A dropped connection cancels every stream it owned.
+    streams.abort_all();
+    clients.unregister(conn);
+    writer_task.abort();
+    result.map(Some)
+}
+
+/// `Ok(true)` once the peer's hello is accepted.
+async fn handshake<R, W>(
+    conn: u64,
+    reader: &mut FrameReader<R>,
+    writer: &mut FrameWriter<W>,
+    stop: &Notify,
+) -> io::Result<bool>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
     writer
         .write_control(&Control::Hello {
             protocol_version: PROTOCOL_VERSION,
@@ -386,70 +504,80 @@ where
         Some(Control::Hello {
             protocol_version, ..
         }) => {
-            if let Err(error) = check_version(protocol_version) {
-                writer.write_control(&Control::Refused { error }).await?;
-                // A version mismatch normally ends the connection here. The one
-                // exception (Phase 4 §5): a client strictly newer than us is
-                // mid-upgrade and gets one more read, to ask us to step aside —
-                // an equal-or-older client's `Shutdown` here is ignored, or two
-                // mismatched clients could evict each other in a loop.
-                if protocol_version > PROTOCOL_VERSION {
-                    if let Ok(Some(Control::Shutdown)) = reader.next_control().await {
-                        stop.notify_one();
-                    }
+            let Err(error) = check_version(protocol_version) else {
+                return Ok(true);
+            };
+            tracing::warn!(
+                "conn {conn}: refused a client speaking protocol {protocol_version}; \
+                 this server speaks {PROTOCOL_VERSION}"
+            );
+            writer.write_control(&Control::Refused { error }).await?;
+            // A version mismatch normally ends the connection here. The one
+            // exception (Phase 4 §5): a client strictly newer than us is
+            // mid-upgrade and gets one more read, to ask us to step aside —
+            // an equal-or-older client's `Shutdown` here is ignored, or two
+            // mismatched clients could evict each other in a loop.
+            if protocol_version > PROTOCOL_VERSION {
+                if let Ok(Some(Control::Shutdown)) = reader.next_control().await {
+                    tracing::warn!(
+                        "conn {conn}: stepping aside for a newer client; every session and \
+                         terminal on this server ends"
+                    );
+                    stop.notify_one();
                 }
-                return Ok(());
             }
+            Ok(false)
         }
         Some(other) => {
+            tracing::warn!("conn {conn}: expected hello, got {}", label(&other));
             let error = WireError::protocol(format!("expected hello, got {}", label(&other)));
             writer.write_control(&Control::Refused { error }).await?;
-            return Ok(());
+            Ok(false)
         }
-        None => return Ok(()),
+        None => Ok(false),
     }
-
-    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_QUEUE_FRAMES);
-    let client_id = clients.register(tx.clone());
-    let writer_task = tokio::spawn(async move {
-        while let Some(bytes) = rx.recv().await {
-            if writer.write_bytes(&bytes).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    let streams = StreamRegistry::default();
-    let result = read_requests(&mut reader, &server, &tx, &stop, &streams).await;
-    // A dropped connection cancels every stream it owned.
-    streams.abort_all();
-    clients.unregister(client_id);
-    writer_task.abort();
-    result
 }
 
+/// Returns how many requests the connection made.
 async fn read_requests<R: AsyncRead + Unpin>(
+    conn: u64,
     reader: &mut FrameReader<R>,
     server: &Arc<Server>,
     tx: &mpsc::Sender<Vec<u8>>,
     stop: &Arc<Notify>,
     streams: &StreamRegistry,
-) -> io::Result<()> {
+) -> io::Result<u64> {
+    let mut requests = 0u64;
     while let Some(frame) = reader.next_frame().await? {
         let line = match frame {
             Frame::Control(line) => line,
             Frame::Data(_) => {
-                tracing::debug!("data frame ignored: the data plane only carries stream events");
+                tracing::debug!(
+                    "conn {conn}: data frame ignored: the data plane only carries stream events"
+                );
                 continue;
             }
         };
         match parse_control(&line)? {
             Control::Request { id, body } => {
+                requests += 1;
                 let server = server.clone();
                 let tx = tx.clone();
                 tokio::spawn(async move {
                     let command = body.command();
-                    let outcome: Outcome<_> = server.dispatch(body).await.into();
+                    let started = Instant::now();
+                    // Its own task, so a panicking handler still gets an answer
+                    // back to the caller instead of leaving it waiting.
+                    let outcome: Outcome<_> =
+                        match tokio::spawn(async move { server.dispatch(body).await }).await {
+                            Ok(result) => result.into(),
+                            Err(e) if e.is_panic() => {
+                                tracing::error!("conn {conn}: {command} panicked: {e}");
+                                Outcome::Err(crashed(command))
+                            }
+                            Err(_) => return,
+                        };
+                    log_outcome(conn, command, started.elapsed(), &outcome);
                     let bytes =
                         encode_control(&Control::Response { id, outcome }).unwrap_or_else(|e| {
                             tracing::error!("{command}: result is not serializable: {e}");
@@ -459,17 +587,39 @@ async fn read_requests<R: AsyncRead + Unpin>(
                             encode_control(&Control::Response { id, outcome })
                                 .expect("an error outcome always serializes")
                         });
-                    let _ = tx.send(bytes).await;
+                    if tx.send(bytes).await.is_err() {
+                        tracing::debug!("conn {conn}: {command} finished after the client left");
+                    }
                 });
             }
             Control::StreamRequest { id, body } => {
+                requests += 1;
                 let server = server.clone();
                 let tx = tx.clone();
                 let streams = streams.clone();
                 tokio::spawn(async move {
-                    match streams::prepare_stream(&server, body).await {
+                    let command = body.command();
+                    let started = Instant::now();
+                    let preparing = server.clone();
+                    let prepared = match tokio::spawn(async move {
+                        streams::prepare_stream(&preparing, body).await
+                    })
+                    .await
+                    {
+                        Ok(prepared) => prepared,
+                        Err(e) if e.is_panic() => {
+                            tracing::error!("conn {conn}: {command} panicked: {e}");
+                            Err(crashed(command))
+                        }
+                        Err(_) => return,
+                    };
+                    match prepared {
                         Ok((response, source)) => {
                             let stream_id = response.stream_id();
+                            tracing::debug!(
+                                "conn {conn}: {command} opened stream {stream_id:?} in {:?}",
+                                started.elapsed()
+                            );
                             let bytes = encode_control(&Control::StreamResponse {
                                 id,
                                 outcome: Outcome::Ok(response),
@@ -501,6 +651,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                             }
                         }
                         Err(error) => {
+                            log_failure(conn, command, &error, started.elapsed());
                             let bytes = encode_control(&Control::StreamResponse {
                                 id,
                                 outcome: Outcome::Err(error),
@@ -511,15 +662,56 @@ async fn read_requests<R: AsyncRead + Unpin>(
                     }
                 });
             }
-            Control::Cancel { stream_id } => streams.abort(stream_id),
-            Control::Shutdown => {
-                stop.notify_one();
-                return Ok(());
+            Control::Cancel { stream_id } => {
+                tracing::debug!("conn {conn}: cancelled stream {stream_id}");
+                streams.abort(stream_id)
             }
-            other => tracing::warn!("unexpected {} frame from client", label(&other)),
+            Control::Shutdown => {
+                tracing::info!("conn {conn}: asked the server to stop");
+                stop.notify_one();
+                return Ok(requests);
+            }
+            other => tracing::warn!(
+                "conn {conn}: unexpected {} frame from client",
+                label(&other)
+            ),
         }
     }
-    Ok(())
+    Ok(requests)
+}
+
+fn crashed(command: &str) -> WireError {
+    WireError::internal(format!(
+        "the server hit an internal error handling {command}; its log has the details"
+    ))
+}
+
+fn log_outcome<T>(conn: u64, command: &str, elapsed: Duration, outcome: &Outcome<T>) {
+    match outcome {
+        Outcome::Err(error) => log_failure(conn, command, error, elapsed),
+        Outcome::Ok(_) if elapsed >= SLOW_REQUEST => {
+            tracing::info!("conn {conn}: {command} took {elapsed:?}")
+        }
+        Outcome::Ok(_) => tracing::trace!("conn {conn}: {command} in {elapsed:?}"),
+    }
+}
+
+/// Command name, code and message only: arguments carry keys, keystrokes and
+/// prompts.
+fn log_failure(conn: u64, command: &str, error: &WireError, elapsed: Duration) {
+    let Some(held) = REQUEST_FAILURES.admit(&format!("{command}:{}", error.code)) else {
+        return;
+    };
+    let repeats = if held > 0 {
+        format!(" ({held} more since the last report)")
+    } else {
+        String::new()
+    };
+    tracing::warn!(
+        "conn {conn}: {command} failed after {elapsed:?}: {}: {}{repeats}",
+        error.code,
+        hyprlayer_core::redact::url_credentials(&error.message)
+    );
 }
 
 #[cfg(all(test, unix))]

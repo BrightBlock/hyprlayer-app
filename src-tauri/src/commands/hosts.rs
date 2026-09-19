@@ -54,6 +54,12 @@ fn app_data_dir(app: &AppHandle) -> CmdResult<PathBuf> {
         .map_err(|e| AppError::internal(format!("could not resolve the app data directory: {e}")))
 }
 
+pub(crate) fn app_log_dir(app: &AppHandle) -> CmdResult<PathBuf> {
+    app.path()
+        .app_log_dir()
+        .map_err(|e| AppError::internal(format!("could not resolve the app log directory: {e}")))
+}
+
 /// Reads `hosts.json` directly — deciding which server to reach is
 /// necessarily local, since there is no server yet to ask (plan Phase 1 §7).
 #[tauri::command]
@@ -69,7 +75,13 @@ pub fn list_hosts(app: AppHandle) -> CmdResult<HostsFile> {
 pub fn save_hosts(app: AppHandle, file: HostsFile) -> CmdResult<()> {
     let dir = app_config_dir(&app)?;
     hosts::save(&dir, &file)
-        .map_err(|e| AppError::internal(format!("could not write hosts.json: {e}")))
+        .map_err(|e| AppError::internal(format!("could not write hosts.json: {e}")))?;
+    log::info!(
+        "saved {} host(s); active: {}",
+        file.hosts.len(),
+        file.active.as_deref().unwrap_or("this machine")
+    );
+    Ok(())
 }
 
 /// JetBrains Gateway's explicit "Test Connection" (plan Phase 1 §3): probes
@@ -78,7 +90,17 @@ pub fn save_hosts(app: AppHandle, file: HostsFile) -> CmdResult<()> {
 #[specta::specta]
 pub async fn test_host_connection(app: AppHandle, host: Host) -> CmdResult<HostProbe> {
     let data_dir = app_data_dir(&app)?;
-    Ok(supervisor::probe_remote(&host, &data_dir).await)
+    let probe = supervisor::probe_remote(&host, &data_dir).await;
+    match &probe.error {
+        None => log::info!("connection test to {} passed", host.destination),
+        Some(e) => log::warn!(
+            "connection test to {} failed: {}: {}",
+            host.destination,
+            e.code,
+            e.message
+        ),
+    }
+    Ok(probe)
 }
 
 /// The level read `useConnectionStatus` polls at mount and on focus.
@@ -115,8 +137,14 @@ pub async fn reconnect_server(
 ) -> CmdResult<ConnectionStatus> {
     let config_dir = app_config_dir(&app)?;
     let data_dir = app_data_dir(&app)?;
+    let log_dir = app_log_dir(&app)?;
     let configured = hosts::target(&config_dir);
     if let Some(refusal) = server_change(&state.target(), &configured) {
+        log::warn!(
+            "not reconnecting: the configured server changed from {} to {}",
+            state.target().name(),
+            configured.name()
+        );
         return Err(refusal);
     }
     // Already live: a second connection would leave the first one's bridge
@@ -125,12 +153,13 @@ pub async fn reconnect_server(
         return Ok(state.status());
     }
 
-    match supervisor::connect(&configured, &config_dir, &data_dir).await {
+    match supervisor::connect(&configured, &config_dir, &data_dir, &log_dir).await {
         supervisor::Outcome::Connected { client, outdated } => {
             // Swapped before the bridge is spawned: a connection that dies in
             // between then retires against the client the state holds, so it
             // still reports itself lost rather than sitting there as `Connected`.
             state.reconnected(client.clone(), outdated);
+            log::info!("reconnected to {}", configured.name());
             crate::attach_client(&app, client).await;
             Ok(state.status())
         }
@@ -146,6 +175,10 @@ pub async fn reconnect_server(
 #[tauri::command]
 #[specta::specta]
 pub async fn restart_server(state: State<'_, AppState>) -> CmdResult<()> {
+    log::warn!(
+        "restarting the server on {} at the user's request; its sessions and terminals end",
+        state.target().name()
+    );
     state
         .client()?
         .request_shutdown()

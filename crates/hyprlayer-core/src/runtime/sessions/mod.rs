@@ -81,6 +81,23 @@ impl SessionActors {
         handle.log_after(caller_epoch, after_seq).await
     }
 
+    pub(crate) async fn attach_after(
+        &self,
+        session_id: &str,
+        caller_epoch: u64,
+        after_seq: Option<i64>,
+    ) -> Result<SessionAttachment> {
+        let mut handles = self.handles.lock().await;
+        if !handles.contains_key(session_id) {
+            handles.insert(
+                session_id.to_string(),
+                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
+            );
+        }
+        let handle = handles.get(session_id).expect("just inserted above");
+        handle.attach_after(caller_epoch, after_seq).await
+    }
+
     pub(crate) async fn rewind(
         &self,
         session_id: &str,
@@ -171,6 +188,17 @@ impl SessionRuntimeHandle {
     ) -> Result<Vec<SessionLogEntry>> {
         self.actors
             .log_after(session_id, caller_epoch, after_seq)
+            .await
+    }
+
+    pub async fn attach_after(
+        &self,
+        session_id: &str,
+        caller_epoch: u64,
+        after_seq: Option<i64>,
+    ) -> Result<SessionAttachment> {
+        self.actors
+            .attach_after(session_id, caller_epoch, after_seq)
             .await
     }
 

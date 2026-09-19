@@ -124,6 +124,10 @@ pub(crate) fn apply_pending(paths: &RuntimePaths) -> Result<()> {
             &paths.opencode_config_file,
         ) {
             Ok(_) => {
+                tracing::info!(
+                    migration = OPENCODE_REMOVE_GITHUB_COPILOT_DEFAULT_V1,
+                    "applied runtime migration"
+                );
                 ledger.completed.insert(
                     OPENCODE_REMOVE_GITHUB_COPILOT_DEFAULT_V1.to_string(),
                     RuntimeMigrationRecord {

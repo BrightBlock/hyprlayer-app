@@ -3,6 +3,7 @@ import { focusManager } from "@tanstack/react-query";
 import { commands, events } from "@/lib/bindings";
 import type { EventBridge } from "@/lib/events";
 import { errorMessage, errorRemedy, isAppError, unwrap } from "@/lib/ipc";
+import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/lib/toast";
 
@@ -48,8 +49,9 @@ export async function retryConnection(): Promise<void> {
   try {
     await unwrap(commands.reconnectServer());
     await queryClient.invalidateQueries();
-  } catch {
-    // Nothing to say: the status already on screen is still the best answer.
+  } catch (e) {
+    // The status already on screen is still the best answer; the log keeps why.
+    log.info("reconnect", "retry failed", e);
   } finally {
     running = false;
   }
@@ -62,18 +64,32 @@ export function startReconnecting(): void {
 async function reconnectLoop(): Promise<void> {
   if (running) return;
   running = true;
+  const lostAt = Date.now();
+  let lastCode: string | null = null;
+  log.info("reconnect", "server connection lost; reconnecting");
   try {
-    for (let attempt = 0; ; attempt++) {
-      await wait(DELAYS[attempt] ?? STEADY_DELAY);
+    for (let attempt = 1; ; attempt++) {
+      await wait(DELAYS[attempt - 1] ?? STEADY_DELAY);
       try {
         await unwrap(commands.reconnectServer());
+        log.info(
+          "reconnect",
+          `reconnected on attempt ${attempt}, ${Math.round((Date.now() - lostAt) / 1000)}s after the drop`,
+        );
         // The server may have restarted with different state.
         await queryClient.invalidateQueries();
         return;
       } catch (e) {
+        // Logged when the reason changes, not on every retry.
+        const code = isAppError(e) ? e.code : "unknown";
+        if (code !== lastCode) {
+          lastCode = code;
+          log.warn("reconnect", `attempt ${attempt} failed`, e);
+        }
         // Disagreeing binaries cannot resolve themselves, and a relaunch would
         // not help either; everything else keeps trying.
         if (isAppError(e) && e.code === "protocol_version_mismatch") {
+          log.error("reconnect", "stopped: the app and server speak different protocols");
           useToast.getState().show(errorMessage(e), errorRemedy(e) ?? "", { tone: "bad" });
           return;
         }

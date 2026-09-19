@@ -137,6 +137,11 @@ pub fn relay_command() -> String {
     format!("{} relay", remote_binary(SERVER_VERSION))
 }
 
+/// Prints the tails of the host's server logs; works with no server running.
+pub fn logs_command() -> String {
+    format!("{} logs", remote_binary(SERVER_VERSION))
+}
+
 /// Receives the pushed binary into `<version>.tmp/`. An interrupted transfer
 /// leaves a directory no lookup ever consults and the next run wipes.
 fn stage_script(version: &str) -> String {
@@ -152,7 +157,8 @@ fn stage_script(version: &str) -> String {
 fn commit_script(version: &str, bytes: u64) -> String {
     format!(
         "set -e; r=\"$HOME/.hyprlayer/server\"; d=\"$r/{version}.tmp\"; \
-         [ \"$(wc -c < \"$d/hyprlayer-server\")\" -eq {bytes} ]; \
+         n=\"$(wc -c < \"$d/hyprlayer-server\")\"; \
+         [ \"$n\" -eq {bytes} ] || {{ echo \"received $n of {bytes} bytes\" >&2; exit 1; }}; \
          chmod 755 \"$d/hyprlayer-server\"; \
          rm -rf \"$r/{version}\"; mv \"$d\" \"$r/{version}\""
     )
@@ -275,12 +281,56 @@ pub async fn provision(
     app_data_dir: &Path,
     on_step: impl Fn(ProvisionStep),
 ) -> Result<(), AppError> {
+    let started = std::time::Instant::now();
+    let current = std::sync::Mutex::new(ProvisionStep::Probe);
+    let result = install(host, app_data_dir, |step| {
+        log::info!(
+            "installing hyprlayer-server {SERVER_VERSION} on {}: {step:?}",
+            host.destination
+        );
+        *current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = step;
+        on_step(step);
+    })
+    .await;
+    let step = *current
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match &result {
+        Ok(()) => log::info!(
+            "installed hyprlayer-server {SERVER_VERSION} on {} in {:?}",
+            host.destination,
+            started.elapsed()
+        ),
+        Err(e) => log::error!(
+            "installing on {} failed at {step:?}: {}: {}",
+            host.destination,
+            e.code,
+            e.message
+        ),
+    }
+    result
+}
+
+async fn install(
+    host: &Host,
+    app_data_dir: &Path,
+    on_step: impl Fn(ProvisionStep),
+) -> Result<(), AppError> {
     on_step(ProvisionStep::Probe);
     let uname = supervisor::ssh_capture(host, "uname -sm").await?;
     let triple = supervisor::triple_for_uname(host, &uname)?;
 
     let local = match resolve_local(app_data_dir, exe_dir().as_deref(), triple) {
-        Some(found) => found.path,
+        Some(found) => {
+            log::info!(
+                "using the {triple} binary from {:?}: {}",
+                found.source,
+                found.path.display()
+            );
+            found.path
+        }
         None => download_into_cache(app_data_dir, triple, &on_step).await?,
     };
     let bytes = std::fs::metadata(&local)
@@ -317,16 +367,18 @@ async fn download_into_cache(
 
     on_step(ProvisionStep::Download);
     let base = format!("{RELEASE_BASE}/v{SERVER_VERSION}");
-    curl_to(&format!("{base}/{asset}"), &part)
+    let binary_url = format!("{base}/{asset}");
+    curl_to(&binary_url, &part)
         .await
-        .map_err(|e| download_error(triple, e))?;
+        .map_err(|e| download_error(triple, format!("{binary_url}: {e}")))?;
 
     on_step(ProvisionStep::Verify);
-    let sums = match curl_text(&format!("{base}/{SUMS_ASSET}")).await {
+    let sums_url = format!("{base}/{SUMS_ASSET}");
+    let sums = match curl_text(&sums_url).await {
         Ok(sums) => sums,
         Err(e) => {
             let _ = std::fs::remove_file(&part);
-            return Err(download_error(triple, e));
+            return Err(download_error(triple, format!("{sums_url}: {e}")));
         }
     };
     let Some(expected) = expected_sha(&sums, &asset) else {

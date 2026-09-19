@@ -182,7 +182,7 @@ impl<'a> HyprCli<'a> {
             .await?;
         serde_json::from_str(&stdout).map_err(|e| CoreError::OutputParse {
             program: "hyprlayer storage info".into(),
-            detail: e.to_string(),
+            detail: parse_detail(&e, &stdout),
         })
     }
 
@@ -247,7 +247,7 @@ impl<'a> HyprCli<'a> {
             .await?;
         serde_json::from_str(&stdout).map_err(|e| CoreError::OutputParse {
             program: "hyprlayer ai status".into(),
-            detail: e.to_string(),
+            detail: parse_detail(&e, &stdout),
         })
     }
 
@@ -267,7 +267,7 @@ impl<'a> HyprCli<'a> {
             .await?;
         serde_json::from_str(&stdout).map_err(|e| CoreError::OutputParse {
             program: "hyprlayer ai versions".into(),
-            detail: e.to_string(),
+            detail: parse_detail(&e, &stdout),
         })
     }
 
@@ -309,6 +309,13 @@ impl<'a> HyprCli<'a> {
             .run_unchecked()
             .await
     }
+}
+
+/// The start of what the CLI printed: a shell shim's banner on stdout (mise
+/// prints one) is otherwise just "expected value at line 1".
+fn parse_detail(e: &serde_json::Error, stdout: &str) -> String {
+    let head: String = stdout.trim_start().chars().take(160).collect();
+    format!("{e}; the output began {head:?}")
 }
 
 #[cfg(test)]

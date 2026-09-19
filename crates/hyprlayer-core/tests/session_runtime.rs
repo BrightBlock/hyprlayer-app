@@ -342,6 +342,49 @@ async fn a_stalled_attachment_lags_detaches_and_the_store_still_has_everything()
 }
 
 #[tokio::test]
+async fn attach_after_resumes_a_lagged_reader_with_no_gap_or_duplicate() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut live = handle.attach("s1").await.unwrap().live;
+    let ingress = handle.ingress("s1").await;
+    const TOTAL: usize = 520;
+    for i in 0..TOTAL {
+        ingress.send(turn_done(i as f64)).await.unwrap();
+    }
+    wait_for_log_len(&db, "s1", TOTAL).await;
+
+    let mut seen = 0usize;
+    let (epoch, last_seq) = loop {
+        match live.recv().await {
+            Some(Ok(_)) => seen += 1,
+            Some(Err(SessionStreamError::Lagged {
+                epoch,
+                last_persisted_seq,
+            })) => break (epoch, last_persisted_seq),
+            None => panic!("channel closed before a Lagged signal was observed"),
+        }
+    };
+
+    let mut resumed = handle.attach_after("s1", epoch, last_seq).await.unwrap();
+    assert_eq!(
+        seen + resumed.replay.len(),
+        TOTAL,
+        "the replay must cover exactly what the lagged reader missed"
+    );
+
+    ingress.send(turn_done(999.0)).await.unwrap();
+    match tokio::time::timeout(Duration::from_secs(2), resumed.live.recv())
+        .await
+        .expect("the resumed attachment must receive later events")
+    {
+        Some(Ok(SessionEvent::TurnDone { cost_usd, .. })) => assert_eq!(cost_usd, Some(999.0)),
+        other => panic!("expected the next turn, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn a_non_coalescible_ephemeral_event_is_never_silently_dropped() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");

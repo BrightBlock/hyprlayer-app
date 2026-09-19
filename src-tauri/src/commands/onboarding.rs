@@ -78,7 +78,7 @@ pub async fn probe_default_thoughts(app: tauri::AppHandle) -> ThoughtsProbe {
     match client.probe_default_thoughts().await {
         Ok(probe) => probe.into(),
         Err(e) => {
-            log::error!("probe_default_thoughts: {}", e.message);
+            log::warn!("probe_default_thoughts: {}: {}", e.code, e.message);
             empty()
         }
     }

@@ -27,12 +27,17 @@ impl TerminalRegistry {
         self.live.lock().await.remove(id)
     }
 
-    pub fn kill_all_blocking(&self) {
-        if let Ok(mut live) = self.live.try_lock() {
-            for (_, session) in live.drain() {
-                session.kill();
-            }
+    /// How many were killed, or `None` when the registry was busy and none were.
+    pub fn kill_all_blocking(&self) -> Option<usize> {
+        let Ok(mut live) = self.live.try_lock() else {
+            tracing::warn!("terminal registry busy at shutdown; its shells were not killed");
+            return None;
+        };
+        let count = live.len();
+        for (_, session) in live.drain() {
+            session.kill();
         }
+        Some(count)
     }
 
     pub async fn remove_for_workstream(&self, ws: &str) {

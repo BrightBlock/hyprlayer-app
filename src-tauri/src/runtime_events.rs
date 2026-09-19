@@ -24,6 +24,7 @@ pub fn spawn(handle: AppHandle, client: Arc<RpcClient>) {
         // `connection_status` on the event already sees it (plan Phase 1 §6) —
         // and stay quiet if a reconnect has already moved on (Phase 8 §2).
         if handle.state::<AppState>().mark_lost(&client) {
+            log::warn!("the server connection is lost; the window will try to reconnect");
             let _ = events::ServerDisconnected.emit(&handle);
         }
     });

@@ -4,6 +4,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { commands, type ScriptKind, type TerminalEvent } from "@/lib/bindings";
 import { releaseChannels } from "@/lib/terminal/channelRelease";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
+import { log } from "@/lib/log";
 import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
@@ -75,7 +76,10 @@ export function ScriptRunView({
 
     void (async () => {
       if (id) {
-        const ok = await unwrap(commands.terminalAttach(id, newChannel()));
+        const ok = await unwrap(commands.terminalAttach(id, newChannel())).catch((e) => {
+          log.warn("script-run", `reattaching terminal ${id} failed`, e);
+          return false;
+        });
         if (!ok) id = undefined;
       }
       if (reattaching && !id) {
@@ -96,6 +100,7 @@ export function ScriptRunView({
           id = opened;
           onStartedRef.current?.(opened);
         } catch (e) {
+          log.error("script-run", `starting the ${kind} script failed`, e);
           const remedy = errorRemedy(e);
           const crlf = (s: string): string => s.replace(/\r?\n/g, "\r\n");
           engine.write(

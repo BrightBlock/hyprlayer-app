@@ -3,6 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
+import { log } from "@/lib/log";
 import { notifyNeedsAttention } from "@/lib/notifications";
 import { b64ToBytes } from "@/lib/terminal/terminalCodec";
 import { StateCoalescer } from "./coalesce";
@@ -171,7 +172,10 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
     const existing = r.terminalId ?? opts.persistedTerminalId;
     if (existing) {
       const ch = makeDetect();
-      const ok = await unwrap(commands.terminalAttach(existing, ch)).catch(() => false);
+      const ok = await unwrap(commands.terminalAttach(existing, ch)).catch((e) => {
+        log.warn("agent", `reattaching terminal ${existing} failed; starting a new agent`, e);
+        return false;
+      });
       if (ok) {
         r.detect = ch;
         return adoptOrKill(existing);
@@ -185,7 +189,8 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<string | null> {
       );
       r.detect = ch;
       return adoptOrKill(id);
-    } catch {
+    } catch (e) {
+      log.error("agent", `starting ${r.engine.id} failed`, e);
       return null;
     }
   })();

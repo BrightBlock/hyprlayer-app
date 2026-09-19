@@ -448,12 +448,13 @@ in `hyprlayer_core::settings` (ADR-0008, Type ownership).
 
 ## Not supported API
 
-`hyprlayer-core` still declares 30 `pub mod`s. Only the ones named above are
+`hyprlayer-core` still declares 31 `pub mod`s. Only the ones named above are
 supported. Everything else is implementation detail with **no stability
 promise** — provider protocols (`claude`, `codex`, `opencode`), raw stores
 (`store`), concrete registries and watchers (`index`, `runtime::script_registry`,
 `runtime::terminal_registry`), Git and process implementations (`gitops`,
-`process`, `worktree`), the CLI wrapper (`hyprcli`), and driver internals.
+`process`, `worktree`), the CLI wrapper (`hyprcli`), log scrubbing (`redact`), and
+driver internals.
 
 They are public only because `hyprlayer-app` still reaches through them for the
 desktop carve-outs ADR-0008 enumerates. That is a migration aid, not a contract:

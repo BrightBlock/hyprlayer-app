@@ -8,7 +8,7 @@ pub mod orphan;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -16,6 +16,9 @@ use crate::error::{CoreError, Result};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 const STDERR_TAIL_CHARS: usize = 2000;
+/// Longer arguments are prompts or file bodies; the log gets their length.
+const LOGGED_ARG_CHARS: usize = 200;
+const LOGGED_STDERR_BYTES: usize = 500;
 
 pub struct Exec {
     program: PathBuf,
@@ -113,6 +116,66 @@ impl Exec {
     }
 
     pub async fn run_unchecked(&self) -> Result<ExecOutput> {
+        let started = Instant::now();
+        let ran = self.spawn_and_wait().await;
+        let elapsed = started.elapsed();
+        match &ran {
+            Ok(out) if out.exit_code == Some(0) => {
+                tracing::debug!("`{}` succeeded in {elapsed:?}", self.describe());
+            }
+            Ok(out) => tracing::debug!(
+                "`{}` exited {:?} in {elapsed:?}: {}",
+                self.describe(),
+                out.exit_code,
+                crate::redact::url_credentials(crate::redact::tail(
+                    out.stderr.trim(),
+                    LOGGED_STDERR_BYTES
+                ))
+            ),
+            Err(CoreError::ExecTimeout { seconds, .. }) => {
+                tracing::warn!(
+                    "`{}` timed out after {seconds}s and was killed",
+                    self.describe()
+                );
+            }
+            Err(e) => tracing::debug!("`{}` could not run: {e}", self.describe()),
+        }
+        ran
+    }
+
+    /// Program, cwd and arguments for a log line, with credentials in URLs,
+    /// values after key- or token-like flags, and long arguments masked.
+    fn describe(&self) -> String {
+        let mut out = program_name(&self.program_display());
+        let mut secret_next = false;
+        for arg in &self.args {
+            let arg = arg.to_string_lossy();
+            out.push(' ');
+            let flag = arg.starts_with('-');
+            let lower = arg.to_ascii_lowercase();
+            let names_secret = ["key", "token", "secret", "password"]
+                .iter()
+                .any(|word| lower.contains(word));
+            if secret_next && !flag {
+                out.push_str("<redacted>");
+            } else if let (true, true, Some((name, _))) = (flag, names_secret, arg.split_once('='))
+            {
+                out.push_str(name);
+                out.push_str("=<redacted>");
+            } else if arg.chars().count() > LOGGED_ARG_CHARS {
+                out.push_str(&format!("<{} chars>", arg.chars().count()));
+            } else {
+                out.push_str(&crate::redact::url_credentials(&arg));
+            }
+            secret_next = flag && names_secret && !arg.contains('=');
+        }
+        if let Some(cwd) = &self.cwd {
+            out.push_str(&format!(" (in {})", cwd.display()));
+        }
+        out
+    }
+
+    async fn spawn_and_wait(&self) -> Result<ExecOutput> {
         let mut cmd = tokio::process::Command::new(&self.program);
         cmd.args(&self.args)
             .stdin(if self.stdin.is_some() {
@@ -233,6 +296,10 @@ impl SupervisedChild {
         self.child.stderr.take()
     }
 
+    pub fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        self.child.try_wait()
+    }
+
     pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
         self.child.wait().await
     }
@@ -327,6 +394,29 @@ fn tail(s: &str, max_chars: usize) -> String {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_logged_command_line_masks_secrets_and_long_arguments() {
+        let prompt = "x".repeat(LOGGED_ARG_CHARS + 1);
+        let line = Exec::new("/usr/bin/git")
+            .args([
+                "clone",
+                "https://me:ghp_abc@github.com/a/b.git",
+                "--depth=1",
+            ])
+            .args(["--api-key", "sk-live", "--token=abc", "-p"])
+            .arg(&prompt)
+            .cwd("/work")
+            .describe();
+        assert_eq!(
+            line,
+            format!(
+                "git clone https://***@github.com/a/b.git --depth=1 --api-key <redacted> \
+                 --token=<redacted> -p <{} chars> (in /work)",
+                LOGGED_ARG_CHARS + 1
+            )
+        );
+    }
 
     #[tokio::test]
     async fn timeout_kills_process_group() {

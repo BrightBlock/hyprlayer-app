@@ -86,11 +86,21 @@ fn hosts_path(app_config_dir: &Path) -> PathBuf {
 
 /// Tolerant: a missing or unreadable file is an empty list, not an error —
 /// there is nothing a fresh profile or a rolled-back binary should fail on.
+/// Logged, though: an empty list means the local server, whatever was active.
 pub fn load(app_config_dir: &Path) -> HostsFile {
-    std::fs::read(hosts_path(app_config_dir))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    let path = hosts_path(app_config_dir);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return HostsFile::default(),
+        Err(e) => {
+            log::warn!("cannot read {}; using this machine: {e}", path.display());
+            return HostsFile::default();
+        }
+    };
+    serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+        log::warn!("{} is not valid; using this machine: {e}", path.display());
+        HostsFile::default()
+    })
 }
 
 /// Tmp-then-rename, like every other config write in this tree
@@ -118,9 +128,13 @@ pub fn target(app_config_dir: &Path) -> Target {
         .find(|h| Some(&h.destination) == active.as_ref())
     {
         Some(host) => Target::Remote(host),
-        None => file
-            .local_profile
-            .map_or(Target::Own, |dir| Target::LocalProfile(PathBuf::from(dir))),
+        None => {
+            if let Some(active) = &active {
+                log::warn!("the active host {active} is not in hosts.json; ignoring it");
+            }
+            file.local_profile
+                .map_or(Target::Own, |dir| Target::LocalProfile(PathBuf::from(dir)))
+        }
     }
 }
 

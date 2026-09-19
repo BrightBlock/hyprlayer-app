@@ -627,12 +627,27 @@ async fn read_and_wait(
         match lines.next_line().await {
             Ok(Some(line)) => {
                 let Some(incoming) = decode_line(&line) else {
+                    // Recorded like claude's unrecognised lines, so the store
+                    // shows what codex versions actually send.
+                    if !line.trim().is_empty() {
+                        tracing::debug!(
+                            "codex sent a line that is not JSON-RPC ({} bytes)",
+                            line.len()
+                        );
+                        let _ = events.send(SessionEvent::ProtocolError {
+                            detail: "codex sent output the app could not read".into(),
+                            raw: line.chars().take(2000).collect(),
+                        });
+                    }
                     continue;
                 };
                 clean_exit |= route_incoming(incoming, &events, &pending, &state, &stdin_tx);
             }
             Ok(None) => break,
-            Err(_) => break,
+            Err(e) => {
+                tracing::warn!("reading codex output failed: {e}");
+                break;
+            }
         }
     }
 
@@ -709,6 +724,9 @@ fn route_incoming(
 }
 
 fn auto_decline(stdin_tx: &mpsc::WeakUnboundedSender<String>, id: &Value, method: &str) {
+    tracing::warn!(
+        "codex asked for {method} (request {id}), which the app does not handle; declined"
+    );
     let result = match method {
         "mcpServer/elicitation/request" => json!({ "action": "decline" }),
         "item/tool/requestUserInput" => json!({ "answers": {} }),

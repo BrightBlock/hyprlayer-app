@@ -5,6 +5,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 
+import { log } from "./log";
 import { flushPersistedWrites } from "./persistedStorage";
 import { IS_LINUX } from "./platform";
 import { useToast } from "./toast";
@@ -76,7 +77,7 @@ async function fetchChangelog(set: Set) {
     const versions: ChangelogEntry[] = Array.isArray(json?.versions) ? json.versions : [];
     set({ changelog: versions });
   } catch (e) {
-    console.warn("[updater] changelog fetch failed:", e);
+    log.warn("updater", "changelog fetch failed", e);
   }
 }
 
@@ -127,10 +128,11 @@ export const useUpdate = create<UpdateState>()(
             set({ pendingVersion: v, lastChecked: Date.now() });
             if (v && v !== toastedVersion && v !== get().dismissedVersion) {
               toastedVersion = v;
+              log.info("updater", `version ${v} is available`);
               showUpdateToast();
             }
           } catch (e) {
-            console.warn("[updater] check failed:", e);
+            log.warn("updater", "check failed", e);
           }
         };
         void probe();
@@ -152,7 +154,7 @@ export const useUpdate = create<UpdateState>()(
           set({ pendingVersion: v, lastChecked: Date.now() });
           return v ? "available" : "uptodate";
         } catch (e) {
-          console.warn("[updater] manual check failed:", e);
+          log.warn("updater", "manual check failed", e);
           return "error";
         }
       },
@@ -160,13 +162,15 @@ export const useUpdate = create<UpdateState>()(
       install: async () => {
         if (!CAN_SELF_INSTALL || !pendingUpdate || get().installing) return;
         set({ installing: "downloading" });
+        log.info("updater", `installing ${pendingUpdate.version}`);
         try {
           await pendingUpdate.downloadAndInstall();
           set({ installing: "installing" });
           flushPersistedWrites();
+          log.info("updater", "installed; relaunching");
           await relaunch();
         } catch (e) {
-          console.error("[updater] install failed:", e);
+          log.error("updater", `installing ${pendingUpdate.version} failed`, e);
           set({ installing: null });
         }
       },

@@ -4,7 +4,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { releaseChannels } from "@/lib/terminal/channelRelease";
-import { unwrap } from "@/lib/ipc";
+import { errorMessage, unwrap } from "@/lib/ipc";
+import { log } from "@/lib/log";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import {
   attachTerminalClipboard,
@@ -93,7 +94,11 @@ export function TerminalTab({
         lastGrid = engine.fit();
         void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
       }
-    })();
+    })().catch((e) => {
+      // Otherwise the pane stays blank with no reason anywhere.
+      log.error("terminal", "opening the terminal failed", e);
+      if (!disposed) engine.write(`\r\n\x1b[31m${errorMessage(e)}\x1b[0m\r\n`);
+    });
 
     const unsubInput = engine.onInput((data) => {
       if (id) void commands.terminalWrite(id, strToB64(data));

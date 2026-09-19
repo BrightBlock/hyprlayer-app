@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type TerminalEvent } from "@/lib/bindings";
-import { unwrap } from "@/lib/ipc";
+import { errorMessage, unwrap } from "@/lib/ipc";
+import { log } from "@/lib/log";
 import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
@@ -63,7 +64,10 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
       idRef.current = termId;
       lastGrid = engine.fit();
       void commands.terminalResize(termId, lastGrid.cols, lastGrid.rows);
-    })();
+    })().catch((e) => {
+      log.error("setup-terminal", "starting the sign-in terminal failed", e);
+      if (!disposed) engine.write(`\r\n\x1b[31m${errorMessage(e)}\x1b[0m\r\n`);
+    });
 
     const unsubInput = engine.onInput((data) => {
       const id = idRef.current;

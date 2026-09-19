@@ -24,6 +24,8 @@ sha2 = "0.10"
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 dirs.workspace = true
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter", "std", "ansi", "tracing-log"] }
+tracing-appender = "0.2.5"
 
 [dev-dependencies]
 hyprlayer-core = { workspace = true, features = ["test-support"] }

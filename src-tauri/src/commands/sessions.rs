@@ -57,6 +57,7 @@ fn spawn_live_pump(
         while let Some(event) = events.recv().await {
             let terminal = matches!(event, SessionEvent::Exited { .. });
             if on_event.send(event).is_err() {
+                log::debug!("session stream {stream_id}: the window stopped listening");
                 let _ = client.cancel_stream(stream_id).await;
                 return;
             }
@@ -64,6 +65,8 @@ fn spawn_live_pump(
                 return;
             }
         }
+        // Ended with no `Exited`: the connection dropped or a frame did not decode.
+        log::info!("session stream {stream_id} ended before the session exited");
     });
 }
 
@@ -94,7 +97,12 @@ pub async fn start_stage_session(
     // `prepare_start` synchronously; only `launch_and_converse` is deferred.
     let client = state.client()?.clone();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = client.launch_and_converse(session_id).await {
+        if let Err(e) = client.launch_and_converse(session_id.clone()).await {
+            log::warn!(
+                "session {session_id} failed to launch: {}: {}",
+                e.code,
+                e.message
+            );
             emit_start_failure(&on_event, &AppError::from(e).message);
         }
     });

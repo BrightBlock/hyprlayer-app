@@ -46,6 +46,7 @@ pub mod opencode;
 pub mod pipeline;
 pub mod pr;
 pub mod process;
+pub mod redact;
 pub mod repo_settings;
 pub mod repos;
 pub mod runtime;

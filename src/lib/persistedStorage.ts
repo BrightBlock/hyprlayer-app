@@ -2,6 +2,8 @@
 import { createJSONStorage } from "zustand/middleware";
 import type { StateStorage } from "zustand/middleware";
 
+import { log } from "./log";
+
 const WRITE_DEBOUNCE_MS = 1000;
 
 const pending = new Map<string, string>();
@@ -17,7 +19,9 @@ function flush(): void {
     try {
       localStorage.setItem(key, value);
       lastWritten.set(key, value);
-    } catch {
+    } catch (e) {
+      // Usually the quota: the state is lost at the next launch.
+      log.warn("storage", `saving ${key} failed`, e);
     }
   }
   pending.clear();

@@ -55,6 +55,10 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         }
     }
 
+    pub fn unconsumed(&self) -> &[u8] {
+        self.decoder.unconsumed()
+    }
+
     /// `None` at a clean EOF; an EOF inside a frame is `UnexpectedEof`.
     pub async fn next_frame(&mut self) -> io::Result<Option<Frame>> {
         loop {

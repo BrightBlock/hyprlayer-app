@@ -213,6 +213,7 @@ pub(crate) fn pump(
     tauri::async_runtime::spawn(async move {
         while let Some(ev) = events.recv().await {
             if on_event.send(ev).is_err() {
+                log::debug!("terminal stream {stream_id}: the window stopped listening");
                 let _ = client.cancel_stream(stream_id).await;
                 break;
             }
